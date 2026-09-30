@@ -1587,7 +1587,14 @@ export class Daemon {
         `[Daemon] IDE plugin subscribed to observation stream (device: ${deviceId ?? "all"}), ensuring WebSocket connections...`,
       );
 
-      const allDevices = this.devicePool.getAllDevices();
+      // A stream subscription can cover every discovered device, but it does
+      // not acquire them. An iOS initial frame calls ensureConnected(), which
+      // can install and start a runner on a simulator with no owning session.
+      const allDevices = this.devicePool
+        .getAllDevices()
+        .filter(
+          (device) => device.platform !== "ios" || this.mayConnectIosObservationClient(device.id),
+        );
 
       pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
         streamServer: server,
@@ -1614,6 +1621,9 @@ export class Daemon {
             device.id,
           )?.refreshObservationStreamScreenshotCadence();
         } else if (device.platform === "ios") {
+          if (!this.mayConnectIosObservationClient(device.id)) {
+            continue;
+          }
           IOSCtrlProxyClient.getExistingInstance(
             device.id,
           )?.refreshObservationStreamScreenshotCadence();
@@ -1632,6 +1642,9 @@ export class Daemon {
             device.id,
           )?.refreshObservationStreamHierarchyCadence();
         } else if (device.platform === "ios") {
+          if (!this.mayConnectIosObservationClient(device.id)) {
+            continue;
+          }
           const client = IOSCtrlProxyClient.getExistingInstance(device.id);
           if (!client) {
             continue;
@@ -1714,6 +1727,19 @@ export class Daemon {
 
     // Wire up navigation graph updates to stream to IDE plugins
     this.setupNavigationGraphStreamListener(server);
+  }
+
+  /** A passive stream subscription must not provision an unclaimed simulator. */
+  private mayConnectIosObservationClient(deviceId: string): boolean {
+    if (
+      this.sessionManager.getAllSessions().some((session) => session.assignedDevice === deviceId)
+    ) {
+      return true;
+    }
+    return (
+      !this.skipIosStartupWarmup &&
+      (this.iosWarmupDeviceIds === null || this.iosWarmupDeviceIds.has(deviceId))
+    );
   }
 
   /**

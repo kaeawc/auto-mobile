@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
+import { DevicePool } from "../../src/daemon/devicePool";
+import type { BootedDevice } from "../../src/models";
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
@@ -18,6 +22,11 @@ import { NavigationGraphManager } from "../../src/features/navigation/Navigation
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
+import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
+import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import type {
   OnNavigationGraphRequestedCallback,
   OnObservationRequestedCallback,
@@ -90,6 +99,9 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   navigationRequestCallbackInstalled = false;
   navigationRequestHandler: OnNavigationGraphRequestedCallback | null = null;
   storageSubscriptionCallbackInstalled = false;
+  subscriberConnected: ((deviceId: string | null) => void) | null = null;
+  screenshotCadenceChanged: ((deviceId: string | null) => void) | null = null;
+  hierarchyCadenceChanged: ((deviceId: string | null) => void) | null = null;
 
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
     this.started.push(record);
@@ -104,16 +116,23 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.navigationUpdates.push({ appId: streamData.appId, deviceId });
   }
 
-  setOnSubscriberConnected(_handler: unknown): void {
+  setOnSubscriberConnected(handler: (deviceId: string | null) => void): void {
     this.subscriberCallbackInstalled = true;
+    this.subscriberConnected = handler;
   }
 
-  setOnScreenshotCadenceChanged(_handler: unknown): void {
+  setOnScreenshotCadenceChanged(handler: (deviceId: string | null) => void): void {
     this.screenshotCadenceCallbackInstalled = true;
+    this.screenshotCadenceChanged = handler;
   }
 
-  setOnHierarchyCadenceChanged(_handler: unknown): void {
+  setOnHierarchyCadenceChanged(handler: (deviceId: string | null) => void): void {
     this.hierarchyCadenceCallbackInstalled = true;
+    this.hierarchyCadenceChanged = handler;
+  }
+
+  getHierarchyIntervalMsForDevice(_deviceId: string): number {
+    return 1_000;
   }
 
   setOnObservationRequested(handler: OnObservationRequestedCallback, timeoutMs?: number): void {
@@ -154,6 +173,119 @@ describe("Daemon stream wiring", () => {
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
+  });
+
+  test("an all-device stream reconnect after runner A restarts never starts idle runner B", async () => {
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousAllowlist = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+    const connectedDevices: string[] = [];
+    const managers = new Map<string, FakeIOSCtrlProxyManager>();
+    const fakeClient = {
+      ensureConnected: async (deviceId: string) => {
+        connectedDevices.push(deviceId);
+        await managers.get(deviceId)?.setup(true);
+        return false;
+      },
+    };
+    const getInstance = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
+      (device) =>
+        ({
+          ensureConnected: () => fakeClient.ensureConnected(device.deviceId),
+        }) as unknown as IOSCtrlProxyClient,
+    );
+    const getExistingInstance = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockImplementation(
+      (deviceId) =>
+        ({
+          ensureConnected: () => fakeClient.ensureConnected(deviceId),
+          refreshObservationStreamScreenshotCadence: () => {
+            void fakeClient.ensureConnected(deviceId);
+          },
+        }) as unknown as IOSCtrlProxyClient,
+    );
+    const bootedDevices: BootedDevice[] = [
+      { deviceId: "sim-a", name: "iPhone A", platform: "ios" },
+      { deviceId: "sim-b", name: "iPhone Duo", platform: "ios" },
+    ];
+
+    try {
+      for (const environment of [
+        { secret: "acceptance-secret", allowlist: undefined },
+        { secret: undefined, allowlist: "sim-a" },
+      ]) {
+        if (environment.secret === undefined) {
+          delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+        } else {
+          process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = environment.secret;
+        }
+        if (environment.allowlist === undefined) {
+          delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+        } else {
+          process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = environment.allowlist;
+        }
+
+        const daemon = new Daemon(
+          {},
+          new FakeInstalledAppsRepository(),
+          new FakeTimer(),
+          new FakeDeviceSessionRepository(),
+          new CountingIdGenerator("device-session"),
+          new FakeDatabaseInitializer(),
+          new FakeStartupFailureTracker(),
+        );
+        const internals = daemon as unknown as DaemonStreamInternals;
+        const stream = new FakeDeviceDataStreamServer();
+        const managerA = new FakeIOSCtrlProxyManager();
+        const managerB = new FakeIOSCtrlProxyManager();
+        managers.set("sim-a", managerA);
+        managers.set("sim-b", managerB);
+        internals.getDeviceSessionRoutingTargets = () => targets(stream);
+        internals.setupNavigationGraphStreamListener = () => {};
+
+        try {
+          await (internals.devicePool as unknown as DevicePool).initializeWithDevices(
+            bootedDevices,
+          );
+          await daemon.getSessionManager().createSession("session-a", "sim-a", "ios");
+          internals.setupDeviceSessionRouting();
+          internals.setupDeviceDataStreamCallback();
+
+          // A reconnect after its runner restart replays the broad subscription.
+          await managerA.forceRestart();
+          stream.subscriberConnected?.(null);
+          stream.subscriberConnected?.(null);
+          stream.hierarchyCadenceChanged?.(null);
+          stream.screenshotCadenceChanged?.(null);
+          await Promise.resolve();
+
+          expect(connectedDevices).toEqual(["sim-a", "sim-a", "sim-a", "sim-a"]);
+          expect(managerA.getCallCount("forceRestart")).toBe(1);
+          expect(managerB.getCallCount("setup")).toBe(0);
+          expect(getInstance).toHaveBeenCalledTimes(2);
+          expect(getExistingInstance).toHaveBeenCalledWith("sim-a");
+          expect(getExistingInstance).not.toHaveBeenCalledWith("sim-b");
+        } finally {
+          connectedDevices.length = 0;
+          managers.clear();
+          getInstance.mockClear();
+          getExistingInstance.mockClear();
+          daemon.getSessionManager().stopCleanupTimer();
+          DaemonState.getInstance().reset();
+        }
+      }
+    } finally {
+      getInstance.mockRestore();
+      getExistingInstance.mockRestore();
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+      if (previousAllowlist === undefined) {
+        delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = previousAllowlist;
+      }
+    }
   });
 
   test("reinstalls routing and lifecycle delivery on an observation-stream replacement", async () => {

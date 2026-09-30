@@ -1,10 +1,22 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { registerStorageResources } from "../../src/server/storageResources";
+import {
+  registerStorageResources,
+  setStorageResourcesAdbClientFactoryForTesting,
+} from "../../src/server/storageResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { ProviderUnavailableError } from "../../src/features/storage/ProviderUnavailableError";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { createExecResult } from "../../src/utils/execResult";
+import { readFileSync } from "node:fs";
+import type { KeyValueEntry } from "../../src/features/storage/storageTypes";
+
+const ANDROID_SHARED_PREFERENCES_XML = readFileSync(
+  new URL("../fixtures/android-shared-preferences.xml", import.meta.url),
+  "utf8",
+);
 
 // storageResources.ts had ZERO test mentions repo-wide (issue #4181, rank 1b).
 // Both resource handlers build a URI, look up a booted device, and return a
@@ -22,6 +34,7 @@ describe("storageResources", () => {
   afterEach(() => {
     PlatformDeviceManagerFactory.setInstance(null);
     AndroidCtrlProxyClient.getInstance = originalGetInstance;
+    setStorageResourcesAdbClientFactoryForTesting(null);
   });
 
   function readResource(uri: string) {
@@ -53,6 +66,11 @@ describe("storageResources", () => {
           );
         },
       })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+      if (suffix.endsWith("entries")) {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandError("cat shared_prefs/", new Error("run-as is unavailable"));
+        setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+      }
       const content = await readResource(
         `automobile:devices/emulator-5554/storage/com.example.nondebug/${suffix}`,
       );
@@ -78,6 +96,170 @@ describe("storageResources", () => {
     const body = JSON.parse(content.text ?? "{}");
     expect(content.mimeType).toBe("application/json");
     expect(body.error).toBe("Device not found or not booted: emulator-5554");
+  });
+
+  test("storage-entries falls back to run-as and reports its source", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
+    );
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "cat shared_prefs/settings.xml",
+      createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+    );
+    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async () => {
+        throw new ProviderUnavailableError(
+          "Unknown authority com.example.app.automobile.sharedprefs",
+        );
+      },
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+    const content = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
+    );
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.source).toBe("run-as");
+    expect(body.entries).toContainEqual({ key: "enabled", type: "BOOLEAN", value: "true" });
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+  });
+
+  test("run-as entries match the CtrlProxy encoding for every SharedPreferences type", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
+    );
+    const kotlinEncodedEntries: KeyValueEntry[] = [
+      { key: "greeting", type: "STRING", value: 'hello "xml" & world' },
+      { key: "empty", type: "STRING", value: "" },
+      { key: "enabled", type: "BOOLEAN", value: "true" },
+      { key: "launch_count", type: "INT", value: "-7" },
+      { key: "max_long", type: "LONG", value: "9223372036854775807" },
+      { key: "ratio", type: "FLOAT", value: "0.1" },
+      { key: "flags", type: "STRING_SET", value: '["first","say \\"hi\\""]' },
+      { key: "nullable", type: "UNKNOWN", value: null },
+    ];
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "cat shared_prefs/settings.xml",
+      createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+    );
+    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async (packageName: string, _fileName: string) => {
+        if (packageName === "com.example.runas") {
+          throw new ProviderUnavailableError("SharedPreferences provider is unavailable");
+        }
+        return kotlinEncodedEntries;
+      },
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+    const ctrlProxyContent = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.ctrlproxy/settings/entries",
+    );
+    const runAsContent = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.runas/settings/entries",
+    );
+    const ctrlProxyBody = JSON.parse(ctrlProxyContent.text ?? "{}");
+    const runAsBody = JSON.parse(runAsContent.text ?? "{}");
+    expect(ctrlProxyBody.entries).toEqual(kotlinEncodedEntries);
+    expect(runAsBody.entries).toEqual(ctrlProxyBody.entries);
+    expect(ctrlProxyBody.source).toBe("ctrlproxy");
+    expect(runAsBody.source).toBe("run-as");
+  });
+
+  test("storage-entries reports CtrlProxy as the source when its read succeeds", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
+    );
+    const entries = [{ key: "enabled", type: "BOOLEAN" as const, value: "true" }];
+    const adb = new FakeAdbExecutor();
+    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async () => entries,
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+    const content = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
+    );
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.source).toBe("ctrlproxy");
+    expect(body.entries).toEqual(entries);
+    expect(adb.getExecutedCommands()).toHaveLength(0);
+  });
+
+  test("storage-entries surfaces non-availability CtrlProxy errors without run-as", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
+    );
+    const adb = new FakeAdbExecutor();
+    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    const failure = new Error("invalid preference request");
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async () => {
+        throw failure;
+      },
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+    const content = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
+    );
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.error).toContain(failure.message);
+    expect(adb.getExecutedCommands()).toHaveLength(0);
+  });
+
+  test.each(["Failed to connect to accessibility service", "WebSocket not connected"])(
+    "storage-entries falls back for CtrlProxy transport error %s",
+    async (message) => {
+      PlatformDeviceManagerFactory.setInstance(
+        new FakeDeviceManager(
+          [],
+          [{ deviceId: "emulator-5554", name: "Test", platform: "android" }],
+        ),
+      );
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "cat shared_prefs/settings.xml",
+        createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
+      );
+      setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+      AndroidCtrlProxyClient.getInstance = mock(() => ({
+        getPreferenceEntries: async () => {
+          throw new Error(message);
+        },
+      })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+      const content = await readResource(
+        "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
+      );
+      expect(JSON.parse(content.text ?? "{}").source).toBe("run-as");
+      expect(adb.getExecutedCommands()).toHaveLength(1);
+    },
+  );
+
+  test("storage-entries reports both failures when run-as also fails", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "emulator-5554", name: "Test", platform: "android" }]),
+    );
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("cat shared_prefs/settings.xml", new Error("run-as permission denied"));
+    setStorageResourcesAdbClientFactoryForTesting({ create: () => adb });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async () => {
+        throw new ProviderUnavailableError("CtrlProxy provider is unavailable");
+      },
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+
+    const content = await readResource(
+      "automobile:devices/emulator-5554/storage/com.example.app/settings/entries",
+    );
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.error).toContain("CtrlProxy: CtrlProxy provider is unavailable");
+    expect(body.error).toContain("run-as: Failed to read Android SharedPreferences");
+    expect(body.errorCode).toBe("PROVIDER_UNAVAILABLE");
+    expect(body.errorReason).toBe("sdk_provider_absent");
+    expect(adb.getExecutedCommands()).toHaveLength(1);
   });
 
   test("storage-files resource URI percent-encodes the package segment round-trip", async () => {

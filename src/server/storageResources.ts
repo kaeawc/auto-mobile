@@ -2,11 +2,24 @@ import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./re
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../models";
+import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import type { PreferenceFile, KeyValueEntry } from "../features/storage/storageTypes";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
-import { resourceErrorFields } from "../features/storage/ProviderUnavailableError";
+import {
+  ProviderUnavailableError,
+  resourceErrorFields,
+} from "../features/storage/ProviderUnavailableError";
+import { errorMessage } from "../utils/describeUnknownError";
+import {
+  readAndroidPreferencesXml,
+  sanitizeAndroidPreferencesFileName,
+} from "../features/preferences/AndroidPreferencesXmlFile";
+import { isSharedPreferencesInspectionDisabledError } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
+import { readAndroidStorageEntries } from "../features/preferences/AppPreferences";
+import { isCtrlProxyStorageUnavailableError } from "../features/observe/android/CtrlProxyStorage";
 
 // Resource URI templates
 const STORAGE_RESOURCE_TEMPLATES = {
@@ -26,6 +39,15 @@ interface StorageEntriesCacheEntry {
   lastUpdated: string;
   hash: string;
 }
+
+type PreferenceEntrySource = "ctrlproxy" | "run-as";
+
+interface PreferenceEntriesResult {
+  entries: KeyValueEntry[];
+  source: PreferenceEntrySource;
+}
+
+let adbClientFactory: AdbClientFactory = defaultAdbClientFactory;
 
 interface StorageCache {
   files: Map<string, StorageFilesCacheEntry>; // key: `${deviceId}:${packageName}`
@@ -82,15 +104,48 @@ async function getPreferenceEntriesForDevice(
   device: BootedDevice,
   packageName: string,
   fileName: string,
-): Promise<KeyValueEntry[]> {
+): Promise<PreferenceEntriesResult> {
   if (device.platform === "android") {
     const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
-    return client.getPreferenceEntries(packageName, fileName);
+    try {
+      return {
+        entries: await client.getPreferenceEntries(packageName, fileName),
+        source: "ctrlproxy",
+      };
+    } catch (ctrlProxyError) {
+      if (!isPreferenceProviderUnavailableError(ctrlProxyError)) {
+        throw ctrlProxyError;
+      }
+      try {
+        const xml = await readAndroidPreferencesXml(
+          adbClientFactory.create(device),
+          packageName,
+          sanitizeAndroidPreferencesFileName(fileName),
+        );
+        return { entries: await readAndroidStorageEntries(xml), source: "run-as" };
+      } catch (runAsError) {
+        throw new ActionableError(
+          `Failed to read Android SharedPreferences. CtrlProxy: ${errorMessage(ctrlProxyError)}; run-as: ${errorMessage(runAsError)}`,
+          { cause: ctrlProxyError },
+        );
+      }
+    }
   } else if (device.platform === "ios") {
     const client = IOSCtrlProxyClient.getInstance(device);
-    return client.getPreferenceEntries(packageName, fileName);
+    return {
+      entries: await client.getPreferenceEntries(packageName, fileName),
+      source: "ctrlproxy",
+    };
   }
   throw new Error(`Unsupported platform: ${device.platform}`);
+}
+
+function isPreferenceProviderUnavailableError(error: unknown): boolean {
+  return (
+    error instanceof ProviderUnavailableError ||
+    isSharedPreferencesInspectionDisabledError(error) ||
+    isCtrlProxyStorageUnavailableError(error)
+  );
 }
 
 /**
@@ -247,7 +302,11 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
       };
     }
 
-    const entries = await getPreferenceEntriesForDevice(device, decodedPackage, decodedFileName);
+    const { entries, source } = await getPreferenceEntriesForDevice(
+      device,
+      decodedPackage,
+      decodedFileName,
+    );
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(entries);
 
@@ -273,6 +332,7 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
           packageName: decodedPackage,
           fileName: decodedFileName,
           platform: device.platform,
+          source,
           entries,
           totalCount: entries.length,
           lastUpdated,
@@ -287,12 +347,26 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
       uri,
       mimeType: "application/json",
       text: JSON.stringify(
-        { error: `Failed to get storage entries: ${error}`, ...resourceErrorFields(error) },
+        {
+          error: `Failed to get storage entries: ${error}`,
+          ...resourceErrorFields(
+            error instanceof ActionableError && error.cause instanceof ProviderUnavailableError
+              ? error.cause
+              : error,
+          ),
+        },
         null,
         2,
       ),
     };
   }
+}
+
+/** Test seam for exercising Android run-as fallback without a device. */
+export function setStorageResourcesAdbClientFactoryForTesting(
+  factory: AdbClientFactory | null,
+): void {
+  adbClientFactory = factory ?? defaultAdbClientFactory;
 }
 
 /**

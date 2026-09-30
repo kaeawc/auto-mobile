@@ -23,6 +23,7 @@ import {
   writeAndroidPreferencesXml,
   type AndroidPreferencesXmlDocument,
 } from "./AndroidPreferencesXmlFile";
+import type { KeyValueEntry, KeyValueType } from "../storage/storageTypes";
 import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedPreferencesMutationCoordinator";
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
@@ -90,6 +91,52 @@ const ANDROID_TYPE_TO_TAG: Record<PreferenceValueType, AndroidPreferenceTag> = {
   int: "int",
   float: "float",
 };
+
+const ANDROID_STORAGE_TAGS = [
+  ["string", "STRING"],
+  ["boolean", "BOOLEAN"],
+  ["int", "INT"],
+  ["long", "LONG"],
+  ["float", "FLOAT"],
+  ["set", "STRING_SET"],
+  ["null", "UNKNOWN"],
+] as const satisfies readonly (readonly [string, KeyValueType])[];
+
+/** Convert SharedPreferences XML into the string values emitted by the Android inspector. */
+export async function readAndroidStorageEntries(xml: string): Promise<KeyValueEntry[]> {
+  const document = await parseAndroidPreferencesXml(xml);
+  const entries: KeyValueEntry[] = [];
+
+  for (const [tag, type] of ANDROID_STORAGE_TAGS) {
+    for (const node of arrayOfNodes(document.map[tag])) {
+      const key = node.$?.name;
+      if (typeof key !== "string") {
+        continue;
+      }
+      const value = storageEntryValue(tag, node);
+      entries.push({ key, type, value });
+    }
+  }
+  return entries;
+}
+
+function storageEntryValue(tag: string, node: any): string | null {
+  if (tag === "null") {
+    return null;
+  }
+  if (tag === "string") {
+    return node._ ?? "";
+  }
+  if (tag === "set") {
+    return JSON.stringify(readAndroidStringSetValues(node));
+  }
+  if (tag === "float") {
+    const value = node.$?.value;
+    return value === undefined ? null : float32ToJavaString(Number(value));
+  }
+  const value = node.$?.value;
+  return value === undefined ? null : String(value);
+}
 
 export class AppPreferences {
   private readonly adbFactory: AdbClientFactory;

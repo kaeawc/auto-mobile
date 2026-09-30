@@ -7,6 +7,12 @@ import { AppPreferences } from "../../../src/features/preferences/AppPreferences
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { readFileSync } from "node:fs";
+
+const ANDROID_SHARED_PREFERENCES_XML = readFileSync(
+  new URL("../../fixtures/android-shared-preferences.xml", import.meta.url),
+  "utf8",
+);
 
 const androidDevice: BootedDevice = {
   name: "Pixel",
@@ -218,11 +224,7 @@ describe("AppPreferences", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
       "cat shared_prefs/settings.xml",
-      createExecResult(
-        "<?xml version='1.0' encoding='utf-8' standalone='yes' ?>\n" +
-          '<map><boolean name="onboarding_complete" value="true" /></map>\n',
-        "",
-      ),
+      createExecResult(ANDROID_SHARED_PREFERENCES_XML, ""),
     );
 
     const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
@@ -230,14 +232,14 @@ describe("AppPreferences", () => {
       scope: "sharedPreferences",
       appId: "com.example.app",
       suite: "settings",
-      key: "onboarding_complete",
+      key: "enabled",
     });
 
     expect(result).toMatchObject({
       success: true,
       appId: "com.example.app",
       suite: "settings",
-      key: "onboarding_complete",
+      key: "enabled",
       value: true,
       type: "bool",
       found: true,

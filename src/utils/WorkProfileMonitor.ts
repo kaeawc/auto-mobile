@@ -1,5 +1,8 @@
 import { Timer, defaultTimer } from "./SystemTimer";
 import { logger } from "./logger";
+import { errorMessage } from "./describeUnknownError";
+import { toActionableError } from "../models/ActionableError";
+import { SingleFlightInterval } from "./SingleFlightInterval";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 
@@ -7,6 +10,7 @@ import type { InstalledAppsStore } from "../db/installedAppsRepository";
  * Environment variable to configure polling interval (default: 5000ms)
  */
 const DEFAULT_POLL_INTERVAL_MS = 5000;
+const ADB_COMMAND_TIMEOUT_MS = 10_000;
 
 /**
  * State tracking for a single work profile
@@ -77,8 +81,8 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
   private readonly installedAppsStore: InstalledAppsStore;
   private readonly timer: Timer;
   private readonly pollIntervalMs: number;
+  private readonly interval: SingleFlightInterval;
   private readonly profileStates: Map<number, ProfileState> = new Map();
-  private intervalHandle: NodeJS.Timeout | null = null;
   private running: boolean = false;
 
   constructor(options: WorkProfileMonitorOptions) {
@@ -92,6 +96,16 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     this.pollIntervalMs =
       options.pollIntervalMs ??
       (envInterval ? parseInt(envInterval, 10) : DEFAULT_POLL_INTERVAL_MS);
+    this.interval = new SingleFlightInterval(
+      this.timer,
+      this.pollIntervalMs,
+      () => this.pollStaleProfiles(),
+      {
+        onError: (error: unknown) => {
+          logger.warn("[WORK_PROFILE_MONITOR] Poll failed", error);
+        },
+      },
+    );
   }
 
   start(): void {
@@ -103,9 +117,7 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     this.running = true;
     logger.info(`[WORK_PROFILE_MONITOR] Starting polling (interval: ${this.pollIntervalMs}ms)`);
 
-    this.intervalHandle = this.timer.setInterval(() => {
-      void this.pollStaleProfiles();
-    }, this.pollIntervalMs);
+    this.interval.start();
   }
 
   stop(): void {
@@ -115,10 +127,7 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     }
 
     this.running = false;
-    if (this.intervalHandle) {
-      this.timer.clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
-    }
+    void this.interval.stop();
     logger.info("[WORK_PROFILE_MONITOR] Stopped");
   }
 
@@ -157,7 +166,7 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     try {
       const result = await this.adb.executeCommand(
         `shell pm list packages --user ${userId}`,
-        undefined,
+        ADB_COMMAND_TIMEOUT_MS,
         undefined,
         true,
       );
@@ -181,7 +190,7 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
         `[WORK_PROFILE_MONITOR] Refreshed ${packages.length} packages for user ${userId}`,
       );
     } catch (error) {
-      logger.warn(`[WORK_PROFILE_MONITOR] Failed to refresh packages for user ${userId}: ${error}`);
+      throw toActionableError(error, `Failed to refresh packages for work profile ${userId}`);
     }
   }
 
@@ -228,7 +237,13 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     logger.debug(`[WORK_PROFILE_MONITOR] Polling ${profilesToRefresh.length} stale profile(s)`);
 
     for (const profile of profilesToRefresh) {
-      await this.refreshProfile(profile.userId);
+      try {
+        await this.refreshProfile(profile.userId);
+      } catch (error) {
+        logger.warn(
+          `[WORK_PROFILE_MONITOR] Failed to refresh profile ${profile.userId}: ${errorMessage(error)}`,
+        );
+      }
     }
   }
 }

@@ -1,8 +1,29 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import type { ExecResult } from "../../src/models";
 import { DefaultWorkProfileMonitor } from "../../src/utils/WorkProfileMonitor";
+import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function packageListResult(): ExecResult {
+  const stdout = "package:com.example.app1\n";
+  return {
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (value: string) => stdout.includes(value),
+  };
+}
 
 describe("WorkProfileMonitor", () => {
   let timer: FakeTimer;
@@ -104,6 +125,94 @@ describe("WorkProfileMonitor", () => {
     // Only user 10 should have been refreshed
     expect(adb.wasCommandExecuted("pm list packages --user 10")).toBe(true);
     expect(adb.wasCommandExecuted("pm list packages --user 11")).toBe(false);
+  });
+
+  test("continues refreshing profiles after one profile fails", async () => {
+    adb.setCommandError("pm list packages --user 10", new Error("ADB command failed"));
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    monitor.setProfileHasAccessibilityService(10, false);
+    monitor.setProfileHasAccessibilityService(11, false);
+    monitor.start();
+
+    timer.advanceTime(5000);
+    for (let turn = 0; turn < 10; turn++) {
+      await Promise.resolve();
+    }
+
+    expect(adb.wasCommandExecuted("pm list packages --user 10")).toBe(true);
+    expect(adb.wasCommandExecuted("pm list packages --user 11")).toBe(true);
+    const apps = await repo.listInstalledApps("emulator-5554");
+    expect(apps.length).toBeGreaterThan(0);
+    expect(apps.every((app) => app.user_id === 11)).toBe(true);
+    expect(warning).toHaveBeenCalledWith(
+      "[WORK_PROFILE_MONITOR] Failed to refresh profile 10: Failed to refresh packages for work profile 10: ADB command failed",
+    );
+    warning.mockRestore();
+  });
+
+  test("does not overlap a slow polling tick with the next interval", async () => {
+    const firstCommand = deferred<ExecResult>();
+    let activeCommands = 0;
+    let maxActiveCommands = 0;
+    let commandCount = 0;
+    const command = spyOn(adb, "executeCommand").mockImplementation(() => {
+      commandCount++;
+      activeCommands++;
+      maxActiveCommands = Math.max(maxActiveCommands, activeCommands);
+      const response =
+        commandCount === 1 ? firstCommand.promise : Promise.resolve(packageListResult());
+      return response.finally(() => {
+        activeCommands--;
+      });
+    });
+    monitor.setProfileHasAccessibilityService(10, false);
+    monitor.start();
+
+    timer.advanceTime(5000);
+    timer.advanceTime(10000);
+    expect(commandCount).toBe(1);
+    expect(maxActiveCommands).toBe(1);
+
+    firstCommand.resolve(packageListResult());
+    for (let turn = 0; turn < 10; turn++) {
+      await Promise.resolve();
+    }
+    timer.advanceTime(5000);
+
+    expect(commandCount).toBe(2);
+    expect(maxActiveCommands).toBe(1);
+    command.mockRestore();
+  });
+
+  test("warns when an ADB command times out and runs the next polling tick", async () => {
+    let commandCount = 0;
+    const command = spyOn(adb, "executeCommand").mockImplementation((_cmd, timeoutMs) => {
+      commandCount++;
+      if (commandCount > 1) {
+        return Promise.resolve(packageListResult());
+      }
+      return new Promise<ExecResult>((_resolve, reject) => {
+        timer.setTimeout(() => reject(new Error("ADB command timed out")), timeoutMs);
+      });
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    monitor.setProfileHasAccessibilityService(10, false);
+    monitor.start();
+
+    timer.advanceTime(5000);
+    expect(command.mock.calls[0]?.[1]).toBe(10_000);
+    timer.advanceTime(10_000);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    timer.advanceTime(5000);
+    expect(commandCount).toBe(2);
+    expect(warning).toHaveBeenCalledWith(
+      "[WORK_PROFILE_MONITOR] Failed to refresh profile 10: Failed to refresh packages for work profile 10: ADB command timed out",
+    );
+    command.mockRestore();
+    warning.mockRestore();
   });
 
   test("does not poll when all profiles have accessibility service", async () => {

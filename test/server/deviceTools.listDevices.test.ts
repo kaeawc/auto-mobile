@@ -187,6 +187,28 @@ describe("listDevices tool (#5870)", () => {
     ).toBe(true);
   });
 
+  test("filters booted devices by display inventory and reports unsupported requirements", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [
+      {
+        ...android,
+        displays: {
+          panels: [
+            { key: "inner", role: "inner", sizePx: { width: 100, height: 100 } },
+            { key: "cover", role: "cover", sizePx: { width: 50, height: 100 } },
+          ],
+          postures: ["opened", "rear_display"],
+        },
+      },
+    ]);
+
+    expect(
+      (await callListDevices({ requires: { panels: 2, posture: "rear_display" } })).count,
+    ).toBe(1);
+    await expect(callListDevices({ requires: { posture: "flipped" } })).rejects.toThrow(
+      /unsupported: requires posture=flipped.*Pixel_9_API_36: 2 panel\(s\), postures=opened\|rear_display/,
+    );
+  });
+
   test("publishes discovered panels in listDevices", async () => {
     const displays = {
       panels: [

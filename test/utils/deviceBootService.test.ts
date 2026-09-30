@@ -65,6 +65,28 @@ function service(
 }
 
 describe("DeviceBootService", () => {
+  it("reports unmet panel requirements and candidate support", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [
+      {
+        ...image,
+        name: "PostureOnly",
+        formFactor: "foldable",
+        displays: {
+          panels: [{ key: "inner", role: "inner", sizePx: { width: 100, height: 100 } }],
+          postures: ["half_opened"],
+        },
+      },
+    ]);
+    await expect(
+      service(devices, new DefaultDeviceMatcher()).boot({
+        platform: "android",
+        requires: { panels: 2 },
+      }),
+    ).rejects.toThrow(
+      /unsupported: requires panels>=2.*PostureOnly: 1 panel\(s\), postures=half_opened/,
+    );
+  });
   it("publishes only claim and release edges for a nested Android cold boot", async () => {
     const devices = new FakeDeviceUtils();
     const matcher = new FakeDeviceMatcher();

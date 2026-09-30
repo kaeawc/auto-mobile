@@ -1667,6 +1667,32 @@
           "minimum": 1000,
           "maximum": 890000
         },
+        "requires": {
+          "description": "Required display capabilities from device inventory",
+          "type": "object",
+          "properties": {
+            "panels": {
+              "description": "Minimum number of display panels",
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "posture": {
+              "description": "Supported device posture",
+              "type": "string",
+              "enum": [
+                "closed",
+                "half_opened",
+                "opened",
+                "rear_display",
+                "flipped",
+                "tent",
+                "unknown"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
         "avdName": {
           "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
           "type": "string",
@@ -3477,6 +3503,30 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "requires": {
+          "description": "Filter booted devices by display inventory capabilities",
+          "type": "object",
+          "properties": {
+            "panels": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "posture": {
+              "type": "string",
+              "enum": [
+                "closed",
+                "half_opened",
+                "opened",
+                "rear_display",
+                "flipped",
+                "tent",
+                "unknown"
+              ]
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

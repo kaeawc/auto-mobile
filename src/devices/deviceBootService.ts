@@ -16,7 +16,11 @@ import {
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
 } from "../utils/deviceUtils";
-import { matchesDeviceCriteria, type DeviceMatcher } from "../utils/deviceMatcher";
+import {
+  describeDisplayRequirements,
+  matchesDeviceCriteria,
+  type DeviceMatcher,
+} from "../utils/deviceMatcher";
 import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
 import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -247,6 +251,7 @@ export interface DeviceBootRequest {
   maxOsVersion?: string;
   name?: string;
   formFactor?: FormFactor;
+  requires?: DeviceMatchCriteria["requires"];
   screenSize?: { width: number; height: number };
   deviceId?: string;
   preferRunning?: boolean;
@@ -361,6 +366,7 @@ export class DeviceBootService {
             minOsVersion: request.minOsVersion,
             maxOsVersion: request.maxOsVersion,
             formFactor: request.formFactor,
+            requires: request.requires,
             screenSize: request.screenSize,
           }),
         },
@@ -451,6 +457,7 @@ export class DeviceBootService {
       maxOsVersion: request.maxOsVersion,
       name: request.name,
       formFactor: request.formFactor,
+      requires: request.requires,
       screenSize: request.screenSize,
     };
     const booted = await this.discoverBootedDevices(
@@ -465,6 +472,7 @@ export class DeviceBootService {
       request.minOsVersion !== undefined ||
       request.maxOsVersion !== undefined ||
       request.formFactor !== undefined ||
+      request.requires !== undefined ||
       request.screenSize !== undefined;
     const running = booted.find((device) => device.deviceId === request.deviceId);
     if (running) {
@@ -497,7 +505,7 @@ export class DeviceBootService {
     }
     if (hasExplicitConstraints && !matchesDeviceCriteria(image, criteria)) {
       throw new ActionableError(
-        `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
+        `Device '${request.deviceId}' does not satisfy the requested constraints. ${describeDisplayRequirements(criteria, [image])}`,
       );
     }
     // `deviceId` also accepts an AVD/image name (see getAndroidSchema), so the
@@ -531,7 +539,7 @@ export class DeviceBootService {
     const resolvedRunning = enriched.device;
     if (hasExplicitConstraints && !matchesDeviceCriteria(resolvedRunning, criteria)) {
       throw new ActionableError(
-        `Device '${request.deviceId}' does not satisfy the requested platform, version, or form-factor constraints.`,
+        `Device '${request.deviceId}' does not satisfy the requested constraints. ${describeDisplayRequirements(criteria, [resolvedRunning])}`,
       );
     }
     const result = await this.waitForRunningDevice(resolvedRunning, context, progress);
@@ -604,6 +612,7 @@ export class DeviceBootService {
       maxOsVersion: request.maxOsVersion,
       name: request.name,
       formFactor: request.formFactor,
+      requires: request.requires,
       screenSize: request.screenSize,
     };
     const criteria = request.matchNamedDeviceIgnoringOsVersion
@@ -616,12 +625,14 @@ export class DeviceBootService {
     const matchingImages = excludedDeviceNames
       ? images.filter((image) => !excludedDeviceNames.has(image.name))
       : images;
+    const bootedCandidates: BootedDevice[] = [];
     const running = await this.findRunningMatch(
       request,
       criteria,
       matchingImages,
       context,
       progress,
+      bootedCandidates,
     );
     if (running) {
       return running;
@@ -647,7 +658,20 @@ export class DeviceBootService {
         request.preferRunning,
       );
     }
-    return this.provisionAndBoot(request, provisionCriteria, matchingImages, context, progress);
+    const candidates = [
+      ...bootedCandidates,
+      ...matchingImages.filter(
+        (image) => !bootedCandidates.some((device) => device.name === image.name),
+      ),
+    ];
+    return this.provisionAndBoot(
+      request,
+      provisionCriteria,
+      matchingImages,
+      context,
+      progress,
+      candidates,
+    );
   }
 
   private async findRunningMatch(
@@ -656,6 +680,7 @@ export class DeviceBootService {
     images: DeviceInfo[],
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
+    candidates?: BootedDevice[],
   ): Promise<DeviceBootResult | undefined> {
     if (request.preferRunning === false) {
       return undefined;
@@ -678,6 +703,7 @@ export class DeviceBootService {
           )
         : booted;
     const enriched = enrichBootedDevicesFromImages(matchingBooted, images);
+    candidates?.push(...enriched);
     const match =
       request.matchExactName && request.name
         ? findEligibleExactBootedDevice(request.platform, enriched, request.name, criteria)
@@ -774,6 +800,7 @@ export class DeviceBootService {
     images: DeviceInfo[],
     context: BootDeadlineContext,
     progress?: DeviceBootProgress,
+    candidates: readonly (BootedDevice | DeviceInfo)[] = images,
   ): Promise<DeviceBootResult> {
     if (!this.dependencies.deviceCreationGate.isCreationAllowed(request.createIfMissing)) {
       throw new ActionableError(
@@ -781,8 +808,12 @@ export class DeviceBootService {
           `${request.minOsVersion ? `minOsVersion>=${request.minOsVersion} ` : ""}` +
           `${request.maxOsVersion ? `maxOsVersion<=${request.maxOsVersion} ` : ""}` +
           `${request.name ? `name=${request.name} ` : ""}` +
+          `${describeDisplayRequirements(criteria, candidates)} ` +
           `Available images: ${images.map((device) => `${device.name}${device.osVersion ? ` (v${device.osVersion})` : ""}`).join(", ") || "none"}.`,
       );
+    }
+    if (criteria.requires?.panels !== undefined || criteria.requires?.posture !== undefined) {
+      throw new ActionableError(describeDisplayRequirements(criteria, candidates));
     }
     const identityHooks: DeviceProvisioningIdentityHooks = {
       reserveBeforeCreate: async (identity) => {

@@ -134,6 +134,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       minOsVersion: args.minOsVersion,
       maxOsVersion: args.maxOsVersion,
       formFactor: args.formFactor,
+      requires: args.requires,
       screenSize: args.screenSize,
     };
     const match = deviceMatcher.matchDeviceImage(
@@ -161,6 +162,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       minOsVersion: args.minOsVersion,
       maxOsVersion: args.maxOsVersion,
       formFactor: args.formFactor,
+      requires: args.requires,
       screenSize: args.screenSize,
     });
     try {
@@ -426,6 +428,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
     const target: StartDeviceArgs = args.avdName
       ? {
           platform: "android",
+          requires: args.requires,
           name: args.avdName,
           ...(explicitAdbSerial ? { deviceId: explicitAdbSerial } : {}),
           matchExactName: true,
@@ -436,6 +439,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
         }
       : {
           platform: "android",
+          requires: args.requires,
           deviceId: args.deviceId,
           preferRunning: true,
           createIfMissing: false,

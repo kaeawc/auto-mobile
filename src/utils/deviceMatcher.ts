@@ -1,4 +1,5 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
+import type { DeviceDisplays } from "../models/DisplayPanel";
 import type {
   DeviceMatchCriteria,
   FormFactor,
@@ -189,6 +190,7 @@ export function matchesDeviceCriteria(
     apiLevel?: number;
     osVersion?: string;
     formFactor?: FormFactor;
+    displays?: DeviceDisplays;
     screenWidth?: number;
     screenHeight?: number;
   },
@@ -199,8 +201,40 @@ export function matchesDeviceCriteria(
     matchesVersionRange(item, criteria) &&
     matchesName(item, criteria) &&
     matchesFormFactor(item, criteria) &&
+    matchesRequiredDisplays(item, criteria) &&
     matchesScreenSize(item, criteria)
   );
+}
+
+function matchesRequiredDisplays(
+  item: { displays?: DeviceDisplays },
+  criteria: DeviceMatchCriteria,
+): boolean {
+  const { panels, posture } = criteria.requires ?? {};
+  return (
+    (panels === undefined || (item.displays?.panels.length ?? 0) >= panels) &&
+    (posture === undefined || item.displays?.postures.includes(posture) === true)
+  );
+}
+
+/** Explain capability failures without inferring panels or postures from form factor. */
+export function describeDisplayRequirements(
+  criteria: DeviceMatchCriteria,
+  candidates: readonly { name: string; displays?: DeviceDisplays }[],
+): string {
+  const { panels, posture } = criteria.requires ?? {};
+  const requested = [
+    panels === undefined ? undefined : `panels>=${panels}`,
+    posture === undefined ? undefined : `posture=${posture}`,
+  ].filter(Boolean);
+  if (requested.length === 0) {
+    return "";
+  }
+  const support = candidates.map((candidate) => {
+    const displays = candidate.displays;
+    return `${candidate.name}: ${displays ? `${displays.panels.length} panel(s), postures=${displays.postures.join("|") || "none"}` : "panels and postures unknown until booted"}`;
+  });
+  return `unsupported: requires ${requested.join(", ")}. Candidate support: ${support.join("; ") || "none"}.`;
 }
 
 function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCriteria): boolean {

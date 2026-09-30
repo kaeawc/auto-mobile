@@ -627,8 +627,7 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
  * PARAM-5 / item 11: per-type `success` defaulting.
  *
  * The decoder defaults `success` differently per response type: base-timing and
- * gesture results default to `true` (a reply that arrived without an explicit
- * failure flag is treated as success), while storage/database/highlight results
+ * gesture results without an error default to `true`, while storage/database/highlight results
  * default to `false` (absence of an explicit success is treated as failure).
  * `screenshot` hardcodes `true`, and `hierarchy_update` carries no `success`.
  */
@@ -678,6 +677,56 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "table_structure_result", expected: false },
     { type: "sdk_capabilities_result", expected: false },
   ];
+
+  const ACTION_RESULT_TYPES = [
+    "pinch_result",
+    "tap_coordinates_result",
+    "swipe_result",
+    "drag_result",
+    "set_text_result",
+    "append_text_result",
+    "clear_text_result",
+    "select_all_result",
+    "press_key_result",
+    "press_button_result",
+    "press_home_result",
+    "press_back_result",
+    "recent_apps_result",
+    "launch_app_result",
+    "reset_permissions_result",
+    "keyboard_result",
+    "rotate_result",
+    "ime_action_result",
+    "action_result",
+    "multi_finger_swipe_result",
+    "clipboard_result",
+  ];
+
+  for (const type of ACTION_RESULT_TYPES) {
+    test(`${type} defaults to failure when error is present`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type, error: "some failure" }));
+      expect(decoded?.result).toMatchObject({ success: false, error: "some failure" });
+    });
+
+    test(`${type} lets explicit success win when error is present`, () => {
+      const decoded = decodeCtrlProxyMessage(msg({ type, success: true, error: "some failure" }));
+      expect(decoded?.result).toMatchObject({ success: true, error: "some failure" });
+    });
+  }
+
+  test("null error defaults action success to true", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "tap_coordinates_result", error: null as never }),
+    );
+    expect(decoded?.result).toMatchObject({ success: true, error: null });
+  });
+
+  test("press_key_result preserves verification metadata when error defaults success", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({ type: "press_key_result", error: "key failed", verified: false }),
+    );
+    expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
+  });
 
   test("the default table covers all 41 explicitly-decoded types", () => {
     expect(DEFAULT_WHEN_ABSENT.length).toBe(41);

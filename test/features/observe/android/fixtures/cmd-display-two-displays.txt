@@ -1,0 +1,3 @@
+Displays:
+  Display id 0: DisplayInfo{"Built-in Screen", displayId 0, type INTERNAL, uniqueId "local:4619827259835644673", isValid=true}
+  Display id 2: DisplayInfo{"Virtual Screen", displayId 2, type VIRTUAL, uniqueId "virtual:example:1", isValid=true}

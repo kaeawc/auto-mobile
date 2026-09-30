@@ -59,7 +59,10 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     AndroidCtrlProxyClient.getInstance = (() => ({
       requestScreenshot: async () => ({ success: false, error: "CtrlProxy unavailable" }),
     })) as typeof AndroidCtrlProxyClient.getInstance;
-    fakeAdb.setDefaultResponse({ stdout: Buffer.from("png bytes").toString("base64"), stderr: "" });
+    fakeAdb.setDefaultResponse({
+      stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+      stderr: "",
+    });
     try {
       const result = await screenshot.execute({});
       expect(result.success).toBe(true);
@@ -74,17 +77,17 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
   test("should use single optimized ADB command for screenshot capture", async function () {
     const testFakeAdb = new FakeAdbExecutor();
     testFakeAdb.setDefaultResponse({
-      stdout: Buffer.from("fake-png-data").toString("base64"),
+      stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
       stderr: "",
     });
     const screenshot = new TakeScreenshot(mockDevice, new FakeAdbClientFactory(testFakeAdb));
     (screenshot as any).window = { getActiveHash: async () => "mock-hash" };
     const result = await screenshot.execute();
     const executedCommands = testFakeAdb.getExecutedCommands();
-    expect(executedCommands.length).toBe(1);
-    expect(executedCommands[0]).toContain("screencap");
-    expect(executedCommands[0]).toContain("base64");
-    expect(executedCommands[0]).toContain("rm");
+    const captureCommand = executedCommands.find((command) => command.includes("screencap"));
+    expect(captureCommand).toContain("screencap -p /sdcard/screenshot.png");
+    expect(captureCommand).toContain("base64");
+    expect(captureCommand).toContain("rm");
     expect(result.success).toBe(true);
   });
 });

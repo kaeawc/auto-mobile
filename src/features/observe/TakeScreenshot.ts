@@ -43,6 +43,10 @@ import {
   type ScreenshotFileWriter,
 } from "./screenshot/ScreenshotFileWriter";
 import { shellQuote } from "../../utils/shellQuote";
+import {
+  AndroidPhysicalDisplayIdResolver,
+  assertValidPng,
+} from "./android/AndroidPhysicalDisplayId";
 
 function replaceScreenshotExtension(filePath: string, extension: string): string {
   return filePath.replace(/\.[^.]+$/, `.${extension}`);
@@ -64,6 +68,7 @@ export class TakeScreenshot implements ScreenshotService {
   private fileWriter: ScreenshotFileWriter;
   private fileSystem: FileSystem;
   private cacheDirResolver: () => string;
+  private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
   private static cacheDir: string | null = null;
   private static readonly MAX_CACHE_SIZE_BYTES = 128 * 1024 * 1024; // 128MB
 
@@ -91,6 +96,9 @@ export class TakeScreenshot implements ScreenshotService {
     fileWriter: ScreenshotFileWriter = defaultScreenshotFileWriter,
     fileSystem: FileSystem = new DefaultFileSystem(),
     cacheDirResolver: () => string = () => TakeScreenshot.getCacheDir(),
+    physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(
+      timer,
+    ),
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -101,6 +109,7 @@ export class TakeScreenshot implements ScreenshotService {
     this.fileWriter = fileWriter;
     this.fileSystem = fileSystem;
     this.cacheDirResolver = cacheDirResolver;
+    this.physicalDisplayIdResolver = physicalDisplayIdResolver;
 
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
     this.cleanupCache();
@@ -488,7 +497,9 @@ export class TakeScreenshot implements ScreenshotService {
     const tempFile = "/sdcard/screenshot.png";
 
     // Single command: screencap -> base64 encode -> remove temp file
-    const command = `shell "screencap -p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
+    const displayId = await this.physicalDisplayIdResolver.resolve(this.adb, this.device.deviceId);
+    const displayArgument = displayId ? `-d ${displayId} ` : "";
+    const command = `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
     // Use larger maxBuffer (50MB) to handle high-resolution screenshots
     const maxBuffer = 50 * 1024 * 1024; // 50MB
     const result = await this.adb.executeCommand(command, undefined, maxBuffer, undefined, signal);
@@ -503,6 +514,7 @@ export class TakeScreenshot implements ScreenshotService {
     const decodeStartTime = this.timer.now();
     const cleanedOutput = result.stdout.replace(/[\r\n]/g, "");
     const imageBuffer = Buffer.from(cleanedOutput, "base64");
+    assertValidPng(imageBuffer);
     const decodeDuration = this.timer.now() - decodeStartTime;
     logger.info(
       `[SCREENSHOT] Base64 decode took ${decodeDuration}ms, buffer size: ${imageBuffer.length} bytes`,
@@ -566,8 +578,13 @@ export class TakeScreenshot implements ScreenshotService {
       const cmdStartTime = this.timer.now();
 
       // Step 1: Take screenshot on device
+      const displayId = await this.physicalDisplayIdResolver.resolve(
+        this.adb,
+        this.device.deviceId,
+      );
+      const displayArgument = displayId ? `-d ${displayId} ` : "";
       const screencapResult = await this.adb.executeCommand(
-        `shell "screencap -p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
+        `shell "screencap ${displayArgument}-p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
         undefined,
         undefined,
         undefined,
@@ -594,6 +611,7 @@ export class TakeScreenshot implements ScreenshotService {
       // Step 4: Read the pulled file into buffer
       const readStartTime = this.timer.now();
       const imageBuffer = await this.fileSystem.readFileBuffer(tempLocalFile);
+      assertValidPng(imageBuffer);
       const readDuration = this.timer.now() - readStartTime;
       logger.info(
         `[SCREENSHOT] File read took ${readDuration}ms, buffer size: ${imageBuffer.length} bytes`,

@@ -1680,45 +1680,94 @@ jobs:
 
   swift-code-coverage:
     name: "Swift Code Coverage"
-    # Self-hosted routing: merge runs triggered by kaeawc (push/merge to main) run
-    # on the self-hosted Apple Silicon runner (label automobile-mac); anyone else's
-    # merge falls back to the GitHub-hosted macos-26 runner. This workflow triggers
-    # on push, so github.actor (not pull_request.user) identifies the actor. No
-    # setup-xcode step, so it uses the runner's ambient Xcode.
-    runs-on: ${{ github.actor == 'kaeawc' && fromJSON('["self-hosted", "automobile-mac"]') || 'macos-26' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          fetch-depth: 2
 
-      - name: "Record Xcode version"
-        id: coverage-xcode-version
-        shell: bash
-        run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" >> "$GITHUB_OUTPUT"
-
-      - name: "Cache Swift coverage dependencies"
-        uses: actions/cache@v4
-        id: cache-swift-coverage
+      - name: "Check for Swift coverage changes"
+        id: filter-swift
+        uses: dorny/paths-filter@v3
         with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-merge-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
-          restore-keys: |
-            ${{ runner.os }}-spm-merge-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-
+          filters: |
+            ios:
+              - 'ios/**'
+              - 'scripts/ios/**'
+              - 'scripts/coverage/**'
+              - '.swiftformat'
+              - '.swiftlint.yml'
 
-      - name: "Resolve Swift coverage dependencies"
-        run: (cd ios/control-proxy && swift package resolve)
-
-      - name: "Generate Swift Coverage Badge"
+      - name: "Run Swift coverage on CircleCI and download badge"
+        if: steps.filter-swift.outputs.ios == 'true'
+        env:
+          CIRCLECI_TOKEN: ${{ secrets.CIRCLECI_TOKEN }}
         run: |
-          echo "Swift cache hit: ${{ steps.cache-swift-coverage.outputs.cache-hit }}"
-          SECONDS=0
-          bash scripts/coverage/generate-swift-coverage.sh
-          echo "build took ${SECONDS}s"
+          set -euo pipefail
+          api='https://circleci.com/api/v2'
+          project='project/gh/kaeawc/auto-mobile'
+          if [[ -z "$CIRCLECI_TOKEN" ]]; then
+            echo '::error::CIRCLECI_TOKEN is required to run Swift coverage on CircleCI' >&2
+            exit 1
+          fi
+          pipeline_id="$(curl -fsS -X POST "$api/$project/pipeline" \
+            -H "Circle-Token: $CIRCLECI_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data '{"branch":"main","parameters":{"run-swift-coverage-main":true}}' \
+            | jq -er '.id')"
+          echo "CircleCI pipeline: $pipeline_id"
+
+          job_number=''
+          for attempt in {1..80}; do
+            workflows="$(curl -fsS --retry 3 --retry-delay 5 \
+              -H "Circle-Token: $CIRCLECI_TOKEN" \
+              "$api/pipeline/$pipeline_id/workflow")"
+            while IFS= read -r workflow_id; do
+              jobs="$(curl -fsS --retry 3 --retry-delay 5 \
+                -H "Circle-Token: $CIRCLECI_TOKEN" \
+                "$api/workflow/$workflow_id/job")"
+              job="$(jq -c '[.items[]? | select(.name == "swift-code-coverage")] | first // empty' <<< "$jobs")"
+              if [[ -n "$job" ]]; then
+                status="$(jq -r '.status' <<< "$job")"
+                job_number="$(jq -r '.job_number // empty' <<< "$job")"
+                echo "CircleCI Swift coverage job $job_number: $status (poll $attempt/80)"
+                break
+              fi
+            done < <(jq -r '.items[]?.id' <<< "$workflows")
+
+            if [[ -n "$job_number" ]]; then
+              case "$status" in
+                success) break ;;
+                running|queued|pending|not_running|on_hold|blocked) ;;
+                *) echo "::error::CircleCI Swift coverage job $job_number ended with status $status" >&2; exit 1 ;;
+              esac
+            fi
+            if (( attempt == 80 )); then
+              echo '::error::Timed out waiting for the CircleCI Swift coverage job' >&2
+              exit 1
+            fi
+            sleep 30
+          done
+
+          artifacts="$(curl -fsS --retry 3 --retry-delay 5 \
+            -H "Circle-Token: $CIRCLECI_TOKEN" \
+            "$api/$project/$job_number/artifacts")"
+          badge_url="$(jq -r '[.items[]? | select(.path | endswith("coverage/swift-coverage-badge.json")) | .url] | first // empty' <<< "$artifacts")"
+          if [[ -z "$badge_url" ]]; then
+            echo "::error::CircleCI job $job_number has no Swift coverage badge artifact" >&2
+            exit 1
+          fi
+          mkdir -p coverage
+          curl -fsSL --retry 3 --retry-delay 5 \
+            -H "Circle-Token: $CIRCLECI_TOKEN" \
+            "$badge_url" -o coverage/swift-coverage-badge.json
+          jq -e . coverage/swift-coverage-badge.json > /dev/null
 
       - name: "Upload Swift Coverage Badge"
+        if: steps.filter-swift.outputs.ios == 'true'
         uses: actions/upload-artifact@v6
         with:
           name: swift-coverage-badge

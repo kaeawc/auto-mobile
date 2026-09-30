@@ -10,10 +10,11 @@ version: 2.1
 # parallel lanes.
 #
 # DYNAMIC CONFIG (setup workflow): this file is a cheap Linux "setup" pipeline.
-# The path-filtering job diffs the branch against main and continues to
-# .circleci/continue_config.yml ONLY when iOS sources changed — so a non-iOS
-# push never spins up (or checks out on) a macOS executor at all. This replaces
-# the old `halt_if_no_ios_changes`, which ran AFTER a full macOS checkout and
+# The path-filtering job diffs PR branches against main and continues to
+# .circleci/continue_config.yml only when iOS sources changed. Post-merge Swift
+# coverage has a separate parameter-gated path, triggered by GitHub Actions only
+# for coverage-input changes. Other pushes never spin up a macOS executor.
+# This replaces the old `halt_if_no_ios_changes`, which ran AFTER a full macOS checkout and
 # therefore still billed macOS minutes for every push. The heavier macOS jobs
 # live in continue_config.yml.
 #
@@ -25,10 +26,15 @@ version: 2.1
 #
 # Budget: CircleCI's open-source plan includes ~30,000 macOS credits/month
 # (~150 macOS minutes at ~200 credits/min); paid overflow is ~$0.12-0.24/min.
-# With path filtering, only pushes that touch ios/**, scripts/ios/**, or
-# .circleci/** reach the macOS lanes; everything else costs a few Linux seconds.
+# With path filtering on PRs and an explicit post-merge trigger, only relevant
+# pushes reach the macOS lanes; everything else costs a few Linux seconds.
 
 setup: true
+
+parameters:
+  run-swift-coverage-main:
+    type: boolean
+    default: false
 
 orbs:
   # Latest stable at time of writing. The filter job's base-revision/config-path/
@@ -89,6 +95,21 @@ jobs:
           configuration_path: /tmp/generated-config.yml
           parameters: /tmp/pipeline-parameters.json
 
+  continue-swift-coverage-main:
+    docker:
+      - image: cimg/base:current
+    environment:
+      GIT_LFS_SKIP_SMUDGE: "1"
+    steps:
+      - checkout:
+          method: blobless
+      - run:
+          name: "Select post-merge Swift coverage"
+          command: echo '{"run-swift-coverage-main":true}' > /tmp/swift-coverage-parameters.json
+      - continuation/continue:
+          configuration_path: .circleci/continue_config.yml
+          parameters: /tmp/swift-coverage-parameters.json
+
 workflows:
   detect-ios-changes:
     jobs:
@@ -107,3 +128,11 @@ workflows:
           filters:
             branches:
               ignore: main
+
+  swift-coverage-main:
+    when: << pipeline.parameters.run-swift-coverage-main >>
+    jobs:
+      - continue-swift-coverage-main:
+          filters:
+            branches:
+              only: main

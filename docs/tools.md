@@ -150,6 +150,12 @@ observation without copying type-command text into the metadata.
 | Android `eventAll`, `eventLast`                | Supported with split delivery                            | ASCII uses key events; other text uses accessibility insertion. A keycap, decomposed letter, or ASCII followed by ZWJ can split after its ASCII base, leaving an accessibility insertion beginning with a combining mark, variation selector, or ZWJ. |
 | Android `eventOnly`, `imeKeyEvents`            | ASCII only                                               | `eventOnly` preflights available key events; `imeKeyEvents` accepts printable ASCII only. Unsupported text fails before editing.                                                                                                                      |
 
+Android `eventAll` and `eventLast` send ASCII with `adb shell input keyevent`
+commands and send unsupported runs through accessibility text insertion. They
+do not use `adb shell input text`, so shell text escaping does not transform
+their Unicode runs. `imeKeyEvents` also rejects all non-printable-ASCII text
+during preflight, before any key event is sent.
+
 Use `ime` or `a11y` for emoji and other Unicode text when complete grapheme
 delivery matters. `auto` uses the IME when available, but its Android insertion
 fallback can split graphemes across key events and accessibility inserts.
@@ -173,6 +179,7 @@ Unicode code points individually; they do not preserve grapheme boundaries.
 | Android `eventAll`                       | Unsupported runs inserted intact                       | Unsupported runs, including ZWJ sequences, inserted intact                                | An ASCII base such as `e` is a key event and its following mark is a separate insertion | Inserted intact                                        | ASCII code points use key events; consecutive unsupported code points are grouped into accessibility inserts. For example, `é` dispatches `e` then inserts only U+0301, and `1️⃣` dispatches `1` then inserts the variation selector and keycap mark. |
 | Android `eventLast`                      | Passed intact when no ASCII key-event character occurs | Passed intact when no ASCII key-event character occurs; ASCII neighbors may cause a split | A trailing mark after ASCII `e` is inserted separately after the `e` key event          | Passed intact when no ASCII key-event character occurs | Sends the last supported ASCII key event, with preceding and following text inserted through accessibility.                                                                                                                                          |
 | Android `eventOnly`                      | Rejected before mutation                               | Rejected before mutation                                                                  | Rejected before mutation                                                                | Rejected before mutation                               | Preflights the entire string and fails at the first character without a key-event plan.                                                                                                                                                              |
+| Android `imeKeyEvents`                   | Rejected before mutation                               | Rejected before mutation                                                                  | Rejected before mutation                                                                | Rejected before mutation                               | Accepts printable ASCII only and preflights before sending key events.                                                                                                                                                                               |
 
 For event-based delivery, surrogate pairs stay together during code-point
 iteration, so an accessibility insertion does not begin with a low surrogate.

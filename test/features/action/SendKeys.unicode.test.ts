@@ -50,6 +50,21 @@ describe("sendKeys Unicode delivery (current behavior)", () => {
     }
   });
 
+  test("Android eventAll sends exact keyevent arguments and never shell-encodes Unicode", async () => {
+    const h = createSendKeysHarness(android);
+    const text = "a😀b日本";
+    expect(await h.executor.type({ action: "type", text, mode: "eventAll" })).toMatchObject({
+      success: true,
+    });
+    const commands = h.adb.getExecutedCommands();
+    expect(commands.filter((command) => command.startsWith("shell input keyevent "))).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+    ]);
+    expect(h.inserted).toEqual(["😀", "日本"]);
+    expect(commands.some((command) => command.startsWith("shell input text "))).toBe(false);
+  });
+
   test("Android eventLast can split an ASCII base from its combining mark", async () => {
     for (const text of [corpus.nonAscii, corpus.emoji, corpus.cjk]) {
       const wholeText = createSendKeysHarness(android);

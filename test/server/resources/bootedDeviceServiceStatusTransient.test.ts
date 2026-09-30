@@ -9,7 +9,7 @@ import {
 } from "../../../src/server/bootedDeviceResources";
 import type { DeviceServiceStatus } from "../../../src/server/bootedDeviceResources";
 import { describeDevice } from "../../../src/server/deviceDescription";
-import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../../src/utils/logger";
 
 // A booted iOS simulator entry as the resource builds it from discovery, before service-status

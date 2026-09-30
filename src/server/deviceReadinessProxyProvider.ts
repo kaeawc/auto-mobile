@@ -1,4 +1,4 @@
-import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { BootedDevice } from "../models";
 

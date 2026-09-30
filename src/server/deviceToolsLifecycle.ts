@@ -1,5 +1,5 @@
 import { DaemonState } from "../daemon/daemonState";
-import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { getAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { DeviceTeardownPhase, DeviceTeardownService } from "../devices/deviceTeardownService";

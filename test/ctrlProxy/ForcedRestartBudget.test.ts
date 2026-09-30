@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ForcedRestartBudget } from "../../src/utils/ctrlProxy/ForcedRestartBudget";
+import { ForcedRestartBudget } from "../../src/ctrlProxy/ForcedRestartBudget";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fixedBackoff } from "../../src/utils/Backoff";
 

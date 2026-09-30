@@ -25,8 +25,8 @@ import { logger } from "../../../../src/utils/logger";
 import {
   IOSCtrlProxyManager,
   type CtrlProxyIosManager,
-} from "../../../../src/utils/IOSCtrlProxyManager";
-import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
+} from "../../../../src/ctrlProxy/IOSCtrlProxyManager";
+import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
 
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {

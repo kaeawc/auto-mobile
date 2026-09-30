@@ -4,7 +4,7 @@ import {
   DeviceSessionManager,
   DefaultDeviceClientProvider,
 } from "../../src/utils/DeviceSessionManager";
-import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";

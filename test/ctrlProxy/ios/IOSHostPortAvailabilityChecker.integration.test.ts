@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createServer, type Server } from "node:net";
-import { TcpHostPortAvailabilityChecker } from "../../../src/utils/ios/IOSHostPortAvailabilityChecker";
+import { TcpHostPortAvailabilityChecker } from "../../../src/ctrlProxy/ios/IOSHostPortAvailabilityChecker";
 
 /**
  * These tests exercise the real TCP-connect probe against loopback. They avoid

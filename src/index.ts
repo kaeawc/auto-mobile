@@ -138,9 +138,9 @@ async function main() {
   const appearanceSyncScheduler = await import("./utils/appearance/AppearanceSyncScheduler");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
-  const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
-  const { IosCtrlProxyBuilder } = await import("./utils/IosCtrlProxyBuilder");
-  const { IOSCtrlProxyManager } = await import("./utils/IOSCtrlProxyManager");
+  const { AndroidCtrlProxyManager } = await import("./ctrlProxy/CtrlProxyManager");
+  const { IosCtrlProxyBuilder } = await import("./ctrlProxy/IosCtrlProxyBuilder");
+  const { IOSCtrlProxyManager } = await import("./ctrlProxy/IOSCtrlProxyManager");
   const { cleanupDaemonChildProcesses } = await import("./daemon/childProcessCleanup");
   const { stopManagedAdbServer } = await import("./utils/android-cmdline-tools/AdbServerLifecycle");
   startupBenchmark.endPhase("moduleImports");

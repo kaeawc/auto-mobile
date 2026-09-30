@@ -4,7 +4,7 @@ import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../
 import { PinchOn } from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
-import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";

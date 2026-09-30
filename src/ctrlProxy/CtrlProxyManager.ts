@@ -1,19 +1,19 @@
-import { errorMessage } from "./describeUnknownError";
+import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
-import { isAndroidFrameworkUnavailable } from "./android-cmdline-tools/isAndroidFrameworkUnavailable";
+import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
-} from "./android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import { logger } from "./logger";
-import { shellQuote } from "./shellQuote";
-import { registerDeviceIncarnationListener } from "./deviceIncarnation";
+} from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { logger } from "../utils/logger";
+import { shellQuote } from "../utils/shellQuote";
+import { registerDeviceIncarnationListener } from "../utils/deviceIncarnation";
 import * as fs from "fs/promises";
 import type { Dirent } from "fs";
 import * as path from "path";
 import { ActionableError, BootedDevice } from "../models";
-import { requireBootedDevice } from "./requireBootedDevice";
+import { requireBootedDevice } from "../utils/requireBootedDevice";
 import {
   isExplicitPin,
   isPinnedVersionKnown,
@@ -24,27 +24,27 @@ import {
 import AdmZip from "adm-zip";
 import crypto from "crypto";
 import os from "os";
-import { accessibilityDetector } from "./AccessibilityDetector";
-import type { AccessibilityDetector } from "./interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../utils/AccessibilityDetector";
+import type { AccessibilityDetector } from "../utils/interfaces/AccessibilityDetector";
 import {
   NoOpPerformanceTracker,
   createGlobalPerformanceTracker,
   type PerformanceTracker,
-} from "./PerformanceTracker";
-import { Timer, defaultTimer } from "./SystemTimer";
-import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
-import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCalculator";
+} from "../utils/PerformanceTracker";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { type FileDownloader, DefaultFileDownloader } from "../utils/FileDownloader";
+import { type ChecksumCalculator, DefaultChecksumCalculator } from "../utils/ChecksumCalculator";
 import type {
   ProxyManager,
   ProxySetupErrorCategory,
   ProxySetupResult,
-} from "./interfaces/ProxyManager";
-import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
-import { getTempDir } from "./tempDir";
+} from "../utils/interfaces/ProxyManager";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import { getTempDir } from "../utils/tempDir";
 import {
   type AndroidPrerequisiteDetector,
   DefaultAndroidPrerequisiteDetector,
-} from "./android-cmdline-tools/AndroidPrerequisiteDetector";
+} from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
 export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;

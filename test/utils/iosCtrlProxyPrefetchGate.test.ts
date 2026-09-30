@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { IosCtrlProxyBuilder } from "../../src/utils/IosCtrlProxyBuilder";
-import type { PrefetchBuilder } from "../../src/utils/IosCtrlProxyBuilder";
+import { IosCtrlProxyBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
+import type { PrefetchBuilder } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
 import type { IosPrerequisiteDetector } from "../../src/utils/ios-cmdline-tools/IosPrerequisiteDetector";
 
 /**

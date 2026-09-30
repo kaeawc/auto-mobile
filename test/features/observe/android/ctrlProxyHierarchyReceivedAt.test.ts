@@ -20,7 +20,7 @@ import type {
   HierarchyDelegateContext,
 } from "../../../../src/features/observe/android/types";
 import type { ViewHierarchyResult } from "../../../../src/models/ViewHierarchyResult";
-import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 

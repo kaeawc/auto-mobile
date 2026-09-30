@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { IosCtrlProxyProcessClient } from "../../../src/utils/ios/IosCtrlProxyProcessClient";
+import { IosCtrlProxyProcessClient } from "../../../src/ctrlProxy/ios/IosCtrlProxyProcessClient";
 import type {
   HostCommandExecutor,
   HostCommandOptions,

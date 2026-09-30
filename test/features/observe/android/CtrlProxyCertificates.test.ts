@@ -15,7 +15,7 @@ import { pathToFileURL } from "node:url";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
-import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../../src/models";
 import {

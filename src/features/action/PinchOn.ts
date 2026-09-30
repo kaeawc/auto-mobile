@@ -17,7 +17,7 @@ import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture"
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { serverConfig } from "../../utils/ServerConfig";
-import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { boundsArea, clamp } from "../../utils/bounds";
 import { buildContainerFromElement } from "../../utils/elementProperties";

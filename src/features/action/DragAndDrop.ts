@@ -18,7 +18,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { serverConfig } from "../../utils/ServerConfig";

@@ -619,7 +619,7 @@ const noStructuredContentReadRule = {
 const PASCAL_CASE = /^[A-Z][A-Za-z0-9]*$/;
 const DEFERRED_IOS_EXPORTS = new Map([
   ["IOSCtrlProxyClient", "src/features/observe/ios/IOSCtrlProxyClient.ts"],
-  ["IOSCtrlProxyManager", "src/utils/IOSCtrlProxyManager.ts"],
+  ["IOSCtrlProxyManager", "src/ctrlProxy/IOSCtrlProxyManager.ts"],
 ]);
 const namingConventionRule = {
   meta: {

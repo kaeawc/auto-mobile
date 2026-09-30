@@ -1,6 +1,9 @@
-import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../HostCommandExecutor";
-import type { Timer } from "../SystemTimer";
-import { logger } from "../logger";
+import {
+  DefaultHostCommandExecutor,
+  type HostCommandExecutor,
+} from "../../utils/HostCommandExecutor";
+import type { Timer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
 
 /**
  * Single source of truth for "is this a usable TCP port number".
@@ -182,7 +185,10 @@ export class IosCtrlProxyHealthClient {
       return health.deviceId === undefined || health.deviceId === deviceId;
     } catch (error) {
       // Malformed/non-JSON health body cannot establish runner identity.
-      logger.debug(`src/utils/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
+      logger.debug(
+        `src/ctrlProxy/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`,
+        error,
+      );
       return false;
     }
   }
@@ -208,7 +214,10 @@ export class IosCtrlProxyHealthClient {
       return isValidCtrlProxyPort(health.port) ? health.port : null;
     } catch (error) {
       // Malformed/non-JSON health body means we can't confirm the reported port belongs to this device; null it out.
-      logger.debug(`src/utils/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
+      logger.debug(
+        `src/ctrlProxy/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`,
+        error,
+      );
       return null;
     }
   }
@@ -226,7 +235,10 @@ export class IosCtrlProxyHealthClient {
       return await this.requestHealthEndpointBodyOnPort(port, timeoutMs);
     } catch (error) {
       // No runner listening on this port (connection refused/timeout) is the expected case; null means "not up yet".
-      logger.debug(`src/utils/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
+      logger.debug(
+        `src/ctrlProxy/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`,
+        error,
+      );
       return null;
     }
   }

@@ -1,7 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
-import { CtrlProxyStaleRunnerCacheError } from "../utils/IosCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../ctrlProxy/IosCtrlProxyBuilder";
 
 /** Options the startup path passes to `DeviceSessionManager.verifyIosDevice`. */
 export interface IosStartupVerifyOptions {

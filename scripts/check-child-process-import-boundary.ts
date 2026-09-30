@@ -12,7 +12,7 @@ const ALLOWED_IMPORTERS = new Set([
   "src/daemon/processTable.ts",
   "src/utils/GitMetadataClient.ts",
   "src/utils/HostCommandExecutor.ts",
-  "src/utils/IOSCtrlProxyManager.ts",
+  "src/ctrlProxy/IOSCtrlProxyManager.ts",
 ]);
 
 interface Violation {

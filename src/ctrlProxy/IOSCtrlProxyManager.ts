@@ -1,29 +1,29 @@
-import { errorMessage } from "./describeUnknownError";
-import { runDetachedFromPerf, trackAmbient } from "./PerfContext";
-import { logger } from "./logger";
+import { errorMessage } from "../utils/describeUnknownError";
+import { runDetachedFromPerf, trackAmbient } from "../utils/PerfContext";
+import { logger } from "../utils/logger";
 import { BootedDevice } from "../models";
-import { requireBootedDevice } from "./requireBootedDevice";
+import { requireBootedDevice } from "../utils/requireBootedDevice";
 import {
   NoOpPerformanceTracker,
   createGlobalPerformanceTracker,
   type PerformanceTracker,
-} from "./PerformanceTracker";
-import { Timer, defaultTimer } from "./SystemTimer";
-import { raceWithDeadline } from "./raceWithDeadline";
+} from "../utils/PerformanceTracker";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IosCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IosCtrlProxyBuilder";
-import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
+import { checkIosCtrlProxyOverride } from "../utils/iosCtrlProxyOverride";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { resolvePinnedVersion } from "../constants/release";
 import { type ChildProcess } from "child_process";
-import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
-import { DefaultHostCommandExecutor, type HostProcessExecutor } from "./HostCommandExecutor";
-import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
-import { XcodebuildClient, type Xcodebuild } from "./ios-cmdline-tools/XcodebuildClient";
-import { DeviceAppManager } from "./ios-cmdline-tools/DeviceAppManager";
-import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
-import { exponentialBackoff } from "./Backoff";
-import { ForcedRestartBudget } from "./ctrlProxy/ForcedRestartBudget";
-import { DefaultProcessSupervisor, type ProcessSupervisor } from "./ProcessSupervisor";
+import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../utils/PortManager";
+import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../utils/HostCommandExecutor";
+import { XcodeSigningManager } from "../utils/ios-cmdline-tools/XcodeSigning";
+import { XcodebuildClient, type Xcodebuild } from "../utils/ios-cmdline-tools/XcodebuildClient";
+import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
+import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { exponentialBackoff } from "../utils/Backoff";
+import { ForcedRestartBudget } from "./ForcedRestartBudget";
+import { DefaultProcessSupervisor, type ProcessSupervisor } from "../utils/ProcessSupervisor";
 import {
   TcpHostPortAvailabilityChecker,
   type HostPortAvailabilityChecker,
@@ -34,8 +34,8 @@ import {
   type CtrlProxyHealthCheckResult,
 } from "./ios/IosCtrlProxyHealthClient";
 import { IosCtrlProxyProcessClient, type RunnerOwnership } from "./ios/IosCtrlProxyProcessClient";
-import { withRemainingBudget } from "./withRemainingBudget";
-import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
+import { withRemainingBudget } from "../utils/withRemainingBudget";
+import type { ProxyManager, ProxySetupResult } from "../utils/interfaces/ProxyManager";
 
 export const MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES = 20;
 export const DIRECT_RUNNER_DISCOVERY_DEADLINE_MS = 5_000;
@@ -2589,7 +2589,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         // A failed remote status call (network/daemon error) is treated the same as
         // "not our tracked runner": returning false here is safe because the caller
         // falls back to local isProcessRunning/re-adoption rather than crashing.
-        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
+        logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -2890,7 +2890,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       } catch (error) {
         // Remote status call failed; report not-alive so the caller respawns rather
         // than trusting a stale in-memory pid across a daemon error.
-        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
+        logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -3344,7 +3344,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       } catch (error) {
         // Remote status call failed; the supervisor should treat iproxy as down
         // and attempt a restart rather than assume the tunnel is still healthy.
-        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
+        logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -3916,7 +3916,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       } catch (error) {
         // `xcrun simctl list devices` failing (Xcode tooling missing/misconfigured)
         // means we can't confirm the simulator is present; treat it as undetected.
-        logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
+        logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
         return false;
       }
     }
@@ -3935,7 +3935,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     } catch (error) {
       // `idevice_id -l` failing (libimobiledevice missing, or no physical device
       // attached) means we can't enumerate physical devices; report undetected.
-      logger.debug(`src/utils/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
+      logger.debug(`src/ctrlProxy/IOSCtrlProxyManager.ts fallback failed: ${error}`, error);
       return false;
     }
   }

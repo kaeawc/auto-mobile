@@ -109,8 +109,8 @@ import {
   resolveIpaUrl,
   resolvePinnedVersion,
 } from "../constants/release";
-import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
-import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
+import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";

@@ -237,12 +237,12 @@
 5	test/server/tools/schema.integration.test.ts
 2	test/server/unissuedSessionBoundConnection.integration.test.ts
 1	test/server/videoRecordingReadiness.test.ts
-35	test/utils/CtrlProxyManager.test.ts
+35	test/ctrlProxy/CtrlProxyManager.test.ts
 95	test/utils/DeepLinkManager.chooser.test.ts
 11	test/utils/DeepLinkManager.test.ts
 7	test/utils/DeepLinkManagerIos.test.ts
 7	test/utils/DeviceSessionManager.test.ts
-13	test/utils/IOSCtrlProxyManager.test.ts
+13	test/ctrlProxy/IOSCtrlProxyManager.test.ts
 1	test/utils/android-cmdline-tools/AdbClient-getDeviceLock.test.ts
 18	test/utils/android-cmdline-tools/AndroidEmulatorClient-corruptImage.test.ts
 6	test/utils/android-cmdline-tools/AndroidEmulatorClient-headless.test.ts

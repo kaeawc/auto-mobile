@@ -17,7 +17,7 @@ import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyF
 import { CtrlProxyForwardingLeaseConflictError } from "../../../src/features/observe/shared/CtrlProxyForwardingLeaseConflictError";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BootedDevice, HighlightShape } from "../../../src/models";
 import {

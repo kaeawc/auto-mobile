@@ -5,7 +5,7 @@ import {
   MAX_STALE_PREFETCH_DIRS_PER_STARTUP,
   REBIND_BIND_WAIT_BUDGET_MS,
   STALE_PREFETCH_SWEEP_DEADLINE_MS,
-} from "../../src/utils/CtrlProxyManager";
+} from "../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";

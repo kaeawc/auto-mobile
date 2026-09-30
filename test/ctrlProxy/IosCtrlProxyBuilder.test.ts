@@ -4,7 +4,7 @@ import {
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
   IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV,
   IosCtrlProxyBuilder,
-} from "../../src/utils/IosCtrlProxyBuilder";
+} from "../../src/ctrlProxy/IosCtrlProxyBuilder";
 import {
   RELEASE_CHECKSUM_REGISTRY,
   resolveAssetVersion,

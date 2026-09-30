@@ -58,7 +58,7 @@ import type { ResolverSelector } from "./elementSelectorSchemas";
 import type { ConditionResolver } from "../features/observe/ConditionPredicates";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
-import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { DaemonState } from "../daemon/daemonState";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";

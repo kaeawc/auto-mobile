@@ -12,7 +12,7 @@ import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
-import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import type { ViewHierarchyResult } from "../../../models";
 import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";

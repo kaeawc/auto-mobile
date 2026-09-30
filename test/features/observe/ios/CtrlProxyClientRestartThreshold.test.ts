@@ -7,9 +7,9 @@ import {
   FakeWebSocket,
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import type { CtrlProxyIosManager } from "../../../../src/utils/IOSCtrlProxyManager";
+import type { CtrlProxyIosManager } from "../../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
-import { ForcedRestartBudget } from "../../../../src/utils/ctrlProxy/ForcedRestartBudget";
+import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
 import { fixedBackoff } from "../../../../src/utils/Backoff";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { ViewHierarchy } from "../../../../src/features/observe/ViewHierarchy";

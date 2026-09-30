@@ -1,11 +1,11 @@
-import type { HostCommandExecutor } from "../HostCommandExecutor";
-import { trackAmbient } from "../PerfContext";
-import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
-import type { Timer } from "../SystemTimer";
-import { defaultTimer } from "../SystemTimer";
-import { logger } from "../logger";
-import { errorMessage } from "../describeUnknownError";
-import { withRemainingBudget } from "../withRemainingBudget";
+import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
+import { trackAmbient } from "../../utils/PerfContext";
+import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
+import type { Timer } from "../../utils/SystemTimer";
+import { defaultTimer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { ActionableError } from "../../models/ActionableError";
 
 /** Matches a `kill -0` failure caused by the target being owned by another

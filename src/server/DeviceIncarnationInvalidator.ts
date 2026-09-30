@@ -12,7 +12,7 @@ import {
 import "../features/action/TerminateApp";
 import "../features/observe/android/AndroidCtrlProxyClient";
 import "../features/performance/PerformanceMonitor";
-import "../utils/CtrlProxyManager";
+import "../ctrlProxy/CtrlProxyManager";
 import "./appResources";
 import "./videoRecordingIncarnationListener";
 

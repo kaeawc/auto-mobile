@@ -1,6 +1,6 @@
 import { logger } from "../../../utils/logger";
 import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
-import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../android";
 import { IOSCtrlProxyClient } from "../ios";
 import { appendObserveError } from "../ObserveError";

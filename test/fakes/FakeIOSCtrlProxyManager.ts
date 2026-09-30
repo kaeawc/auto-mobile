@@ -1,6 +1,9 @@
-import { CtrlProxyIosManager, CtrlProxyIosSetupResult } from "../../src/utils/IOSCtrlProxyManager";
+import {
+  CtrlProxyIosManager,
+  CtrlProxyIosSetupResult,
+} from "../../src/ctrlProxy/IOSCtrlProxyManager";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
-import { ForcedRestartBudget } from "../../src/utils/ctrlProxy/ForcedRestartBudget";
+import { ForcedRestartBudget } from "../../src/ctrlProxy/ForcedRestartBudget";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "./FakeTimer";
 

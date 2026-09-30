@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { BootedDevice } from "../../../../src/models";
-import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { PortManager } from "../../../../src/utils/PortManager";

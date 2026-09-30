@@ -32,7 +32,7 @@ import {
 import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { loadSharp, type SharpFactory } from "../../utils/image/loadSharp";
 import {
   WebpBinaryResolver,

@@ -8,7 +8,7 @@ describe("VM restore incarnation listener registry", () => {
   test("keeps every known per-serial state owner registered", () => {
     const expected: Readonly<Record<string, string>> = {
       "ctrlproxy-client": "src/features/observe/android/AndroidCtrlProxyClient.ts",
-      "ctrlproxy-manager": "src/utils/CtrlProxyManager.ts",
+      "ctrlproxy-manager": "src/ctrlProxy/CtrlProxyManager.ts",
       "observe-window-cache": "src/features/action/TerminateApp.ts",
       "installed-apps": "src/server/appResources.ts",
       recordings: "src/server/videoRecordingIncarnationListener.ts",

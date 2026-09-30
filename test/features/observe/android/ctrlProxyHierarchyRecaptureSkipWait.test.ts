@@ -17,7 +17,7 @@ import type {
   CachedHierarchy,
   HierarchyDelegateContext,
 } from "../../../../src/features/observe/android/types";
-import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyManager";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 

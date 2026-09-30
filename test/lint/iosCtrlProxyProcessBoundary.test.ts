@@ -8,8 +8,8 @@ import {
 } from "../../scripts/check-ios-ctrl-proxy-process-boundary";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const MANAGER = "src/utils/IOSCtrlProxyManager.ts";
-const OWNER = "src/utils/ios/IosCtrlProxyProcessClient.ts";
+const MANAGER = "src/ctrlProxy/IOSCtrlProxyManager.ts";
+const OWNER = "src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts";
 const CHECK = "scripts/check-ios-ctrl-proxy-process-boundary.ts";
 
 const PROCESS_TOOLING = /processExecutor\.exec\(\s*["'`](?:ps|pgrep|kill)/;
@@ -407,8 +407,8 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
   });
 
   test("normalizes Windows separators before applying ownership exceptions", () => {
-    expect(repositoryPath("src\\utils\\ios\\IosCtrlProxyProcessClient.ts")).toBe(
-      "src/utils/ios/IosCtrlProxyProcessClient.ts",
+    expect(repositoryPath("src\\ctrlProxy\\ios\\IosCtrlProxyProcessClient.ts")).toBe(
+      "src/ctrlProxy/ios/IosCtrlProxyProcessClient.ts",
     );
   });
 

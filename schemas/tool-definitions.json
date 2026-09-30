@@ -16552,6 +16552,10 @@
           "description": "Recording label",
           "type": "string"
         },
+        "display": {
+          "description": "Android panel key, role, or \"active\" (start only)",
+          "type": "string"
+        },
         "highlights": {
           "description": "Recording highlights",
           "type": "array",

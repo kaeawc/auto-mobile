@@ -26,6 +26,7 @@ import {
 } from "../../src/server/videoRecordingManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS } from "../../src/features/video/androidScreenrecord";
+import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
 
 async function drainMicrotasks(turns = 10): Promise<void> {
@@ -151,6 +152,7 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   afterEach(() => {
+    displayTransitions.reset("tool-foldable");
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
     setVideoRecordingDeviceDetectorForTesting(undefined);
@@ -396,6 +398,65 @@ describe("videoRecording tool segmentation branch", () => {
     expect((stopped.metadata as VideoRecordingMetadata).highlights?.[0]?.description).toBe(
       "single recording",
     );
+  });
+
+  test("Android stop result reports the pinned panel and panel transitions", async () => {
+    const foldable: BootedDevice = {
+      deviceId: "tool-foldable",
+      platform: "android",
+      name: "Foldable",
+      displays: {
+        panels: [
+          { key: "11", role: "inner", sizePx: { width: 200, height: 300 } },
+          { key: "22", role: "cover", sizePx: { width: 100, height: 200 } },
+        ],
+        postures: ["opened", "closed"],
+      },
+    };
+    await setVideoRecordingManagerDependencies({
+      resolveAndroidDisplay: async () => ({
+        panel: { key: "11", role: "inner" },
+        physicalId: "11",
+        activePanel: { key: "11", role: "inner" },
+      }),
+    });
+    const start = parse(
+      await handler()(foldable, {
+        action: "start",
+        platform: "android",
+        deviceId: foldable.deviceId,
+        display: "inner",
+      }),
+    );
+    const recordingId = (start.recordings as Array<{ recordingId: string }>)[0].recordingId;
+    expect(fakeBackend.startCalls[0]?.physicalDisplayId).toBe("11");
+    fakeTimer.advanceTime(250);
+    displayTransitions.notifyAndroidTransition(foldable.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:22",
+    });
+    displayTransitions.record(foldable.deviceId, {
+      display: { key: "22", role: "cover", posture: "closed", generation: 1 },
+      screenSize: { width: 100, height: 200 },
+    });
+
+    const stop = parse(
+      await handler()(foldable, {
+        action: "stop",
+        platform: "android",
+        recordingId,
+      }),
+    );
+    const result = (stop.recordings as Array<Record<string, unknown>>)[0];
+    expect(result.recordedPanel).toEqual({ key: "11", role: "inner" });
+    expect(result.transitions).toEqual([
+      {
+        atMs: 250,
+        from: { key: "11", role: "inner" },
+        to: { key: "22", role: "cover" },
+      },
+    ]);
   });
 
   test("non-android recording past the android cap stays single (not segmented)", async () => {

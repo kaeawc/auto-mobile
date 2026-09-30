@@ -73,6 +73,18 @@ function parseHighlights(
   }
 }
 
+function parseDisplayMetadata<T>(value: string | null): T | undefined {
+  if (!value) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    logger.warn(`[VideoRecordingRepository] Failed to parse display metadata: ${error}`);
+    return undefined;
+  }
+}
+
 function toRecord(row: DbVideoRecording): VideoRecordingRecord {
   return {
     recordingId: row.recording_id,
@@ -92,6 +104,12 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
     lastAccessedAt: row.last_accessed_at,
     config: parseConfig(row.config_json),
     highlights: parseHighlights(row.highlights_json ?? null),
+    recordedPanel: parseDisplayMetadata<VideoRecordingMetadata["recordedPanel"]>(
+      row.recorded_panel_json,
+    ),
+    transitions: parseDisplayMetadata<VideoRecordingMetadata["transitions"]>(
+      row.display_transitions_json,
+    ),
     ownerSessionUuid: row.owner_session_uuid ?? undefined,
   };
 }
@@ -165,6 +183,12 @@ function buildUpdatePayload(update: Partial<VideoRecordingRecord>): VideoRecordi
   if (update.highlights !== undefined) {
     payload.highlights_json = JSON.stringify(update.highlights ?? []);
   }
+  if (update.recordedPanel !== undefined) {
+    payload.recorded_panel_json = JSON.stringify(update.recordedPanel);
+  }
+  if (update.transitions !== undefined) {
+    payload.display_transitions_json = JSON.stringify(update.transitions);
+  }
   if (update.ownerSessionUuid !== undefined) {
     payload.owner_session_uuid = update.ownerSessionUuid ?? null;
   }
@@ -207,6 +231,8 @@ export class VideoRecordingRepository {
       last_accessed_at: record.lastAccessedAt,
       config_json: JSON.stringify(record.config),
       highlights_json: record.highlights ? JSON.stringify(record.highlights) : null,
+      recorded_panel_json: record.recordedPanel ? JSON.stringify(record.recordedPanel) : null,
+      display_transitions_json: record.transitions ? JSON.stringify(record.transitions) : null,
       owner_session_uuid: record.ownerSessionUuid ?? null,
     };
 
@@ -234,6 +260,8 @@ export class VideoRecordingRepository {
           last_accessed_at: row.last_accessed_at,
           config_json: row.config_json,
           highlights_json: row.highlights_json,
+          recorded_panel_json: row.recorded_panel_json,
+          display_transitions_json: row.display_transitions_json,
           owner_session_uuid: row.owner_session_uuid,
         }),
       )

@@ -24,6 +24,10 @@ import type {
 import { VideoCaptureFinalizationError } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
+import {
+  probeScreenrecordDisplayFlag,
+  resolveAndroidRecordingDisplay,
+} from "./AndroidRecordingDisplay";
 
 interface AndroidBackendHandle {
   kind: "android";
@@ -49,6 +53,61 @@ const DEVICE_FILE_FINALIZE_POLL_ATTEMPTS = 5;
 const DEVICE_FILE_FINALIZE_POLL_INTERVAL_MS = 300;
 const PULL_MAX_ATTEMPTS = 3;
 const PULL_RETRY_DELAY_MS = 500;
+
+async function startScreenrecordProcess(
+  adb: Pick<AdbExecutor, "spawn">,
+  args: string[],
+  config: VideoCaptureConfig,
+  device: BootedDevice,
+  physicalDisplayId: string | undefined,
+  timer: Timer,
+): Promise<{
+  process: TrackedChildProcess;
+  exitState: ProcessExitState;
+  exitPromise: Promise<void>;
+  stderr: string[];
+  warning?: string;
+  physicalDisplayId?: string;
+}> {
+  let process = await adb.spawn(args, {
+    signal: config.abortSignal,
+    abortSignalScope: "startup",
+  });
+  const abortStartup = () => process.kill("SIGTERM");
+  config.abortSignal?.addEventListener("abort", abortStartup, { once: true });
+  try {
+    if (config.abortSignal?.aborted) {
+      abortStartup();
+    }
+    let stderr: string[] = [];
+    let { exitState, exitPromise } = createExitTracker(process, stderr);
+    let warning: string | undefined;
+    let effectivePhysicalId = physicalDisplayId;
+    if (physicalDisplayId !== undefined && device.apiLevel === undefined) {
+      if (await probeScreenrecordDisplayFlag({ exitPromise, exitState, stderr }, timer)) {
+        warning = "Android screenrecord rejected --display-id; recording the default display.";
+        logger.warn(`[VideoCapture] ${warning}`);
+        process = await adb.spawn(
+          args.filter((arg, index) => arg !== "--display-id" && args[index - 1] !== "--display-id"),
+          { signal: config.abortSignal, abortSignalScope: "startup" },
+        );
+        stderr = [];
+        ({ exitState, exitPromise } = createExitTracker(process, stderr));
+        effectivePhysicalId = undefined;
+      }
+    }
+    return {
+      process,
+      exitState,
+      exitPromise,
+      stderr,
+      warning,
+      physicalDisplayId: effectivePhysicalId,
+    };
+  } finally {
+    config.abortSignal?.removeEventListener("abort", abortStartup);
+  }
+}
 
 export function clampBitrateKbps(config: VideoCaptureConfig): number {
   const maxBitrateKbps = Math.max(0, Math.floor(config.maxThroughputMbps * 1000));
@@ -426,6 +485,17 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     config: VideoCaptureConfig,
   ): Promise<RecordingHandle> {
     const adb = this.adbFactory.create(device);
+    const display =
+      config.physicalDisplayId === undefined
+        ? await resolveAndroidRecordingDisplay(
+            device,
+            adb,
+            config.display,
+            config.abortSignal,
+            this.timer,
+          )
+        : undefined;
+    const physicalDisplayId = config.physicalDisplayId ?? display?.physicalId;
     const bitrateKbps = clampBitrateKbps(config);
     const bitrateBps = Math.max(1, Math.round(bitrateKbps * 1000));
     const timeLimitSeconds = this.resolveAndroidTimeLimit(config.maxDurationSeconds);
@@ -449,6 +519,10 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       String(timeLimitSeconds),
     ];
 
+    if (physicalDisplayId !== undefined) {
+      args.push("--display-id", physicalDisplayId);
+    }
+
     if (config.resolution) {
       args.push("--size", `${config.resolution.width}x${config.resolution.height}`);
     }
@@ -468,17 +542,14 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // A recording owns its process after this method returns. The request signal
     // must bound only startup, not kill an accepted recording after its caller
     // has moved on to post-tool auditing.
-    const process = await adb.spawn(args, {
-      signal: config.abortSignal,
-      abortSignalScope: "startup",
-    });
-    const abortStartup = () => process.kill("SIGTERM");
-    config.abortSignal?.addEventListener("abort", abortStartup, { once: true });
-    if (config.abortSignal?.aborted) {
-      abortStartup();
-    }
-    const stderr: string[] = [];
-    const { exitState, exitPromise } = createExitTracker(process, stderr);
+    const {
+      process,
+      exitState,
+      exitPromise,
+      stderr,
+      warning,
+      physicalDisplayId: effectivePhysicalId,
+    } = await startScreenrecordProcess(adb, args, config, device, physicalDisplayId, this.timer);
 
     const backendHandle: AndroidBackendHandle = {
       kind: "android",
@@ -489,11 +560,12 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       device,
       deviceTempPath,
     };
-    config.abortSignal?.removeEventListener("abort", abortStartup);
     return {
       recordingId: config.recordingId,
       outputPath: config.outputPath,
       startedAt: config.startedAt,
+      warning,
+      physicalDisplayId: effectivePhysicalId,
       backendHandle,
     };
   }

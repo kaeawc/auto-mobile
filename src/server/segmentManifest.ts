@@ -2,6 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { logger } from "../utils/logger";
+import type { VideoRecordingDisplayTransition, VideoRecordingPanel } from "../models";
 
 /** File name of the per-session manifest written alongside the first segment. */
 export const SEGMENT_MANIFEST_FILE = "segments.json";
@@ -11,6 +12,9 @@ export interface StoppedSegment {
   recordingId: string;
   filePath: string;
   segmentIndex: number;
+  recordedPanel?: VideoRecordingPanel;
+  transitions?: VideoRecordingDisplayTransition[];
+  warnings?: string[];
 }
 
 /**

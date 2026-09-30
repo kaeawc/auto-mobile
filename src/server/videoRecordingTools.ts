@@ -105,12 +105,15 @@ const segmentedSessions = (() => {
       handle: string,
       session: AndroidSegmentedPlanVideoSession,
     ): Promise<StoppedSegmentedSession> {
-      const { filePaths, recordingIds, highlights } = await session.stop();
+      const { filePaths, recordingIds, metadata, highlights } = await session.stop();
       byHandle.delete(handle);
       const segments: StoppedSegment[] = recordingIds.map((id, index) => ({
         recordingId: id,
         filePath: filePaths[index],
         segmentIndex: index,
+        ...(metadata[index]?.recordedPanel && { recordedPanel: metadata[index].recordedPanel }),
+        ...(metadata[index]?.transitions && { transitions: metadata[index].transitions }),
+        ...(metadata[index]?.warnings && { warnings: metadata[index].warnings }),
       }));
       const manifestPath = await writeSegmentManifest(handle, segments);
       return { sessionId: handle, segments, manifestPath, highlights };
@@ -216,6 +219,7 @@ export interface VideoRecordingArgs {
   sessionUuid?: string;
   device?: string;
   highlights?: VideoRecordingHighlightInput[];
+  display?: string;
 }
 
 const resolutionSchema = z.object({
@@ -259,6 +263,7 @@ const videoRecordingSchema = addDeviceTargetingToSchema(
         .optional()
         .describe("Max duration seconds"),
       outputName: z.string().optional().describe("Recording label"),
+      display: z.string().optional().describe('Android panel key, role, or "active" (start only)'),
       highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
     })
     .strict(),
@@ -413,6 +418,8 @@ async function stopRecordingById(recordingId: string) {
       durationMs,
       sizeBytes,
       codec,
+      recordedPanel: metadata.recordedPanel,
+      transitions: metadata.transitions,
       metadata: { ...metadata, durationMs, sizeBytes, codec },
       deviceId: matching?.deviceId,
       platform: matching?.platform,
@@ -465,6 +472,7 @@ export function registerVideoRecordingTools(): void {
               outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
               configOverrides: buildConfigOverrides(args),
               highlights: args.highlights,
+              display: args.display,
               ownerSessionUuid: args.sessionUuid,
               timer: segmentedSessions.timer,
               maxDurationSeconds,
@@ -493,6 +501,8 @@ export function registerVideoRecordingTools(): void {
               deviceId: target.deviceId,
               platform: target.platform,
               segmented: true,
+              recordedPanel: active.recordedPanel,
+              warnings: active.warning ? [active.warning] : undefined,
               settings: {
                 ...active.config,
                 maxDurationSeconds,
@@ -509,6 +519,7 @@ export function registerVideoRecordingTools(): void {
             highlights: args.highlights,
             ownerSessionUuid: args.sessionUuid,
             abortSignal: signal,
+            display: args.display,
           });
 
           recordings.push({
@@ -518,6 +529,8 @@ export function registerVideoRecordingTools(): void {
             outputName: active.outputName,
             deviceId: target.deviceId,
             platform: target.platform,
+            recordedPanel: active.recordedPanel,
+            warnings: active.warning ? [active.warning] : undefined,
             settings: {
               ...active.config,
               resolution: active.config.resolution,
@@ -597,6 +610,9 @@ export function registerVideoRecordingTools(): void {
                   filePath: segment.filePath,
                   segmentIndex: segment.segmentIndex,
                   sessionId,
+                  recordedPanel: segment.recordedPanel,
+                  transitions: segment.transitions,
+                  warnings: segment.warnings,
                   deviceId: target.deviceId,
                   platform: target.platform,
                   segmented: true,
@@ -644,6 +660,9 @@ export function registerVideoRecordingTools(): void {
             durationMs,
             sizeBytes,
             codec,
+            recordedPanel: metadata.recordedPanel,
+            transitions: metadata.transitions,
+            warnings: metadata.warnings,
             metadata: { ...metadata, durationMs, sizeBytes, codec },
             deviceId: target.deviceId,
             platform: target.platform,

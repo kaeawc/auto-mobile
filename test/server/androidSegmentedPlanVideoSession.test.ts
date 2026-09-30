@@ -164,6 +164,56 @@ describe("AndroidSegmentedPlanVideoSession", () => {
 });
 
 describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
+  test("reuses the physical ID and offsets a boundary and later transition", async () => {
+    const timer = new FakeTimer();
+    const requests: Array<
+      Parameters<
+        NonNullable<
+          ConstructorParameters<typeof AndroidSegmentedPlanVideoSession>[0]["startVideoRecording"]
+        >
+      >[0]
+    > = [];
+    const recordedPanel = { key: "11", role: "inner" as const };
+    const cover = { key: "22", role: "cover" as const };
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "panels",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async (request) => {
+        requests.push(request);
+        return {
+          ...makeActiveRecording(`r${requests.length}`, `/tmp/r${requests.length}.mp4`),
+          recordedPanel,
+          physicalDisplayId: "11",
+        };
+      },
+      stopVideoRecording: async (recordingId) => ({
+        metadata: {
+          ...makeStopMetadata(recordingId ?? "unknown", "/tmp/panels.mp4"),
+          recordedPanel,
+          transitions:
+            recordingId === "r1"
+              ? [{ atMs: 400, from: recordedPanel, to: cover }]
+              : [
+                  { atMs: 0, from: recordedPanel, to: cover },
+                  { atMs: 250, from: cover, to: recordedPanel },
+                ],
+        },
+        evictedRecordingIds: [],
+      }),
+    });
+    await session.start();
+    timer.advanceTime(1000);
+    await flush();
+    expect(requests[1]?.physicalDisplayId).toBe("11");
+    expect(requests[1]?.display).toBeUndefined();
+    expect(requests[1]?.activePanel).toEqual(cover);
+    const result = await session.stop();
+    expect(result.metadata[1]?.transitions?.map((transition) => transition.atMs)).toEqual([
+      1000, 1250,
+    ]);
+  });
   test("routes highlights to segment windows and returns session-timeline entries", async () => {
     const timer = new FakeTimer();
     const firstHighlight = {

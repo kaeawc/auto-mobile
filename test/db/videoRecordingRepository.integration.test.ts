@@ -8,6 +8,7 @@ import type {
 } from "../../src/db/videoRecordingRepository";
 import { createTestDatabase } from "./testDbHelper";
 import type { VideoRecordingConfig } from "../../src/models";
+import { up as addDisplayColumns } from "../../src/db/migrations/2026_09_30_000_video_recording_display";
 
 function makeConfig(overrides: Partial<VideoRecordingConfig> = {}): VideoRecordingConfig {
   return {
@@ -68,6 +69,29 @@ describe("VideoRecordingRepository", () => {
     expect(result!.sizeBytes).toBe(0);
     expect(result!.config.qualityPreset).toBe("low");
     expect(result!.config.fps).toBe(15);
+  });
+
+  test("persists the recorded panel and display transition markers", async () => {
+    const recordedPanel = { key: "11", role: "inner" as const };
+    const transitions = [
+      {
+        atMs: 1250,
+        from: recordedPanel,
+        to: { key: "22", role: "cover" as const },
+      },
+    ];
+    await repo.insertRecording(makeRecord({ recordedPanel }));
+    await repo.updateRecording("rec-1", { transitions });
+
+    const result = await repo.getRecording("rec-1");
+    expect(result?.recordedPanel).toEqual(recordedPanel);
+    expect(result?.transitions).toEqual(transitions);
+  });
+
+  test("display migration tolerates both columns already existing", async () => {
+    await addDisplayColumns(db as unknown as Kysely<unknown>);
+    await repo.insertRecording(makeRecord({ recordedPanel: { key: "11", role: "inner" } }));
+    expect((await repo.getRecording("rec-1"))?.recordedPanel?.key).toBe("11");
   });
 
   describe("owner-session scoping (issue #4752)", () => {

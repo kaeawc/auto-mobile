@@ -9,6 +9,8 @@ import type {
   VideoQualityPreset,
   BootedDevice,
   VideoResolution,
+  VideoRecordingPanel,
+  VideoRecordingDisplayTransition,
 } from "../../models";
 import { toActionableError } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
@@ -52,6 +54,9 @@ export interface VideoCaptureConfig extends VideoRecordingConfig {
   maxDurationSeconds?: number;
   /** Aborts a capture which has spawned but has not completed startup yet. */
   abortSignal?: AbortSignal;
+  display?: string;
+  recordingPanel?: VideoRecordingPanel;
+  physicalDisplayId?: string;
 }
 
 export interface RecordingHandle {
@@ -60,6 +65,8 @@ export interface RecordingHandle {
   startedAt: string;
   /** Configuration actually used by a backend that adjusted the request. */
   effectiveConfig?: VideoRecordingConfig;
+  warning?: string;
+  physicalDisplayId?: string;
   backendHandle?: unknown;
 }
 
@@ -106,6 +113,30 @@ export interface RecordingResult {
   durationMs?: number;
   sizeBytes?: number;
   codec?: string;
+  recordedPanel?: VideoRecordingPanel;
+  warnings?: string[];
+  transitions?: VideoRecordingDisplayTransition[];
+}
+
+function recordingTransitions(
+  result: RecordingResult,
+  panel?: VideoRecordingPanel,
+): VideoRecordingDisplayTransition[] | undefined {
+  return result.transitions ?? (panel ? [] : undefined);
+}
+
+function applyBackendDisplayOutcome(active: ActiveVideoRecording, handle: RecordingHandle): void {
+  active.physicalDisplayId = handle.warning
+    ? undefined
+    : (handle.physicalDisplayId ?? active.physicalDisplayId);
+  active.warning = handle.warning;
+  if (handle.warning?.includes("rejected --display-id")) {
+    active.recordedPanel = undefined;
+  }
+}
+
+function recordingWarnings(active: ActiveVideoRecording): string[] | undefined {
+  return active.warning ? [active.warning] : undefined;
 }
 
 export interface VideoCaptureBackend {
@@ -120,6 +151,9 @@ export interface StartVideoRecordingOptions {
   device?: BootedDevice;
   maxDurationSeconds?: number;
   abortSignal?: AbortSignal;
+  display?: string;
+  recordingPanel?: VideoRecordingPanel;
+  physicalDisplayId?: string;
 }
 
 export interface ActiveVideoRecording {
@@ -129,6 +163,9 @@ export interface ActiveVideoRecording {
   startedAt: string;
   config: VideoRecordingConfig;
   outputName?: string;
+  recordedPanel?: VideoRecordingPanel;
+  physicalDisplayId?: string;
+  warning?: string;
 }
 
 export interface VideoRecorderServiceDependencies {
@@ -249,6 +286,9 @@ export class VideoRecorderService {
       device: options.device,
       maxDurationSeconds: options.maxDurationSeconds,
       abortSignal: combineAbortSignals(options.abortSignal, startAbortController.signal),
+      display: options.display,
+      recordingPanel: options.recordingPanel,
+      physicalDisplayId: options.physicalDisplayId,
       ...config,
     };
     // Defer backend invocation by one microtask so provisional ownership is
@@ -264,6 +304,8 @@ export class VideoRecorderService {
       startedAt,
       config,
       outputName: options.outputName,
+      recordedPanel: options.recordingPanel,
+      physicalDisplayId: options.physicalDisplayId,
       deviceId: options.device?.deviceId,
       startPromise,
       startAbortController,
@@ -279,6 +321,7 @@ export class VideoRecorderService {
       active.fileName = path.basename(active.outputPath);
       active.startedAt = handle.startedAt || startedAt;
       active.config = toPublicRecordingConfig(handle.effectiveConfig ?? config);
+      applyBackendDisplayOutcome(active, handle);
       if (active.forceStopRequested || this.activeRecordings.get(recordingId) !== active) {
         throw new Error(`Recording ${recordingId} was force-stopped while it was starting.`);
       }
@@ -290,6 +333,9 @@ export class VideoRecorderService {
         startedAt: active.startedAt,
         config: active.config,
         outputName: active.outputName,
+        recordedPanel: active.recordedPanel,
+        physicalDisplayId: active.physicalDisplayId,
+        warning: active.warning,
       };
     } catch (error) {
       return await this.handleStartFailure(error, active);
@@ -369,6 +415,9 @@ export class VideoRecorderService {
       endedAt,
       lastAccessedAt: endedAt,
       config: active.config,
+      recordedPanel: stopResult.recordedPanel ?? active.recordedPanel,
+      transitions: recordingTransitions(stopResult, active.recordedPanel),
+      warnings: recordingWarnings(active),
     };
 
     this.activeRecordings.delete(recordingId);

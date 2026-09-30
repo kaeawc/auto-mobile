@@ -85,7 +85,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     const result = await screenshot.execute();
     const executedCommands = testFakeAdb.getExecutedCommands();
     const captureCommand = executedCommands.find((command) => command.includes("screencap"));
-    expect(captureCommand).toContain("screencap -p /sdcard/screenshot.png");
+    expect(captureCommand).toMatch(/screencap -p \/data\/local\/tmp\/am-shot-/);
     expect(captureCommand).toContain("base64");
     expect(captureCommand).toContain("rm");
     expect(result.success).toBe(true);

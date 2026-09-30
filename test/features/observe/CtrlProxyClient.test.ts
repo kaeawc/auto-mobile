@@ -562,7 +562,7 @@ describe("AndroidCtrlProxyClient", function () {
     );
   };
 
-  const setAdbPngScreenshotResponse = (screenshotBase64: string = "png-base64"): void => {
+  const setAdbPngScreenshotResponse = (screenshotBase64: string = pngFrame(1, 1)): void => {
     fakeAdb.setCommandResponse("screencap -p", {
       stdout: `${screenshotBase64}\n`,
       stderr: "",
@@ -638,7 +638,7 @@ describe("AndroidCtrlProxyClient", function () {
 
   test("reports ADB screencap fallback screenshots as PNG fallback with reason", async () => {
     fakeAdb.setCommandResponse("screencap -p", {
-      stdout: "png-base64\n",
+      stdout: `${pngFrame(1, 1)}\n`,
       stderr: "",
     });
 
@@ -646,7 +646,7 @@ describe("AndroidCtrlProxyClient", function () {
 
     expect(result).toMatchObject({
       success: true,
-      data: "png-base64",
+      data: pngFrame(1, 1),
       screenshotMimeType: "image/png",
       screenshotFormat: "png",
       screenshotCaptureSource: "android_adb_screencap",
@@ -779,7 +779,7 @@ describe("AndroidCtrlProxyClient", function () {
     await flushPromises();
 
     await expectSingleScreenshotUpdate(streamSocket, {
-      screenshotBase64: "png-base64",
+      screenshotBase64: pngFrame(1, 1),
       screenshotMimeType: "image/png",
       screenshotFormat: "png",
       screenshotCaptureSource: "android_adb_screencap",

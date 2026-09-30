@@ -6,6 +6,7 @@ import type { ScreenshotFileWriter } from "../../../src/features/observe/screens
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeFileSystem } from "../../fakes/FakeFileSystem";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { androidDevice } from "./takeScreenshotTestHelpers";
 
@@ -50,7 +51,7 @@ function createScreenshot(adb: FakeAdbExecutor, timer: FakeTimer): TakeScreensho
 }
 
 describe("TakeScreenshot Android physical display selection", function () {
-  test("keeps the single-display screencap command unchanged", async function () {
+  test("uses a unique temp path for single-display screencap", async function () {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("dumpsys SurfaceFlinger", {
       stdout: `Display ${singleDisplayId} (HWC display 0): port=1`,
@@ -65,9 +66,8 @@ describe("TakeScreenshot Android physical display selection", function () {
     await captureBase64(screenshot, "/screenshots/single-again.png");
 
     const commands = adb.getExecutedCommands();
-    expect(commands).toContain(
-      'shell "screencap -p /sdcard/screenshot.png && base64 /sdcard/screenshot.png && rm /sdcard/screenshot.png"',
-    );
+    expect(commands.some((command) => command.includes("/data/local/tmp/am-shot-"))).toBe(true);
+    expect(commands.some((command) => command.includes("/sdcard/screenshot.png"))).toBe(false);
     expect(commands.filter((command) => command.includes("dumpsys SurfaceFlinger"))).toHaveLength(
       0,
     );
@@ -75,9 +75,7 @@ describe("TakeScreenshot Android physical display selection", function () {
       0,
     );
     expect(commands.filter((command) => command.includes("screencap"))).toHaveLength(1);
-    expect(commands).toContain(
-      'shell "screencap -p /sdcard/screenshot.png && base64 /sdcard/screenshot.png && rm /sdcard/screenshot.png"',
-    );
+    expect(commands.find((command) => command.includes("screencap"))).toContain("screencap -p");
   });
 
   test("caches a single-display result within the TTL", async function () {
@@ -125,6 +123,46 @@ describe("TakeScreenshot Android physical display selection", function () {
     );
   });
 
+  test("keeps concurrent captures isolated and preserves their PNG bytes", async function () {
+    const adb = new FakeAdbExecutor();
+    const firstPng = Buffer.concat([png, Buffer.from([1])]);
+    const secondPng = Buffer.concat([png, Buffer.from([2])]);
+    adb.setCommandResponseSequence("screencap", [
+      { stdout: firstPng.toString("base64"), stderr: "" },
+      { stdout: secondPng.toString("base64"), stderr: "" },
+    ]);
+    const written = new Map<string, Buffer>();
+    const writer: ScreenshotFileWriter = {
+      async write(filePath, data): Promise<void> {
+        written.set(filePath, Buffer.from(data));
+      },
+      async remove(): Promise<void> {},
+    };
+    const screenshot = new TakeScreenshot(
+      androidDevice("concurrent-capture-device"),
+      new FakeAdbClientFactory(adb),
+      new FakeTimer(),
+      new FakeIdGenerator(["capture-one", "capture-two"]),
+      writer,
+      new FakeFileSystem(),
+      () => "/screenshots/cache",
+    );
+
+    await Promise.all([
+      captureBase64(screenshot, "/screenshots/one.png"),
+      captureBase64(screenshot, "/screenshots/two.png"),
+    ]);
+
+    expect(written.get("/screenshots/one.png")).toEqual(firstPng);
+    expect(written.get("/screenshots/two.png")).toEqual(secondPng);
+    const captureCommands = adb
+      .getExecutedCommands()
+      .filter((command) => command.includes("screencap"));
+    expect(captureCommands).toHaveLength(2);
+    expect(captureCommands[0]).toContain("/data/local/tmp/am-shot-capture-one-");
+    expect(captureCommands[1]).toContain("/data/local/tmp/am-shot-capture-two-");
+  });
+
   test("rejects decoded screencap data without the PNG signature", async function () {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("dumpsys SurfaceFlinger", {
@@ -139,7 +177,35 @@ describe("TakeScreenshot Android physical display selection", function () {
 
     await expect(
       captureBase64(createScreenshot(adb, new FakeTimer()), "/screenshots/bad.png"),
-    ).rejects.toThrow("Screencap output is not a valid PNG (missing PNG signature)");
+    ).rejects.toThrow("Android screencap returned data without a PNG signature");
+  });
+
+  test("strips warning text printed before base64 screencap output", async function () {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("screencap", {
+      stdout: `WARNING: display fallback\n${png.toString("base64")}`,
+      stderr: "",
+    });
+    const written = new Map<string, Buffer>();
+    const writer: ScreenshotFileWriter = {
+      async write(filePath, data): Promise<void> {
+        written.set(filePath, Buffer.from(data));
+      },
+      async remove(): Promise<void> {},
+    };
+    const screenshot = new TakeScreenshot(
+      androidDevice("warning-output-device"),
+      new FakeAdbClientFactory(adb),
+      new FakeTimer(),
+      new FakeIdGenerator(["warning"]),
+      writer,
+      new FakeFileSystem(),
+      () => "/screenshots/cache",
+    );
+
+    await captureBase64(screenshot, "/screenshots/warning.png");
+
+    expect(written.get("/screenshots/warning.png")).toEqual(png);
   });
 
   test("caches a resolved ID for 10 seconds and refreshes after expiry", async function () {

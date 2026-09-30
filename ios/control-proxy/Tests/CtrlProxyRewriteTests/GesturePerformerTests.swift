@@ -1,6 +1,15 @@
 @testable import CtrlProxyRewrite
 import XCTest
 
+final class ConsumerButtonUsageTests: XCTestCase {
+    func testConsumerButtonUsages() throws {
+        XCTAssertEqual(try GesturePerformer.consumerUsage(for: "volume_up"), 0xE9)
+        XCTAssertEqual(try GesturePerformer.consumerUsage(for: "volume_down"), 0xEA)
+        XCTAssertEqual(try GesturePerformer.consumerUsage(for: "power"), 0x30)
+        XCTAssertThrowsError(try GesturePerformer.consumerUsage(for: "menu"))
+    }
+}
+
 final class KeyboardCloseKeySelectionTests: XCTestCase {
     func testKeyboardResponseEncodesDismissalMethod() throws {
         let response = KeyboardResponse(

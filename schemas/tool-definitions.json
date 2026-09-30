@@ -8703,7 +8703,7 @@
   },
   {
     "name": "pressButton",
-    "description": "Press device or navigation button",
+    "description": "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

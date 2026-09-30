@@ -359,15 +359,6 @@ export class PressButton extends BaseVisualChange {
     }
 
     if (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)) {
-      if (isIosSimulatorUdid(this.device.deviceId)) {
-        return {
-          success: false,
-          button,
-          keyCode: -1,
-          error: `iOS button "${button}" is unavailable on the iOS simulator (physical device only)`,
-        };
-      }
-
       const client = IOSCtrlProxyClient.getInstance(this.device);
       const result = await client.requestPressButton(
         normalizedButton,

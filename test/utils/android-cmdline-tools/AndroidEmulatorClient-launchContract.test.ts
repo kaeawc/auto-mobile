@@ -11,7 +11,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { HostPortAvailabilityChecker } from "../../../src/ctrlProxy/ios/IOSHostPortAvailabilityChecker";
+import type { PortAvailabilityChecker } from "../../../src/utils/PortManager";
 
 const execResult = (stdout = ""): ExecResult => ({
   stdout,
@@ -36,8 +36,8 @@ function createChild(): ChildProcess & EventEmitter {
 function createClient(
   spawnFn: (command: string, args: string[]) => ChildProcess,
   adb: FakeAdbExecutor = new FakeAdbExecutor(),
-  hostPortAvailabilityChecker: HostPortAvailabilityChecker = {
-    isAvailable: async () => true,
+  hostPortAvailabilityChecker: PortAvailabilityChecker = {
+    isPortAvailable: () => true,
   },
   avdName: string = "Pixel 9",
   timer: FakeTimer = new FakeTimer(),
@@ -194,7 +194,7 @@ describe("AndroidEmulatorClient launch contract", () => {
       },
       adb,
       {
-        isAvailable: async (_host, port) => {
+        isPortAvailable: (port) => {
           checkedPorts.push(port);
           return port !== 5555;
         },
@@ -214,19 +214,8 @@ describe("AndroidEmulatorClient launch contract", () => {
     const secondChild = createChild();
     const children = [firstChild, secondChild];
     const spawnedArgs: string[][] = [];
-    let firstPairProbeCount = 0;
-    let releaseFirstPairProbes: () => void = () => {};
-    const firstPairProbes = new Promise<void>((resolve) => {
-      releaseFirstPairProbes = resolve;
-    });
-    const hostPortAvailabilityChecker: HostPortAvailabilityChecker = {
-      isAvailable: async (_host, port) => {
-        if (port === 5554 || port === 5555) {
-          firstPairProbeCount += 1;
-          await firstPairProbes;
-        }
-        return true;
-      },
+    const hostPortAvailabilityChecker: PortAvailabilityChecker = {
+      isPortAvailable: () => true,
     };
     const createSharedClient = (avdName: string) =>
       createClient(
@@ -246,17 +235,12 @@ describe("AndroidEmulatorClient launch contract", () => {
     // Distinct AVDs: two CONCURRENT launches of the SAME AVD are the duplicate
     // this process now refuses outright (#6407), and the port-reservation race
     // under test is about the ports, not the AVD label.
-    const firstLaunch = createSharedClient("Pixel 9").startEmulator("Pixel 9");
-    while (firstPairProbeCount < 2) {
-      await Promise.resolve();
-    }
-    const secondLaunch = createSharedClient("Pixel 9a").startEmulator("Pixel 9a");
-    while (firstPairProbeCount < 4) {
-      await Promise.resolve();
-    }
-    releaseFirstPairProbes();
-    await Promise.all([firstLaunch, secondLaunch]);
+    const launches = await Promise.all([
+      createSharedClient("Pixel 9").startEmulator("Pixel 9"),
+      createSharedClient("Pixel 9a").startEmulator("Pixel 9a"),
+    ]);
 
+    expect(launches).toHaveLength(2);
     expect(spawnedArgs).toEqual([
       expect.arrayContaining(["-port", "5554"]),
       expect.arrayContaining(["-port", "5556"]),
@@ -718,10 +702,6 @@ describe("AndroidEmulatorClient launch contract", () => {
 
   test("cancels host-port reservation before spawning", async () => {
     const controller = new AbortController();
-    let releaseHostProbe: () => void = () => {};
-    const hostProbe = new Promise<void>((resolve) => {
-      releaseHostProbe = resolve;
-    });
     let hostProbeStarted = false;
     let spawns = 0;
     const client = createClient(
@@ -731,23 +711,19 @@ describe("AndroidEmulatorClient launch contract", () => {
       },
       new FakeAdbExecutor(),
       {
-        isAvailable: async () => {
+        isPortAvailable: () => {
           hostProbeStarted = true;
-          await hostProbe;
+          controller.abort();
           return true;
         },
       },
     );
 
     const launch = client.launchEmulator({ avdName: "Pixel 9", signal: controller.signal });
-    while (!hostProbeStarted) {
-      await Promise.resolve();
-    }
-    controller.abort();
 
     await expect(launch).rejects.toThrow("cancelled");
     expect(spawns).toBe(0);
-    releaseHostProbe();
+    expect(hostProbeStarted).toBe(true);
   });
 
   test("cancels the reservation snapshot before starting the raw-state scan", async () => {

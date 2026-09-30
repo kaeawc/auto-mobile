@@ -23,9 +23,10 @@ import { combineAbortSignals } from "../AbortContext";
 import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
-  TcpHostPortAvailabilityChecker,
-  type HostPortAvailabilityChecker,
-} from "../../ctrlProxy/ios/IOSHostPortAvailabilityChecker";
+  BunPortAvailabilityChecker,
+  PortManager,
+  type PortAvailabilityChecker,
+} from "../PortManager";
 import type { AvdConfig, AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader, MIN_AVD_RAM_MB } from "./AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
@@ -656,7 +657,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private avdConfigReader: AvdConfigReader;
   private platform: NodeJS.Platform;
   private hostArchitecture: string;
-  private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
+  private readonly hostPortAvailabilityChecker: PortAvailabilityChecker;
   private readonly runningAvdAdvertisementReader: RunningAvdAdvertisementReader;
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
   private readonly launchTargetDeviceIds = new WeakMap<ChildProcess, string>();
@@ -722,7 +723,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     avdConfigReader?: AvdConfigReader,
     platform: NodeJS.Platform = process.platform,
     hostArchitecture: string = arch(),
-    hostPortAvailabilityChecker: HostPortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
+    hostPortAvailabilityChecker: PortAvailabilityChecker = AndroidEmulatorClient.defaultHostPortAvailabilityChecker(),
     runningAvdAdvertisementReader: RunningAvdAdvertisementReader = new TmpdirRunningAvdAdvertisementReader(),
     consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
     private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
@@ -742,8 +743,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     this.emulatorPath = this.getFallbackEmulatorPath();
   }
 
-  private static defaultHostPortAvailabilityChecker(): HostPortAvailabilityChecker {
-    return testOverrides.hostPortAvailabilityChecker ?? new TcpHostPortAvailabilityChecker();
+  private static defaultHostPortAvailabilityChecker(): PortAvailabilityChecker {
+    return testOverrides.hostPortAvailabilityChecker ?? new BunPortAvailabilityChecker();
   }
 
   static resetLaunchReservationsForTesting(): void {
@@ -756,7 +757,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   }
 
   static setHostPortAvailabilityCheckerForTesting(
-    checker: HostPortAvailabilityChecker | undefined,
+    checker: PortAvailabilityChecker | undefined,
   ): void {
     testOverrides.hostPortAvailabilityChecker = checker;
   }
@@ -3258,9 +3259,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     ports: EmulatorPortPair,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const availability = Promise.all([
-      this.hostPortAvailabilityChecker.isAvailable("127.0.0.1", ports.consolePort),
-      this.hostPortAvailabilityChecker.isAvailable("127.0.0.1", ports.adbPort),
+    const availability = Promise.resolve([
+      PortManager.isPortAvailable(ports.consolePort, this.hostPortAvailabilityChecker),
+      PortManager.isPortAvailable(ports.adbPort, this.hostPortAvailabilityChecker),
     ]);
     if (!signal) {
       return (await availability).every(Boolean);

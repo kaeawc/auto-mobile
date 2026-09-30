@@ -41,7 +41,7 @@ testOverrides.telemetryNoOpDefault = true;
 // Emulator launch tests must never create real TCP probes. Individual tests
 // inject unavailable ports when exercising allocation behavior.
 testOverrides.hostPortAvailabilityChecker = {
-  isAvailable: async () => true,
+  isPortAvailable: () => true,
 };
 
 /**

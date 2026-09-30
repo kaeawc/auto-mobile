@@ -1,7 +1,7 @@
 import type { BootedDevice } from "../models";
 import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
-import type { HostPortAvailabilityChecker } from "../ctrlProxy/ios/IOSHostPortAvailabilityChecker";
+import type { PortAvailabilityChecker } from "./PortManager";
 
 /** The narrow readiness seam used by ToolExecutionContext. */
 export interface DeviceReadinessProxyDriver {
@@ -22,7 +22,7 @@ export type DeviceReadinessProxyDriverProvider = (
 
 /** Test-only values read lazily by production modules. All imports here are erased types. */
 export const testOverrides: {
-  hostPortAvailabilityChecker: HostPortAvailabilityChecker | undefined;
+  hostPortAvailabilityChecker: PortAvailabilityChecker | undefined;
   deviceReadinessProxyDriverProvider: DeviceReadinessProxyDriverProvider | null;
   telemetryNoOpDefault: boolean;
   /** Directory read by auxiliary socket configs during in-process tests. */

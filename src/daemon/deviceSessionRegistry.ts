@@ -55,7 +55,7 @@ interface LiveEntry {
  */
 export interface DeviceSessionLifecycleListener {
   onSessionStarted(record: DeviceSessionRecord): void;
-  onSessionEnded(record: DeviceSessionRecord): void;
+  onSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void;
 }
 
 /**
@@ -94,9 +94,9 @@ export class DeviceSessionRegistry {
     }
   }
 
-  private emitEnded(record: DeviceSessionRecord): void {
+  private emitEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
     try {
-      this.lifecycleListener?.onSessionEnded(record);
+      this.lifecycleListener?.onSessionEnded(record, successorSessionUuid);
     } catch (error) {
       // See emitStarted: preserve registry bookkeeping and surface delivery faults.
       logger.warn(`[DeviceSessionRegistry] onSessionEnded listener threw: ${error}`);
@@ -116,20 +116,19 @@ export class DeviceSessionRegistry {
     if (existing && existing.incarnation === input.incarnation) {
       return existing.record;
     }
-    if (existing) {
-      // Superseded epoch (new incarnation for the same serial) — drop its uuid
-      // so a stale reference cannot resolve to the reincarnated device, and
-      // surface the boundary as an end of the old epoch before the new one starts.
-      this.uuidToDeviceId.delete(existing.record.deviceSessionUuid);
-      this.emitEnded(existing.record);
-    }
-
     const record: DeviceSessionRecord = {
       deviceSessionUuid: this.idGenerator.next(),
       deviceId: input.deviceId,
       platform: input.platform,
       epochStartedAt: this.timer.now(),
     };
+    if (existing) {
+      // Superseded epoch (new incarnation for the same serial) — drop its uuid
+      // so a stale reference cannot resolve to the reincarnated device, and
+      // surface the boundary as an end of the old epoch before the new one starts.
+      this.uuidToDeviceId.delete(existing.record.deviceSessionUuid);
+      this.emitEnded(existing.record, record.deviceSessionUuid);
+    }
     this.byDeviceId.set(input.deviceId, { record, incarnation: input.incarnation });
     this.uuidToDeviceId.set(record.deviceSessionUuid, input.deviceId);
     this.emitStarted(record);

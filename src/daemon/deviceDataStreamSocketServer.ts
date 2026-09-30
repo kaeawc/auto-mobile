@@ -114,6 +114,8 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
    * epoch maps to the serial (e.g. a navigation broadcast with unknown provenance).
    */
   deviceSessionUuid?: string | null;
+  /** New epoch's uuid when a `device_session_ended` frame represents replacement. */
+  successorSessionUuid?: string;
   /** Device platform. Carried on `device_session_started`/`device_session_ended` frames. */
   platform?: Platform;
   timestamp?: number;
@@ -689,18 +691,20 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     this.pushDeviceSessionLifecycle("device_session_started", record);
   }
 
-  pushDeviceSessionEnded(record: DeviceSessionRecord): void {
-    this.pushDeviceSessionLifecycle("device_session_ended", record);
+  pushDeviceSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
+    this.pushDeviceSessionLifecycle("device_session_ended", record, successorSessionUuid);
   }
 
   private pushDeviceSessionLifecycle(
     type: "device_session_started" | "device_session_ended",
     record: DeviceSessionRecord,
+    successorSessionUuid?: string,
   ): void {
     const message: DeviceDataStreamMessage = {
       type,
       deviceId: record.deviceId,
       deviceSessionUuid: record.deviceSessionUuid,
+      ...(successorSessionUuid === undefined ? {} : { successorSessionUuid }),
       platform: record.platform,
       timestamp: this.timer.now(),
     };

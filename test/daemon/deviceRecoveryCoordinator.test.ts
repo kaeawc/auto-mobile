@@ -5,6 +5,7 @@ import {
 } from "../../src/daemon/deviceRecoveryCoordinator";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { PooledDevice } from "../../src/daemon/devicePool";
 
 function harness() {
   const timer = new FakeTimer();
@@ -16,6 +17,18 @@ function harness() {
   const quarantined = new Set<string>();
   const settlements = new Map<string, Promise<void>>();
   const port: DeviceRecoveryPoolPort = {
+    getPooledDevice: () => undefined,
+    getSessionForDevice: () => undefined,
+    getAndroidSessionPreservingRecoveryTarget: () => undefined,
+    getSessionPreservingRecoveryTarget: () => undefined,
+    isIOSSimulatorContinuityDevice: (device): device is PooledDevice & { platform: "ios" } =>
+      device.platform === "ios",
+    performSessionPreservingRecovery: async () => "not-attempted",
+    finishEmulatorLossIncident: async () => {},
+    recoverSessionBoundAndroidDeviceAfterAdbServerReset: async () => false,
+    releaseAdbServerResetCohortReservations: async () => {},
+    getEmulatorLossIncident: async () => undefined,
+    completeJoinedEmulatorLossRecovery: async () => {},
     getRecoveringSessionLosses: () => records,
     getTimer: () => timer,
     getAndroidRecoveryRecordLedger: () => ledger,
@@ -188,5 +201,85 @@ describe("DeviceRecoveryCoordinator", () => {
     expect(timer.getSleepHistory()).toEqual([250]);
     timer.advanceTime(250);
     await waiting;
+  });
+
+  test("joins an in-flight loss and settles the joining incident from the primary outcome", async () => {
+    const { coordinator, port } = harness();
+    const gate = Promise.withResolvers<"recovered">();
+    const completed: string[] = [];
+    const settled: string[] = [];
+    port.getSessionForDevice = () => "session";
+    port.getEmulatorLossIncident = async () =>
+      ({
+        recovery: { outcome: "recovered" },
+        session: { state: "awaiting-device" },
+      }) as Awaited<ReturnType<typeof port.getEmulatorLossIncident>>;
+    port.completeJoinedEmulatorLossRecovery = async (id, outcome, state) => {
+      completed.push(`${id}:${outcome}:${state}`);
+    };
+    port.settleEmulatorLossIncident = (id) => {
+      if (id) {
+        settled.push(id);
+      }
+    };
+    coordinator.registerSessionPreservingRecovery("session", {
+      promise: gate.promise,
+      incidentId: "primary",
+    });
+    const joined = coordinator.recoverSessionBoundAndroidDeviceAfterLoss("emulator-5554", "joiner");
+    gate.resolve("recovered");
+    expect(await joined).toBe("recovered");
+    expect(completed).toEqual(["joiner:recovered:awaiting-device"]);
+    expect(settled).toEqual(["joiner"]);
+  });
+
+  test("preparation keeps its quarantine until the matching token finishes", () => {
+    const { coordinator, port, records, quarantined } = harness();
+    port.getAndroidSessionPreservingRecoveryTarget = () =>
+      ({ device: { id: "emulator-5554" }, session: { sessionId: "session" } }) as NonNullable<
+        ReturnType<typeof port.getAndroidSessionPreservingRecoveryTarget>
+      >;
+    const preparation = coordinator.prepareSessionPreservingRecovery("emulator-5554");
+    expect(preparation).toBeDefined();
+    expect(quarantined.has("session")).toBe(true);
+    coordinator.finishSessionPreservingRecoveryPreparation({
+      sessionId: "session",
+      token: Symbol("stale"),
+    });
+    expect(records.has("session")).toBe(true);
+    coordinator.finishSessionPreservingRecoveryPreparation(preparation);
+    expect(records.has("session")).toBe(false);
+    expect(quarantined.has("session")).toBe(false);
+  });
+
+  test("deferred recovery checks the live record after an awaited earlier entry", async () => {
+    const { coordinator, port, records, timer } = harness();
+    const device = { id: "emulator-5554" } as PooledDevice;
+    const gate = Promise.withResolvers<void>();
+    const recovered: string[] = [];
+    port.recoverSessionBoundAndroidDeviceAfterAdbServerReset = async (id) => {
+      recovered.push(id);
+      await gate.promise;
+      return false;
+    };
+    const first = coordinator.startAndroidRecoveryRecord(
+      "first",
+      { deviceId: "first", expectedDevice: device },
+      ["loss"],
+    );
+    const second = coordinator.startAndroidRecoveryRecord(
+      "second",
+      { deviceId: "second", expectedDevice: device },
+      ["loss"],
+    );
+    first.state = "deferred";
+    second.state = "deferred";
+    first.deferredUntil = timer.now();
+    second.deferredUntil = timer.now();
+    const retry = coordinator.retryDueDeferredSessionRecoveries();
+    records.delete("second");
+    gate.resolve();
+    await retry;
+    expect(recovered).toEqual(["first"]);
   });
 });

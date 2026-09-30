@@ -1,8 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "path";
 import os from "os";
-import { mkdirSync, rmSync, readdirSync, existsSync, writeFileSync, utimesSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync, readdirSync, existsSync, writeFileSync, utimesSync } from "node:fs";
 import { writeFileAsync } from "../../../../src/utils/io";
 import {
   FileSystemObserveCacheStore,
@@ -30,8 +29,7 @@ describe("FileSystemObserveCacheStore", function () {
   let idGenerator: CountingIdGenerator;
 
   beforeEach(function () {
-    cacheDir = path.join(os.tmpdir(), `observe-cache-test-${randomUUID()}`);
-    mkdirSync(cacheDir, { recursive: true });
+    cacheDir = mkdtempSync(path.join(os.tmpdir(), "observe-cache-test-"));
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     idGenerator = new CountingIdGenerator("process");
@@ -45,11 +43,12 @@ describe("FileSystemObserveCacheStore", function () {
   });
 
   test("creates the cache directory on construction if missing", function () {
-    const fresh = path.join(os.tmpdir(), `observe-cache-fresh-${randomUUID()}`);
+    const freshRoot = mkdtempSync(path.join(os.tmpdir(), "observe-cache-fresh-"));
+    const fresh = path.join(freshRoot, "cache");
     expect(existsSync(fresh)).toBe(false);
     new FileSystemObserveCacheStore(timer, fresh);
     expect(existsSync(fresh)).toBe(true);
-    rmSync(fresh, { recursive: true, force: true });
+    rmSync(freshRoot, { recursive: true, force: true });
   });
 
   test("put then getRecentInMemoryForDevice returns the cached result", async function () {

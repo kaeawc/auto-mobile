@@ -1,5 +1,5 @@
 import { ActionableError, type Platform } from "../models";
-import { defaultTimer, type Timer } from "./SystemTimer";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 export type VirtualDeviceLifecycleOperation =
   | "start"

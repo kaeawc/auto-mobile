@@ -8,6 +8,9 @@ src/utils/DeepLinkManager.ts -> src/features/utility/ElementGeometry
 src/utils/DeepLinkManager.ts -> src/features/utility/ElementParser
 src/utils/DeepLinkManager.ts -> src/server/systemTrayHelpers
 src/utils/DeviceSessionManager.ts -> src/daemon/deviceIdentityEvidence
+src/utils/DeviceSessionManager.ts -> src/devices/deviceCreationGate
+src/utils/DeviceSessionManager.ts -> src/devices/deviceProvisioning
+src/utils/DeviceSessionManager.ts -> src/devices/virtualDeviceLifecycleCoordinator
 src/utils/DeviceSessionManager.ts -> src/features/observe/ObserveScreen
 src/utils/DeviceSessionManager.ts -> src/features/observe/Window
 src/utils/DeviceSessionManager.ts -> src/features/observe/android
@@ -32,7 +35,10 @@ src/utils/appearance/AppearanceSyncScheduler.ts -> src/daemon/daemonState
 src/utils/appearance/AppearanceSyncScheduler.ts -> src/server/appearanceManager
 src/utils/appearance/applyAppearanceOnConnect.ts -> src/server/appearanceManager
 src/utils/configuredDeviceInventory.ts -> src/server/deviceDescription
+src/utils/deviceBootRecovery.ts -> src/devices/deviceBootService
+src/utils/deviceBootRecovery.ts -> src/devices/deviceProvisioning
 src/utils/deviceUtils.ts -> src/daemon/deviceIdentityEvidence
+src/utils/deviceUtils.ts -> src/devices/virtualDeviceLifecycleCoordinator
 src/utils/interfaces/AccessibilityDetector.ts -> src/features/featureFlags/FeatureFlagService
 src/utils/interfaces/ElementSelector.ts -> src/features/utility/ElementResolver
 src/utils/interfaces/IosVoiceOverDetector.ts -> src/features/featureFlags/FeatureFlagService

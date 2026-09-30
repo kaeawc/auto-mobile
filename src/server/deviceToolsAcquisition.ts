@@ -6,11 +6,11 @@ import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../daemon/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../utils/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
-import type { DeviceBootResult } from "../utils/deviceBootService";
+import type { DeviceBootResult } from "../devices/deviceBootService";
 import type {
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
-} from "../utils/virtualDeviceLifecycleCoordinator";
+} from "../devices/virtualDeviceLifecycleCoordinator";
 import { stableStringify } from "../utils/stableStringify";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";

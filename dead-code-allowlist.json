@@ -150,12 +150,12 @@
       "reason": "Assertion wrapper retained as policy API surface alongside isToolEnabledForSession/isToolEnabledForAnySession"
     },
     {
-      "file": "src/utils/virtualDeviceLifecycleCoordinator.ts",
+      "file": "src/devices/virtualDeviceLifecycleCoordinator.ts",
       "name": "setVirtualDeviceLifecycleCoordinatorForTests",
       "reason": "Test-only DI seam for the coordinator singleton (getX/setXForTests/resetXForTests pattern)"
     },
     {
-      "file": "src/utils/virtualDeviceLifecycleCoordinator.ts",
+      "file": "src/devices/virtualDeviceLifecycleCoordinator.ts",
       "name": "resetVirtualDeviceLifecycleCoordinatorForTests",
       "reason": "Test-only DI seam for the coordinator singleton (getX/setXForTests/resetXForTests pattern)"
     },

@@ -3,7 +3,7 @@ import type { PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
 import type { DeviceDisplays } from "../models/DisplayPanel";
-import type { ExactProvisionedDevice } from "../utils/exactDeviceProvisioning";
+import type { ExactProvisionedDevice } from "../devices/exactDeviceProvisioning";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { iosSimulatorCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
 import type { FormFactor } from "../models/DeviceMatchCriteria";

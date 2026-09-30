@@ -20,7 +20,7 @@ missing_avd="automobile-sdk-resolution-probe"
 
 # The one outcome that proves the SDK resolved: the product enumerated the AVDs,
 # found none matching, and refused to create one. These substrings come from the
-# ActionableError in src/utils/deviceBootService.ts (provisionAndBoot), which
+# ActionableError in src/devices/deviceBootService.ts (provisionAndBoot), which
 # interpolates the platform and the requested name:
 #   `No ${platform} device matching criteria found. ... name=${name} ...`
 # A BATS guard pins them to the product text so a reword is caught in-repo

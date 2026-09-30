@@ -4,7 +4,7 @@ import {
   type VirtualDeviceLifecycleIdentity,
   type VirtualDeviceLifecycleLease,
   type VirtualDeviceLifecycleReservationOptions,
-} from "../../src/utils/virtualDeviceLifecycleCoordinator";
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeTimer } from "./FakeTimer";
 
 export interface RecordedLifecycleReservation {

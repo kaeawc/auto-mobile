@@ -3,7 +3,7 @@ import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { getAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { DeviceTeardownPhase, DeviceTeardownService } from "../devices/deviceTeardownService";
-import type { VirtualDeviceLifecycleLease } from "../utils/virtualDeviceLifecycleCoordinator";
+import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
 import type { ProgressCallback } from "./toolRegistry";
 import {

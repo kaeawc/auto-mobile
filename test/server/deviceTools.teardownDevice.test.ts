@@ -59,7 +59,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
 class FakeDeviceSessionRepository extends DeviceSessionRepository {

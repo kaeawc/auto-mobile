@@ -25,7 +25,7 @@ import {
 } from "./directSessionDeviceRegistry";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
-import { DeviceShutdownService } from "../utils/deviceShutdownService";
+import { DeviceShutdownService } from "../devices/deviceShutdownService";
 import { isAdbMissingDeviceError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import {
   DEVICE_ALREADY_STOPPED_ERROR_CODE,

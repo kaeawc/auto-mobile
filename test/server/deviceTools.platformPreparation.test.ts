@@ -22,12 +22,12 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { DeviceBootTimeoutError } from "../../src/utils/deviceBootService";
+import { DeviceBootTimeoutError } from "../../src/devices/deviceBootService";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import type {
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
-} from "../../src/utils/virtualDeviceLifecycleCoordinator";
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 
 class DeferredSessionPersistence extends FakeDeviceSessionPersistence {
   activeSessionUuid: string | undefined;

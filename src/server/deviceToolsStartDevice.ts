@@ -6,7 +6,7 @@ import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poo
 import { DaemonState } from "../daemon/daemonState";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
-import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
+import { DeviceBootService, type DeviceBootResult } from "../devices/deviceBootService";
 import { IOSCtrlProxyClient } from "../features/observe/ios/IOSCtrlProxyClient";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { logger } from "../utils/logger";
@@ -23,7 +23,7 @@ import {
   type RunnerReadinessRequest,
 } from "../utils/RunnerReadinessService";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
-import type { VirtualDeviceLifecycleLease } from "../utils/virtualDeviceLifecycleCoordinator";
+import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { registerDirectSessionDevice } from "./directSessionDeviceRegistry";
 import { describeDevice, projectBootedDevice } from "./deviceDescription";
 import { ProgressCallback } from "./toolRegistry";

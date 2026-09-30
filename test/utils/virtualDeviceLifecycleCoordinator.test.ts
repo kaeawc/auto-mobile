@@ -3,7 +3,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import {
   DeviceLifecyclePreemptedError,
   InMemoryVirtualDeviceLifecycleCoordinator,
-} from "../../src/utils/virtualDeviceLifecycleCoordinator";
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 
 describe("InMemoryVirtualDeviceLifecycleCoordinator", () => {
   test("teardown preempts start, provision, recovery, and shutdown work", async () => {

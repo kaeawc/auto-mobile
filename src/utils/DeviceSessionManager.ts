@@ -25,8 +25,8 @@ import { IOSCtrlProxyManager, CtrlProxyIosManager } from "./IOSCtrlProxyManager"
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "./interfaces/DeviceUtils";
-import { getDeviceCreationGate } from "./deviceCreationGate";
-import { createDefaultDeviceProvisioner } from "./deviceProvisioning";
+import { getDeviceCreationGate } from "../devices/deviceCreationGate";
+import { createDefaultDeviceProvisioner } from "../devices/deviceProvisioning";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -49,7 +49,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
   type VirtualDeviceLifecycleLease,
-} from "./virtualDeviceLifecycleCoordinator";
+} from "../devices/virtualDeviceLifecycleCoordinator";
 import { runWithAbortSignal } from "./AbortContext";
 import {
   compareIdentityEvidence,

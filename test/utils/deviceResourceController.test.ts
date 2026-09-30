@@ -10,7 +10,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { iosDeviceResourceCatalog } from "../../src/utils/iosDeviceResourceCatalog";
 import { deviceResourceDescriptions } from "../../src/models/deviceResourceDescriptions";
 import { basename, join } from "node:path";
-import { DeviceLifecyclePreemptedError } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { DeviceLifecyclePreemptedError } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 
 const udid = "12345678-1234-1234-1234-123456789ABC";
 const label = "com.apple.PosterBoard";

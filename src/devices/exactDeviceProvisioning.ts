@@ -4,20 +4,20 @@ import { join } from "node:path";
 import type { DeviceInfo } from "../models";
 import { ActionableError } from "../models";
 import type { DeviceCreationGate } from "./deviceCreationGate";
-import type { PlatformDeviceManager } from "./deviceUtils";
-import type { AvdConfigReader } from "./android-cmdline-tools/AvdConfigReader";
+import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { AvdConfigReader } from "../utils/android-cmdline-tools/AvdConfigReader";
 import {
   FileAvdConfigReader,
   resolveAndroidAvdHome,
-} from "./android-cmdline-tools/AvdConfigReader";
-import { parseAndroidSystemImageRuntime } from "./android-cmdline-tools/AndroidSystemImageRuntime";
-import { AvdManagerClient } from "./android-cmdline-tools/AvdManagerClient";
-import { AndroidAvdProvenanceCache } from "./AndroidAvdProvenanceCache";
-import type { CreateAvdParams } from "./android-cmdline-tools/avdmanager";
-import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
-import { awaitWhileRequestIsLive, throwIfAborted } from "./toolUtils";
-import { trackAmbient } from "./PerfContext";
-import { defaultTimer, type Timer } from "./SystemTimer";
+} from "../utils/android-cmdline-tools/AvdConfigReader";
+import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
+import { AvdManagerClient } from "../utils/android-cmdline-tools/AvdManagerClient";
+import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
+import type { CreateAvdParams } from "../utils/android-cmdline-tools/avdmanager";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
+import { trackAmbient } from "../utils/PerfContext";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   androidAvdConfigurationSchema,
   androidAvdConfigurationKeys,
@@ -27,7 +27,7 @@ import {
   classifyDisplayCutout,
   type DisplayCutoutClassification,
   type DisplayCutoutPreference,
-} from "./displayCutout";
+} from "../utils/displayCutout";
 import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,

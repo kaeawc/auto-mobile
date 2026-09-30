@@ -1,4 +1,4 @@
-import type { DeviceCreationGate, EnvironmentReader } from "../../src/utils/deviceCreationGate";
+import type { DeviceCreationGate, EnvironmentReader } from "../../src/devices/deviceCreationGate";
 
 /** In-memory {@link EnvironmentReader} so tests never mutate `process.env`. */
 export class FakeEnvironmentReader implements EnvironmentReader {

@@ -34,9 +34,9 @@ import {
 import {
   DeviceBootService,
   getInFlightAndroidColdBootReader,
-} from "../../../src/utils/deviceBootService";
+} from "../../../src/devices/deviceBootService";
 import { FakeDeviceMatcher } from "../../fakes/FakeDeviceMatcher";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../src/utils/virtualDeviceLifecycleCoordinator";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../../src/devices/virtualDeviceLifecycleCoordinator";
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";

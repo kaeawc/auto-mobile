@@ -1,4 +1,4 @@
-import type { HostChildProcess as ChildProcess } from "./HostCommandExecutor";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import { ActionableError } from "../models";
 import type {
@@ -7,7 +7,7 @@ import type {
   MatchingStrategy,
 } from "../models/DeviceMatchCriteria";
 import type { DeviceCreationGate } from "./deviceCreationGate";
-import { isAndroidEmulatorSerial } from "./androidSerial";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import {
   assertAndroidImageRunningStateKnown,
   DEFAULT_DEVICE_READY_TIMEOUT_MS,
@@ -15,14 +15,14 @@ import {
   type DeviceDiscoveryError,
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
-} from "./deviceUtils";
-import { matchesDeviceCriteria, type DeviceMatcher } from "./deviceMatcher";
+} from "../utils/deviceUtils";
+import { matchesDeviceCriteria, type DeviceMatcher } from "../utils/deviceMatcher";
 import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
-import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
-import { defaultTimer, type Timer } from "./SystemTimer";
-import { errorMessage } from "./describeUnknownError";
-import { logger } from "./logger";
-import { runWithAbortSignal } from "./AbortContext";
+import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "../utils/deviceBootRecovery";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { errorMessage } from "../utils/describeUnknownError";
+import { logger } from "../utils/logger";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
   getVirtualDeviceLifecycleCoordinator,
@@ -30,7 +30,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
-import { stableStringify } from "./stableStringify";
+import { stableStringify } from "../utils/stableStringify";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 

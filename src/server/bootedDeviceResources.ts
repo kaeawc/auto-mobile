@@ -61,7 +61,7 @@ import { SingleFlight } from "../utils/cache/SingleFlight";
 import {
   getInFlightAndroidColdBootReader,
   type InFlightAndroidColdBootReader,
-} from "../utils/deviceBootService";
+} from "../devices/deviceBootService";
 
 // Resource URIs
 export const BOOTED_DEVICE_RESOURCE_URIS = {

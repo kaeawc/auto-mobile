@@ -1,9 +1,9 @@
 import { ActionableError } from "../models";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
-import { getDeviceCreationGate } from "../utils/deviceCreationGate";
-import { DeviceBootService, type DeviceBootRequest } from "../utils/deviceBootService";
+import { getDeviceCreationGate } from "../devices/deviceCreationGate";
+import { DeviceBootService, type DeviceBootRequest } from "../devices/deviceBootService";
 import { DefaultDeviceMatcher } from "../utils/deviceMatcher";
-import { createDefaultDeviceProvisioner } from "../utils/deviceProvisioning";
+import { createDefaultDeviceProvisioner } from "../devices/deviceProvisioning";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { createCiIosBootConfiguration } from "../utils/deviceBootRecovery";
 

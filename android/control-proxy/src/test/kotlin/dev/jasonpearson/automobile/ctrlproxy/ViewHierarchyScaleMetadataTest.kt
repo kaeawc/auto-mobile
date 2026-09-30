@@ -136,7 +136,7 @@ class ViewHierarchyScaleMetadataTest {
 
     assertTrue(
       "ADB fallback must capture the display-change generation before hierarchy inputs",
-      "val rotationCapture = rotationProvenance.beginCapture()" in body,
+      "val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)" in body,
     )
     assertTrue(
       "ADB fallback must retain rotation only when the display-change generation is stable",

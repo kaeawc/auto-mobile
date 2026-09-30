@@ -15,6 +15,7 @@ import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.Path
+import android.graphics.Point
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
@@ -682,6 +683,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private lateinit var webSocketServer: WebSocketServer
   private lateinit var hierarchyDebouncer: HierarchyDebouncer
   private lateinit var rotationProvenance: RotationProvenanceTracker
+  private var deviceStateRegistration: AutoCloseable? = null
   private val navigationEventAccumulator = NavigationEventAccumulator()
   private val sdkEventBatchProcessor by lazy {
     SdkEventBatchProcessor(
@@ -761,6 +763,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private data class ScreenshotCapturePayload(
     val base64Image: String,
     val rotation: Int?,
+    val displayId: Int,
+    val panelUniqueId: String?,
     val captureDurationMs: Long,
     val encodeDurationMs: Long,
     val byteLength: Int,
@@ -1271,12 +1275,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     try {
-      rotationProvenance =
-        RotationProvenanceTracker(
-          DisplayRotationChangeSignal(
-            getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-          )
+      val displaySignal =
+        DisplayRotationChangeSignal(
+          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager,
+          onTransition = { transition ->
+            serviceScope.launch {
+              if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+                webSocketServer.broadcast(displayTransitionFrame(transition))
+              }
+            }
+          },
         )
+      rotationProvenance = RotationProvenanceTracker(displaySignal)
+      deviceStateRegistration =
+        DeviceStateTransitions.register(this) { state ->
+          displaySignal.emitDeviceState(state)
+        }
       overlayDrawer = OverlayDrawer(screenDimensionsProvider = { getScreenDimensions() })
       overlayManager =
         OverlayManager(this, viewFactory = { HighlightOverlayView(it, overlayDrawer) })
@@ -1633,6 +1647,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (::rotationProvenance.isInitialized) {
       rotationProvenance.close()
     }
+    runCatching { deviceStateRegistration?.close() }
+      .onFailure { Log.w(TAG, "Failed to unregister device-state listener", it) }
+    deviceStateRegistration = null
 
     // Stop logcat reader
     logcatReader?.stop()
@@ -1689,12 +1706,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     disableAllFiltering: Boolean,
     maxDepth: Int?,
     maxNodes: Int?,
+    displayId: Int?,
   ) =
     extractHierarchyNow(
       disableAllFiltering,
       HierarchySnapshotOptions(
         maxDepth = maxDepth ?: 100,
         maxNodes = maxNodes ?: 10_000,
+        displayId = displayId,
         isCancelled = { serviceScope.coroutineContext[Job]?.isActive == false },
       ),
     )
@@ -1711,6 +1730,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   override fun requestScreenshot(requestId: String?) = broadcastScreenshot(requestId)
+
+  override fun requestScreenshot(requestId: String?, displayId: Int?) =
+    broadcastScreenshot(requestId, displayId)
 
   override fun requestSwipe(
     requestId: String?,
@@ -2767,8 +2789,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Get current screen dimensions for offscreen filtering. */
   @Suppress("DEPRECATION")
-  private fun getScreenDimensions(): ScreenDimensions? {
+  private fun getScreenDimensions(displayId: Int = Display.DEFAULT_DISPLAY): ScreenDimensions? {
     return try {
+      if (displayId != Display.DEFAULT_DISPLAY && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val displayManager =
+          getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        val display = displayManager?.getDisplay(displayId) ?: return null
+        val size = Point()
+        display.getRealSize(size)
+        return ScreenDimensions(size.x, size.y)
+      }
       val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
       if (windowManager != null) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -2787,6 +2817,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       null
     }
   }
+
+  private fun activeDisplayId(): Int = viewHierarchyExtractor.selectDisplayWindows(this).displayId
+
+  private fun panelUniqueId(displayId: Int): String? =
+    (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
+      ?.getDisplay(displayId)
+      .let(::panelUniqueIdOf)
 
   /** Get the top system inset (status bar height) for coordinate adjustment. */
   @Suppress("DEPRECATION")
@@ -2827,13 +2864,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * 0 fallback.
    */
   @Suppress("DEPRECATION")
-  private fun getRotationOrNull(): Int? {
+  private fun getRotationOrNull(displayId: Int = Display.DEFAULT_DISPLAY): Int? {
     return try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         // Use DisplayManager for AccessibilityService context (can't use context.display)
         val displayManager =
           getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-        displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation
+        displayManager?.getDisplay(displayId)?.rotation
       } else {
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
         windowManager?.defaultDisplay?.rotation
@@ -2854,7 +2891,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Get typed current-window inset metadata for coordinate and layout inspection. */
   @Suppress("DEPRECATION")
-  private fun getObservationInsets(screenDimensions: ScreenDimensions?): ObservationInsetsInfo {
+  private fun getObservationInsets(
+    screenDimensions: ScreenDimensions?,
+    displayId: Int = Display.DEFAULT_DISPLAY,
+  ): ObservationInsetsInfo {
+    if (displayId != Display.DEFAULT_DISPLAY) {
+      return ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
+    }
     return try {
       val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
       if (windowManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -3107,17 +3155,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val contextAtExtractionStart = currentFrameContext()
     // Bracket every input acquisition and the extraction itself. If rotation changes anywhere in
     // that interval, hierarchy geometry cannot be proven to match a single display orientation.
-    val rotationCapture = rotationProvenance.beginCapture()
-    val rotationAtCaptureStart = getRotationOrNull()
-    // Get all windows to capture popups, toolbars, and other floating windows
-    val allWindows = windows
-    val rootNode = rootInActiveWindow
+    val selected = viewHierarchyExtractor.selectDisplayWindows(this, snapshotOptions.displayId)
+    val targetDisplayId = selected.displayId
+    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
+    val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
+    val allWindows = selected.windows
+    val rootNode =
+      viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
     // Capture foreground info atomically with rootNode to avoid race conditions
     // where the app state changes between hierarchy extraction and getForegroundActivity()
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
-    val screenDimensions = getScreenDimensions()
-    val insets = getObservationInsets(screenDimensions)
+    val screenDimensions = getScreenDimensions(targetDisplayId)
+    val insets = getObservationInsets(screenDimensions, targetDisplayId)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       Log.w(TAG, "No windows or root node available for extraction")
@@ -3140,6 +3190,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           true,
           disableAllFiltering,
           occlusionEnabled,
+          displayId = targetDisplayId,
+          panelUniqueId = panelUniqueId(targetDisplayId),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
@@ -3148,6 +3200,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           screenDimensions,
           true,
           disableAllFiltering,
+          displayId = targetDisplayId,
+          panelUniqueId = panelUniqueId(targetDisplayId),
         )
       }
 
@@ -3155,7 +3209,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       rotationProvenance.rotationIfUnchanged(
         rotationCapture,
         rotationAtCaptureStart,
-        getRotationOrNull(),
+        getRotationOrNull(targetDisplayId),
+        targetDisplayId,
       )
     // Bounding rectangles are only meaningful relative to the same orientation
     // as screenDimensions. Keep the established edge insets, but avoid emitting
@@ -3173,6 +3228,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val density = getDensity()
     val enriched =
       hierarchy?.copy(
+        displayId = targetDisplayId,
+        panelUniqueId = panelUniqueId(targetDisplayId),
         screenWidth = screenDimensions?.width,
         screenHeight = screenDimensions?.height,
         rotation = rotation,
@@ -3340,12 +3397,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // This is the synchronous ADB-broadcast fallback, not the debounced direct route above. It
     // must bracket the same inputs and extraction so the fallback never publishes a hierarchy
     // whose geometry and rotation came from different display states.
-    val rotationCapture = rotationProvenance.beginCapture()
-    val rotationAtCaptureStart = getRotationOrNull()
-    val allWindows = windows
-    val rootNode = rootInActiveWindow
-    val screenDimensions = getScreenDimensions()
-    val insets = getObservationInsets(screenDimensions)
+    val selected = viewHierarchyExtractor.selectDisplayWindows(this)
+    val targetDisplayId = selected.displayId
+    val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
+    val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
+    val allWindows = selected.windows
+    val rootNode =
+      viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
+    val screenDimensions = getScreenDimensions(targetDisplayId)
+    val insets = getObservationInsets(screenDimensions, targetDisplayId)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       return null
@@ -3366,6 +3426,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           true,
           disableAllFiltering,
           occlusionEnabled,
+          displayId = targetDisplayId,
+          panelUniqueId = panelUniqueId(targetDisplayId),
         )
       } else {
         viewHierarchyExtractor.extractFromActiveWindow(
@@ -3374,13 +3436,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           screenDimensions,
           true,
           disableAllFiltering,
+          displayId = targetDisplayId,
+          panelUniqueId = panelUniqueId(targetDisplayId),
         )
       }
     val rotation =
       rotationProvenance.rotationIfUnchanged(
         rotationCapture,
         rotationAtCaptureStart,
-        getRotationOrNull(),
+        getRotationOrNull(targetDisplayId),
+        targetDisplayId,
       )
     // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
     // add the other device metadata, but the daemon retains scale metadata off any route).
@@ -3389,6 +3454,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val hierarchyWithScaleMetadata =
       withScaleMetadata(
         hierarchy?.copy(
+          displayId = targetDisplayId,
+          panelUniqueId = panelUniqueId(targetDisplayId),
           rotation = rotation,
           systemInsets = legacySystemInsets(captureInsets),
           insets = captureInsets,
@@ -3532,7 +3599,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Takes a screenshot and returns it as a base64-encoded JPEG plus capture diagnostics. Requires
    * Android R (API 30) or higher. Runs on IO dispatcher to avoid blocking the main thread.
    */
-  private suspend fun takeScreenshotAsync(quality: Int = 80): ScreenshotCaptureOutcome {
+  private suspend fun takeScreenshotAsync(
+    targetDisplayId: Int,
+    quality: Int = 80,
+  ): ScreenshotCaptureOutcome {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
       Log.w(TAG, "Screenshot API requires Android R (API 30) or higher")
       return ScreenshotCaptureOutcome.Failure(null)
@@ -3543,12 +3613,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val startTime = System.currentTimeMillis()
 
         // Use suspendCancellableCoroutine to bridge callback-based API
-        val rotationCapture = rotationProvenance.beginCapture()
-        val rotationAtCaptureStart = getRotationOrNull()
+        val rotationCapture = rotationProvenance.beginCapture(targetDisplayId)
+        val rotationAtCaptureStart = getRotationOrNull(targetDisplayId)
         val captured =
           suspendCancellableCoroutine<ScreenshotCallbackResult> { continuation ->
             takeScreenshot(
-              Display.DEFAULT_DISPLAY,
+              targetDisplayId,
               mainExecutor,
               object : TakeScreenshotCallback {
                 override fun onSuccess(screenshot: ScreenshotResult) {
@@ -3568,7 +3638,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                     rotationProvenance.rotationIfUnchanged(
                       rotationCapture,
                       rotationAtCaptureStart,
-                      getRotationOrNull(),
+                      getRotationOrNull(targetDisplayId),
+                      targetDisplayId,
                     )
                   continuation.resume(ScreenshotCallbackResult.Captured(hardwareBitmap, rotation))
                 }
@@ -3619,6 +3690,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           ScreenshotCapturePayload(
             base64Image = base64String,
             rotation = rotation,
+            displayId = targetDisplayId,
+            panelUniqueId = panelUniqueId(targetDisplayId),
             captureDurationMs = screenshotTime,
             encodeDurationMs = encodeTime,
             byteLength = jpegBytes.size,
@@ -6728,7 +6801,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /** Broadcast screenshot to WebSocket clients */
-  private fun broadcastScreenshot(requestId: String?) {
+  private fun broadcastScreenshot(requestId: String?, displayId: Int? = null) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping screenshot broadcast")
       return
@@ -6739,7 +6812,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // and hanging the awaiting client until timeout (issue #3023).
     asyncActionRunner.launch(requestId, "screenshot") {
       val contextBeforeCapture = currentFrameContext()
-      val outcome = takeScreenshotAsync()
+      val targetDisplayId = displayId ?: activeDisplayId()
+      val outcome = takeScreenshotAsync(targetDisplayId)
       val stableContext = contextBeforeCapture.takeIf { it == currentFrameContext() }
       when (outcome) {
         is ScreenshotCaptureOutcome.Success -> {
@@ -6751,6 +6825,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               data = screenshot.base64Image,
               format = "jpeg",
               rotation = screenshot.rotation,
+              displayId = screenshot.displayId,
+              panelUniqueId = screenshot.panelUniqueId,
               screenshotCaptureDurationMs = screenshot.captureDurationMs,
               screenshotEncodeDurationMs = screenshot.encodeDurationMs,
               screenshotByteLength = screenshot.byteLength,
@@ -6764,7 +6840,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // Surface a rate limit distinctly so the daemon classifies it as ctrlproxy_rate_limited
           // rather than a generic capture failure (issue #4927).
           val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
-          webSocketServer.broadcast(screenshotErrorFrame(requestId, error))
+          webSocketServer.broadcast(
+            screenshotErrorFrame(requestId, error, targetDisplayId, panelUniqueId(targetDisplayId))
+          )
         }
       }
     }

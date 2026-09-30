@@ -47,6 +47,8 @@ export const quoteForAdbArg = (value: string): string => {
  * Interface for accessibility service node format
  */
 export interface AccessibilityNode {
+  displayId?: number | null;
+  panelUniqueId?: string | null;
   /** Native ownership marker present on captured window roots only. */
   windowId?: number;
   actions?: string[];
@@ -103,6 +105,8 @@ export interface AccessibilityNodeSelector {
  * Interface for accessibility hierarchy data from the device.
  */
 export interface AccessibilityHierarchy {
+  displayId?: number | null;
+  panelUniqueId?: string | null;
   /** Daemon sequence assigned when this capture was forwarded to the observation stream. */
   captureSequence?: number;
   updatedAt: number;
@@ -215,6 +219,8 @@ export interface AccessibilityHierarchyResponse {
  */
 export interface ScreenshotResult extends ScreenshotPerformanceMetadata {
   success: boolean;
+  displayId?: number | null;
+  panelUniqueId?: string | null;
   data?: string; // Base64 encoded JPEG
   format?: string;
   timestamp?: number;

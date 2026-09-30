@@ -23,6 +23,7 @@ interface CtrlProxyActions {
     disableAllFiltering: Boolean,
     maxDepth: Int?,
     maxNodes: Int?,
+    displayId: Int? = null,
   ) = requestHierarchy(disableAllFiltering)
 
   fun requestHierarchyIfStale(sinceTimestamp: Long)
@@ -30,6 +31,8 @@ interface CtrlProxyActions {
   fun setHierarchyInterval(intervalMs: Long?)
 
   fun requestScreenshot(requestId: String?)
+
+  fun requestScreenshot(requestId: String?, displayId: Int?) = requestScreenshot(requestId)
 
   // Coordinate params are `Double` so fractional wire values pass through untruncated to the
   // gesture engine (which builds float `Path`s). `offset`, durations, and `rotationDegrees` are not

@@ -22,6 +22,7 @@ sealed class WebSocketRequest {
 @SerialName("request_hierarchy")
 data class RequestHierarchy(
   override val requestId: String? = null,
+  val displayId: Int? = null,
   val disableAllFiltering: Boolean = false,
   val maxDepth: Int? = null,
   val maxNodes: Int? = null,
@@ -48,7 +49,10 @@ data class SetHierarchyInterval(
 
 @Serializable
 @SerialName("request_screenshot")
-data class RequestScreenshot(override val requestId: String? = null) : WebSocketRequest()
+data class RequestScreenshot(
+  override val requestId: String? = null,
+  val displayId: Int? = null,
+) : WebSocketRequest()
 
 // =============================================================================
 // Gesture Requests

@@ -791,6 +791,8 @@ export class CtrlProxyHierarchy {
           "Accessibility hierarchy missing from accessibility service";
         return {
           captureSequence: accessibilityHierarchy.captureSequence,
+          displayId: accessibilityHierarchy.displayId,
+          panelUniqueId: accessibilityHierarchy.panelUniqueId,
           hierarchy: {
             error: errorMessage,
           },
@@ -840,6 +842,8 @@ export class CtrlProxyHierarchy {
 
       const result: ViewHierarchyResult = {
         captureSequence: accessibilityHierarchy.captureSequence,
+        displayId: accessibilityHierarchy.displayId,
+        panelUniqueId: accessibilityHierarchy.panelUniqueId,
         hierarchy: convertedHierarchy,
         packageName: resolvedPackageName,
         windows: linkWindowRoots(convertedHierarchy, accessibilityHierarchy.windows),

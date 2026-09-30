@@ -55,6 +55,7 @@ import {
   structuredContentOmissionReason,
   responseCarriesStructuredContent,
 } from "./stripToolResultStructuredContent";
+import { shapeToolCallError } from "./shapeToolCallError";
 
 // Import the resource registry
 import { ResourceRegistry } from "./resourceRegistry";
@@ -1558,7 +1559,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           isError: true,
         };
       }
-      throw error;
+      // The SDK's request-handler result alias is narrower than its exported
+      // CallToolResult type, though this text-only error result satisfies the
+      // protocol schema.
+      return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
     } finally {
       cleanupAcquisitionRelease?.();
       executionTracker.endExecution(execution.id);

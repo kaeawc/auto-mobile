@@ -38,6 +38,7 @@ import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
 import { ToolRegistry } from "./toolRegistry";
 import { installToolCallDispatcher } from "./toolCallDispatch";
+import { shapeToolCallError } from "./shapeToolCallError";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -421,12 +422,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       );
       return deviceControlTransportFailureResult(error);
     }
-    logger.error(`[ProxyServer] Tool call failed: ${name} - ${error}`);
-    // Return error as tool result (not throwing) to match expected MCP behavior
-    return {
-      content: [{ type: "text", text: `Error: ${safeForwardedRequestErrorMessage(error)}` }],
-      isError: true,
-    };
+    return shapeToolCallError(error, { toolName: name, source: "ProxyServer" });
   };
 
   // Register tools/call handler - forward to daemon through the shared

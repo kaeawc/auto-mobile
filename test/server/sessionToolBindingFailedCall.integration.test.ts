@@ -50,12 +50,12 @@ describe("session tool binding after failed calls", () => {
       name: "bindingProbe",
       arguments: { sessionUuid: "session-a" },
     });
-    await expect(
-      fixture.client.callTool({
-        name: "rejectSession",
-        arguments: { sessionUuid: "session-b" },
-      }),
-    ).rejects.toThrow("session rejected");
+    const rejectedCall = await fixture.client.callTool({
+      name: "rejectSession",
+      arguments: { sessionUuid: "session-b" },
+    });
+    expect(rejectedCall).toMatchObject({ isError: true });
+    expect(rejectedCall.content[0].text).toContain("session rejected");
     await expect(fixture.client.listTools()).resolves.toMatchObject({
       tools: expect.arrayContaining([expect.objectContaining({ name: "bindingProbe" })]),
     });

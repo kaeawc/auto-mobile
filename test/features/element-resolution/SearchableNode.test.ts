@@ -6,6 +6,23 @@ import { SearchableHierarchy, toSearchable } from "../../../src/features/utility
 const bounds = { left: 0, top: 0, right: 100, bottom: 50 };
 
 describe("searchable node derivation", () => {
+  test("projects flat and nested hierarchy attributes equivalently", () => {
+    const attributes = {
+      class: "android.widget.Button",
+      text: "Continue",
+      clickable: true,
+      bounds,
+    };
+    const projection = new SearchableHierarchy();
+    const flat = projection.project({ hierarchy: { node: attributes } })[0];
+    const nested = projection.project({ hierarchy: { node: { $: attributes } } })[0];
+
+    expect(flat?.label).toBe("Continue");
+    expect(nested?.label).toBe(flat?.label);
+    expect(nested?.bounds).toEqual(flat?.bounds);
+    expect(nested?.affordances).toEqual(flat?.affordances);
+  });
+
   test("keeps native and synthetic identity distinct", () => {
     const node = toSearchable({ bounds, "resource-id": "pkg:id/save", "view-id": "s-stable" });
     expect(node.nativeId).toBe("pkg:id/save");

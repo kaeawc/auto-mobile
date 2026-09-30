@@ -1,4 +1,5 @@
 import type { ViewHierarchyResult, ViewHierarchyNode } from "../models/ViewHierarchyResult";
+import { nodeAttributes } from "../models/ViewHierarchyResult";
 
 /**
  * Per-frame diff state stamped onto a node in the observation stream's hierarchy
@@ -57,7 +58,8 @@ function boundsSignature(value: unknown): string {
 
 /** Attributes compared to decide whether a node at a stable tree position changed. */
 function nodeSignature(node: ViewHierarchyNode): string {
-  const attrs = node.$ ?? {};
+  // Keep the stream diff's existing nested-attribute projection for flat nodes.
+  const attrs = node.$ === undefined || node.$ === null ? {} : nodeAttributes(node);
   const get = (...keys: string[]): string => {
     for (const key of keys) {
       const value = attrs[key];

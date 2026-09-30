@@ -1,5 +1,6 @@
 import { Element } from "../../models/Element";
 import { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../../models";
+import { nodeAttributes, nodeBounds } from "../../models/ViewHierarchyResult";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { parseBounds } from "../../utils/bounds";
@@ -18,7 +19,7 @@ export class DefaultElementParser implements ElementParser {
    */
   extractNodeProperties(node: ViewHierarchyNode): any {
     // XML parser from xml2js puts properties in $ object
-    return node && node.$ ? node.$ : node;
+    return nodeAttributes(node);
   }
 
   /**
@@ -54,7 +55,7 @@ export class DefaultElementParser implements ElementParser {
     delete nodeProperties.node;
     const parsedNode: ViewHierarchyNode = { ...nodeProperties };
 
-    const parsedBounds = this.parseBounds(node.bounds ?? nodeProperties.bounds);
+    const parsedBounds = this.parseBounds(nodeBounds(node));
     if (!parsedBounds) {
       return null;
     }

@@ -7,6 +7,7 @@
 
 import type { SemanticLink, ViewHierarchyResult } from "../../../models";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
+import { nodeAttributes } from "../../../models/ViewHierarchyResult";
 import { isDeepStrictEqual } from "node:util";
 import { screenScaleMetadataSpread } from "../../../models/ScreenScaleMetadata";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
@@ -806,7 +807,7 @@ export class CtrlProxyHierarchy {
     isRoot: boolean = false,
     insideSpringBoardIcon: boolean = false,
   ): ConvertedNode | null {
-    const attrs = node.$ || {};
+    const attrs = nodeAttributes(node);
     const children = node.node || [];
 
     // XCTest exposes the title/artwork of a SpringBoard icon as tappable
@@ -890,7 +891,7 @@ export class CtrlProxyHierarchy {
   }
 
   private isIconArtworkImage(node: ConvertedNode): boolean {
-    const attrs = node.$ ?? {};
+    const attrs = nodeAttributes(node);
     const protectedFields = [
       "text",
       "hint-text",
@@ -956,7 +957,7 @@ export class CtrlProxyHierarchy {
       return false;
     }
 
-    const attrs = child.$ ?? {};
+    const attrs = nodeAttributes(child);
     const className = typeof attrs["class"] === "string" ? attrs["class"] : "";
     const role = typeof attrs["role"] === "string" ? attrs["role"] : "";
     if (className !== "UILabel" || (role !== "" && role !== "text")) {
@@ -1021,7 +1022,7 @@ export class CtrlProxyHierarchy {
       return null;
     }
 
-    const attrs = node.$ ?? {};
+    const attrs = nodeAttributes(node);
     if (Array.isArray(attrs["actions"]) && attrs["actions"].length > 0) {
       return null;
     }

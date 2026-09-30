@@ -1,5 +1,9 @@
 import type { ScreenIdentity } from "../../../models/ObserveResult";
-import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../models/ViewHierarchyResult";
+import {
+  nodeAttributes,
+  type ViewHierarchyNode,
+  type ViewHierarchyResult,
+} from "../../../models/ViewHierarchyResult";
 
 type NodeAttrs = Record<string, unknown>;
 type HierarchyNodeLike = ViewHierarchyNode & Record<string, unknown>;
@@ -46,13 +50,7 @@ function textOf(attrs: NodeAttrs): string | undefined {
 }
 
 function attrsOf(node: ViewHierarchyNode | undefined): NodeAttrs {
-  if (!node) {
-    return {};
-  }
-  if (node.$ && typeof node.$ === "object") {
-    return node.$;
-  }
-  return node as unknown as NodeAttrs;
+  return node ? nodeAttributes(node) : {};
 }
 
 function nodeChildren(node: ViewHierarchyNode | undefined): ViewHierarchyNode[] {

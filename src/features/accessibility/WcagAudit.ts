@@ -6,7 +6,11 @@
 import crypto from "crypto";
 import { Element } from "../../models/Element";
 import { ElementBounds } from "../../models/ElementBounds";
-import { ViewHierarchyNode } from "../../models/ViewHierarchyResult";
+import {
+  type Hierarchy,
+  type ViewHierarchyNode,
+  nodeAttributes,
+} from "../../models/ViewHierarchyResult";
 import {
   AccessibilityAuditConfig,
   AccessibilityAuditResult,
@@ -45,7 +49,7 @@ export class WcagAudit {
    */
   async audit(
     elements: Element[],
-    viewHierarchy: ViewHierarchyNode,
+    viewHierarchy: Hierarchy | ViewHierarchyNode,
     screenshotPath: string | undefined,
     packageName: string,
     config: AccessibilityAuditConfig,
@@ -282,7 +286,7 @@ export class WcagAudit {
    */
   private checkFormInputLabels(
     elements: Element[],
-    hierarchy: ViewHierarchyNode,
+    hierarchy: Hierarchy | ViewHierarchyNode,
     density?: number,
   ): WcagViolation[] {
     const violations: WcagViolation[] = [];
@@ -419,22 +423,20 @@ export class WcagAudit {
   /**
    * Generate screen identifier for baseline tracking
    */
-  private generateScreenId(packageName: string, hierarchy: ViewHierarchyNode): string {
+  private generateScreenId(packageName: string, hierarchy: Hierarchy | ViewHierarchyNode): string {
     // Use package name + root activity/fragment identifier
     // This is a simplified approach - could be enhanced with more specific identifiers
     //
-    // Node attributes (class, resource-id) live under `$`, not directly on the
-    // node (issue #6252) -- `rootNode.class`/`rootNode["resource-id"]` were
-    // always undefined, so every screen collapsed to the same "unknown:" id,
-    // defeating per-screen baseline tracking.
+    // iOS CtrlProxy attributes are nested; Android and cleaned iOS attributes are flat.
     const rootNode = this.resolveRootNode(hierarchy);
-    const rootClass = (rootNode.$?.class as string | undefined) || "unknown";
-    const rootId = (rootNode.$?.["resource-id"] as string | undefined) || "";
+    const attrs = nodeAttributes(rootNode as ViewHierarchyNode);
+    const rootClass = (attrs.class as string | undefined) || "unknown";
+    const rootId = (attrs["resource-id"] as string | undefined) || "";
 
     return `${packageName}:${rootClass}:${rootId}`;
   }
 
-  private resolveRootNode(hierarchy: ViewHierarchyNode): ViewHierarchyNode {
+  private resolveRootNode(hierarchy: Hierarchy | ViewHierarchyNode): Hierarchy | ViewHierarchyNode {
     const node = hierarchy.node;
     if (Array.isArray(node) && node.length > 0) {
       return node[node.length - 1] as ViewHierarchyNode;

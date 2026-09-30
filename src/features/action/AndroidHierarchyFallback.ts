@@ -54,17 +54,21 @@ function missingXmlNodes(
     ) {
       return children;
     }
+    const candidateAttributes: Record<string, unknown> = {
+      ...attributes,
+      "hierarchy-source": "uiautomator",
+    };
     const candidate: ViewHierarchyNode = {
-      $: { ...attributes, "hierarchy-source": "uiautomator" },
+      $: candidateAttributes,
       bounds,
       ...(children.length ? { node: children } : {}),
     };
     // The XML format has no native action identity. Never manufacture or accept
     // one from a dump: these nodes are coordinate-only candidates.
-    delete candidate.$["view-id"];
-    delete candidate.$["unique-id"];
-    delete candidate.$.actions;
-    if (nativeKeys.has(nodeKey(candidate.$, candidate.bounds))) {
+    delete candidateAttributes["view-id"];
+    delete candidateAttributes["unique-id"];
+    delete candidateAttributes.actions;
+    if (nativeKeys.has(nodeKey(candidateAttributes, candidate.bounds))) {
       return children;
     }
     return [candidate];

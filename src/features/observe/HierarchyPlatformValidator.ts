@@ -1,4 +1,5 @@
 import type { ObserveResult, ViewHierarchyResult } from "../../models";
+import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { logger } from "../../utils/logger";
 
 export interface HierarchyPlatformValidation {
@@ -42,7 +43,9 @@ function isFromAndroid(viewHierarchy: ViewHierarchyResult): boolean {
   if (viewHierarchy.foregroundActivity !== undefined) {
     return true;
   }
-  if (viewHierarchy.hierarchy.node?.$?.class?.startsWith("android.")) {
+  const root = viewHierarchy.hierarchy.node;
+  const rootClass = root && nodeAttributes(root)["class"];
+  if (typeof rootClass === "string" && rootClass.startsWith("android.")) {
     return true;
   }
 

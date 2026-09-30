@@ -7,6 +7,7 @@
  * node — no I/O, no device dependencies.
  */
 import type { ViewHierarchyResult } from "../../models";
+import { nodeAttributes } from "../../models/ViewHierarchyResult";
 import { SearchableHierarchy } from "../../features/utility/SearchableNode";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
@@ -56,10 +57,7 @@ export const getNodeProperties = (node: any): Record<string, any> | null => {
   if (!node || typeof node !== "object") {
     return null;
   }
-  if ("$" in node && node.$) {
-    return node.$ as Record<string, any>;
-  }
-  return node as Record<string, any>;
+  return nodeAttributes(node);
 };
 
 export const traverseForHint = (node: any, predicate: (node: any) => boolean): boolean => {

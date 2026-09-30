@@ -1,6 +1,7 @@
 import type { ObserveResult } from "../../../models/ObserveResult";
 import type { LayoutWarnings } from "../../../models/ObservationInsets";
 import type { ElementBounds } from "../../../models/ElementBounds";
+import { nodeAttributes } from "../../../models/ViewHierarchyResult";
 import type {
   FocusAnchor,
   NormalizedRegion,
@@ -113,11 +114,7 @@ function attr(node: NodeRecord, key: string): unknown {
   if (node[key] !== undefined) {
     return node[key];
   }
-  const raw = node.$;
-  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-    return (raw as NodeRecord)[key];
-  }
-  return undefined;
+  return nodeAttributes(node)[key];
 }
 
 function stringAttr(node: NodeRecord, key: string): string {

@@ -43,7 +43,7 @@ function clientWithAvd(
     undefined,
     undefined,
     undefined,
-    { isAvailable: async () => true },
+    { isPortAvailable: () => true },
     advertisements,
   );
   (client as unknown as { ensureEmulatorPath: () => Promise<string> }).ensureEmulatorPath =

@@ -296,6 +296,13 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     expect(unlisted).toEqual([]);
   });
 
+  test("System UI ANR reboot uses its bounded image lookup without booted discovery", () => {
+    const source = blankComments(
+      readFileSync(join(ROOT, "src/server/deviceToolsSystemUiAnr.ts"), "utf8"),
+    );
+    expect(source).not.toMatch(DISCOVERY_CALL);
+  });
+
   test("no discovery call site was added to an inventoried file", () => {
     const counts = discoveryCallCounts();
     const drift = [...counts.entries()]

@@ -8,11 +8,13 @@ describe("isMutationQuery", () => {
     expect(isMutationQuery("UPDATE t SET a = 1")).toBe(true);
     expect(isMutationQuery("ALTER TABLE t ADD COLUMN a")).toBe(true);
     expect(isMutationQuery("DROP TABLE t")).toBe(true);
+    expect(isMutationQuery("REPLACE INTO t VALUES (1)")).toBe(true);
   });
 
   test("classifies reads as non-mutations", () => {
     expect(isMutationQuery("SELECT * FROM t")).toBe(false);
     expect(isMutationQuery("WITH cte AS (SELECT 1) SELECT * FROM cte")).toBe(false);
+    expect(isMutationQuery("PRAGMA user_version")).toBe(false);
   });
 
   test("detects mutations behind a leading line comment", () => {
@@ -36,6 +38,12 @@ describe("isMutationQuery", () => {
         "-- cte\nWITH d AS (SELECT id FROM t) DELETE FROM t WHERE id IN (SELECT id FROM d)",
       ),
     ).toBe(true);
+  });
+
+  test("conservatively classifies CTE REPLACE and PRAGMA writes", () => {
+    expect(isMutationQuery("WITH cte AS (SELECT 1) REPLACE INTO t VALUES (1)")).toBe(true);
+    expect(isMutationQuery("PRAGMA user_version = 42")).toBe(true);
+    expect(isMutationQuery("some unknown statement")).toBe(true);
   });
 
   test("still treats a commented-out read as a non-mutation", () => {

@@ -131,8 +131,6 @@ export class SessionHeartbeatMonitor {
   }
 
   private async tickOnce(): Promise<void> {
-    const now = this.timer.now();
-
     // Release idle/expired sessions promptly (e.g. autolocked devices whose idle
     // timeout has elapsed). Their idle timeout equals their heartbeat timeout, so
     // they expire out of getAllSessions() exactly when they would become stale —
@@ -140,12 +138,14 @@ export class SessionHeartbeatMonitor {
     // 5-minute cleanup sweep.
     this.sessions.cleanupExpiredSessions();
 
+    const reaps: Promise<void>[] = [];
     for (const session of this.sessions.getAllSessions()) {
       if (this.hasActiveExecutions(session.sessionId)) {
         continue;
       }
       // Awaiting-owner sessions never receive pre-first-heartbeat grace; judge them solely by
       // the rehydration-owner timeout while they await ownership.
+      const now = this.timer.now();
       const reason =
         session.ownership === "awaiting-owner"
           ? this.rehydrationOwnerStaleReason(session, now)
@@ -154,8 +154,23 @@ export class SessionHeartbeatMonitor {
         logger.warn(
           `Session ${session.sessionId} ${STALE_REASON_DESCRIPTION[reason]}, cancelling (reason=${reason})`,
         );
-        await this.reap(session.sessionId, reason);
+        try {
+          reaps.push(
+            this.reap(session.sessionId, reason).catch((error: unknown) => {
+              logger.warn(`Failed to reap stale session ${session.sessionId}`, error);
+              throw error;
+            }),
+          );
+        } catch (error) {
+          logger.warn(`Failed to reap stale session ${session.sessionId}`, error);
+          reaps.push(Promise.reject(error));
+        }
       }
+    }
+    const results = await Promise.allSettled(reaps);
+    const firstFailure = results.find((result) => result.status === "rejected");
+    if (firstFailure) {
+      throw firstFailure.reason;
     }
   }
 

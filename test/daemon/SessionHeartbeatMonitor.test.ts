@@ -380,6 +380,78 @@ describe("SessionHeartbeatMonitor", () => {
 
       await monitor.stop();
     });
+
+    it("samples the clock for each staleness decision", async () => {
+      await sessionManager.createSession("stale", "emulator-5554", "android", 60_000, 100);
+      sessionManager.recordHeartbeat("stale");
+      timer.advanceTime(50);
+      await sessionManager.createSession("newly-stale", "emulator-5556", "android", 60_000, 100);
+      sessionManager.recordHeartbeat("newly-stale");
+      timer.advanceTime(51);
+      const reaped: string[] = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sid) => {
+          reaped.push(sid);
+          if (sid === "stale") {
+            timer.advanceTime(50);
+          }
+        },
+        timer,
+      );
+
+      await monitor.tick();
+      expect(reaped).toEqual(["stale", "newly-stale"]);
+    });
+
+    it("finishes other stale reaps before reporting a failed reap", async () => {
+      await sessionManager.createSession("bad", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("slow", "emulator-5556", "android", 60_000);
+      timer.advanceTime(5_001);
+      const reaped: string[] = [];
+      const finishSlow = Promise.withResolvers<void>();
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sid) => {
+          reaped.push(sid);
+          if (sid === "bad") {
+            throw new Error("release failed");
+          }
+          await finishSlow.promise;
+        },
+        timer,
+      );
+
+      const tick = monitor.tick();
+      await Promise.resolve();
+      expect(reaped).toEqual(["bad", "slow"]);
+      finishSlow.resolve();
+      await expect(tick).rejects.toThrow("release failed");
+    });
+
+    it("continues reaping after a synchronous reap failure", async () => {
+      await sessionManager.createSession("bad", "emulator-5554", "android", 60_000);
+      await sessionManager.createSession("good", "emulator-5556", "android", 60_000);
+      timer.advanceTime(5_001);
+      const reaped: string[] = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        (sid) => {
+          reaped.push(sid);
+          if (sid === "bad") {
+            throw new Error("synchronous release failure");
+          }
+          return Promise.resolve();
+        },
+        timer,
+      );
+
+      await expect(monitor.tick()).rejects.toThrow("synchronous release failure");
+      expect(reaped).toEqual(["bad", "good"]);
+    });
   });
 
   describe("integration with DevicePool autolock", () => {

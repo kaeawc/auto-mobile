@@ -188,7 +188,7 @@ export interface NodeAttributes {
 }
 
 export interface ViewHierarchyNode {
-  $: NodeAttributes;
+  $?: NodeAttributes;
   node?: ViewHierarchyNode[];
   /**
    * Element bounds in the platform's coordinate space: integer pixels on
@@ -206,4 +206,14 @@ export interface ViewHierarchyNode {
   "test-tag"?: string;
   "view-id"?: string;
   extras?: Record<string, string>;
+}
+
+/** iOS CtrlProxy nests attributes in `$`; Android and cleaned iOS nodes are flat. */
+export function nodeAttributes(node: ViewHierarchyNode): NodeAttributes {
+  return node.$ ?? (node as NodeAttributes);
+}
+
+/** Direct bounds take precedence when a converter also carries bounds in `$`. */
+export function nodeBounds(node: ViewHierarchyNode): unknown {
+  return node.bounds ?? nodeAttributes(node)["bounds"];
 }

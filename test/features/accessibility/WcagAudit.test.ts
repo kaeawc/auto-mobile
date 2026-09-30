@@ -741,12 +741,7 @@ describe("WcagAudit", function () {
       async clearBaseline(): Promise<void> {}
     }
 
-    it("derives the screen id from the node's $ attributes, not top-level fields", async function () {
-      // Real hierarchies carry attributes under `$` (xml2js/CtrlProxy shape), not
-      // as top-level `class`/`resource-id` fields directly on the node. Before
-      // #6252, `generateScreenId` read `rootNode.class` / `rootNode["resource-id"]`
-      // directly, which are always undefined on this shape, so every screen
-      // collapsed to the same "unknown:" id.
+    it("derives the screen id from nested iOS CtrlProxy attributes", async function () {
       const hierarchy: ViewHierarchyNode = {
         $: { class: "com.example.MainActivity", "resource-id": "root-container" },
       };
@@ -760,6 +755,23 @@ describe("WcagAudit", function () {
       });
 
       expect(recorder.lastScreenId).toBe("com.test:com.example.MainActivity:root-container");
+    });
+
+    it("derives the screen id from flat Android attributes", async function () {
+      const hierarchy: ViewHierarchyNode = {
+        class: "android.widget.FrameLayout",
+        "resource-id": "root-container",
+      };
+      const recorder = new RecordingBaselineManager();
+      const withRecorder = new WcagAudit(new FakeTimer(), recorder);
+
+      await withRecorder.audit([], hierarchy, undefined, "com.test", {
+        level: "AA",
+        failureMode: "report",
+        useBaseline: true,
+      });
+
+      expect(recorder.lastScreenId).toBe("com.test:android.widget.FrameLayout:root-container");
     });
 
     it("falls back to 'unknown' when $ attributes are absent", async function () {

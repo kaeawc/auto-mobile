@@ -2,6 +2,7 @@ import type { Element } from "../../../models/Element";
 import type { LayoutWarning, LayoutWarningsScope } from "../../../models/ObservationInsets";
 import type { ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
+import { nodeAttributes as hierarchyNodeAttributes } from "../../../models/ViewHierarchyResult";
 import { projectSkeleton, projectSkeletonElement } from "./SkeletonProjection";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons } from "../truncationReasons";
@@ -905,7 +906,7 @@ function nodeKey(node: Record<string, unknown>, siblingIndex: number): string {
 const PATH_KEY_SEP = "\x01";
 
 /** A node's own attributes, excluding the `node` child array (diffed separately). */
-function nodeAttributes(node: Record<string, unknown>): Record<string, unknown> {
+function diffNodeAttributes(node: Record<string, unknown>): Record<string, unknown> {
   const attrs: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === "node") {
@@ -926,11 +927,7 @@ function platformClassNameForDiff(node: Record<string, unknown>): string {
   if (className !== "") {
     return className;
   }
-  const xmlAttrs = node.$;
-  if (!xmlAttrs || typeof xmlAttrs !== "object" || Array.isArray(xmlAttrs)) {
-    return "";
-  }
-  const xmlClassName = (xmlAttrs as Record<string, unknown>).class;
+  const xmlClassName = hierarchyNodeAttributes(node).class;
   return typeof xmlClassName === "string" ? xmlClassName : "";
 }
 
@@ -957,7 +954,7 @@ function flattenForDiff(obs: ObserveResult, collapseKeyboard = false): FlatObser
     }
     const localKey = nodeKey(rec, siblingIndex);
     const pathKey = parentPath === "" ? localKey : `${parentPath}${PATH_KEY_SEP}${localKey}`;
-    out.push({ pathKey, key: localKey, attributes: nodeAttributes(rec), ancestorClasses });
+    out.push({ pathKey, key: localKey, attributes: diffNodeAttributes(rec), ancestorClasses });
     const className = classNameForDiff(rec);
     const childAncestorClasses =
       className === "" ? ancestorClasses : [...ancestorClasses, className];

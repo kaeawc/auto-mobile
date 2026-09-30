@@ -28,6 +28,14 @@ describe("RealHierarchyPlatformValidator", () => {
       expect(validator.validate("android", viewHierarchy)).toEqual({ valid: true });
     });
 
+    test("recognizes flat Android class without platform metadata", () => {
+      const viewHierarchy: ViewHierarchyResult = {
+        hierarchy: { node: { class: "android.widget.FrameLayout" } },
+      };
+
+      expect(validator.validate("ios", viewHierarchy).valid).toBe(false);
+    });
+
     test("rejects raw iOS hierarchy (XCUIElementTypeApplication)", () => {
       const viewHierarchy = {
         hierarchy: {

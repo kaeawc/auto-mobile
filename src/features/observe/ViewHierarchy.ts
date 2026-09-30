@@ -28,7 +28,7 @@ import {
 } from "./HierarchyNormalization";
 import { HOST_OUTPUT_CHILD_CAP_REASON_PREFIX } from "./truncationReasons";
 import type { CtrlProxyHierarchyResponse } from "./ios/types";
-import type { Hierarchy } from "../../models/ViewHierarchyResult";
+import { nodeAttributes, type Hierarchy } from "../../models/ViewHierarchyResult";
 
 function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hierarchy {
   const reason = result?.unavailableReason ?? "unknown";
@@ -599,7 +599,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       return rootCopy;
     }
 
-    const props = node.$ || node;
+    const props = nodeAttributes(node);
     const meetsFilterCriteria = this.meetsFilterCriteria(props);
     const relevantChildren = this.processNodeChildren(
       node,
@@ -748,7 +748,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * Commas are avoided because PerformanceAuditor joins reasons with ", ".
    */
   private describeTruncatedNode(node: any): string {
-    const props = node.$ || node;
+    const props = nodeAttributes(node);
     const identity =
       props["resource-id"] || props["view-id"] || props["content-desc"] || props.class;
     return typeof identity === "string" && identity !== ""
@@ -841,7 +841,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         return;
       }
 
-      const props = node.$ || node;
+      const props = nodeAttributes(node);
       if (props[propertyName] === "true" || props[propertyName] === true) {
         const element = this.parseNodeBounds(node);
         if (element) {

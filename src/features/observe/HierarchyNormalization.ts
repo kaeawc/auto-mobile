@@ -1,4 +1,5 @@
 import type { ViewHierarchyResult } from "../../models";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
 import type { ElementBounds } from "../../models/ElementBounds";
 import { logger, LogLevel } from "../../utils/logger";
 import { parseBounds } from "../../utils/bounds";
@@ -114,7 +115,7 @@ function filterOffscreenNode(
   if (Array.isArray(node)) {
     return filterOffscreenChildren(node, screenWidth, screenHeight, margin);
   }
-  const bounds = parseBounds(node.bounds ?? node.$?.bounds);
+  const bounds = parseBounds(nodeBounds(node));
 
   // Check if this node is completely offscreen
   const isOffscreen = bounds && isCompletelyOffscreen(bounds, screenWidth, screenHeight, margin);

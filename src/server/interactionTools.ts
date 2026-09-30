@@ -1,4 +1,5 @@
 import { toActionableError } from "../models/ActionableError";
+import { nodeAttributes } from "../models/ViewHierarchyResult";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
@@ -1473,11 +1474,7 @@ function collectVisibleHierarchyText(value: unknown, texts: string[]): void {
 }
 
 function nodeAttribute(node: Record<string, unknown>, key: string): unknown {
-  const attributes =
-    node.$ && typeof node.$ === "object" && !Array.isArray(node.$)
-      ? (node.$ as Record<string, unknown>)
-      : undefined;
-  return node[key] ?? attributes?.[key];
+  return node[key] ?? nodeAttributes(node)[key];
 }
 
 function countIosDialogButtons(value: unknown): number {

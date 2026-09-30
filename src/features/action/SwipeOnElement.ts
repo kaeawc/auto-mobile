@@ -8,6 +8,7 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { SwipeResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { IOSCtrlProxyClient } from "../observe/ios";
 
 /**
  * Executes swipe gestures on specific UI elements
@@ -49,6 +50,7 @@ export class SwipeOnElement extends BaseVisualChange {
     );
     logger.info(`[SwipeOnElement] Element bounds: ${JSON.stringify(element.bounds)}`);
     logger.info(`[SwipeOnElement] Options: ${JSON.stringify(options)}`);
+    let iosDispatchTimestamp: number | undefined;
 
     return this.observedInteraction(
       async () => {
@@ -83,6 +85,10 @@ export class SwipeOnElement extends BaseVisualChange {
               perf,
             ),
           );
+          if (this.device.platform === "ios" && result.success) {
+            iosDispatchTimestamp = this.timer.now();
+            IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+          }
           logger.info(`[SwipeOnElement] Swipe completed successfully: ${JSON.stringify(result)}`);
           return result;
         } catch (error) {
@@ -97,6 +103,7 @@ export class SwipeOnElement extends BaseVisualChange {
         progress,
         perf,
         signal,
+        observationTimestampProvider: () => iosDispatchTimestamp,
       },
     );
   }

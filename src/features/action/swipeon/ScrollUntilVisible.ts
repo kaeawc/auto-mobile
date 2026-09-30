@@ -39,6 +39,7 @@ import { getScreenBounds } from "../../../utils/screenBounds";
 import { exponentialBackoff } from "../../../utils/Backoff";
 import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/scrollIdle";
 import type { ProgressCallback } from "../BaseVisualChange";
+import { IOSCtrlProxyClient } from "../../observe/ios";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
@@ -89,6 +90,7 @@ interface ScrollUntilVisibleDependencies {
         toolArgs: Record<string, unknown>;
       };
       deferPostActionScreenshot?: boolean;
+      observationTimestampProvider?: () => number | undefined;
     },
   ) => Promise<T & { observation?: ObserveResult }>;
   captureTerminalObservationScreenshot?: (
@@ -303,6 +305,7 @@ export class ScrollUntilVisible {
       };
 
       // Execute swipe with observedInteraction
+      let iosDispatchTimestamp: number | undefined;
       const swipeResult = await this.deps.observedInteraction(
         async () => {
           const swipeRunner =
@@ -314,7 +317,7 @@ export class ScrollUntilVisible {
               "VoiceOver swipe runner is not configured for iOS scroll-until-visible",
             );
           }
-          return await swipeRunner.executeSwipeGesture(
+          const result = await swipeRunner.executeSwipeGesture(
             Math.floor(startX),
             Math.floor(startY),
             Math.floor(endX),
@@ -325,6 +328,11 @@ export class ScrollUntilVisible {
             perf,
             boomerang,
           );
+          if (this.deps.device.platform === "ios" && result.success) {
+            iosDispatchTimestamp = this.deps.timer.now();
+            IOSCtrlProxyClient.getExistingInstance(this.deps.device.deviceId)?.invalidateCache();
+          }
+          return result;
         },
         {
           changeExpected: false,
@@ -333,6 +341,7 @@ export class ScrollUntilVisible {
           perf,
           skipPreviousObserve: scrollIteration > 1,
           deferPostActionScreenshot: true,
+          observationTimestampProvider: () => iosDispatchTimestamp,
           predictionContext: {
             toolName: "swipeOn",
             toolArgs: this.deps.buildPredictionArgs(options),

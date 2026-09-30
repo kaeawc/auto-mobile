@@ -450,6 +450,7 @@ export class SwipeOn extends BaseVisualChange {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
+    let iosDispatchTimestamp: number | undefined;
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
@@ -500,6 +501,10 @@ export class SwipeOn extends BaseVisualChange {
                 boomerang,
               ),
         );
+        if (this.device.platform === "ios" && swipeResult.success) {
+          iosDispatchTimestamp = this.timer.now();
+          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+        }
 
         perf.end();
         return {
@@ -512,6 +517,7 @@ export class SwipeOn extends BaseVisualChange {
         timeoutMs: 500,
         progress,
         perf,
+        observationTimestampProvider: () => iosDispatchTimestamp,
         predictionContext: {
           toolName: "swipeOn",
           toolArgs: this.buildPredictionArgs(options),
@@ -528,6 +534,7 @@ export class SwipeOn extends BaseVisualChange {
     logger.info(
       `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,
     );
+    let iosDispatchTimestamp: number | undefined;
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
@@ -580,6 +587,10 @@ export class SwipeOn extends BaseVisualChange {
                 boomerang,
               ),
         );
+        if (this.device.platform === "ios" && swipeResult.success) {
+          iosDispatchTimestamp = this.timer.now();
+          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+        }
 
         perf.end();
         return {
@@ -599,6 +610,7 @@ export class SwipeOn extends BaseVisualChange {
         timeoutMs: 500,
         progress,
         perf,
+        observationTimestampProvider: () => iosDispatchTimestamp,
         predictionContext: {
           toolName: "swipeOn",
           toolArgs: this.buildPredictionArgs(options),

@@ -151,11 +151,12 @@ export class PinchOn extends BaseVisualChange {
       }
       const duration = options.duration ?? 300;
       const rotationDegrees = options.rotationDegrees ?? 0;
+      let iosDispatchTimestamp: number | undefined;
 
       const pinchResult = await this.observedInteraction(
         async () => {
           if (this.device.platform === "ios") {
-            return await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
+            const result = await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
               centerX,
               centerY,
               distanceStart,
@@ -165,6 +166,11 @@ export class PinchOn extends BaseVisualChange {
               5000,
               perf,
             );
+            if (result.success) {
+              iosDispatchTimestamp = this.timer.now();
+              IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+            }
+            return result;
           }
 
           return await AndroidCtrlProxyClient.getInstance(
@@ -186,6 +192,7 @@ export class PinchOn extends BaseVisualChange {
           timeoutMs: 8000,
           progress,
           perf,
+          observationTimestampProvider: () => iosDispatchTimestamp,
           predictionContext: {
             toolName: "pinchOn",
             toolArgs: {

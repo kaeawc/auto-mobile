@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerHighlightTools } from "../../src/server/highlightTools";
+import { VisualHighlightClient } from "../../src/features/debug/VisualHighlight";
+import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, HighlightShape, ViewHierarchyResult } from "../../src/models";
+import { innerBounds, nestedClickableHierarchy } from "../fixtures/nestedClickableHierarchy";
 
 describe("Highlight Tools Registration", () => {
   beforeEach(() => {
@@ -19,9 +22,9 @@ describe("Highlight Tools Registration", () => {
     expect(toolNames).toContain("highlight");
   });
   test.each([
-    [false, { x: 20, y: 40, width: 60, height: 20 }],
+    [false, { x: 0, y: 0, width: 100, height: 100 }],
     [true, { x: 0, y: 0, width: 100, height: 100 }],
-  ])("text highlight containerOf=%s starts from the matched label", async (containerOf, bounds) => {
+  ])("text highlight containerOf=%s targets the clickable row", async (containerOf, bounds) => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
         node: {
@@ -58,6 +61,90 @@ describe("Highlight Tools Registration", () => {
     );
     expect(JSON.parse(response.content[0].text).success).toBe(true);
     expect(shapes[0]).toEqual({ type: "circle", bounds });
+  });
+
+  test("Android text highlight chooses the same nested clickable ancestor as tap", async () => {
+    let shape: HighlightShape | undefined;
+    registerHighlightTools({
+      generateHighlightId: () => "nested-highlight",
+      hierarchyCaptureFactory: () => ({
+        capture: async (request) => ({
+          captureId: "nested",
+          platform: "android",
+          requestedFreshness: request.freshness,
+          receivedAt: 0,
+          hierarchy: nestedClickableHierarchy,
+          nodes: new SearchableHierarchy().project(nestedClickableHierarchy),
+        }),
+      }),
+      highlightClientFactory: () =>
+        Object.assign(new VisualHighlightClient(), {
+          addHighlight: async (_id: string, value: HighlightShape) => {
+            shape = value;
+            return { success: true };
+          },
+        }),
+    });
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "android-test", platform: "android", name: "test" },
+      tool.schema.parse({ text: "Wi-Fi" }),
+    );
+    expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(shape).toEqual({
+      type: "circle",
+      bounds: {
+        x: innerBounds.left,
+        y: innerBounds.top,
+        width: innerBounds.right - innerBounds.left,
+        height: innerBounds.bottom - innerBounds.top,
+      },
+    });
+  });
+
+  test("Android element ID highlight keeps the bounded label inside a clickable row", async () => {
+    const labelBounds = { left: 20, top: 30, right: 120, bottom: 60 };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          "resource-id": "app:id/row",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+          node: [{ "resource-id": "app:id/label", bounds: labelBounds, text: "Wi-Fi" }],
+        },
+      },
+    };
+    let shape: HighlightShape | undefined;
+    registerHighlightTools({
+      hierarchyCaptureFactory: () => ({
+        capture: async (request) => ({
+          captureId: "id-highlight",
+          platform: "android",
+          requestedFreshness: request.freshness,
+          receivedAt: 0,
+          hierarchy,
+          nodes: new SearchableHierarchy().project(hierarchy),
+        }),
+      }),
+      highlightClientFactory: () =>
+        Object.assign(new VisualHighlightClient(), {
+          addHighlight: async (_id: string, value: HighlightShape) => {
+            shape = value;
+            return { success: true };
+          },
+        }),
+    });
+
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "android-test", platform: "android", name: "test" },
+      tool.schema.parse({ elementId: "app:id/label" }),
+    );
+    expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(shape).toEqual({
+      type: "circle",
+      bounds: { x: 20, y: 30, width: 100, height: 30 },
+    });
   });
 
   test("validates highlight schema for add action", () => {

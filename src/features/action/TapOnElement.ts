@@ -1,5 +1,9 @@
 import { unsupportedPlatformError } from "../../models/ActionableError";
-import { ElementResolver, isFocusEditableElement } from "../utility/ElementResolver";
+import {
+  ElementResolver,
+  isFocusEditableElement,
+  promoteClickableAncestor,
+} from "../utility/ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "../utility/SearchableNode";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import {
@@ -2638,17 +2642,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return { element, usedParent: false };
     }
     const nodes = new SearchableHierarchy().project(viewHierarchy);
-    let candidate = findTapTargetNode(nodes, element);
-    while (candidate) {
-      const canAct =
-        action === "longPress"
-          ? candidate.affordances.includes("long-press")
-          : candidate.affordances.includes("tap") || candidate.affordances.includes("toggle");
-      if (canAct && (!requireResourceId || candidate.nativeId) && candidate.element) {
-        const target = candidate.element;
-        return { element: target, usedParent: !boundsEqual(target.bounds, element.bounds) };
-      }
-      candidate = candidate.parentIndex === undefined ? undefined : nodes[candidate.parentIndex];
+    const matched = findTapTargetNode(nodes, element);
+    const target = matched
+      ? promoteClickableAncestor(matched, nodes, {
+          action: action === "longPress" ? "long-press" : "tap",
+          requireResourceId,
+        })
+      : null;
+    if (target?.element) {
+      return {
+        element: target.element,
+        usedParent: !boundsEqual(target.element.bounds, element.bounds),
+      };
     }
     return { element, usedParent: false };
   }

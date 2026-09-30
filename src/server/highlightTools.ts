@@ -169,9 +169,10 @@ const resolveHighlightShapeFromSelector = async (
   if (!resolution.chosen?.element) {
     throw new ActionableError("Unable to find an element that matches the highlight selector.");
   }
-  const selected = args.text
-    ? (matchedSourceNode(resolution, { text: args.text }) ?? resolution.chosen)
-    : resolution.chosen;
+  const selected =
+    args.text && (args.containerOf || device.platform !== "android")
+      ? (matchedSourceNode(resolution, { text: args.text }) ?? resolution.chosen)
+      : resolution.chosen;
   const highlightElement = args.containerOf
     ? findContainerForElement(snapshot.nodes, selected)
     : selected.element;

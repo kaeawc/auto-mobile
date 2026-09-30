@@ -18,6 +18,8 @@ import {
   STABLE_VIEW_ID_TEXT_HASH_LENGTH,
 } from "../observe/android/StableNodeIdentity";
 import { ActionableError } from "../../models/ActionableError";
+import { isWithin, promoteClickableAncestor } from "./ElementResolver";
+import { SearchableHierarchy } from "./SearchableNode";
 
 /**
  * `assignStableViewIds` disambiguates structural duplicates with a descendant
@@ -1511,44 +1513,26 @@ export class DefaultElementFinder implements ElementFinder {
       return [];
     }
 
-    const searchRoots = containerNode
-      ? [containerNode]
-      : this.parser.extractRootNodes(viewHierarchy);
-
-    const clickableParents = this.collectClickableParentsWithTextInRoots(searchRoots, matchesText);
-
-    if (clickableParents.length > 0) {
-      return clickableParents;
+    const nodes = new SearchableHierarchy(this.parser).project(viewHierarchy);
+    const scope = containerNode ? nodes.find((node) => node.source === containerNode) : undefined;
+    if (containerNode && !scope) {
+      return [];
     }
-
-    // Try window roots if no match in main hierarchy
-    if (!containerNode) {
-      const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-      for (const windowRoots of windowRootGroups) {
-        const windowMatches = this.collectClickableParentsWithTextInRoots(windowRoots, matchesText);
-        if (windowMatches.length > 0) {
-          return windowMatches;
+    const matches = new Map<(typeof nodes)[number]["source"], (typeof nodes)[number]>();
+    for (const node of [...nodes].sort(
+      (a, b) => a.windowRank - b.windowRank || a.index - b.index,
+    )) {
+      if (
+        (!scope || node === scope || isWithin(node, scope, nodes)) &&
+        this.nodeHasText(node.source, matchesText)
+      ) {
+        const target = promoteClickableAncestor(node, nodes, { action: "tap" });
+        if (target?.element && (!scope || target === scope || isWithin(target, scope, nodes))) {
+          matches.set(target.source, matches.get(target.source) ?? target);
         }
       }
     }
-
-    return [];
-  }
-
-  /**
-   * Internal method to find clickable elements that have descendants with matching text.
-   */
-  private collectClickableParentsWithTextInRoots(
-    rootNodes: ViewHierarchyNode[],
-    matchesText: (input?: string) => boolean,
-  ): Element[] {
-    const matches: Element[] = [];
-
-    for (const rootNode of rootNodes) {
-      this.findClickableParentsInNode(rootNode, matchesText, matches);
-    }
-
-    return matches;
+    return [...matches.values()].flatMap((node) => (node.element ? [node.element] : []));
   }
 
   /**
@@ -1829,44 +1813,6 @@ export class DefaultElementFinder implements ElementFinder {
         }
       }
     }
-  }
-
-  /**
-   * Recursively search for clickable elements that contain text-matching descendants.
-   */
-  private findClickableParentsInNode(
-    node: ViewHierarchyNode,
-    matchesText: (input?: string) => boolean,
-    results: Element[],
-  ): boolean {
-    const nodeProperties = this.parser.extractNodeProperties(node);
-    const isClickable = this.isClickableNode(nodeProperties);
-
-    // Check if this node or any descendant has matching text
-    const hasMatchingText = this.nodeOrDescendantHasText(node, matchesText);
-
-    if (isClickable && hasMatchingText) {
-      const parsedNode = this.parser.parseNodeBounds(node);
-      if (parsedNode) {
-        results.push(parsedNode);
-      }
-      // Don't recurse into children - we found a clickable parent
-      return true;
-    }
-
-    // Recurse into children
-    const children = node.node;
-    if (children) {
-      if (Array.isArray(children)) {
-        for (const child of children) {
-          this.findClickableParentsInNode(child, matchesText, results);
-        }
-      } else if (typeof children === "object") {
-        this.findClickableParentsInNode(children as ViewHierarchyNode, matchesText, results);
-      }
-    }
-
-    return false;
   }
 
   /**

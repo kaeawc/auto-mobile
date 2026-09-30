@@ -12,6 +12,11 @@ import { identifyObservedHierarchy } from "../../../src/features/observe/Hierarc
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { iosProjectionFixture } from "../../fixtures/iosProjectionFixture";
+import {
+  innerBounds,
+  labelBounds,
+  nestedClickableHierarchy,
+} from "../../fixtures/nestedClickableHierarchy";
 const bounds = { left: 0, top: 0, right: 20, bottom: 20 };
 
 test("iOS debug and action candidates use observe's cleaned visible bounds in raw mode", async () => {
@@ -67,6 +72,12 @@ const search = (capture: ViewHierarchyResult) =>
       nodes: new SearchableHierarchy().project(capture),
     }),
   });
+test("debug search reports the label and selects its nearest clickable ancestor", async () => {
+  const result = await search(nestedClickableHierarchy).execute({ text: "Wi-Fi" });
+  expect(result.matches[0].element.bounds).toEqual(labelBounds);
+  expect(result.selectedMatch?.element.bounds).toEqual(innerBounds);
+  expect(result.selectedMatch?.resourceId).toBe("app:id/inner");
+});
 test("debug search requests current hierarchy rather than cached coordinates", async () => {
   let freshness: string | undefined;
   const feature = new DebugSearch(

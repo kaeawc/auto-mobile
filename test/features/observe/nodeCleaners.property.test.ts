@@ -40,6 +40,14 @@ const SHARED_KEYS = [
 // set requires an explicit decision about each known divergence.
 const DOCUMENTED_DIFFERENCES = [
   {
+    key: "className",
+    attrKey: "className",
+    policy:
+      "ViewHierarchy intentionally uses a capture allow-list that omits className; the other three cleaners retain it.",
+    attrs: { className: "UIButton" },
+    survives: [false, true, true, true],
+  },
+  {
     key: "unknown-attribute",
     attrKey: "unknown-attribute",
     policy: "ViewHierarchy uses an allow-list; the other three retain unknown attributes.",
@@ -208,11 +216,11 @@ describe("observe node cleaners (property-based)", () => {
     expect(outputs.cleanupIos.value).toEqual(attrs.value);
   });
 
-  test.todo("#6479: ViewHierarchy.cleanNodeProperties currently drops className", () => {
-    expect(cleanAndroidNode({ className: "UIButton" })).toEqual({ className: "UIButton" });
+  test("ViewHierarchy.cleanNodeProperties follows its documented className allow-list policy", () => {
+    expect(cleanAndroidNode({ className: "UIButton" })).toEqual({});
   });
 
-  test.todo("#6479: CtrlProxy cleanAttributes drops explicit enabled=false", () => {
+  test("CtrlProxy cleanAttributes preserves explicit enabled=false", () => {
     expect(cleanCtrlProxyNode({ enabled: "false" }).enabled).toBe("false");
   });
 

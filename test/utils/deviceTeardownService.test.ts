@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DeviceTeardownService,
   type DeviceTeardownPhase,
-} from "../../src/utils/deviceTeardownService";
+} from "../../src/devices/deviceTeardownService";
 import type { DeviceTeardownOperationStore } from "../../src/db/deviceTeardownOperationRepository";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,

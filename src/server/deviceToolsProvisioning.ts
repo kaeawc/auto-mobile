@@ -52,7 +52,7 @@ import {
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
 import { type VirtualDeviceLifecycleLease } from "../utils/virtualDeviceLifecycleCoordinator";
-import { DeviceTeardownService } from "../utils/deviceTeardownService";
+import { DeviceTeardownService } from "../devices/deviceTeardownService";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import { classifyDisplayCutout } from "../utils/displayCutout";
 import {

@@ -277,15 +277,19 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
     domain: "user_files",
     portable: false,
     platformScope: "android",
-    note: "Android user-visible shared storage. putAppFile writes bounded Downloads fixture namespaces; a listing/read surface is not yet exposed.",
+    note: 'Android user-visible shared storage. putAppFile/stageSharedStorage write bounded Downloads namespaces; the "Downloads Namespace Files" and "Downloads Namespace File" MCP resources expose listing and reading at automobile:devices/{deviceId}/downloads/{namespace}[/{path}].',
     operations: [
-      unavailableOperation(
+      deriveOperation(
         "list",
-        "No AutoMobile shared-storage listing surface is currently exposed.",
+        undefined,
+        [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)],
+        'Exposed by the "Downloads Namespace Files" MCP resource template.',
       ),
-      unavailableOperation(
+      deriveOperation(
         "read",
-        "No AutoMobile shared-storage read surface is currently exposed.",
+        undefined,
+        [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)],
+        'Exposed by the "Downloads Namespace File" MCP resource template.',
       ),
       deriveOperation("write", undefined, [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)]),
     ],

@@ -446,6 +446,14 @@ interface SocketFileIdentity {
   ino: number;
 }
 
+interface PendingSocketRequest {
+  id: string;
+  sessionId: string;
+  socket: Socket;
+  admitted: boolean;
+  terminal: boolean;
+}
+
 /**
  * Creates the MCP HTTP client the daemon forwards `tools/call` requests through.
  * Injected so tests can substitute a fake without monkeypatching a private method
@@ -671,6 +679,8 @@ export class UnixSocketServer {
   private clientSockets: Map<string, Socket> = new Map();
   /** Request handlers that can continue after their client socket is destroyed. */
   private activeRequestHandlers: Set<Promise<void>> = new Set();
+  /** Parsed requests awaiting their one terminal response, including queued requests. */
+  private pendingSocketRequests = new Set<PendingSocketRequest>();
   /** Socket sessions that opted in to server-pushed notifications. */
   private notificationSubscribers: Set<string> = new Set();
   /** Session-release frames written but not yet flushed to their client sockets. */
@@ -1032,6 +1042,11 @@ export class UnixSocketServer {
         this.traceFrame("socket_close", "*", undefined, undefined, { hadError });
       }
       logger.info(`Client disconnected: ${sessionId}`);
+      for (const pending of this.pendingSocketRequests) {
+        if (pending.socket === socket) {
+          this.pendingSocketRequests.delete(pending);
+        }
+      }
       this.releaseSocketSession(sessionId, socket);
     });
 
@@ -1052,15 +1067,30 @@ export class UnixSocketServer {
   ): Promise<void> {
     let requestId = "unknown";
     let deviceId: string | undefined;
+    let pending: PendingSocketRequest | undefined;
     try {
       const request: DaemonRequest = JSON.parse(line);
       requestId = request.id;
+      pending = {
+        id: requestId,
+        sessionId,
+        socket,
+        admitted:
+          request.method === DAEMON_HEARTBEAT_METHOD ||
+          request.method === DAEMON_CANCEL_REQUEST_METHOD ||
+          request.method === DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+        terminal: false,
+      };
+      this.pendingSocketRequests.add(pending);
+      const tracked = pending;
       deviceId = this.onFrameTrace ? this.frameDeviceId(request) : undefined;
       if (this.onFrameTrace) {
         this.traceFrame("frame_parsed", requestId, deviceId);
       }
-      const response = await this.handleRequest(sessionId, socket, request, receivedAtMs);
-      this.writeFrame(socket, sessionId, response, undefined, deviceId);
+      const response = await this.handleRequest(sessionId, socket, request, receivedAtMs, () => {
+        tracked.admitted = true;
+      });
+      this.writeTerminalSocketResponse(pending, response, deviceId);
     } catch (error) {
       logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
       const errorResponse: DaemonResponse = {
@@ -1069,8 +1099,25 @@ export class UnixSocketServer {
         success: false,
         error: errorMessage(error),
       };
-      this.writeFrame(socket, sessionId, errorResponse, undefined, deviceId);
+      if (pending) {
+        this.writeTerminalSocketResponse(pending, errorResponse, deviceId);
+      } else {
+        this.writeFrame(socket, sessionId, errorResponse, undefined, deviceId);
+      }
     }
+  }
+
+  private writeTerminalSocketResponse(
+    pending: PendingSocketRequest,
+    response: DaemonResponse,
+    deviceId?: string,
+  ): void {
+    if (pending.terminal) {
+      return;
+    }
+    pending.terminal = true;
+    this.pendingSocketRequests.delete(pending);
+    this.writeFrame(pending.socket, pending.sessionId, response, undefined, deviceId);
   }
 
   private frameDeviceId(request: DaemonRequest): string | undefined {
@@ -1363,6 +1410,7 @@ export class UnixSocketServer {
     ownerSocket: Socket,
     request: DaemonRequest,
     receivedAtMs: number = this.timer.now(),
+    onAdmitted?: () => void,
   ): Promise<DaemonResponse> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -1572,6 +1620,16 @@ export class UnixSocketServer {
       .run(
         resolveSocketAdmissionLane(request),
         () => {
+          if (this.closing) {
+            return Promise.resolve({
+              id: request.id,
+              type: "mcp_response" as const,
+              success: false,
+              error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+              daemonShuttingDown: daemonShuttingDownFailure(),
+            });
+          }
+          onAdmitted?.();
           if (this.onFrameTrace) {
             this.traceFrame("admission_granted", request.id, deviceId);
           }
@@ -6416,7 +6474,32 @@ export class UnixSocketServer {
     this.sessionReleaseUnsubscribe?.();
     this.sessionReleaseUnsubscribe = null;
 
-    // Close MCP clients
+    // Keep sockets and session bookkeeping alive while handlers finish and write.
+    // The listener stops new connections now; existing requests get the bounded drain.
+    const clientSockets = Array.from(this.clientSockets.values());
+    const ownsSocketPath = this.isOwnedSocketFile();
+    const serverClosed = this.closeListeningServer(ownsSocketPath);
+
+    // Queued requests have not started device work and must not begin during shutdown.
+    for (const pending of this.pendingSocketRequests) {
+      if (!pending.admitted) {
+        this.writeShutdownSocketResponse(pending);
+      }
+    }
+    const requestHandlersDrained = this.drainActiveRequestHandlers();
+    await requestHandlersDrained;
+    for (const pending of this.pendingSocketRequests) {
+      this.writeShutdownSocketResponse(pending);
+    }
+    this.destroyClientSockets(clientSockets);
+    await serverClosed;
+    this.sessions.clear();
+    this.clientSockets.clear();
+    this.notificationSubscribers.clear();
+    this.server = null;
+
+    // Existing forwards may need their MCP clients throughout the drain. Close
+    // those clients only after every socket has received its terminal frames.
     const clients = Array.from(this.mcpClients.entries());
     this.mcpClients.clear();
     this.mcpClientPromises.clear();
@@ -6436,29 +6519,20 @@ export class UnixSocketServer {
     this.mcpForwardIdleCloseKeys.clear();
     this.appendTextInputs.clear();
 
-    // Capture clients before clearing their session bookkeeping. server.close() stops
-    // accepting new connections, but waits for existing ones; destroy them before
-    // awaiting its callback so daemon shutdown cannot hang on an idle client.
-    const clientSockets = Array.from(this.clientSockets.values());
-
-    // Clear sessions
-    this.sessions.clear();
-    this.clientSockets.clear();
-    this.notificationSubscribers.clear();
-
-    const ownsSocketPath = this.isOwnedSocketFile();
-    const serverClosed = this.closeListeningServer(ownsSocketPath);
-    const requestHandlersDrained = this.drainActiveRequestHandlers();
-
-    this.destroyClientSockets(clientSockets);
-    await serverClosed;
-    await requestHandlersDrained;
-    this.server = null;
-
     // The listener removes the socket it created as part of close(). Do not
     // unlink the pathname afterward: a successor can bind in the interval and
     // filesystems are allowed to reuse the original socket inode immediately.
     this.socketFileIdentity = null;
+  }
+
+  private writeShutdownSocketResponse(pending: PendingSocketRequest): void {
+    this.writeTerminalSocketResponse(pending, {
+      id: pending.id,
+      type: "mcp_response",
+      success: false,
+      error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
+      daemonShuttingDown: daemonShuttingDownFailure(),
+    });
   }
 
   private closeListeningServer(ownsSocketPath: boolean): Promise<void> {

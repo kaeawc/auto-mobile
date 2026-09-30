@@ -1,8 +1,8 @@
 // swiftlint:disable force_unwrapping
 // Force-unwrap is idiomatic in test fixtures (fail fast on bad setup); disabled file-wide.
 
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 private final class EventCollector: @unchecked Sendable {
     private let lock = NSLock()
@@ -32,13 +32,13 @@ final class AutoMobileNetworkTests: XCTestCase {
     override func tearDown() {
         AutoMobileNetwork.shared.reset()
         #if DEBUG
-        NetworkMockRuleStore.shared.setRules([])
-        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: false,
-            errorType: nil,
-            limit: nil,
-            expiresAtEpochMs: nil
-        ))
+            NetworkMockRuleStore.shared.setRules([])
+            NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: false,
+                errorType: nil,
+                limit: nil,
+                expiresAtEpochMs: nil
+            ))
         #endif
         super.tearDown()
     }
@@ -275,495 +275,495 @@ final class AutoMobileNetworkTests: XCTestCase {
     // MARK: - Network Mock Rules
 
     #if DEBUG
-    func testNetworkMockRuleStoreMatchesWildcardMethodAndRegex() {
-        let store = NetworkMockRuleStore()
-        store.setRules([
-            NetworkMockRuleDTO(
-                mockId: "mock-1",
-                host: "api\\.example\\.com",
-                path: "^/v1/items",
-                method: "*",
-                limit: nil,
-                remaining: nil,
-                statusCode: 503,
-                responseHeaders: ["x-source": "test"],
-                responseBody: "{\"offline\":true}",
-                contentType: "application/json"
-            ),
-        ])
+        func testNetworkMockRuleStoreMatchesWildcardMethodAndRegex() {
+            let store = NetworkMockRuleStore()
+            store.setRules([
+                NetworkMockRuleDTO(
+                    mockId: "mock-1",
+                    host: "api\\.example\\.com",
+                    path: "^/v1/items",
+                    method: "*",
+                    limit: nil,
+                    remaining: nil,
+                    statusCode: 503,
+                    responseHeaders: ["x-source": "test"],
+                    responseBody: "{\"offline\":true}",
+                    contentType: "application/json"
+                ),
+            ])
 
-        let match = store.findMatchingRule(host: "api.example.com", path: "/v1/items/42", method: "POST")
+            let match = store.findMatchingRule(host: "api.example.com", path: "/v1/items/42", method: "POST")
 
-        XCTAssertEqual(match?.mockId, "mock-1")
-        XCTAssertEqual(match?.statusCode, 503)
-        XCTAssertEqual(match?.responseHeaders["x-source"], "test")
-        XCTAssertEqual(match?.responseBody, "{\"offline\":true}")
-        XCTAssertEqual(match?.contentType, "application/json")
-    }
+            XCTAssertEqual(match?.mockId, "mock-1")
+            XCTAssertEqual(match?.statusCode, 503)
+            XCTAssertEqual(match?.responseHeaders["x-source"], "test")
+            XCTAssertEqual(match?.responseBody, "{\"offline\":true}")
+            XCTAssertEqual(match?.contentType, "application/json")
+        }
 
-    func testNetworkMockRuleStoreMatchesExplicitMethodCaseInsensitively() {
-        let store = NetworkMockRuleStore()
-        store.setRules([
-            NetworkMockRuleDTO(
-                mockId: "mock-1",
-                host: "api\\.example\\.com",
-                path: "/users",
-                method: "post",
-                limit: nil,
-                remaining: nil,
-                statusCode: 201,
-                responseHeaders: [:],
-                responseBody: "",
-                contentType: "application/json"
-            ),
-        ])
+        func testNetworkMockRuleStoreMatchesExplicitMethodCaseInsensitively() {
+            let store = NetworkMockRuleStore()
+            store.setRules([
+                NetworkMockRuleDTO(
+                    mockId: "mock-1",
+                    host: "api\\.example\\.com",
+                    path: "/users",
+                    method: "post",
+                    limit: nil,
+                    remaining: nil,
+                    statusCode: 201,
+                    responseHeaders: [:],
+                    responseBody: "",
+                    contentType: "application/json"
+                ),
+            ])
 
-        XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/users", method: "POST"))
-        XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/users", method: "GET"))
-    }
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/users", method: "POST"))
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/users", method: "GET"))
+        }
 
-    func testNetworkMockRuleStoreHonorsLimit() {
-        let store = NetworkMockRuleStore()
-        store.setRules([
-            NetworkMockRuleDTO(
-                mockId: "mock-1",
-                host: ".*",
-                path: ".*",
-                method: "*",
+        func testNetworkMockRuleStoreHonorsLimit() {
+            let store = NetworkMockRuleStore()
+            store.setRules([
+                NetworkMockRuleDTO(
+                    mockId: "mock-1",
+                    host: ".*",
+                    path: ".*",
+                    method: "*",
+                    limit: 1,
+                    remaining: 1,
+                    statusCode: 204,
+                    responseHeaders: [:],
+                    responseBody: "",
+                    contentType: "application/json"
+                ),
+            ])
+
+            XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
+            XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
+        }
+
+        func testNetworkMockRuleStoreHonorsErrorSimulationLimitAndExpiry() {
+            let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
+            let store = NetworkMockRuleStore(dateProvider: dateProvider)
+            store.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "http500",
                 limit: 1,
-                remaining: 1,
-                statusCode: 204,
-                responseHeaders: [:],
-                responseBody: "",
-                contentType: "application/json"
-            ),
-        ])
+                expiresAtEpochMs: 101_000
+            ))
 
-        XCTAssertNotNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
-        XCTAssertNil(store.findMatchingRule(host: "api.example.com", path: "/one", method: "GET"))
-    }
+            XCTAssertEqual(store.activeErrorSimulation()?.errorType, "http500")
+            XCTAssertNil(store.activeErrorSimulation())
 
-    func testNetworkMockRuleStoreHonorsErrorSimulationLimitAndExpiry() {
-        let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
-        let store = NetworkMockRuleStore(dateProvider: dateProvider)
-        store.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: true,
-            errorType: "http500",
-            limit: 1,
-            expiresAtEpochMs: 101_000
-        ))
+            store.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "timeout",
+                limit: nil,
+                expiresAtEpochMs: 101_000
+            ))
+            dateProvider.advance(by: 2)
 
-        XCTAssertEqual(store.activeErrorSimulation()?.errorType, "http500")
-        XCTAssertNil(store.activeErrorSimulation())
+            XCTAssertNil(store.activeErrorSimulation())
+        }
 
-        store.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: true,
-            errorType: "timeout",
-            limit: nil,
-            expiresAtEpochMs: 101_000
-        ))
-        dateProvider.advance(by: 2)
+        func testNetworkMockRuleStoreClearsErrorSimulationWhenDisabled() {
+            let store = NetworkMockRuleStore()
+            store.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "http500",
+                limit: nil,
+                expiresAtEpochMs: nil
+            ))
 
-        XCTAssertNil(store.activeErrorSimulation())
-    }
+            store.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: false,
+                errorType: nil,
+                limit: nil,
+                expiresAtEpochMs: nil
+            ))
 
-    func testNetworkMockRuleStoreClearsErrorSimulationWhenDisabled() {
-        let store = NetworkMockRuleStore()
-        store.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: true,
-            errorType: "http500",
-            limit: nil,
-            expiresAtEpochMs: nil
-        ))
+            XCTAssertNil(store.activeErrorSimulation())
+        }
 
-        store.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: false,
-            errorType: nil,
-            limit: nil,
-            expiresAtEpochMs: nil
-        ))
+        func testNetworkMockRuleStoreSkipsInvalidRegexRules() {
+            let store = NetworkMockRuleStore()
+            store.setRules([
+                NetworkMockRuleDTO(
+                    mockId: "bad",
+                    host: "[",
+                    path: ".*",
+                    method: "*",
+                    limit: nil,
+                    remaining: nil,
+                    statusCode: 500,
+                    responseHeaders: [:],
+                    responseBody: "bad",
+                    contentType: "application/json"
+                ),
+                NetworkMockRuleDTO(
+                    mockId: "good",
+                    host: "api\\.example\\.com",
+                    path: "/ok",
+                    method: "GET",
+                    limit: nil,
+                    remaining: nil,
+                    statusCode: 200,
+                    responseHeaders: [:],
+                    responseBody: "ok",
+                    contentType: "text/plain"
+                ),
+            ])
 
-        XCTAssertNil(store.activeErrorSimulation())
-    }
+            let match = store.findMatchingRule(host: "api.example.com", path: "/ok", method: "GET")
 
-    func testNetworkMockRuleStoreSkipsInvalidRegexRules() {
-        let store = NetworkMockRuleStore()
-        store.setRules([
-            NetworkMockRuleDTO(
-                mockId: "bad",
-                host: "[",
+            XCTAssertEqual(match?.mockId, "good")
+            XCTAssertEqual(match?.responseBody, "ok")
+        }
+
+        func testFaultRulesMatchTransportAndConsumePerConnection() {
+            let store = NetworkMockRuleStore()
+            store.setFaultRules([
+                NetworkFaultRuleDTO(
+                    faultId: "reset-1",
+                    transport: .nwConnection,
+                    host: "api\\.example\\.com",
+                    port: 443,
+                    scheme: "https",
+                    path: "/stream",
+                    method: "CONNECTION",
+                    headers: nil,
+                    origin: nil,
+                    connectionId: nil,
+                    sessionId: nil,
+                    action: .closeConnection,
+                    statusCode: nil,
+                    responseHeaders: nil,
+                    responseBody: nil,
+                    contentType: nil,
+                    errorType: "connectionReset",
+                    delayMs: nil,
+                    bandwidthBytesPerSecond: nil,
+                    dropBytes: nil,
+                    limit: 1,
+                    expiresAtEpochMs: nil,
+                    scope: "connection",
+                    dryRun: false
+                ),
+            ])
+            let request = { (id: String) in
+                NetworkMockRuleStore.FaultRequest(
+                    transport: .nwConnection,
+                    host: "api.example.com",
+                    port: 443,
+                    scheme: "https",
+                    path: "/stream",
+                    method: "CONNECTION",
+                    headers: [:],
+                    origin: nil,
+                    connectionId: id,
+                    sessionId: nil
+                )
+            }
+
+            XCTAssertEqual(store.evaluate(request("a"))?.faultId, "reset-1")
+            XCTAssertNil(store.evaluate(request("a")))
+            XCTAssertEqual(store.evaluate(request("b"))?.faultId, "reset-1")
+        }
+
+        func testFaultRulesHonorExpiryAndDryRunWithoutConsuming() {
+            let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
+            let store = NetworkMockRuleStore(dateProvider: dateProvider)
+            let dto = NetworkFaultRuleDTO(
+                faultId: "delay-1",
+                transport: .urlSession,
+                host: ".*",
+                port: nil,
+                scheme: nil,
                 path: ".*",
                 method: "*",
-                limit: nil,
-                remaining: nil,
-                statusCode: 500,
-                responseHeaders: [:],
-                responseBody: "bad",
-                contentType: "application/json"
-            ),
-            NetworkMockRuleDTO(
-                mockId: "good",
-                host: "api\\.example\\.com",
-                path: "/ok",
-                method: "GET",
-                limit: nil,
-                remaining: nil,
-                statusCode: 200,
-                responseHeaders: [:],
-                responseBody: "ok",
-                contentType: "text/plain"
-            ),
-        ])
-
-        let match = store.findMatchingRule(host: "api.example.com", path: "/ok", method: "GET")
-
-        XCTAssertEqual(match?.mockId, "good")
-        XCTAssertEqual(match?.responseBody, "ok")
-    }
-
-    func testFaultRulesMatchTransportAndConsumePerConnection() {
-        let store = NetworkMockRuleStore()
-        store.setFaultRules([
-            NetworkFaultRuleDTO(
-                faultId: "reset-1",
-                transport: .nwConnection,
-                host: "api\\.example\\.com",
-                port: 443,
-                scheme: "https",
-                path: "/stream",
-                method: "CONNECTION",
                 headers: nil,
                 origin: nil,
                 connectionId: nil,
                 sessionId: nil,
-                action: .closeConnection,
+                action: .latency,
                 statusCode: nil,
                 responseHeaders: nil,
                 responseBody: nil,
                 contentType: nil,
-                errorType: "connectionReset",
-                delayMs: nil,
+                errorType: nil,
+                delayMs: 50,
                 bandwidthBytesPerSecond: nil,
                 dropBytes: nil,
                 limit: 1,
-                expiresAtEpochMs: nil,
-                scope: "connection",
-                dryRun: false
-            ),
-        ])
-        let request = { (id: String) in
-            NetworkMockRuleStore.FaultRequest(
-                transport: .nwConnection,
-                host: "api.example.com",
-                port: 443,
-                scheme: "https",
-                path: "/stream",
-                method: "CONNECTION",
-                headers: [:],
-                origin: nil,
-                connectionId: id,
-                sessionId: nil
+                expiresAtEpochMs: 101_000,
+                scope: nil,
+                dryRun: true
             )
-        }
-
-        XCTAssertEqual(store.evaluate(request("a"))?.faultId, "reset-1")
-        XCTAssertNil(store.evaluate(request("a")))
-        XCTAssertEqual(store.evaluate(request("b"))?.faultId, "reset-1")
-    }
-
-    func testFaultRulesHonorExpiryAndDryRunWithoutConsuming() {
-        let dateProvider = FakeDateProvider(initialDate: Date(timeIntervalSince1970: 100))
-        let store = NetworkMockRuleStore(dateProvider: dateProvider)
-        let dto = NetworkFaultRuleDTO(
-            faultId: "delay-1",
-            transport: .urlSession,
-            host: ".*",
-            port: nil,
-            scheme: nil,
-            path: ".*",
-            method: "*",
-            headers: nil,
-            origin: nil,
-            connectionId: nil,
-            sessionId: nil,
-            action: .latency,
-            statusCode: nil,
-            responseHeaders: nil,
-            responseBody: nil,
-            contentType: nil,
-            errorType: nil,
-            delayMs: 50,
-            bandwidthBytesPerSecond: nil,
-            dropBytes: nil,
-            limit: 1,
-            expiresAtEpochMs: 101_000,
-            scope: nil,
-            dryRun: true
-        )
-        store.setFaultRules([dto])
-        let request = NetworkMockRuleStore.FaultRequest(
-            transport: .urlSession, host: "api.example.com", port: 443, scheme: "https",
-            path: "/v1", method: "GET", headers: [:], origin: nil,
-            connectionId: nil, sessionId: nil
-        )
-
-        XCTAssertEqual(store.evaluate(request)?.delayMs, 50)
-        XCTAssertEqual(store.evaluate(request)?.delayMs, 50)
-        dateProvider.advance(by: 2)
-        XCTAssertNil(store.evaluate(request))
-    }
-
-    func testClearSessionDoesNotRemoveRulesForOtherSessions() {
-        let store = NetworkMockRuleStore()
-        let rule = { (sessionId: String) in
-            NetworkFaultRuleDTO(
-                faultId: "fault-\(sessionId)",
-                transport: .urlSession,
-                host: "api\\.example\\.com",
-                port: nil,
-                scheme: nil,
-                path: "/v1",
-                method: "GET",
-                headers: nil,
-                origin: nil,
-                connectionId: nil,
-                sessionId: sessionId,
-                action: .error,
-                statusCode: nil,
-                responseHeaders: nil,
-                responseBody: nil,
-                contentType: nil,
-                errorType: "timeout",
-                delayMs: nil,
-                bandwidthBytesPerSecond: nil,
-                dropBytes: nil,
-                limit: nil,
-                expiresAtEpochMs: nil,
-                scope: "session",
-                dryRun: false
+            store.setFaultRules([dto])
+            let request = NetworkMockRuleStore.FaultRequest(
+                transport: .urlSession, host: "api.example.com", port: 443, scheme: "https",
+                path: "/v1", method: "GET", headers: [:], origin: nil,
+                connectionId: nil, sessionId: nil
             )
-        }
-        store.setFaultRules([rule("a"), rule("b")])
-        let request = { (sessionId: String) in
-            NetworkMockRuleStore.FaultRequest(
-                transport: .urlSession,
-                host: "api.example.com",
-                port: nil,
-                scheme: "https",
-                path: "/v1",
-                method: "GET",
-                headers: [:],
-                origin: nil,
-                connectionId: nil,
-                sessionId: sessionId
-            )
+
+            XCTAssertEqual(store.evaluate(request)?.delayMs, 50)
+            XCTAssertEqual(store.evaluate(request)?.delayMs, 50)
+            dateProvider.advance(by: 2)
+            XCTAssertNil(store.evaluate(request))
         }
 
-        store.clearSession("a")
+        func testClearSessionDoesNotRemoveRulesForOtherSessions() {
+            let store = NetworkMockRuleStore()
+            let rule = { (sessionId: String) in
+                NetworkFaultRuleDTO(
+                    faultId: "fault-\(sessionId)",
+                    transport: .urlSession,
+                    host: "api\\.example\\.com",
+                    port: nil,
+                    scheme: nil,
+                    path: "/v1",
+                    method: "GET",
+                    headers: nil,
+                    origin: nil,
+                    connectionId: nil,
+                    sessionId: sessionId,
+                    action: .error,
+                    statusCode: nil,
+                    responseHeaders: nil,
+                    responseBody: nil,
+                    contentType: nil,
+                    errorType: "timeout",
+                    delayMs: nil,
+                    bandwidthBytesPerSecond: nil,
+                    dropBytes: nil,
+                    limit: nil,
+                    expiresAtEpochMs: nil,
+                    scope: "session",
+                    dryRun: false
+                )
+            }
+            store.setFaultRules([rule("a"), rule("b")])
+            let request = { (sessionId: String) in
+                NetworkMockRuleStore.FaultRequest(
+                    transport: .urlSession,
+                    host: "api.example.com",
+                    port: nil,
+                    scheme: "https",
+                    path: "/v1",
+                    method: "GET",
+                    headers: [:],
+                    origin: nil,
+                    connectionId: nil,
+                    sessionId: sessionId
+                )
+            }
 
-        XCTAssertNil(store.evaluate(request("a")))
-        XCTAssertEqual(store.evaluate(request("b"))?.faultId, "fault-b")
-    }
+            store.clearSession("a")
 
-    func testURLProtocolServesMatchingMockResponseAndRecordsRequest() async throws {
-        let collector = EventCollector()
-        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            collector.collect(events)
+            XCTAssertNil(store.evaluate(request("a")))
+            XCTAssertEqual(store.evaluate(request("b"))?.faultId, "fault-b")
         }
-        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
-        AutoMobileNetwork.shared.setCaptureHeaders(true)
-        AutoMobileNetwork.shared.setCaptureBodies(true)
-        NetworkMockRuleStore.shared.setRules([
-            NetworkMockRuleDTO(
-                mockId: "mock-1",
-                host: "api\\.example\\.com",
-                path: "^/v1/items$",
-                method: "GET",
-                limit: nil,
-                remaining: nil,
-                statusCode: 500,
-                responseHeaders: ["x-mocked": "true"],
-                responseBody: "{\"error\":\"mocked\"}",
-                contentType: "application/json"
-            ),
-        ])
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
-        let session = URLSession(configuration: config)
 
-        let (data, response) = try await session.data(from: URL(string: "https://api.example.com/v1/items")!)
-
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
-        XCTAssertEqual(String(data: data, encoding: .utf8), "{\"error\":\"mocked\"}")
-        XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-mocked"), "true")
-        buffer.flush()
-        let event = collector.events.first as? SdkNetworkRequestEvent
-        XCTAssertEqual(event?.url, "https://api.example.com/v1/items")
-        XCTAssertEqual(event?.method, "GET")
-        XCTAssertEqual(event?.statusCode, 500)
-        XCTAssertEqual(event?.responseBody, "{\"error\":\"mocked\"}")
-        XCTAssertEqual(event?.contentType, "application/json")
-        XCTAssertEqual(event?.error, "mocked:mock-1")
-    }
-
-    func testURLProtocolPrefersMockRuleOverErrorSimulation() async throws {
-        let collector = EventCollector()
-        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            collector.collect(events)
-        }
-        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
-        AutoMobileNetwork.shared.setCaptureBodies(true)
-        NetworkMockRuleStore.shared.setRules([
-            NetworkMockRuleDTO(
-                mockId: "mock-1",
-                host: "api\\.example\\.com",
-                path: "^/v1/items$",
-                method: "GET",
-                limit: nil,
-                remaining: nil,
-                statusCode: 418,
-                responseHeaders: ["x-mocked": "true"],
-                responseBody: "mock-wins",
-                contentType: "text/plain"
-            ),
-        ])
-        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: true,
-            errorType: "timeout",
-            limit: nil,
-            expiresAtEpochMs: nil
-        ))
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
-        let session = URLSession(configuration: config)
-
-        let (data, response) = try await session.data(from: URL(string: "https://api.example.com/v1/items")!)
-
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 418)
-        XCTAssertEqual(String(data: data, encoding: .utf8), "mock-wins")
-        XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-mocked"), "true")
-        buffer.flush()
-        let event = collector.events.first as? SdkNetworkRequestEvent
-        XCTAssertEqual(event?.url, "https://api.example.com/v1/items")
-        XCTAssertEqual(event?.statusCode, 418)
-        XCTAssertEqual(event?.responseBody, "mock-wins")
-        XCTAssertEqual(event?.error, "mocked:mock-1")
-    }
-
-    func testURLProtocolServesSimulatedHttp500AndRecordsRequest() async throws {
-        let collector = EventCollector()
-        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            collector.collect(events)
-        }
-        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
-        AutoMobileNetwork.shared.setCaptureBodies(true)
-        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: true,
-            errorType: "http500",
-            limit: nil,
-            expiresAtEpochMs: nil
-        ))
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
-        let session = URLSession(configuration: config)
-        var request = URLRequest(url: URL(string: "https://api.example.com/fail")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data("{\"query\":\"mutation\"}".utf8)
-
-        let (data, response) = try await session.data(for: request)
-
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
-        XCTAssertTrue(data.isEmpty)
-        buffer.flush()
-        let event = collector.events.first as? SdkNetworkRequestEvent
-        XCTAssertEqual(event?.url, "https://api.example.com/fail")
-        XCTAssertEqual(event?.method, "POST")
-        XCTAssertEqual(event?.requestBody, "{\"query\":\"mutation\"}")
-        XCTAssertEqual(event?.statusCode, 500)
-        XCTAssertEqual(event?.error, "simulated:http500")
-    }
-
-    func testURLProtocolCapsSimulatedErrorStreamBodyCapture() async throws {
-        let collector = EventCollector()
-        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            collector.collect(events)
-        }
-        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
-        AutoMobileNetwork.shared.setCaptureBodies(true)
-        AutoMobileNetwork.shared.setMaxBodyBytes(8)
-        NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
-            enabled: true,
-            errorType: "http500",
-            limit: nil,
-            expiresAtEpochMs: nil
-        ))
-        let config = URLSessionConfiguration.ephemeral
-        config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
-        let session = URLSession(configuration: config)
-        var request = URLRequest(url: URL(string: "https://api.example.com/stream")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBodyStream = InputStream(data: Data("{\"query\":\"mutation with a long payload\"}".utf8))
-
-        let (_, response) = try await session.data(for: request)
-
-        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
-        buffer.flush()
-        let event = collector.events.first as? SdkNetworkRequestEvent
-        XCTAssertEqual(event?.url, "https://api.example.com/stream")
-        XCTAssertEqual(event?.method, "POST")
-        XCTAssertEqual(event?.requestBody, "{\"query\"")
-        XCTAssertEqual(event?.statusCode, 500)
-        XCTAssertEqual(event?.error, "simulated:http500")
-    }
-
-    func testURLProtocolServesTransportErrorSimulationsAndRecordsRequests() async {
-        let cases: [(String, URLError.Code)] = [
-            ("timeout", .timedOut),
-            ("connectionRefused", .cannotConnectToHost),
-            ("dnsFailure", .cannotFindHost),
-            ("tlsFailure", .secureConnectionFailed),
-        ]
-
-        for (errorType, expectedCode) in cases {
+        func testURLProtocolServesMatchingMockResponseAndRecordsRequest() async throws {
             let collector = EventCollector()
             let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
                 collector.collect(events)
             }
-            AutoMobileNetwork.shared.reset()
+            AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+            AutoMobileNetwork.shared.setCaptureHeaders(true)
+            AutoMobileNetwork.shared.setCaptureBodies(true)
+            NetworkMockRuleStore.shared.setRules([
+                NetworkMockRuleDTO(
+                    mockId: "mock-1",
+                    host: "api\\.example\\.com",
+                    path: "^/v1/items$",
+                    method: "GET",
+                    limit: nil,
+                    remaining: nil,
+                    statusCode: 500,
+                    responseHeaders: ["x-mocked": "true"],
+                    responseBody: "{\"error\":\"mocked\"}",
+                    contentType: "application/json"
+                ),
+            ])
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+            let session = URLSession(configuration: config)
+
+            let (data, response) = try await session.data(from: URL(string: "https://api.example.com/v1/items")!)
+
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
+            XCTAssertEqual(String(data: data, encoding: .utf8), "{\"error\":\"mocked\"}")
+            XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-mocked"), "true")
+            buffer.flush()
+            let event = collector.events.first as? SdkNetworkRequestEvent
+            XCTAssertEqual(event?.url, "https://api.example.com/v1/items")
+            XCTAssertEqual(event?.method, "GET")
+            XCTAssertEqual(event?.statusCode, 500)
+            XCTAssertEqual(event?.responseBody, "{\"error\":\"mocked\"}")
+            XCTAssertEqual(event?.contentType, "application/json")
+            XCTAssertEqual(event?.error, "mocked:mock-1")
+        }
+
+        func testURLProtocolPrefersMockRuleOverErrorSimulation() async throws {
+            let collector = EventCollector()
+            let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+                collector.collect(events)
+            }
             AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
             AutoMobileNetwork.shared.setCaptureBodies(true)
+            NetworkMockRuleStore.shared.setRules([
+                NetworkMockRuleDTO(
+                    mockId: "mock-1",
+                    host: "api\\.example\\.com",
+                    path: "^/v1/items$",
+                    method: "GET",
+                    limit: nil,
+                    remaining: nil,
+                    statusCode: 418,
+                    responseHeaders: ["x-mocked": "true"],
+                    responseBody: "mock-wins",
+                    contentType: "text/plain"
+                ),
+            ])
             NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
                 enabled: true,
-                errorType: errorType,
+                errorType: "timeout",
                 limit: nil,
                 expiresAtEpochMs: nil
             ))
             let config = URLSessionConfiguration.ephemeral
             config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
             let session = URLSession(configuration: config)
-            var request = URLRequest(url: URL(string: "https://api.example.com/\(errorType)")!)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = Data("{\"operation\":\"\(errorType)\"}".utf8)
 
-            do {
-                _ = try await session.data(for: request)
-                XCTFail("Expected \(errorType) to fail")
-            } catch {
-                XCTAssertEqual((error as? URLError)?.code, expectedCode)
-            }
+            let (data, response) = try await session.data(from: URL(string: "https://api.example.com/v1/items")!)
 
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 418)
+            XCTAssertEqual(String(data: data, encoding: .utf8), "mock-wins")
+            XCTAssertEqual((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-mocked"), "true")
             buffer.flush()
             let event = collector.events.first as? SdkNetworkRequestEvent
-            XCTAssertEqual(event?.url, "https://api.example.com/\(errorType)")
-            XCTAssertEqual(event?.method, "POST")
-            XCTAssertEqual(event?.requestBody, "{\"operation\":\"\(errorType)\"}")
-            XCTAssertNil(event?.statusCode)
-            XCTAssertEqual(event?.error, "simulated:\(errorType)")
+            XCTAssertEqual(event?.url, "https://api.example.com/v1/items")
+            XCTAssertEqual(event?.statusCode, 418)
+            XCTAssertEqual(event?.responseBody, "mock-wins")
+            XCTAssertEqual(event?.error, "mocked:mock-1")
         }
-    }
+
+        func testURLProtocolServesSimulatedHttp500AndRecordsRequest() async throws {
+            let collector = EventCollector()
+            let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+                collector.collect(events)
+            }
+            AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+            AutoMobileNetwork.shared.setCaptureBodies(true)
+            NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "http500",
+                limit: nil,
+                expiresAtEpochMs: nil
+            ))
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+            let session = URLSession(configuration: config)
+            var request = URLRequest(url: URL(string: "https://api.example.com/fail")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = Data("{\"query\":\"mutation\"}".utf8)
+
+            let (data, response) = try await session.data(for: request)
+
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
+            XCTAssertTrue(data.isEmpty)
+            buffer.flush()
+            let event = collector.events.first as? SdkNetworkRequestEvent
+            XCTAssertEqual(event?.url, "https://api.example.com/fail")
+            XCTAssertEqual(event?.method, "POST")
+            XCTAssertEqual(event?.requestBody, "{\"query\":\"mutation\"}")
+            XCTAssertEqual(event?.statusCode, 500)
+            XCTAssertEqual(event?.error, "simulated:http500")
+        }
+
+        func testURLProtocolCapsSimulatedErrorStreamBodyCapture() async throws {
+            let collector = EventCollector()
+            let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+                collector.collect(events)
+            }
+            AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+            AutoMobileNetwork.shared.setCaptureBodies(true)
+            AutoMobileNetwork.shared.setMaxBodyBytes(8)
+            NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true,
+                errorType: "http500",
+                limit: nil,
+                expiresAtEpochMs: nil
+            ))
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+            let session = URLSession(configuration: config)
+            var request = URLRequest(url: URL(string: "https://api.example.com/stream")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBodyStream = InputStream(data: Data("{\"query\":\"mutation with a long payload\"}".utf8))
+
+            let (_, response) = try await session.data(for: request)
+
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 500)
+            buffer.flush()
+            let event = collector.events.first as? SdkNetworkRequestEvent
+            XCTAssertEqual(event?.url, "https://api.example.com/stream")
+            XCTAssertEqual(event?.method, "POST")
+            XCTAssertEqual(event?.requestBody, "{\"query\"")
+            XCTAssertEqual(event?.statusCode, 500)
+            XCTAssertEqual(event?.error, "simulated:http500")
+        }
+
+        func testURLProtocolServesTransportErrorSimulationsAndRecordsRequests() async {
+            let cases: [(String, URLError.Code)] = [
+                ("timeout", .timedOut),
+                ("connectionRefused", .cannotConnectToHost),
+                ("dnsFailure", .cannotFindHost),
+                ("tlsFailure", .secureConnectionFailed),
+            ]
+
+            for (errorType, expectedCode) in cases {
+                let collector = EventCollector()
+                let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+                    collector.collect(events)
+                }
+                AutoMobileNetwork.shared.reset()
+                AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+                AutoMobileNetwork.shared.setCaptureBodies(true)
+                NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                    enabled: true,
+                    errorType: errorType,
+                    limit: nil,
+                    expiresAtEpochMs: nil
+                ))
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+                let session = URLSession(configuration: config)
+                var request = URLRequest(url: URL(string: "https://api.example.com/\(errorType)")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = Data("{\"operation\":\"\(errorType)\"}".utf8)
+
+                do {
+                    _ = try await session.data(for: request)
+                    XCTFail("Expected \(errorType) to fail")
+                } catch {
+                    XCTAssertEqual((error as? URLError)?.code, expectedCode)
+                }
+
+                buffer.flush()
+                let event = collector.events.first as? SdkNetworkRequestEvent
+                XCTAssertEqual(event?.url, "https://api.example.com/\(errorType)")
+                XCTAssertEqual(event?.method, "POST")
+                XCTAssertEqual(event?.requestBody, "{\"operation\":\"\(errorType)\"}")
+                XCTAssertNil(event?.statusCode)
+                XCTAssertEqual(event?.error, "simulated:\(errorType)")
+            }
+        }
     #endif
 }
 
@@ -917,7 +917,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         let group = DispatchGroup()
         let queue = DispatchQueue(label: "network-recorder-test", attributes: .concurrent)
 
-        for index in 0..<20 {
+        for index in 0 ..< 20 {
             group.enter()
             queue.async {
                 let requestId = recorder.beginRequest(
@@ -1024,72 +1024,72 @@ final class NetworkCaptureRecorderTests: XCTestCase {
     }
 
     #if DEBUG
-    private func makeDelayedFaultProtocol(client: RecordingURLProtocolClient) -> AutoMobileURLProtocol {
-        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: SdkEventBuffer { _ in })
-        NetworkMockRuleStore.shared.setFaultRules([
-            NetworkFaultRuleDTO(
-                faultId: "delayed-error", transport: .urlSession, host: nil, port: nil,
-                scheme: nil, path: nil, method: nil, headers: nil, origin: nil,
-                connectionId: nil, sessionId: nil, action: .error, statusCode: nil,
-                responseHeaders: nil, responseBody: nil, contentType: nil, errorType: "timeout",
-                delayMs: 100, bandwidthBytesPerSecond: nil, dropBytes: nil, limit: nil,
-                expiresAtEpochMs: nil, scope: nil, dryRun: false
-            ),
-        ])
-        let request = URLRequest(url: URL(string: "https://api.example.com/v1/x")!)
-        return AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
-    }
-
-    // The delayed fault fires normally when the protocol has NOT been stopped.
-    func testDelayedFaultFiresWhenNotStopped() {
-        let scheduler = FakeFaultScheduler()
-        AutoMobileURLProtocol.faultScheduler = scheduler
-        defer {
-            AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
-            NetworkMockRuleStore.shared.setFaultRules([])
+        private func makeDelayedFaultProtocol(client: RecordingURLProtocolClient) -> AutoMobileURLProtocol {
+            AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: SdkEventBuffer { _ in })
+            NetworkMockRuleStore.shared.setFaultRules([
+                NetworkFaultRuleDTO(
+                    faultId: "delayed-error", transport: .urlSession, host: nil, port: nil,
+                    scheme: nil, path: nil, method: nil, headers: nil, origin: nil,
+                    connectionId: nil, sessionId: nil, action: .error, statusCode: nil,
+                    responseHeaders: nil, responseBody: nil, contentType: nil, errorType: "timeout",
+                    delayMs: 100, bandwidthBytesPerSecond: nil, dropBytes: nil, limit: nil,
+                    expiresAtEpochMs: nil, scope: nil, dryRun: false
+                ),
+            ])
+            let request = URLRequest(url: URL(string: "https://api.example.com/v1/x")!)
+            return AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
         }
 
-        let client = RecordingURLProtocolClient()
-        let proto = makeDelayedFaultProtocol(client: client)
-        proto.startLoading() // schedules the fault via the fake scheduler (captured, not fired)
+        // The delayed fault fires normally when the protocol has NOT been stopped.
+        func testDelayedFaultFiresWhenNotStopped() {
+            let scheduler = FakeFaultScheduler()
+            AutoMobileURLProtocol.faultScheduler = scheduler
+            defer {
+                AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
+                NetworkMockRuleStore.shared.setFaultRules([])
+            }
 
-        scheduler.captured?.perform() // fire the delayed fault
+            let client = RecordingURLProtocolClient()
+            let proto = makeDelayedFaultProtocol(client: client)
+            proto.startLoading() // schedules the fault via the fake scheduler (captured, not fired)
 
-        XCTAssertEqual(client.calls, ["didFail"], "an un-stopped delayed fault serves the client")
-    }
+            scheduler.captured?.perform() // fire the delayed fault
 
-    // A fault whose work item fires AFTER stopLoading — the already-running interleaving —
-    // must not invoke the client, because serveFault's stopped-check is atomic with delivery.
-    func testDelayedFaultFiringAfterStopDoesNotCallClient() {
-        let scheduler = FakeFaultScheduler()
-        AutoMobileURLProtocol.faultScheduler = scheduler
-        defer {
-            AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
-            NetworkMockRuleStore.shared.setFaultRules([])
+            XCTAssertEqual(client.calls, ["didFail"], "an un-stopped delayed fault serves the client")
         }
 
-        let client = RecordingURLProtocolClient()
-        let proto = makeDelayedFaultProtocol(client: client)
-        proto.startLoading() // captures the work item
-        proto.stopLoading() // marks the protocol stopped (and cancels the work item)
+        // A fault whose work item fires AFTER stopLoading — the already-running interleaving —
+        // must not invoke the client, because serveFault's stopped-check is atomic with delivery.
+        func testDelayedFaultFiringAfterStopDoesNotCallClient() {
+            let scheduler = FakeFaultScheduler()
+            AutoMobileURLProtocol.faultScheduler = scheduler
+            defer {
+                AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
+                NetworkMockRuleStore.shared.setFaultRules([])
+            }
 
-        scheduler.captured?.perform() // fire the (now stale) work item anyway
+            let client = RecordingURLProtocolClient()
+            let proto = makeDelayedFaultProtocol(client: client)
+            proto.startLoading() // captures the work item
+            proto.stopLoading() // marks the protocol stopped (and cancels the work item)
 
-        XCTAssertTrue(
-            client.calls.isEmpty,
-            "a delayed fault that fires after stopLoading() must not invoke the client"
-        )
-    }
+            scheduler.captured?.perform() // fire the (now stale) work item anyway
+
+            XCTAssertTrue(
+                client.calls.isEmpty,
+                "a delayed fault that fires after stopLoading() must not invoke the client"
+            )
+        }
     #endif
 }
 
 #if DEBUG
-/// Captures the delayed-fault work item so a test can fire it deterministically, instead
-/// of waiting on the real timer.
-private final class FakeFaultScheduler: FaultScheduling {
-    var captured: DispatchWorkItem?
-    func schedule(delayMs _: Int, work: DispatchWorkItem) { captured = work }
-}
+    /// Captures the delayed-fault work item so a test can fire it deterministically, instead
+    /// of waiting on the real timer.
+    private final class FakeFaultScheduler: FaultScheduling {
+        var captured: DispatchWorkItem?
+        func schedule(delayMs _: Int, work: DispatchWorkItem) { captured = work }
+    }
 #endif
 
 /// Records `URLProtocolClient` callbacks so a test can assert a stopped protocol makes none.
@@ -1104,9 +1104,15 @@ private final class RecordingURLProtocolClient: NSObject, URLProtocolClient {
         lock.lock(); _calls.append(name); lock.unlock()
     }
 
-    func urlProtocol(_: URLProtocol, wasRedirectedTo _: URLRequest, redirectResponse _: URLResponse) { record("redirect") }
+    func urlProtocol(_: URLProtocol, wasRedirectedTo _: URLRequest, redirectResponse _: URLResponse) {
+        record("redirect")
+    }
+
     func urlProtocol(_: URLProtocol, cachedResponseIsValid _: CachedURLResponse) { record("cached") }
-    func urlProtocol(_: URLProtocol, didReceive _: URLResponse, cacheStoragePolicy _: URLCache.StoragePolicy) { record("didReceive") }
+    func urlProtocol(_: URLProtocol, didReceive _: URLResponse, cacheStoragePolicy _: URLCache.StoragePolicy) {
+        record("didReceive")
+    }
+
     func urlProtocol(_: URLProtocol, didLoad _: Data) { record("didLoad") }
     func urlProtocolDidFinishLoading(_: URLProtocol) { record("finish") }
     func urlProtocol(_: URLProtocol, didFailWithError _: Error) { record("didFail") }

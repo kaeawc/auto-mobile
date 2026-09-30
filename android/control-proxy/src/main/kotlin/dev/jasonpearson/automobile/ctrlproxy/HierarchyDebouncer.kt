@@ -80,6 +80,13 @@ internal constructor(
 ) {
   companion object {
     private const val TAG = "HierarchyDebouncer"
+    // A client may request a faster broadcast interval, but accessibility events must never
+    // turn into an unbounded stream of full tree walks.
+    private const val MIN_UNSOLICITED_INTERVAL_MS = 50L
+  }
+
+  init {
+    unsolicitedIntervalMs = unsolicitedIntervalMs.coerceAtLeast(MIN_UNSOLICITED_INTERVAL_MS)
   }
 
   /*
@@ -111,7 +118,7 @@ internal constructor(
 
   fun setUnsolicitedIntervalMs(intervalMs: Long) {
     synchronized(eventLock) {
-      unsolicitedIntervalMs = intervalMs.coerceAtLeast(0L)
+      unsolicitedIntervalMs = intervalMs.coerceAtLeast(MIN_UNSOLICITED_INTERVAL_MS)
       if (pendingRefresh && !extractionInFlight) {
         debounceJob?.cancel()
         debounceJob = null

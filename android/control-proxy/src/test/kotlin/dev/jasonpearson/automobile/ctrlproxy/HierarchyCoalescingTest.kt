@@ -102,6 +102,45 @@ class HierarchyCoalescingTest {
   }
 
   @Test
+  fun `zero client interval still bounds unsolicited extraction without delaying explicit pulls`() =
+    runTest {
+      val time = FakeTime()
+      val stats = CtrlProxyWorkStats()
+      var state = 0
+      val debouncer =
+        HierarchyDebouncer(
+          scope = backgroundScope,
+          timeProvider = time,
+          unsolicitedIntervalMs = 0,
+          stats = stats,
+          extractHierarchy = { _, _ -> ViewHierarchy(packageName = "state-$state") },
+        )
+
+      debouncer.onAccessibilityEvent()
+      advanceTimeBy(5)
+      time.now += 5
+      runCurrent()
+      assertEquals(1L, stats.extractions.get())
+
+      debouncer.setUnsolicitedIntervalMs(0)
+      state = 1
+      repeat(100) { debouncer.onAccessibilityEvent() }
+      advanceTimeBy(49)
+      time.now += 49
+      runCurrent()
+      assertEquals(1L, stats.extractions.get())
+
+      advanceTimeBy(1)
+      time.now += 1
+      runCurrent()
+      assertEquals(2L, stats.extractions.get())
+
+      state = 2
+      assertEquals("state-2", debouncer.extractNowBlocking(skipFlowEmit = true)?.packageName)
+      assertEquals(3L, stats.extractions.get())
+    }
+
+  @Test
   fun `event during extraction requests exactly one trailing refresh`() = runTest {
     val time = FakeTime()
     val stats = CtrlProxyWorkStats()

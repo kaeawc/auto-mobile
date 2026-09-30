@@ -885,7 +885,7 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
-  fun `dense full-width windows visit each spatial candidate once`() {
+  fun `dense duplicate bounds compare one occluder per rectangle`() {
     val stats = CtrlProxyWorkStats()
     val indexedExtractor = ViewHierarchyExtractor(stats = stats)
     fun window(id: String): UIElementInfo =
@@ -901,16 +901,70 @@ class ViewHierarchyExtractorTest {
           },
       )
 
-    indexedExtractor.buildOcclusionInfoForTest(
-      listOf(
-        indexedExtractor.createWindowEntry(1, 0, window("app")),
-        indexedExtractor.createWindowEntry(2, 1, window("overlay")),
+    val occlusionInfo =
+      indexedExtractor.buildOcclusionInfoForTest(
+        listOf(
+          indexedExtractor.createWindowEntry(1, 0, window("app")),
+          indexedExtractor.createWindowEntry(2, 1, window("overlay")),
+        )
       )
-    )
     assertTrue(
-      "index visits must stay below the old pair-loop budget: ${stats.occlusionIndexEntriesVisited.get()}",
-      stats.occlusionIndexEntriesVisited.get() <= 20_402L,
+      "duplicate rectangles must not multiply index visits: ${stats.occlusionIndexEntriesVisited.get()}",
+      stats.occlusionIndexEntriesVisited.get() <= 101L,
     )
+    assertTrue(stats.occlusionCandidateComparisons.get() <= 101L)
+    val filtered =
+      indexedExtractor.filterOccludedHierarchyForTest(
+        window("app"),
+        occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
+    assertEquals("overlay-root", filtered?.occludedBy)
+  }
+
+  @Test
+  fun `duplicate bounds retain first eligible occluder across equal layer windows`() {
+    val app =
+      elementWithBounds(
+        resourceId = "app-root",
+        bounds = bounds(0, 0, 100, 100),
+        children =
+          listOf(elementWithBounds(resourceId = "app-child", bounds = bounds(0, 0, 100, 100))),
+      )
+    val overlay =
+      elementWithBounds(
+        resourceId = "overlay-root",
+        bounds = bounds(0, 0, 100, 100),
+        children =
+          listOf(elementWithBounds(resourceId = "overlay-child", bounds = bounds(0, 0, 100, 100))),
+      )
+    val occlusionInfo =
+      extractor.buildOcclusionInfoForTest(
+        listOf(
+          extractor.createWindowEntry(1, 0, app),
+          extractor.createWindowEntry(2, 0, overlay),
+        )
+      )
+    val root =
+      extractor.filterOccludedHierarchyForTest(
+        app,
+        occlusionInfo,
+        windowKey = 1,
+        path = "",
+        isRoot = true,
+      )
+    val child =
+      extractor.filterOccludedHierarchyForTest(
+        app.children.single(),
+        occlusionInfo,
+        windowKey = 1,
+        path = "0",
+        isRoot = true,
+      )
+    assertEquals("overlay-root", root?.occludedBy)
+    assertEquals("overlay-child", child?.occludedBy)
   }
 
   @Test

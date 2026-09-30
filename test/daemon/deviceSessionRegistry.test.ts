@@ -141,7 +141,13 @@ describe("DeviceSessionRegistry", () => {
   });
 
   describe("lifecycle listener", () => {
-    type Event = { kind: "started" | "ended"; uuid: string; deviceId: string; platform: string };
+    type Event = {
+      kind: "started" | "ended";
+      uuid: string;
+      deviceId: string;
+      platform: string;
+      successorSessionUuid?: string;
+    };
 
     function withListener(scripted?: string[]) {
       const { registry, timer, idGenerator } = makeRegistry(scripted);
@@ -154,12 +160,13 @@ describe("DeviceSessionRegistry", () => {
             deviceId: record.deviceId,
             platform: record.platform,
           }),
-        onSessionEnded: (record) =>
+        onSessionEnded: (record, successorSessionUuid) =>
           events.push({
             kind: "ended",
             uuid: record.deviceSessionUuid,
             deviceId: record.deviceId,
             platform: record.platform,
+            ...(successorSessionUuid === undefined ? {} : { successorSessionUuid }),
           }),
       });
       return { registry, timer, idGenerator, events };
@@ -235,7 +242,13 @@ describe("DeviceSessionRegistry", () => {
 
       expect(events).toEqual([
         { kind: "started", uuid: "uuid-a", deviceId: "emulator-5554", platform: "android" },
-        { kind: "ended", uuid: "uuid-a", deviceId: "emulator-5554", platform: "android" },
+        {
+          kind: "ended",
+          uuid: "uuid-a",
+          deviceId: "emulator-5554",
+          platform: "android",
+          successorSessionUuid: "uuid-b",
+        },
         { kind: "started", uuid: "uuid-b", deviceId: "emulator-5554", platform: "android" },
       ]);
     });

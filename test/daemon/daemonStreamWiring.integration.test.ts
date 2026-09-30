@@ -91,6 +91,7 @@ class FakePushServer implements RoutingTarget {
 
 class FakeDeviceDataStreamServer extends FakePushServer {
   started: DeviceSessionRecord[] = [];
+  ended: Array<{ record: DeviceSessionRecord; successorSessionUuid?: string }> = [];
   navigationUpdates: Array<{ appId: string | null; deviceId: string | null | undefined }> = [];
   subscriberCallbackInstalled = false;
   screenshotCadenceCallbackInstalled = false;
@@ -109,7 +110,12 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.started.push(record);
   }
 
-  pushDeviceSessionEnded(_record: DeviceSessionRecord): void {}
+  pushDeviceSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
+    this.ended.push({
+      record,
+      ...(successorSessionUuid === undefined ? {} : { successorSessionUuid }),
+    });
+  }
 
   pushNavigationGraphUpdate(
     streamData: { appId: string | null },
@@ -175,6 +181,46 @@ describe("Daemon stream wiring", () => {
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
+  });
+
+  test("forwards a successor uuid only when the registry replaces a live epoch", () => {
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      new FakeTimer(),
+      new FakeDeviceSessionRepository(),
+      new CountingIdGenerator("device-session"),
+      new FakeDatabaseInitializer(),
+      new FakeStartupFailureTracker(),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const stream = new FakeDeviceDataStreamServer();
+    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+
+    try {
+      internals.setupDeviceSessionRouting();
+      const first = internals.deviceSessionRegistry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 1,
+      });
+      const second = internals.deviceSessionRegistry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 2,
+      });
+      expect(stream.ended).toEqual([
+        { record: first, successorSessionUuid: second.deviceSessionUuid },
+      ]);
+
+      internals.deviceSessionRegistry.onDeviceDisconnected("emulator-5554");
+      expect(stream.ended).toEqual([
+        { record: first, successorSessionUuid: second.deviceSessionUuid },
+        { record: second },
+      ]);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+    }
   });
 
   test("an all-device subscriber connects owned Android and logs the skipped unowned device", async () => {

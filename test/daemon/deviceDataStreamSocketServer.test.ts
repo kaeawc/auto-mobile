@@ -2223,6 +2223,7 @@ describe("DeviceDataStreamSocketServer", () => {
       type: string;
       deviceId?: string;
       deviceSessionUuid?: string | null;
+      successorSessionUuid?: string;
       platform?: string;
       navigationGraph?: NavigationGraphStreamData;
     }
@@ -2407,6 +2408,53 @@ describe("DeviceDataStreamSocketServer", () => {
           deviceId: "device-a",
           platform: "android",
         });
+        expect(f[0]).not.toHaveProperty("successorSessionUuid");
+      });
+
+      it("names the successor on the old epoch's ended frame without widening data routing", () => {
+        server.sessionResolver.bind("device-a", "session-a");
+        const old = server.simulateSubscription({
+          deviceId: "device-a",
+          deviceSessionUuid: "session-a",
+          hierarchyIntervalMs: 500,
+        });
+        server.sessionResolver.retire("device-a");
+        server.pushDeviceSessionEnded(record({ deviceSessionUuid: "session-a" }), "session-b");
+        server.sessionResolver.bind("device-a", "session-b");
+        server.pushDeviceSessionStarted(record({ deviceSessionUuid: "session-b" }));
+
+        const ended = frames(old.socket).filter((frame) => frame.type === "device_session_ended");
+        expect(ended).toHaveLength(1);
+        expect(ended[0]).toMatchObject({
+          deviceId: "device-a",
+          deviceSessionUuid: "session-a",
+          successorSessionUuid: "session-b",
+        });
+        expect(
+          frames(old.socket).filter((frame) => frame.type === "device_session_started"),
+        ).toHaveLength(0);
+        expect(server.hasSubscriberForDevice("device-a")).toBe(false);
+        expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(2_147_483_647);
+
+        server.pushHierarchyUpdate("device-a", hierarchy);
+        expect(
+          frames(old.socket).filter((frame) => frame.type === "hierarchy_update"),
+        ).toHaveLength(0);
+
+        const next = server.simulateSubscription({
+          deviceId: "device-a",
+          deviceSessionUuid: "session-b",
+          hierarchyIntervalMs: 500,
+        });
+        expect(server.hasSubscriberForDevice("device-a")).toBe(true);
+        expect(server.getHierarchyIntervalMsForDevice("device-a")).toBe(500);
+        server.pushHierarchyUpdate("device-a", hierarchy);
+        expect(
+          frames(next.socket).filter((frame) => frame.type === "hierarchy_update"),
+        ).toHaveLength(1);
+        expect(
+          frames(old.socket).filter((frame) => frame.type === "hierarchy_update"),
+        ).toHaveLength(0);
       });
     });
   });

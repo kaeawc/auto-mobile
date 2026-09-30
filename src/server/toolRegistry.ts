@@ -1414,7 +1414,7 @@ export class ToolRegistryClass {
   };
   private deviceSessionManager: DeviceSessionManager;
   private cleanupService: AppCleanupService;
-  private toolCallRepository: ToolCallRepository;
+  private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
   private executionTargetResolver: ExecutionTargetResolver;
   private auditRunner: AuditRunner;
@@ -1433,6 +1433,10 @@ export class ToolRegistryClass {
     this.navigationToolCallRecorder = new DefaultNavigationToolCallRecorder();
     this.afterToolCall = new DefaultAfterToolCallHandler();
     this.planLifecycleManager = new DefaultPlanLifecycleManager();
+  }
+
+  setToolCallRepositoryForTesting(repository: Pick<ToolCallRepository, "recordToolCall">): void {
+    this.toolCallRepository = repository;
   }
 
   private getToolAvailabilityGateReasons(tool: RegisteredTool): string[] {

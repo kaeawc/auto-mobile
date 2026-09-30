@@ -18,11 +18,11 @@ describe("ToolRegistry tool call duration recording", () => {
     originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
     (ToolRegistry as any).timer = timer;
     records = [];
-    (ToolRegistry as any).toolCallRepository = {
+    ToolRegistry.setToolCallRepositoryForTesting({
       async recordToolCall(record: any): Promise<void> {
         records.push(record);
       },
-    };
+    });
   });
 
   afterEach(() => {

@@ -64,6 +64,9 @@ export interface ObserveResultCacheStore {
   /** Host-clock timestamp of the most recent live in-memory entry for a device. */
   getRecentCachedAtForDevice(deviceId: string): number | undefined;
 
+  /** Screenshot paths retained by live memory or disk cache entries. */
+  getReferencedScreenshotPaths(): Promise<readonly string[]>;
+
   /** Clear memory + disk cache. If deviceId provided, only that device. */
   clear(deviceId?: string): void;
 }

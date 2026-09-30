@@ -285,6 +285,20 @@ describe("InMemoryScreenshotStateStore", () => {
     expect(store.getPath("device-X")).toBeUndefined();
     expect(store.getError("device-X")).toBeUndefined();
   });
+
+  test("reports live screenshot paths and stops protecting them after the TTL", () => {
+    const timer = new FakeTimer();
+    const store = new InMemoryScreenshotStateStore(timer);
+    store.update("device-A", "/tmp/latest.png");
+    store.updateForObservation("device-A", "obs-1", "/tmp/observation.png");
+
+    expect(new Set(store.getReferencedScreenshotPaths())).toEqual(
+      new Set(["/tmp/latest.png", "/tmp/observation.png"]),
+    );
+
+    timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
+    expect(store.getReferencedScreenshotPaths()).toEqual([]);
+  });
 });
 
 describe("module-level screenshot state store", () => {

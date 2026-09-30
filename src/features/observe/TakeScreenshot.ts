@@ -43,6 +43,8 @@ import {
   type ScreenshotFileWriter,
 } from "./screenshot/ScreenshotFileWriter";
 import { shellQuote } from "../../utils/shellQuote";
+import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
+import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
 import {
   AndroidPhysicalDisplayIdResolver,
   assertValidPng,
@@ -136,16 +138,30 @@ export class TakeScreenshot implements ScreenshotService {
         }),
       );
 
+      const referencedPaths = new Set([
+        ...getScreenshotStateStore().getReferencedScreenshotPaths(),
+        ...(await getObserveCacheStore().getReferencedScreenshotPaths()),
+      ]);
+      const isReferenced = (filePath: string): boolean => referencedPaths.has(filePath);
+
       // Evict oldest-first until under the limit, but never a file young enough
       // to be an in-flight capture from another process sharing this dir (in
-      // production each agent runs its own client process writing here).
-      const toDelete = selectScreenshotsToEvict(
+      // production each agent runs its own client process writing here) or
+      // referenced by a live observe result or screenshot state.
+      const nowMs = Date.now();
+      const evictionPlan = selectScreenshotsToEvict(
         fileStats.map((f) => ({ path: f.path, size: f.stats.size, mtimeMs: f.mtime })),
         TakeScreenshot.MAX_CACHE_SIZE_BYTES,
         SCREENSHOT_MIN_EVICT_AGE_MS,
-        Date.now(),
+        nowMs,
+        isReferenced,
       );
-      for (const filePath of toDelete) {
+      if (evictionPlan.overBudgetAfterEviction) {
+        logger.warn(
+          `Screenshot cache remains over budget after eviction; skipped ${evictionPlan.skippedReferenced} referenced screenshots`,
+        );
+      }
+      for (const filePath of evictionPlan.toEvict) {
         await this.fileSystem.unlink(filePath);
         logger.debug(`Removed cached screenshot: ${filePath}`);
       }

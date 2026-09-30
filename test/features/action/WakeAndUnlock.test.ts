@@ -3,6 +3,7 @@ import { WakeAndUnlock } from "../../../src/features/action/WakeAndUnlock";
 import type {
   DeviceLockType,
   IosScreenUnlocker,
+  IosRunnerRecovery,
   LockCredentialStore,
 } from "../../../src/features/action/WakeAndUnlock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -33,9 +34,33 @@ class FakeCredentialStore implements LockCredentialStore {
 class FakeIosUnlocker implements IosScreenUnlocker {
   calls = 0;
   result: { success: boolean; error?: string } = { success: true };
+  results?: Array<{ success: boolean; error?: string }>;
   async wakeAndDismiss(): Promise<{ success: boolean; error?: string }> {
     this.calls++;
-    return this.result;
+    return this.results?.shift() ?? this.result;
+  }
+}
+
+class FakeIosRecovery implements IosRunnerRecovery {
+  connected = true;
+  starts = 0;
+  budgets: number[] = [];
+  outcomes: Array<"recovered" | "not_recovering" | "failed" | "timed_out"> = [];
+  isConnected(): boolean {
+    return this.connected;
+  }
+  ensureRecoveryStarted(): void {
+    this.starts++;
+  }
+  async awaitRecovery(
+    budgetMs: number,
+  ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
+    this.budgets.push(budgetMs);
+    const outcome = this.outcomes.shift() ?? "not_recovering";
+    if (outcome === "recovered") {
+      this.connected = true;
+    }
+    return outcome;
   }
 }
 
@@ -273,5 +298,74 @@ describe("WakeAndUnlock", () => {
     expect(result).toMatchObject({ success: true, platform: "ios", unlocked: true });
     // The pin is ignored on iOS: no Android key events are sent.
     expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("iOS: waits for a disconnected runner before swiping", async () => {
+    const ios = new FakeIosUnlocker();
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = ["recovered", "not_recovering"];
+
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: ios,
+      iosRunnerRecovery: recovery,
+    }).execute();
+
+    expect(result.success).toBe(true);
+    expect(ios.calls).toBe(1);
+    expect(recovery.starts).toBe(1);
+    expect(recovery.budgets).toEqual([20_000]);
+  });
+
+  test("iOS: retries one failed swipe after runner recovery", async () => {
+    const ios = new FakeIosUnlocker();
+    ios.results = [{ success: false, error: "runner disconnected" }, { success: true }];
+    const recovery = new FakeIosRecovery();
+    recovery.outcomes = ["not_recovering", "recovered"];
+
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: ios,
+      iosRunnerRecovery: recovery,
+    }).execute();
+
+    expect(result.success).toBe(true);
+    expect(ios.calls).toBe(2);
+    expect(recovery.budgets).toEqual([20_000, 20_000]);
+  });
+
+  test("iOS: recovery timeout fails without a swipe", async () => {
+    const ios = new FakeIosUnlocker();
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = ["timed_out"];
+
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: ios,
+      iosRunnerRecovery: recovery,
+    }).execute();
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("did not recover");
+    expect(ios.calls).toBe(0);
+    expect(recovery.budgets).toEqual([20_000]);
+  });
+
+  test("iOS: a failed swipe without recovery is not repeated", async () => {
+    const ios = new FakeIosUnlocker();
+    ios.result = { success: false, error: "swipe failed" };
+    const recovery = new FakeIosRecovery();
+
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: ios,
+      iosRunnerRecovery: recovery,
+    }).execute();
+
+    expect(result.error).toBe("swipe failed");
+    expect(ios.calls).toBe(1);
+    expect(recovery.starts).toBe(0);
   });
 });

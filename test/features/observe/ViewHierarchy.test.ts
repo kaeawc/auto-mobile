@@ -495,7 +495,7 @@ describe("ViewHierarchy", function () {
       }
     });
 
-    test("waits once and refetches iOS after runner recovery", async function () {
+    test("waits once and refetches iOS when an untyped error coincides with a disconnected runner", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",
         name: "Test iPhone",
@@ -508,13 +508,14 @@ describe("ViewHierarchy", function () {
           ++reads === 1
             ? {
                 hierarchy: null,
-                unavailableReason: "runner_not_running",
+                unavailableReason: "unknown",
                 unavailableDetail: "dead",
               }
             : { hierarchy: { hierarchy: { role: "text", text: "Recovered" } }, fresh: true },
         ensureRecoveryStarted: () => {
           starts++;
         },
+        isConnected: () => false,
         awaitRecovery: async (budget: number) => {
           expect(budget).toBe(20_000);
           return "recovered";
@@ -620,7 +621,7 @@ describe("ViewHierarchy", function () {
       }
     });
 
-    test("keeps the iOS cooldown reason when joined recovery times out", async function () {
+    test("reports ongoing iOS recovery when the bounded wait times out", async function () {
       const timer = new FakeTimer();
       const iosDevice: BootedDevice = {
         deviceId: "test-ios-device",
@@ -657,7 +658,7 @@ describe("ViewHierarchy", function () {
         );
         const result = await vh.getViewHierarchy();
         expect(reads).toBe(1);
-        expect(result.hierarchy.unavailableReason).toBe("connection_lost");
+        expect(result.hierarchy.unavailableReason).toBe("service_recovering");
         expect(result.hierarchy.unavailableDetail).toBe("runner socket closed");
       } finally {
         spy.mockRestore();

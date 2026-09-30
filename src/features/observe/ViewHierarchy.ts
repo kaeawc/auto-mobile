@@ -201,6 +201,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     result: ViewHierarchyResult,
     context: RecoveryReadContext,
   ): Promise<ViewHierarchyResult> {
+    const client = IOSCtrlProxyClient.getInstance(this.device);
+    this.classifyDisconnectedIosHierarchy(result, client);
     if (
       (result.hierarchy.unavailableReason !== "runner_not_running" &&
         result.hierarchy.unavailableReason !== "connection_lost" &&
@@ -210,15 +212,16 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     ) {
       return result;
     }
-    const client = IOSCtrlProxyClient.getInstance(this.device);
     client.ensureRecoveryStarted();
-    if (
-      (await client.awaitRecovery(
-        this.recoveryWaitBudget(context, IOSCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS),
-        context.signal,
-      )) !== "recovered" ||
-      !this.hasRecoveryRefetchBudget(context)
-    ) {
+    const recovery = await client.awaitRecovery(
+      this.recoveryWaitBudget(context, IOSCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS),
+      context.signal,
+    );
+    if (recovery !== "recovered" || !this.hasRecoveryRefetchBudget(context)) {
+      if (recovery === "timed_out") {
+        result.hierarchy.unavailableReason = "service_recovering";
+        result.hierarchy.iosUnavailableReason = "service_recovering";
+      }
       return result;
     }
     return this.getiOSViewHierarchy(
@@ -228,6 +231,18 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       this.remainingRecoveryBudget(context),
       context.signal,
     );
+  }
+
+  private classifyDisconnectedIosHierarchy(
+    result: ViewHierarchyResult,
+    client: IOSCtrlProxyClient,
+  ): void {
+    // A request-scoped runner error can be untyped while the host socket has
+    // already closed. The known disconnect is sufficient to join recovery.
+    if (result.hierarchy.unavailableReason === "unknown" && client.isConnected?.() === false) {
+      result.hierarchy.unavailableReason = "connection_lost";
+      result.hierarchy.iosUnavailableReason = "connection_lost";
+    }
   }
 
   private async retryAndroidAfterRecovery(

@@ -2655,6 +2655,8 @@ export function registerInteractionTools() {
     const wakeAndUnlock = new WakeAndUnlock(device, undefined, {
       credentialStore: new DeviceLockStore(),
       iosUnlocker,
+      iosRunnerRecovery:
+        device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
     });
     const result = await wakeAndUnlock.execute(args.pin);
     const message = result.success

@@ -1,0 +1,110 @@
+package dev.jasonpearson.automobile.ctrlproxy
+
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+
+private val resultFrameJson = Json {
+  prettyPrint = false
+  encodeDefaults = true
+}
+
+private fun resultFrame(
+  type: String,
+  requestId: String?,
+  perfTiming: JsonElement? = null,
+  content: JsonObjectBuilder.() -> Unit,
+): String =
+  resultFrameJson.encodeToString(
+    buildJsonObject {
+      put("type", type)
+      put("timestamp", System.currentTimeMillis())
+      if (requestId != null) put("requestId", requestId)
+      content()
+      if (perfTiming != null) put("perfTiming", perfTiming)
+    }
+  )
+
+internal fun swipeResultFrame(
+  requestId: String?,
+  success: Boolean,
+  error: String?,
+  totalTimeMs: Long,
+  gestureTimeMs: Long?,
+  perfTiming: JsonElement?,
+): String =
+  resultFrame("swipe_result", requestId, perfTiming) {
+    put("success", success)
+    put("totalTimeMs", totalTimeMs)
+    if (gestureTimeMs != null) put("gestureTimeMs", gestureTimeMs)
+    if (error != null) put("error", error)
+  }
+
+internal fun dragResultFrame(
+  requestId: String?,
+  success: Boolean,
+  error: String?,
+  totalTimeMs: Long,
+  gestureTimeMs: Long?,
+  perfTiming: JsonElement?,
+): String =
+  resultFrame("drag_result", requestId, perfTiming) {
+    put("success", success)
+    put("totalTimeMs", totalTimeMs)
+    if (gestureTimeMs != null) put("gestureTimeMs", gestureTimeMs)
+    if (error != null) put("error", error)
+  }
+
+internal fun tapCoordinatesResultFrame(
+  requestId: String?,
+  success: Boolean,
+  error: String?,
+  totalTimeMs: Long,
+  perfTiming: JsonElement?,
+): String =
+  resultFrame("tap_coordinates_result", requestId, perfTiming) {
+    put("success", success)
+    put("totalTimeMs", totalTimeMs)
+    if (error != null) put("error", error)
+  }
+
+internal fun pinchResultFrame(
+  requestId: String?,
+  success: Boolean,
+  error: String?,
+  totalTimeMs: Long,
+  gestureTimeMs: Long?,
+  perfTiming: JsonElement?,
+): String =
+  resultFrame("pinch_result", requestId, perfTiming) {
+    put("success", success)
+    put("totalTimeMs", totalTimeMs)
+    if (gestureTimeMs != null) put("gestureTimeMs", gestureTimeMs)
+    if (error != null) put("error", error)
+  }
+
+internal fun screenshotErrorFrame(requestId: String?, error: String): String =
+  resultFrame("screenshot_error", requestId) { put("error", error) }
+
+internal fun currentFocusErrorFrame(
+  requestId: String?,
+  error: String?,
+  totalTimeMs: Long,
+): String =
+  resultFrame("current_focus_result", requestId) {
+    put("totalTimeMs", totalTimeMs)
+    put("error", error ?: "Unknown error")
+  }
+
+internal fun traversalOrderErrorFrame(
+  requestId: String?,
+  error: String?,
+  totalTimeMs: Long,
+): String =
+  resultFrame("traversal_order_result", requestId) {
+    put("totalTimeMs", totalTimeMs)
+    put("error", error ?: "Unknown error")
+  }

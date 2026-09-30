@@ -1,8 +1,36 @@
 @testable import CtrlProxyRewrite
+import Network
 import os
 import XCTest
 
 final class ListenerFailureTests: XCTestCase {
+    func testLoopbackListenerBecomesReadyAndAcceptsConnection() throws {
+        let listener = try WebSocketServer.makeLoopbackListener(port: 0)
+        let ready = expectation(description: "listener ready")
+        let accepted = expectation(description: "loopback connection accepted")
+        let queue = DispatchQueue(label: "com.ctrlproxy.tests.loopback-listener")
+        listener.stateUpdateHandler = { state in
+            switch state {
+            case .ready: ready.fulfill()
+            case let .failed(error): XCTFail("Listener failed: \(error)")
+            default: break
+            }
+        }
+        listener.newConnectionHandler = { connection in
+            accepted.fulfill()
+            connection.cancel()
+        }
+        listener.start(queue: queue)
+        defer { listener.cancel() }
+
+        wait(for: [ready], timeout: 2)
+        let port = try XCTUnwrap(listener.port)
+        let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+        connection.start(queue: queue)
+        defer { connection.cancel() }
+        wait(for: [accepted], timeout: 2)
+    }
+
     func testListenerFailureNotifiesPresenceExactlyOnce() throws {
         let listener = FakeServerListener()
         let transitions = ValueBox<Bool>()

@@ -2443,8 +2443,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     _perf: PerformanceTracker,
     _signal: AbortSignal,
   ): Promise<void> {
-    // No port forwarding needed for iOS simulator
-    // For real devices, iproxy may be needed in the future
+    // The manager establishes iproxy for physical devices before connecting.
   }
 
   // ===========================================================================
@@ -2452,7 +2451,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   private resolveWebSocketHost(): string {
-    return "localhost";
+    return "127.0.0.1";
   }
 
   private processMessage(message: WebSocketMessage): void {

@@ -141,7 +141,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
 
     expect(result).toBe(true);
     expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(false);
-    expect(urls).toEqual(["ws://localhost:8765/ws", "ws://localhost:8767/ws"]);
+    expect(urls).toEqual(["ws://127.0.0.1:8765/ws", "ws://127.0.0.1:8767/ws"]);
 
     await client.close();
   });
@@ -152,7 +152,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
 
     expect(sameClient).toBe(client);
     expect((sameClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
-      "ws://localhost:8767/ws",
+      "ws://127.0.0.1:8767/ws",
     );
 
     await client.close();
@@ -177,7 +177,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     (client as unknown as { updatePort: (port: number) => void }).updatePort(8767);
 
     expect(await client.ensureConnected()).toBe(true);
-    expect(urls).toEqual(["ws://localhost:8765/ws", "ws://localhost:8767/ws"]);
+    expect(urls).toEqual(["ws://127.0.0.1:8765/ws", "ws://127.0.0.1:8767/ws"]);
 
     await client.close();
   });
@@ -215,7 +215,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       const connectPromise = connect.call(client);
       await flushPromises(8);
       expect(sockets.length).toBe(1);
-      expect(sockets[0].url).toBe("ws://localhost:8765/ws");
+      expect(sockets[0].url).toBe("ws://127.0.0.1:8765/ws");
       expect(client.isConnected()).toBe(false);
 
       // A port reallocation races the in-flight connect.
@@ -236,7 +236,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       await flushPromises(8);
       const latest = sockets[sockets.length - 1];
       expect(sockets.length).toBe(2);
-      expect(latest.url).toBe("ws://localhost:8767/ws");
+      expect(latest.url).toBe("ws://127.0.0.1:8767/ws");
       latest.socket.readyState = WebSocketState.OPEN;
       latest.socket.emit("open");
       await flushPromises(8);
@@ -331,7 +331,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       const connectPromise = connect.call(client);
       await flushPromises(8);
       expect(sockets.length).toBe(1);
-      expect(sockets[0].url).toBe("ws://localhost:8765/ws");
+      expect(sockets[0].url).toBe("ws://127.0.0.1:8765/ws");
       expect(client.isConnected()).toBe(false);
 
       // A port reallocation races the wedged handshake.
@@ -351,7 +351,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       await flushPromises(8);
       expect(sockets.length).toBe(2);
       const latest = sockets[sockets.length - 1];
-      expect(latest.url).toBe("ws://localhost:8767/ws");
+      expect(latest.url).toBe("ws://127.0.0.1:8767/ws");
 
       latest.socket.readyState = WebSocketState.OPEN;
       latest.socket.emit("open");
@@ -453,7 +453,7 @@ describe("IOSCtrlProxyClient auto-setup", function () {
 
       reaping.resolve();
       await expect(connecting).resolves.toBe(true);
-      expect(urls).toEqual(["ws://localhost:8765/ws"]);
+      expect(urls).toEqual(["ws://127.0.0.1:8765/ws"]);
     } finally {
       reaping.resolve();
       await client.close();

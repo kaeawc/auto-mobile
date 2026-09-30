@@ -248,7 +248,7 @@ export class IosCtrlProxyHealthClient {
       IosCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
       Math.max(1, timeoutMs ?? IosCtrlProxyHealthClient.FETCH_TIMEOUT_MS),
     );
-    const host = this.context.useRemoteRunner() ? this.context.getHost() : "localhost";
+    const host = this.context.useRemoteRunner() ? this.context.getHost() : "127.0.0.1";
     if (this.context.useRemoteRunner()) {
       const controller = new AbortController();
       const timeoutId = this.timer.setTimeout(() => controller.abort(), requestTimeoutMs);

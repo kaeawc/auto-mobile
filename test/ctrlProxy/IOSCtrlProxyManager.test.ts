@@ -1502,7 +1502,7 @@ describe("IOSCtrlProxyManager", function () {
     // Map each candidate /health port to a body the runner would return.
     const installHealthFakes = (bodyByPort: Record<number, string>): void => {
       fakeExecutor.setCommandHandler("curl -s", (command) => {
-        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        const port = Number(command.match(/127\.0\.0\.1:(\d+)\/health/)?.[1]);
         return createExecResult(bodyByPort[port] ?? "", "");
       });
     };
@@ -3899,10 +3899,10 @@ describe("IOSCtrlProxyManager", function () {
         );
         expect(manager.getServicePort()).toBe(8767);
 
-        fakeExecutor.setCommandResponse("http://localhost:8767/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("http://127.0.0.1:8767/health", createExecResult("", ""));
         fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
         fakeExecutor.setCommandResponse(
-          "http://localhost:8765/health",
+          "http://127.0.0.1:8765/health",
           createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
         );
         fakeTimer.enableAutoAdvance();
@@ -3938,10 +3938,10 @@ describe("IOSCtrlProxyManager", function () {
           );
           expect(manager.getServicePort()).toBe(8767);
 
-          fakeExecutor.setCommandResponse("http://localhost:8767/health", createExecResult("", ""));
+          fakeExecutor.setCommandResponse("http://127.0.0.1:8767/health", createExecResult("", ""));
           fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
           fakeExecutor.setCommandResponse(
-            "http://localhost:8765/health",
+            "http://127.0.0.1:8765/health",
             createExecResult(JSON.stringify({ status: "ok", deviceId }), ""),
           );
           fakeTimer.enableAutoAdvance();
@@ -3975,9 +3975,9 @@ describe("IOSCtrlProxyManager", function () {
           fakeExecutor,
         );
 
-        fakeExecutor.setCommandResponse("http://localhost:8767/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("http://127.0.0.1:8767/health", createExecResult("", ""));
         fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
-        fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
         fakeTimer.enableAutoAdvance();
 
         await expect(manager.start()).rejects.toThrow("CtrlProxy failed to start within timeout");
@@ -4005,7 +4005,7 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2469\n", ""));
       fakeExecutor.setCommandResponse(
         "ps -p 2469",
@@ -4015,7 +4015,7 @@ describe("IOSCtrlProxyManager", function () {
         ),
       );
       fakeExecutor.setCommandResponse(
-        "http://localhost:8790/health",
+        "http://127.0.0.1:8790/health",
         createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
       );
       fakeTimer.enableAutoAdvance();
@@ -4061,9 +4061,9 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
       fakeExecutor.setCommandResponse(
-        "http://localhost:8790/health",
+        "http://127.0.0.1:8790/health",
         createExecResult(JSON.stringify({ status: "ok", deviceId: testDevice.deviceId }), ""),
       );
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
@@ -4103,13 +4103,13 @@ describe("IOSCtrlProxyManager", function () {
       );
 
       fakeExecutor.setCommandResponse(
-        "http://localhost:8790/health",
+        "http://127.0.0.1:8790/health",
         createExecResult(JSON.stringify({ status: "ok", deviceId: "OTHER-SIMULATOR" }), ""),
       );
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("2474\n", ""));
       fakeExecutor.setCommandHandler("curl -s", (command) => {
-        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        const port = Number(command.match(/127\.0\.0\.1:(\d+)\/health/)?.[1]);
         return createExecResult(
           port === 8790
             ? JSON.stringify({ status: "ok", deviceId: "OTHER-SIMULATOR" })
@@ -4149,7 +4149,7 @@ describe("IOSCtrlProxyManager", function () {
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -f 'CtrlProxy'", createExecResult("2475\n", ""));
       fakeExecutor.setCommandHandler("curl -s", (command) => {
-        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        const port = Number(command.match(/127\.0\.0\.1:(\d+)\/health/)?.[1]);
         return createExecResult(
           port === 8790
             ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
@@ -4202,7 +4202,7 @@ describe("IOSCtrlProxyManager", function () {
         createExecResult(candidateProcesses.map((process) => String(process.pid)).join("\n"), ""),
       );
       fakeExecutor.setCommandHandler("curl -s", (command) => {
-        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        const port = Number(command.match(/127\.0\.0\.1:(\d+)\/health/)?.[1]);
         if (port >= 8800 && port <= 8800 + MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
           customPortHealthProbeCount++;
           return createExecResult("", "");
@@ -4270,7 +4270,7 @@ describe("IOSCtrlProxyManager", function () {
         ),
       );
       fakeExecutor.setCommandHandler("curl -s", (command) => {
-        const port = Number(command.match(/localhost:(\d+)\/health/)?.[1]);
+        const port = Number(command.match(/127\.0\.0\.1:(\d+)\/health/)?.[1]);
         return createExecResult(
           port === runnerProcess.port
             ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
@@ -4311,7 +4311,7 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2470\n", ""));
       fakeExecutor.setCommandResponse("ps -p 2470", createExecResult(externalProcess.command, ""));
       fakeTimer.enableAutoAdvance();
@@ -4349,7 +4349,7 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2471\n", ""));
       fakeExecutor.setCommandResponse("ps -p 2471", createExecResult(externalProcess.command, ""));
       fakeTimer.enableAutoAdvance();
@@ -4389,8 +4389,8 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
-      fakeExecutor.setCommandResponse("http://localhost:8791/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("http://127.0.0.1:8791/health", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2472\n", ""));
       fakeExecutor.setCommandResponse(
         "ps -p 2472",
@@ -4422,7 +4422,7 @@ describe("IOSCtrlProxyManager", function () {
         fakeExecutor,
       );
 
-      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
       fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2469\n", ""));
       fakeExecutor.setCommandResponse(
         "ps -p 2469",
@@ -4868,8 +4868,8 @@ describe("IOSCtrlProxyManager", function () {
         isPortAvailable: (port) => port !== 8765,
       });
       try {
-        fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
-        fakeExecutor.setCommandResponse("http://localhost:8766/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("http://127.0.0.1:8765/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("http://127.0.0.1:8766/health", createExecResult("", ""));
         fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("", ""));
         fakeTimer.enableAutoAdvance();
         const fakeBuilder = {

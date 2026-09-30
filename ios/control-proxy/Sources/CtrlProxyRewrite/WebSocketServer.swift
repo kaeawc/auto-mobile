@@ -116,6 +116,17 @@ public final class CommandFailureCoordinator: Sendable {
 /// and the presence callback (race #4) plus the SDK-updated hook are immutable
 /// init-injected `@Sendable` closures instead of settable vars.
 final class WebSocketServer: @unchecked Sendable {
+    private static let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "WebSocketServer")
+
+    static func makeLoopbackListener(port: UInt16) throws -> NWListener {
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = true
+        parameters.requiredLocalEndpoint = .hostPort(
+            host: "127.0.0.1", port: NWEndpoint.Port(integerLiteral: port)
+        )
+        return try NWListener(using: parameters)
+    }
+
     enum ServerError: Error {
         case alreadyRunning
         case failedToStart(Error)
@@ -184,10 +195,8 @@ final class WebSocketServer: @unchecked Sendable {
         monotonicNowMs: @escaping @Sendable () -> Int64 = {
             Int64(ProcessInfo.processInfo.systemUptime * 1000)
         },
-        listenerFactory: @escaping @Sendable (UInt16) throws -> any ServerListening = { port in
-            let parameters = NWParameters.tcp
-            parameters.allowLocalEndpointReuse = true
-            return try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
+        listenerFactory: @escaping @Sendable (UInt16) throws -> any ServerListening = {
+            try WebSocketServer.makeLoopbackListener(port: $0)
         }
     ) {
         self.listenerFactory = listenerFactory
@@ -230,6 +239,7 @@ final class WebSocketServer: @unchecked Sendable {
         do {
             newListener = try listenerFactory(port)
         } catch {
+            Self.logger.warning("CtrlProxy listener failed to bind: \(error)")
             throw ServerError.failedToStart(error)
         }
 
@@ -238,7 +248,7 @@ final class WebSocketServer: @unchecked Sendable {
             // Delivered on `queue` (listener.start(queue:)), so the self-stop runs on-queue.
             switch state {
             case let .failed(error):
-                print("[WebSocketServer] Server failed: \(error)")
+                Self.logger.warning("CtrlProxy listener failed: \(error)")
                 self.onqueue_stop()
             case .ready, .cancelled:
                 break

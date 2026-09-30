@@ -13,7 +13,7 @@ import {
 } from "../screen-stream/screenCaptureHelperPath";
 
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { parseCapabilityMarker } from "../screen-stream/IOSScreenCaptureHelper";
+import { parseCapabilityMarker } from "../screen-stream/IosScreenCaptureHelper";
 
 export interface SimulatorHighlightsDependencies {
   fallback?: () => {

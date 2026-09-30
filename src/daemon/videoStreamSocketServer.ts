@@ -8,7 +8,7 @@ import type { PlatformDeviceManager } from "../utils/deviceUtils";
 import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFactory";
 import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
 import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
-import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IOSScreenCaptureHelper";
+import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IosScreenCaptureHelper";
 import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";

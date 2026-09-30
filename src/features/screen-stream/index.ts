@@ -18,7 +18,7 @@ export {
 } from "./frameProtocol";
 export { LatestFrameQueue, type FrameQueueMetrics } from "./LatestFrameQueue";
 export {
-  IOSScreenCaptureHelper,
+  IosScreenCaptureHelper,
   parseCaptureIdleMarker,
   SIMULATOR_IDLE_EVIDENCE_CAPABILITY,
   IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES,
@@ -43,14 +43,14 @@ export {
   type NativeFrameMetrics,
   type IosScreenCaptureReadiness,
   type IosScreenCaptureReadinessPhase,
-} from "./IOSScreenCaptureHelper";
+} from "./IosScreenCaptureHelper";
 export {
-  IOSSimulatorCaptureHelperPool,
+  IosSimulatorCaptureHelperPool,
   IOS_SIMULATOR_HELPER_IDLE_TTL_MS,
   iosSimulatorCaptureHelperPool,
   type IosSimulatorCaptureHelperLease,
   type SimulatorCaptureHelperPoolOptions,
-} from "./IOSSimulatorCaptureHelperPool";
+} from "./IosSimulatorCaptureHelperPool";
 export {
   ScreenCaptureHelperProvider,
   SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,

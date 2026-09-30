@@ -55,7 +55,7 @@ function healthProbeFailureReason(
  * unchanged: local probes go through `curl` on the injected {@link HostCommandExecutor}
  * and remote probes use `fetch` with a timer-driven abort, exactly as before.
  */
-export class IOSCtrlProxyHealthClient {
+export class IosCtrlProxyHealthClient {
   private static readonly FETCH_TIMEOUT_MS = 2000;
 
   public constructor(
@@ -182,7 +182,7 @@ export class IOSCtrlProxyHealthClient {
       return health.deviceId === undefined || health.deviceId === deviceId;
     } catch (error) {
       // Malformed/non-JSON health body cannot establish runner identity.
-      logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return false;
     }
   }
@@ -208,7 +208,7 @@ export class IOSCtrlProxyHealthClient {
       return isValidCtrlProxyPort(health.port) ? health.port : null;
     } catch (error) {
       // Malformed/non-JSON health body means we can't confirm the reported port belongs to this device; null it out.
-      logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -226,15 +226,15 @@ export class IOSCtrlProxyHealthClient {
       return await this.requestHealthEndpointBodyOnPort(port, timeoutMs);
     } catch (error) {
       // No runner listening on this port (connection refused/timeout) is the expected case; null means "not up yet".
-      logger.debug(`src/utils/ios/IOSCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/ios/IosCtrlProxyHealthClient.ts fallback failed: ${error}`, error);
       return null;
     }
   }
 
   private async requestHealthEndpointBodyOnPort(port: number, timeoutMs?: number): Promise<string> {
     const requestTimeoutMs = Math.min(
-      IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
-      Math.max(1, timeoutMs ?? IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS),
+      IosCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
+      Math.max(1, timeoutMs ?? IosCtrlProxyHealthClient.FETCH_TIMEOUT_MS),
     );
     const host = this.context.useRemoteRunner() ? this.context.getHost() : "localhost";
     if (this.context.useRemoteRunner()) {

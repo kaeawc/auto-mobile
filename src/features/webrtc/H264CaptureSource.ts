@@ -1,5 +1,5 @@
 import type { BootedDevice } from "../../models";
-import type { NativeFrameMetrics } from "../screen-stream/IOSScreenCaptureHelper";
+import type { NativeFrameMetrics } from "../screen-stream/IosScreenCaptureHelper";
 import type { FrameQueueMetrics } from "../screen-stream/LatestFrameQueue";
 
 export interface H264EncoderFrameMetrics extends FrameQueueMetrics {

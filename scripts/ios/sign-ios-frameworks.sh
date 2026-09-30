@@ -29,7 +29,7 @@ STRICT_MODE="${IOS_SIGNING_STRICT:-false}"
 # SPM-framework signing script to build. The shippable CtrlProxy artifact is the
 # AutoMobileTest / CtrlProxyUITests bundle, built via the AutoMobileTest scheme and
 # signed by that build's own Automatic code-signing (see project.yml /
-# IOSCtrlProxyBuilder), not here.
+# IosCtrlProxyBuilder), not here.
 PACKAGES=(
   "XCTestRunner:XCTestRunner"
 )

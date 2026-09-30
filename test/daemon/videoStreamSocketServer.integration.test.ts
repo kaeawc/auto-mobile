@@ -21,7 +21,7 @@ import {
   PACKET_FLAG_DROPPED_FRAMES,
   PACKET_FLAG_HEARTBEAT,
 } from "../../src/daemon/videoStreamFraming";
-import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IOSScreenCaptureHelper";
+import { SIMULATOR_FPS_DEFAULT } from "../../src/features/screen-stream/IosScreenCaptureHelper";
 import {
   permissiveDeviceAdmissionGate,
   type DeviceAdmissionGate,

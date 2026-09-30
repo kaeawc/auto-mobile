@@ -137,12 +137,12 @@ interface CtrlProxyIosBuilderDependencies {
 }
 
 /**
- * The narrow builder surface {@link IOSCtrlProxyBuilder.doPrefetch} drives.
+ * The narrow builder surface {@link IosCtrlProxyBuilder.doPrefetch} drives.
  * Exposed so the prefetch gate can be tested without a real build/download
  * (issue #4407); grow it only when the prefetch needs another method.
  */
 export type PrefetchBuilder = Pick<
-  IOSCtrlProxyBuilder,
+  IosCtrlProxyBuilder,
   "needsRebuild" | "getBuildProductsPath" | "getXctestrunPath" | "build"
 >;
 
@@ -180,7 +180,7 @@ type IOSCtrlProxyBundleMetadata = {
  * CtrlProxy Builder
  * Handles release bundle download and extraction for CtrlProxy
  */
-export class IOSCtrlProxyBuilder {
+export class IosCtrlProxyBuilder {
   /**
    * Filename prefix for the per-launch xctestrun copies written by
    * {@link writeRunnerEnvironment}. Distinct from the build-products xctestrun so
@@ -232,7 +232,7 @@ export class IOSCtrlProxyBuilder {
     new DefaultCtrlProxyCodesignVerifier();
 
   // Singleton instances per configuration
-  private static instances: Map<string, IOSCtrlProxyBuilder> = new Map();
+  private static instances: Map<string, IosCtrlProxyBuilder> = new Map();
 
   private readonly config: CtrlProxyIosBuildConfig;
   private readonly downloader: CtrlProxyIosBundleDownloader;
@@ -258,7 +258,7 @@ export class IOSCtrlProxyBuilder {
    */
   private derivedLocalRunnerSha256: Map<IOSCtrlProxyPlatform, string> = new Map();
   /**
-   * Single-flight guard for {@link build}. `IOSCtrlProxyBuilder` is a
+   * Single-flight guard for {@link build}. `IosCtrlProxyBuilder` is a
    * process-wide singleton shared by every `IOSCtrlProxyManager` device
    * instance (issue #6417): with no in-flight guard, two devices whose
    * `needsRebuild()` both observe `true` before either has finished would
@@ -280,17 +280,17 @@ export class IOSCtrlProxyBuilder {
       projectRoot:
         config.projectRoot ||
         process.env.AUTOMOBILE_PROJECT_ROOT ||
-        IOSCtrlProxyBuilder.DEFAULT_PROJECT_ROOT,
+        IosCtrlProxyBuilder.DEFAULT_PROJECT_ROOT,
       derivedDataPath:
         config.derivedDataPath ||
         process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA ||
-        getTempDir(IOSCtrlProxyBuilder.DEFAULT_DERIVED_DATA_SUBDIR),
-      scheme: config.scheme || IOSCtrlProxyBuilder.DEFAULT_SCHEME,
-      destination: config.destination || IOSCtrlProxyBuilder.DEFAULT_DESTINATION,
+        getTempDir(IosCtrlProxyBuilder.DEFAULT_DERIVED_DATA_SUBDIR),
+      scheme: config.scheme || IosCtrlProxyBuilder.DEFAULT_SCHEME,
+      destination: config.destination || IosCtrlProxyBuilder.DEFAULT_DESTINATION,
       bundleCacheDir:
         config.bundleCacheDir ||
         process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR ||
-        getSharedAutoMobileDir(IOSCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_SUBDIR),
+        getSharedAutoMobileDir(IosCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_SUBDIR),
     };
     this.downloader = dependencies.downloader ?? new DefaultIOSCtrlProxyBundleDownloader();
   }
@@ -301,34 +301,34 @@ export class IOSCtrlProxyBuilder {
   public static getInstance(
     config?: Partial<CtrlProxyIosBuildConfig>,
     dependencies?: CtrlProxyIosBuilderDependencies,
-  ): IOSCtrlProxyBuilder {
+  ): IosCtrlProxyBuilder {
     const key = JSON.stringify({
       config: config || {},
       deps: dependencies?.downloader ? "custom" : "default",
     });
-    if (!IOSCtrlProxyBuilder.instances.has(key)) {
-      IOSCtrlProxyBuilder.instances.set(key, new IOSCtrlProxyBuilder(config, dependencies));
+    if (!IosCtrlProxyBuilder.instances.has(key)) {
+      IosCtrlProxyBuilder.instances.set(key, new IosCtrlProxyBuilder(config, dependencies));
     }
-    return IOSCtrlProxyBuilder.instances.get(key)!;
+    return IosCtrlProxyBuilder.instances.get(key)!;
   }
 
   /**
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
-    IOSCtrlProxyBuilder.instances.clear();
-    IOSCtrlProxyBuilder.prefetchPromise = null;
-    IOSCtrlProxyBuilder.prefetchInFlight = false;
-    IOSCtrlProxyBuilder.prefetchResult = null;
-    IOSCtrlProxyBuilder.prefetchError = null;
-    IOSCtrlProxyBuilder.expectedChecksumOverride = null;
-    IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
-    IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = null;
-    IOSCtrlProxyBuilder.useLocalBuildOverride = null;
-    IOSCtrlProxyBuilder.timer = defaultTimer;
-    IOSCtrlProxyBuilder.iosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
-    IOSCtrlProxyBuilder.prefetchBuilderOverride = null;
-    IOSCtrlProxyBuilder.codesignVerifier = new DefaultCtrlProxyCodesignVerifier();
+    IosCtrlProxyBuilder.instances.clear();
+    IosCtrlProxyBuilder.prefetchPromise = null;
+    IosCtrlProxyBuilder.prefetchInFlight = false;
+    IosCtrlProxyBuilder.prefetchResult = null;
+    IosCtrlProxyBuilder.prefetchError = null;
+    IosCtrlProxyBuilder.expectedChecksumOverride = null;
+    IosCtrlProxyBuilder.expectedRunnerChecksumOverride = null;
+    IosCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = null;
+    IosCtrlProxyBuilder.useLocalBuildOverride = null;
+    IosCtrlProxyBuilder.timer = defaultTimer;
+    IosCtrlProxyBuilder.iosPrerequisiteDetector = new DefaultIosPrerequisiteDetector();
+    IosCtrlProxyBuilder.prefetchBuilderOverride = null;
+    IosCtrlProxyBuilder.codesignVerifier = new DefaultCtrlProxyCodesignVerifier();
   }
 
   /**
@@ -336,41 +336,41 @@ export class IOSCtrlProxyBuilder {
    * restores the default `codesign`/`spctl`-backed verifier.
    */
   public static setCodesignVerifierForTesting(verifier: CtrlProxyCodesignVerifier | null): void {
-    IOSCtrlProxyBuilder.codesignVerifier = verifier ?? new DefaultCtrlProxyCodesignVerifier();
+    IosCtrlProxyBuilder.codesignVerifier = verifier ?? new DefaultCtrlProxyCodesignVerifier();
   }
 
   /**
    * Override the timer for testing
    */
   public static setTimerForTesting(timer: Timer): void {
-    IOSCtrlProxyBuilder.timer = timer;
+    IosCtrlProxyBuilder.timer = timer;
   }
 
   /**
    * Override checksum for tests
    */
   public static setExpectedChecksumForTesting(checksum: string | null): void {
-    IOSCtrlProxyBuilder.expectedChecksumOverride = checksum;
+    IosCtrlProxyBuilder.expectedChecksumOverride = checksum;
   }
 
   /** Override the iOS-prerequisite gate for the prefetch (issue #4407). Null restores the default detector. */
   public static setIosPrerequisiteDetectorForTesting(
     detector: IosPrerequisiteDetector | null,
   ): void {
-    IOSCtrlProxyBuilder.iosPrerequisiteDetector = detector ?? new DefaultIosPrerequisiteDetector();
+    IosCtrlProxyBuilder.iosPrerequisiteDetector = detector ?? new DefaultIosPrerequisiteDetector();
   }
 
   /** Override the builder driven by the static prefetch (issue #4407). Null restores getInstance(). */
   public static setPrefetchBuilderForTesting(builder: PrefetchBuilder | null): void {
-    IOSCtrlProxyBuilder.prefetchBuilderOverride = builder;
+    IosCtrlProxyBuilder.prefetchBuilderOverride = builder;
   }
 
   public static setExpectedRunnerChecksumForTesting(
     checksum: string | null,
     target: RunnerSha256Target | null = null,
   ): void {
-    IOSCtrlProxyBuilder.expectedRunnerChecksumOverride = checksum;
-    IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = target;
+    IosCtrlProxyBuilder.expectedRunnerChecksumOverride = checksum;
+    IosCtrlProxyBuilder.expectedRunnerChecksumTargetOverride = target;
   }
 
   /**
@@ -378,7 +378,7 @@ export class IOSCtrlProxyBuilder {
    * (issue #5561). Null restores reading the environment variable.
    */
   public static setUseLocalBuildForTesting(useLocalBuild: boolean | null): void {
-    IOSCtrlProxyBuilder.useLocalBuildOverride = useLocalBuild;
+    IosCtrlProxyBuilder.useLocalBuildOverride = useLocalBuild;
   }
 
   /**
@@ -411,7 +411,7 @@ export class IOSCtrlProxyBuilder {
     } catch (error) {
       // Build products directory doesn't exist yet (no build has run); null tells the
       // caller to trigger a build rather than treating this as a hard failure.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -437,7 +437,7 @@ export class IOSCtrlProxyBuilder {
       const xctestrunFiles = files.filter(
         (file) =>
           file.endsWith(".xctestrun") &&
-          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
+          !file.startsWith(IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
       );
       if (xctestrunFiles.length === 0) {
         return null;
@@ -474,7 +474,7 @@ export class IOSCtrlProxyBuilder {
     } catch (error) {
       // Products directory listing/stat failed (e.g. not built yet); reporting no
       // xctestrun path lets the caller fall back to triggering a build.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -525,7 +525,7 @@ export class IOSCtrlProxyBuilder {
       const safeDeviceId = deviceId.replace(/[^A-Za-z0-9._-]/g, "_") || "device";
       const outputPath = path.join(
         path.dirname(xctestrunPath),
-        `${IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX}${safeDeviceId}.xctestrun`,
+        `${IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX}${safeDeviceId}.xctestrun`,
       );
       await fs.writeFile(outputPath, buildPlist(root), "utf-8");
       logger.info(
@@ -550,7 +550,7 @@ export class IOSCtrlProxyBuilder {
       const xctestrunFiles = files.filter(
         (file) =>
           file.endsWith(".xctestrun") &&
-          !file.startsWith(IOSCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
+          !file.startsWith(IosCtrlProxyBuilder.RUNNER_XCTESTRUN_PREFIX),
       );
       if (xctestrunFiles.length <= 1) {
         return;
@@ -749,20 +749,20 @@ export class IOSCtrlProxyBuilder {
       return Promise.resolve(null);
     }
 
-    if (IOSCtrlProxyBuilder.prefetchPromise !== null) {
+    if (IosCtrlProxyBuilder.prefetchPromise !== null) {
       logger.info("[IOSCtrlProxyBuilder] Prefetch already initiated, skipping");
-      return IOSCtrlProxyBuilder.prefetchPromise;
+      return IosCtrlProxyBuilder.prefetchPromise;
     }
 
     logger.info("[IOSCtrlProxyBuilder] Starting download prefetch");
-    const startTime = IOSCtrlProxyBuilder.timer.now();
+    const startTime = IosCtrlProxyBuilder.timer.now();
 
-    IOSCtrlProxyBuilder.prefetchInFlight = true;
-    IOSCtrlProxyBuilder.prefetchPromise = IOSCtrlProxyBuilder.doPrefetch()
+    IosCtrlProxyBuilder.prefetchInFlight = true;
+    IosCtrlProxyBuilder.prefetchPromise = IosCtrlProxyBuilder.doPrefetch()
       .then((result) => {
-        const duration = IOSCtrlProxyBuilder.timer.now() - startTime;
+        const duration = IosCtrlProxyBuilder.timer.now() - startTime;
         if (result && result.success) {
-          IOSCtrlProxyBuilder.prefetchResult = result;
+          IosCtrlProxyBuilder.prefetchResult = result;
           logger.info(`[IOSCtrlProxyBuilder] Prefetch completed in ${duration}ms`, {
             buildPath: result.buildPath,
           });
@@ -774,18 +774,18 @@ export class IOSCtrlProxyBuilder {
         return result;
       })
       .catch((error) => {
-        const duration = IOSCtrlProxyBuilder.timer.now() - startTime;
-        IOSCtrlProxyBuilder.prefetchError =
+        const duration = IosCtrlProxyBuilder.timer.now() - startTime;
+        IosCtrlProxyBuilder.prefetchError =
           error instanceof Error ? error : new Error(String(error));
         logger.warn(`[IOSCtrlProxyBuilder] Prefetch failed after ${duration}ms`, {
-          error: IOSCtrlProxyBuilder.prefetchError.message,
+          error: IosCtrlProxyBuilder.prefetchError.message,
         });
         return null;
       })
       .finally(() => {
-        IOSCtrlProxyBuilder.prefetchInFlight = false;
+        IosCtrlProxyBuilder.prefetchInFlight = false;
       });
-    return IOSCtrlProxyBuilder.prefetchPromise;
+    return IosCtrlProxyBuilder.prefetchPromise;
   }
 
   /**
@@ -797,7 +797,7 @@ export class IOSCtrlProxyBuilder {
    * failures via {@link getPrefetchError} and resolves null.
    */
   public static pendingPrefetch(): Promise<CtrlProxyIosBuildResult | null> | null {
-    return IOSCtrlProxyBuilder.prefetchInFlight ? IOSCtrlProxyBuilder.prefetchPromise : null;
+    return IosCtrlProxyBuilder.prefetchInFlight ? IosCtrlProxyBuilder.prefetchPromise : null;
   }
 
   /**
@@ -809,7 +809,7 @@ export class IOSCtrlProxyBuilder {
     // there is no reason to download and extract it at startup (issue #4407).
     // Returning null (not throwing) keeps the daemon healthy and non-iOS
     // workflows intact; the on-demand build path still runs when a device connects.
-    if (!(await IOSCtrlProxyBuilder.iosPrerequisiteDetector.hasIosPrerequisites())) {
+    if (!(await IosCtrlProxyBuilder.iosPrerequisiteDetector.hasIosPrerequisites())) {
       logger.info(
         "[IOSCtrlProxyBuilder] Prefetch skipped: iOS prerequisites (xcrun/xcodebuild) not detected; " +
           "the runner bundle is only needed for iOS device work",
@@ -818,7 +818,7 @@ export class IOSCtrlProxyBuilder {
     }
 
     const builder: PrefetchBuilder =
-      IOSCtrlProxyBuilder.prefetchBuilderOverride ?? IOSCtrlProxyBuilder.getInstance();
+      IosCtrlProxyBuilder.prefetchBuilderOverride ?? IosCtrlProxyBuilder.getInstance();
     const needsDownload = await builder.needsRebuild();
     if (!needsDownload) {
       const buildPath = await builder.getBuildProductsPath();
@@ -838,17 +838,17 @@ export class IOSCtrlProxyBuilder {
    * Wait for prefetch to complete
    */
   public static async waitForPrefetch(): Promise<CtrlProxyIosBuildResult | null> {
-    if (IOSCtrlProxyBuilder.prefetchPromise === null) {
+    if (IosCtrlProxyBuilder.prefetchPromise === null) {
       return null;
     }
 
     try {
-      await IOSCtrlProxyBuilder.prefetchPromise;
-      return IOSCtrlProxyBuilder.prefetchResult;
+      await IosCtrlProxyBuilder.prefetchPromise;
+      return IosCtrlProxyBuilder.prefetchResult;
     } catch (error) {
       // Background prefetch already failed and recorded its error via getPrefetchError();
       // returning null here just means "no prefetched result", callers build on demand.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -857,14 +857,14 @@ export class IOSCtrlProxyBuilder {
    * Get the prefetched build result (non-blocking)
    */
   public static getPrefetchedResult(): CtrlProxyIosBuildResult | null {
-    return IOSCtrlProxyBuilder.prefetchResult;
+    return IosCtrlProxyBuilder.prefetchResult;
   }
 
   /**
    * Check if prefetch had an error
    */
   public static getPrefetchError(): Error | null {
-    return IOSCtrlProxyBuilder.prefetchError;
+    return IosCtrlProxyBuilder.prefetchError;
   }
 
   /**
@@ -927,7 +927,7 @@ export class IOSCtrlProxyBuilder {
     } catch (error) {
       // Hashing the app bundle failed (e.g. bundle missing/unreadable); hash is only
       // used for compat checks, so null just skips that optimization.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
@@ -952,13 +952,13 @@ export class IOSCtrlProxyBuilder {
     } catch (error) {
       // Runner binary not present in the build products dir; null tells the caller
       // the UI test runner hasn't been built yet rather than throwing.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
 
   private getBundlePath(): string {
-    return path.join(this.config.bundleCacheDir, IOSCtrlProxyBuilder.DEFAULT_BUNDLE_FILENAME);
+    return path.join(this.config.bundleCacheDir, IosCtrlProxyBuilder.DEFAULT_BUNDLE_FILENAME);
   }
 
   private getBundleUrl(): string {
@@ -982,7 +982,7 @@ export class IOSCtrlProxyBuilder {
   }
 
   private getExpectedChecksum(): string {
-    const override = IOSCtrlProxyBuilder.expectedChecksumOverride;
+    const override = IosCtrlProxyBuilder.expectedChecksumOverride;
     if (override !== null) {
       return override;
     }
@@ -990,7 +990,7 @@ export class IOSCtrlProxyBuilder {
   }
 
   private getExpectedRunnerChecksum(): string {
-    const override = IOSCtrlProxyBuilder.expectedRunnerChecksumOverride;
+    const override = IosCtrlProxyBuilder.expectedRunnerChecksumOverride;
     if (override !== null) {
       return override;
     }
@@ -1007,7 +1007,7 @@ export class IOSCtrlProxyBuilder {
   }
 
   private getExpectedRunnerChecksumTarget(): RunnerSha256Target {
-    const override = IOSCtrlProxyBuilder.expectedRunnerChecksumTargetOverride;
+    const override = IosCtrlProxyBuilder.expectedRunnerChecksumTargetOverride;
     if (override !== null) {
       return override;
     }
@@ -1104,13 +1104,13 @@ export class IOSCtrlProxyBuilder {
   private async isBundleValid(bundlePath: string, expectedChecksum: string): Promise<boolean> {
     try {
       const stats = await fs.stat(bundlePath);
-      if (!stats.isFile() || stats.size < IOSCtrlProxyBuilder.MIN_BUNDLE_SIZE_BYTES) {
+      if (!stats.isFile() || stats.size < IosCtrlProxyBuilder.MIN_BUNDLE_SIZE_BYTES) {
         return false;
       }
     } catch (error) {
       // fs.stat failed because the cached bundle file doesn't exist (or isn't
       // readable); treat it as invalid so the caller re-downloads it.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return false;
     }
 
@@ -1124,7 +1124,7 @@ export class IOSCtrlProxyBuilder {
 
   private async verifyBundle(bundlePath: string): Promise<void> {
     const stats = await fs.stat(bundlePath);
-    if (stats.size < IOSCtrlProxyBuilder.MIN_BUNDLE_SIZE_BYTES) {
+    if (stats.size < IosCtrlProxyBuilder.MIN_BUNDLE_SIZE_BYTES) {
       throw new Error(`Downloaded bundle is too small (${stats.size} bytes), likely invalid`);
     }
 
@@ -1153,7 +1153,7 @@ export class IOSCtrlProxyBuilder {
    * override is the trusted escape hatch.
    */
   private assertPinnedVersionVerifiable(): void {
-    if (IOSCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
+    if (IosCtrlProxyBuilder.isPinnedVersionUnverifiable()) {
       throw new ActionableError(
         `AUTOMOBILE_VERSION=${resolvePinnedVersion()} is not in the AutoMobile release ` +
           `checksum registry, so the CtrlProxy bundle cannot be integrity-verified. ` +
@@ -1170,7 +1170,7 @@ export class IOSCtrlProxyBuilder {
    * `IOSCtrlProxyManager.setup()`, `doctor --ios`, and the booted-device compat check.
    */
   static isPinnedVersionUnverifiable(): boolean {
-    if (IOSCtrlProxyBuilder.expectedChecksumOverride !== null) {
+    if (IosCtrlProxyBuilder.expectedChecksumOverride !== null) {
       return false;
     }
     const ipaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
@@ -1225,13 +1225,13 @@ export class IOSCtrlProxyBuilder {
     } catch (error) {
       // Metadata file is missing or its JSON is malformed/stale; null just means
       // "no cached metadata", so the caller recomputes it from the bundle.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }
 
   private getMetadataPath(): string {
-    return path.join(this.config.bundleCacheDir, IOSCtrlProxyBuilder.METADATA_FILENAME);
+    return path.join(this.config.bundleCacheDir, IosCtrlProxyBuilder.METADATA_FILENAME);
   }
 
   private async normalizeExtractedBundle(): Promise<void> {
@@ -1402,7 +1402,7 @@ export class IOSCtrlProxyBuilder {
     if (knownRelease && knownRelease.version !== expectedVersion) {
       return new CtrlProxyStaleRunnerCacheError(knownRelease.version, expectedVersion);
     }
-    if (IOSCtrlProxyBuilder.pendingPrefetch() !== null) {
+    if (IosCtrlProxyBuilder.pendingPrefetch() !== null) {
       return new CtrlProxyStaleRunnerCacheError(null, expectedVersion);
     }
     return null;
@@ -1410,7 +1410,7 @@ export class IOSCtrlProxyBuilder {
 
   /** Whether the {@link IOS_CTRL_PROXY_USE_LOCAL_BUILD_ENV} switch is active (#5561). */
   private isLocalBuildMode(): boolean {
-    const override = IOSCtrlProxyBuilder.useLocalBuildOverride;
+    const override = IosCtrlProxyBuilder.useLocalBuildOverride;
     if (override !== null) {
       return override;
     }
@@ -1524,7 +1524,7 @@ export class IOSCtrlProxyBuilder {
 
     let outcome: CodesignVerificationOutcome;
     try {
-      outcome = await IOSCtrlProxyBuilder.codesignVerifier.verifyAppBundle(appPath);
+      outcome = await IosCtrlProxyBuilder.codesignVerifier.verifyAppBundle(appPath);
     } catch (error) {
       // The codesign/spctl tools themselves errored (e.g. not installed). Treat
       // as a non-fatal warning by default so a broken toolchain does not block
@@ -1589,7 +1589,7 @@ export class IOSCtrlProxyBuilder {
     } catch (error) {
       // Runner app not present yet (not built/extracted); null lets the caller
       // skip codesign rather than treating a missing bundle as a hard failure.
-      logger.debug(`src/utils/IOSCtrlProxyBuilder.ts fallback failed: ${error}`, error);
+      logger.debug(`src/utils/IosCtrlProxyBuilder.ts fallback failed: ${error}`, error);
       return null;
     }
   }

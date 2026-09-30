@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { IOSCtrlProxyBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
-import type { PrefetchBuilder } from "../../src/utils/IOSCtrlProxyBuilder";
+import { IosCtrlProxyBuilder } from "../../src/utils/IosCtrlProxyBuilder";
+import type { PrefetchBuilder } from "../../src/utils/IosCtrlProxyBuilder";
 import type { IosPrerequisiteDetector } from "../../src/utils/ios-cmdline-tools/IosPrerequisiteDetector";
 
 /**
  * Gate for the startup runner-bundle prefetch: it must skip cleanly when iOS
  * prerequisites are absent and still reach the builder when present (#4407).
  */
-describe("IOSCtrlProxyBuilder prefetch prerequisite gate", function () {
+describe("IosCtrlProxyBuilder prefetch prerequisite gate", function () {
   let originalPlatform: PropertyDescriptor | undefined;
   let recordingBuilder: PrefetchBuilder & { needsRebuildCalls: number; buildCalls: number };
 
@@ -16,7 +16,7 @@ describe("IOSCtrlProxyBuilder prefetch prerequisite gate", function () {
   });
 
   beforeEach(function () {
-    IOSCtrlProxyBuilder.resetInstances();
+    IosCtrlProxyBuilder.resetInstances();
     // prefetchBuild() early-returns off macOS; force darwin so the gate is what decides.
     originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
     Object.defineProperty(process, "platform", { value: "darwin", configurable: true });
@@ -39,35 +39,35 @@ describe("IOSCtrlProxyBuilder prefetch prerequisite gate", function () {
         return null;
       },
     } as PrefetchBuilder & { needsRebuildCalls: number; buildCalls: number };
-    IOSCtrlProxyBuilder.setPrefetchBuilderForTesting(recordingBuilder);
+    IosCtrlProxyBuilder.setPrefetchBuilderForTesting(recordingBuilder);
   });
 
   afterEach(function () {
-    IOSCtrlProxyBuilder.resetInstances();
+    IosCtrlProxyBuilder.resetInstances();
     if (originalPlatform) {
       Object.defineProperty(process, "platform", originalPlatform);
     }
   });
 
   test("does not reach the builder when iOS prerequisites are absent", async function () {
-    IOSCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(false));
+    IosCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(false));
 
-    IOSCtrlProxyBuilder.prefetchBuild();
+    IosCtrlProxyBuilder.prefetchBuild();
     // Draining the prefetch must resolve null without throwing, so the daemon
     // stays healthy and non-iOS workflows are unaffected.
-    const result = await IOSCtrlProxyBuilder.waitForPrefetch();
+    const result = await IosCtrlProxyBuilder.waitForPrefetch();
 
     expect(result).toBeNull();
-    expect(IOSCtrlProxyBuilder.getPrefetchError()).toBeNull();
+    expect(IosCtrlProxyBuilder.getPrefetchError()).toBeNull();
     expect(recordingBuilder.needsRebuildCalls).toBe(0);
     expect(recordingBuilder.buildCalls).toBe(0);
   });
 
   test("reaches the builder when iOS prerequisites are present", async function () {
-    IOSCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(true));
+    IosCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(true));
 
-    IOSCtrlProxyBuilder.prefetchBuild();
-    await IOSCtrlProxyBuilder.waitForPrefetch();
+    IosCtrlProxyBuilder.prefetchBuild();
+    await IosCtrlProxyBuilder.waitForPrefetch();
 
     // The gate let the prefetch through, so the build path ran.
     expect(recordingBuilder.needsRebuildCalls).toBe(1);

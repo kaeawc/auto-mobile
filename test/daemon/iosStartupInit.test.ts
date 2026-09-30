@@ -1,6 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { initializeIosCtrlProxyAtStartup } from "../../src/daemon/iosStartupInit";
-import { CtrlProxyStaleRunnerCacheError } from "../../src/utils/IOSCtrlProxyBuilder";
+import { CtrlProxyStaleRunnerCacheError } from "../../src/utils/IosCtrlProxyBuilder";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";

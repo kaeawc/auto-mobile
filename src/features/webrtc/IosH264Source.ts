@@ -7,9 +7,9 @@ import {
   CAPTURE_PERMISSION_TARGET_PREFIX,
   ENCODED_VIDEO_CAPABILITY,
   SIMULATOR_IDLE_EVIDENCE_CAPABILITY,
-  IOSScreenCaptureHelper,
+  IosScreenCaptureHelper,
   type CapturePermission,
-} from "../screen-stream/IOSScreenCaptureHelper";
+} from "../screen-stream/IosScreenCaptureHelper";
 import type {
   CaptureTarget,
   DecodedAudio,
@@ -28,9 +28,9 @@ import { isTruthyEnvValue } from "../../utils/ctrlProxyDownloadControl";
 import { LatestFrameQueue } from "../screen-stream/LatestFrameQueue";
 import {
   iosSimulatorCaptureHelperPool,
-  type IOSSimulatorCaptureHelperPool,
+  type IosSimulatorCaptureHelperPool,
   type IosSimulatorCaptureHelperLease,
-} from "../screen-stream/IOSSimulatorCaptureHelperPool";
+} from "../screen-stream/IosSimulatorCaptureHelperPool";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../utils/logger";
@@ -326,7 +326,7 @@ export interface IosH264SourceOptions extends H264CaptureSourceOptions {
   timer?: Timer;
   firstFrameTimeoutMs?: number;
   /** Host-scoped warm helper pool. Supplying createHelper bypasses it for tests. */
-  simulatorHelperPool?: IOSSimulatorCaptureHelperPool;
+  simulatorHelperPool?: IosSimulatorCaptureHelperPool;
   /**
    * Running-phase reconnect attempts before surfacing `onError`. Defaults to
    * {@link IOS_RUNNING_RECONNECT_MAX_ATTEMPTS}; `0` restores the legacy
@@ -411,7 +411,7 @@ export class IosH264Source implements H264CaptureSource {
   private readonly timer: Timer;
   private readonly firstFrameTimeoutMs: number;
   private readonly pendingFrames: LatestFrameQueue;
-  private readonly simulatorHelperPool: IOSSimulatorCaptureHelperPool;
+  private readonly simulatorHelperPool: IosSimulatorCaptureHelperPool;
   private readonly runningReconnectMaxAttempts: number;
   private readonly runningReconnectBackoff: BackoffPolicy;
 
@@ -485,7 +485,7 @@ export class IosH264Source implements H264CaptureSource {
     });
     this.fps = options.fps ?? DEFAULT_IOS_WEBRTC_FPS;
     this.createHelper =
-      options.createHelper ?? ((helperOptions) => new IOSScreenCaptureHelper(helperOptions));
+      options.createHelper ?? ((helperOptions) => new IosScreenCaptureHelper(helperOptions));
     this.ffmpegClient =
       options.ffmpegClient ??
       new DefaultFfmpegClient({
@@ -835,7 +835,7 @@ export class IosH264Source implements H264CaptureSource {
   /**
    * End the outgoing encoder's stdin, SIGTERM it, and await its exit within
    * {@link IOS_ENCODER_RESTART_GRACE_MS}; if it has not exited by then, escalate
-   * to SIGKILL. Mirrors {@link IOSScreenCaptureHelper}'s shutdown discipline.
+   * to SIGKILL. Mirrors {@link IosScreenCaptureHelper}'s shutdown discipline.
    */
   private async reapOutgoingEncoder(encoder: IosH264EncoderProcess): Promise<void> {
     let exited = false;

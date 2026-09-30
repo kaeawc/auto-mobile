@@ -52,7 +52,7 @@ while IFS= read -r _arg; do
 done < <(local_sim_build_args)
 XCODEPROJ="${CTRL_PROXY_IOS_DIR}/CtrlProxy.xcodeproj"
 
-# Default derived data path (matches IOSCtrlProxyBuilder.ts)
+# Default derived data path (matches IosCtrlProxyBuilder.ts)
 DEFAULT_DERIVED_DATA="/tmp/automobile-ctrl-proxy"
 DERIVED_DATA="${AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA:-${DEFAULT_DERIVED_DATA}}"
 

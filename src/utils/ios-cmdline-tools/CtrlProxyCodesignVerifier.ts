@@ -4,7 +4,7 @@ import { execFileAsync as sharedExecFileAsync } from "../HostCommandExecutor";
 /**
  * Result of running `codesign`/`spctl` against the downloaded CtrlProxy runner
  * app bundle. This is a pure inspection result — the policy decision (warn vs.
- * refuse) lives in {@link IOSCtrlProxyBuilder}, not here (issue #4760).
+ * refuse) lives in {@link IosCtrlProxyBuilder}, not here (issue #4760).
  */
 export interface CodesignVerificationOutcome {
   /** `codesign --verify --deep --strict` exited 0 (signature intact). */
@@ -24,7 +24,7 @@ export interface CodesignVerificationOutcome {
 /**
  * Narrow seam over the macOS `codesign`/`spctl` command-line tools, used as the
  * second integrity control before launching the downloaded iOS helper (issue
- * #4760). Injected into {@link IOSCtrlProxyBuilder} so unit tests can supply a
+ * #4760). Injected into {@link IosCtrlProxyBuilder} so unit tests can supply a
  * fake and never spawn a real process.
  */
 export interface CtrlProxyCodesignVerifier {

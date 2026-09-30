@@ -6,17 +6,17 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import {
   CAPTURE_CAPABILITY_PREFIX,
   ENCODED_VIDEO_CAPABILITY,
-  IOSScreenCaptureHelper,
+  IosScreenCaptureHelper,
   type CaptureTarget,
   type DecodedEncodedVideo,
 } from "../../../src/features/screen-stream";
 
 function withFakeSpawner(target: CaptureTarget = { kind: "simulator", windowID: 1 }): {
   fake: FakeChildProcess;
-  helper: IOSScreenCaptureHelper;
+  helper: IosScreenCaptureHelper;
 } {
   const fake = new FakeChildProcess();
-  const helper = new IOSScreenCaptureHelper({
+  const helper = new IosScreenCaptureHelper({
     binaryPath: "/fake/screen-capture-helper",
     target,
     spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -42,7 +42,7 @@ const goldenKeyframeRecordHex: string = (() => {
   return record.recordHex;
 })();
 
-describe("IOSScreenCaptureHelper capability handshake (issue #4787)", () => {
+describe("IosScreenCaptureHelper capability handshake (issue #4787)", () => {
   test("parses the capability marker, exposes it, and does not leak it as a stderr line", async () => {
     const { fake, helper } = withFakeSpawner();
     const capabilities: string[] = [];

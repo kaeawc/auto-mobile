@@ -617,6 +617,10 @@ const noStructuredContentReadRule = {
 // two selectors the repo enforces: interface names (PascalCase, no "I" prefix,
 // no "Interface" suffix) and class names (PascalCase, no "Impl" suffix).
 const PASCAL_CASE = /^[A-Z][A-Za-z0-9]*$/;
+const DEFERRED_IOS_EXPORTS = new Map([
+  ["IOSCtrlProxyClient", "src/features/observe/ios/IOSCtrlProxyClient.ts"],
+  ["IOSCtrlProxyManager", "src/utils/IOSCtrlProxyManager.ts"],
+]);
 const namingConventionRule = {
   meta: {
     type: "problem",
@@ -624,9 +628,14 @@ const namingConventionRule = {
       interfaceName:
         "Interface names must be PascalCase without an 'I' prefix or 'Interface' suffix.",
       className: "Class names must be PascalCase without an 'Impl' suffix.",
+      iosClassPrefix: "Exported iOS class names must use the 'Ios' prefix.",
     },
   },
   create(context) {
+    function isDeferredIosExport(name) {
+      const file = DEFERRED_IOS_EXPORTS.get(name);
+      return file !== undefined && context.filename.replaceAll("\\", "/").endsWith(file);
+    }
     // Class names appear on both ClassDeclaration (`class Foo {}`) and named
     // ClassExpression (`const X = class FooImpl {}`); the old
     // @typescript-eslint `class` selector covered both, so check both here. A
@@ -641,6 +650,27 @@ const namingConventionRule = {
         context.report({ node: node.id, messageId: "className" });
       }
     }
+    function checkExportedClass(node) {
+      const declaration = node.declaration;
+      if (
+        declaration?.type === "ClassDeclaration" &&
+        /^IOS[A-Z]/.test(declaration.id?.name ?? "") &&
+        !isDeferredIosExport(declaration.id?.name)
+      ) {
+        context.report({ node: declaration.id, messageId: "iosClassPrefix" });
+      }
+      if (declaration?.type === "VariableDeclaration") {
+        for (const declarator of declaration.declarations) {
+          if (
+            declarator.init?.type === "ClassExpression" &&
+            /^IOS[A-Z]/.test(declarator.id?.name ?? "") &&
+            !isDeferredIosExport(declarator.id?.name)
+          ) {
+            context.report({ node: declarator.id, messageId: "iosClassPrefix" });
+          }
+        }
+      }
+    }
     return {
       TSInterfaceDeclaration(node) {
         const name = node.id?.name;
@@ -653,6 +683,15 @@ const namingConventionRule = {
       },
       ClassDeclaration: checkClassName,
       ClassExpression: checkClassName,
+      ExportNamedDeclaration: checkExportedClass,
+      ExportDefaultDeclaration(node) {
+        if (node.declaration?.type === "ClassDeclaration") {
+          const name = node.declaration.id?.name ?? "";
+          if (/^IOS[A-Z]/.test(name) && !isDeferredIosExport(name)) {
+            context.report({ node: node.declaration.id, messageId: "iosClassPrefix" });
+          }
+        }
+      },
     };
   },
 };

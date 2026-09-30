@@ -15,6 +15,7 @@
  */
 
 import WebSocket from "ws";
+import { toActionableError } from "../../models/ActionableError";
 import { exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -135,6 +136,8 @@ export abstract class DeviceServiceClient {
   protected reconnectTimeoutId: ReturnType<Timer["setTimeout"]> | null = null;
   private backgroundReconnectAttempts = 0;
   private backgroundReconnectPaused = false;
+  /** Shared dial promise for callers joining the same connection attempt. */
+  private inFlightConnectPromise: Promise<boolean> | null = null;
   // Captured synchronously by connectWebSocket(), including subclass overrides.
   private backgroundConnectRequested = false;
 
@@ -514,14 +517,49 @@ export abstract class DeviceServiceClient {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     interest: { release: () => void } = this.acquirePendingConnectInterest(),
   ): Promise<boolean> {
-    if (!this.backgroundConnectRequested && this.isConnecting) {
+    if (!this.backgroundConnectRequested && (this.isConnecting || this.inFlightConnectPromise)) {
       // Joining callers reseed background recovery without spending another dial.
       this.backgroundReconnectAttempts = 0;
       this.backgroundReconnectPaused = false;
     }
-    return this.connectWebSocketAttempt(perf, this.backgroundConnectRequested).finally(
-      interest.release,
-    );
+
+    let connectPromise = this.inFlightConnectPromise;
+    const isJoiner = connectPromise !== null;
+    if (!connectPromise) {
+      connectPromise = this.connectWebSocketAttempt(perf, this.backgroundConnectRequested);
+      this.inFlightConnectPromise = connectPromise;
+      void connectPromise.then(
+        () => {
+          if (this.inFlightConnectPromise === connectPromise) {
+            this.inFlightConnectPromise = null;
+          }
+        },
+        () => {
+          if (this.inFlightConnectPromise === connectPromise) {
+            this.inFlightConnectPromise = null;
+          }
+        },
+      );
+    }
+
+    const callerPromise = isJoiner ? this.waitForConnectAttempt(connectPromise) : connectPromise;
+    return callerPromise.finally(interest.release);
+  }
+
+  /** Bound each caller's wait while allowing callers to share the dial itself. */
+  private waitForConnectAttempt(connectPromise: Promise<boolean>): Promise<boolean> {
+    const timeout = new Error("Connection attempt timed out");
+    return raceWithDeadline(connectPromise, {
+      timer: this.timer,
+      timeoutMs: this.config.connectionTimeoutMs,
+      label: "Device service connection",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return false;
+      }
+      throw toActionableError(error, "Failed while waiting for the device service connection");
+    });
   }
 
   protected connectBackgroundWebSocket(): Promise<boolean> {
@@ -563,20 +601,6 @@ export abstract class DeviceServiceClient {
       } catch (error) {
         logger.debug(`[${this.logTag}] Error closing stale WebSocket: ${error}`);
       }
-    }
-
-    // Connection already in progress - wait for it
-    if (this.isConnecting) {
-      logger.debug(`[${this.logTag}] Connection already in progress, waiting...`);
-      const connected = await new Promise<boolean>((resolve) => {
-        const checkInterval = this.timer.setInterval(() => {
-          if (!this.isConnecting) {
-            this.timer.clearInterval(checkInterval);
-            resolve(this.ws?.readyState === WebSocket.OPEN);
-          }
-        }, 100);
-      });
-      return connected;
     }
 
     if (this.isConnectCooldownActive(background)) {

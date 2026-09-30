@@ -4,6 +4,7 @@ export interface DragAndDropTarget {
 }
 
 export interface DragAndDropOptions {
+  display?: string;
   source: DragAndDropTarget;
   target: DragAndDropTarget;
   pressDurationMs?: number;

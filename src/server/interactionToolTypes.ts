@@ -40,6 +40,7 @@ export interface SystemTrayArgs {
 }
 
 export interface SendKeysArgs {
+  display?: string;
   commands: SendKeysCommand[];
   selector?: SendKeysSelector;
   platform?: Platform;
@@ -62,6 +63,7 @@ export interface OpenLinkArgs {
 }
 
 export interface TapOnArgs {
+  display?: string;
   selector: {
     elementId?: string;
     testTag?: string;
@@ -95,6 +97,7 @@ export interface TapOnArgs {
 }
 
 export interface TapAtArgs {
+  display?: string;
   x: number;
   y: number;
   platform?: Platform;
@@ -118,6 +121,7 @@ export interface TapAnyArgs {
 }
 
 export interface DragAndDropArgs {
+  display?: string;
   source: {
     text?: string;
     elementId?: string;
@@ -133,6 +137,7 @@ export interface DragAndDropArgs {
 }
 
 export interface SwipeOnArgs {
+  display?: string;
   includeSystemInsets?: boolean;
   container?: {
     elementId?: string;
@@ -153,6 +158,7 @@ export interface SwipeOnArgs {
 }
 
 export interface PinchOnArgs {
+  display?: string;
   direction: "in" | "out";
   distanceStart?: number;
   distanceEnd?: number;

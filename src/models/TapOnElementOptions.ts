@@ -8,6 +8,7 @@ export interface TapOnSubtextTarget {
 }
 
 export interface TapOnElementOptions {
+  display?: string;
   // Element selection - one of these must be provided
   text?: string;
   textAny?: string[];

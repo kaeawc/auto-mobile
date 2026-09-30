@@ -2,4 +2,5 @@
 export interface TapAtOptions {
   x: number;
   y: number;
+  display?: string;
 }

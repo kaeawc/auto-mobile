@@ -356,6 +356,7 @@ export const tapOnSchema = withJsonSchemaOverride(
     z
       .object({
         selector: tapOnSelectorSchema,
+        display: z.string().optional().describe("Target panel key, role, or active"),
         sibling: z
           .boolean()
           .optional()
@@ -492,6 +493,7 @@ export const tapAtSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
       .object({
+        display: z.string().optional().describe("Target panel key, role, or active"),
         x: z
           .number()
           .describe("Absolute screen x coordinate in the native observe coordinate space"),
@@ -568,6 +570,7 @@ export const dragAndDropSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
       .object({
+        display: z.string().optional().describe("Target panel key, role, or active"),
         source: dragAndDropSelectorSchema("Source"),
         target: dragAndDropSelectorSchema("Target"),
         pressDurationMs: z
@@ -603,6 +606,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
       .object({
+        display: z.string().optional().describe("Target panel key, role, or active"),
         includeSystemInsets: z
           .boolean()
           .optional()
@@ -649,6 +653,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
     z
       .object({
+        display: z.string().optional().describe("Target panel key, role, or active"),
         direction: z.enum(["in", "out"]).describe("Pinch direction"),
         distanceStart: z
           .number()
@@ -904,6 +909,7 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
 export const sendKeysSchema = addDeviceTargetingToSchema(
   z
     .object({
+      display: z.string().optional().describe("Target panel key, role, or active"),
       selector: sendKeysSelectorSchema
         .optional()
         .describe("Field to focus once before executing the ordered command sequence"),
@@ -1253,6 +1259,17 @@ export function formatSwipeOnMessage(
 // gating below is caught by a test — not just the formatter (#6163).
 export type SwipeOnLike = Pick<SwipeOn, "execute">;
 
+type SendKeysLike = Pick<SendKeys, "execute">;
+let sendKeysFactory: (device: BootedDevice) => SendKeysLike = (device) => new SendKeys(device);
+
+export function setSendKeysFactory(factory: (device: BootedDevice) => SendKeysLike): void {
+  sendKeysFactory = factory;
+}
+
+export function resetSendKeysFactory(): void {
+  sendKeysFactory = (device) => new SendKeys(device);
+}
+
 let swipeOnFactory: (device: BootedDevice) => SwipeOnLike = (device) => new SwipeOn(device);
 
 export function setSwipeOnFactory(factory: (device: BootedDevice) => SwipeOnLike): void {
@@ -1267,6 +1284,7 @@ export async function swipeOnHandler(
   device: BootedDevice,
   args: SwipeOnArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ): Promise<StructuredToolResponse<SwipeOnToolPayload> & { isError?: true }> {
   RecompositionTracker.getInstance().recordInteraction();
   const swipeOn = swipeOnFactory(device);
@@ -1276,17 +1294,20 @@ export async function swipeOnHandler(
   });
   const result = await swipeOn.execute(
     {
+      display: args.display,
       container: args.container,
-      autoTarget: args.autoTarget ?? true,
+      autoTarget: args.display === undefined ? (args.autoTarget ?? true) : args.autoTarget,
       direction: resolvedDirection.direction,
       lookFor: args.lookFor,
       speed: args.speed,
-      includeSystemInsets: args.includeSystemInsets ?? false,
+      includeSystemInsets:
+        args.display === undefined ? (args.includeSystemInsets ?? false) : args.includeSystemInsets,
       boomerang: args.boomerang,
       apexPause: args.apexPause,
       returnSpeed: args.returnSpeed,
     },
     progress,
+    signal,
   );
 
   const response = createStructuredToolResponse({
@@ -1338,6 +1359,7 @@ export async function pinchOnHandler(
   const pinchOn = pinchOnFactory(device);
   const result = await pinchOn.execute(
     {
+      display: args.display,
       direction: args.direction,
       distanceStart: args.distanceStart,
       distanceEnd: args.distanceEnd,
@@ -1753,6 +1775,7 @@ export async function tapOnHandler(
   const tapOnTextCommand = tapOnElementFactory(device);
   const result = await tapOnTextCommand.execute(
     {
+      display: args.display,
       container: args.container,
       text: args.selector.text,
       textAny: args.selector.textAny,
@@ -1796,7 +1819,10 @@ export async function tapAtHandler(
   progress?: ProgressCallback,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
-  const result = await tapAtElementFactory(device).execute({ x: args.x, y: args.y }, progress);
+  const result = await tapAtElementFactory(device).execute(
+    { x: args.x, y: args.y, display: args.display },
+    progress,
+  );
   const message = result.success
     ? `Tapped at (${result.x}, ${result.y})`
     : `Failed to tap at (${result.x}, ${result.y}): ${result.error || "unknown error"}`;
@@ -1901,6 +1927,7 @@ export async function dragAndDropHandler(
   const dragAndDrop = dragAndDropFactory(device);
   const result: DragAndDropResult = await dragAndDrop.execute(
     {
+      display: args.display,
       source: args.source,
       target: args.target,
       pressDurationMs: args.pressDurationMs,
@@ -2605,8 +2632,14 @@ export function registerInteractionTools() {
   ) => {
     await assertSendKeysRunnerCompatible(device);
     RecompositionTracker.getInstance().recordInteraction();
-    const sendKeys = new SendKeys(device);
-    const result = await sendKeys.execute(args.commands, args.selector, progress, signal);
+    const sendKeys = sendKeysFactory(device);
+    const result = await sendKeys.execute(
+      args.commands,
+      args.selector,
+      progress,
+      signal,
+      args.display,
+    );
     const response = createJSONToolResponse({
       message: result.success
         ? `Executed ${result.completedCommands} sendKeys command(s)`

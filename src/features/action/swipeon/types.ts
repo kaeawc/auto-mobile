@@ -12,6 +12,7 @@ import { SwipeResult } from "../../../models/SwipeResult";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
+import type { RenderedObservationReader } from "../TargetDisplayAction";
 
 export type SwipeOnResolvedOptions = SwipeOnOptions & { direction: SwipeDirection };
 
@@ -111,6 +112,7 @@ export interface ScrollAccessibilityService {
 }
 
 export interface SwipeOnDependencies {
+  lastRenderedObservation?: RenderedObservationReader;
   resolver?: Pick<import("../../utility/ElementResolver").ElementResolver, "resolve">;
   executeGesture?: GestureExecutor;
   observeScreen?: ObserveScreen;

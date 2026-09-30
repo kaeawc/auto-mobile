@@ -61,6 +61,12 @@ export interface InputKeyResult {
   error?: string;
 }
 
+interface InputKeyRouting {
+  displayId?: number;
+  signal?: AbortSignal;
+  onDispatch?: () => void;
+}
+
 export interface FrameContextValidator {
   validateFrameContext(
     frameContext: string,
@@ -101,11 +107,12 @@ export class InputKey {
     timeoutMs?: number,
     frameContext?: string,
     modifiers: readonly InputKeyModifier[] = [],
+    routing: InputKeyRouting = {},
   ): Promise<InputKeyResult> {
     if (this.device.platform === "ios") {
       return this.pressIos(key, modifiers, timeoutMs);
     }
-    return this.pressAndroid(key, modifiers, timeoutMs, frameContext);
+    return this.pressAndroid(key, modifiers, timeoutMs, frameContext, routing);
   }
 
   private async pressAndroid(
@@ -113,6 +120,7 @@ export class InputKey {
     modifiers: readonly InputKeyModifier[],
     timeoutMs?: number,
     frameContext?: string,
+    { displayId, signal, onDispatch }: InputKeyRouting = {},
   ): Promise<InputKeyResult> {
     const keyCode = INPUT_KEY_CODE_MAP[key];
     try {
@@ -126,6 +134,9 @@ export class InputKey {
       );
       if ("failure" in inputArgsResult) {
         return inputArgsResult.failure;
+      }
+      if (displayId !== undefined) {
+        inputArgsResult.args.splice(2, 0, "-d", String(displayId));
       }
       const adbTimeoutMs = this.remainingMs(deadlineMs);
       if (adbTimeoutMs !== undefined && adbTimeoutMs <= 0) {
@@ -141,19 +152,23 @@ export class InputKey {
         await this.adb.execute(inputArgsResult.args, {
           timeoutMs: adbTimeoutMs,
           noRetry: true,
+          signal,
           beforeDispatch:
-            frameContext === undefined
+            frameContext === undefined && !onDispatch
               ? undefined
               : async () => {
-                  validationFailure = await this.validateBeforeDispatch(
-                    key,
-                    keyCode,
-                    frameContext,
-                    deadlineMs,
-                  );
-                  if (validationFailure) {
-                    throw new Error(validationFailure.error);
+                  if (frameContext !== undefined) {
+                    validationFailure = await this.validateBeforeDispatch(
+                      key,
+                      keyCode,
+                      frameContext,
+                      deadlineMs,
+                    );
+                    if (validationFailure) {
+                      throw new Error(validationFailure.error);
+                    }
                   }
+                  onDispatch?.();
                 },
         });
       } catch (error) {

@@ -39,7 +39,7 @@ import { stripInternalObservationFields } from "./observationInternalFields";
 export interface ObservationBaselineStore {
   get(sessionUuid: string): ObserveResult | undefined;
   set(sessionUuid: string, observation: ObserveResult, displayRevision?: number): void;
-  setDisplayRevision?(sessionUuid: string, revision: number): void;
+  setDisplayRevision?(sessionUuid: string, revision: number, key?: string): void;
 }
 
 export type ObservationArtifactPayload = string;
@@ -432,6 +432,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   let hasArtifactableObservation = false;
   let pendingBaselineUpdate: { sessionUuid: string; observation: ObserveResult } | undefined;
   const renderedObservation = isObserveTool ? payload : payload.observation;
+  const renderedDisplayKey = isObserveResult(renderedObservation)
+    ? renderedObservation.display?.key
+    : undefined;
   const renderedDisplayRevision =
     !ctx.internal &&
     (isObserveTool || !noObserveEnabled) &&
@@ -712,7 +715,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       renderedDisplayRevision,
     );
   } else if (ctx.sessionUuid && renderedDisplayRevision !== undefined) {
-    ctx.baselineStore?.setDisplayRevision?.(ctx.sessionUuid, renderedDisplayRevision);
+    ctx.baselineStore?.setDisplayRevision?.(
+      ctx.sessionUuid,
+      renderedDisplayRevision,
+      renderedDisplayKey,
+    );
   }
 
   return response;

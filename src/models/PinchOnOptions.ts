@@ -1,4 +1,5 @@
 export interface PinchOnOptions {
+  display?: string;
   direction: "in" | "out";
   distanceStart?: number;
   distanceEnd?: number;

@@ -23,7 +23,20 @@ When inventory has two or more panels, `otherDisplays` lists each remaining
 panel's `key`, `role`, and pixel `size` (`width`, `height`).
 `display: "all"` is not supported yet. Android routes the hierarchy and
 screenshot reads to the selected display; on iOS, only the currently live
-simulator panel can be observed. This selector does not route interaction tools.
+simulator panel can be observed.
+
+`tapOn`, `tapAt`, `swipeOn`, `pinchOn`, `dragAndDrop`, and `sendKeys` accept the
+same optional `display` selector. First observe the target panel, then pass the
+same panel to the action. An explicit action rejects coordinates from another
+panel and asks you to re-observe the target. Android single-finger input uses
+the selected panel's logical display ID. The current Android CtrlProxy APK does
+not expose per-display two-finger gesture dispatch, so `pinchOn` on an explicitly
+selected Android panel reports that limitation. iOS accepts only its live panel.
+On iOS, `tapOn`, `swipeOn`, `dragAndDrop`, and `pinchOn` validate the selected
+panel, then use their existing CtrlProxy gesture path on that live panel.
+For Android `sendKeys`, text, clear, and IME actions require a selector when
+`display` is set so the input field can be focused on that panel. Discrete key
+events use `input -d` directly.
 
 ### Screen-coordinate contract
 

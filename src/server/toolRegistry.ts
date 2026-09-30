@@ -1224,10 +1224,10 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
               DaemonState.getInstance()
                 .getSessionManager()
                 .setLastRenderedObservation(uuid, observation, displayRevision),
-            setDisplayRevision: (uuid, revision) =>
+            setDisplayRevision: (uuid, revision, key) =>
               DaemonState.getInstance()
                 .getSessionManager()
-                .setLastRenderedDisplayRevision(uuid, revision),
+                .setLastRenderedDisplayRevision(uuid, revision, key),
           }
         : undefined;
     const configuredArtifactDirectory = serverConfig.getToolOutputsDir();

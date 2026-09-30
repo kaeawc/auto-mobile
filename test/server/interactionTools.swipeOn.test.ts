@@ -7,7 +7,7 @@ import {
   swipeOnHandler,
 } from "../../src/server/interactionTools";
 import type { SwipeOnArgs } from "../../src/server/interactionToolTypes";
-import type { BootedDevice, SwipeOnToolPayload } from "../../src/models";
+import type { BootedDevice, SwipeOnOptions, SwipeOnToolPayload } from "../../src/models";
 import { resolveSwipeDirection } from "../../src/utils/swipeOnUtils";
 import { getStructuredField } from "../../src/utils/toolUtils";
 
@@ -110,5 +110,23 @@ describe("swipeOnHandler (registered handler wiring)", () => {
     const response = await swipeOnHandler(fakeDevice, args);
     expect(response.isError).toBeUndefined();
     expect(getStructuredField(response, "message")).toBe("Swiped up");
+  });
+
+  test("omitting display preserves swipe defaults and forwards the original signal", async () => {
+    const signal = new AbortController().signal;
+    let options: SwipeOnOptions | undefined;
+    let forwardedSignal: AbortSignal | undefined;
+    setSwipeOnFactory(() => ({
+      execute: async (args, _progress, actionSignal) => {
+        options = args;
+        forwardedSignal = actionSignal;
+        return fakeResult({ success: true });
+      },
+    }));
+    await swipeOnHandler(fakeDevice, args, undefined, signal);
+    expect(options?.display).toBeUndefined();
+    expect(options?.autoTarget).toBe(true);
+    expect(options?.includeSystemInsets).toBe(false);
+    expect(forwardedSignal).toBe(signal);
   });
 });

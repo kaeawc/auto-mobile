@@ -44,7 +44,7 @@ extension SCWindow: @retroactive @unchecked Sendable {}
 /// reconfiguration so frames don't get cropped.
 ///
 /// `@unchecked Sendable`: every mutable frame-path field (`_pipeline`, `_stream`,
-/// `_configuredPixelWidth/Height`, `_reconfiguring`) is `stateLock`-guarded, and
+/// `_configuredPixelWidth/Height`) is `stateLock`-guarded, and
 /// `fps`, `audioEnabled`, `windowID`, `configuredPixelFormat`, and
 /// `startCaptureDeadlineSeconds` are set once in `start()` before frames flow, then
 /// read-only. This lets the ScreenCaptureKit callbacks and the reconfigure task
@@ -66,7 +66,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     /// Guards the mutable frame-path state shared across the ScreenCaptureKit frame
     /// queue (`didOutputSampleBuffer`), the MainActor `start()`/`stop()`, and the
     /// reconfigure `Task`: the encode `pipeline`, the `stream`, the configured
-    /// dimensions, and the reconfigure-in-flight flag. Snapshot-under-lock-then-act;
+    /// dimensions. Snapshot-under-lock-then-act;
     /// the lock is never held across an `await` or a blocking call.
     private let stateLock = NSLock()
     /// Shared in-helper encode wiring in `--encode h264` mode (issues #4788 /
@@ -77,9 +77,6 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     private var _stream: CaptureStream?
     private var _configuredPixelWidth = 0
     private var _configuredPixelHeight = 0
-    /// True while an async `updateConfiguration` dispatched by `reconfigure` is in
-    /// flight, so a burst of same-size frames does not spawn overlapping updates.
-    private var _reconfiguring = false
     private var _overlaySourceRect = CGRect.zero
     private var _updatingOverlay = false
     private var lastIdleMarkerUptime: TimeInterval?
@@ -361,7 +358,10 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         // target and lets VideoToolbox scale the native buffer — the divergence the
         // shared pipeline is designed around.)
         if width != target.width || height != target.height {
-            reconfigure(width: target.width, height: target.height)
+            let configured = currentConfiguredSize()
+            if configured.width != target.width || configured.height != target.height {
+                reconfigure(width: target.width, height: target.height)
+            }
             return
         }
 
@@ -510,63 +510,22 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
         return (_configuredPixelWidth, _configuredPixelHeight)
     }
 
-    /// Kicks off a size change from the frame queue. `beginReconfigure` commits the
-    /// new size synchronously and claims the single in-flight slot, so a burst of
-    /// frames neither races the dimension writes nor spawns overlapping
-    /// `updateConfiguration` calls (the reconfigure storm). The loop then
-    /// **coalesces to the latest** target: if a newer size is requested while an
-    /// update is applying, it is applied once the current one completes, so the last
-    /// requested geometry is never dropped (only same-size requests are truly
-    /// deduped). The retry inside `applyStreamConfiguration` bounds recovery so a
-    /// single transient failure does not strand the stream at a stale size (#4768).
-    private func reconfigure(width: Int, height: Int) {
-        guard let stream = beginReconfigure(width: width, height: height) else { return }
+    /// Commits a frame's new size before dispatching one stream update. Subsequent
+    /// frames at that size see the committed dimensions and skip this path. A later
+    /// frame with a different size commits and dispatches its own update, even when
+    /// an earlier update is still in flight. Internal so tests can assert the
+    /// synchronous commit without a real ScreenCaptureKit stream.
+    func reconfigure(width: Int, height: Int) {
+        let stream: CaptureStream? = stateLock.withLock {
+            guard let stream = _stream else { return nil }
+            _configuredPixelWidth = width
+            _configuredPixelHeight = height
+            return stream
+        }
+        guard let stream = stream else { return }
         Task { [weak self] in
-            var width = width
-            var height = height
-            while true {
-                await self?.applyStreamConfiguration(stream: stream, width: width, height: height)
-                guard let next = self?.nextReconfigureTarget(applied: width, height) else { return }
-                width = next.width
-                height = next.height
-            }
+            await self?.applyStreamConfiguration(stream: stream, width: width, height: height)
         }
-    }
-
-    /// Commits the new size under `stateLock` and claims the reconfigure slot,
-    /// returning the stream to update — or `nil` when there is no stream, or an
-    /// update is already in flight. In the in-flight case the newer size is still
-    /// committed, so the running loop picks it up via `nextReconfigureTarget`
-    /// (coalesce-to-latest). Synchronous, so once a frame commits a size a same-size
-    /// burst no longer re-triggers. Internal so tests can drive it deterministically.
-    func beginReconfigure(width: Int, height: Int) -> CaptureStream? {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        // No stream: nothing to reconfigure, and committing a size here would be wrong
-        // if a frame slipped in before `beginCapture` stored the stream. Leave it.
-        guard let stream = _stream else { return nil }
-        _configuredPixelWidth = width
-        _configuredPixelHeight = height
-        if _reconfiguring {
-            return nil
-        }
-        _reconfiguring = true
-        return stream
-    }
-
-    /// Called after applying `(width, height)`. If the committed target still matches
-    /// what was applied, releases the in-flight slot and returns `nil`. If a newer
-    /// target was committed while the update was applying, keeps the slot and returns
-    /// that target so the loop applies it too — so the latest requested geometry is
-    /// never left unsent. Internal so tests can drive the coalescing deterministically.
-    func nextReconfigureTarget(applied width: Int, _ height: Int) -> (width: Int, height: Int)? {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        if _configuredPixelWidth == width, _configuredPixelHeight == height {
-            _reconfiguring = false
-            return nil
-        }
-        return (_configuredPixelWidth, _configuredPixelHeight)
     }
 
     /// Applies a new capture size to the given stream. Split out so tests can `await`
@@ -610,7 +569,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
 
     /// Applies a new capture size to the live stream. Retained as the directly-`await`able
     /// test seam for the `updateConfiguration` success/retry/failure paths; production goes
-    /// through `reconfigure` → `beginReconfigure`. Commits the size under the lock (only when a
+    /// through `reconfigure`. Commits the size under the lock (only when a
     /// stream is present) then applies it.
     func performReconfiguration(width: Int, height: Int) async {
         // Scoped `withLock`: `lock()`/`unlock()` is unavailable from async contexts in

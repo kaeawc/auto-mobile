@@ -388,7 +388,7 @@ test("selection metadata separates the matched text child from the shared action
   expect(highlight.matchedElement?.bounds).toEqual(childBounds);
 });
 
-test("tap promotion and resolver choose the nearest nested clickable ancestor", async () => {
+test("tap and long-press promotion choose the same nearest ordinary clickable ancestor", async () => {
   const { ResolverElementSelector } =
     await import("../../../src/features/utility/ResolverElementSelector");
   const matched: Element = { text: "Wi-Fi", bounds: labelBounds };
@@ -397,14 +397,29 @@ test("tap promotion and resolver choose the nearest nested clickable ancestor", 
   const selection = new ResolverElementSelector().selectByText(nestedClickableHierarchy, "Wi-Fi", {
     intentAction: "tap",
   });
+  const longPressPromoted = tap.resolveTapTargetElement(
+    matched,
+    nestedClickableHierarchy,
+    "longPress",
+    false,
+  );
+  const longPressSelection = new ResolverElementSelector().selectByText(
+    nestedClickableHierarchy,
+    "Wi-Fi",
+    { intentAction: "long-press" },
+  );
 
   expect(promoted.usedParent).toBe(true);
   expect(promoted.element.bounds).toEqual(innerBounds);
   expect(selection.element?.bounds).toEqual(innerBounds);
   expect(selection.matchedElement?.bounds).toEqual(labelBounds);
+  expect(longPressPromoted.usedParent).toBe(true);
+  expect(longPressPromoted.element.bounds).toEqual(innerBounds);
+  expect(longPressSelection.element?.bounds).toEqual(innerBounds);
+  expect(longPressSelection.matchedElement?.bounds).toEqual(labelBounds);
 });
 
-test("nested promotion skips ancestors lacking the requested action or resource ID", async () => {
+test("nested promotion chooses the nearest eligible ancestor and honors resource ID", async () => {
   const { ResolverElementSelector } =
     await import("../../../src/features/utility/ResolverElementSelector");
   const hierarchy = {
@@ -434,10 +449,11 @@ test("nested promotion skips ancestors lacking the requested action or resource 
   );
   expect(
     tap.resolveTapTargetElement(matched, hierarchy, "longPress", false).element["resource-id"],
-  ).toBe("app:id/outer");
+  ).toBeUndefined();
   expect(
-    selector.selectByText(hierarchy, "Wi-Fi", { intentAction: "long-press" }).element?.[
-      "resource-id"
-    ],
+    selector.selectByText(hierarchy, "Wi-Fi", { intentAction: "long-press" }).element?.bounds,
+  ).toEqual(innerBounds);
+  expect(
+    tap.resolveTapTargetElement(matched, hierarchy, "longPress", true).element["resource-id"],
   ).toBe("app:id/outer");
 });

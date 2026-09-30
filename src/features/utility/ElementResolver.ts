@@ -150,9 +150,7 @@ export function promoteClickableAncestor(
     if (
       hasVisibleBounds(candidate, intent) &&
       (!intent.requireResourceId || candidate.nativeId) &&
-      (action === "long-press"
-        ? candidate.affordances.includes("long-press")
-        : candidate.affordances.includes("tap") || candidate.affordances.includes("toggle"))
+      hasActionAffordance(candidate, { action })
     ) {
       return candidate;
     }
@@ -190,7 +188,10 @@ function containsBounds(container: ElementBounds, contained: ElementBounds): boo
   );
 }
 
-function hasActionAffordance(node: SearchableEntry, intent: ResolutionIntent): boolean {
+function hasActionAffordance(
+  node: SearchableEntry,
+  intent: Pick<ResolutionIntent, "action">,
+): boolean {
   if (intent.action === "focus-input") {
     return isFocusEditableElement(node.properties);
   }

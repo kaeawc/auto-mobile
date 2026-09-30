@@ -5,6 +5,7 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { displayTransitions } from "../observe/DisplayTransition";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { Window } from "../observe/Window";
 import {
@@ -50,6 +51,15 @@ export interface ProgressCallback {
  * of guessing at a duplicated magic number (issue #6248 review, P2).
  */
 export const FINAL_OBSERVATION_RETRY_BACKOFF_MS: readonly number[] = [50, 100, 200, 400];
+
+const COORDINATE_ACTIONS = new Set([
+  "tapAt",
+  "tapOn",
+  "tapAny",
+  "swipeOn",
+  "dragAndDrop",
+  "pinchOn",
+]);
 
 /**
  * Max retry attempts `takeObservation` performs after its initial observation
@@ -160,6 +170,7 @@ export class BaseVisualChange {
       await progress(0, 100, "Preparing to execute action...");
     }
     throwIfAborted(options.signal);
+    const displayRevision = displayTransitions.revision(this.device.deviceId);
 
     // Fetch cached view hierarchy (skip if we just terminated/cleared the app)
     let previousObserveResult: ObserveResult | null = null;
@@ -199,6 +210,13 @@ export class BaseVisualChange {
       }
     }
 
+    const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
+    if (coordinateAction && displayTransitions.revision(this.device.deviceId) !== displayRevision) {
+      throw new ActionableError(
+        "Display changed while preparing this action. Re-observe the active panel and choose the target again.",
+      );
+    }
+
     // Record the action start time (device time if available) to ensure fresh data
     const actionStartTime = await perf.track("getActionStartTime", async () => {
       if (this.device.platform !== "android") {
@@ -212,6 +230,14 @@ export class BaseVisualChange {
 
     const blockResult = await perf.track("executeBlock", async () => {
       throwIfAborted(options.signal);
+      if (
+        coordinateAction &&
+        displayTransitions.revision(this.device.deviceId) !== displayRevision
+      ) {
+        throw new ActionableError(
+          "Display changed before dispatch. Re-observe the active panel and choose the target again.",
+        );
+      }
       return block(previousObserveResult!);
     });
 

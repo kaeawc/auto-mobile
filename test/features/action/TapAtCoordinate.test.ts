@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
 import { computeFreshness } from "../../../src/features/observe/observationFreshness";
+import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -102,6 +103,59 @@ function createTapAt(
 }
 
 describe("TapAtCoordinate", () => {
+  test("rejects panel-A coordinates when the pre-dispatch observation detects a fold", async () => {
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice, 200, 200);
+    const panelA = {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    } as ObserveResult;
+    const panelB = {
+      display: { key: "cover", role: "cover", posture: "closed", generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    } as ObserveResult;
+    displayTransitions.record(androidDevice.deviceId, panelA);
+    const execute = spyOn(observeScreen, "execute").mockImplementation(async () => {
+      displayTransitions.checkIdentity(androidDevice.deviceId, panelB.display);
+      displayTransitions.record(androidDevice.deviceId, panelB);
+      return observation(100, 100, "panel-b");
+    });
+    try {
+      const result = await tapAt.execute({ x: 50, y: 50 });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Re-observe");
+      expect(androidDispatches).toEqual([]);
+    } finally {
+      execute.mockRestore();
+      displayTransitions.reset(androidDevice.deviceId);
+    }
+  });
+
+  test("accepts coordinates chosen after re-observing the transitioned panel", async () => {
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice, 100, 100);
+    const panelA = {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    } as ObserveResult;
+    const panelB = {
+      display: { key: "cover", role: "cover", posture: "closed", generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    } as ObserveResult;
+    displayTransitions.record(androidDevice.deviceId, panelA);
+    displayTransitions.checkIdentity(androidDevice.deviceId, panelB.display);
+    displayTransitions.record(androidDevice.deviceId, panelB);
+    observeScreen.setObserveResult({
+      ...observation(100, 100, "panel-b"),
+      display: panelB.display,
+    });
+    try {
+      const result = await tapAt.execute({ x: 50, y: 50 });
+      expect(result.success).toBe(true);
+      expect(androidDispatches).toHaveLength(1);
+    } finally {
+      displayTransitions.reset(androidDevice.deviceId);
+    }
+  });
+
   test("rounds in-bounds Android coordinates and dispatches native pixels", async () => {
     const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice);
 

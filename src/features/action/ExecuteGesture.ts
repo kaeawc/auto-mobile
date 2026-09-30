@@ -10,13 +10,14 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 /**
  * Executes gestures using platform-specific commands
  */
 export class ExecuteGesture extends BaseVisualChange {
-  constructor(device: BootedDevice, adb: AdbExecutor | null = null) {
-    super(device, adb);
+  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
+    super(device, adb, timer);
     this.device = device;
   }
 

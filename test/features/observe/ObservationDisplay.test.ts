@@ -1,8 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import {
+  ObservedAndroidDisplayCache,
   observedAndroidDisplay,
   observedIosDisplay,
 } from "../../../src/features/observe/ObservationDisplay";
+import { DisplayTransitionTracker } from "../../../src/features/observe/DisplayTransition";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
@@ -98,7 +100,7 @@ describe("observation display stamp", () => {
     }
   });
 
-  test("two Android multi-panel observations reuse one display service lookup", async () => {
+  test("two Android multi-panel observations reuse the live display binding", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", {
@@ -143,6 +145,63 @@ describe("observation display stamp", () => {
       ).toHaveLength(1);
     } finally {
       resetObserveCacheStore();
+    }
+  });
+
+  test("an empty or failed lookup retains the last panel until the next successful read", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = {
+      ...android,
+      deviceId: "display-lookup-gap",
+      displays: {
+        panels: [
+          { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } },
+          { key: "cover", role: "cover", sizePx: { width: 100, height: 100 } },
+        ],
+        postures: ["opened", "closed"],
+      },
+    };
+    const outputs = [
+      'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+      "",
+      "",
+      'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+    ];
+    let reads = 0;
+    const transitions: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => transitions.push(reason));
+    const adb = {
+      executeCommand: async () => {
+        const index = reads++;
+        if (index === 1) {
+          throw new Error("lookup failed");
+        }
+        return { stdout: outputs[index] ?? "", stderr: "" };
+      },
+    } as unknown as FakeAdbExecutor;
+    const cache = new ObservedAndroidDisplayCache(timer);
+    try {
+      const first = await cache.resolve(device, adb);
+      const failed = await cache.resolve(device, adb, undefined, true);
+      const empty = await cache.resolve(device, adb, undefined, true);
+      const recovered = await cache.resolve(device, adb, undefined, true);
+      for (const resolved of [first, failed, empty, recovered]) {
+        tracker.checkIdentity(device.deviceId, resolved.display);
+        tracker.record(device.deviceId, {
+          display: resolved.display,
+          screenSize: { width: 200, height: 200 },
+        });
+      }
+      expect([
+        first.display.key,
+        failed.display.key,
+        empty.display.key,
+        recovered.display.key,
+      ]).toEqual(["inner", "inner", "inner", "inner"]);
+      expect(reads).toBe(4);
+      expect(transitions).toEqual([]);
+    } finally {
+      ObservedAndroidDisplayCache.release(device.deviceId);
     }
   });
 

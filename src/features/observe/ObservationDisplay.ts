@@ -48,10 +48,20 @@ interface CachedAndroidDisplay {
 }
 
 const androidDisplayCache = new Map<string, CachedAndroidDisplay>();
+const lastKnownAndroidDisplay = new Map<string, ObservedAndroidDisplay>();
 
 /** Reuse the panel mapping across observe instances and settle polls. */
 export class ObservedAndroidDisplayCache {
   private static readonly TTL_MS = 5000;
+
+  static clear(deviceId: string): void {
+    androidDisplayCache.delete(deviceId);
+  }
+
+  static release(deviceId: string): void {
+    androidDisplayCache.delete(deviceId);
+    lastKnownAndroidDisplay.delete(deviceId);
+  }
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
 
@@ -59,6 +69,7 @@ export class ObservedAndroidDisplayCache {
     device: BootedDevice,
     adb: Pick<AdbExecutor, "executeCommand">,
     signal?: AbortSignal,
+    force = false,
   ): Promise<ObservedAndroidDisplay> {
     signal?.throwIfAborted();
     const inventory = JSON.stringify(device.displays ?? null);
@@ -68,12 +79,19 @@ export class ObservedAndroidDisplayCache {
       cached !== undefined &&
       cached.inventory === inventory &&
       age >= 0 &&
-      age < ObservedAndroidDisplayCache.TTL_MS
+      age < ObservedAndroidDisplayCache.TTL_MS &&
+      !force
     ) {
       return { ...cached.value, display: { ...cached.value.display } };
     }
-    const value = await observedAndroidDisplay(device, adb, signal);
+    const value = await observedAndroidDisplay(
+      device,
+      adb,
+      signal,
+      lastKnownAndroidDisplay.get(device.deviceId),
+    );
     signal?.throwIfAborted();
+    lastKnownAndroidDisplay.set(device.deviceId, value);
     androidDisplayCache.set(device.deviceId, {
       inventory,
       value: { ...value, display: { ...value.display } },
@@ -88,6 +106,7 @@ export async function observedAndroidDisplay(
   device: BootedDevice,
   adb: Pick<AdbExecutor, "executeCommand">,
   signal?: AbortSignal,
+  previous?: ObservedAndroidDisplay,
 ): Promise<ObservedAndroidDisplay> {
   const panels = device.displays?.panels;
   if (!panels?.length) {
@@ -98,6 +117,16 @@ export async function observedAndroidDisplay(
     };
   }
   const infos = await readAndroidDisplayInfos(adb, signal);
+  if (infos.length === 0 && previous) {
+    return { ...previous, display: { ...previous.display } };
+  }
+  return displayForAndroidInfos(panels, infos);
+}
+
+function displayForAndroidInfos(
+  panels: readonly DisplayPanel[],
+  infos: ReturnType<typeof parseAndroidDisplayInfos>,
+): ObservedAndroidDisplay {
   const physicalKey = infos
     .find((info) => info.logicalId === "0")
     ?.uniqueId?.split(":")

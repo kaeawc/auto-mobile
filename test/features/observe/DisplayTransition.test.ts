@@ -1,0 +1,288 @@
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  DisplayTransitionTracker,
+  displayTransitions,
+} from "../../../src/features/observe/DisplayTransition";
+import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
+import type { BootedDevice, ObserveResult } from "../../../src/models";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import { setObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
+
+const device: BootedDevice = {
+  deviceId: "display-transition-test",
+  name: "Foldable",
+  platform: "android",
+  displays: {
+    panels: [
+      { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } },
+      { key: "cover", role: "cover", sizePx: { width: 100, height: 100 } },
+    ],
+    postures: ["closed", "opened"],
+  },
+};
+
+const options = {
+  skipScreenshot: true,
+  skipBackStack: true,
+  skipRecompositionTracking: true,
+  skipPerformanceAudit: true,
+  skipAccessibilityAudit: true,
+};
+
+afterEach(() => {
+  displayTransitions.reset(device.deviceId);
+  resetObserveCacheStore();
+});
+
+describe("display transitions", () => {
+  test("geometry and identity changes invalidate once; unchanged captures preserve state", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));
+    const inner = {
+      key: "inner",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    const cover = {
+      key: "cover",
+      role: "cover" as const,
+      posture: "closed" as const,
+      generation: 2,
+    };
+    expect(
+      tracker.record(device.deviceId, { display: inner, screenSize: { width: 200, height: 200 } }),
+    ).toBe(false);
+    expect(
+      tracker.record(device.deviceId, {
+        display: { ...inner, generation: 3 },
+        screenSize: { width: 200, height: 200 },
+      }),
+    ).toBe(false);
+    expect(invalidations).toEqual([]);
+    expect(tracker.checkIdentity(device.deviceId, cover)).toBe(true);
+    expect(invalidations).toEqual(["display key, role, or posture changed"]);
+    expect(
+      tracker.record(device.deviceId, { display: cover, screenSize: { width: 100, height: 100 } }),
+    ).toBe(false);
+    expect(
+      tracker.record(device.deviceId, { display: cover, screenSize: { width: 101, height: 100 } }),
+    ).toBe(true);
+    expect(invalidations).toHaveLength(2);
+  });
+
+  test("rotation keeps the panel and revision without invalidating", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));
+    const display = {
+      key: "inner",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    tracker.record(device.deviceId, { display, screenSize: { width: 100, height: 200 } });
+    expect(
+      tracker.record(device.deviceId, {
+        display,
+        screenSize: { width: 200, height: 100 },
+      }),
+    ).toBe(false);
+    expect(tracker.revision(device.deviceId)).toBe(0);
+    expect(invalidations).toEqual([]);
+  });
+
+  test("rotation does not wipe observe cache or repeat the lock sample", async () => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", {
+      stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 100}',
+      stderr: "",
+    });
+    const lockRead = spyOn(adb, "getDeviceLock");
+    const cache = new FakeObserveCacheStore(timer);
+    const hierarchy = new FakeViewHierarchy();
+    hierarchy.configureHierarchySequence([
+      { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 100, updatedAt: 1 },
+      { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 200, updatedAt: 2 },
+    ]);
+    const screen = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(adb),
+      {
+        viewHierarchy: hierarchy,
+        cacheStore: cache,
+      },
+      timer,
+    );
+    try {
+      await screen.execute(options);
+      const generation = cache.currentGeneration(device.deviceId);
+      const firstLockReads = lockRead.mock.calls.length;
+      await screen.execute(options);
+      expect(displayTransitions.revision(device.deviceId)).toBe(0);
+      expect(cache.currentGeneration(device.deviceId)).toBe(generation);
+      expect(lockRead.mock.calls.length - firstLockReads).toBe(1);
+    } finally {
+      lockRead.mockRestore();
+    }
+  });
+
+  test("reset on release lets a new session establish its first panel", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));
+    const first = {
+      display: { key: "inner", role: "inner" as const, posture: "opened" as const, generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    };
+    const next = {
+      display: { key: "cover", role: "cover" as const, posture: "closed" as const, generation: 1 },
+      screenSize: { width: 100, height: 100 },
+    };
+    tracker.record(device.deviceId, first);
+    tracker.reset(device.deviceId);
+    expect(tracker.checkIdentity(device.deviceId, next.display)).toBe(false);
+    expect(tracker.record(device.deviceId, next)).toBe(false);
+    expect(invalidations).toEqual([]);
+  });
+
+  test("a panel change clears the per-device observe cache and leaves other devices intact", async () => {
+    const cache = new FakeObserveCacheStore(new FakeTimer());
+    setObserveCacheStore(cache);
+    const first = {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    } as ObserveResult;
+    await cache.put(device.deviceId, first);
+    await cache.put("other-device", first);
+    displayTransitions.record(device.deviceId, first);
+    expect(cache.getRecentInMemoryForDevice(device.deviceId)).toBe(first);
+    displayTransitions.notifyTransition(device.deviceId, "display_transition frame");
+    expect(cache.getRecentInMemoryForDevice(device.deviceId)).toBeUndefined();
+    expect(cache.getRecentInMemoryForDevice("other-device")).toBe(first);
+  });
+
+  test("the first folded observation reports the newly locked keyguard", async () => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    const hierarchy = new FakeViewHierarchy();
+    const cache = new FakeObserveCacheStore(timer);
+    adb.setCommandResponseSequence("cmd display get-displays", [
+      {
+        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+        stderr: "",
+      },
+      {
+        stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        stderr: "",
+      },
+    ]);
+    adb.setDeviceLockSequence([
+      { locked: false, keyguardShowing: false },
+      { locked: false, keyguardShowing: false },
+      { locked: true, keyguardShowing: true },
+    ]);
+    hierarchy.configureHierarchySequence([
+      {
+        hierarchy: { node: {} },
+        screenWidth: 200,
+        screenHeight: 200,
+        captureSequence: 1,
+        updatedAt: 1,
+      },
+      {
+        hierarchy: { node: {} },
+        screenWidth: 100,
+        screenHeight: 100,
+        captureSequence: 2,
+        updatedAt: 2,
+      },
+    ]);
+    const screen = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(adb),
+      { viewHierarchy: hierarchy, cacheStore: cache },
+      timer,
+    );
+    const first = await screen.execute(options);
+    const folded = await screen.execute(options);
+    expect(first.display.key).toBe("inner");
+    expect(folded.display.key).toBe("cover");
+    expect(folded.deviceLock?.locked).toBe(true);
+    expect(displayTransitions.revision(device.deviceId)).toBe(1);
+    expect(
+      adb.getExecutedCommands().filter((command) => command.includes("cmd display get-displays")),
+    ).toHaveLength(2);
+  });
+
+  test("tapOn rejects a fresh hierarchy captured on a different sized panel", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", {
+      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+      stderr: "",
+    });
+    const capture = {
+      capture: async () => ({
+        hierarchy: { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 },
+      }),
+    } as HierarchyCapture;
+    const tap = new TapOnElement(device, adb, {
+      timer: new FakeTimer(),
+      hierarchyCapture: capture,
+    });
+    displayTransitions.record(device.deviceId, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    });
+    await expect(tap.refreshViewHierarchy(10, { width: 200, height: 200 })).rejects.toThrow(
+      "Display changed during tap preparation",
+    );
+    expect(displayTransitions.revision(device.deviceId)).toBe(1);
+  });
+
+  test("tapOn rejects a same-sized panel with a different physical key", async () => {
+    const sameSized = {
+      ...device,
+      deviceId: "same-size-panels",
+      displays: {
+        panels: [
+          { key: "inner", role: "inner" as const, sizePx: { width: 200, height: 200 } },
+          { key: "cover", role: "cover" as const, sizePx: { width: 200, height: 200 } },
+        ],
+        postures: ["opened" as const, "closed" as const],
+      },
+    };
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", {
+      stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 200 x 200}',
+      stderr: "",
+    });
+    const capture = {
+      capture: async () => ({
+        hierarchy: { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
+      }),
+    } as HierarchyCapture;
+    const tap = new TapOnElement(sameSized, adb, {
+      timer: new FakeTimer(),
+      hierarchyCapture: capture,
+    });
+    displayTransitions.record(sameSized.deviceId, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    });
+    try {
+      await expect(tap.refreshViewHierarchy(10, { width: 200, height: 200 })).rejects.toThrow(
+        "Display changed during tap preparation",
+      );
+      expect(displayTransitions.revision(sameSized.deviceId)).toBe(1);
+    } finally {
+      displayTransitions.reset(sameSized.deviceId);
+    }
+  });
+});

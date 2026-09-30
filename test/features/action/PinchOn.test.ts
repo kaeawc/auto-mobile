@@ -1,7 +1,16 @@
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
-import { PinchOn } from "../../../src/features/action/PinchOn";
+import type {
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../src/models";
+import {
+  isLikelyBottomSheet,
+  PinchOn,
+  scorePinchElement,
+} from "../../../src/features/action/PinchOn";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
@@ -158,6 +167,27 @@ describe("PinchOn", () => {
     }));
     const target = await (pinchOn as any).resolveTarget({ direction: "out" });
     expect(target.bounds).toEqual(mapBounds);
+  });
+
+  test("string true scrollable flags receive the scrollable score", () => {
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      scrollable: "true",
+    };
+    expect(scorePinchElement(element, 20_000)).toBe(10_800);
+  });
+
+  test("bottom-sheet detection handles string and boolean scrollable flags", () => {
+    const bounds = { left: 0, top: 700, right: 300, bottom: 1000 };
+    const screenBounds = { left: 0, top: 0, right: 500, bottom: 1000 };
+    const stringTrue: Element = { bounds, scrollable: "true" };
+    const stringFalse: Element = { bounds, scrollable: "false" };
+    const booleanTrue: Element = { bounds, scrollable: true };
+
+    expect(isLikelyBottomSheet(stringTrue, screenBounds)).toBe(true);
+    expect(isLikelyBottomSheet(stringFalse, screenBounds)).toBe(false);
+    expect(isLikelyBottomSheet(booleanTrue, screenBounds)).toBe(true);
+    expect(scorePinchElement(stringFalse, 20_000)).toBe(108_000);
   });
 
   test("returns error when container specifies both elementId and text", async () => {

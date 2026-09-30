@@ -10,6 +10,7 @@ import {
   detectHomebrewAndroidTools,
   detectAndroidSdkTools,
   detectAndroidCommandLineTools,
+  AndroidToolsDetectionAbortError,
   ANDROID_TOOLS,
   clearDetectionCache,
   getAndroidHomeWithSystemImages,
@@ -447,6 +448,60 @@ describe("Android Command Line Tools - Detection", () => {
   });
 
   describe("detectAndroidCommandLineTools", () => {
+    test("shares one in-flight detection across concurrent callers", async () => {
+      const gate = Promise.withResolvers<void>();
+      systemDetection.setExecuteCommandGate(gate.promise);
+      const callers = Array.from({ length: 5 }, () =>
+        detectAndroidCommandLineTools(systemDetection),
+      );
+
+      for (
+        let attempt = 0;
+        attempt < 50 && systemDetection.executeCommandCallCount === 0;
+        attempt++
+      ) {
+        await Promise.resolve();
+      }
+      expect(systemDetection.executeCommandCallCount).toBe(1);
+
+      gate.resolve();
+      await Promise.all(callers);
+    });
+
+    test("uses the completed result until the cache is invalidated", async () => {
+      await detectAndroidCommandLineTools(systemDetection);
+      const callsAfterDetection = systemDetection.executeCommandCallCount;
+      await detectAndroidCommandLineTools(systemDetection);
+      expect(systemDetection.executeCommandCallCount).toBe(callsAfterDetection);
+
+      clearDetectionCache();
+      await detectAndroidCommandLineTools(systemDetection);
+      expect(systemDetection.executeCommandCallCount).toBeGreaterThan(callsAfterDetection);
+    });
+
+    for (const name of ["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK_HOME"]) {
+      test(`re-detects when ${name} changes`, async () => {
+        await detectAndroidCommandLineTools(systemDetection);
+        const initialCalls = systemDetection.executeCommandCallCount;
+        systemDetection.setEnvVar(name, "/new/sdk");
+        await detectAndroidCommandLineTools(systemDetection);
+        expect(systemDetection.executeCommandCallCount).toBeGreaterThan(initialCalls);
+      });
+    }
+
+    test("does not retain a rejected detection", async () => {
+      systemDetection.setExecError(
+        "which apkanalyzer",
+        new AndroidToolsDetectionAbortError(new Error("cancelled")),
+      );
+      await expect(detectAndroidCommandLineTools(systemDetection)).rejects.toThrow("cancelled");
+      const callsAfterFailure = systemDetection.executeCommandCallCount;
+
+      systemDetection.setExecResponse("which apkanalyzer", "");
+      await detectAndroidCommandLineTools(systemDetection);
+      expect(systemDetection.executeCommandCallCount).toBeGreaterThan(callsAfterFailure);
+    });
+
     test("should preserve first-seen order when deduplicating by path", async () => {
       systemDetection.setPlatform("darwin");
       systemDetection.setEnvVar("ANDROID_SDK_ROOT", "/android/sdk");

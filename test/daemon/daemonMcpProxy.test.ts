@@ -1,4 +1,4 @@
-import { describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
   DaemonMcpProxy,
   DaemonVersionMismatchError,
@@ -38,6 +38,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
 import { DeviceControlTransportError } from "../../src/daemon/deviceControlTransportFailure";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 
 const OLDER_VERSION = "0.0.1";
 const NEWER_VERSION = "9999.0.0";
@@ -149,6 +150,16 @@ class ScriptedDaemonClient implements DaemonClientLike {
 }
 
 describe("DaemonMcpProxy", () => {
+  beforeEach(() => {
+    ToolRegistry.register("observe", "read-only observation", {}, async () => ({ content: [] }), {
+      transportRecovery: "replay",
+    });
+  });
+
+  afterEach(() => {
+    ToolRegistry.unregister("observe");
+  });
+
   test("reused progress token routes by request id and survives sibling completion", async () => {
     const firstGate = Promise.withResolvers<void>();
     const secondGate = Promise.withResolvers<void>();

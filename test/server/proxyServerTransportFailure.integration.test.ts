@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -22,6 +22,7 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
@@ -271,6 +272,16 @@ describe("proxy server daemon-overload errors", () => {
 });
 
 describe("proxy server socket-close diagnostics", () => {
+  beforeEach(() => {
+    ToolRegistry.register("observe", "read-only observation", {}, async () => ({ content: [] }), {
+      transportRecovery: "replay",
+    });
+  });
+
+  afterEach(() => {
+    ToolRegistry.unregister("observe");
+  });
+
   test("labels a real request timer expiry as a timeout", async () => {
     const timer = new FakeTimer();
     const daemonClient = new DaemonClient("/unused", 250, timer);

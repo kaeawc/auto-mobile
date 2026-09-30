@@ -4638,7 +4638,7 @@ export function registerDeviceTools() {
     "Find or recover an Android AVD and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAndroidSchema,
     getAndroidHandler,
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, transportRecovery: "connect" },
   );
 
   ToolRegistry.register(
@@ -4646,13 +4646,14 @@ export function registerDeviceTools() {
     "Find or recover an iOS Simulator and prepare it for automation. See the automobile:tools resource for every tool's default enabled/gated state before acquiring a device.",
     getAppleSchema,
     getAppleHandler,
-    { defaultEnabled: true, supportsProgress: true },
+    { defaultEnabled: true, supportsProgress: true, transportRecovery: "connect" },
   );
 
   ToolRegistry.register("startDevice", "Start device", startDeviceSchema, startDeviceHandler, {
     defaultEnabled: true,
     supportsProgress: true,
     hidden: true,
+    transportRecovery: "connect",
   });
 
   ToolRegistry.register(
@@ -4660,11 +4661,16 @@ export function registerDeviceTools() {
     "Provision exact virtual device",
     provisionDeviceSchema,
     provisionDeviceHandler,
-    { defaultEnabled: false, outputSchema: provisionDeviceOutputSchema },
+    {
+      defaultEnabled: false,
+      outputSchema: provisionDeviceOutputSchema,
+      transportRecovery: "connect",
+    },
   );
 
   ToolRegistry.register("killDevice", "Kill device", killDeviceSchema, killDeviceHandler, {
     defaultEnabled: true,
+    transportRecovery: "connect",
   });
 
   ToolRegistry.register(
@@ -4672,6 +4678,6 @@ export function registerDeviceTools() {
     "Stop and permanently delete a device, with verified platform-inventory absence",
     teardownDeviceSchema,
     deleteDeviceHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, transportRecovery: "connect" },
   );
 }

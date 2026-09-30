@@ -166,7 +166,8 @@ import {
   deviceControlToolName,
   isDeviceControlTransportRequest,
   isReplaySafeAfterResponseClosure,
-  isUnexpectedSocketClosure,
+  isLoopbackTransportFailure,
+  loopbackMcpFetch,
   type DeviceControlTransportFailure,
   type DeviceControlTransportPhase,
 } from "./deviceControlTransportFailure";
@@ -2474,8 +2475,8 @@ export class UnixSocketServer {
     return false;
   }
 
-  private isDeviceControlSocketClosure(request: DaemonRequest, error: unknown): boolean {
-    return isDeviceControlTransportRequest(request) && isUnexpectedSocketClosure(error);
+  private isDeviceControlLoopbackTransportFailure(request: DaemonRequest, error: unknown): boolean {
+    return isDeviceControlTransportRequest(request) && isLoopbackTransportFailure(error);
   }
 
   private async forwardMcpRequestWithRecovery(
@@ -2493,7 +2494,7 @@ export class UnixSocketServer {
       );
       context.signal?.throwIfAborted();
     } catch (error) {
-      if (!this.isDeviceControlSocketClosure(context.request, error)) {
+      if (!this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
         throw error;
       }
       return this.recoverDeviceControlTransport({
@@ -2534,7 +2535,7 @@ export class UnixSocketServer {
       if (isExpiredLoopbackMcpSession(error)) {
         return this.retryExpiredMcpSession(context, identity, mcpClient);
       }
-      if (this.isDeviceControlSocketClosure(context.request, error)) {
+      if (this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
         const recoveryIdentity = this.getDeviceControlRecoveryFailureIdentity(context, identity);
         return this.recoverDeviceControlTransport({
           ...context,
@@ -2566,7 +2567,7 @@ export class UnixSocketServer {
       );
       context.signal?.throwIfAborted();
     } catch (error) {
-      if (!this.isDeviceControlSocketClosure(context.request, error)) {
+      if (!this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
         throw error;
       }
       throw this.deviceControlTransportError({
@@ -2595,7 +2596,7 @@ export class UnixSocketServer {
         context.signal,
       );
     } catch (error) {
-      if (!this.isDeviceControlSocketClosure(context.request, error)) {
+      if (!this.isDeviceControlLoopbackTransportFailure(context.request, error)) {
         throw error;
       }
       await this.resetMcpClientIfCurrent(context.route.clientKey, freshClient, "detach");
@@ -2955,7 +2956,7 @@ export class UnixSocketServer {
   private isDeviceControlReconnectExhaustion(request: DaemonRequest, error: unknown): boolean {
     return (
       error instanceof McpClientReconnectDeadlineError ||
-      this.isDeviceControlSocketClosure(request, error)
+      this.isDeviceControlLoopbackTransportFailure(request, error)
     );
   }
 
@@ -3224,7 +3225,7 @@ export class UnixSocketServer {
     const replayAfterResponse =
       input.phase === "response" && isReplaySafeAfterResponseClosure(input.request);
     logger.warn(
-      `[McpForward] device-control transport closed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
+      `[McpForward] device-control loopback transport failed for ${deviceControlToolName(input.request)} during ${input.phase}; reconnecting once`,
     );
     if (this.remainingMcpForwardBudget(input) <= 0) {
       throw this.deviceControlTransportError({
@@ -3268,7 +3269,7 @@ export class UnixSocketServer {
       }
       return response;
     } catch (error) {
-      if (!isUnexpectedSocketClosure(error)) {
+      if (!isLoopbackTransportFailure(error)) {
         throw error;
       }
       await this.resetMcpClientIfCurrent(recoveryRoute.clientKey, freshClient, "detach");
@@ -6036,6 +6037,7 @@ export class UnixSocketServer {
       throw new Error("mcpEndpoint is not set");
     }
     const transport = new StreamableHTTPClientTransport(new URL(this.mcpEndpoint), {
+      fetch: loopbackMcpFetch,
       reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
       ...(boundSessionUuid || toolSelectionProfileUuid || releasedSessionUuid
         ? {

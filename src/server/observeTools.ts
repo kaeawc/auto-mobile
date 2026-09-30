@@ -1568,6 +1568,7 @@ export function registerObserveTools() {
     observeHandler,
     {
       defaultEnabled: true,
+      transportRecovery: "replay",
       outputSchema: observeToolResultSchema,
       appUiResourceUri: OBSERVE_APP_RESOURCE_URI,
     },

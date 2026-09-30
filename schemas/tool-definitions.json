@@ -12220,7 +12220,7 @@
           "enum": ["up", "down", "left", "right"]
         },
         "gestureType": {
-          "description": "Finger direction or content scroll direction; default: scrollTowardsDirection",
+          "description": "Finger direction or content scroll direction; default: swipeFingerTowardsDirection",
           "type": "string",
           "enum": ["swipeFingerTowardsDirection", "scrollTowardsDirection"]
         },

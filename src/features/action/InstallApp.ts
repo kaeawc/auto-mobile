@@ -8,6 +8,7 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BootedDevice } from "../../models";
+import { ActionableError } from "../../models/ActionableError";
 import type { InstallAppResult } from "../../models/InstallAppResult";
 import {
   createGlobalPerformanceTracker,
@@ -197,12 +198,9 @@ export class InstallApp {
       });
     }
 
-    let beforePackages: Set<string> | null = null;
-    if (!packageName) {
-      beforePackages = await perf.track("listPackagesBefore", async () => {
-        return this.listPackagesForUser(targetUserId, signal);
-      });
-    }
+    const beforePackages = await perf.track("listPackagesBefore", async () => {
+      return this.listPackagesForUser(targetUserId, signal);
+    });
 
     const installArgs = `install --user ${targetUserId} -r "${artifactPath}"`;
     let installAttempt = await perf.track("adbInstall", () =>
@@ -249,25 +247,35 @@ export class InstallApp {
 
     const success = installAttempt.success;
 
-    if (!packageName && beforePackages) {
-      const afterPackages = success
-        ? await perf.track("listPackagesAfter", async () => {
-            return this.listPackagesForUser(targetUserId, signal);
-          })
-        : beforePackages;
-      const newPackages = this.diffSets(beforePackages, afterPackages);
+    if (success) {
+      const afterPackages = await perf.track("listPackagesAfter", async () => {
+        return this.listPackagesForUser(targetUserId, signal);
+      });
 
-      if (newPackages.length === 1) {
-        packageName = newPackages[0];
-      } else if (newPackages.length > 1) {
-        warnings.push(
-          "Installed APK but multiple new packages were detected; unable to determine the package name reliably.",
+      if (packageName && !afterPackages.has(packageName)) {
+        const observedPackages = this.diffSets(beforePackages, afterPackages);
+        const devicePackageName =
+          observedPackages.length > 0 ? observedPackages.join(", ") : "no installed package";
+        throw new ActionableError(
+          `APK package name mismatch: aapt reported "${packageName}", but the device reported "${devicePackageName}" after installation. Verify the APK manifest application ID and install the matching APK.`,
         );
-      } else if (success) {
-        warnings.push(
-          "Installed APK but package name could not be determined from the device package list.",
-        );
-        isInstalled = true;
+      }
+
+      if (!packageName) {
+        const newPackages = this.diffSets(beforePackages, afterPackages);
+
+        if (newPackages.length === 1) {
+          packageName = newPackages[0];
+        } else if (newPackages.length > 1) {
+          warnings.push(
+            "Installed APK but multiple new packages were detected; unable to determine the package name reliably.",
+          );
+        } else if (success) {
+          warnings.push(
+            "Installed APK but package name could not be determined from the device package list.",
+          );
+          isInstalled = true;
+        }
       }
     }
 
@@ -625,7 +633,7 @@ export class InstallApp {
 
     const result = await this.hostExecutor.executeCommand(tool.path, ["dump", "badging", apkPath]);
     const output = `${result.stdout}\n${result.stderr}`;
-    const match = output.match(/package:\s+name='([^']+)'/);
+    const match = output.match(/^package:\s+name='([^']+)'(?:\s|$)/m);
     if (!match) {
       throw new Error(`Failed to extract package name from ${tool.tool} output.`);
     }

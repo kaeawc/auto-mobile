@@ -55,10 +55,14 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 7,
+      calls: 6,
       reason:
-        "The pool IS the funnel: refresh sweep, assignment-time liveness check, and the " +
-        "bounded cache-bypassing identity rediscovery all reconcile through the pool.",
+        "The pool IS the funnel: refresh sweep and assignment-time liveness checks reconcile through the pool.",
+    },
+    "src/daemon/deviceDisconnectHandler.ts": {
+      calls: 1,
+      reason:
+        "Bounded stale-disconnect rediscovery reads the injected pool port and preserves captured incarnation checks.",
     },
     "src/daemon/deviceAutolockManager.ts": {
       calls: 1,

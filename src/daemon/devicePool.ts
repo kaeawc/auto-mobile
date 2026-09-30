@@ -83,6 +83,12 @@ import {
 import { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import { IdleDeviceReaper } from "./idleDeviceReaper";
 import { DeviceAutolockManager, type AutolockClient } from "./deviceAutolockManager";
+import {
+  DeviceDisconnectHandler,
+  INCARNATION_ANY,
+  type CurrentDisconnectStatus,
+} from "./deviceDisconnectHandler";
+export type { CurrentDisconnectStatus } from "./deviceDisconnectHandler";
 export { McpSessionRecoveryInProgressError } from "./deviceAutolockManager";
 import {
   AndroidRebootCoordinator,
@@ -137,8 +143,6 @@ export class DevicePoolError extends Error {
  * Pooled Device Status
  */
 export type DeviceStatus = "idle" | "busy" | "error";
-type AndroidRediscoveryVerification = "rediscovered" | "not-rediscovered" | "unknown";
-export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
 const UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS = 30_000;
 const RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS = 250;
 const MAX_DEFERRED_RECOVERY_SHUTDOWNS = 1;
@@ -585,14 +589,6 @@ class EmulatorProcessOutputTail {
 }
 
 /**
- * Marker incarnation used when an intentional shutdown is recorded while no
- * pooled device is present (only an in-flight recovery). Such a marker applies
- * to whatever incarnation the recovery produces, matching the pre-existing
- * serial-scoped recovery-cancellation behavior (issue #4915).
- */
-const INCARNATION_ANY = -1;
-
-/**
  * Device Pool
  *
  * Manages a pool of Android devices for parallel test execution:
@@ -693,6 +689,7 @@ export class DevicePool {
   private readonly androidRecoveryRecordLedger: AndroidRecoveryRecordLedger;
   private readonly idleDeviceReaper: IdleDeviceReaper;
   private readonly autolockManager: DeviceAutolockManager;
+  private readonly disconnectHandler: DeviceDisconnectHandler;
   private readonly androidRebootCoordinator: AndroidRebootCoordinator;
   private get recoveringSessionLosses(): Map<string, AndroidRecoveryRecord> {
     return this.androidRecoveryRecordLedger.recoveringSessionLosses;
@@ -1022,6 +1019,34 @@ export class DevicePool {
       this.criteriaMatcher,
       this.androidDeviceReboot,
     );
+    this.disconnectHandler = new DeviceDisconnectHandler({
+      getPooledDevice: (deviceId) => this.devices.get(deviceId),
+      getIntentionalShutdownMarker: (deviceId) => this.intentionalShutdowns.get(deviceId),
+      deleteIntentionalShutdownMarker: (deviceId) => {
+        this.intentionalShutdowns.delete(deviceId);
+      },
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      finishEmulatorLossIncident: (incidentId, outcome) =>
+        this.finishEmulatorLossIncident(incidentId, outcome),
+      recordEmulatorLossIncident: (deviceId, path, processExit, lastAdbState) =>
+        this.recordEmulatorLossIncident(deviceId, path, processExit, lastAdbState),
+      shouldRebootDisconnectedAndroidDevice: (device) =>
+        this.shouldRebootDisconnectedAndroidDevice(device),
+      rebootDisconnectedAndroidDevice: (device, incidentId) =>
+        this.rebootDisconnectedAndroidDevice(device, incidentId),
+      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
+      suppressAutoStartForDevice: (device) => this.suppressAutoStartForDevice(device),
+      completeEmulatorLossRecovery: (incidentId, outcome) =>
+        this.completeEmulatorLossRecovery(incidentId, outcome),
+      getRecoveryPolicy: () => this.getRecoveryPolicy(),
+      isAndroidEmulatorActiveRelaunchEligible: (device) =>
+        this.isAndroidEmulatorActiveRelaunchEligible(device),
+      getDeviceManager: () => this.deviceManager,
+      androidRediscoveryMatches: (candidate, deviceId, avdName) =>
+        this.criteriaMatcher.androidRediscoveryMatches(candidate, deviceId, avdName),
+    });
     this.releaseSessionForDisconnectedDevice =
       releaseSessionForDisconnectedDevice ??
       (async (sessionId, _deviceId, releaseReason, shouldCommit) => {
@@ -1693,167 +1718,18 @@ export class DevicePool {
     }
   }
 
-  /**
-   * Apply any intentional-shutdown marker to a disconnect, gated on the device
-   * incarnation. Returns `true` when the disconnect is fully handled here — the
-   * marked device was removed, or the signal was stale and the live device kept —
-   * and `false` when no marker applied and the caller should handle the
-   * disconnect normally.
-   */
-  private async applyIntentionalShutdownOnDisconnect(
-    deviceId: string,
-    device: PooledDevice | undefined,
-    mayBeStaleSignal: boolean,
-  ): Promise<boolean> {
-    const markerIncarnation = this.intentionalShutdowns.get(deviceId);
-    if (markerIncarnation === undefined) {
-      return false;
-    }
-    const appliesToCurrent =
-      !device || markerIncarnation === INCARNATION_ANY || markerIncarnation === device.incarnation;
-    if (!appliesToCurrent) {
-      // A different incarnation now holds this serial, so the mark belonged to a
-      // device that is already gone. Drop the stale marker instead of removing
-      // the live replacement (or suppressing its recovery), and let the caller
-      // handle this disconnect on its own merits.
-      this.intentionalShutdowns.delete(deviceId);
-      return false;
-    }
-    if (
-      mayBeStaleSignal &&
-      device &&
-      (await this.wasRebootedAndroidDeviceRediscovered(device)) !== "not-rediscovered"
-    ) {
-      // The intentionally-stopped serial is still (or again) booted, so this
-      // disconnect is stale — keep the live device and the marker until a real
-      // disconnect for this incarnation arrives.
-      return true;
-    }
-    // Re-validate identity after the discovery await: a same-serial incarnation
-    // may have replaced `device` while we awaited (removeDisconnectedDevice does
-    // not hold assignmentMutex, cf. the sibling check below). Only the captured
-    // incarnation — or an already-empty slot — may be consumed here; a fresh
-    // replacement carries its own marker and disconnect lifecycle.
-    const current = this.devices.get(deviceId);
-    if (device && current && current !== device) {
-      return true;
-    }
-    await this.consumeIntentionalShutdownAndRemove(deviceId, device);
-    return true;
-  }
-
-  private async consumeIntentionalShutdownAndRemove(
-    deviceId: string,
-    device: PooledDevice | undefined,
-  ): Promise<void> {
-    if (device?.sessionId) {
-      // removeDevice would refuse an assigned entry; keep the marker so it still
-      // applies (and suppresses recovery) once the session releases (#6392).
-      logger.warn(
-        `[DevicePool] Retaining intentionally stopped device ${deviceId} until session ${device.sessionId} releases it`,
-      );
-      return;
-    }
-    this.intentionalShutdowns.delete(deviceId);
-    await this.removeDevice(deviceId, true, device);
-  }
-
-  private async shouldDeferDisconnectCleanup(
-    deviceId: string,
-    device: PooledDevice | undefined,
-    mayBeStaleSignal: boolean,
-  ): Promise<boolean> {
-    if (device && this.isReservedForShutdown(device)) {
-      // killDevice owns this captured incarnation until its bounded disappearance
-      // check retires it (or hands a replacement to the pool). A concurrent
-      // monitor signal must not release its session or consume its marker.
-      return true;
-    }
-    return await this.applyIntentionalShutdownOnDisconnect(deviceId, device, mayBeStaleSignal);
-  }
-
-  async removeDisconnectedDevice(
+  removeDisconnectedDevice(
     deviceId: string,
     mayBeStaleSignal: boolean = true,
     incidentId?: string,
     expectedDevice?: PooledDevice,
   ): Promise<void> {
-    const device = this.devices.get(deviceId);
-    if (!this.matchesExpectedDisconnectedDevice(device, expectedDevice)) {
-      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-      return;
-    }
-    if (await this.shouldDeferDisconnectCleanup(deviceId, device, mayBeStaleSignal)) {
-      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-      return;
-    }
-    if (!this.matchesExpectedDisconnectedDevice(this.devices.get(deviceId), expectedDevice)) {
-      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-      return;
-    }
-    if (!device) {
-      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-      return;
-    }
-    if (device.sessionId) {
-      // removeDevice refuses assigned entries. A disconnect reaching here with
-      // sessionId still set is a release deferred behind late session teardown
-      // (releaseCapturedDevice); freeing the serial now could hand it out
-      // mid-teardown. Retain it — the deferred release returns it to idle and
-      // the next disconnect evaluation removes it (#6392).
-      logger.warn(
-        `[DevicePool] Retaining disconnected device ${deviceId} until session ${device.sessionId} teardown completes`,
-      );
-      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-      return;
-    }
-    const rediscovery = mayBeStaleSignal
-      ? await this.wasRebootedAndroidDeviceRediscovered(device)
-      : "not-rediscovered";
-    if (!this.canContinueDisconnectCleanup(device, rediscovery)) {
-      await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-      return;
-    }
-    const recordedIncidentId =
-      incidentId ??
-      (await this.recordEmulatorLossIncident(
-        deviceId,
-        "device-discovery-miss",
-        undefined,
-        "absent",
-      ));
-    const recoveryWasAttempted = this.shouldRebootDisconnectedAndroidDevice(device);
-    if (await this.rebootDisconnectedAndroidDevice(device, recordedIncidentId)) {
-      this.settleEmulatorLossIncident(recordedIncidentId);
-      return;
-    }
-    if (this.hasReplacementDisconnectedDevice(device)) {
-      this.settleEmulatorLossIncident(recordedIncidentId);
-      return;
-    }
-    this.suppressAutoStartForDevice(device);
-    await this.completeRecoveryIfNotAttempted(recordedIncidentId, recoveryWasAttempted);
-    await this.removeDevice(deviceId, true, device);
-    this.settleEmulatorLossIncident(recordedIncidentId);
-  }
-
-  private matchesExpectedDisconnectedDevice(
-    device: PooledDevice | undefined,
-    expectedDevice: PooledDevice | undefined,
-  ): boolean {
-    return expectedDevice === undefined || device === expectedDevice;
-  }
-
-  private canContinueDisconnectCleanup(
-    device: PooledDevice,
-    rediscovery: "rediscovered" | "not-rediscovered" | "unknown",
-  ): boolean {
-    return this.devices.get(device.id) === device && rediscovery === "not-rediscovered";
-  }
-
-  private hasReplacementDisconnectedDevice(device: PooledDevice): boolean {
-    const current = this.devices.get(device.id);
-    return current !== undefined && current !== device;
+    return this.disconnectHandler.removeDisconnectedDevice(
+      deviceId,
+      mayBeStaleSignal,
+      incidentId,
+      expectedDevice,
+    );
   }
 
   /**
@@ -1872,15 +1748,6 @@ export class DevicePool {
       processExit,
       lastAdbState,
     );
-  }
-
-  private async completeRecoveryIfNotAttempted(
-    incidentId: string | undefined,
-    recoveryWasAttempted: boolean,
-  ): Promise<void> {
-    if (!recoveryWasAttempted) {
-      await this.completeEmulatorLossRecovery(incidentId, "not-attempted");
-    }
   }
 
   private getDeviceManager(): PlatformDeviceManager {
@@ -1940,56 +1807,8 @@ export class DevicePool {
     return this.emulatorLossLedger.finishEmulatorLossIncident(incidentId, outcome);
   }
 
-  private async wasRebootedAndroidDeviceRediscovered(
-    device: PooledDevice,
-  ): Promise<AndroidRediscoveryVerification> {
-    if (!this.getRecoveryPolicy().onLoss || !this.isAndroidEmulatorActiveRelaunchEligible(device)) {
-      return "not-rediscovered";
-    }
-    const avdName = device.avdName;
-    try {
-      resetAdbDeviceListCache();
-      resetBootedDevicesResourceCache();
-      resetAndroidDeviceImageResourceCache();
-      const discovery = await this.deviceManager.getBootedDevicesDetailed("android");
-      if (!discovery.succeededPlatforms.has("android")) {
-        logger.warn(
-          `[DevicePool] Retained ${device.id}: Android discovery failed during stale-disconnect check`,
-        );
-        return "unknown";
-      }
-      if (
-        !discovery.devices.some((candidate) =>
-          this.criteriaMatcher.androidRediscoveryMatches(candidate, device.id, avdName),
-        )
-      ) {
-        return "not-rediscovered";
-      }
-      logger.info(
-        `[DevicePool] Retained ${device.id}: a rebooted Android emulator is present despite a stale disconnect signal`,
-      );
-      return "rediscovered";
-    } catch (error) {
-      logger.warn(
-        `[DevicePool] Could not verify rebooted Android emulator ${device.id}: ${error}`,
-        error,
-      );
-      return "unknown";
-    }
-  }
-
-  async isCurrentDisconnectedDevice(device: PooledDevice): Promise<CurrentDisconnectStatus> {
-    if (this.devices.get(device.id) !== device) {
-      return "recovered";
-    }
-    const rediscovery = await this.wasRebootedAndroidDeviceRediscovered(device);
-    if (this.devices.get(device.id) !== device) {
-      return "recovered";
-    }
-    if (rediscovery === "unknown") {
-      return "unknown";
-    }
-    return rediscovery === "rediscovered" ? "recovered" : "current";
+  isCurrentDisconnectedDevice(device: PooledDevice): Promise<CurrentDisconnectStatus> {
+    return this.disconnectHandler.isCurrentDisconnectedDevice(device);
   }
 
   /** Assign the next monotonic incarnation id for a newly pooled connection. */
@@ -8355,7 +8174,7 @@ export class DevicePool {
    * Whether the currently-bound incarnation of a device is being killed: either
    * held under an active shutdown reservation, or carrying an intentional-shutdown
    * marker that applies to the current incarnation. Incarnation-gated (mirroring
-   * {@link applyIntentionalShutdownOnDisconnect}) so a same-serial replacement,
+   * {@link DeviceDisconnectHandler.applyIntentionalShutdownOnDisconnect}) so a same-serial replacement,
    * whose own marker/reservation lifecycle is independent, is not blocked by a
    * stale marker left behind by a device that is already gone.
    */

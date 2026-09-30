@@ -1505,7 +1505,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   a11yScreenshotSupported: boolean | null = null;
   private a11yScreenshotFailures: number = 0;
+  private a11yScreenshotUnsupportedSince: number | null = null;
   private static readonly A11Y_SCREENSHOT_MAX_FAILURES = 3;
+  private static readonly A11Y_SCREENSHOT_REPROBE_COOLDOWN_MS = 60_000;
   // Minimum interval between accessibility takeScreenshot() requests. The platform rate-limits
   // calls below its floor (~333ms, ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT); 350ms sits just
   // above it so a front-loaded backoff burst or an animation's restart storm cannot trip the
@@ -2148,6 +2150,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionEstablished(): void {
     // Reset failure escalation state on every successful connect (issue #7532).
     this.consecutiveConnectionFailures = 0;
+    // A newly connected CtrlProxy may be a different runner or service version.
+    this.resetA11yScreenshotSupport();
     if (this.restartRearmTimeout) {
       this.timer.clearTimeout(this.restartRearmTimeout);
     }
@@ -5481,8 +5485,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
-    // If we know the device doesn't support a11y screenshots, go straight to ADB fallback
-    if (this.a11yScreenshotSupported === false) {
+    // Keep unsupported devices on ADB between probes, but periodically recheck in case the
+    // CtrlProxy service/APK was updated without replacing this client instance.
+    if (this.a11yScreenshotSupported === false && !this.prepareA11yScreenshotReprobe()) {
       return this.captureScreenshotViaAdb("a11y_screenshot_unsupported");
     }
 
@@ -5529,6 +5534,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
               `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`,
           );
           this.a11yScreenshotSupported = false;
+          this.a11yScreenshotUnsupportedSince = this.timer.now();
         }
         return this.captureScreenshotViaAdb(fallbackReasonForCtrlProxyFailure(result.error));
       }
@@ -5556,6 +5562,29 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } finally {
       this.screenshotObservationStreamSuppressions.delete(requestId);
     }
+  }
+
+  private resetA11yScreenshotSupport(): void {
+    this.a11yScreenshotSupported = null;
+    this.a11yScreenshotFailures = 0;
+    this.a11yScreenshotUnsupportedSince = null;
+  }
+
+  private prepareA11yScreenshotReprobe(): boolean {
+    const unsupportedSince = this.a11yScreenshotUnsupportedSince;
+    if (
+      unsupportedSince === null ||
+      this.timer.now() - unsupportedSince <
+        AndroidCtrlProxyClient.A11Y_SCREENSHOT_REPROBE_COOLDOWN_MS
+    ) {
+      return false;
+    }
+
+    this.a11yScreenshotSupported = null;
+    // One failed post-cooldown probe should relatch immediately and restart the cooldown.
+    this.a11yScreenshotFailures = AndroidCtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES - 1;
+    this.a11yScreenshotUnsupportedSince = null;
+    return true;
   }
 
   /**

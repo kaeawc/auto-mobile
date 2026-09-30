@@ -109,9 +109,12 @@ final class PressKeyTests: XCTestCase {
             marker: marker
         ))
         XCTAssertNil(GesturePerformer.forwardDeleteMarkerIndex(original: "hello", probed: "hello", marker: marker))
-        XCTAssertTrue(GesturePerformer.caretHasFollowingCharacter(markerIndex: 4, originalLength: 5))
-        XCTAssertFalse(GesturePerformer.caretHasFollowingCharacter(markerIndex: 5, originalLength: 5))
-        XCTAssertFalse(GesturePerformer.caretHasFollowingCharacter(markerIndex: 0, originalLength: 0))
+        XCTAssertEqual(GesturePerformer.forwardDeleteResult(original: "hello", caretIndex: 3), "helo")
+        XCTAssertEqual(GesturePerformer.forwardDeleteResult(original: "abcde", caretIndex: 3), "abce")
+        XCTAssertNil(GesturePerformer.forwardDeleteResult(original: "hello", caretIndex: 5))
+        XCTAssertNil(GesturePerformer.forwardDeleteResult(original: "", caretIndex: 0))
+        XCTAssertNil(GesturePerformer.forwardDeleteResult(original: "hello", caretIndex: -1))
+        XCTAssertEqual(GesturePerformer.forwardDeleteResult(original: "a👩🏽‍💻b", caretIndex: 1), "ab")
     }
 
     func testHorizontalArrowOutcomeRejectsChangedValueBeforeConsideringCaret() {

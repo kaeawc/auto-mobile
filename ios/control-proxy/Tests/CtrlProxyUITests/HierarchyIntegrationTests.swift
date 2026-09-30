@@ -239,22 +239,23 @@ final class HierarchyIntegrationTests: XCTestCase {
             return
         }
 
-        try gestures.typeText(text: "hello")
+        try gestures.typeText(text: "abcde")
         let typedTextExpectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "hello"),
+            predicate: NSPredicate(format: "value == %@", "abcde"),
             object: messageTextView
         )
         XCTAssertEqual(XCTWaiter().wait(for: [typedTextExpectation], timeout: 5), .completed)
 
-        try gestures.pressKey(key: "arrow_left", modifiers: [])
+        XCTAssertEqual(try gestures.pressKey(key: "arrow_left", modifiers: []), true)
+        XCTAssertEqual(try gestures.pressKey(key: "arrow_left", modifiers: []), true)
         try gestures.pressKey(key: "delete", modifiers: [])
         let deletedTextExpectation = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "hell"),
+            predicate: NSPredicate(format: "value == %@", "abce"),
             object: messageTextView
         )
         XCTAssertEqual(XCTWaiter().wait(for: [deletedTextExpectation], timeout: 5), .completed)
         XCTAssertEqual((messageTextView.value as? String)?.count, 4)
-        XCTAssertEqual(messageTextView.value as? String, "hell")
+        XCTAssertEqual(messageTextView.value as? String, "abce")
     }
 
     func testPressKeyForwardDeleteAtEndOfTextFailsClosed() throws {
@@ -285,7 +286,10 @@ final class HierarchyIntegrationTests: XCTestCase {
         )
         XCTAssertEqual(XCTWaiter().wait(for: [typedTextExpectation], timeout: 5), .completed)
 
-        XCTAssertThrowsError(try gestures.pressKey(key: "delete", modifiers: []))
+        // A caret at the end has no following character; report that boundary explicitly.
+        XCTAssertThrowsError(try gestures.pressKey(key: "delete", modifiers: [])) { error in
+            XCTAssertTrue(error.localizedDescription.contains("no following character at the caret"))
+        }
         XCTAssertEqual((messageTextView.value as? String)?.count, 5)
         XCTAssertEqual(messageTextView.value as? String, "hello")
     }

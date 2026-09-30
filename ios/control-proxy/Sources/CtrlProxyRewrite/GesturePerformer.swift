@@ -223,8 +223,9 @@ public final class GesturePerformer: GesturePerforming {
         return probed.distance(from: probed.startIndex, to: range.lowerBound)
     }
 
-    nonisolated static func caretHasFollowingCharacter(markerIndex: Int, originalLength: Int) -> Bool {
-        markerIndex < originalLength
+    nonisolated static func forwardDeleteResult(original: String, caretIndex: Int) -> String? {
+        guard caretIndex >= 0, caretIndex < original.count else { return nil }
+        return String(original.prefix(caretIndex)) + String(original.dropFirst(caretIndex + 1))
     }
 
     enum ArrowOutcome: Equatable {
@@ -1318,7 +1319,7 @@ public final class GesturePerformer: GesturePerforming {
             let focusedElement = isDestructiveKey || isPlainHorizontalArrow ? resolveFocusedTextElement(app: app) : nil
             let valueBeforeKeyPress = focusedElement.map { fieldText($0) }
             let caretBefore: Int?
-            if isPlainHorizontalArrow, let focusedElement {
+            if isPlainHorizontalArrow || normalizedKey == "delete", let focusedElement {
                 try ensureArrowBudget(startedAt: arrowStartedAt, step: .initialProbe)
                 caretBefore = try probeCaretIndex(
                     app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
@@ -1337,6 +1338,24 @@ public final class GesturePerformer: GesturePerforming {
                 )
             }
 
+            let expectedForwardDelete: String?
+            if normalizedKey == "delete", let original = valueBeforeKeyPress, !original.isEmpty {
+                guard let caretBefore else {
+                    throw GestureError.gestureFailed(
+                        "Forward delete unavailable: could not verify the caret position; use text replacement instead"
+                    )
+                }
+                guard let expected = GesturePerformer.forwardDeleteResult(original: original, caretIndex: caretBefore)
+                else {
+                    throw GestureError.gestureFailed(
+                        "Forward delete has no following character at the caret; move the caret left first"
+                    )
+                }
+                expectedForwardDelete = expected
+            } else {
+                expectedForwardDelete = nil
+            }
+
             try catchingObjCException {
                 if normalizedKey == "backspace" {
                     // Backspace uses text insertion on the focused field because app-level
@@ -1348,7 +1367,11 @@ public final class GesturePerformer: GesturePerforming {
                     }
                     focusedElement.typeText(keyboardKey.rawValue)
                 } else if normalizedKey == "delete" {
-                    app.typeKey(keyboardKey, modifierFlags: [])
+                    // XCUI forward delete is a no-op on the simulator; use the
+                    // verified Right Arrow + Backspace path below there.
+                    #if !targetEnvironment(simulator)
+                        app.typeKey(keyboardKey, modifierFlags: [])
+                    #endif
                 } else {
                     app.typeKey(keyboardKey, modifierFlags: modifierFlags)
                 }
@@ -1396,24 +1419,37 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             if normalizedKey == "delete" {
-                let valueAfterNativeKeyPress = try catchingObjCException { fieldText(focusedElement) }
-                if valueAfterNativeKeyPress == valueBeforeKeyPress,
-                   GesturePerformer.destructiveKeyOutcome(
-                       before: valueBeforeKeyPress, after: valueAfterNativeKeyPress
-                   ) == .noEffect
-                {
-                    try emulateForwardDelete(app: app, focusedElement: focusedElement, original: valueBeforeKeyPress)
+                let valueBeforeFallback = try catchingObjCException { fieldText(focusedElement) }
+                if valueBeforeFallback == expectedForwardDelete { return nil }
+                if valueBeforeFallback == valueBeforeKeyPress, let caretBefore {
+                    try emulateForwardDelete(
+                        app: app, focusedElement: focusedElement, original: valueBeforeKeyPress,
+                        caretBefore: caretBefore
+                    )
+                } else {
+                    throw GestureError.gestureFailed(
+                        "Forward delete changed a different character; use text replacement instead"
+                    )
                 }
             }
 
             let deadline = Date().addingTimeInterval(1.0)
             while Date() < deadline {
                 guard focusedElement.exists else {
+                    if normalizedKey == "delete" {
+                        throw GestureError.gestureFailed(
+                            "Forward delete unavailable: focused field disappeared; use text replacement instead"
+                        )
+                    }
                     return nil
                 }
                 let valueAfterKeyPress = try catchingObjCException { fieldText(focusedElement) }
-                if GesturePerformer.destructiveKeyOutcome(before: valueBeforeKeyPress, after: valueAfterKeyPress)
-                    == .deleted
+                if normalizedKey == "delete", valueAfterKeyPress == expectedForwardDelete {
+                    return nil
+                }
+                if normalizedKey == "backspace",
+                   GesturePerformer
+                   .destructiveKeyOutcome(before: valueBeforeKeyPress, after: valueAfterKeyPress) == .deleted
                 {
                     return nil
                 }
@@ -1421,9 +1457,19 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             guard focusedElement.exists else {
+                if normalizedKey == "delete" {
+                    throw GestureError.gestureFailed(
+                        "Forward delete unavailable: focused field disappeared; use text replacement instead"
+                    )
+                }
                 return nil
             }
             let valueAfterKeyPress = try catchingObjCException { fieldText(focusedElement) }
+            if normalizedKey == "delete" {
+                throw GestureError.gestureFailed(
+                    "Forward delete did not remove the character after the caret: expected length \(expectedForwardDelete?.count ?? 0), observed \(valueAfterKeyPress.count); use text replacement instead"
+                )
+            }
             if GesturePerformer.destructiveKeyOutcome(before: valueBeforeKeyPress, after: valueAfterKeyPress)
                 == .noEffect
             {
@@ -1498,42 +1544,25 @@ public final class GesturePerformer: GesturePerforming {
             return nil
         }
 
-        private func emulateForwardDelete(app: XCUIApplication, focusedElement: XCUIElement, original: String) throws {
-            guard let marker = GesturePerformer.forwardDeleteMarker(for: original) else { return }
-
-            do {
-                try catchingObjCException {
-                    focusedElement.typeText(marker)
-                    let probed = fieldText(focusedElement)
-                    guard let markerIndex = GesturePerformer.forwardDeleteMarkerIndex(
-                        original: original, probed: probed, marker: marker
-                    )
-                    else {
-                        throw GestureError.gestureFailed("Forward-delete caret probe did not round-trip")
-                    }
-
-                    focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
-                    guard fieldText(focusedElement) == original else {
-                        throw GestureError.gestureFailed("Forward-delete caret probe did not restore the original text")
-                    }
-
-                    if GesturePerformer.caretHasFollowingCharacter(
-                        markerIndex: markerIndex,
-                        originalLength: original.count
-                    ) {
-                        app.typeKey(.rightArrow, modifierFlags: [])
-                        focusedElement.typeText(XCUIKeyboardKey.delete.rawValue)
-                    }
-                }
-            } catch {
-                try restoreForwardDeleteProbe(
-                    app: app,
-                    focusedElement: focusedElement,
-                    original: original,
-                    marker: marker
-                )
-                // The caller's existing post-condition reports the failed deletion.
+        private func emulateForwardDelete(
+            app: XCUIApplication, focusedElement: XCUIElement, original: String, caretBefore: Int
+        )
+            throws
+        {
+            // The native forward-delete key is a no-op on some simulator runtimes. Move
+            // one character right and backspace only after observing that movement.
+            try catchingObjCException { app.typeKey(.rightArrow, modifierFlags: []) }
+            var caretAfter = try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
+            if caretAfter == caretBefore {
+                try catchingObjCException { focusedElement.typeKey(.rightArrow, modifierFlags: []) }
+                caretAfter = try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
             }
+            guard caretAfter == caretBefore + 1 else {
+                throw GestureError.gestureFailed(
+                    "Forward delete unavailable: Right Arrow did not move the caret one character; use text replacement instead"
+                )
+            }
+            try catchingObjCException { focusedElement.typeText(XCUIKeyboardKey.delete.rawValue) }
         }
 
         private func restoreForwardDeleteProbe(

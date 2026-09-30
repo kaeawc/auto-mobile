@@ -7,6 +7,7 @@ import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStat
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
+import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
@@ -198,6 +199,7 @@ const RESPONSE_HEADROOM_MS = 3_000;
 export class SetUIState extends BaseVisualChange {
   private fieldTypeDetector: FieldTypeDetector;
   private finder: ElementFinder;
+  private readonly iosSelector = new ResolverElementSelector();
   private dependencies: SetUIStateDependencies;
 
   constructor(
@@ -1148,7 +1150,8 @@ export class SetUIState extends BaseVisualChange {
     return {
       error:
         `Verification failed for ${this.describeSelector(fieldSpec.selector)}: ` +
-        `expected ${JSON.stringify(fieldSpec.value)}, observed ${JSON.stringify(verifyResult.observedValue)}`,
+        `expected ${JSON.stringify(fieldType === "toggle" || fieldType === "checkbox" ? fieldSpec.selected : fieldSpec.value)}, ` +
+        `observed ${JSON.stringify(verifyResult.observedValue)}`,
       stopRetrying: fieldType === "text" && attempts >= 2,
     };
   }
@@ -1216,6 +1219,14 @@ export class SetUIState extends BaseVisualChange {
     }
 
     if (selector.text) {
+      if (this.device.platform === "ios") {
+        return (
+          this.iosSelector.selectByText(viewHierarchy, selector.text, {
+            intentAction: "inspect",
+            selectionIntent: "focus-input",
+          }).element ?? null
+        );
+      }
       return this.finder.findElementByText(viewHierarchy, selector.text, undefined, true, false);
     }
 
@@ -1423,7 +1434,7 @@ export class SetUIState extends BaseVisualChange {
   ): Promise<{
     verified: boolean;
     observation?: ObserveResult;
-    observedValue?: string;
+    observedValue?: string | boolean;
     unverifiable?: boolean;
   }> {
     // Get fresh observation. The caller (processField -> execute) reuses this
@@ -1472,7 +1483,11 @@ export class SetUIState extends BaseVisualChange {
       case "toggle":
         if (fieldSpec.selected !== undefined) {
           const isChecked = this.fieldTypeDetector.isChecked(element);
-          return { verified: isChecked === fieldSpec.selected, observation };
+          return {
+            verified: isChecked === fieldSpec.selected,
+            observation,
+            observedValue: isChecked,
+          };
         }
         return { verified: true, observation };
 

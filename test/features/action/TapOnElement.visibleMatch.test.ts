@@ -11,6 +11,7 @@ import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
 
 const screen = { left: 0, top: 0, right: 402, bottom: 874 };
 const offscreenRow = { left: 16, top: 870, right: 386, bottom: 948 };
@@ -99,6 +100,7 @@ async function run(
   retryIfNoChange = false,
   textAny = false,
   transformSelection?: (selection: ElementSelectionResult) => ElementSelectionResult,
+  text = "Forms & Input",
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -144,7 +146,7 @@ async function run(
   tap.recordDeferredPredictionOutcome = async () => {};
   tap.enforceFreshnessConsistencyWithEffect = () => {};
   const result = await tap.execute({
-    ...(textAny ? { textAny: ["Forms & Input"] } : { text: "Forms & Input" }),
+    ...(textAny ? { textAny: [text] } : { text }),
     action: "tap",
     retryIfNoChange,
   });
@@ -152,6 +154,30 @@ async function run(
 }
 
 describe("tapOn visible matched element", () => {
+  test("iOS taps the control inside a labelled UISwitch row", async () => {
+    const capture = iosFormsSwitch("true");
+    const { result, points } = await run(
+      "ios",
+      capture,
+      capture,
+      false,
+      false,
+      undefined,
+      "Enable Notifications",
+    );
+    expect(result.success).toBe(true);
+    expect(points).toHaveLength(1);
+    expect(points[0].x).toBeGreaterThanOrEqual(301);
+    expect(points[0].x).toBeLessThan(364);
+    expect(points[0].y).toBeGreaterThanOrEqual(296);
+    expect(points[0].y).toBeLessThan(324);
+    expect(result.selectedElement?.bounds).toMatchObject({
+      left: 301,
+      top: 296,
+      right: 364,
+      bottom: 324,
+    });
+  });
   for (const platform of ["ios", "android"] as const) {
     test(`${platform} refuses off-screen label promoted to full-screen container`, async () => {
       const initial = hierarchy(offscreenLabel, offscreenRow, 790);

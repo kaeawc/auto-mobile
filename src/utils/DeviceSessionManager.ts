@@ -59,6 +59,7 @@ import {
 } from "../daemon/deviceIdentityEvidence";
 import { isAndroidEmulatorSerial } from "./androidSerial";
 import { throwIfProvisionedDeviceTransportRetired } from "./provisionedDeviceTransportFence";
+import { deviceReadinessLockKey, withDeviceReadinessLock } from "./deviceReadinessLock";
 
 /**
  * Render a device list for a "not found" error.
@@ -797,6 +798,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
       return;
     }
 
+    await withDeviceReadinessLock(
+      deviceReadinessLockKey("android", deviceId),
+      () => this.ensureAndroidCtrlProxyReady(deviceId, device, options),
+      { signal: options?.signal },
+    );
+  }
+
+  // Existing CtrlProxy state machine moved intact so the readiness lock covers it.
+  // oxlint-disable-next-line eslint/complexity
+  private async ensureAndroidCtrlProxyReady(
+    deviceId: string,
+    device: BootedDevice,
+    options?: DeviceReadyOptions,
+  ): Promise<void> {
     // Always track setup timing (one-time per session, valuable for debugging)
     const perf = createPerformanceTracker(true);
     perf.serial("ensureAccessibilityService");
@@ -956,7 +971,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       }
 
       if (needsSetup || !isInstalled) {
-        await manager.setup(false, perf);
+        const setup = await manager.setup(false, perf);
+        if (!setup.success) {
+          throw new ActionableError(setup.error ?? setup.message);
+        }
         didSetup = true;
         // setup() just changed the endpoint's state (fresh install/enable);
         // failures recorded before this point must not cool down the connect

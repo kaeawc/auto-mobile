@@ -73,6 +73,12 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
+async function drainMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 30; turn++) {
+    await Promise.resolve();
+  }
+}
+
 function makeReadyWindow(): FakeWindow {
   const w = new FakeWindow();
   w.configureActiveWindow({
@@ -212,6 +218,142 @@ describe("DeviceSessionManager", () => {
     await manager.ensureDeviceReady("android", "device-1");
 
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
+  });
+
+  test("verifyAndroidDevice rejects a failed CtrlProxy setup result", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+
+    const manager = DeviceSessionManager.createInstance(provider);
+    for (const { result, reason } of [
+      {
+        result: { success: false, message: "Setup already attempted" },
+        reason: "Setup already attempted",
+      },
+      {
+        result: { success: false, message: "Setup failed", error: "Permission denied" },
+        reason: "Permission denied",
+      },
+    ]) {
+      accessibilityManager.setup = async () => result;
+      await expect(manager.verifyAndroidDevice(device.deviceId)).rejects.toThrow(reason);
+    }
+  });
+
+  test("verifyAndroidDevice resolves after successful CtrlProxy setup", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+
+    await expect(
+      DeviceSessionManager.createInstance(provider).verifyAndroidDevice(device.deviceId),
+    ).resolves.toBeUndefined();
+    expect(accessibilityManager.getCallCount("setup")).toBe(1);
+  });
+
+  test("concurrent verifyAndroidDevice calls serialize CtrlProxy setup for one device", async () => {
+    const firstSetup = deferred();
+    const firstSetupStarted = deferred();
+    const accessibilityManager = new FakeCtrlProxyManager();
+    let setupCount = 0;
+    let activeSetups = 0;
+    let maxActiveSetups = 0;
+    const events: string[] = [];
+    accessibilityManager.setup = async () => {
+      const call = ++setupCount;
+      activeSetups++;
+      maxActiveSetups = Math.max(maxActiveSetups, activeSetups);
+      events.push(`start:${call}`);
+      if (call === 1) {
+        firstSetupStarted.resolve();
+        await firstSetup.promise;
+      }
+      events.push(`end:${call}`);
+      activeSetups--;
+      return { success: true, message: "ready" };
+    };
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
+    const first = manager.verifyAndroidDevice(device.deviceId);
+    await firstSetupStarted.promise;
+    const second = manager.verifyAndroidDevice(device.deviceId);
+    try {
+      await drainMicrotasks();
+      expect(setupCount).toBe(1);
+      expect(maxActiveSetups).toBe(1);
+    } finally {
+      firstSetup.resolve();
+      await Promise.all([first, second]);
+    }
+    expect(events).toEqual(["start:1", "end:1", "start:2", "end:2"]);
+  });
+
+  test("concurrent verifyAndroidDevice calls can set up different devices", async () => {
+    const otherDevice: BootedDevice = {
+      name: "device-2",
+      deviceId: "device-2",
+      platform: "android",
+    };
+    fakeAdb.setDevices([device, otherDevice]);
+    const firstSetup = deferred();
+    const firstSetupStarted = deferred();
+    let secondSetupStarted = false;
+    const firstManager = new FakeCtrlProxyManager();
+    firstManager.setup = async () => {
+      firstSetupStarted.resolve();
+      await firstSetup.promise;
+      return { success: true, message: "ready" };
+    };
+    const secondManager = new FakeCtrlProxyManager();
+    secondManager.setup = async () => {
+      secondSetupStarted = true;
+      return { success: true, message: "ready" };
+    };
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: firstManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+    provider.getAndroidCtrlProxyManager = (target) =>
+      target.deviceId === device.deviceId ? firstManager : secondManager;
+    const manager = DeviceSessionManager.createInstance(provider);
+    const first = manager.verifyAndroidDevice(device.deviceId);
+    await firstSetupStarted.promise;
+    const second = manager.verifyAndroidDevice(otherDevice.deviceId);
+    try {
+      await drainMicrotasks();
+      expect(secondSetupStarted).toBe(true);
+    } finally {
+      firstSetup.resolve();
+      await Promise.all([first, second]);
+    }
   });
 
   test("booted Android readiness verifies the active window without initializing CtrlProxy", async () => {

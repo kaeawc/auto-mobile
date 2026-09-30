@@ -1,9 +1,11 @@
-import type { ObserveResult, SkeletonElement } from "../models/ObserveResult";
+import type { ObserveResult } from "../models/ObserveResult";
 import {
   sanitizeObserveResult,
+  projectSanitizedObserveSkeleton,
   diffObserveResult,
   isSameObservationScreen,
   type SanitizeObserveConfig,
+  type ObserveResultCloner,
 } from "../features/observe/output/ObserveResultOutput";
 import {
   applyObserveScopeExperiments,
@@ -149,60 +151,12 @@ function resolveObserveProjection(args?: Record<string, unknown>): "full" | "ske
 }
 
 /**
- * The `skeleton` to attach to a diff response (issue #6221 item 4.1), resolved
- * independently of whatever projection `servedObservation` happens to carry.
- * `servedObservation` only carries `.skeleton` when the tool defaults to it
- * (issue #5872's `SKELETON_DEFAULT_ACTION_TOOLS`) AND the resolved projection
- * is `"skeleton"` — a per-call `raw:true` / `project:"full"` request (or a
- * tool outside that set) leaves it `undefined`. Without this, exactly THOSE
- * modes would silently violate the always-usable-selector guarantee (PR #6242
- * review PRRT_kwDOP-GF5M6fq3iK): a diff with no skeleton, in the one case the
- * guarantee exists to prevent. So when `servedObservation.skeleton` is absent,
- * this re-projects one from the underlying (pre-sanitize) observation, which
- * still carries `.elements` regardless of what projection was requested.
- */
-function resolveDiffSkeleton(
-  servedObservation: ObserveResult,
-  rawObservation: ObserveResult,
-  cfg: SanitizeObserveConfig,
-): SkeletonElement[] {
-  if (servedObservation.skeleton) {
-    return servedObservation.skeleton;
-  }
-  return sanitizeObserveResult(rawObservation, { ...cfg, project: "skeleton" }).skeleton ?? [];
-}
-
-/**
- * The `context` to attach to a diff response (issue #6256), resolved the same
- * way {@link resolveDiffSkeleton} resolves `skeleton` and for the same reason:
- * `diffObserveResult` never sees `context` (it is dropped from `sanitized`
- * before the diff runs), so without this a diff-mode response would carry the
- * actionable `skeleton` but silently drop every non-actionable state-readout
- * row — a timer countdown, a toggle's current-state text — leaving a client
- * unable to tell a failed input from a successful one purely from the diff.
- * Returns `undefined` (never an empty array) when no such row survives, so the
- * emitted diff omits `context` entirely rather than carrying a pointless `[]`
- * — matching how a full observation only ever carries `context` when it is
- * non-empty (see `projectSkeletonOnto`).
- */
-function resolveDiffContext(
-  servedObservation: ObserveResult,
-  rawObservation: ObserveResult,
-  cfg: SanitizeObserveConfig,
-): SkeletonElement[] | undefined {
-  if (servedObservation.context) {
-    return servedObservation.context;
-  }
-  return sanitizeObserveResult(rawObservation, { ...cfg, project: "skeleton" }).context;
-}
-
-/**
  * Top-level metadata a hierarchy diff cannot derive for itself, but which a
  * diff-mode client needs with the same shape as a full observation. Sourced
  * from the raw (pre-sanitize) observation so projection never suppresses it.
  * Add a field here when it is a straight copy; the contract test walks this
  * list. `skeleton`, `context`, `keyboard`, and `truncationReasons` are excluded
- * because they require their existing fallback re-projection logic.
+ * because they require projection or provenance merging.
  */
 export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "activeWindow",
@@ -325,6 +279,8 @@ function resolveDiffTruncationReasons(
  */
 export interface FinalizeToolResponseContext {
   name: string;
+  /** Injectable JSON clone boundary for deterministic clone-count tests. */
+  cloneObservation?: ObserveResultCloner;
   /**
    * Registered tool output contract. Required top-level object fields remain in
    * a bounded inline residue when the complete response spills to an artifact.
@@ -416,6 +372,27 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     dropElements: !serverConfig.isObserveResultIncludeElementsEnabled(),
     compact: true,
   };
+  const sanitizedObservations = new WeakMap<
+    ObserveResult,
+    { uncapped: ObserveResult; capped: ObserveResult }
+  >();
+  const sanitizedCopies = (source: ObserveResult) => {
+    const existing = sanitizedObservations.get(source);
+    if (existing) {
+      return existing;
+    }
+    const uncapped = sanitizeObserveResult(
+      source,
+      { ...cfg, capLayoutWarnings: false },
+      ctx.cloneObservation,
+    );
+    const capped = uncapped.layoutWarnings
+      ? { ...uncapped, layoutWarnings: capLayoutWarnings(uncapped.layoutWarnings) }
+      : uncapped;
+    const copies = { uncapped, capped };
+    sanitizedObservations.set(source, copies);
+    return copies;
+  };
 
   // Progressive-disclosure scoping experiments (issue #4344), now always honored:
   // each dimension is intersected with the per-call `scope` request in
@@ -466,7 +443,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
     const observeResult = payload as unknown as ObserveResult;
-    const sanitized = sanitizeObserveResult(observeResult, cfg);
+    const { uncapped, capped: sanitized } = sanitizedCopies(observeResult);
     if (canDiff) {
       // Diff against the full sanitized tree, never the scoped/projected copy — the
       // next action must see real state, not what this observe payload was cropped
@@ -477,11 +454,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     // (#4344) are alternative croppings of the observe payload; both apply only to
     // the headline `observe` payload, never to embedded action observations. Skeleton
     // is the more aggressive projection (it replaces viewHierarchy/elements), so when
-    // requested it wins. It re-projects from the original payload so it still sees
-    // `elements` even under --observe-result-drop-elements.
+    // requested it wins. Its skeleton reads the original elements to retain
+    // non-enumerable ancestry provenance even when elements are dropped from output.
     let served: ObserveResult = sanitized;
     if (resolveObserveProjection(ctx.args) === "skeleton") {
-      served = sanitizeObserveResult(observeResult, { ...cfg, project: "skeleton" });
+      served = projectSanitizedObserveSkeleton(sanitized, observeResult);
       // Skeleton replaces the hierarchy, so scope's structural transforms cannot
       // run afterward. Preserve only the requested dimensions withheld by flags.
       if ((scopeConfig.gatedOff?.length ?? 0) > 0) {
@@ -493,12 +470,16 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         });
       }
     } else if (scopeActive) {
-      // Scope-then-cap (#5074): re-derive the served copy UNCAPPED so the scope
+      // Scope-then-cap (#5074): use the already-sanitized UNCAPPED copy so the scope
       // transforms see every warning, then cap the scoped result — an in-scope
       // warning is never lost to a cap taken against the full tree. The baseline
       // above stays the capped `sanitized` full tree.
-      const uncapped = sanitizeObserveResult(observeResult, { ...cfg, capLayoutWarnings: false });
       served = applyObserveScopeExperiments(uncapped, scopeConfig);
+      // A no-op scope returns its input. Keep subsequent output-only metadata
+      // off the cached baseline when capped and uncapped are the same object.
+      if (served === uncapped) {
+        served = { ...served };
+      }
       if (served.layoutWarnings) {
         served.layoutWarnings = capLayoutWarnings(served.layoutWarnings);
       }
@@ -519,7 +500,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       } satisfies ObservationDiffMetadata;
       sanitizedPayload = stripped;
     } else if (isObserveResult(payload.observation)) {
-      const sanitized = sanitizeObserveResult(payload.observation as ObserveResult, cfg);
+      const rawObservation = payload.observation as ObserveResult;
+      const { capped: sanitized } = sanitizedCopies(rawObservation);
       // Action observations default to the compact skeleton (issue #5872) — the
       // same response-shape control `observe` already has — so a client no longer
       // pays the full raw hierarchy on every tapOn/sendKeys/launchApp. Scoped to
@@ -533,10 +515,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         !ctx.internal &&
         SKELETON_DEFAULT_ACTION_TOOLS.has(ctx.name) &&
         resolveObserveProjection(ctx.args) === "skeleton"
-          ? sanitizeObserveResult(payload.observation as ObserveResult, {
-              ...cfg,
-              project: "skeleton",
-            })
+          ? projectSanitizedObserveSkeleton(sanitized, rawObservation)
           : sanitized;
       let observationOut: unknown = servedObservation;
       let observationDiff: ObservationDiffMetadata | undefined;
@@ -597,27 +576,17 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           // `servedObservation` itself carries no skeleton. `diffObserveResult`
           // cannot compute this itself — `elements` is already dropped from
           // `sanitized` by the time it runs — so it is resolved here instead.
-          diff.skeleton = resolveDiffSkeleton(
-            servedObservation,
-            payload.observation as ObserveResult,
-            cfg,
-          );
+          const skeletonProjection =
+            servedObservation.skeleton !== undefined
+              ? servedObservation
+              : projectSanitizedObserveSkeleton(sanitized, rawObservation);
+          diff.skeleton = skeletonProjection.skeleton ?? [];
           // Issue #6256: a diff must not silently drop the state-readout
-          // `context` alongside `skeleton` — see resolveDiffContext. `undefined`
+          // `context` alongside `skeleton`. `undefined`
           // (no surviving readout row) is dropped on serialization just like an
           // absent key, so no extra branch is needed here.
-          diff.context = resolveDiffContext(
-            servedObservation,
-            payload.observation as ObserveResult,
-            cfg,
-          );
-          diff.keyboard =
-            servedObservation.skeleton !== undefined
-              ? servedObservation.keyboard
-              : sanitizeObserveResult(payload.observation as ObserveResult, {
-                  ...cfg,
-                  project: "skeleton",
-                }).keyboard;
+          diff.context = skeletonProjection.context;
+          diff.keyboard = skeletonProjection.keyboard;
           Object.assign(
             diff,
             copyDefinedFields(

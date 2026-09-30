@@ -1,0 +1,27 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`finalizeToolResponse serialized shape compatibility full 1`] = `"{"updatedAt":123,"screenSize":{"width":100,"height":200},"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"viewHierarchy":{"packageName":"example.app","hierarchy":{"node":{"resource-id":"example.app:id/root","bounds":[0,0,100,200],"node":[{"resource-id":"example.app:id/button","text":"Run","bounds":[10,20,50,50]}]}}}}"`;
+
+exports[`finalizeToolResponse serialized shape compatibility overview summary 1`] = `"{"updatedAt":123,"screenSize":{"width":100,"height":200},"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"viewHierarchy":{"packageName":"example.app","hierarchy":{"node":[{"resource-id":"example.app:id/root","bounds":[0,0,100,200],"node":[{"resource-id":"example.app:id/button","bounds":[10,20,50,50]}]}]}},"observeScope":{"applied":["overview"],"nodesBefore":2,"nodesAfter":2}}"`;
+
+exports[`finalizeToolResponse serialized shape compatibility skeleton 1`] = `"{"updatedAt":123,"screenSize":{"width":100,"height":200},"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"skeleton":[{"bounds":[10,20,50,50],"affordances":["tap"],"elementId":"example.app:id/button","label":"Run"}]}"`;
+
+exports[`finalizeToolResponse serialized shape compatibility diff with full projection 1`] = `"{"success":true,"observation":{"isDiff":true,"skeleton":[{"bounds":[10,20,50,50],"affordances":["tap"],"elementId":"example.app:id/button","label":"Run"}],"added":[],"removed":[],"changed":[{"key":"example.app:id/button\\u000010,20,50,50\\u0000Run\\u00000","selector":{"elementId":"example.app:id/button","label":"Run"},"changes":{"checked":{"to":"true"}}}],"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"screenSize":{"width":100,"height":200}},"observationDiff":{"mode":"diff","reason":"diff_emitted","fromScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"},"toScreen":{"activeWindow":{"appId":"example.app","activityName":".Main","layoutSeqSum":1},"hierarchyPackageName":"example.app"}}}"`;
+
+exports[`finalizeToolResponse serialized shape compatibility oversized spill 1`] = `
+{
+  "inline": "{"success":true,"artifact":{"path":"/tmp/fixture.json","format":"json","payload":"ToolResponse","bytes":70251,"tool":"tapOn","resourceUri":"automobile:tool-output/fixture"}}",
+  "writes": [
+    {
+      "payload": "ObserveResult",
+      "sha256": "b2ccd3c2fdf5797c3eaeea03aadfd72ebb17f77f9d7f385c304affd622692c38",
+      "tool": "tapOn",
+    },
+    {
+      "payload": "ToolResponse",
+      "sha256": "cd4f1d0c68d64dda156c623f0b650d2a0c1f42cea60410c1f3be2ee4af2e0793",
+      "tool": "tapOn",
+    },
+  ],
+}
+`;

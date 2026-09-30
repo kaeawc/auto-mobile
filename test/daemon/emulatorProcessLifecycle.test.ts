@@ -58,8 +58,10 @@ function harness() {
   const outputs = new Map<string, EmulatorProcessOutputTail>();
   const devices = new Map<string, PooledDevice>();
   const calls: string[] = [];
+  const settlements: Array<[string | undefined, "not-attempted" | "exhausted"]> = [];
   let reserved = false;
   let onRecord: (() => void) | undefined;
+  let evictionError: Error | undefined;
   const port: EmulatorProcessLifecyclePoolPort = {
     getTimer: () => timer,
     getStartedDeviceProcesses: () => processes,
@@ -79,12 +81,16 @@ function harness() {
       onRecord?.();
       return "incident";
     },
-    finishEmulatorLossIncident: async () => {
+    finishEmulatorLossIncident: async (incidentId, outcome) => {
       calls.push("settle");
+      settlements.push([incidentId, outcome]);
     },
     evictMissingPooledDevice: async (_device, reason) => {
       expect(reason).toBe("emulator process exited after startup (code=1, signal=null)");
       calls.push("evict");
+      if (evictionError) {
+        throw evictionError;
+      }
     },
   };
   return {
@@ -94,6 +100,10 @@ function harness() {
     outputs,
     devices,
     calls,
+    settlements,
+    throwOnEviction: (error: Error) => {
+      evictionError = error;
+    },
     reserve: () => {
       reserved = true;
     },
@@ -135,6 +145,31 @@ describe("EmulatorProcessLifecycle", () => {
     process.emit("exit", 1, null);
     await flushUntil(() => h.calls.includes("finish"));
     expect(h.calls).toEqual(["prepare", "record", "settle", "finish"]);
+    expect(h.settlements).toEqual([["incident", "not-attempted"]]);
+  });
+
+  test("settles incident as exhausted and rethrows when eviction fails", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    const originalError = new Error("eviction failed");
+    h.throwOnEviction(originalError);
+
+    await expect(h.lifecycle.evictStartedDeviceAfterProcessExit(deviceId, 1, null)).rejects.toBe(
+      originalError,
+    );
+
+    expect(h.settlements).toEqual([["incident", "exhausted"]]);
+    expect(h.calls).toEqual(["prepare", "record", "evict", "settle", "finish"]);
+  });
+
+  test("does not settle again when eviction succeeds", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+
+    await h.lifecycle.evictStartedDeviceAfterProcessExit(deviceId, 1, null);
+
+    expect(h.settlements).toEqual([]);
+    expect(h.calls).toEqual(["prepare", "record", "evict", "finish"]);
   });
 
   test("stops a tracked process and clears both maps", async () => {

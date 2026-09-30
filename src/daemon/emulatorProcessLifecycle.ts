@@ -33,7 +33,7 @@ export interface EmulatorProcessLifecyclePoolPort {
   ): Promise<string | undefined>;
   finishEmulatorLossIncident(
     incidentId: string | undefined,
-    outcome: "not-attempted",
+    outcome: "not-attempted" | "exhausted",
   ): Promise<void>;
   evictMissingPooledDevice(
     device: PooledDevice,
@@ -313,16 +313,32 @@ export class EmulatorProcessLifecycle {
         await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
         return;
       }
-      await this.pool.evictMissingPooledDevice(
-        device,
-        `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-        true,
-        incidentId,
-        true,
-        preparation,
-      );
+      try {
+        await this.pool.evictMissingPooledDevice(
+          device,
+          `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
+          true,
+          incidentId,
+          true,
+          preparation,
+        );
+      } catch (error) {
+        await this.finishFailedEvictionIncident(incidentId);
+        throw error;
+      }
     } finally {
       this.pool.finishSessionPreservingRecoveryPreparation(preparation);
+    }
+  }
+
+  private async finishFailedEvictionIncident(incidentId: string | undefined): Promise<void> {
+    try {
+      await this.pool.finishEmulatorLossIncident(incidentId, "exhausted");
+    } catch (settlementError) {
+      logger.warn(
+        `[DevicePool] Failed to settle emulator-loss incident ${incidentId ?? "unknown"} after eviction failure: ${settlementError}`,
+        settlementError,
+      );
     }
   }
 }

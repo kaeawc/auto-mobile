@@ -20,6 +20,7 @@ import {
   PutAppFileWriteResult,
   StorageDomain,
   buildAppFileResourceUri,
+  hasSupportedMediaLibraryExtension,
   hasSupportedSimulatorMediaExtension,
   normalizeAppFileRelativePath,
   normalizePutAppFileTarget,
@@ -839,6 +840,18 @@ class AndroidMediaLibraryProvider implements AppFileWriteProvider {
         `Android media-library provider received unsupported target domain: ${request.target.domain}`,
       );
     }
+    for (const file of requests) {
+      if (file.target.domain !== "media_library") {
+        throw new ActionableError(
+          `Android media-library provider received unsupported target domain: ${file.target.domain}`,
+        );
+      }
+      if (!hasSupportedMediaLibraryExtension(file.destinationPath)) {
+        throw new ActionableError(
+          `Android media-library fixture ${file.destinationPath} must use an image, video, or audio filename supported by Android MediaStore.`,
+        );
+      }
+    }
     const result = await this.sharedStorageService.stage({
       device: request.device,
       namespace: ANDROID_MEDIA_LIBRARY_NAMESPACE,
@@ -847,6 +860,8 @@ class AndroidMediaLibraryProvider implements AppFileWriteProvider {
         destinationPath: file.destinationPath,
       })),
       signal: request.signal,
+      rollbackOnFailure: true,
+      requireMediaIndexing: true,
     });
     return result.files.map((staged) => {
       if (staged.mediaIndexing.status !== "completed") {

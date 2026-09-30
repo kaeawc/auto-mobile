@@ -42,10 +42,14 @@ function samePanelAndGeometry(current: PanelGeometry, previous: PanelGeometry): 
   );
 }
 
-function samePushedPanel(event: PushedDisplayTransition, previous: PanelGeometry): boolean {
-  const key = event.panelUniqueId?.includes(":")
+function pushedPanelKey(event: PushedDisplayTransition): string | undefined {
+  return event.panelUniqueId?.includes(":")
     ? event.panelUniqueId.split(":").slice(1).join(":")
     : event.panelUniqueId;
+}
+
+function samePushedPanel(event: PushedDisplayTransition, previous: PanelGeometry): boolean {
+  const key = pushedPanelKey(event);
   return (
     (!key || key === previous.key) &&
     (event.width === undefined ||
@@ -60,11 +64,46 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
   private readonly revisions = new Map<string, number>();
   private readonly pendingPushes = new Map<string, number>();
   private readonly deviceStates = new Map<string, number>();
+  private readonly listeners = new Map<
+    string,
+    Set<(panel?: Pick<DisplayRef, "key" | "role">) => void>
+  >();
 
   constructor(private readonly invalidate: (deviceId: string, reason: string) => void) {}
 
   revision(deviceId: string): number {
     return this.revisions.get(deviceId) ?? 0;
+  }
+
+  /** Most recent accepted observation stamp, unless a push has fenced it. */
+  observedPanel(deviceId: string): Pick<DisplayRef, "key" | "role"> | undefined {
+    if (this.pendingPushes.get(deviceId) === this.revision(deviceId)) {
+      return undefined;
+    }
+    const panel = this.panels.get(deviceId);
+    return panel ? { key: panel.key, role: panel.role } : undefined;
+  }
+
+  /** Subscribe to panel changes, including pushes that precede a fresh observation. */
+  subscribe(
+    deviceId: string,
+    listener: (panel?: Pick<DisplayRef, "key" | "role">) => void,
+  ): () => void {
+    const listeners = this.listeners.get(deviceId) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(deviceId, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) {
+        this.listeners.delete(deviceId);
+      }
+    };
+  }
+
+  private emitPanel(deviceId: string, panel?: Pick<DisplayRef, "key" | "role">): void {
+    for (const listener of this.listeners.get(deviceId) ?? []) {
+      listener(panel);
+    }
   }
 
   geometryChanged(deviceId: string, size: ObserveResult["screenSize"]): boolean {
@@ -90,6 +129,9 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     }
     this.panels.delete(deviceId);
     this.notifyTransition(deviceId, "display key, role, or posture changed");
+    if (previous.key !== display.key || previous.role !== display.role) {
+      this.emitPanel(deviceId, display);
+    }
     return true;
   }
 
@@ -114,12 +156,16 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     this.panels.set(deviceId, current);
     const unchanged = previous !== undefined && samePanelAndGeometry(current, previous);
     if (pushedRevision === this.revision(deviceId)) {
+      this.emitPanel(deviceId, current);
       return false;
     }
     if (!previous || unchanged) {
       return false;
     }
     this.notifyTransition(deviceId, "display geometry changed");
+    if (previous.key !== current.key || previous.role !== current.role) {
+      this.emitPanel(deviceId, current);
+    }
     return true;
   }
 
@@ -151,6 +197,8 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
       return;
     }
     this.notifyTransition(deviceId, `CtrlProxy ${event.change}`);
+    const key = pushedPanelKey(event);
+    this.emitPanel(deviceId, key ? { key, role: "unknown" } : undefined);
     this.pendingPushes.set(deviceId, this.revision(deviceId));
   }
 

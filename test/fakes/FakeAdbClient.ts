@@ -24,7 +24,7 @@ type FakeAdbClientContract = Pick<
 interface SpawnBehavior {
   match: string;
   outcome:
-    | { kind: "exit"; code: number }
+    | { kind: "exit"; code: number; stderr?: string }
     | { kind: "error"; error: Error }
     | { kind: "reject"; error: Error };
 }
@@ -173,7 +173,11 @@ export class FakeAdbClient implements FakeAdbClientContract {
     if (behavior?.outcome.kind === "error") {
       proc.scheduleError(behavior.outcome.error);
     } else {
-      proc.scheduleExit(behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0);
+      proc.scheduleExit(
+        behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0,
+        null,
+        behavior?.outcome.kind === "exit" ? behavior.outcome.stderr : undefined,
+      );
     }
     return proc;
   }
@@ -182,8 +186,8 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * Configure how a spawned command whose argv contains `match` terminates.
    * Without a match a spawned command exits cleanly with code 0.
    */
-  setSpawnExit(match: string, code: number): void {
-    this.spawnBehaviors.push({ match, outcome: { kind: "exit", code } });
+  setSpawnExit(match: string, code: number, stderr?: string): void {
+    this.spawnBehaviors.push({ match, outcome: { kind: "exit", code, stderr } });
   }
 
   setSpawnError(match: string, error: Error): void {

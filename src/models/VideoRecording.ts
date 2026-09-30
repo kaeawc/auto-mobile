@@ -1,4 +1,16 @@
 import type { HighlightShape } from "./VisualHighlight";
+import type { PanelRole } from "./DisplayPanel";
+
+export interface VideoRecordingPanel {
+  key: string;
+  role: PanelRole;
+}
+
+export interface VideoRecordingDisplayTransition {
+  atMs: number;
+  from: VideoRecordingPanel;
+  to: VideoRecordingPanel;
+}
 
 export type VideoQualityPreset = "low" | "medium" | "high";
 
@@ -70,4 +82,7 @@ export interface VideoRecordingMetadata {
   lastAccessedAt: string;
   config: VideoRecordingConfig;
   highlights?: VideoRecordingHighlightEntry[];
+  recordedPanel?: VideoRecordingPanel;
+  transitions?: VideoRecordingDisplayTransition[];
+  warnings?: string[];
 }

@@ -144,6 +144,105 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     expect(fakeClient.getSpawnedProcesses()[0]?.killed).toBe(false);
   });
 
+  test("pins a selected foldable panel by physical display ID", async () => {
+    const fakeFactory = new FakeAdbClientFactory();
+    fakeFactory
+      .getFakeClient()
+      .setCommandResult(
+        "shell cmd display get-displays",
+        'Display id 0: DisplayInfo{uniqueId "local:11" type INTERNAL, real 100 x 200}\n' +
+          'Display id 3: DisplayInfo{uniqueId "local:22" type INTERNAL, real 200 x 300}',
+      );
+    const device: BootedDevice = {
+      platform: "android",
+      deviceId: "foldable-video",
+      name: "Foldable",
+      displays: {
+        panels: [
+          { key: "11", role: "cover", sizePx: { width: 100, height: 200 } },
+          { key: "22", role: "inner", sizePx: { width: 200, height: 300 } },
+        ],
+        postures: ["closed", "opened"],
+      },
+    };
+    const config: VideoCaptureConfig = {
+      recordingId: "foldable-recording",
+      outputDirectory: tempDir,
+      outputPath: path.join(tempDir, "foldable.mp4"),
+      fileName: "foldable.mp4",
+      startedAt: "1970-01-01T00:00:00.000Z",
+      qualityPreset: "low",
+      targetBitrateKbps: 1000,
+      maxThroughputMbps: 5,
+      fps: 15,
+      maxArchiveSizeMb: 100,
+      format: "mp4",
+      device,
+      display: "inner",
+    };
+
+    await new PlatformVideoCaptureBackend(fakeFactory).start(config);
+    expect(fakeFactory.getFakeClient().getSpawnCalls()[0]).toContain("--display-id");
+    expect(fakeFactory.getFakeClient().getSpawnCalls()[0]).toContain("22");
+
+    await new PlatformVideoCaptureBackend(fakeFactory).start({
+      ...config,
+      recordingId: "single-recording",
+      device: { platform: "android", deviceId: "single", name: "Phone" },
+      display: undefined,
+    });
+    expect(fakeFactory.getFakeClient().getSpawnCalls()[1]).not.toContain("--display-id");
+  });
+
+  test("unknown API retries once without display flag after an immediate usage error", async () => {
+    const fakeFactory = new FakeAdbClientFactory();
+    fakeFactory
+      .getFakeClient()
+      .setSpawnExit(
+        "--display-id",
+        1,
+        "screenrecord: unknown option --display-id\nUsage: screenrecord",
+      );
+    fakeFactory
+      .getFakeClient()
+      .setCommandResult(
+        "shell cmd display get-displays",
+        'Display id 0: DisplayInfo{uniqueId "local:11" type INTERNAL, real 100 x 200}\n' +
+          'Display id 3: DisplayInfo{uniqueId "local:22" type INTERNAL, real 200 x 300}',
+      );
+    const handle = await new PlatformVideoCaptureBackend(fakeFactory).start({
+      recordingId: "unknown-api",
+      outputDirectory: tempDir,
+      outputPath: path.join(tempDir, "video.mp4"),
+      fileName: "video.mp4",
+      startedAt: "1970-01-01T00:00:00.000Z",
+      qualityPreset: "low",
+      targetBitrateKbps: 1000,
+      maxThroughputMbps: 5,
+      fps: 15,
+      maxArchiveSizeMb: 100,
+      format: "mp4",
+      device: {
+        platform: "android",
+        deviceId: "unknown-api",
+        name: "Foldable",
+        displays: {
+          panels: [
+            { key: "11", role: "cover", sizePx: { width: 100, height: 200 } },
+            { key: "22", role: "inner", sizePx: { width: 200, height: 300 } },
+          ],
+          postures: [],
+        },
+      },
+    });
+    const calls = fakeFactory.getFakeClient().getSpawnCalls();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain("--display-id");
+    expect(calls[1]).not.toContain("--display-id");
+    expect(handle.warning).toContain("rejected --display-id");
+    expect(handle.physicalDisplayId).toBeUndefined();
+  });
+
   describe("Stop Operation", () => {
     test("rejects stop when backend handle is missing", async () => {
       const invalidHandle: RecordingHandle = {

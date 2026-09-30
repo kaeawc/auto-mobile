@@ -36,6 +36,7 @@ import {
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import {
   buildVideoArchiveItemUri,
   VIDEO_RESOURCE_URIS,
@@ -92,6 +93,7 @@ describe("videoRecordingManager", () => {
 
   afterEach(async () => {
     resetVideoRecordingManagerDependencies();
+    displayTransitions.reset("recording-foldable");
   });
 
   afterAll(async () => {
@@ -140,12 +142,125 @@ describe("videoRecordingManager", () => {
 
     expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
 
-    await stopVideoRecording(active.recordingId);
+    const stopped = await stopVideoRecording(active.recordingId);
+    expect(stopped.metadata.recordedPanel).toBeUndefined();
+    expect(stopped.metadata.transitions).toBeUndefined();
     expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     expect(fakeBackend.stopCalls.length).toBe(1);
 
     fakeTimer.advanceTime(3000);
     expect(fakeBackend.stopCalls.length).toBe(1);
+  });
+
+  test("stop metadata retains the recorded panel and a timestamped pushed transition", async () => {
+    const foldable: BootedDevice = {
+      deviceId: "recording-foldable",
+      platform: "android",
+      name: "Foldable",
+      displays: {
+        panels: [
+          { key: "11", role: "inner", sizePx: { width: 200, height: 300 } },
+          { key: "22", role: "cover", sizePx: { width: 100, height: 200 } },
+        ],
+        postures: ["opened", "closed"],
+      },
+    };
+    await setVideoRecordingManagerDependencies({
+      resolveAndroidDisplay: async () => ({
+        panel: { key: "11", role: "inner" },
+        physicalId: "11",
+        activePanel: { key: "11", role: "inner" },
+      }),
+    });
+    const active = await startVideoRecording({ device: foldable });
+    expect(fakeBackend.startCalls[0]?.physicalDisplayId).toBe("11");
+    fakeTimer.advanceTime(1250);
+    displayTransitions.notifyAndroidTransition(foldable.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:22",
+    });
+
+    const { metadata } = await stopVideoRecording(active.recordingId);
+    expect(metadata.recordedPanel).toEqual({ key: "11", role: "inner" });
+    expect(metadata.transitions).toEqual([
+      {
+        atMs: 1250,
+        from: { key: "11", role: "inner" },
+        to: { key: "22", role: "cover" },
+      },
+    ]);
+    expect((await fakeRepository.getRecording(active.recordingId))?.transitions).toEqual(
+      metadata.transitions,
+    );
+  });
+
+  test("same-panel rotation and posture pushes create no display transition", async () => {
+    const foldable: BootedDevice = {
+      deviceId: "recording-foldable",
+      platform: "android",
+      name: "Foldable",
+      displays: {
+        panels: [{ key: "11", role: "inner", sizePx: { width: 200, height: 300 } }],
+        postures: ["opened"],
+      },
+    };
+    await setVideoRecordingManagerDependencies({
+      resolveAndroidDisplay: async () => ({
+        panel: { key: "11", role: "inner" },
+        physicalId: "11",
+        activePanel: { key: "11", role: "inner" },
+      }),
+    });
+    const active = await startVideoRecording({ device: foldable });
+    fakeTimer.advanceTime(100);
+    displayTransitions.notifyAndroidTransition(foldable.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:11",
+      width: 300,
+      height: 200,
+    });
+    displayTransitions.notifyAndroidTransition(foldable.deviceId, {
+      change: "device_state",
+      displayId: 0,
+      deviceState: 2,
+    });
+    expect((await stopVideoRecording(active.recordingId)).metadata.transitions).toEqual([]);
+  });
+
+  test("seeds an active-panel boundary and returns a flagless warning", async () => {
+    const foldable: BootedDevice = {
+      deviceId: "recording-foldable",
+      platform: "android",
+      name: "Foldable",
+      displays: {
+        panels: [
+          { key: "11", role: "inner", sizePx: { width: 200, height: 300 } },
+          { key: "22", role: "cover", sizePx: { width: 100, height: 200 } },
+        ],
+        postures: ["opened", "closed"],
+      },
+    };
+    await setVideoRecordingManagerDependencies({
+      resolveAndroidDisplay: async () => ({
+        panel: { key: "11", role: "inner" },
+        activePanel: { key: "22", role: "cover" },
+        warning: "Recording the default display without a pinned panel.",
+      }),
+    });
+    const active = await startVideoRecording({ device: foldable });
+    expect(active.warning).toContain("without a pinned panel");
+    expect(fakeBackend.startCalls[0]?.physicalDisplayId).toBeUndefined();
+    const { metadata } = await stopVideoRecording(active.recordingId);
+    expect(metadata.warnings).toEqual([active.warning]);
+    expect(metadata.transitions).toEqual([
+      {
+        atMs: 0,
+        from: { key: "11", role: "inner" },
+        to: { key: "22", role: "cover" },
+      },
+    ]);
   });
 
   test("retains durable ownership when a generic backend stop failure has no exit confirmation", async () => {

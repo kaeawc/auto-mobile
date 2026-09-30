@@ -361,6 +361,26 @@ The `deviceId` fields exist so the value at `runtime.deviceId` in `listDevices` 
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                            |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                        |
 
+On Android, `videoRecording({ action: "start", display })` accepts a physical
+panel key, the role `inner`, `cover`, `rear`, or `external`, or `"active"`.
+Omitting `display` selects the active panel when supported. Multi-panel recordings pin
+`screenrecord` to that physical panel for the full capture; a panel switch
+does not retarget it. The stop result's `metadata.recordedPanel` gives its
+`key` and `role`, and `metadata.transitions` contains timestamped
+`{ atMs, from, to }` panel changes in milliseconds since capture start. For
+segmented recordings, `atMs` includes preceding segments' time offsets and
+each segment may begin with a boundary transition when the active panel
+differs from the recorded panel (`atMs: 0` for the first segment, or the
+segment offset for later segments).
+If no multi-panel inventory is available, Android keeps the existing
+`screenrecord` command and omits `recordedPanel`.
+A one-panel inventory reports that panel without changing the command. On a
+known API below 34, default multi-panel recording uses the flagless command
+and returns a warning; explicit panel selection requires API 34 or newer.
+When the API is unknown and `screenrecord` quickly rejects `--display-id`,
+capture retries once without the flag and returns a warning. iOS does not
+accept the recording `display` argument.
+
 ## Accessibility & session tools
 
 | Tool                               | What it does                                                                                                                                                                                                                                                                                                       |

@@ -16,6 +16,7 @@ import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
 import { logger } from "../../utils/logger";
 import { withRemainingBudget } from "../../utils/withRemainingBudget";
 import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
+import { probeScreenrecordDisplayFlag } from "./AndroidRecordingDisplay";
 import {
   DefaultFfmpegClient,
   type FfmpegClient,
@@ -579,12 +580,25 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   ): Promise<RecordingHandle> {
     const adb = this.adbFactory.create(device);
 
-    const screenrecordArgs = ["exec-out", "screenrecord", "-"];
+    const screenrecordArgs = ["exec-out", "screenrecord"];
+    if (config.physicalDisplayId !== undefined) {
+      screenrecordArgs.push("--display-id", config.physicalDisplayId);
+    }
+    screenrecordArgs.push("-");
 
     logger.info(`[FfmpegVideo] Starting screenrecord: ${screenrecordArgs.join(" ")}`);
 
-    const captureProcess = await adb.spawn(screenrecordArgs);
-    const captureTracker = trackProcess(captureProcess);
+    let captureProcess = await adb.spawn(screenrecordArgs);
+    let captureTracker = trackProcess(captureProcess);
+    let warning: string | undefined;
+    if (config.physicalDisplayId !== undefined && device.apiLevel === undefined) {
+      if (await probeScreenrecordDisplayFlag(captureTracker, this.timer)) {
+        warning = "Android screenrecord rejected --display-id; recording the default display.";
+        logger.warn(`[FfmpegVideo] ${warning}`);
+        captureProcess = await adb.spawn(["exec-out", "screenrecord", "-"]);
+        captureTracker = trackProcess(captureProcess);
+      }
+    }
     let ffmpegProcess: FfmpegProcess | undefined;
     let ffmpegTracker: ProcessTracker | undefined;
     const forceStopStartingProcesses = () => {
@@ -653,6 +667,8 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         recordingId: config.recordingId,
         outputPath: config.outputPath,
         startedAt: config.startedAt,
+        warning,
+        physicalDisplayId: warning ? undefined : config.physicalDisplayId,
         backendHandle,
       };
     } catch (error) {

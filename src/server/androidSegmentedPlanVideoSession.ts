@@ -20,10 +20,13 @@ import type {
   VideoRecordingMetadata,
 } from "../models";
 import { combineAbortSignals } from "../utils/AbortContext";
+import { displayTransitions } from "../features/observe/DisplayTransition";
+import type { VideoRecordingPanel } from "../models";
 
 interface SegmentedSessionResult {
   filePaths: string[];
   recordingIds: string[];
+  metadata: VideoRecordingMetadata[];
   highlights?: VideoRecordingHighlightEntry[];
 }
 
@@ -45,6 +48,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   highlights?: VideoRecordingHighlightInput[];
   /** Daemon session that owns every segment in this recording session. */
   ownerSessionUuid?: string;
+  display?: string;
   /** Cancellation for the caller-owned initial segment startup only. */
   startupAbortSignal?: AbortSignal;
   /**
@@ -90,6 +94,9 @@ export class AndroidSegmentedPlanVideoSession {
   private readonly highlights: VideoRecordingHighlightInput[] | undefined;
 
   private readonly ownerSessionUuid: string | undefined;
+  private readonly display: string | undefined;
+  private recordedPhysicalDisplayId: string | undefined;
+  private lastActivePanel: VideoRecordingPanel | undefined;
 
   private readonly startupAbortSignal: AbortSignal | undefined;
 
@@ -127,6 +134,7 @@ export class AndroidSegmentedPlanVideoSession {
   private readonly completedFilePaths: string[] = [];
 
   private readonly completedRecordingIds: string[] = [];
+  private readonly completedMetadata: VideoRecordingMetadata[] = [];
 
   private readonly completedHighlights: VideoRecordingHighlightEntry[] = [];
 
@@ -156,6 +164,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.configOverrides = options.configOverrides;
     this.highlights = options.highlights;
     this.ownerSessionUuid = options.ownerSessionUuid;
+    this.display = options.display;
     this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
@@ -306,6 +315,7 @@ export class AndroidSegmentedPlanVideoSession {
     }
     this.activeRecordingId = undefined;
     this.completedRecordingIds.splice(0);
+    this.completedMetadata.splice(0);
     this.completedFilePaths.splice(0);
     this.completedHighlights.splice(0);
     this.pendingRollbackRecordingIds.splice(0);
@@ -379,8 +389,16 @@ export class AndroidSegmentedPlanVideoSession {
       configOverrides: this.configOverrides,
       highlights,
       ownerSessionUuid: this.ownerSessionUuid,
+      display: this.segmentIndex === 0 ? this.display : undefined,
+      physicalDisplayId: this.segmentIndex === 0 ? undefined : this.recordedPhysicalDisplayId,
+      activePanel:
+        this.segmentIndex === 0
+          ? undefined
+          : (displayTransitions.observedPanel(this.device.deviceId) ?? this.lastActivePanel),
       abortSignal: abortSignal ?? this.sessionAbortController.signal,
     });
+    this.recordedPhysicalDisplayId ??= recording.physicalDisplayId;
+    this.lastActivePanel ??= recording.recordedPanel;
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();
     this.segmentIndex += 1;
@@ -396,6 +414,15 @@ export class AndroidSegmentedPlanVideoSession {
     segmentIndex: number,
   ): void {
     this.completedRecordingIds.push(recordingId);
+    this.completedMetadata.push(metadata);
+    this.lastActivePanel = metadata.transitions?.at(-1)?.to ?? this.lastActivePanel;
+    const offsetMs = segmentIndex * this.segmentRotateAfterMs;
+    if (metadata.transitions) {
+      metadata.transitions = metadata.transitions.map((transition) => ({
+        ...transition,
+        atMs: transition.atMs + offsetMs,
+      }));
+    }
     this.completedFilePaths.push(metadata.filePath);
     const offsetSeconds = (segmentIndex * this.segmentRotateAfterMs) / 1000;
     for (const highlight of metadata.highlights ?? []) {
@@ -485,6 +512,7 @@ export class AndroidSegmentedPlanVideoSession {
     return {
       filePaths: [...this.completedFilePaths],
       recordingIds: [...this.completedRecordingIds],
+      metadata: [...this.completedMetadata],
       highlights: this.completedHighlights.length > 0 ? [...this.completedHighlights] : undefined,
     };
   }

@@ -17,6 +17,11 @@ import { Shake } from "../features/action/Shake";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
 import { Rotate } from "../features/action/Rotate";
+import {
+  SetPosture,
+  type SetPostureOutput,
+  type RequestedPosture,
+} from "../features/device/SetPosture";
 import { OpenURL } from "../features/action/OpenURL";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
 import { Clipboard } from "../features/action/Clipboard";
@@ -1136,6 +1141,17 @@ export const rotateSchema = addDeviceTargetingToSchema(
     .strict(),
 );
 
+export const setPostureSchema = addDeviceTargetingToSchema(
+  z
+    .object({
+      posture: z.enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]),
+      displayPreset: z.enum(["phone", "unfolded", "tablet"]).optional(),
+      platform: platformSchema.optional(),
+      ...responseShapeControlFields,
+    })
+    .strict(),
+);
+
 const clipboardTextRequiredMessage = "text is required when action is copy";
 const optionalClipboardTextSchema = z
   .string()
@@ -1998,6 +2014,35 @@ export function setRotateFactory(factory: (device: BootedDevice) => RotateLike):
 
 export function resetRotateFactory(): void {
   rotateFactory = (device) => new Rotate(device);
+}
+
+export type SetPostureLike = Pick<SetPosture, "execute">;
+
+let setPostureFactory: (device: BootedDevice) => SetPostureLike = (device) =>
+  new SetPosture(device);
+
+export function setSetPostureFactory(factory: (device: BootedDevice) => SetPostureLike): void {
+  setPostureFactory = factory;
+}
+
+export function resetSetPostureFactory(): void {
+  setPostureFactory = (device) => new SetPosture(device);
+}
+
+export async function setPostureHandler(
+  device: BootedDevice,
+  args: { posture: RequestedPosture; displayPreset?: "phone" | "unfolded" | "tablet" },
+) {
+  try {
+    const result: SetPostureOutput = await setPostureFactory(device).execute(
+      args.posture,
+      args.displayPreset,
+    );
+    const message = "status" in result ? result.message : `Set device posture to ${result.posture}`;
+    return createJSONToolResponse({ message, ...result });
+  } catch (error) {
+    throw toActionableError(error, "Failed to set device posture");
+  }
 }
 
 export function formatRotateMessage(
@@ -2915,6 +2960,14 @@ export function registerInteractionTools() {
     rotateSchema,
     rotateHandler,
     { defaultEnabled: false, supportsProgress: true },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setPosture",
+    "Set the device posture, and optionally the Resizable emulator display preset",
+    setPostureSchema,
+    setPostureHandler,
+    { defaultEnabled: false },
   );
 
   // Register the clipboard tool

@@ -24,14 +24,45 @@ const STATE_POSTURES: Record<string, Posture> = {
   TENT: "tent",
 };
 
-export function parseAndroidPostures(output: string): Posture[] {
-  const postures = new Set<Posture>();
+export interface AndroidDeviceState {
+  identifier: number;
+  name: string;
+  posture: Posture;
+}
+
+/** Parse the DeviceState rows printed by `cmd device_state print-states`. */
+export function parseAndroidDeviceStates(output: string): AndroidDeviceState[] {
+  const states: AndroidDeviceState[] = [];
   for (const line of output.split(/\r?\n/)) {
-    const name = /\bDeviceState\{[^}\n]*\bname='([^']+)'/.exec(line)?.[1];
-    if (name) {
-      postures.add(STATE_POSTURES[name] ?? "unknown");
+    const rowStart = line.indexOf("DeviceState{");
+    const rowEnd = line.indexOf("}", rowStart);
+    if (rowStart < 0 || rowEnd < 0) {
+      continue;
     }
+    const fields = new Map<string, string>();
+    for (const field of line.slice(rowStart + "DeviceState{".length, rowEnd).split(",")) {
+      const separator = field.indexOf("=");
+      if (separator < 0) {
+        continue;
+      }
+      const key = field.slice(0, separator).trim();
+      const rawValue = field.slice(separator + 1).trim();
+      const value =
+        rawValue.startsWith("'") && rawValue.endsWith("'") ? rawValue.slice(1, -1) : rawValue;
+      fields.set(key, value);
+    }
+    const identifier = Number(fields.get("identifier"));
+    const name = fields.get("name");
+    if (!Number.isInteger(identifier) || !name) {
+      continue;
+    }
+    states.push({ identifier, name, posture: STATE_POSTURES[name] ?? "unknown" });
   }
+  return states;
+}
+
+export function parseAndroidPostures(output: string): Posture[] {
+  const postures = new Set(parseAndroidDeviceStates(output).map((state) => state.posture));
   return postures.size ? [...postures] : ["unknown"];
 }
 

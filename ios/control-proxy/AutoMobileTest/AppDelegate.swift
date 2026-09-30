@@ -2,27 +2,17 @@ import UIKit
 
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate {
-    var window: UIWindow?
-
     func application(
         _: UIApplication,
         didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]?
     )
         -> Bool
     {
-        window = UIWindow(frame: UIScreen.main.bounds)
-        if ProcessInfo.processInfo.environment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] == "1" {
-            window?.rootViewController = SnapshotGapViewController()
-        } else {
-            window?.rootViewController = UIViewController()
-        }
-        window?.rootViewController?.view.backgroundColor = .systemBackground
-        window?.makeKeyAndVisible()
-        return true
+        true
     }
 }
 
-private final class SnapshotGapViewController: UIViewController {
+final class SnapshotGapViewController: UIViewController {
     private let composerGroup = UIView()
     private let messageTextView = UITextView()
     private let standardTextField = UITextField()

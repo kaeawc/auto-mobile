@@ -182,7 +182,8 @@ Everything in `.oxlintrc.json` set to `error` is gated directly by `oxlint` (a
 non-zero exit). The ratchet only gates the rules set to `warn` because they carry
 pre-existing violations: `complexity`, `max-depth`, `max-params`,
 `max-lines-per-function`, `auto-mobile/catch-convention`,
-`auto-mobile/no-unknown-cast`, and the two type-aware promise rules
+`auto-mobile/no-raw-promise-race`, `auto-mobile/no-unknown-cast`,
+`auto-mobile/no-caught-error-interpolation`, and the two type-aware promise rules
 (`typescript/no-floating-promises`, `typescript/no-misused-promises`). The baseline
 is keyed per file + per rule with only a **count**, so it does not churn on line
 shifts. Because the type-aware rules need type info, the ratchet script runs
@@ -199,12 +200,10 @@ selectors into a shared one, so a baselined violation cannot be silently traded
 for a genuinely-dangerous one.
 
 Rules with a numeric threshold: `complexity` 12, `max-depth` 3, `max-params` 6,
-`max-lines-per-function` 150, `max-nested-callbacks` 3 (0 baselined),
+`max-lines-per-function` 150 (blank lines and comments excluded),
+`max-nested-callbacks` 3 (0 baselined), and
 `auto-mobile/no-accumulator-foreach` (src/ only, 0 baselined). The full set the
-ratchet gates (per the section above) also includes `max-params`,
-`max-lines-per-function`, `auto-mobile/catch-convention`,
-`auto-mobile/no-unknown-cast`, `typescript/no-floating-promises`, and
-`typescript/no-misused-promises`.
+ratchet gates is listed above.
 
 Explicit loops (`for`, `for-of`, `for-in`, `while`) are deliberately NOT linted.
 The ratchet nudges toward declarative style where a clean declarative form

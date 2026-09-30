@@ -141,9 +141,11 @@ async function stopVideoRecordingBeforeShutdown(
       context.timer,
       context.deadlineMs,
       "video recording teardown did not complete",
-      context.requestAbortSignal,
-      async () => await stopVideoRecording(recordingId),
-      context.timeoutMs,
+      {
+        requestAbortSignal: context.requestAbortSignal,
+        operation: async () => await stopVideoRecording(recordingId),
+        timeoutMs: context.timeoutMs,
+      },
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
@@ -164,22 +166,26 @@ export async function stopVideoRecordingsBeforeShutdown(
       context.timer,
       context.deadlineMs,
       "segmented video recording teardown did not complete",
-      context.requestAbortSignal,
-      async () => await stopSegmentedVideoRecordingsForDevice(context.device),
-      context.timeoutMs,
+      {
+        requestAbortSignal: context.requestAbortSignal,
+        operation: async () => await stopSegmentedVideoRecordingsForDevice(context.device),
+        timeoutMs: context.timeoutMs,
+      },
     );
     const activeRecordings = await runWithinShutdownDeadline(
       context.device,
       context.timer,
       context.deadlineMs,
       "recording discovery did not complete",
-      context.requestAbortSignal,
-      async () =>
-        await listActiveVideoRecordings({
-          deviceId: context.device.deviceId,
-          platform: context.device.platform,
-        }),
-      context.timeoutMs,
+      {
+        requestAbortSignal: context.requestAbortSignal,
+        operation: async () =>
+          await listActiveVideoRecordings({
+            deviceId: context.device.deviceId,
+            platform: context.device.platform,
+          }),
+        timeoutMs: context.timeoutMs,
+      },
     );
     for (const recording of activeRecordings) {
       await stopVideoRecordingBeforeShutdown(recording.recordingId, context);
@@ -217,9 +223,11 @@ async function stopIosCtrlProxyBeforeShutdown(
       context.timer,
       context.deadlineMs,
       "iOS CtrlProxy shutdown did not complete",
-      context.requestAbortSignal,
-      async () => await stop,
-      context.timeoutMs,
+      {
+        requestAbortSignal: context.requestAbortSignal,
+        operation: async () => await stop,
+        timeoutMs: context.timeoutMs,
+      },
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
@@ -263,8 +271,7 @@ async function stopAndroidCtrlProxyBeforeShutdown(
       context.timer,
       context.deadlineMs,
       "Android observer detach did not complete",
-      context.requestAbortSignal,
-      async () => await stop,
+      { requestAbortSignal: context.requestAbortSignal, operation: async () => await stop },
     );
   } catch (error) {
     if (shouldPropagateShutdownPreparationError(error, context.requestAbortSignal)) {
@@ -457,9 +464,11 @@ async function reconnectAndroidObserverWithinShutdownDeadline(
         timer,
         shutdownDeadlineMs,
         "Android observer reconnect did not complete",
-        requestAbortSignal,
-        async () => await observer.ensureConnected(),
-        timeoutMs,
+        {
+          requestAbortSignal: requestAbortSignal,
+          operation: async () => await observer.ensureConnected(),
+          timeoutMs: timeoutMs,
+        },
       );
     } catch (error) {
       if (isShutdownTimeoutError(error) || requestAbortSignal?.aborted) {
@@ -637,15 +646,11 @@ async function runPostShutdownStep(
   perf.startOperation(operationName);
   try {
     if (strictDeadline) {
-      await runWithinShutdownDeadline(
-        context.device,
-        context.timer,
-        context.deadlineMs,
-        detail,
-        context.requestAbortSignal,
-        async () => await operation(),
-        context.timeoutMs,
-      );
+      await runWithinShutdownDeadline(context.device, context.timer, context.deadlineMs, detail, {
+        requestAbortSignal: context.requestAbortSignal,
+        operation: async () => await operation(),
+        timeoutMs: context.timeoutMs,
+      });
       return;
     }
     await operation();
@@ -682,29 +687,31 @@ async function getShutdownDiscovery(
     timer,
     deadlineMs,
     "platform discovery did not complete",
-    requestAbortSignal ?? getAbortSignal(),
-    async () => {
-      const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
-        bypassAndroidDeviceListCache: true,
-        ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
-      });
-      // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
-      // label may be acted on destructively, so the pool must see this
-      // observation before that decision (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight", {
-        // This kill IS the discovering execution. Entering the quarantine
-        // cancels the pooled session's in-flight work, and without this
-        // exemption that includes the kill awaiting this very observation: it
-        // would lose the `runWithinShutdownDeadline` signal race and report a
-        // device-loss failure instead of reaching confirm-or-refuse
-        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-        excludeExecutionId: getShutdownInitiatingExecutionId(),
-        signal: getAbortSignal(),
-        namesResolved: !skipAndroidNameEnrichment,
-      });
-      return discovery;
+    {
+      requestAbortSignal: requestAbortSignal ?? getAbortSignal(),
+      operation: async () => {
+        const discovery = await deviceManager.getBootedDevicesDetailed(device.platform, {
+          bypassAndroidDeviceListCache: true,
+          ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
+        });
+        // FUNNEL 1: the kill/teardown preflight decides whether the pooled AVD
+        // label may be acted on destructively, so the pool must see this
+        // observation before that decision (#6863 review).
+        await reconcileDiscoveryObservation(discovery.devices, "shutdown-preflight", {
+          // This kill IS the discovering execution. Entering the quarantine
+          // cancels the pooled session's in-flight work, and without this
+          // exemption that includes the kill awaiting this very observation: it
+          // would lose the `runWithinShutdownDeadline` signal race and report a
+          // device-loss failure instead of reaching confirm-or-refuse
+          // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+          excludeExecutionId: getShutdownInitiatingExecutionId(),
+          signal: getAbortSignal(),
+          namesResolved: !skipAndroidNameEnrichment,
+        });
+        return discovery;
+      },
+      timeoutMs: timeoutMs,
     },
-    timeoutMs,
   );
 }
 
@@ -902,6 +909,8 @@ async function findReplacementAfterSessionRelease(
 }
 
 interface ShutdownOwnershipContext {
+  sessionManager?: SessionManager;
+  sessionId?: string;
   device: BootedDevice;
   expectedPooledDevice: PooledDevice | null;
   expectedSession: Session | undefined;
@@ -912,6 +921,11 @@ interface ShutdownOwnershipContext {
   stopPerformanceMonitoring: (deviceId: string) => void;
   retainReservationUntil: (retirement: Promise<void>) => void;
 }
+
+type ShutdownSessionOwnershipContext = ShutdownOwnershipContext & {
+  sessionManager: SessionManager;
+  sessionId: string;
+};
 
 type ShutdownEntryContext = Pick<
   ShutdownOwnershipContext,
@@ -1054,26 +1068,19 @@ async function findReplacementOrRetainShutdownReservation(
 }
 
 function preserveLateShutdownRetirement(
-  context: ShutdownOwnershipContext,
+  context: ShutdownSessionOwnershipContext,
   error: unknown,
   release: Promise<string | null>,
   observedReplacement: BootedDevice | undefined,
   options: {
-    sessionManager: SessionManager;
-    sessionId: string;
     terminalReleaseRetriesRemaining: number;
     skipAndroidNameEnrichment: boolean;
     disappearanceConfirmed: boolean;
   },
 ): void {
-  const { device, requestAbortSignal } = context;
-  const {
-    sessionManager,
-    sessionId,
-    terminalReleaseRetriesRemaining,
-    skipAndroidNameEnrichment,
-    disappearanceConfirmed,
-  } = options;
+  const { device, requestAbortSignal, sessionManager, sessionId } = context;
+  const { terminalReleaseRetriesRemaining, skipAndroidNameEnrichment, disappearanceConfirmed } =
+    options;
   if (
     !isShutdownTimeoutError(error) &&
     !requestAbortSignal?.aborted &&
@@ -1139,18 +1146,20 @@ async function releaseShutdownSessionOwnership(
       timer,
       shutdownRecheckDeadlineMs(timer, deadlineMs, strictDeadline),
       "session ownership retirement did not complete",
-      requestAbortSignal,
-      async () => await release,
-      timeoutMs,
+      {
+        requestAbortSignal: requestAbortSignal,
+        operation: async () => await release,
+        timeoutMs: timeoutMs,
+      },
     );
   } catch (error) {
-    preserveLateShutdownRetirement(context, error, release, observedReplacement, {
-      sessionManager,
-      sessionId,
-      terminalReleaseRetriesRemaining,
-      skipAndroidNameEnrichment,
-      disappearanceConfirmed,
-    });
+    preserveLateShutdownRetirement(
+      { ...context, sessionManager, sessionId },
+      error,
+      release,
+      observedReplacement,
+      { terminalReleaseRetriesRemaining, skipAndroidNameEnrichment, disappearanceConfirmed },
+    );
     throw error;
   }
 }
@@ -1295,6 +1304,25 @@ async function resolvePooledAvdKillTarget(
     : { ...device, name: confirmation.confirmedAvdName };
 }
 
+interface KillProcessAndRetireOwnershipOptions {
+  androidObserverState: AndroidObserverShutdownState;
+  releaseShutdownReservation: () => Promise<void>;
+  strictDeadline: boolean;
+  timeoutMs: number;
+  killTarget: BootedDevice;
+  /**
+   * Required rather than defaulted: this is the one function that hands the
+   * caller's #6864 escape hatch to the platform kill, and a default here counts
+   * against the function's complexity ratchet for no benefit -- it has a single
+   * call site.
+   */
+  force: boolean;
+  retainReservationUntil: (
+    retirement: Promise<void>,
+    releaseReservationAfterFailure?: boolean,
+  ) => void;
+}
+
 async function killProcessAndRetireOwnership(
   context: ShutdownEntryContext &
     Pick<
@@ -1304,24 +1332,7 @@ async function killProcessAndRetireOwnership(
   dependencies: DeviceToolsDependencies,
   perf: ReturnType<typeof createPerformanceTracker>,
   devicePool: DevicePool | undefined,
-  options: {
-    androidObserverState: AndroidObserverShutdownState;
-    releaseShutdownReservation: () => Promise<void>;
-    strictDeadline: boolean;
-    timeoutMs: number;
-    killTarget: BootedDevice;
-    /**
-     * Required rather than defaulted: this is the one function that hands the
-     * caller's #6864 escape hatch to the platform kill, and a default here counts
-     * against the function's complexity ratchet for no benefit -- it has a single
-     * call site.
-     */
-    force: boolean;
-    retainReservationUntil: (
-      retirement: Promise<void>,
-      releaseReservationAfterFailure?: boolean,
-    ) => void;
-  },
+  options: KillProcessAndRetireOwnershipOptions,
 ): Promise<string | undefined> {
   const { device, expectedPooledDevice, requestAbortSignal } = context;
   const {
@@ -1350,16 +1361,18 @@ async function killProcessAndRetireOwnership(
       dependencies.timer,
       shutdownDeadlineMs,
       "platform shutdown command did not complete",
-      requestAbortSignal,
-      async (signal, timeoutMs) => {
-        platformShutdown = deviceManager
-          .killDevice(killTarget, { signal, timeoutMs, force })
-          .finally(() => {
-            platformShutdownSettled = true;
-          });
-        return await platformShutdown;
+      {
+        requestAbortSignal: requestAbortSignal,
+        operation: async (signal, timeoutMs) => {
+          platformShutdown = deviceManager
+            .killDevice(killTarget, { signal, timeoutMs, force })
+            .finally(() => {
+              platformShutdownSettled = true;
+            });
+          return await platformShutdown;
+        },
+        timeoutMs: timeoutMs,
       },
-      timeoutMs,
     );
     shutdownDevice = killedDevice ?? device;
   } catch (error) {
@@ -1527,9 +1540,12 @@ export async function shutdownDevice(
           dependencies.timer,
           shutdownDeadlineMs,
           "shutdown preparation did not complete",
-          requestAbortSignal,
-          async (signal) => await devicePool?.reserveDeviceForShutdown(device.deviceId, signal),
-          timeoutMs,
+          {
+            requestAbortSignal: requestAbortSignal,
+            operation: async (signal) =>
+              await devicePool?.reserveDeviceForShutdown(device.deviceId, signal),
+            timeoutMs: timeoutMs,
+          },
         );
         expectedSession = reservation?.session;
         return reservation;

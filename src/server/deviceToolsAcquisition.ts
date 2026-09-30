@@ -73,15 +73,17 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       },
       timer,
       deadlineMs,
-      signal,
-      (detail) =>
-        acquisitionLifecycleTimeoutError(
-          budgets,
-          `${stableTarget.platform}:${stableTarget.stableId}`,
-          detail,
-        ),
-      "start",
-      coordinator,
+      {
+        requestAbortSignal: signal,
+        timeoutError: (detail) =>
+          acquisitionLifecycleTimeoutError(
+            budgets,
+            `${stableTarget.platform}:${stableTarget.stableId}`,
+            detail,
+          ),
+        operation: "start",
+        coordinator: coordinator,
+      },
     );
   };
 
@@ -113,11 +115,13 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       timer,
       budgets.automationDeadlineMs,
       "iOS simulator identity discovery did not complete",
-      signal,
-      async () =>
-        await deviceUtils.getDeviceImagesDetailed("ios", {
-          bypassIosDeviceListCache: true,
-        }),
+      {
+        requestAbortSignal: signal,
+        operation: async () =>
+          await deviceUtils.getDeviceImagesDetailed("ios", {
+            bypassIosDeviceListCache: true,
+          }),
+      },
     );
     if (!discovery.succeededPlatforms.has("ios")) {
       throw new ActionableError(
@@ -183,9 +187,11 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
     budgets: DevicePreparationBudgets,
     deps: DeviceToolsDependencies,
     deviceUtils: PlatformDeviceManager,
-    deviceMatcher: DeviceMatcher,
-    bootDeadlineMs: number,
-    signal: AbortSignal | undefined,
+    {
+      deviceMatcher,
+      bootDeadlineMs,
+      signal,
+    }: { deviceMatcher: DeviceMatcher; bootDeadlineMs: number; signal: AbortSignal | undefined },
   ): Promise<{
     releaseAndroidStartupLease: (() => Promise<void>) | undefined;
     lifecycleLease: VirtualDeviceLifecycleLease;
@@ -280,15 +286,11 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       // → `simctl list` discovery) so its commands attribute into perfTiming,
       // matching the boot scope inside bootAndPrepareDevice (see PerfContext).
       lifecycleReservations = await runWithPerfTracker(ambientPerfFor(perf), () =>
-        reserveStartDeviceLifecycleReservations(
-          args,
-          budgets,
-          deps,
-          deviceUtils,
-          deviceMatcher,
-          bootDeadlineMs,
-          signal,
-        ),
+        reserveStartDeviceLifecycleReservations(args, budgets, deps, deviceUtils, {
+          deviceMatcher: deviceMatcher,
+          bootDeadlineMs: bootDeadlineMs,
+          signal: signal,
+        }),
       );
       const coordinatedSignals = [signal, lifecycleReservations.lifecycleLease.signal].filter(
         (candidate): candidate is AbortSignal => candidate !== undefined,
@@ -315,21 +317,17 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
           },
         ),
       );
-      return await getBootAndPrepareDevice()(
-        args,
-        budgets,
-        deps,
-        deviceUtils,
-        deviceMatcher,
-        bootDeadlineMs,
-        requestedIdentity,
-        progress,
-        coordinatedSignal,
-        perf,
-        releaseReadinessReservations,
-        lifecycleReservations.lifecycleLease,
-        state,
-      );
+      return await getBootAndPrepareDevice()(args, budgets, deps, deviceUtils, {
+        deviceMatcher: deviceMatcher,
+        bootDeadlineMs: bootDeadlineMs,
+        requestedIdentity: requestedIdentity,
+        progress: progress,
+        signal: coordinatedSignal,
+        perf: perf,
+        releaseReadinessReservations: releaseReadinessReservations,
+        lifecycleLease: lifecycleReservations.lifecycleLease,
+        state: state,
+      });
     } catch (error) {
       perf.end();
       if (!state.ownershipTransferred) {

@@ -907,11 +907,17 @@ export async function reserveStableDeviceLifecycle(
   deadlineDevice: BootedDevice,
   timer: Timer,
   deadlineMs: number,
-  requestAbortSignal: AbortSignal | undefined,
-  timeoutError: StableDeviceLifecycleTimeoutFactory = (detail) =>
-    shutdownTimeoutError(deadlineDevice, detail),
-  operation: VirtualDeviceLifecycleOperation = "start",
-  coordinator: VirtualDeviceLifecycleCoordinator = getVirtualDeviceLifecycleCoordinator(),
+  {
+    requestAbortSignal,
+    timeoutError = (detail) => shutdownTimeoutError(deadlineDevice, detail),
+    operation = "start",
+    coordinator = getVirtualDeviceLifecycleCoordinator(),
+  }: {
+    requestAbortSignal: AbortSignal | undefined;
+    timeoutError?: StableDeviceLifecycleTimeoutFactory;
+    operation?: VirtualDeviceLifecycleOperation;
+    coordinator?: VirtualDeviceLifecycleCoordinator;
+  },
 ): Promise<VirtualDeviceLifecycleLease> {
   try {
     return await coordinator.reserve(
@@ -1407,11 +1413,19 @@ export async function runWithinShutdownDeadline<T>(
   timer: Timer,
   deadlineMs: number,
   detail: string,
-  requestAbortSignal: AbortSignal | undefined,
-  operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>,
-  timeoutMs?: number,
-  phase?: string,
-  onOrphan?: (pending: Promise<unknown>) => void,
+  {
+    requestAbortSignal,
+    operation,
+    timeoutMs,
+    phase,
+    onOrphan,
+  }: {
+    requestAbortSignal: AbortSignal | undefined;
+    operation: (signal: AbortSignal, timeoutMs: number) => Promise<T>;
+    timeoutMs?: number;
+    phase?: string;
+    onOrphan?: (pending: Promise<unknown>) => void;
+  },
 ): Promise<T> {
   const remainingMs = deadlineMs - timer.now();
   // The wait is always `remainingMs`; `timeoutMs` only names the caller's own
@@ -2354,9 +2368,11 @@ export async function stopSegmentedVideoRecordingsBeforeDestroy(
     context.dependencies.timer,
     context.deadlineMs,
     "segmented video recording teardown did not complete",
-    context.requestAbortSignal,
-    async () => await stopSegmentedVideoRecordingsForDevice(target.device),
-    context.timeoutMs,
+    {
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async () => await stopSegmentedVideoRecordingsForDevice(target.device),
+      timeoutMs: context.timeoutMs,
+    },
   );
 }
 
@@ -2371,28 +2387,30 @@ async function readTeardownBootedDiscovery(
     context.dependencies.timer,
     context.deadlineMs,
     detail,
-    context.requestAbortSignal,
-    async () => {
-      const discovery = await context.deviceManager.getBootedDevicesDetailed(
-        context.args.target.platform,
-        {
-          bypassAndroidDeviceListCache: true,
-          ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
-        },
-      );
-      // FUNNEL 1: teardown reads pooled entries (`findAbsentTeardownPooledDevices`)
-      // against this observation (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "teardown-precondition", {
-        // Same exemption as the shutdown preflight: a `deleteDevice` cancelled
-        // by its own observation returns `operation_cancelled` while its
-        // accepted teardown carries on
-        // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-        excludeExecutionId: getShutdownInitiatingExecutionId(),
-        namesResolved: !skipAndroidNameEnrichment,
-      });
-      return discovery;
+    {
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async () => {
+        const discovery = await context.deviceManager.getBootedDevicesDetailed(
+          context.args.target.platform,
+          {
+            bypassAndroidDeviceListCache: true,
+            ...(skipAndroidNameEnrichment ? { skipAndroidNameEnrichment: true } : {}),
+          },
+        );
+        // FUNNEL 1: teardown reads pooled entries (`findAbsentTeardownPooledDevices`)
+        // against this observation (#6863 review).
+        await reconcileDiscoveryObservation(discovery.devices, "teardown-precondition", {
+          // Same exemption as the shutdown preflight: a `deleteDevice` cancelled
+          // by its own observation returns `operation_cancelled` while its
+          // accepted teardown carries on
+          // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
+          excludeExecutionId: getShutdownInitiatingExecutionId(),
+          namesResolved: !skipAndroidNameEnrichment,
+        });
+        return discovery;
+      },
+      timeoutMs: context.timeoutMs,
     },
-    context.timeoutMs,
   );
 }
 
@@ -2446,79 +2464,81 @@ async function readTeardownInventory(
     context.dependencies.timer,
     context.deadlineMs,
     detail,
-    context.requestAbortSignal,
-    async (signal) => {
-      const platformInventory = await context.deviceManager.getDeviceImagesDetailed(platform, {
-        bypassIosDeviceListCache: true,
-        signal,
-      });
-      if (platform !== "android") {
-        return platformInventory;
-      }
+    {
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async (signal) => {
+        const platformInventory = await context.deviceManager.getDeviceImagesDetailed(platform, {
+          bypassIosDeviceListCache: true,
+          signal,
+        });
+        if (platform !== "android") {
+          return platformInventory;
+        }
 
-      const avdManagerResult = await Promise.allSettled([
-        context.dependencies.avdManagerFactory().listDeviceImages(signal),
-      ]);
-      const [avdManagerInventory] = avdManagerResult;
-      if (avdManagerInventory.status === "rejected") {
-        signal.throwIfAborted();
-        const message = `avdmanager list avd failed: ${errorMessage(avdManagerInventory.reason)}`;
-        logger.warn(`[DeviceTools] ${message}`, avdManagerInventory.reason);
-        const succeededPlatforms = new Set(platformInventory.succeededPlatforms);
-        succeededPlatforms.delete("android");
-        const incompleteSources = platformInventory.succeededPlatforms.has("android")
-          ? []
-          : ["emulator -list-avds"];
-        const existingAndroidError = platformInventory.discoveryErrors?.android;
+        const avdManagerResult = await Promise.allSettled([
+          context.dependencies.avdManagerFactory().listDeviceImages(signal),
+        ]);
+        const [avdManagerInventory] = avdManagerResult;
+        if (avdManagerInventory.status === "rejected") {
+          signal.throwIfAborted();
+          const message = `avdmanager list avd failed: ${errorMessage(avdManagerInventory.reason)}`;
+          logger.warn(`[DeviceTools] ${message}`, avdManagerInventory.reason);
+          const succeededPlatforms = new Set(platformInventory.succeededPlatforms);
+          succeededPlatforms.delete("android");
+          const incompleteSources = platformInventory.succeededPlatforms.has("android")
+            ? []
+            : ["emulator -list-avds"];
+          const existingAndroidError = platformInventory.discoveryErrors?.android;
+          return {
+            ...platformInventory,
+            succeededPlatforms,
+            discoveryErrors: {
+              ...platformInventory.discoveryErrors,
+              android: existingAndroidError
+                ? {
+                    ...existingAndroidError,
+                    message: `${existingAndroidError.message} ${message}`,
+                  }
+                : { code: "failed", message },
+            },
+            androidSources: {
+              emulatorAvdNames: new Set(
+                platformInventory.devices
+                  .filter((device) => device.platform === "android")
+                  .map((device) => device.name),
+              ),
+              avdManagerAvdNames: new Set(),
+              incompleteSources: [...incompleteSources, "avdmanager list avd"],
+            },
+          };
+        }
+
+        const emulatorAvdNames = new Set(
+          platformInventory.devices
+            .filter((device) => device.platform === "android")
+            .map((device) => device.name),
+        );
+        const avdManagerAvdNames = new Set(avdManagerInventory.value.map((avd) => avd.name));
+        const devices = [...platformInventory.devices];
+        for (const avd of avdManagerInventory.value) {
+          if (!emulatorAvdNames.has(avd.name)) {
+            devices.push({ platform: "android", name: avd.name, isRunning: false });
+          }
+        }
         return {
           ...platformInventory,
-          succeededPlatforms,
-          discoveryErrors: {
-            ...platformInventory.discoveryErrors,
-            android: existingAndroidError
-              ? {
-                  ...existingAndroidError,
-                  message: `${existingAndroidError.message} ${message}`,
-                }
-              : { code: "failed", message },
-          },
+          devices,
           androidSources: {
-            emulatorAvdNames: new Set(
-              platformInventory.devices
-                .filter((device) => device.platform === "android")
-                .map((device) => device.name),
-            ),
-            avdManagerAvdNames: new Set(),
-            incompleteSources: [...incompleteSources, "avdmanager list avd"],
+            emulatorAvdNames,
+            avdManagerAvdNames,
+            incompleteSources: platformInventory.succeededPlatforms.has("android")
+              ? []
+              : ["emulator -list-avds"],
           },
         };
-      }
-
-      const emulatorAvdNames = new Set(
-        platformInventory.devices
-          .filter((device) => device.platform === "android")
-          .map((device) => device.name),
-      );
-      const avdManagerAvdNames = new Set(avdManagerInventory.value.map((avd) => avd.name));
-      const devices = [...platformInventory.devices];
-      for (const avd of avdManagerInventory.value) {
-        if (!emulatorAvdNames.has(avd.name)) {
-          devices.push({ platform: "android", name: avd.name, isRunning: false });
-        }
-      }
-      return {
-        ...platformInventory,
-        devices,
-        androidSources: {
-          emulatorAvdNames,
-          avdManagerAvdNames,
-          incompleteSources: platformInventory.succeededPlatforms.has("android")
-            ? []
-            : ["emulator -list-avds"],
-        },
-      };
+      },
+      timeoutMs: context.timeoutMs,
     },
-    context.timeoutMs,
   );
 }
 
@@ -2856,9 +2876,12 @@ async function retireTeardownPooledOwnership(
     context.dependencies.timer,
     context.deadlineMs,
     "stopped-device ownership reservation did not complete",
-    context.requestAbortSignal,
-    async (signal) => await devicePool.reserveDeviceForShutdown(expectedPooledDevice.id, signal),
-    context.timeoutMs,
+    {
+      requestAbortSignal: context.requestAbortSignal,
+      operation: async (signal) =>
+        await devicePool.reserveDeviceForShutdown(expectedPooledDevice.id, signal),
+      timeoutMs: context.timeoutMs,
+    },
   );
   if (!reservation || reservation.device !== expectedPooledDevice) {
     await reservation?.release();
@@ -2981,17 +3004,19 @@ export async function destroyTeardownTarget(
       context.dependencies.timer,
       context.deadlineMs,
       "platform deletion command did not complete",
-      context.requestAbortSignal,
-      async (signal, timeoutMs) => {
-        markDestructionStarted();
-        destroy = context.deviceManager.destroyDevice(target.device, {
-          signal,
-          timeoutMs,
-          lifecycleLease: context.lifecycleLease,
-        });
-        return await destroy;
+      {
+        requestAbortSignal: context.requestAbortSignal,
+        operation: async (signal, timeoutMs) => {
+          markDestructionStarted();
+          destroy = context.deviceManager.destroyDevice(target.device, {
+            signal,
+            timeoutMs,
+            lifecycleLease: context.lifecycleLease,
+          });
+          return await destroy;
+        },
+        timeoutMs: context.timeoutMs,
       },
-      context.timeoutMs,
     );
   } catch (error) {
     if (destroy) {
@@ -3814,13 +3839,15 @@ async function validateRequestedAndroidConfiguredAvdPairBeforeBoot(
     timer,
     bootDeadlineMs,
     "Android pre-boot AVD identity validation did not complete",
-    signal,
-    async (signal) =>
-      await deviceUtils.getDeviceImagesDetailed("android", {
-        signal,
-      }),
-    undefined,
-    "pre-boot AVD identity validation",
+    {
+      requestAbortSignal: signal,
+      operation: async (signal) =>
+        await deviceUtils.getDeviceImagesDetailed("android", {
+          signal,
+        }),
+      timeoutMs: undefined,
+      phase: "pre-boot AVD identity validation",
+    },
   );
   if (!inventory.succeededPlatforms.has("android")) {
     return true;
@@ -3870,37 +3897,39 @@ export async function validateRequestedAndroidIdentifiersBeforeBoot(
     timer,
     bootDeadlineMs,
     "Android pre-boot serial validation did not complete",
-    signal,
-    async (signal) => {
-      const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
-        bypassAndroidDeviceListCache: true,
-        signal,
-      });
-      if (signal.aborted) {
-        // The deadline/abort already settled prepareDevice and released its
-        // lifecycle lease. Dropping this stale snapshot is safe: the post-boot
-        // recheck for the next acquisition will observe with current context.
-        logger.debug(
-          `[DeviceTools] Dropping stale pre-boot serial validation discovery after deadline/abort for avdName=${avdName}`,
-        );
+    {
+      requestAbortSignal: signal,
+      operation: async (signal) => {
+        const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+          bypassAndroidDeviceListCache: true,
+          signal,
+        });
+        if (signal.aborted) {
+          // The deadline/abort already settled prepareDevice and released its
+          // lifecycle lease. Dropping this stale snapshot is safe: the post-boot
+          // recheck for the next acquisition will observe with current context.
+          logger.debug(
+            `[DeviceTools] Dropping stale pre-boot serial validation discovery after deadline/abort for avdName=${avdName}`,
+          );
+          return discovery;
+        }
+        // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
+        // context, so the pool must have seen this observation (#6863 review).
+        await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation", {
+          signal,
+        });
         return discovery;
-      }
-      // FUNNEL 1: the post-boot recheck this defers to decides with pool/incarnation
-      // context, so the pool must have seen this observation (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "pre-boot-serial-validation", {
-        signal,
-      });
-      return discovery;
-    },
-    undefined,
-    "pre-boot serial validation",
-    (pending) => {
-      collectPendingSettlement?.(
-        pending.then(
-          () => undefined,
-          () => undefined,
-        ),
-      );
+      },
+      timeoutMs: undefined,
+      phase: "pre-boot serial validation",
+      onOrphan: (pending) => {
+        collectPendingSettlement?.(
+          pending.then(
+            () => undefined,
+            () => undefined,
+          ),
+        );
+      },
     },
   );
   if (!discovery.succeededPlatforms.has("android")) {
@@ -4438,15 +4467,17 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     timer,
     deadlineMs,
     "Android booted-device identity discovery did not complete",
-    signal,
-    async () => {
-      const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
-        bypassAndroidDeviceListCache: true,
-      });
-      // FUNNEL 1: lifecycle coordination resolves the AVD behind a serial, which
-      // is exactly what the quarantine puts in doubt (#6863 review).
-      await reconcileDiscoveryObservation(discovery.devices, "android-start-lifecycle-target");
-      return discovery;
+    {
+      requestAbortSignal: signal,
+      operation: async () => {
+        const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+          bypassAndroidDeviceListCache: true,
+        });
+        // FUNNEL 1: lifecycle coordination resolves the AVD behind a serial, which
+        // is exactly what the quarantine puts in doubt (#6863 review).
+        await reconcileDiscoveryObservation(discovery.devices, "android-start-lifecycle-target");
+        return discovery;
+      },
     },
   );
   const bootedMatches = bootedDiscovery.devices.filter(
@@ -4468,8 +4499,10 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     timer,
     deadlineMs,
     "Android AVD identity discovery did not complete",
-    signal,
-    async () => await deviceUtils.getDeviceImagesDetailed("android"),
+    {
+      requestAbortSignal: signal,
+      operation: async () => await deviceUtils.getDeviceImagesDetailed("android"),
+    },
   );
   if (!imageDiscovery.succeededPlatforms.has("android")) {
     throw new ActionableError(

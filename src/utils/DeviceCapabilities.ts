@@ -5,6 +5,18 @@ import {
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
+import { defaultTimer, type Timer } from "./SystemTimer";
+import { deviceIncarnationToken } from "./deviceIncarnation";
+
+export const REFRESH_RATE_PROBE_TIMEOUT_MS = 750;
+export const REFRESH_RATE_DETECTION_BUDGET_MS = 2_000;
+
+const refreshRateCache = new Map<string, number>();
+
+/** Clear conclusive refresh-rate detections, primarily for isolated tests. */
+export function clearDeviceCapabilitiesCache(): void {
+  refreshRateCache.clear();
+}
 
 /**
  * Device capabilities including refresh rate and display properties
@@ -19,9 +31,15 @@ export interface DeviceCapabilities {
  */
 export class DeviceCapabilitiesDetector {
   private adb: AdbExecutor;
+  private readonly deviceId: string;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    private readonly timer: Timer = defaultTimer,
+  ) {
     this.adb = adbFactory.create(device);
+    this.deviceId = device.deviceId;
   }
 
   /**
@@ -29,39 +47,53 @@ export class DeviceCapabilitiesDetector {
    * Uses dumpsys display to get the current refresh rate
    */
   async detectRefreshRate(): Promise<number> {
+    const incarnation = deviceIncarnationToken(this.deviceId) ?? "unknown";
+    const cacheKey = `${this.deviceId}\0${incarnation}`;
+    const cachedRefreshRate = refreshRateCache.get(cacheKey);
+    if (cachedRefreshRate !== undefined) {
+      return cachedRefreshRate;
+    }
+
+    const startedAt = this.timer.now();
     try {
       // Try to get refresh rate from dumpsys display
-      const { stdout } = await this.adb.executeCommand("shell dumpsys display | grep mRefreshRate");
+      const { stdout } = await this.probe("shell dumpsys display | grep mRefreshRate", startedAt);
 
       // Look for patterns like "mRefreshRate=120.0" or "mRefreshRate=60.0"
       const refreshRateMatch = stdout.match(/mRefreshRate[=:]\s*(\d+\.?\d*)/i);
       if (refreshRateMatch && refreshRateMatch[1]) {
         const refreshRate = Math.round(parseFloat(refreshRateMatch[1]));
         logger.info(`Detected refresh rate: ${refreshRate}Hz`);
+        refreshRateCache.set(cacheKey, refreshRate);
         return refreshRate;
       }
 
       // Fallback: try dumpsys SurfaceFlinger
-      const { stdout: sfOutput } = await this.adb.executeCommand(
+      const { stdout: sfOutput } = await this.probe(
         "shell dumpsys SurfaceFlinger | grep 'refresh-rate'",
+        startedAt,
       );
 
       const sfMatch = sfOutput.match(/refresh-rate[=:]\s*(\d+\.?\d*)/i);
       if (sfMatch && sfMatch[1]) {
         const refreshRate = Math.round(parseFloat(sfMatch[1]));
         logger.info(`Detected refresh rate from SurfaceFlinger: ${refreshRate}Hz`);
+        refreshRateCache.set(cacheKey, refreshRate);
         return refreshRate;
       }
 
       // Fallback: check display modes
-      const { stdout: modesOutput } = await this.adb.executeCommand(
+      const { stdout: modesOutput } = await this.probe(
         "shell dumpsys display | grep -A 5 'mBaseDisplayInfo'",
+        startedAt,
       );
 
-      const modesMatch = modesOutput.match(/(\d+\.?\d*)\s*fps/i);
-      if (modesMatch && modesMatch[1]) {
-        const refreshRate = Math.round(parseFloat(modesMatch[1]));
+      const modesMatch = modesOutput.match(/fps\s*[=:]\s*(\d+\.?\d*)|(\d+\.?\d*)\s*fps/i);
+      const modesRefreshRate = modesMatch?.[1] ?? modesMatch?.[2];
+      if (modesRefreshRate) {
+        const refreshRate = Math.round(parseFloat(modesRefreshRate));
         logger.info(`Detected refresh rate from display modes: ${refreshRate}Hz`);
+        refreshRateCache.set(cacheKey, refreshRate);
         return refreshRate;
       }
 
@@ -69,9 +101,24 @@ export class DeviceCapabilitiesDetector {
       logger.warn("Could not detect refresh rate, defaulting to 60Hz");
       return 60;
     } catch (error) {
-      logger.warn(`Error detecting refresh rate: ${error}, defaulting to 60Hz`);
+      logger.warn(`Error detecting refresh rate: ${error}; defaulting to 60Hz`, error);
       return 60;
     }
+  }
+
+  private async probe(command: string, startedAt: number): Promise<{ stdout: string }> {
+    const elapsed = this.timer.now() - startedAt;
+    const remainingBudget = REFRESH_RATE_DETECTION_BUDGET_MS - elapsed;
+    if (remainingBudget <= 0) {
+      return { stdout: "" };
+    }
+
+    return this.adb.executeCommand(
+      command,
+      Math.min(REFRESH_RATE_PROBE_TIMEOUT_MS, remainingBudget),
+      undefined,
+      true,
+    );
   }
 
   /**

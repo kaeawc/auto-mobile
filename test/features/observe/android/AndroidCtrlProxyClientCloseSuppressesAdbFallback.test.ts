@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { BootedDevice } from "../../../../src/models";
 import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
@@ -77,6 +78,57 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
 
       expect(result.success).toBe(true);
       expect(fakeAdb.wasCommandExecuted("screencap")).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("keeps the legacy screencap command when SurfaceFlinger reports one display", async function () {
+    fakeAdb.setCommandResponse("dumpsys SurfaceFlinger --display-id", {
+      stdout:
+        'Display 4619827259835644672 (HWC display 0): port=0 pnpId=GGL displayName="Built-in Screen"',
+      stderr: "",
+    });
+
+    const client = createClient();
+    (client as unknown as { a11yScreenshotSupported: boolean }).a11yScreenshotSupported = false;
+    try {
+      const result = await client.captureScreenshotForObservationStream();
+
+      expect(result.success).toBe(true);
+      expect(fakeAdb.getExecutedCommands()).toContain(
+        'shell "screencap -p /sdcard/screenshot_stream.png && base64 /sdcard/screenshot_stream.png && rm /sdcard/screenshot_stream.png"',
+      );
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("selects the default logical display's physical ID on multi-display devices", async function () {
+    fakeAdb.setCommandResponse("dumpsys SurfaceFlinger --display-id", {
+      stdout: readFileSync(
+        new URL("./fixtures/surfaceflinger-two-displays.txt", import.meta.url),
+        "utf8",
+      ),
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("cmd display get-displays", {
+      stdout: readFileSync(
+        new URL("./fixtures/cmd-display-two-displays.txt", import.meta.url),
+        "utf8",
+      ),
+      stderr: "",
+    });
+
+    const client = createClient();
+    (client as unknown as { a11yScreenshotSupported: boolean }).a11yScreenshotSupported = false;
+    try {
+      const result = await client.captureScreenshotForObservationStream();
+
+      expect(result.success).toBe(true);
+      expect(fakeAdb.getExecutedCommands()).toContain(
+        'shell "screencap -d 4619827259835644673 -p /sdcard/screenshot_stream.png && base64 /sdcard/screenshot_stream.png && rm /sdcard/screenshot_stream.png"',
+      );
     } finally {
       await client.close();
     }

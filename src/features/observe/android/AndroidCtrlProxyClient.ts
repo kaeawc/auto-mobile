@@ -89,6 +89,7 @@ import {
   CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR,
   fallbackReasonForCtrlProxyFailure,
 } from "./screenshotFallbackReason";
+import { AndroidPhysicalDisplayIdResolver } from "./AndroidPhysicalDisplayId";
 import {
   normalizeAnr,
   normalizeCrash,
@@ -1315,6 +1316,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private device: BootedDevice;
   private adb: AdbExecutor;
+  private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
 
   // Per-instance port allocation for multi-device support
   private localPort: number;
@@ -1506,6 +1508,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.loggerInstance = loggerInstance;
     this.device = device;
     this.adb = adb;
+    this.physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(this.timer);
     this.installedAppsRepository = installedAppsRepository ?? null;
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
     this.deviceConnectionLostNotifier =
@@ -5482,7 +5485,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     try {
       const tempFile = "/sdcard/screenshot_stream.png";
-      const command = `shell "screencap -p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
+      const displayId = await this.physicalDisplayIdResolver.resolve(
+        this.adb,
+        this.device.deviceId,
+      );
+      const displayArgument = displayId ? `-d ${displayId} ` : "";
+      const command = `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
       const maxBuffer = 50 * 1024 * 1024;
       const result = await this.adb.executeCommand(command, undefined, maxBuffer);
 

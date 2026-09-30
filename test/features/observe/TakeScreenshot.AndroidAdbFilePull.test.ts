@@ -11,6 +11,8 @@ import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { androidFilePullDevice } from "./takeScreenshotTestHelpers";
 
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
 describe("Android file-pull screenshots", function () {
   test("rejects a quiet screencap failure before pulling a stale frame and cleans up", async function () {
     const fakeAdb = new FakeAdbExecutor();
@@ -52,9 +54,9 @@ describe("Android file-pull screenshots", function () {
     );
     const firstPath = path.join(localDir, "first.png");
     const secondPath = path.join(localDir, "second.png");
-    fileSystem.setFile(`${firstPath}.temp`, "first");
+    fileSystem.setBinaryFile(`${firstPath}.temp`, pngBytes);
     await (screenshot as any).captureScreenshotFilePull(firstPath, { format: "png" });
-    fileSystem.setFile(`${secondPath}.temp`, "second");
+    fileSystem.setBinaryFile(`${secondPath}.temp`, pngBytes);
     await (screenshot as any).captureScreenshotFilePull(secondPath, { format: "png" });
     const commands = fakeAdb.getExecutedCommands();
     const screencaps = commands.filter((command) => command.includes("screencap -p"));
@@ -96,7 +98,7 @@ describe("Android file-pull screenshots", function () {
       fileSystem,
       () => "/screenshots/cache",
     );
-    fileSystem.setFile(`${finalPath}.temp`, "pulled frame");
+    fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
     await expect(
       (screenshot as any).captureScreenshotFilePull(
         finalPath,
@@ -127,7 +129,7 @@ describe("Android file-pull screenshots", function () {
     );
     const finalPath = path.join(localDir, "malicious.png");
     const tempFile = `/sdcard/screenshot_${screenshotTempIdToken("../evil id; rm -rf /")}.png`;
-    fileSystem.setFile(`${finalPath}.temp`, "pulled frame");
+    fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
     await (screenshot as any).captureScreenshotFilePull(finalPath, { format: "png" });
     const commands = fakeAdb.getExecutedCommands();
     expect(commands).toContain(

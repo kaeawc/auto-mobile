@@ -157,6 +157,8 @@ export class CtrlProxyHierarchy {
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
     let cachedCaptureAgeMs: number | undefined;
+    let cacheNeedsVerification = false;
+    let cacheMissesMinTimestamp = false;
     const cachedIsSpringboard = cachedHierarchy?.hierarchy.packageName === "com.apple.springboard";
     if (cachedHierarchy) {
       // `updatedAt` identifies a capture but lives in the device clock domain,
@@ -178,6 +180,8 @@ export class CtrlProxyHierarchy {
         cacheAge < Math.min(this.context.cacheFreshTtlMs, maxObservationAgeMs());
       const meetsMinTimestamp =
         minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
+      cacheNeedsVerification = !isFresh;
+      cacheMissesMinTimestamp = !meetsMinTimestamp;
 
       if (isFresh && meetsMinTimestamp && !cachedIsSpringboard) {
         if (cachedHierarchy.hierarchy.packageName) {
@@ -195,17 +199,13 @@ export class CtrlProxyHierarchy {
 
     // Need fresh data.
     //
-    // An explicitly invalidated entry forces the sync fetch even when the caller
-    // passed skipWaitForFresh. Observe's default path is skipWaitForFresh=true, so
-    // without this the stale fallback below would hand back the very entry the
-    // invalidation was meant to retire — e.g. the unfiltered snapshot that
-    // HierarchyCollector.collectRaw caches and then invalidates (issue #4193).
-    // Nulling the cache instead is not an option here: under skipWaitForFresh a
-    // missing cache yields no hierarchy at all rather than a refetch.
+    // An unverified or too-old entry forces a sync fetch even when the caller
+    // passed skipWaitForFresh. Observe's default path is skipWaitForFresh=true.
+    // Keep the cache for an explicitly stale fallback if the sync request fails.
     const cacheInvalidated = cachedHierarchy !== null && !cachedHierarchy.fresh;
     const cacheMissing = cachedHierarchy === null;
-    // A cache whose CAPTURE timestamp is past the freshness budget must be
-    // re-verified before it may be served, even on the `skipWaitForFresh` path —
+    // A cache past its freshness budget must be re-verified before it may be
+    // served, even on the `skipWaitForFresh` path —
     // which is `observe`'s default (ObserveScreen.execute: `skipWaitForFresh ??
     // true`). Without this clause the default path reaches neither branch below
     // and falls straight through to the stale fallback, so the ONLY thing that
@@ -216,17 +216,15 @@ export class CtrlProxyHierarchy {
     // has wedged — leaves the entry frozen and every subsequent `observe`
     // re-serves it, forever. That is the "no known mechanism to recover a stale
     // tree" symptom: there was no code path that asked.
-    const cacheStale =
-      cachedCaptureAgeMs !== undefined && cachedCaptureAgeMs > maxObservationAgeMs();
     const requestFailure: { value?: HierarchyRequestFailure } = {};
     if (
       !skipWaitForFresh ||
       cacheMissing ||
-      cacheInvalidated ||
-      cacheStale ||
+      cacheNeedsVerification ||
+      cacheMissesMinTimestamp ||
       cachedIsSpringboard
     ) {
-      if (cacheStale && skipWaitForFresh && !cacheInvalidated) {
+      if (cacheNeedsVerification && skipWaitForFresh && !cacheInvalidated) {
         logger.debug(
           `[CTRL_PROXY] Cached hierarchy is ${cachedCaptureAgeMs}ms old (budget ${maxObservationAgeMs()}ms); forcing a synchronous re-verification`,
         );
@@ -236,15 +234,12 @@ export class CtrlProxyHierarchy {
       // a hierarchy update. `request_hierarchy_if_stale` trusts the runner cache
       // in both cases and can return the same pre-dialog tree. Force a real
       // capture so normal observe sees the same current window as raw observe.
-      const forceCapture = cacheMissing || cacheInvalidated || cachedIsSpringboard;
-      const result = await this.requestHierarchySync(
-        perf,
+      const forceCapture =
+        cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp;
+      const result = await this.requestHierarchySync(perf, false, signal, timeout, false, {
+        failureSink: requestFailure,
         forceCapture,
-        signal,
-        timeout,
-        false,
-        requestFailure,
-      );
+      });
       if (result) {
         if (result.hierarchy.packageName) {
           this.lastKnownPackageName = result.hierarchy.packageName;
@@ -279,18 +274,22 @@ export class CtrlProxyHierarchy {
     // Return cached (stale) data if available.
     //
     // This return is the last honest resort, not a normal path: reaching it
-    // means the runner did not answer a synchronous hierarchy request within
-    // `timeout`. It is reported as `fresh: false`, which now survives all the
+    // means the runner did not provide a usable synchronous hierarchy. The
+    // fallback is reported as `fresh: false`, which now survives all the
     // way to `ObserveResult.freshness` (see getAccessibilityHierarchy) instead
     // of being overwritten with a constant `true` by ObserveScreen.
     if (fallbackHierarchy) {
-      const fallbackCapturedAt = fallbackHierarchy.hierarchy.updatedAt;
-      logger.warn(
-        `[CTRL_PROXY] Serving an UNVERIFIED cached hierarchy: the runner did not answer a synchronous ` +
-          `hierarchy request within ${timeout}ms. Tree was captured ` +
-          `${typeof fallbackCapturedAt === "number" ? this.context.timer.now() - fallbackCapturedAt : "?"}ms ago. ` +
-          `Reporting freshness.isFresh=false.`,
-      );
+      const fallbackIsFreshPush = fallbackSupersededOriginal && fallbackHierarchy.fresh;
+      if (!fallbackIsFreshPush) {
+        const fallbackAgeMs =
+          this.context.timer.now() -
+          (fallbackHierarchy.captureReceivedAt ?? fallbackHierarchy.receivedAt);
+        logger.warn(
+          `[CTRL_PROXY] Serving an UNVERIFIED cached hierarchy: synchronous request ` +
+            `failed (${requestFailure.value?.reason ?? "no hierarchy returned"}). Tree was captured ` +
+            `${fallbackAgeMs}ms ago. Reporting freshness.isFresh=false.`,
+        );
+      }
       // Update tracking from cache — it may have been refreshed by a WebSocket push
       if (fallbackHierarchy.hierarchy.packageName) {
         if (
@@ -308,7 +307,7 @@ export class CtrlProxyHierarchy {
         // A push with a new capture may have won the race with the synchronous
         // re-verification. It is device-supplied fresh data, not the failed
         // request's stale fallback. Same-capture re-deliveries remain false.
-        fresh: fallbackSupersededOriginal && fallbackHierarchy.fresh,
+        fresh: fallbackIsFreshPush,
         updatedAt: fallbackHierarchy.hierarchy.updatedAt,
         perfTiming: fallbackHierarchy.perfTiming,
         frameContext: fallbackHierarchy.frameContext,
@@ -408,15 +407,18 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     timeoutMs: number = 5000,
     suppressObservationStreamPush: boolean = false,
-    failureSink?: { value?: HierarchyRequestFailure },
+    requestOptions?: {
+      failureSink?: { value?: HierarchyRequestFailure };
+      forceCapture?: boolean;
+    },
   ): Promise<{
     hierarchy: XCTestHierarchy;
     perfTiming?: CtrlProxyPerfTiming;
     frameContext?: string;
   } | null> {
     const recordFailure = (failure: HierarchyRequestFailure) => {
-      if (failureSink) {
-        failureSink.value = failure;
+      if (requestOptions?.failureSink) {
+        requestOptions.failureSink.value = failure;
       }
     };
     const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
@@ -471,7 +473,10 @@ export class CtrlProxyHierarchy {
     signal?.addEventListener("abort", rejectOnAbort, { once: true });
 
     const message = {
-      type: disableAllFiltering ? "request_hierarchy" : "request_hierarchy_if_stale",
+      type:
+        requestOptions?.forceCapture || disableAllFiltering
+          ? "request_hierarchy"
+          : "request_hierarchy_if_stale",
       requestId,
       disableAllFiltering: disableAllFiltering ?? false,
     };

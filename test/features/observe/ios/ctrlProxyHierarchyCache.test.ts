@@ -29,6 +29,7 @@ interface Harness {
   /** Number of `request_hierarchy*` messages that reached the socket. */
   fetchCount: () => number;
   requestTypes: () => string[];
+  requests: () => Array<{ type: string; disableAllFiltering: boolean }>;
   getCached: () => CtrlProxyCachedHierarchy | null;
   setCached: (entry: CtrlProxyCachedHierarchy | null) => void;
   /** Simulate a disconnected/reconnecting runner, so no fetch can succeed. */
@@ -49,6 +50,7 @@ function createHarness(): Harness {
   let cached: CtrlProxyCachedHierarchy | null = null;
   let fetches = 0;
   const requestTypes: string[] = [];
+  const requests: Array<{ type: string; disableAllFiltering: boolean }> = [];
   let connected = true;
 
   const context: HierarchyDelegateContext = {
@@ -56,9 +58,14 @@ function createHarness(): Harness {
       ({
         readyState: 1,
         send: (data: string) => {
-          const message = JSON.parse(data) as { requestId: string; type: string };
+          const message = JSON.parse(data) as {
+            requestId: string;
+            type: string;
+            disableAllFiltering: boolean;
+          };
           fetches += 1;
           requestTypes.push(message.type);
+          requests.push({ type: message.type, disableAllFiltering: message.disableAllFiltering });
           // Respond immediately with a hierarchy stamped at the current fake time,
           // so each fetch is distinguishable from the previously cached one.
           requestManager.resolve(message.requestId, {
@@ -82,6 +89,7 @@ function createHarness(): Harness {
     timer,
     fetchCount: () => fetches,
     requestTypes: () => requestTypes,
+    requests: () => requests,
     getCached: () => cached,
     setCached: (entry) => {
       cached = entry;
@@ -115,6 +123,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
 
     expect(h.fetchCount()).toBe(2);
     expect(h.requestTypes()).toEqual(["request_hierarchy", "request_hierarchy"]);
+    expect(h.requests()).toEqual([
+      { type: "request_hierarchy", disableAllFiltering: false },
+      { type: "request_hierarchy", disableAllFiltering: false },
+    ]);
     expect(result.fresh).toBe(true);
     expect(result.updatedAt).toBe(CACHE_TTL_MS / 2);
   });
@@ -156,6 +168,7 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
 
     expect(h.fetchCount()).toBe(1);
     expect(h.requestTypes()).toEqual(["request_hierarchy"]);
+    expect(h.requests()[0]?.disableAllFiltering).toBe(false);
     expect(result.fresh).toBe(true);
   });
 
@@ -175,6 +188,10 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     const next = await h.hierarchy.getLatestHierarchy(true, 1000);
     expect(h.fetchCount()).toBe(2);
     expect(next.hierarchy).not.toBe(rawResult!.hierarchy);
+    expect(h.requests()).toEqual([
+      { type: "request_hierarchy", disableAllFiltering: true },
+      { type: "request_hierarchy", disableAllFiltering: false },
+    ]);
   });
 
   test("an invalidated entry forces a refetch even on the skipWaitForFresh observe path", async () => {
@@ -196,17 +213,33 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
 
     expect(h.fetchCount()).toBe(1);
     expect(h.requestTypes()).toEqual(["request_hierarchy"]);
+    expect(h.requests()[0]?.disableAllFiltering).toBe(false);
     expect(result.fresh).toBe(true);
   });
 
-  test("skipWaitForFresh still skips the fetch when the cache was not invalidated", async () => {
+  test("a cached frame before minTimestamp forces a filtered capture", async () => {
+    await primeCache();
+    h.timer.advanceTime(1);
+
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, true, 1);
+
+    expect(h.fetchCount()).toBe(2);
+    expect(h.requests()[1]).toEqual({ type: "request_hierarchy", disableAllFiltering: false });
+    expect(result.updatedAt).toBe(1);
+  });
+
+  test("skipWaitForFresh re-verifies the 2-5s expired-TTL window", async () => {
     await primeCache();
     h.timer.advanceTime(CACHE_TTL_MS * 4); // past the TTL, but not invalidated
 
     const result = await h.hierarchy.getLatestHierarchy(false, 15000, undefined, true, 0);
 
-    expect(h.fetchCount()).toBe(1);
-    expect(result.fresh).toBe(false);
+    expect(h.fetchCount()).toBe(2);
+    expect(h.requests()[1]).toEqual({
+      type: "request_hierarchy_if_stale",
+      disableAllFiltering: false,
+    });
+    expect(result.fresh).toBe(true);
   });
 
   test("a future device timestamp cannot keep an old host-side capture fresh", async () => {

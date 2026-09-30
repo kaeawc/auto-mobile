@@ -133,6 +133,7 @@ export class DragAndDrop extends BaseVisualChange {
       const pressDurationMs = this.getPressDurationMs(options);
       const dragDurationMs = this.getDragDurationMs(options);
       const holdDurationMs = this.getHoldDurationMs(options);
+      let iosDispatchTimestamp: number | undefined;
 
       const result = await this.observedInteraction(
         async (observeResult: ObserveResult) => {
@@ -158,6 +159,11 @@ export class DragAndDrop extends BaseVisualChange {
             signal,
           );
 
+          if (this.device.platform === "ios" && dragResult.success) {
+            iosDispatchTimestamp = this.timer.now();
+            IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+          }
+
           await this.timer.sleep(DROP_DURATION_MS);
 
           const distance = Math.hypot(targetPoint.x - sourcePoint.x, targetPoint.y - sourcePoint.y);
@@ -176,6 +182,7 @@ export class DragAndDrop extends BaseVisualChange {
           progress,
           perf,
           signal,
+          observationTimestampProvider: () => iosDispatchTimestamp,
           predictionContext: {
             toolName: "dragAndDrop",
             toolArgs: {

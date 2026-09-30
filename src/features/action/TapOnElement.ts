@@ -585,6 +585,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       const result = await IOSCtrlProxyClient.getInstance(
         this.device,
       ).requestActivateAccessibilityLink(text, occurrence, ownerResourceId as string | undefined);
+      this.invalidateIosCacheOnSuccess(result);
       return { success: result.success, error: result.error };
     }
     return {
@@ -3590,13 +3591,22 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (action === "doubleTap") {
       // Double tap - perform two taps
       await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
 
       await this.timer.sleep(200);
 
       await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, "second tap");
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } else {
       // Single tap or long press
       await dispatchIosCoordinateTap(client, x, y, tapDuration);
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+    }
+  }
+
+  private invalidateIosCacheOnSuccess(result: { success: boolean }): void {
+    if (result.success) {
+      IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     }
   }
 
@@ -3637,6 +3647,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestVoiceOverActivate(label, voiceOverAction);
+
+    this.invalidateIosCacheOnSuccess(result);
 
     if (!result.success) {
       logger.warn(

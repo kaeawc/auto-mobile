@@ -137,6 +137,7 @@ export interface TapAtCoordinateDependencies {
   iosClient?: CoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
+  invalidateIosCache?: () => void;
 }
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
@@ -145,6 +146,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly iosClient: CoordinateTapClient;
   private readonly androidCoordinateTap: AndroidCoordinateTapDispatch;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
+  private readonly invalidateIosCache: () => void;
 
   constructor(
     device: BootedDevice,
@@ -158,6 +160,9 @@ export class TapAtCoordinate extends BaseVisualChange {
     this.androidCoordinateTap =
       dependencies.dispatchAndroidCoordinateTap ?? dispatchAndroidCoordinateTap;
     this.iosCoordinateTap = dependencies.dispatchIosCoordinateTap ?? dispatchIosCoordinateTap;
+    this.invalidateIosCache =
+      dependencies.invalidateIosCache ??
+      (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
   }
 
   async execute(
@@ -168,15 +173,14 @@ export class TapAtCoordinate extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("tapAt");
     let dispatchedCoordinates: { x: number; y: number } | undefined;
+    let iosDispatchTimestamp: number | undefined;
 
     try {
       throwIfAborted(signal);
       return await this.observedInteraction(
         async () => {
-          // This is deliberately not the cached observation used by other actions:
-          // the point is validated against the current screen immediately before it
-          // is sent to the native runner. Omitting skipWaitForFresh requests a fresh
-          // full observation, which also supplies the optional frame-context token.
+          // Validate against the latest available frame immediately before dispatch.
+          // Observe defaults to skipWaitForFresh=true, so cache validity matters here.
           const observeResult = await this.observeScreen.execute({ signal, perf });
           const resolved = this.resolveCoordinates(options, observeResult);
           if ("error" in resolved) {
@@ -203,6 +207,8 @@ export class TapAtCoordinate extends BaseVisualChange {
                 IOS_TAP_DURATION_MS,
                 frameContext,
               );
+              iosDispatchTimestamp = this.timer.now();
+              this.invalidateIosCache();
               break;
             default:
               throw unsupportedPlatformError(this.device.platform, "tap at coordinates");
@@ -215,9 +221,10 @@ export class TapAtCoordinate extends BaseVisualChange {
           progress,
           perf,
           signal,
-          // The authoritative pre-dispatch observation is the fresh observation
-          // above; do not resolve a cached one first.
+          // The pre-dispatch observation above supplies the target and frame
+          // context; do not resolve a second cached one first.
           skipPreviousObserve: true,
+          observationTimestampProvider: () => iosDispatchTimestamp,
           predictionContext: {
             toolName: "tapAt",
             toolArgs: { x: options.x, y: options.y, platform: this.device.platform },

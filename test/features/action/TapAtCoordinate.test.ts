@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
+import { computeFreshness } from "../../../src/features/observe/observationFreshness";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -58,16 +59,24 @@ function createAndroidTapAtWithClient(
   return { tapAt, observeScreen, adb };
 }
 
-function createTapAt(device: BootedDevice, width = 10, height = 10) {
+function createTapAt(
+  device: BootedDevice,
+  width = 10,
+  height = 10,
+  onIosDispatch?: (timer: FakeTimer) => void,
+) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation(width, height));
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  let iosCacheInvalidations = 0;
   const androidDispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
   const iosDispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
   const unusedClient: CoordinateTapClient = {
     requestTapCoordinates: async () => ({ success: true }),
   };
   const tapAt = new TapAtCoordinate(device, new FakeAdbExecutor(), {
-    timer: new FakeTimer(),
+    timer,
     androidClient: unusedClient,
     iosClient: unusedClient,
     dispatchAndroidCoordinateTap: async (_client, _adb, x, y, _duration, frameContext) => {
@@ -75,10 +84,21 @@ function createTapAt(device: BootedDevice, width = 10, height = 10) {
     },
     dispatchIosCoordinateTap: async (_client, x, y, _duration, frameContext) => {
       iosDispatches.push({ x, y, frameContext });
+      onIosDispatch?.(timer);
+    },
+    invalidateIosCache: () => {
+      iosCacheInvalidations++;
     },
   });
   tapAt.observeScreen = observeScreen;
-  return { tapAt, observeScreen, androidDispatches, iosDispatches };
+  return {
+    tapAt,
+    observeScreen,
+    androidDispatches,
+    iosDispatches,
+    timer,
+    iosCacheInvalidations: () => iosCacheInvalidations,
+  };
 }
 
 describe("TapAtCoordinate", () => {
@@ -153,6 +173,63 @@ describe("TapAtCoordinate", () => {
 
     expect(result).toMatchObject({ success: true, x: 1.25, y: 2.75 });
     expect(iosDispatches).toEqual([{ x: 1.25, y: 2.75, frameContext: "frame-123" }]);
+  });
+
+  test("iOS tap invalidates the cache and observes from the dispatch time", async () => {
+    const { tapAt, observeScreen, timer, iosCacheInvalidations } = createTapAt(
+      iosDevice,
+      10,
+      10,
+      (clock) => clock.advanceTime(25),
+    );
+    timer.advanceTime(100);
+    observeScreen.setObserveResult((index) => {
+      if (index === 0) {
+        timer.advanceTime(25); // pre-dispatch observation
+      }
+      const updatedAt = index === 0 ? 125 : index === 1 ? 124 : 175;
+      return {
+        ...observation(10, 10),
+        updatedAt,
+        freshness: computeFreshness({
+          requestedAfter: index === 0 ? undefined : 150,
+          actualTimestamp: updatedAt,
+          now: timer.now(),
+          verified: true,
+        }),
+      } as ObserveResult;
+    });
+    const result = await tapAt.execute({ x: 1, y: 2 });
+
+    expect(result.success).toBe(true);
+    expect(iosCacheInvalidations()).toBe(1);
+    expect(observeScreen.getExecuteOptions()[1]?.minTimestamp).toBe(150);
+    expect(observeScreen.getExecuteCallCount()).toBe(3);
+    expect(result.observation.updatedAt).toBe(175);
+  });
+
+  test("rejected iOS tap leaves the cache valid", async () => {
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(observation(10, 10));
+    let invalidations = 0;
+    const unusedClient: CoordinateTapClient = {
+      requestTapCoordinates: async () => ({ success: false, error: "Stale frame context" }),
+    };
+    const tapAt = new TapAtCoordinate(iosDevice, new FakeAdbExecutor(), {
+      timer: new FakeTimer(),
+      androidClient: unusedClient,
+      iosClient: unusedClient,
+      invalidateIosCache: () => {
+        invalidations++;
+      },
+    });
+    tapAt.observeScreen = observeScreen;
+
+    const result = await tapAt.execute({ x: 1, y: 2 });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Stale frame context");
+    expect(invalidations).toBe(0);
   });
 
   test("dispatches resolved Android pixels and iOS points byte-for-byte without daemon conversion (#7336 bullets 2 and 5)", async () => {

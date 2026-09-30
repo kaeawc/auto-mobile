@@ -15,6 +15,11 @@ export interface RecordNetworkEventInput {
   requestBodySize: number;
   responseBodySize: number;
   protocol: string | null;
+  requestId?: string | null;
+  connectionId?: string | null;
+  direction?: string | null;
+  metadata?: Record<string, string> | null;
+  sequenceNumber?: number | null;
   host: string | null;
   path: string | null;
   error: string | null;
@@ -45,6 +50,11 @@ export async function recordNetworkEvent(
       request_body_size: input.requestBodySize,
       response_body_size: input.responseBodySize,
       protocol: input.protocol,
+      request_id: input.requestId ?? null,
+      connection_id: input.connectionId ?? null,
+      direction: input.direction ?? null,
+      metadata_json: input.metadata ? JSON.stringify(input.metadata) : null,
+      sequence_number: input.sequenceNumber ?? null,
       host: input.host,
       path: input.path,
       error: input.error,
@@ -91,6 +101,11 @@ function mapRow(r: any): NetworkEventWithId {
     requestBodySize: r.request_body_size ?? -1,
     responseBodySize: r.response_body_size ?? -1,
     protocol: r.protocol,
+    requestId: r.request_id,
+    connectionId: r.connection_id,
+    direction: r.direction,
+    metadata: JSON.parse(String(r.metadata_json)) as Record<string, string> | null,
+    sequenceNumber: r.sequence_number,
     host: r.host,
     path: r.path,
     error: r.error,

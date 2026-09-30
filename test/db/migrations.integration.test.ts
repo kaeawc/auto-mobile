@@ -11,6 +11,31 @@ import * as storageEventsPreviousValueMigration from "../../src/db/migrations/20
 import * as layoutEventsScreenNameMigration from "../../src/db/migrations/2026_03_19_003_layout_events_screen_name";
 import * as networkEventDetailsMigration from "../../src/db/migrations/2026_03_20_000_network_event_details";
 import * as dropCustomEventsMigration from "../../src/db/migrations/2026_04_01_000_drop_custom_events";
+import * as networkCaptureFieldsMigration from "../../src/db/migrations/2026_09_30_001_network_capture_fields";
+
+test("network capture migration preserves older rows and is idempotent", async () => {
+  const db = createDb();
+  try {
+    await telemetryMigration.up(db);
+    await sql`INSERT INTO network_events (timestamp, url, method) VALUES (1000, 'https://example.com', 'GET')`.execute(
+      db,
+    );
+    await networkCaptureFieldsMigration.up(db);
+    await networkCaptureFieldsMigration.up(db);
+    const row = await sql<{
+      request_id: string | null;
+      metadata_json: string | null;
+      sequence_number: number | null;
+    }>`SELECT request_id, metadata_json, sequence_number FROM network_events`.execute(db);
+    expect(row.rows[0]).toMatchObject({
+      request_id: null,
+      metadata_json: null,
+      sequence_number: null,
+    });
+  } finally {
+    await db.destroy();
+  }
+});
 
 function createDb(): Kysely<unknown> {
   return new Kysely<unknown>({
@@ -81,6 +106,15 @@ describe("full migration chain", () => {
     expect(await columnExists(db, "network_events", "request_body")).toBe(true);
     expect(await columnExists(db, "network_events", "response_body")).toBe(true);
     expect(await columnExists(db, "network_events", "content_type")).toBe(true);
+    for (const column of [
+      "request_id",
+      "connection_id",
+      "direction",
+      "metadata_json",
+      "sequence_number",
+    ]) {
+      expect(await columnExists(db, "network_events", column)).toBe(true);
+    }
   });
 
   test("creates log_events table", async () => {

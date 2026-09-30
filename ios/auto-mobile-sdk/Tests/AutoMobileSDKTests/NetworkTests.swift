@@ -768,6 +768,75 @@ final class AutoMobileNetworkTests: XCTestCase {
 }
 
 final class NetworkCaptureRecorderTests: XCTestCase {
+    func testWritesSerializedNetworkCaptureFixtures() throws {
+        guard let outputDirectory = ProcessInfo.processInfo.environment["AUTOMOBILE_FIXTURE_OUT_DIR"] else { return }
+
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 10, flushIntervalMs: 60000) { events in
+            collector.collect(events)
+        }
+        AutoMobileNetwork.shared.initialize(bundleId: "fixture.app", buffer: buffer)
+        defer { AutoMobileNetwork.shared.reset() }
+        AutoMobileNetwork.shared.setCaptureHeaders(true)
+
+        let records = NetworkRecordCollector()
+        let recorder = NetworkCaptureRecorder(
+            emit: { records.append($0) },
+            idGenerator: { "fixture-request" }
+        )
+        let session = URLSessionNetworkCaptureAdapter(recorder: recorder)
+        let sessionId = session.begin(
+            url: "https://api.example.com/v1/items?token=<redacted>",
+            method: "GET",
+            connectionId: "session-connection",
+            requestHeaders: ["Authorization": "Bearer secret"]
+        )
+        session.didReceiveMetrics(requestId: sessionId, durationMs: 12.5)
+        session.didComplete(requestId: sessionId, statusCode: 204)
+
+        WebSocketNetworkCaptureAdapter(recorder: recorder).recordFrame(
+            url: "wss://api.example.com/socket",
+            connectionId: "socket-connection",
+            direction: .sent,
+            frameType: .text,
+            payloadSize: 4
+        )
+
+        let connection = NWConnectionNetworkCaptureAdapter(recorder: recorder)
+        let connectionId = connection.begin(
+            endpoint: "tcp://api.example.com:443",
+            connectionId: "nw-connection"
+        )
+        connection.didUpdateState(requestId: connectionId, state: "ready")
+        connection.didSend(requestId: connectionId, bytes: 3)
+        connection.didCancel(requestId: connectionId)
+
+        XCTAssertEqual(records.records.count, 3)
+        for record in records.records {
+            AutoMobileNetwork.shared.recordRequest(record)
+        }
+        buffer.flush()
+        XCTAssertEqual(collector.events.count, 3)
+
+        let names = ["urlsession", "websocket", "nwconnection"]
+        try FileManager.default.createDirectory(
+            atPath: outputDirectory, withIntermediateDirectories: true
+        )
+        for (name, event) in zip(names, collector.events) {
+            guard let event = event as? SdkNetworkRequestEvent else {
+                XCTFail("Expected network request event")
+                return
+            }
+            let batch = try SdkEventBatch(
+                bundleId: "fixture.app",
+                events: [SdkEventEnvelope(event)],
+                timestamp: 1_700_000_000_000
+            )
+            let data = try JSONEncoder().encode(batch)
+            try data.write(to: URL(fileURLWithPath: outputDirectory).appendingPathComponent("\(name).json"))
+        }
+    }
+
     /// Single-threaded harness whose `emit` re-enters the recorder. `@unchecked Sendable`
     /// because the whole test runs synchronously on one thread.
     private final class ReentrantEmitHarness: @unchecked Sendable {

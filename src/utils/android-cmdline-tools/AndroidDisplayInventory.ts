@@ -2,7 +2,7 @@ import type { DeviceDisplays, DisplayPanel, PanelRole, Posture } from "../../mod
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
-import { parseAndroidDisplayInfos, parseSurfaceFlingerDisplayIds } from "./AndroidDisplayParsers";
+import { parseSurfaceFlingerDisplayIds } from "./AndroidDisplayParsers";
 
 interface AndroidDisplayRecord {
   key: string;
@@ -28,6 +28,102 @@ export interface AndroidDeviceState {
   identifier: number;
   name: string;
   posture: Posture;
+}
+
+function splitDisplayDeviceFields(line: string, start: number): string[] {
+  const fields: string[] = [];
+  let fieldStart = start;
+  let depth = 0;
+  let quote: string | undefined;
+  for (let index = start; index < line.length; index++) {
+    const character = line[index];
+    if (quote !== undefined) {
+      quote = isUnescapedQuoteEnd(character, line[index - 1], quote) ? undefined : quote;
+      continue;
+    }
+    if (isQuote(character)) {
+      quote = character;
+      continue;
+    }
+    if (character === "}" && depth === 0) {
+      fields.push(line.slice(fieldStart, index));
+      break;
+    }
+    depth += delimiterDepthChange(character);
+    if (character === "," && depth === 0) {
+      fields.push(line.slice(fieldStart, index));
+      fieldStart = index + 1;
+    }
+  }
+  return fields;
+}
+
+function isQuote(character: string): boolean {
+  return character === '"' || character === "'";
+}
+
+function isUnescapedQuoteEnd(
+  character: string,
+  previous: string | undefined,
+  quote: string,
+): boolean {
+  return character === quote && previous !== "\\";
+}
+
+function delimiterDepthChange(character: string): number {
+  switch (character) {
+    case "{":
+    case "[":
+    case "(":
+      return 1;
+    case "}":
+    case "]":
+    case ")":
+      return -1;
+    default:
+      return 0;
+  }
+}
+
+function parseDisplayType(value: string | undefined): AndroidDisplayRecord["type"] | undefined {
+  switch (value) {
+    case "INTERNAL":
+    case "EXTERNAL":
+    case "VIRTUAL":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function parseAndroidDisplayDeviceInfo(line: string): AndroidDisplayRecord | undefined {
+  const marker = line.indexOf("DisplayDeviceInfo{");
+  if (marker < 0) {
+    return undefined;
+  }
+  const start = marker + "DisplayDeviceInfo{".length;
+  const fields = splitDisplayDeviceFields(line, start).map((field) => field.trim());
+  const uniqueId = fields
+    .find((field) => field.startsWith("uniqueId="))
+    ?.slice("uniqueId=".length)
+    .replace(/^"|"$/g, "");
+  const type = parseDisplayType(fields.find((field) => field.startsWith("type "))?.slice(5));
+  const dimensions = /^(\d+)\s+x\s+(\d+)$/.exec(
+    fields.find((field) => /^(\d+)\s+x\s+(\d+)$/.test(field)) ?? "",
+  );
+  const sizePx = dimensions
+    ? { width: Number(dimensions[1]), height: Number(dimensions[2]) }
+    : undefined;
+  const key = /^(?:local|external|virtual):(.+)$/.exec(uniqueId ?? "")?.[1];
+  return key && type && sizePx ? { key, type, sizePx } : undefined;
+}
+
+/** Read DisplayDeviceInfo records' structured top-level fields. */
+function parseAndroidDisplayDeviceInfos(output: string): AndroidDisplayRecord[] {
+  return output
+    .split(/\r?\n/)
+    .map(parseAndroidDisplayDeviceInfo)
+    .filter((record): record is AndroidDisplayRecord => record !== undefined);
 }
 
 /** Parse the DeviceState rows printed by `cmd device_state print-states`. */
@@ -66,21 +162,15 @@ export function parseAndroidPostures(output: string): Posture[] {
   return postures.size ? [...postures] : ["unknown"];
 }
 
-/** Join SurfaceFlinger physical IDs to display service sizes and types. */
+/** Join SurfaceFlinger physical IDs to display service physical-panel records. */
 export function parseAndroidDeviceDisplays(
   physicalIdsOutput: string,
-  displayInfosOutput: string,
+  displayDeviceInfosOutput: string,
   statesOutput: string,
 ): DeviceDisplays | undefined {
   const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
-  const records: AndroidDisplayRecord[] = parseAndroidDisplayInfos(displayInfosOutput).flatMap(
-    (record) => {
-      const key = /^(?:local|external|virtual):(.+)$/.exec(record.uniqueId ?? "")?.[1];
-      if (!record.hasDisplayInfo || !key || !record.sizePx || !record.type || !ids.has(key)) {
-        return [];
-      }
-      return [{ key, type: record.type, sizePx: record.sizePx }];
-    },
+  const records = parseAndroidDisplayDeviceInfos(displayDeviceInfosOutput).filter((record) =>
+    ids.has(record.key),
   );
   // Single-screen devices retain their pre-existing inventory JSON shape.
   if (records.length < 2) {
@@ -110,7 +200,7 @@ export async function readAndroidDeviceDisplays(
 ): Promise<DeviceDisplays | undefined> {
   const commands = [
     "shell dumpsys SurfaceFlinger --display-id",
-    "shell cmd display get-displays",
+    "shell dumpsys display",
     "shell cmd device_state print-states",
   ] as const;
   const results = await Promise.allSettled(

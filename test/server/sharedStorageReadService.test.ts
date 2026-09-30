@@ -16,6 +16,9 @@ const androidDevice: BootedDevice = {
   platform: "android",
 };
 
+// Device fixtures use `stat -c '%s|%Y|%n'` and sha256sum's exact
+// `<64 lowercase hex chars><two spaces><path>` output format.
+
 function execResult(stdout: string) {
   return {
     stdout,
@@ -116,7 +119,6 @@ describe("SharedStorageReadService.list", () => {
   test("distinguishes an existing-but-empty namespace from a missing one", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("-exec stat", execResult(""));
-    executor.setCommandResponse("sha256sum", execResult(""));
 
     const empty = await serviceWith(executor).list({
       deviceId: "emulator-5554",
@@ -182,7 +184,6 @@ describe("SharedStorageReadService.list", () => {
   test("targets the resolved profile's Downloads for work-profile devices", async () => {
     const executor = new FakeAdbExecutor();
     executor.setCommandResponse("-exec stat", execResult(""));
-    executor.setCommandResponse("sha256sum", execResult(""));
     const captured: UserTargetRequest[] = [];
 
     const listing = await serviceWith(
@@ -273,6 +274,93 @@ describe("SharedStorageReadService.list", () => {
         .getExecutedCommands()
         .some((command) => command.includes("/storage/emulated/0/Download/explicit-zero/note.txt")),
     ).toBe(true);
+  });
+
+  test("reuses hashes for unchanged files without issuing another sha256sum command", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse(
+      "-exec stat",
+      execResult("4|1690000000|/storage/emulated/0/Download/run-42/a.txt\n"),
+    );
+    executor.setCommandResponse(
+      "sha256sum",
+      execResult(
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  /storage/emulated/0/Download/run-42/a.txt\n",
+      ),
+    );
+    const service = serviceWith(executor);
+    const request = { deviceId: "emulator-5554", namespace: "run-42" };
+
+    await service.list(request);
+    const second = await service.list(request);
+
+    expect(second.files[0]?.sha256).toBe(
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    expect(
+      executor.getExecutedCommands().filter((command) => command.includes("sha256sum")),
+    ).toHaveLength(1);
+  });
+
+  test("rehashes only files whose size or mtime changed", async () => {
+    for (const changedField of ["mtime", "size"] as const) {
+      const executor = new FakeAdbExecutor();
+      const directory = "/storage/emulated/0/Download/run-42/";
+      const firstA = `4|1690000000|${directory}a.txt\n`;
+      const changedA =
+        changedField === "mtime"
+          ? `4|1690000001|${directory}a.txt\n`
+          : `5|1690000000|${directory}a.txt\n`;
+      const b = `8|1690000000|${directory}b.txt\n`;
+      executor.setCommandResponseSequence("-exec stat", [
+        execResult(`${firstA}${b}`),
+        execResult(`${changedA}${b}`),
+      ]);
+      executor.setCommandResponse(
+        "sha256sum",
+        execResult(
+          `bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  ${directory}a.txt\n` +
+            `cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc  ${directory}b.txt\n`,
+        ),
+      );
+      const service = serviceWith(executor);
+      const request = { deviceId: "emulator-5554", namespace: "run-42" };
+
+      await service.list(request);
+      await service.list(request);
+
+      const hashCommands = executor
+        .getExecutedCommands()
+        .filter((command) => command.includes("sha256sum"));
+      expect(hashCommands).toHaveLength(2);
+      expect(hashCommands[1]).toContain("a.txt");
+      expect(hashCommands[1]).not.toContain("b.txt");
+    }
+  });
+
+  test("marks a vanished file's hash unavailable and ignores hashes absent from stat output", async () => {
+    const executor = new FakeAdbExecutor();
+    const directory = "/storage/emulated/0/Download/run-42/";
+    executor.setCommandResponse(
+      "-exec stat",
+      execResult(`3|1690000000|${directory}vanished.txt\n`),
+    );
+    executor.setCommandResponse(
+      "sha256sum",
+      execResult(
+        `dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  ${directory}other.txt\n`,
+      ),
+    );
+
+    const listing = await serviceWith(executor).list({
+      deviceId: "emulator-5554",
+      namespace: "run-42",
+    });
+
+    expect(listing.observation).toBe("complete");
+    expect(listing.files).toHaveLength(1);
+    expect(listing.files[0]?.sha256).toBeUndefined();
+    expect(listing.files[0]?.sha256Unavailable).toContain("disappeared");
   });
 
   test("reports unavailable when the active profile cannot be resolved", async () => {

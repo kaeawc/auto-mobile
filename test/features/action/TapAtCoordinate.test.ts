@@ -114,6 +114,20 @@ function createTapAt(
 }
 
 describe("TapAtCoordinate", () => {
+  test("Duo landscape bounds dispatch x=700 and reject exclusive edges", async () => {
+    const { tapAt, iosDispatches } = createTapAt(iosDevice, 951, 669);
+    expect((await tapAt.execute({ x: 700, y: 48 })).success).toBe(true);
+    expect(iosDispatches).toHaveLength(1);
+    for (const coordinates of [
+      { x: 951, y: 0 },
+      { x: 0, y: 669 },
+    ]) {
+      const result = await tapAt.execute(coordinates);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("outside screen bounds [0, 951) x [0, 669)");
+    }
+    expect(iosDispatches).toHaveLength(1);
+  });
   beforeEach(() => {
     displayTransitions.reset(androidDevice.deviceId);
     displayTransitions.reset(iosDevice.deviceId);

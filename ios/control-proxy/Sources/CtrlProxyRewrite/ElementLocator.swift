@@ -717,7 +717,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             let (screenWidth, screenHeight) = ElementLocator.resolveScreenDimensions(
                 rootBounds: finalHierarchy.bounds,
                 fallbackWidth: currentScreenMetrics.fallbackWidth,
-                fallbackHeight: currentScreenMetrics.fallbackHeight
+                fallbackHeight: currentScreenMetrics.fallbackHeight,
+                elements: finalHierarchy.node ?? []
             )
             let pixelDimensions = ElementLocator.computePixelDimensions(
                 pointWidth: screenWidth,
@@ -1759,11 +1760,41 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     nonisolated static func resolveScreenDimensions(
         rootBounds: ElementBounds?,
         fallbackWidth: Int,
-        fallbackHeight: Int
+        fallbackHeight: Int,
+        elements: [UIElementInfo] = []
     )
         -> (width: Int, height: Int)
     {
         if let bounds = rootBounds, bounds.width > 0, bounds.height > 0 {
+            var exceedsRoot = false
+            var fitsSwapped = true
+            var fullLandscapeFrame = false
+            func visit(_ element: UIElementInfo) {
+                if let frame = element.bounds {
+                    if frame.right > bounds.right || frame.bottom > bounds.bottom {
+                        exceedsRoot = true
+                    }
+                    if frame.right > bounds.left + bounds.height ||
+                        frame.bottom > bounds.top + bounds.width
+                    {
+                        fitsSwapped = false
+                    }
+                    if frame.left <= bounds.left, frame.top <= bounds.top,
+                       frame.right > bounds.right, frame.bottom >= bounds.top + bounds.width
+                    {
+                        fullLandscapeFrame = true
+                    }
+                }
+                for child in element.node ?? [] {
+                    visit(child)
+                }
+            }
+            for element in elements {
+                visit(element)
+            }
+            if exceedsRoot && fitsSwapped && fullLandscapeFrame {
+                return (bounds.height, bounds.width)
+            }
             return (bounds.width, bounds.height)
         }
         return (fallbackWidth, fallbackHeight)

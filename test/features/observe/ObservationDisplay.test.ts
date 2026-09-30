@@ -25,6 +25,11 @@ import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
+import {
+  parseSimulatorDisplays,
+  simulatorDeviceDisplays,
+} from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "simulator" };
@@ -314,25 +319,27 @@ describe("observation display stamp", () => {
   test("folded iPhone Duo selects the live cover panel by runner pixel size", () => {
     const device: BootedDevice = {
       ...ios,
-      displays: {
-        panels: [
-          { key: "inner", role: "inner", sizePx: { width: 2064, height: 2208 } },
-          { key: "primary", role: "cover", sizePx: { width: 1170, height: 2532 } },
-        ],
-        postures: ["closed", "half_opened", "opened"],
-      },
+      displays: simulatorDeviceDisplays(
+        parseSimulatorDisplays(loadDuoEnumerate()),
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+      ),
     };
     expect(
       observedIosDisplay(device, {
-        pixelWidth: 1170,
-        pixelHeight: 2532,
+        pixelWidth: 1398,
+        pixelHeight: 2034,
         captureSequence: 41,
       } as ViewHierarchyResult),
     ).toEqual({
       key: "primary",
       role: "cover",
-      posture: "unknown",
+      posture: "closed",
       generation: 41,
+    });
+    expect(observedIosDisplay(device, { pixelWidth: 2007, pixelHeight: 2853 })).toMatchObject({
+      key: "primary-1",
+      role: "inner",
+      posture: "opened",
     });
   });
 });

@@ -595,7 +595,7 @@ describe("display read routing", () => {
         skipRecompositionTracking: true,
         skipAccessibilityAudit: true,
       });
-      expect(result.display).toMatchObject({ key: "primary-1", role: "inner", posture: "unknown" });
+      expect(result.display).toMatchObject({ key: "primary-1", role: "inner", posture: "opened" });
       expect(result.otherDisplays).toEqual([
         { key: "primary", role: "cover", size: { width: 1398, height: 2034 } },
       ]);

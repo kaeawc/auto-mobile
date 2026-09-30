@@ -7,6 +7,55 @@
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { DelegateContext, CtrlProxyScreenshotResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
+import type { BootedDevice } from "../../../models";
+import type { XCTestHierarchy } from "./types";
+import type { SimCtl } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import { observedIosDisplay } from "../ObservationDisplay";
+import { readImageHeaderDimensions } from "../../../utils/screenshot/imageHeaderDimensions";
+import { logger } from "../../../utils/logger";
+
+/** Select a physical simulator panel, verifying its PNG before accepting it. */
+export async function captureIosPanelScreenshot(
+  device: BootedDevice,
+  hierarchy: XCTestHierarchy | null,
+  simctl: Pick<SimCtl, "screenshot">,
+  runnerCapture: () => Promise<CtrlProxyScreenshotResult>,
+  signal?: AbortSignal,
+  activePanelKey?: string,
+): Promise<CtrlProxyScreenshotResult> {
+  const panels = device.displays?.panels ?? [];
+  if (panels.length < 2) {
+    return runnerCapture();
+  }
+  const display = observedIosDisplay(device, hierarchy ?? undefined);
+  const panel = panels.find((candidate) => candidate.key === (activePanelKey ?? display.key));
+  if (!panel) {
+    logger.warn("[SCREENSHOT] Could not identify active iOS panel; using runner capture");
+    return runnerCapture();
+  }
+  try {
+    const png = await simctl.screenshot(device.deviceId, panel.key, signal);
+    const dimensions = readImageHeaderDimensions(png);
+    if (
+      !dimensions ||
+      !(
+        (dimensions.width === panel.sizePx.width && dimensions.height === panel.sizePx.height) ||
+        (dimensions.width === panel.sizePx.height && dimensions.height === panel.sizePx.width)
+      )
+    ) {
+      logger.warn(
+        `[SCREENSHOT] iOS panel ${panel.key} returned unexpected PNG dimensions; using runner capture`,
+      );
+      return runnerCapture();
+    }
+    return { success: true, data: png.toString("base64"), format: "png" };
+  } catch (error) {
+    logger.warn(
+      `[SCREENSHOT] iOS panel ${panel.key} capture failed; using runner capture: ${error}`,
+    );
+    return runnerCapture();
+  }
+}
 
 /**
  * Delegate class for handling screenshot operations.

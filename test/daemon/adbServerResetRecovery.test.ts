@@ -25,6 +25,46 @@ class StoppedDeviceManager extends FakeDeviceManager {
 }
 
 describe("ADB server reset session recovery", () => {
+  test("recovery targets read reset reservations live after cohort release", async () => {
+    const timer = new FakeTimer();
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const manager = new FakeDeviceManager();
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "daemon-session", {
+        timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: manager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
+    );
+    const booted: BootedDevice = {
+      platform: "android",
+      name: "Pixel_8_API_35",
+      deviceId: "emulator-5554",
+    };
+    const image: DeviceInfo = {
+      name: booted.name,
+      platform: "android",
+      isRunning: true,
+      source: "local",
+    };
+    try {
+      await pool.addDevice(booted, image);
+      const cohort = await pool.detachAdbServerResetCohort([pool.getDevice(booted.deviceId)!]);
+      expect(pool.getRecoveringAndroidTargets()).toEqual({
+        names: new Set([booted.name]),
+        serials: new Set([booted.deviceId]),
+      });
+      await pool.releaseAdbServerResetCohortReservations(cohort.devices);
+      expect(pool.getRecoveringAndroidTargets()).toEqual({
+        names: new Set(),
+        serials: new Set(),
+      });
+    } finally {
+      sessions.stopCleanupTimer();
+    }
+  });
+
   test("rebinds a live session only after restarting its recorded AVD", async () => {
     class ReplacementSerialDeviceManager extends FakeDeviceManager {
       readonly killedDeviceIds: string[] = [];

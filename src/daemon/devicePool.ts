@@ -87,6 +87,10 @@ import {
 } from "./deviceRecoveryCoordinator";
 import { DeviceAutolockManager, type AutolockClient } from "./deviceAutolockManager";
 import {
+  AdbServerResetQuarantine,
+  type AdbServerResetQuarantinePoolPort,
+} from "./adbServerResetQuarantine";
+import {
   DeviceDisconnectHandler,
   INCARNATION_ANY,
   type CurrentDisconnectStatus,
@@ -468,7 +472,7 @@ interface ReadinessReservationTarget {
   incarnation: number;
 }
 
-interface AdbServerResetRecoveryReservation {
+export interface AdbServerResetRecoveryReservation {
   deviceId: string;
   image: DeviceInfo;
   cancelled: boolean;
@@ -483,7 +487,7 @@ export interface AdbServerResetCohortDetachment {
   deferred: boolean;
 }
 
-interface AndroidStartupLeaseRequest {
+export interface AndroidStartupLeaseRequest {
   name?: string;
   exactName: boolean;
   ownsOfflineRecovery: boolean;
@@ -609,7 +613,17 @@ export interface DevicePoolDependencies {
   idGenerator?: IdGenerator;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+  adbServerResetQuarantineFactory?: (
+    pool: AdbServerResetQuarantinePoolPort,
+  ) => AdbServerResetQuarantine;
   deviceSessionContinuityEnabled?: boolean;
+}
+
+function createAdbServerResetQuarantine(
+  port: AdbServerResetQuarantinePoolPort,
+  factory?: DevicePoolDependencies["adbServerResetQuarantineFactory"],
+): AdbServerResetQuarantine {
+  return factory ? factory(port) : new AdbServerResetQuarantine(port);
 }
 
 export class DevicePool {
@@ -648,6 +662,7 @@ export class DevicePool {
   private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly deviceSessionContinuityEnabled: boolean;
   private readonly recoveryCoordinator: DeviceRecoveryCoordinator;
+  private readonly adbServerResetQuarantine: AdbServerResetQuarantine;
   private get recoveringAndroidImages(): Map<string, DeviceInfo> {
     return this.recoveryCoordinator.recoveringAndroidImages;
   }
@@ -802,6 +817,7 @@ export class DevicePool {
     idGenerator = defaultIdGenerator,
     lifecycleCoordinator,
     consoleBusyRegistry,
+    adbServerResetQuarantineFactory,
     deviceSessionContinuityEnabled,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
@@ -907,6 +923,42 @@ export class DevicePool {
         this.releaseDisconnectedRecoverySessionWithRetry(sessionId, deviceId, reason, attempt),
       releaseDevice: (deviceId, sessionId) => this.releaseDevice(deviceId, sessionId),
     });
+    this.adbServerResetQuarantine = createAdbServerResetQuarantine(
+      {
+        getAssignmentMutex: () => this.assignmentMutex,
+        getDevices: () => this.devices,
+        getSessionManager: () => this.sessionManager,
+        getStartedDeviceProcesses: () => this.startedDeviceProcesses,
+        getAdbServerResetTrackedProcesses: () => this.adbServerResetTrackedProcesses,
+        getAdbServerResetRecoveryReservations: () => this.adbServerResetRecoveryReservations,
+        getAndroidStartupLeases: () => this.androidStartupLeases,
+        getRecoveringAndroidImages: () => this.recoveringAndroidImages,
+        getRecoveringAndroidDeviceIds: () => this.recoveringAndroidDeviceIds,
+        getRecoveringSessionLosses: () => this.recoveringSessionLosses,
+        getFailedTerminalRecoveryReleases: () => this.failedTerminalRecoveryReleases,
+        getRecoveryCoordinator: () => this.recoveryCoordinator,
+        getAfterAndroidStartupRecoverySnapshot: () => this.afterAndroidStartupRecoverySnapshot,
+        getDevice: (id) => this.getDevice(id),
+        isPreservedSessionCurrent: (session, deviceId) =>
+          this.isPreservedSessionCurrent(session, deviceId),
+        isAndroidEmulatorActiveRelaunchEligible: (device) =>
+          this.isAndroidEmulatorActiveRelaunchEligible(device),
+        removeDevice: (id, awaitCacheCleanup, expected) =>
+          this.removeDevice(id, awaitCacheCleanup, expected),
+        startAndroidRecoveryRecord: (sessionId, details, reservations, replace) =>
+          this.startAndroidRecoveryRecord(sessionId, details, reservations, replace),
+        recordEmulatorLossIncident: (id, path, exit, state) =>
+          this.recordEmulatorLossIncident(id, path, exit, state),
+        cancelDeviceSessionExecutions: (id, reason) =>
+          this.cancelDeviceSessionExecutions(id, reason),
+        completeEmulatorLossRecovery: (id, outcome) =>
+          this.completeEmulatorLossRecovery(id, outcome),
+        settleEmulatorLossIncident: (id) => this.settleEmulatorLossIncident(id),
+        finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
+        stopTrackedEmulatorProcess: (id) => this.stopTrackedEmulatorProcess(id),
+      },
+      adbServerResetQuarantineFactory,
+    );
     this.emulatorLossLedger = new EmulatorLossIncidentLedger(
       {
         getDevice: (deviceId) => this.getDevice(deviceId),
@@ -1131,18 +1183,7 @@ export class DevicePool {
   }
 
   private clearAdbResetRecoveryReservation(record: AndroidRecoveryRecord): void {
-    if (!record.reservations.has("reset-cohort") || !record.avdName) {
-      return;
-    }
-    const reservation = this.adbServerResetRecoveryReservations.get(record.avdName);
-    if (
-      reservation?.sessionId !== record.sessionId ||
-      reservation.recoveryGeneration !== record.generation
-    ) {
-      return;
-    }
-    this.adbServerResetRecoveryReservations.delete(record.avdName);
-    reservation.resolve();
+    this.adbServerResetQuarantine.clearAdbResetRecoveryReservation(record);
   }
 
   /**
@@ -3523,38 +3564,10 @@ export class DevicePool {
     deviceId: string,
     expectedDevice: PooledDevice | undefined,
   ): AndroidEmulatorRecoveryDevice | undefined {
-    const currentDevice = this.devices.get(deviceId);
-    if (currentDevice === undefined) {
-      return expectedDevice && this.isAndroidEmulatorActiveRelaunchEligible(expectedDevice)
-        ? expectedDevice
-        : undefined;
-    }
-    if (expectedDevice !== undefined && currentDevice !== expectedDevice) {
-      // A preceding cohort member can legitimately reuse this detached
-      // member's old serial. Keep recovering the captured AVD by its stable
-      // name rather than treating that different replacement as this device.
-      return this.isAndroidEmulatorActiveRelaunchEligible(expectedDevice)
-        ? expectedDevice
-        : undefined;
-    }
-    return this.isAndroidEmulatorActiveRelaunchEligible(currentDevice) ? currentDevice : undefined;
+    return this.adbServerResetQuarantine.getAdbResetRecoveryDevice(deviceId, expectedDevice);
   }
-
   private getAdbResetRecoverySession(device: PooledDevice): Session | undefined {
-    if (device.adbServerResetSession) {
-      return this.isPreservedSessionCurrent(device.adbServerResetSession, device.id)
-        ? device.adbServerResetSession
-        : undefined;
-    }
-    const sessionId =
-      device.adbServerResetSessionId ??
-      device.sessionId ??
-      this.sessionManager.getSessionForDevice(device.id);
-    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
-    if (!session || session.assignedDevice !== device.id || session.platform !== "android") {
-      return undefined;
-    }
-    return session;
+    return this.adbServerResetQuarantine.getAdbResetRecoverySession(device);
   }
 
   /**
@@ -3565,455 +3578,38 @@ export class DevicePool {
   async detachAdbServerResetCohort(
     cohort: readonly PooledDevice[],
   ): Promise<AdbServerResetCohortDetachment> {
-    return await this.assignmentMutex.runExclusive(async () => {
-      if (
-        cohort.some(
-          (device) =>
-            this.isAndroidEmulatorActiveRelaunchEligible(device) &&
-            this.isLeasedForAndroidStartup(device.avdName),
-        )
-      ) {
-        // An ADB reset affects every member of this captured cohort. Leaving a
-        // subset pooled would make later polling treat those members as ordinary
-        // disconnects, permanently separating their preserved sessions.
-        return { devices: [], deferred: true };
-      }
-      await this.prepareAdbServerResetCohortDetachment(cohort);
-      const detached: PooledDevice[] = [];
-      for (const device of cohort) {
-        if (
-          this.devices.get(device.id) !== device ||
-          !this.isAndroidEmulatorActiveRelaunchEligible(device)
-        ) {
-          continue;
-        }
-        const sessionId = device.sessionId;
-        if (device.sessionId) {
-          const session = this.sessionManager.getSession(device.sessionId);
-          if (!session || session.assignedDevice !== device.id || session.platform !== "android") {
-            this.recoveryCoordinator.finalizeRecoveryRecord(device.sessionId);
-            continue;
-          }
-          device.adbServerResetSessionId = device.sessionId;
-        }
-        device.adbServerResetAutolockSessionId = device.autolockSessionId;
-        const trackedProcess = this.startedDeviceProcesses.get(device.id);
-        if (trackedProcess && sessionId) {
-          this.adbServerResetTrackedProcesses.set(device, trackedProcess);
-        }
-        this.reserveAdbServerResetRecovery(device);
-        device.sessionId = null;
-        device.status = "idle";
-        await this.removeDevice(device.id, false, device);
-        detached.push(device);
-      }
-      return { devices: detached, deferred: false };
-    });
+    return await this.adbServerResetQuarantine.detachAdbServerResetCohort(cohort);
   }
-
-  private async prepareAdbServerResetCohortDetachment(
-    cohort: readonly PooledDevice[],
-  ): Promise<void> {
-    const capturedTargets = this.getAdbServerResetCohortSessionTargets(cohort);
-    const capturedSessionIds = new Set(capturedTargets.map(({ sessionId }) => sessionId));
-    for (const { sessionId, deviceId, session, pooledDevice } of capturedTargets) {
-      const record = this.startAndroidRecoveryRecord(
-        sessionId,
-        { deviceId, avdName: pooledDevice.avdName },
-        ["quarantine", "loss"],
-        true,
-      );
-      pooledDevice.adbServerResetSession = session;
-      pooledDevice.adbServerResetRecoveryGeneration = record.generation;
-    }
-    try {
-      for (const device of cohort) {
-        if (capturedTargets.some(({ sessionId }) => sessionId === device.sessionId)) {
-          device.adbServerResetIncidentId = await this.recordEmulatorLossIncident(
-            device.id,
-            "adb-server-reset",
-            undefined,
-            "absent",
-          );
-        }
-      }
-      const sessionTargets = this.getAdbServerResetCohortSessionTargets(cohort).filter(
-        ({ sessionId }) => capturedSessionIds.has(sessionId),
-      );
-      const activeSessionIds = new Set(sessionTargets.map(({ sessionId }) => sessionId));
-      for (const { sessionId } of capturedTargets) {
-        if (!activeSessionIds.has(sessionId)) {
-          this.recoveryCoordinator.finalizeRecoveryRecord(sessionId);
-        }
-      }
-      for (const { sessionId, deviceId, incidentId } of sessionTargets) {
-        this.startAndroidRecoveryRecord(sessionId, { deviceId, incidentId }, [
-          "quarantine",
-          "loss",
-        ]);
-      }
-      await this.settleAbandonedAdbResetIncidents(cohort, sessionTargets);
-      await Promise.all(
-        sessionTargets.map(({ sessionId, deviceId, incidentId }) =>
-          this.cancelDeviceSessionExecutions(
-            sessionId,
-            deviceLossCancellationReason(deviceId, incidentId),
-          ),
-        ),
-      );
-      await this.stopTrackedIdleAdbResetCohortProcesses(cohort);
-    } catch (error) {
-      await this.settleFailedAdbResetCohortPreparation(cohort, capturedTargets);
-      throw error;
-    }
-  }
-
-  private async settleFailedAdbResetCohortPreparation(
-    cohort: readonly PooledDevice[],
-    capturedTargets: readonly { sessionId: string; deviceId: string }[],
-  ): Promise<void> {
-    const activeSessionIds = new Set<string>();
-    for (const { sessionId, deviceId } of capturedTargets) {
-      const session = this.sessionManager.getSession(sessionId);
-      if (session?.assignedDevice === deviceId && session.platform === "android") {
-        activeSessionIds.add(sessionId);
-      } else {
-        this.recoveryCoordinator.finalizeRecoveryRecord(sessionId);
-      }
-    }
-    for (const device of cohort) {
-      if (device.adbServerResetIncidentId) {
-        await this.completeEmulatorLossRecovery(
-          device.adbServerResetIncidentId,
-          device.sessionId && activeSessionIds.has(device.sessionId)
-            ? "exhausted"
-            : "not-attempted",
-        );
-        this.settleEmulatorLossIncident(device.adbServerResetIncidentId);
-      }
-    }
-  }
-
-  private async settleAbandonedAdbResetIncidents(
-    cohort: readonly PooledDevice[],
-    sessionTargets: readonly { incidentId?: string }[],
-  ): Promise<void> {
-    const activeIncidentIds = new Set(
-      sessionTargets.flatMap(({ incidentId }) => (incidentId ? [incidentId] : [])),
-    );
-    for (const device of cohort) {
-      const incidentId = device.adbServerResetIncidentId;
-      if (incidentId && !activeIncidentIds.has(incidentId)) {
-        await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-        delete device.adbServerResetIncidentId;
-      }
-    }
-  }
-
-  private getAdbServerResetCohortSessionTargets(cohort: readonly PooledDevice[]): Array<{
-    sessionId: string;
-    deviceId: string;
-    session: Session;
-    pooledDevice: PooledDevice;
-    incidentId?: string;
-  }> {
-    const sessionTargets = new Map<
-      string,
-      { deviceId: string; session: Session; pooledDevice: PooledDevice; incidentId?: string }
-    >();
-    for (const device of cohort) {
-      if (
-        this.devices.get(device.id) !== device ||
-        !this.isAndroidEmulatorActiveRelaunchEligible(device) ||
-        !device.sessionId
-      ) {
-        continue;
-      }
-      const session = this.sessionManager.getSession(device.sessionId);
-      if (session?.assignedDevice === device.id && session.platform === "android") {
-        sessionTargets.set(device.sessionId, {
-          deviceId: device.id,
-          session,
-          pooledDevice: device,
-          ...(device.adbServerResetIncidentId
-            ? { incidentId: device.adbServerResetIncidentId }
-            : {}),
-        });
-      }
-    }
-    return Array.from(sessionTargets, ([sessionId, target]) => ({ sessionId, ...target }));
-  }
-
-  private async stopTrackedIdleAdbResetCohortProcesses(
-    cohort: readonly PooledDevice[],
-  ): Promise<void> {
-    // Stop every fallible idle process before reserving or detaching any cohort
-    // member. A failed stop then leaves all session routes and reservations intact.
-    for (const device of cohort) {
-      if (
-        this.devices.get(device.id) !== device ||
-        !this.isAndroidEmulatorActiveRelaunchEligible(device) ||
-        device.sessionId !== null ||
-        !this.startedDeviceProcesses.has(device.id)
-      ) {
-        continue;
-      }
-      await this.stopTrackedEmulatorProcess(device.id);
-    }
-  }
-
-  /**
-   * Wait for a cohort-level reservation created before ADB-reset recovery
-   * starts. Named startup uses this so it cannot race a later cohort member.
-   */
   async waitForAdbServerResetRecovery(avdName: string, signal?: AbortSignal): Promise<void> {
-    const reservation = this.adbServerResetRecoveryReservations.get(avdName);
-    if (!reservation) {
-      return;
-    }
-    await this.waitForAdbServerResetReservations([reservation], signal);
+    await this.adbServerResetQuarantine.waitForAdbServerResetRecovery(avdName, signal);
   }
-
-  /** Snapshot the Android runtimes whose preserved sessions still own startup recovery. */
   getRecoveringAndroidTargets(): { names: Set<string>; serials: Set<string> } {
-    return {
-      names: new Set([
-        ...this.recoveringAndroidImages.keys(),
-        ...this.adbServerResetRecoveryReservations.keys(),
-      ]),
-      serials: new Set([
-        ...Array.from(this.recoveringAndroidImages.values())
-          .map((image) => image.deviceId)
-          .filter((deviceId): deviceId is string => Boolean(deviceId)),
-        ...Array.from(this.adbServerResetRecoveryReservations.values())
-          .map((reservation) => reservation.deviceId)
-          .filter(Boolean),
-        ...Array.from(this.recoveringSessionLosses.values())
-          .map((recovery) => recovery.deviceId)
-          .filter(Boolean),
-        ...Array.from(this.recoveringAndroidDeviceIds).filter(Boolean),
-      ]),
-    };
+    return this.adbServerResetQuarantine.getRecoveringAndroidTargets();
   }
-
-  /**
-   * Atomically wait for matching reset recovery and reserve the requested AVD
-   * against a concurrent reset-cohort detachment. The returned release must
-   * remain held until startup has bound or abandoned the device.
-   */
   async reserveAndroidStartupLease(
     name: string | undefined,
     exactName: boolean,
     signal?: AbortSignal,
     ownsOfflineRecovery = false,
   ): Promise<() => Promise<void>> {
-    const owner = Symbol("android-startup-lease");
-    const request: AndroidStartupLeaseRequest = { name, exactName, ownsOfflineRecovery };
-    for (;;) {
-      let matchingReservations: AdbServerResetRecoveryReservation[] = [];
-      let matchingRecoveryAvdNames: string[] = [];
-      await this.assignmentMutex.runExclusive(() => {
-        ({ matchingReservations, matchingRecoveryAvdNames } =
-          this.getAndroidStartupRecoveryMatches(request));
-        if (matchingReservations.length === 0 && matchingRecoveryAvdNames.length === 0) {
-          this.androidStartupLeases.set(owner, request);
-        }
-      });
-      this.afterAndroidStartupRecoverySnapshot?.();
-      if (matchingReservations.length === 0 && matchingRecoveryAvdNames.length === 0) {
-        break;
-      }
-      if (matchingReservations.length > 0) {
-        await this.waitForAdbServerResetReservations(matchingReservations, signal);
-      } else {
-        await this.recoveryCoordinator.waitForRecoveringAndroidImages(
-          matchingRecoveryAvdNames,
-          signal,
-        );
-      }
-    }
-
-    let released = false;
-    return async () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      await this.assignmentMutex.runExclusive(() => {
-        this.androidStartupLeases.delete(owner);
-      });
-    };
+    return await this.adbServerResetQuarantine.reserveAndroidStartupLease(
+      name,
+      exactName,
+      signal,
+      ownsOfflineRecovery,
+    );
   }
-
-  /**
-   * Legacy startDevice accepts a partial name, unlike getAndroid's exact AVD
-   * name. Do not let that compatibility path select a reserved reset member.
-   */
   async waitForAdbServerResetRecoveryMatchingName(
     name: string | undefined,
     signal?: AbortSignal,
   ): Promise<void> {
-    const normalizedName = name?.toLowerCase();
-    const reservations = Array.from(this.adbServerResetRecoveryReservations.values()).filter(
-      (reservation) =>
-        normalizedName === undefined ||
-        reservation.image.name.toLowerCase().includes(normalizedName),
-    );
-    await this.waitForAdbServerResetReservations(reservations, signal);
+    await this.adbServerResetQuarantine.waitForAdbServerResetRecoveryMatchingName(name, signal);
   }
-
   async releaseAdbServerResetCohortReservations(cohort: readonly PooledDevice[]): Promise<void> {
-    await this.assignmentMutex.runExclusive(() => {
-      for (const device of cohort) {
-        if (device.adbServerResetSessionId) {
-          const sessionId = device.adbServerResetSessionId;
-          const record = this.recoveringSessionLosses.get(sessionId);
-          if (!record || record.generation !== device.adbServerResetRecoveryGeneration) {
-            // A later recovery reused this session or AVD. Its reservations are
-            // not owned by this delayed cohort sweep.
-            continue;
-          }
-          if (!this.canReleaseAdbServerResetSessionFence(device, sessionId)) {
-            // An unsettled owner must retain both its session fence and the
-            // AVD reservation, including after the cohort caller's finally.
-            continue;
-          }
-          this.recoveryCoordinator.finalizeRecoveryRecord(sessionId, record);
-          continue;
-        }
-        if (!device.avdName) {
-          continue;
-        }
-        const reservation = this.adbServerResetRecoveryReservations.get(device.avdName);
-        if (!reservation) {
-          continue;
-        }
-        this.adbServerResetRecoveryReservations.delete(device.avdName);
-        reservation.resolve();
-      }
-    });
+    await this.adbServerResetQuarantine.releaseAdbServerResetCohortReservations(cohort);
   }
-
-  private canReleaseAdbServerResetSessionFence(device: PooledDevice, sessionId: string): boolean {
-    if (this.failedTerminalRecoveryReleases.has(sessionId)) {
-      return false;
-    }
-    const capturedSession = device.adbServerResetSession;
-    if (!capturedSession || !this.sessionManager.isCurrentSession(capturedSession)) {
-      return true;
-    }
-    const assignedDeviceId = capturedSession.assignedDevice;
-    const restoredDevice = assignedDeviceId ? this.devices.get(assignedDeviceId) : undefined;
-    return (
-      restoredDevice?.sessionId === sessionId &&
-      restoredDevice.status === "busy" &&
-      restoredDevice.platform === "android" &&
-      restoredDevice.avdName === device.avdName
-    );
-  }
-
-  private reserveAdbServerResetRecovery(device: PooledDevice): void {
-    if (!device.avdName || !device.androidImage) {
-      return;
-    }
-    const sessionId = device.adbServerResetSessionId;
-    const record = sessionId ? this.recoveringSessionLosses.get(sessionId) : undefined;
-    const existing = this.adbServerResetRecoveryReservations.get(device.avdName);
-    if (existing) {
-      if (record && existing.recoveryGeneration !== record.generation) {
-        record.reservations.add("reset-cohort");
-        existing.sessionId = record.sessionId;
-        existing.recoveryGeneration = record.generation;
-        existing.deviceId = device.id;
-      }
-      return;
-    }
-    let resolve!: () => void;
-    const settled = new Promise<void>((resolvePromise) => {
-      resolve = resolvePromise;
-    });
-    if (record) {
-      record.reservations.add("reset-cohort");
-    }
-    this.adbServerResetRecoveryReservations.set(device.avdName, {
-      image: {
-        ...device.androidImage,
-        name: device.avdName,
-        platform: "android",
-        isRunning: false,
-        source: "local",
-      },
-      deviceId: device.id,
-      cancelled: false,
-      settled,
-      resolve,
-      ...(record ? { sessionId: record.sessionId, recoveryGeneration: record.generation } : {}),
-    });
-  }
-
-  private isLeasedForAndroidStartup(avdName: string): boolean {
-    return Array.from(this.androidStartupLeases.values()).some((request) =>
-      this.androidStartupRequestMatchesAvd(request, avdName),
-    );
-  }
-
-  /**
-   * Whether the given serial's AVD has a startup lease that owns fresh-offline
-   * recovery. Warm startup leases still serialize ADB-reset recovery, but do
-   * not suppress the disconnect monitor's global reconnect. Returns `false`
-   * for an untracked serial or one with no recorded `avdName`.
-   */
   isDeviceLeasedForAndroidStartup(deviceId: string): boolean {
-    const device = this.getDevice(deviceId);
-    return (
-      Boolean(device?.avdName) &&
-      Array.from(this.androidStartupLeases.values()).some(
-        (request) =>
-          request.ownsOfflineRecovery &&
-          this.androidStartupRequestMatchesAvd(request, device!.avdName!),
-      )
-    );
-  }
-
-  private getAndroidStartupRecoveryMatches(request: AndroidStartupLeaseRequest): {
-    matchingReservations: AdbServerResetRecoveryReservation[];
-    matchingRecoveryAvdNames: string[];
-  } {
-    if (!request.name) {
-      return { matchingReservations: [], matchingRecoveryAvdNames: [] };
-    }
-    return {
-      matchingReservations: Array.from(this.adbServerResetRecoveryReservations.entries())
-        .filter(([avdName]) => this.androidStartupRequestMatchesAvd(request, avdName))
-        .map(([, reservation]) => reservation),
-      matchingRecoveryAvdNames: Array.from(this.recoveringAndroidImages.keys()).filter((avdName) =>
-        this.androidStartupRequestMatchesAvd(request, avdName),
-      ),
-    };
-  }
-
-  private androidStartupRequestMatchesAvd(
-    request: AndroidStartupLeaseRequest,
-    avdName: string,
-  ): boolean {
-    if (!request.name) {
-      return true;
-    }
-    const normalizedName = request.name.toLowerCase();
-    const normalizedAvdName = avdName.toLowerCase();
-    return request.exactName
-      ? normalizedAvdName === normalizedName
-      : normalizedAvdName.includes(normalizedName);
-  }
-
-  private async waitForAdbServerResetReservations(
-    reservations: readonly AdbServerResetRecoveryReservation[],
-    signal?: AbortSignal,
-  ): Promise<void> {
-    await this.recoveryCoordinator.waitForRecoverySettlements(
-      reservations.map((reservation) => reservation.settled),
-      signal,
-    );
+    return this.adbServerResetQuarantine.isDeviceLeasedForAndroidStartup(deviceId);
   }
 
   private async releasePreservedAdbResetSessionIfDetached(
@@ -4306,15 +3902,7 @@ export class DevicePool {
   }
 
   private consumeAdbServerResetRecoveryCancellation(device: PooledDevice): boolean {
-    if (!device.avdName) {
-      return false;
-    }
-    const reservation = this.adbServerResetRecoveryReservations.get(device.avdName);
-    if (!reservation || reservation.deviceId !== device.id || !reservation.cancelled) {
-      return false;
-    }
-    reservation.cancelled = false;
-    return true;
+    return this.adbServerResetQuarantine.consumeAdbServerResetRecoveryCancellation(device);
   }
 
   private consumeAndroidRecoveryCancellation(

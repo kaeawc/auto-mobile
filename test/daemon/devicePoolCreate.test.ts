@@ -15,6 +15,10 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import type { AndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
 import type { DeviceRecoveryPolicy } from "../../src/daemon/poolConfig";
 import type { BootedDevice } from "../../src/models";
+import {
+  AdbServerResetQuarantine,
+  type AdbServerResetQuarantinePoolPort,
+} from "../../src/daemon/adbServerResetQuarantine";
 
 describe("DevicePool.create", () => {
   const sessionManagers: SessionManager[] = [];
@@ -56,6 +60,25 @@ describe("DevicePool.create", () => {
     expect(factoryPool.getTotalDeviceCount()).toBe(directPool.getTotalDeviceCount());
     expect(factoryPool.getAvailableDeviceCount()).toBe(directPool.getAvailableDeviceCount());
     expect(factoryPool.getAvailableDeviceCount()).toBe(0);
+  });
+
+  test("accepts an injected ADB reset quarantine factory", () => {
+    const timer = new FakeTimer();
+    const sessionManager = makeSessionManager(timer);
+    let capturedPort: AdbServerResetQuarantinePoolPort | undefined;
+    const pool = DevicePool.create({
+      sessionManager,
+      daemonSessionId: "injected-daemon",
+      timer,
+      adbServerResetQuarantineFactory: (port) => {
+        capturedPort = port;
+        return new AdbServerResetQuarantine(port);
+      },
+    });
+
+    expect(capturedPort?.getSessionManager()).toBe(sessionManager);
+    expect(capturedPort?.getDevices()).toBeDefined();
+    expect(pool.getRecoveringAndroidTargets()).toEqual({ names: new Set(), serials: new Set() });
   });
 
   test("matches the direct constructor with all dependencies specified", async () => {

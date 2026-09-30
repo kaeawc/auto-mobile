@@ -7,6 +7,7 @@
 
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
 import type { DelegateContext } from "./types";
 import { generateSecureId } from "./types";
@@ -26,6 +27,15 @@ import type {
   SubscribeStorageResult,
   UnsubscribeStorageResult,
 } from "../../storage/storageTypes";
+
+/** Known transport failures raised while reading Android preferences from CtrlProxy. */
+export function isCtrlProxyStorageUnavailableError(error: unknown): boolean {
+  const message = errorMessage(error);
+  return (
+    message === "Failed to connect to accessibility service" ||
+    message === "WebSocket not connected"
+  );
+}
 
 /**
  * Delegate class for handling SharedPreferences operations.

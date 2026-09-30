@@ -1,0 +1,2 @@
+<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+<map><string name="greeting">hello &quot;xml&quot; &amp; world</string><string name="empty" /><boolean name="enabled" value="true" /><int name="launch_count" value="-7" /><long name="max_long" value="9223372036854775807" /><float name="ratio" value="0.1" /><set name="flags"><string>first</string><string>say &quot;hi&quot;</string></set><null name="nullable" /></map>

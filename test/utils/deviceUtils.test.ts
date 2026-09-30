@@ -28,6 +28,90 @@ async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promi
 }
 
 describe("MultiPlatformDeviceManager", () => {
+  describe("concurrent detailed discovery", () => {
+    const androidDevice: BootedDevice = {
+      name: "Pixel 9",
+      platform: "android",
+      deviceId: "emulator-5554",
+    };
+    const iosDevice: BootedDevice = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "1B2C3D4E-5F60-4718-8293-A1B2C3D4E5F6",
+    };
+
+    function makeManager(
+      androidDiscovery: () => Promise<BootedDevice[]>,
+    ): MultiPlatformDeviceManager {
+      return new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        {
+          isAvailable: async () => true,
+          getBootedSimulatorsChecked: async () => [iosDevice],
+        } as unknown as SimCtlClient,
+        createFakeAndroidEmulator({ getBootedDevicesChecked: androidDiscovery }),
+        undefined,
+        undefined,
+        { listConnectedDevices: async () => ({ devices: [], complete: true }) },
+      );
+    }
+
+    test("starts iOS discovery while Android is still pending", async () => {
+      await withProcessPlatform("darwin", async () => {
+        let finishAndroid!: (devices: BootedDevice[]) => void;
+        let iosStarted = false;
+        const manager = makeManager(() => new Promise((resolve) => (finishAndroid = resolve)));
+        const getBootedSimulatorsChecked = manager["simctl"].getBootedSimulatorsChecked.bind(
+          manager["simctl"],
+        );
+        manager["simctl"].getBootedSimulatorsChecked = async (...args) => {
+          iosStarted = true;
+          return getBootedSimulatorsChecked(...args);
+        };
+
+        const discoveryPromise = manager.getBootedDevicesDetailed("either");
+        for (let turn = 0; turn < 8 && !iosStarted; turn++) {
+          await Promise.resolve();
+        }
+        expect(iosStarted).toBe(true);
+
+        finishAndroid([androidDevice]);
+        const discovery = await discoveryPromise;
+        expect(discovery.devices).toEqual([androidDevice, iosDevice]);
+      });
+    });
+
+    test("returns iOS devices when Android discovery throws", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const manager = makeManager(async () => {
+          throw new Error("adb unavailable");
+        });
+
+        const discovery = await manager.getBootedDevicesDetailed("either");
+
+        expect(discovery.devices).toEqual([iosDevice]);
+        expect(discovery.succeededPlatforms.has("ios")).toBe(true);
+        expect(discovery.discoveryErrors?.android?.code).toBe("failed");
+      });
+    });
+
+    test("keeps Android then iOS order and the detailed result shape", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const manager = makeManager(async () => [androidDevice]);
+
+        const discovery = await manager.getBootedDevicesDetailed("either");
+
+        expect(discovery).toEqual({
+          devices: [androidDevice, iosDevice],
+          succeededPlatforms: new Set(["android", "ios"]),
+          succeededSources: new Set(["android", "ios-simulator", "ios-physical"]),
+          freshDeviceIds: new Set([androidDevice.deviceId, iosDevice.deviceId]),
+          discoveryErrors: {},
+        });
+      });
+    });
+  });
+
   describe("physical iOS device discovery (#5620)", () => {
     const physicalDevice: BootedDevice = {
       name: "Jason's iPhone",

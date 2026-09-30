@@ -70,6 +70,57 @@ describe("AppearanceSyncScheduler resilience", () => {
     await scheduler.stop();
   });
 
+  test("startup sync touches only the acquired Android device", async () => {
+    const devices = [makeTarget(1), { ...makeTarget(1), deviceId: "emulator-5556" }];
+    const applied: string[] = [];
+    const scheduler = makeScheduler(
+      () => devices.filter((device) => device.deviceId === "emulator-5554"),
+      async (device) => {
+        applied.push(device.deviceId);
+      },
+    );
+
+    await scheduler.trigger();
+
+    expect(applied).toEqual(["emulator-5554"]);
+    await scheduler.stop();
+  });
+
+  test("startup secret disables all appearance sync", async () => {
+    const applied: string[] = [];
+    const scheduler = new AppearanceSyncScheduler(new FakeTimer(), {
+      getConfig: async () => ({ syncWithHost: true }) as AppearanceConfig,
+      resolveMode: async () => "dark",
+      getTargets: () => [makeTarget(1)],
+      apply: async (device) => {
+        applied.push(device.deviceId);
+      },
+      isEnabled: () => false,
+    });
+
+    await scheduler.trigger();
+    await scheduler.syncDevice(makeTarget(1));
+
+    expect(applied).toEqual([]);
+    await scheduler.stop();
+  });
+
+  test("applies appearance sync when a session acquires a device later", async () => {
+    const acquired = makeTarget(1);
+    const applied: string[] = [];
+    const scheduler = makeScheduler(
+      () => [],
+      async (device) => {
+        applied.push(device.deviceId);
+      },
+    );
+
+    await scheduler.syncDevice(acquired);
+
+    expect(applied).toEqual(["emulator-5554"]);
+    await scheduler.stop();
+  });
+
   test("stop waits for an in-flight apply and prevents later targets", async () => {
     let finishApply: (() => void) | undefined;
     const applied: BootedDevice[] = [];

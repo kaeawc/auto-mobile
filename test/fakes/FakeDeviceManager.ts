@@ -5,7 +5,7 @@ import {
   DeviceImageDiscovery,
   DeviceImageDiscoveryOptions,
   PlatformDeviceManager,
-} from "../../src/utils/deviceUtils";
+} from "../../src/devices/deviceUtils";
 import { discoverySourceFor, type DiscoverySource } from "../../src/utils/discoverySource";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 

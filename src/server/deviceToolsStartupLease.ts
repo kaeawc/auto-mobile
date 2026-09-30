@@ -2,7 +2,7 @@ import { ActionableError } from "../models";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool } from "../daemon/devicePool";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";

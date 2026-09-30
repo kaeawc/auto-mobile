@@ -1,6 +1,6 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult, DeviceBootService } from "../devices/deviceBootService";
 import { logger } from "../utils/logger";

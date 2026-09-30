@@ -1,5 +1,5 @@
 import { ActionableError, type BootedDevice, type Platform, type SomePlatform } from "../models";
-import type { BootedDeviceDiscovery } from "../utils/deviceUtils";
+import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import {
   createConfiguredInventoryContract,

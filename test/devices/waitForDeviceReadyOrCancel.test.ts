@@ -3,7 +3,7 @@ import { ChildProcess } from "child_process";
 import {
   type PlatformDeviceManager,
   waitForDeviceReadyOrCancel,
-} from "../../src/utils/deviceUtils";
+} from "../../src/devices/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError, type DeviceInfo } from "../../src/models";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";

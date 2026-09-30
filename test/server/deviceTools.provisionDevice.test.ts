@@ -45,7 +45,7 @@ import type { BootedDevice, SomePlatform } from "../../src/models";
 import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
-} from "../../src/utils/deviceUtils";
+} from "../../src/devices/deviceUtils";
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 

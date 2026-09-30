@@ -3,7 +3,7 @@ import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { WEBRTC_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ActionableError, type BootedDevice } from "../models";
-import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../devices/deviceUtils";
 import type {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,

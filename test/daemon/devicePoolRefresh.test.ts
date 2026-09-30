@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../../src/models";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../../src/utils/deviceUtils";
+import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import type { PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
 import { DevicePoolRefresh, type DevicePoolRefreshPort } from "../../src/daemon/devicePoolRefresh";

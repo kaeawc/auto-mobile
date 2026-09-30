@@ -4,7 +4,7 @@ import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../daemon/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult } from "../devices/deviceBootService";
 import type {

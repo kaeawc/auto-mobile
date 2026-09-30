@@ -5,7 +5,7 @@ import {
   type MissingDeviceLivenessPoolPort,
 } from "../../src/daemon/missingDeviceLiveness";
 import type { PooledDevice } from "../../src/daemon/devicePool";
-import type { PlatformDeviceManager, BootedDeviceDiscovery } from "../../src/utils/deviceUtils";
+import type { PlatformDeviceManager, BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 

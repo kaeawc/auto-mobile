@@ -8,7 +8,7 @@ import {
   DeviceImageDiscovery,
   DeviceImageDiscoveryOptions,
   PlatformDeviceManager,
-} from "../../src/utils/deviceUtils";
+} from "../../src/devices/deviceUtils";
 import {
   type DiscoverySource,
   discoverySourceFor,

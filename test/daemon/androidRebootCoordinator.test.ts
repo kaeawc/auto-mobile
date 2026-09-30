@@ -6,11 +6,11 @@ import {
   type AndroidRebootCoordinatorPoolPort,
 } from "../../src/daemon/androidRebootCoordinator";
 import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRecordLedger";
-import type { IdentityEvidence } from "../../src/daemon/deviceIdentityEvidence";
+import type { IdentityEvidence } from "../../src/devices/deviceIdentityEvidence";
 import type { DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
 import { BoundedAndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
-import type { PlatformDeviceManager } from "../../src/utils/deviceUtils";
+import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const oldDevice: PooledDevice = {

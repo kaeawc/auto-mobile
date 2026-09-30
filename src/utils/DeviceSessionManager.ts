@@ -10,7 +10,7 @@ import {
   assertAndroidImageRunningStateKnown,
   MultiPlatformDeviceManager,
   waitForDeviceReadyOrCancel,
-} from "./deviceUtils";
+} from "../devices/deviceUtils";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -56,7 +56,7 @@ import {
   deriveEvidenceFromBootedDevice,
   type IdentityEvidence,
   isUnresolvedAndroidEmulatorName,
-} from "../daemon/deviceIdentityEvidence";
+} from "../devices/deviceIdentityEvidence";
 import { isAndroidEmulatorSerial } from "./androidSerial";
 import { throwIfProvisionedDeviceTransportRetired } from "./provisionedDeviceTransportFence";
 import { deviceReadinessLockKey, withDeviceReadinessLock } from "./deviceReadinessLock";

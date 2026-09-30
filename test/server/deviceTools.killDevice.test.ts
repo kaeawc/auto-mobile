@@ -40,7 +40,7 @@ import type {
   BootedDeviceDiscovery,
   BootedDeviceDiscoveryOptions,
   DeviceShutdownOptions,
-} from "../../src/utils/deviceUtils";
+} from "../../src/devices/deviceUtils";
 import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { createRegistryWiredDevicePool } from "../helpers/createRegistryWiredDevicePool";

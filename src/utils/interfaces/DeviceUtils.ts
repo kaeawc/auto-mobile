@@ -4,4 +4,4 @@
  */
 
 // Re-export from new location for backward compatibility
-export type { PlatformDeviceManager } from "../deviceUtils";
+export type { PlatformDeviceManager } from "../../devices/deviceUtils";

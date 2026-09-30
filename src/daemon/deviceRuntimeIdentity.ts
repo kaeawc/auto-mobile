@@ -1,7 +1,7 @@
 import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { getAbortSignal } from "../utils/AbortContext";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../utils/logger";
 import { DEFAULT_RETRY_OPTIONS, type RetryExecutor } from "../utils/retry/RetryExecutor";
@@ -13,7 +13,7 @@ import {
   deriveEvidenceFromPooledDevice,
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
-} from "./deviceIdentityEvidence";
+} from "../devices/deviceIdentityEvidence";
 import { DevicePoolError, type DiscoveryReconcileOptions, type PooledDevice } from "./devicePool";
 
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;

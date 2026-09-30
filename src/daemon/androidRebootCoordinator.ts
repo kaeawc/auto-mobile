@@ -1,11 +1,11 @@
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
-import type { ChildProcess, PlatformDeviceManager } from "../utils/deviceUtils";
-import { waitForDeviceReadyOrCancel } from "../utils/deviceUtils";
+import type { ChildProcess, PlatformDeviceManager } from "../devices/deviceUtils";
+import { waitForDeviceReadyOrCancel } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { AndroidDeviceReboot } from "../devices/androidDeviceReboot";
 import { logger } from "../utils/logger";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
-import type { IdentityEvidence } from "./deviceIdentityEvidence";
+import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 import type { PooledDevice, DeviceRecoveryPolicy } from "./devicePool";
 import type { Session } from "./sessionManager";
 import type { AndroidRecoveryRecordLedger } from "./androidRecoveryRecordLedger";

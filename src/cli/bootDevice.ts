@@ -4,7 +4,7 @@ import { getDeviceCreationGate } from "../devices/deviceCreationGate";
 import { DeviceBootService, type DeviceBootRequest } from "../devices/deviceBootService";
 import { DefaultDeviceMatcher } from "../utils/deviceMatcher";
 import { createDefaultDeviceProvisioner } from "../devices/deviceProvisioning";
-import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { createCiIosBootConfiguration } from "../devices/deviceBootRecovery";
 
 function readValue(args: string[], index: number, flag: string): string {

@@ -16,7 +16,7 @@ import {
   PlatformDeviceManager,
   type BootedDeviceDiscovery,
   waitForDeviceReadyOrCancel,
-} from "../utils/deviceUtils";
+} from "../devices/deviceUtils";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
@@ -52,7 +52,7 @@ import {
   deriveEvidenceFromPooledDevice,
   isUnresolvedAndroidEmulatorName,
   type IdentityEvidence,
-} from "./deviceIdentityEvidence";
+} from "../devices/deviceIdentityEvidence";
 import {
   didSourceSucceedForDevice,
   discoverySourceFor,

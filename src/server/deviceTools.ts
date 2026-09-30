@@ -44,7 +44,7 @@ import {
   type DeviceImageDiscovery,
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
-} from "../utils/deviceUtils";
+} from "../devices/deviceUtils";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type { DeviceMatchCriteria, FormFactor } from "../models/DeviceMatchCriteria";

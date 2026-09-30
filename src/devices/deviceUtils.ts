@@ -1,39 +1,39 @@
-import { errorMessage } from "./describeUnknownError";
-import type { HostChildProcess as ChildProcess } from "./HostCommandExecutor";
-export type { HostChildProcess as ChildProcess } from "./HostCommandExecutor";
+import { errorMessage } from "../utils/describeUnknownError";
+import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
+export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { toActionableError } from "../models/ActionableError";
-import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
-import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import {
   DevicectlDeviceLister,
   type IosPhysicalDeviceLister,
   type PhysicalIosDeviceDiscovery,
-} from "./ios-cmdline-tools/DevicectlDeviceLister";
-import { isIosPhysicalUdid } from "./ios-cmdline-tools/iosDeviceType";
-import type { DiscoverySource } from "./discoverySource";
-import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
+} from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import type { DiscoverySource } from "../utils/discoverySource";
+import { AndroidEmulatorClient } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import type {
   AndroidEmulatorForDeviceManager,
   AndroidEmulatorReadinessOptions,
-} from "./android-cmdline-tools/AndroidEmulatorClient";
-import { deleteAvd } from "./android-cmdline-tools/avdmanager";
-import { logger } from "./logger";
-import { isAndroidEmulatorSerial } from "./androidSerial";
-import { isUnresolvedAndroidEmulatorName } from "../daemon/deviceIdentityEvidence";
-import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
-import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "./AbortContext";
-import { defaultTimer, type Timer } from "./SystemTimer";
-import { raceWithDeadline } from "./raceWithDeadline";
-import { runPhaseWithSettlement } from "./runPhaseWithSettlement";
+} from "../utils/android-cmdline-tools/AndroidEmulatorClient";
+import { deleteAvd } from "../utils/android-cmdline-tools/avdmanager";
+import { logger } from "../utils/logger";
+import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { isUnresolvedAndroidEmulatorName } from "./deviceIdentityEvidence";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
+import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
-} from "../devices/virtualDeviceLifecycleCoordinator";
+} from "./virtualDeviceLifecycleCoordinator";
 
-export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
+export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 
 // Pool allocation deadlines must not advance while a non-cooperative readiness wait settles.
 // A bounded microtask wait lets cooperative promise rejections surface before cleanup.

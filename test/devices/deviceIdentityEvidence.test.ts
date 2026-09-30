@@ -3,7 +3,7 @@ import {
   compareIdentityEvidence,
   deriveEvidenceFromBootedDevice,
   deriveEvidenceFromPooledDevice,
-} from "../../src/daemon/deviceIdentityEvidence";
+} from "../../src/devices/deviceIdentityEvidence";
 
 describe("device identity evidence", () => {
   test("orders stamped, unstamped, and unresolved observations", () => {

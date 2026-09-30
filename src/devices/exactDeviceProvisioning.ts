@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { DeviceInfo } from "../models";
 import { ActionableError } from "../models";
 import type { DeviceCreationGate } from "./deviceCreationGate";
-import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "./deviceUtils";
 import type { AvdConfigReader } from "../utils/android-cmdline-tools/AvdConfigReader";
 import {
   FileAvdConfigReader,

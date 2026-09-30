@@ -1,4 +1,4 @@
-import { MultiPlatformDeviceManager } from "../deviceUtils";
+import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 import { AdbClientFactory } from "../android-cmdline-tools/AdbClientFactory";
 import { PlatformDeviceManager } from "../interfaces/DeviceUtils";
 import { logger } from "../logger";

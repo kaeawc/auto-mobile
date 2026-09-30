@@ -5,7 +5,7 @@ import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
-import type { BootedDeviceDiscovery } from "../../src/utils/deviceUtils";
+import type { BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";

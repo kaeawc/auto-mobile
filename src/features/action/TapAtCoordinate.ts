@@ -1,4 +1,4 @@
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import {
   BootedDevice,
@@ -18,6 +18,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { displayTransitions } from "../observe/DisplayTransition";
 import { BaseVisualChange, type ProgressCallback } from "./BaseVisualChange";
 import {
   type CoordinateTapClient,
@@ -174,6 +175,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     perf.serial("tapAt");
     let dispatchedCoordinates: { x: number; y: number } | undefined;
     let iosDispatchTimestamp: number | undefined;
+    const transitionRevision = displayTransitions.revision(this.device.deviceId);
 
     try {
       throwIfAborted(signal);
@@ -186,6 +188,15 @@ export class TapAtCoordinate extends BaseVisualChange {
             signal,
             perf,
           });
+          if (displayTransitions.revision(this.device.deviceId) !== transitionRevision) {
+            return {
+              success: false,
+              x: options.x,
+              y: options.y,
+              error:
+                "Display changed since these coordinates were chosen. Re-observe the active panel and choose a new point before retrying.",
+            };
+          }
           const resolved = this.resolveCoordinates(options, observeResult);
           if ("error" in resolved) {
             return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
@@ -199,6 +210,7 @@ export class TapAtCoordinate extends BaseVisualChange {
                 options,
                 resolved,
                 observeResult,
+                transitionRevision,
                 perf,
                 signal,
               );
@@ -256,6 +268,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     resolved: { x: number; y: number },
     observeResult: ObserveResult,
+    transitionRevision: number,
     perf: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<void> {
@@ -285,6 +298,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         signal,
         perf,
       });
+      this.assertDisplayRevisionCurrent(transitionRevision);
       const refreshed = this.resolveCoordinates(options, refreshedObservation);
       const refreshedFrameContext = refreshedObservation.viewHierarchy?.frameContext;
       if (
@@ -308,6 +322,14 @@ export class TapAtCoordinate extends BaseVisualChange {
         ANDROID_TAP_DURATION_MS,
         refreshedFrameContext,
         signal,
+      );
+    }
+  }
+
+  private assertDisplayRevisionCurrent(revision: number): void {
+    if (displayTransitions.revision(this.device.deviceId) !== revision) {
+      throw new ActionableError(
+        "Display changed since these coordinates were chosen. Re-observe the active panel and choose a new point before retrying.",
       );
     }
   }

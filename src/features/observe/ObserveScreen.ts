@@ -85,6 +85,7 @@ import {
 } from "../../utils/androidSystemUiAnr";
 import { DaemonState } from "../../daemon/daemonState";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
+import { displayTransitions } from "./DisplayTransition";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -781,12 +782,14 @@ export class RealObserveScreen implements ObserveScreen {
       throwIfAborted(signal);
 
       const result = this.createBaseResult();
+      const transitionRevision = displayTransitions.revision(this.device.deviceId);
       const observedAndroid =
         this.device.platform === "android"
           ? await this.observedAndroidDisplayCache.resolve(this.device, this.adb, signal)
           : undefined;
       if (observedAndroid) {
         result.display = observedAndroid.display;
+        displayTransitions.checkIdentity(this.device.deviceId, result.display);
       }
 
       // Capture the device's cache generation before the hierarchy is captured so
@@ -794,7 +797,7 @@ export class RealObserveScreen implements ObserveScreen {
       // this observation is in flight fences out our late put() below, instead of
       // repopulating the just-cleared cache with the terminated app's hierarchy
       // (issue #5884).
-      const cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
+      let cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
 
       perf.serial("observe");
 
@@ -1020,8 +1023,35 @@ export class RealObserveScreen implements ObserveScreen {
       if (this.device.platform === "ios") {
         result.display = observedIosDisplay(this.device, result.viewHierarchy);
       } else {
+        if (
+          observedAndroid &&
+          (this.device.displays?.panels.length ?? 0) > 1 &&
+          displayTransitions.geometryChanged(this.device.deviceId, result.screenSize)
+        ) {
+          const refreshed = await this.observedAndroidDisplayCache.resolve(
+            this.device,
+            this.adb,
+            signal,
+            true,
+          );
+          result.display = refreshed.display;
+          displayTransitions.checkIdentity(this.device.deviceId, result.display);
+        }
         // Zero means no forwarded captureSequence was assigned, not a second counter.
         result.display.generation = result.viewHierarchy?.captureSequence ?? 0;
+      }
+      const geometryTransition = displayTransitions.record(this.device.deviceId, result);
+      if (geometryTransition) {
+        cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
+      }
+      if (
+        this.device.platform === "android" &&
+        (geometryTransition ||
+          displayTransitions.revision(this.device.deviceId) !== transitionRevision)
+      ) {
+        // The ordinary lock sample may precede a fold discovered by the final hierarchy.
+        delete result.deviceLock;
+        await this.deviceStateCollector.collectDeviceLock(result, signal);
       }
       this.identifyCapture(result, options?.freshness ?? "cached-ok");
 

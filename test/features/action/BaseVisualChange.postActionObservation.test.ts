@@ -12,6 +12,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { serverConfig } from "../../../src/utils/ServerConfig";
+import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import {
   ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV,
   shouldSkipActionObservationScreenshot,
@@ -66,6 +67,7 @@ describe("BaseVisualChange post-action observation", () => {
   });
 
   afterEach(() => {
+    displayTransitions.reset("device-123");
     if (originalActionScreenshotPolicy === undefined) {
       delete process.env[ACTION_OBSERVATION_SKIP_SCREENSHOT_ENV];
     } else {
@@ -102,6 +104,57 @@ describe("BaseVisualChange post-action observation", () => {
     expect((result.observation as { updatedAt: number }).updatedAt).toBe(4);
     // After the cap the observation carries the stale warning.
     expect(result.observation.freshness.warning).toBe("Observation may be stale after interaction");
+  });
+
+  test("a revision change rejects coordinates but allows a non-coordinate key action", async () => {
+    fakeObserveScreen.setObserveResult(makeObserve());
+    const progress = async (step: number) => {
+      if (step === 10) {
+        displayTransitions.notifyTransition("device-123", "fold");
+      }
+    };
+    const key = await createVisualChange("ios").observedInteraction(
+      async () => ({ success: true }),
+      {
+        changeExpected: false,
+        progress,
+        predictionContext: { toolName: "pressButton", toolArgs: {} },
+      },
+    );
+    expect(key.success).toBe(true);
+    displayTransitions.reset("device-123");
+    await expect(
+      createVisualChange("ios").observedInteraction(async () => ({ success: true }), {
+        changeExpected: false,
+        progress,
+        predictionContext: { toolName: "tapOn", toolArgs: {} },
+      }),
+    ).rejects.toThrow("Display changed");
+  });
+
+  test("rejects coordinates when the display folds during the initial progress callback", async () => {
+    fakeObserveScreen.setObserveResult(makeObserve());
+    let dispatched = false;
+
+    await expect(
+      createVisualChange("ios").observedInteraction(
+        async () => {
+          dispatched = true;
+          return { success: true };
+        },
+        {
+          changeExpected: false,
+          progress: async (step) => {
+            if (step === 0) {
+              await Promise.resolve();
+              displayTransitions.notifyTransition("device-123", "fold");
+            }
+          },
+          predictionContext: { toolName: "tapOn", toolArgs: {} },
+        },
+      ),
+    ).rejects.toThrow("Re-observe the active panel");
+    expect(dispatched).toBe(false);
   });
 
   test("never retries when the observation hierarchy carries an error", async () => {

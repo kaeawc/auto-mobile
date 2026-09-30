@@ -1,6 +1,8 @@
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
+import { displayTransitions } from "../features/observe/DisplayTransition";
+import { getObserveCacheStore } from "../features/observe/cache/ObserveCacheRegistry";
 import {
   SessionManager,
   SessionRecoveryIdentityLossError,
@@ -1597,6 +1599,8 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    displayTransitions.reset(deviceId);
+    getObserveCacheStore().clear(deviceId);
     this.deviceRemovalStamps.set(deviceId, ++this.deviceRemovalGeneration);
     this.settledLateShutdowns.delete(deviceId);
     this.deferredDeviceReleases.delete(deviceId);
@@ -4998,6 +5002,8 @@ export class DevicePool {
     const sessionId = device.sessionId;
     device.sessionId = null;
     device.status = "idle";
+    displayTransitions.reset(deviceId);
+    getObserveCacheStore().clear(deviceId);
     device.errorCount = 0;
     this.lastReleasedDeviceId = deviceId;
 

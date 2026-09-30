@@ -13,6 +13,8 @@ import {
 } from "../observe/HierarchyCapture";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import { displayTransitions } from "../observe/DisplayTransition";
+import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import {
   ActionableError,
   BootedDevice,
@@ -1876,15 +1878,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   async refreshViewHierarchy(
     timeoutMs: number,
-    _screenSize?: ObserveResult["screenSize"],
+    screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
     throwIfAborted(signal);
     if (timeoutMs <= 0) {
       return null;
     }
+    let captured: ViewHierarchyResult;
     try {
-      return (
+      captured = (
         await this.hierarchyCapture.capture({
           freshness: "fresh",
           searchRaw: serverConfig.isRawElementSearchEnabled(),
@@ -1896,6 +1899,45 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throwIfAborted(signal);
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
+    }
+    if (screenSize && this.device.platform === "android") {
+      await this.checkRefreshedDisplay(captured, screenSize, signal);
+    }
+    return captured;
+  }
+
+  private async checkRefreshedDisplay(
+    captured: ViewHierarchyResult,
+    screenSize: ObserveResult["screenSize"],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const freshSize = this.getScreenSizeFromHierarchy(captured);
+    if (
+      !freshSize ||
+      (freshSize.width === screenSize.width &&
+        freshSize.height === screenSize.height &&
+        (this.device.displays?.panels.length ?? 0) < 2)
+    ) {
+      return;
+    }
+    const resolved = await new ObservedAndroidDisplayCache(this.timer).resolve(
+      this.device,
+      this.adb,
+      signal,
+      true,
+    );
+    const identityChanged = displayTransitions.checkIdentity(
+      this.device.deviceId,
+      resolved.display,
+    );
+    const geometryTransition = displayTransitions.record(this.device.deviceId, {
+      display: resolved.display,
+      screenSize: freshSize,
+    });
+    if (identityChanged || geometryTransition) {
+      throw new ActionableError(
+        "Display changed during tap preparation. Re-observe the active panel and choose the target again.",
+      );
     }
   }
 

@@ -2795,6 +2795,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cachedHierarchy = null;
   }
 
+  /** Discard hierarchy and screenshot provenance when the physical panel changes. */
+  clearDisplayProvenance(): void {
+    this.clearCache();
+    this.screenGeometry.clear();
+  }
+
   // ===========================================================================
   // Delegated Public Methods - Highlights
   // ===========================================================================

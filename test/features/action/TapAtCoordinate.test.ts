@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
 import { computeFreshness } from "../../../src/features/observe/observationFreshness";
+import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -102,6 +103,59 @@ function createTapAt(
 }
 
 describe("TapAtCoordinate", () => {
+  test("rejects panel-A coordinates when the pre-dispatch observation detects a fold", async () => {
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice, 200, 200);
+    const panelA = {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    } as ObserveResult;
+    const panelB = {
+      display: { key: "cover", role: "cover", posture: "closed", generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    } as ObserveResult;
+    displayTransitions.record(androidDevice.deviceId, panelA);
+    const execute = spyOn(observeScreen, "execute").mockImplementation(async () => {
+      displayTransitions.checkIdentity(androidDevice.deviceId, panelB.display);
+      displayTransitions.record(androidDevice.deviceId, panelB);
+      return observation(100, 100, "panel-b");
+    });
+    try {
+      const result = await tapAt.execute({ x: 50, y: 50 });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Re-observe");
+      expect(androidDispatches).toEqual([]);
+    } finally {
+      execute.mockRestore();
+      displayTransitions.reset(androidDevice.deviceId);
+    }
+  });
+
+  test("accepts coordinates chosen after re-observing the transitioned panel", async () => {
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice, 100, 100);
+    const panelA = {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    } as ObserveResult;
+    const panelB = {
+      display: { key: "cover", role: "cover", posture: "closed", generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    } as ObserveResult;
+    displayTransitions.record(androidDevice.deviceId, panelA);
+    displayTransitions.checkIdentity(androidDevice.deviceId, panelB.display);
+    displayTransitions.record(androidDevice.deviceId, panelB);
+    observeScreen.setObserveResult({
+      ...observation(100, 100, "panel-b"),
+      display: panelB.display,
+    });
+    try {
+      const result = await tapAt.execute({ x: 50, y: 50 });
+      expect(result.success).toBe(true);
+      expect(androidDispatches).toHaveLength(1);
+    } finally {
+      displayTransitions.reset(androidDevice.deviceId);
+    }
+  });
+
   test("rounds in-bounds Android coordinates and dispatches native pixels", async () => {
     const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice);
 
@@ -420,6 +474,44 @@ describe("TapAtCoordinate", () => {
         .map((options) => options.freshness),
     ).toEqual(["cached-ok", "cached-ok"]);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
+  });
+
+  test("rejects a stale-frame retry when its observation detects a fold", async () => {
+    const dispatches: string[] = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push(frameContext ?? "missing");
+        return dispatches.length === 1
+          ? {
+              success: false,
+              error: "Stale frame context for input/tap; observe a fresh frame before retrying",
+            }
+          : { success: true };
+      },
+    };
+    const { tapAt, observeScreen } = createAndroidTapAtWithClient(
+      [observation(100, 200, "epoch:1")],
+      client,
+    );
+    observeScreen.setObserveResult((index) => {
+      if (index === 1) {
+        displayTransitions.notifyTransition(androidDevice.deviceId, "fold");
+      }
+      return observation(100, 200, index === 0 ? "epoch:1" : "epoch:2");
+    });
+
+    try {
+      const result = await tapAt.execute({ x: 20, y: 30 });
+
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining("Re-observe the active panel"),
+      });
+      expect(dispatches).toEqual(["epoch:1"]);
+      expect(observeScreen.getExecuteCallCount()).toBe(2);
+    } finally {
+      displayTransitions.reset(androidDevice.deviceId);
+    }
   });
 
   test.each([

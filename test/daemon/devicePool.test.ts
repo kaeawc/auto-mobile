@@ -14,6 +14,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import {
@@ -7252,6 +7253,26 @@ describe("DevicePool", () => {
   });
 
   describe("releaseDevice", () => {
+    test("clears display identity before the same serial is assigned to a new session", async () => {
+      await initializeLiveDevices([createBootedDevice("emulator-5554")]);
+      const deviceId = await devicePool.assignDeviceToSession("session-a");
+      displayTransitions.record(deviceId, {
+        display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+        screenSize: { width: 200, height: 200 },
+      });
+      await devicePool.releaseDevice(deviceId, "session-a");
+      await devicePool.assignDeviceToSession("session-b");
+      expect(displayTransitions.revision(deviceId)).toBe(0);
+      expect(
+        displayTransitions.checkIdentity(deviceId, {
+          key: "cover",
+          role: "cover",
+          posture: "closed",
+          generation: 1,
+        }),
+      ).toBe(false);
+    });
+
     test("does not release a replacement allocation when an expected session no longer owns the device", async () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554")]);
       const deviceId = await devicePool.assignDeviceToSession("session-a");

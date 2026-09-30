@@ -8,6 +8,7 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { shellQuote } from "../utils/shellQuote";
@@ -533,26 +534,20 @@ export class IosSimulatorSessionLogProvider implements SessionLogProvider {
     const signal = callerSignal
       ? AbortSignal.any([callerSignal, controller.signal])
       : controller.signal;
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      timeoutHandle = this.timer.setTimeout(() => {
-        const error = new SessionLogTimeoutError(
-          `Unified log collection timed out after ${this.unifiedLogTimeoutMs}ms on ${device.deviceId}.`,
-        );
-        controller.abort(error);
-        reject(error);
-      }, this.unifiedLogTimeoutMs);
-    });
     const run = simctl.executeCommandArgs(args, undefined, signal);
-    // Once the timer wins, the aborted run settles later; keep it handled.
-    run.catch(() => {});
-    try {
-      return (await Promise.race([run, timeout])).stdout;
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-    }
+    let timeoutError: SessionLogTimeoutError | undefined;
+    return (
+      await raceWithDeadline(run, {
+        timer: this.timer,
+        timeoutMs: this.unifiedLogTimeoutMs,
+        label: "Unified log collection",
+        timeoutError: () =>
+          (timeoutError = new SessionLogTimeoutError(
+            `Unified log collection timed out after ${this.unifiedLogTimeoutMs}ms on ${device.deviceId}.`,
+          )),
+        onTimeout: () => controller.abort(timeoutError),
+      })
+    ).stdout;
   }
 
   private requireSimulator(device: BootedDevice, action: string): void {

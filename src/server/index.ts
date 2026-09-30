@@ -16,6 +16,7 @@ import { stringifyToolResponse } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker } from "./executionTracker";
 import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
@@ -262,18 +263,17 @@ async function awaitWithCancellation<T>(
     promise.catch(() => undefined);
     throw new ActionableError("MCP request was cancelled during acquisition.");
   }
-  let onAbort: (() => void) | undefined;
-  const cancellation = new Promise<never>((_, reject) => {
-    onAbort = () => reject(new ActionableError("MCP request was cancelled during acquisition."));
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  promise.catch(() => undefined);
   try {
-    return await Promise.race([promise, cancellation]);
-  } finally {
-    if (onAbort) {
-      signal.removeEventListener("abort", onAbort);
+    return await raceWithDeadline(promise, {
+      timer: defaultTimer,
+      signal,
+      label: "MCP request acquisition",
+    });
+  } catch (error) {
+    if (signal.aborted && error === signal.reason) {
+      throw new ActionableError("MCP request was cancelled during acquisition.");
     }
+    throw error;
   }
 }
 

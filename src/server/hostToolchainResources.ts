@@ -18,6 +18,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { checkDevicectlAvailability } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, type ResourceContent } from "./resourceRegistry";
 
 export const HOST_TOOLCHAIN_RESOURCE_URI = "automobile:host/toolchain";
@@ -126,30 +127,27 @@ function isAbsolutePath(value: string): boolean {
 }
 
 async function probe(name: string, check: DoctorCheck, timer: Timer): Promise<CheckResult> {
-  let timeout: NodeJS.Timeout | undefined;
   const controller = new AbortController();
+  let timeoutError: Error | undefined;
   try {
-    return await Promise.race([
+    return await raceWithDeadline(
       Promise.resolve().then(() =>
         check({ signal: controller.signal, timeoutMs: DOCTOR_EXEC_TIMEOUT_MS }),
       ),
-      new Promise<never>((_resolve, reject) => {
-        timeout = timer.setTimeout(() => {
-          const error = new Error(`Probe timed out after ${DOCTOR_EXEC_TIMEOUT_MS}ms`);
-          // The losing check keeps running otherwise; aborting kills its children.
-          controller.abort(error);
-          reject(error);
-        }, DOCTOR_EXEC_TIMEOUT_MS);
-      }),
-    ]);
+      {
+        timer,
+        timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+        label: name,
+        timeoutError: () =>
+          (timeoutError = new Error(`Probe timed out after ${DOCTOR_EXEC_TIMEOUT_MS}ms`)),
+        // The losing check keeps running otherwise; aborting kills its children.
+        onTimeout: () => controller.abort(timeoutError),
+      },
+    );
   } catch (error) {
     const message = errorMessage(error);
     logger.warn(`[HostToolchainResources] ${name} probe failed: ${message}`, error);
     return { name, status: "fail", message };
-  } finally {
-    if (timeout) {
-      timer.clearTimeout(timeout);
-    }
   }
 }
 

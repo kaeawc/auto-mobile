@@ -22,6 +22,12 @@ interface AppearanceSyncDependencies {
   resolveMode: typeof resolveAppearanceMode;
   getTargets: () => AppearanceSyncTarget[];
   apply: typeof applyAppearanceToDevice;
+  isEnabled?: () => boolean;
+}
+
+export interface AppearanceSyncScope {
+  getTargets: () => AppearanceSyncTarget[];
+  isEnabled?: () => boolean;
 }
 
 export class AppearanceSyncScheduler {
@@ -39,6 +45,7 @@ export class AppearanceSyncScheduler {
       resolveMode: resolveAppearanceMode,
       getTargets: () => this.getSyncTargets(),
       apply: applyAppearanceToDevice,
+      isEnabled: () => true,
     },
   ) {
     this.timer = timer;
@@ -58,6 +65,35 @@ export class AppearanceSyncScheduler {
     void this.trigger();
   }
 
+  setScope(scope: AppearanceSyncScope): void {
+    this.scope = scope;
+  }
+
+  private scope: AppearanceSyncScope | undefined;
+
+  private isEnabled(): boolean {
+    return (this.dependencies.isEnabled?.() ?? true) && (this.scope?.isEnabled?.() ?? true);
+  }
+
+  async syncDevice(device: AppearanceSyncTarget): Promise<void> {
+    if (this.stopped || !this.isEnabled() || device.platform !== "android") {
+      return;
+    }
+    try {
+      const config = await this.dependencies.getConfig();
+      if (!config.syncWithHost || this.stopped) {
+        return;
+      }
+      const mode = await this.dependencies.resolveMode(config);
+      if (!this.stopped) {
+        await this.dependencies.apply(device, mode);
+        this.lastAppliedModes.set(device.deviceId, { mode, incarnation: device.incarnation });
+      }
+    } catch (error) {
+      logger.warn(`[Appearance] Failed to apply host sync mode to ${device.deviceId}: ${error}`);
+    }
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.intervalHandle) {
@@ -70,6 +106,9 @@ export class AppearanceSyncScheduler {
 
   async trigger(): Promise<void> {
     if (this.stopped) {
+      return;
+    }
+    if (!this.isEnabled()) {
       return;
     }
     if (this.pending) {
@@ -107,7 +146,7 @@ export class AppearanceSyncScheduler {
     if (this.stopped) {
       return;
     }
-    const targets = this.dependencies.getTargets();
+    const targets = this.scope?.getTargets() ?? this.dependencies.getTargets();
     if (targets.length === 0) {
       return;
     }
@@ -149,9 +188,13 @@ export class AppearanceSyncScheduler {
       const pool = daemonState.getDevicePool();
       const pooledDevices = pool.getAllDevices();
       if (pooledDevices.length > 0) {
-        // Only return Android devices - appearance sync via ADB only works for Android
+        const sessions = daemonState.getSessionManager().getAllSessions();
         return pooledDevices
-          .filter((device) => device.platform === "android")
+          .filter(
+            (device) =>
+              device.platform === "android" &&
+              sessions.some((session) => session.assignedDevice === device.id),
+          )
           .map((device) => ({
             deviceId: device.id,
             name: device.id,
@@ -169,7 +212,10 @@ export class AppearanceSyncScheduler {
 
 const scheduler = new AppearanceSyncScheduler();
 
-export function startAppearanceSyncScheduler(): void {
+export function startAppearanceSyncScheduler(scope?: AppearanceSyncScope): void {
+  if (scope) {
+    scheduler.setScope(scope);
+  }
   scheduler.start();
 }
 
@@ -179,4 +225,10 @@ export async function stopAppearanceSyncScheduler(): Promise<void> {
 
 export async function triggerAppearanceSync(): Promise<void> {
   await scheduler.trigger();
+}
+
+export async function syncAppearanceForDevice(
+  device: BootedDevice & { incarnation?: number },
+): Promise<void> {
+  await scheduler.syncDevice(device);
 }

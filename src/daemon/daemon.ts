@@ -158,6 +158,7 @@ import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import { initializeIosCtrlProxyAtStartup } from "./iosStartupInit";
 import {
   startAppearanceSyncScheduler,
+  syncAppearanceForDevice,
   stopAppearanceSyncScheduler,
 } from "../utils/appearance/AppearanceSyncScheduler";
 import {
@@ -473,6 +474,17 @@ export class Daemon {
       this.setupNavigationGraphUpdateListener(
         NavigationGraphManager.getInstanceForSession(session.sessionId),
       );
+      if (!this.skipIosStartupWarmup && this.mayUseDeviceForPassiveWork(session.assignedDevice)) {
+        const device = this.devicePool.getDevice(session.assignedDevice);
+        if (device?.platform === "android") {
+          void syncAppearanceForDevice({
+            deviceId: device.id,
+            name: device.id,
+            platform: "android",
+            incarnation: device.incarnation,
+          });
+        }
+      }
     });
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
@@ -798,7 +810,21 @@ export class Daemon {
     await this.startAuxiliarySocket("video-stream", startVideoStreamSocketServer);
     startupBenchmark.endPhase("auxiliarySocketServerStart");
 
-    startAppearanceSyncScheduler();
+    startAppearanceSyncScheduler({
+      getTargets: () =>
+        this.devicePool
+          .getAllDevices()
+          .filter(
+            (device) => device.platform === "android" && this.mayUseDeviceForPassiveWork(device.id),
+          )
+          .map((device) => ({
+            deviceId: device.id,
+            name: device.id,
+            platform: "android",
+            incarnation: device.incarnation,
+          })),
+      isEnabled: () => !this.skipIosStartupWarmup,
+    });
     startPerformanceMonitor();
     this.startAdbMissingDeviceListener();
     this.startDeviceDisconnectMonitor();
@@ -1593,7 +1619,7 @@ export class Daemon {
       const allDevices = this.devicePool
         .getAllDevices()
         .filter(
-          (device) => device.platform !== "ios" || this.mayConnectIosObservationClient(device.id),
+          (device) => device.platform !== "ios" || this.mayUseDeviceForPassiveWork(device.id),
         );
 
       pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
@@ -1621,7 +1647,7 @@ export class Daemon {
             device.id,
           )?.refreshObservationStreamScreenshotCadence();
         } else if (device.platform === "ios") {
-          if (!this.mayConnectIosObservationClient(device.id)) {
+          if (!this.mayUseDeviceForPassiveWork(device.id)) {
             continue;
           }
           IOSCtrlProxyClient.getExistingInstance(
@@ -1642,7 +1668,7 @@ export class Daemon {
             device.id,
           )?.refreshObservationStreamHierarchyCadence();
         } else if (device.platform === "ios") {
-          if (!this.mayConnectIosObservationClient(device.id)) {
+          if (!this.mayUseDeviceForPassiveWork(device.id)) {
             continue;
           }
           const client = IOSCtrlProxyClient.getExistingInstance(device.id);
@@ -1730,7 +1756,7 @@ export class Daemon {
   }
 
   /** A passive stream subscription must not provision an unclaimed simulator. */
-  private mayConnectIosObservationClient(deviceId: string): boolean {
+  private mayUseDeviceForPassiveWork(deviceId: string): boolean {
     if (
       this.sessionManager.getAllSessions().some((session) => session.assignedDevice === deviceId)
     ) {

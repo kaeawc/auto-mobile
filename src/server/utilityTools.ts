@@ -660,6 +660,7 @@ export function registerUtilityTools() {
           );
           RealObserveScreen.clearCache(previousDevice.deviceId);
         }
+        sessionManager.setExplicitDevicePin(readyDevice);
       }
 
       if (selectedAutolockSession) {

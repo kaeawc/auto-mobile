@@ -244,6 +244,11 @@ export interface DeviceSessionManager {
    */
   setCurrentDevice(device: BootedDevice, platform: Platform): void;
 
+  /** Explicit selection made by the legacy setActiveDevice tool. */
+  getExplicitDevicePin(): BootedDevice | undefined;
+  setExplicitDevicePin(device: BootedDevice): void;
+  clearExplicitDevicePin(deviceId: string): void;
+
   /**
    * Ensure a device is ready for the specified platform and return its ID
    * Throws an error if both Android and iOS devices are connected when auto-detecting platform
@@ -355,6 +360,7 @@ export interface DeviceSessionManagerOptions {
 export class DeviceSessionManager implements DeviceSessionManager {
   private currentDevice: BootedDevice | undefined;
   private currentPlatform: Platform | undefined;
+  private explicitDevicePin: BootedDevice | undefined;
   private static instance: DeviceSessionManager;
   private static defaultProvider: DeviceClientProvider | undefined;
   private readonly provider: DeviceClientProvider;
@@ -467,6 +473,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
   }
 
+  public getExplicitDevicePin(): BootedDevice | undefined {
+    return this.explicitDevicePin;
+  }
+
+  public setExplicitDevicePin(device: BootedDevice): void {
+    this.explicitDevicePin = device;
+  }
+
+  public clearExplicitDevicePin(deviceId: string): void {
+    if (this.explicitDevicePin?.deviceId === deviceId) {
+      this.explicitDevicePin = undefined;
+    }
+  }
+
   /**
    * Detect the platform of connected devices
    */
@@ -523,6 +543,16 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const connectedPlatforms = await (options?.getConnectedPlatforms
       ? options.getConnectedPlatforms()
       : this.detectConnectedPlatforms(options?.signal));
+    const pinnedDevice = this.explicitDevicePin;
+    if (
+      pinnedDevice &&
+      !connectedPlatforms.some(
+        (device) =>
+          device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
+      )
+    ) {
+      this.clearExplicitDevicePin(pinnedDevice.deviceId);
+    }
     logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
     const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
     logger.info(`Found ${androidDevices.length} android devices`);
@@ -558,9 +588,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
             }
           }
           // With no matching deviceId, fall back to the platform setActiveDevice selected.
-          if (this.currentDevice && this.currentPlatform) {
-            platformDevices = this.currentPlatform === "android" ? androidDevices : iosDevices;
-            resolvedPlatform = this.currentPlatform;
+          const selectedPlatform = this.explicitDevicePin?.platform ?? this.currentPlatform;
+          if (selectedPlatform && (this.explicitDevicePin || this.currentDevice)) {
+            platformDevices = selectedPlatform === "android" ? androidDevices : iosDevices;
+            resolvedPlatform = selectedPlatform;
             break;
           }
           throw new ActionableError(
@@ -594,6 +625,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
         );
       }
       selectedDevice = await this.resolveAndroidReadinessIdentity(providedDevice, options?.signal);
+      deviceSource = "provided";
+    }
+
+    // Explicit selection takes precedence over ambient resolution by another call.
+    const selectedPin = platformDevices.find(
+      (device) => device.deviceId === this.explicitDevicePin?.deviceId,
+    );
+    if (!selectedDevice && !providedDeviceId && selectedPin) {
+      selectedDevice = await this.resolveAndroidReadinessIdentity(selectedPin, options?.signal);
       deviceSource = "provided";
     }
 

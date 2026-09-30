@@ -47,12 +47,12 @@ describe("ToolRegistry Android session context", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
   });
 
   afterEach(() => {
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     ToolRegistry.clearTools();
   });
 
@@ -99,9 +99,10 @@ describe("ToolRegistry Android session context", () => {
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
-  test("allows the already-active Android device for a named platform", async () => {
+  test("allows an explicitly pinned Android device for a named platform", async () => {
     fakeDeviceSessionManager.setConnectedDevices([androidDeviceA, androidDeviceB]);
     fakeDeviceSessionManager.setCurrentDevice(androidDeviceB, "android");
+    fakeDeviceSessionManager.setExplicitDevicePin(androidDeviceB);
     const tool = registerTool("androidActiveDeviceTool");
 
     const response = await tool.handler({ platform: "android" });

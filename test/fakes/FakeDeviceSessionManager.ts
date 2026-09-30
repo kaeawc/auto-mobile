@@ -8,6 +8,7 @@ import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src
 export class FakeDeviceSessionManager implements DeviceSessionManager {
   private currentDevice: BootedDevice | undefined;
   private currentPlatform: Platform | undefined;
+  private explicitDevicePin: BootedDevice | undefined;
   private connectedDevices: BootedDevice[] = [];
   private connectedPlatforms: BootedDevice[] = [];
   private preferredPlatform: Platform | undefined;
@@ -207,6 +208,20 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     this.setCurrentDeviceCalls.push(device);
   }
 
+  getExplicitDevicePin(): BootedDevice | undefined {
+    return this.explicitDevicePin;
+  }
+
+  setExplicitDevicePin(device: BootedDevice): void {
+    this.explicitDevicePin = device;
+  }
+
+  clearExplicitDevicePin(deviceId: string): void {
+    if (this.explicitDevicePin?.deviceId === deviceId) {
+      this.explicitDevicePin = undefined;
+    }
+  }
+
   async ensureDeviceReady(
     platform: SomePlatform,
     providedDeviceId?: string,
@@ -244,16 +259,24 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
           );
         }
         const resolvedPlatform =
-          hasAndroid && hasIos ? this.currentPlatform : hasAndroid ? "android" : "ios";
+          hasAndroid && hasIos
+            ? (this.explicitDevicePin?.platform ?? this.currentPlatform)
+            : hasAndroid
+              ? "android"
+              : "ios";
         selectedDevice =
-          this.currentPlatform === resolvedPlatform
-            ? this.currentDevice
-            : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
+          this.explicitDevicePin?.platform === resolvedPlatform
+            ? this.explicitDevicePin
+            : this.currentPlatform === resolvedPlatform
+              ? this.currentDevice
+              : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
       } else {
         selectedDevice =
-          this.currentPlatform === platform
-            ? this.currentDevice
-            : this.connectedDevices.find((d) => d.platform === platform);
+          this.explicitDevicePin?.platform === platform
+            ? this.explicitDevicePin
+            : this.currentPlatform === platform
+              ? this.currentDevice
+              : this.connectedDevices.find((d) => d.platform === platform);
       }
 
       if (!selectedDevice) {
@@ -274,8 +297,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     }
 
     // Set as current device
-    this.currentDevice = selectedDevice;
-    this.currentPlatform = selectedDevice.platform;
+    this.setCurrentDevice(selectedDevice, selectedDevice.platform);
 
     return selectedDevice;
   }

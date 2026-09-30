@@ -47,7 +47,11 @@ import {
   INTERNAL_LIVE_DEADLINE_KEY_PARAM,
   DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
 } from "./constants";
-import { resolveSocketAdmissionLane, SocketRequestAdmissionQueue } from "./socketRequestAdmission";
+import {
+  isHostInventoryCall,
+  resolveSocketAdmissionLane,
+  SocketRequestAdmissionQueue,
+} from "./socketRequestAdmission";
 import { daemonShuttingDownFailure, isDaemonShuttingDownToolResult } from "./daemonShutdownOutcome";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
@@ -1565,12 +1569,32 @@ export class UnixSocketServer {
       this.traceFrame("admission_requested", request.id, deviceId);
     }
     return session.requestQueue
-      .run(resolveSocketAdmissionLane(request), () => {
-        if (this.onFrameTrace) {
-          this.traceFrame("admission_granted", request.id, deviceId);
-        }
-        return this.runCancellableQueuedHandler(handler, cancellation.signal);
-      })
+      .run(
+        resolveSocketAdmissionLane(request),
+        () => {
+          if (this.onFrameTrace) {
+            this.traceFrame("admission_granted", request.id, deviceId);
+          }
+          return this.runCancellableQueuedHandler(handler, cancellation.signal);
+        },
+        {
+          timer: this.timer,
+          deadlineMs: deadline.value,
+          signal: cancellation.signal,
+          timeoutError: (sameLaneWait) =>
+            new McpTimeoutError({
+              toolName:
+                request.method === "tools/call"
+                  ? (request.params?.name ?? request.method)
+                  : request.method,
+              timeoutMs: totalTimeoutMs,
+              origin: "UnixSocketServer.handleRequest",
+              detail: sameLaneWait
+                ? `timed out in queue (waiting in queue for ${resolveSocketAdmissionLane(request)})`
+                : "timed out in queue before admission",
+            }),
+        },
+      )
       .finally(cancellation.dispose);
   }
 
@@ -2141,7 +2165,7 @@ export class UnixSocketServer {
     }
 
     if (boundRoute) {
-      return boundRoute;
+      return this.hostInventoryOrBoundRoute(boundRoute, toolName, args);
     }
 
     const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
@@ -2152,6 +2176,16 @@ export class UnixSocketServer {
     // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
     // pre-forward key so separate daemon clients can autolock and run independently.
     return this.sharedMcpForwardRoute(`socket:${socketSessionId}`);
+  }
+
+  private hostInventoryOrBoundRoute(
+    boundRoute: McpForwardRoute,
+    toolName: unknown,
+    args: unknown,
+  ): McpForwardRoute {
+    return isHostInventoryCall(toolName, args)
+      ? { ...boundRoute, executionKey: "host:inventory" }
+      : boundRoute;
   }
 
   private isUnboundDeviceAcquisitionTool(

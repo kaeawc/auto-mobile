@@ -76,21 +76,33 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     budgets: DevicePreparationBudgets,
     deps: DeviceToolsDependencies,
     deviceUtils: PlatformDeviceManager,
-    deviceMatcher: DeviceMatcher,
-    bootDeadlineMs: number,
-    requestedIdentity: string,
-    progress: ProgressCallback | undefined,
-    signal: AbortSignal | undefined,
-    perf: ReturnType<typeof createPerformanceTracker>,
-    releaseReadinessReservations: DeviceReadinessReservation[],
-    lifecycleLease: VirtualDeviceLifecycleLease,
-    state: {
-      boot: DeviceBootResult | undefined;
-      ownershipTransferred: boolean;
-      // Every unowned cold boot this request cancelled, recovery included. The
-      // lifecycle lease is released only once all of them have settled.
-      coldBootSettlements: Promise<void>[];
-      bindingSettlements: Promise<unknown>[];
+    {
+      deviceMatcher,
+      bootDeadlineMs,
+      requestedIdentity,
+      progress,
+      signal,
+      perf,
+      releaseReadinessReservations,
+      lifecycleLease,
+      state,
+    }: {
+      deviceMatcher: DeviceMatcher;
+      bootDeadlineMs: number;
+      requestedIdentity: string;
+      progress: ProgressCallback | undefined;
+      signal: AbortSignal | undefined;
+      perf: ReturnType<typeof createPerformanceTracker>;
+      releaseReadinessReservations: DeviceReadinessReservation[];
+      lifecycleLease: VirtualDeviceLifecycleLease;
+      state: {
+        boot: DeviceBootResult | undefined;
+        ownershipTransferred: boolean;
+        // Every unowned cold boot this request cancelled, recovery included. The
+        // lifecycle lease is released only once all of them have settled.
+        coldBootSettlements: Promise<void>[];
+        bindingSettlements: Promise<unknown>[];
+      };
     },
   ) => {
     const bootService = new DeviceBootService({
@@ -275,11 +287,15 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
                       : undefined,
                     // Recovery already registered this process and its output tail.
                     readinessResult.preservedSessionId ? undefined : state.boot!.processHandle,
-                    new Set(releaseReadinessReservations.map((reservation) => reservation.owner)),
-                    verifiedWarmAndroidAvdIdentity,
-                    "automationReady",
-                    (settlement) => {
-                      state.bindingSettlements.push(settlement);
+                    {
+                      readinessReservationOwners: new Set(
+                        releaseReadinessReservations.map((reservation) => reservation.owner),
+                      ),
+                      verifiedAndroidAvdIdentity: verifiedWarmAndroidAvdIdentity,
+                      achievedReadiness: "automationReady",
+                      collectCancellationSettlement: (settlement) => {
+                        state.bindingSettlements.push(settlement);
+                      },
                     },
                   ),
                 (settlement) => {
@@ -318,15 +334,11 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     state.ownershipTransferred = true;
 
     refreshResourcesAfterCommittedBoot(state.boot, deps);
-    return buildBootedResponse(
-      state.boot.device,
-      state.boot.source,
-      perf,
-      sessionId,
-      state.boot.processId,
-      sourceImage,
-      configuredImageForAcquiredDevice(state.boot.device, sourceImage),
-    );
+    return buildBootedResponse(state.boot.device, state.boot.source, perf, sessionId, {
+      processId: state.boot.processId,
+      sourceImage: sourceImage,
+      configuredImage: configuredImageForAcquiredDevice(state.boot.device, sourceImage),
+    });
   };
 
   const startDeviceHandler = async (
@@ -398,10 +410,17 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     args: StartDeviceArgs,
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-    verifiedAndroidAvdIdentity?: DeviceInfo,
-    achievedReadiness: DeviceReadinessLevel = "automationReady",
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
+    {
+      readinessReservationOwners,
+      verifiedAndroidAvdIdentity,
+      achievedReadiness = "automationReady",
+      collectCancellationSettlement,
+    }: {
+      readinessReservationOwners?: ReadonlySet<symbol>;
+      verifiedAndroidAvdIdentity?: DeviceInfo;
+      achievedReadiness?: DeviceReadinessLevel;
+      collectCancellationSettlement?: (settlement: Promise<void>) => void;
+    } = {},
   ): Promise<string> {
     // Reserve the exact ready device before resource notifications publish it
     // to concurrent allocators.
@@ -495,10 +514,17 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     source: "booted" | "cold-boot",
     perf: ReturnType<typeof createPerformanceTracker>,
     sessionId: string,
-    processId?: number,
-    sourceImage?: DeviceInfo,
-    configuredImage?: StableConfiguredDeviceImage,
-    achievedReadiness: DeviceReadinessLevel = "automationReady",
+    {
+      processId,
+      sourceImage,
+      configuredImage,
+      achievedReadiness = "automationReady",
+    }: {
+      processId?: number;
+      sourceImage?: DeviceInfo;
+      configuredImage?: StableConfiguredDeviceImage;
+      achievedReadiness?: DeviceReadinessLevel;
+    } = {},
   ) {
     perf.end();
     const timing = perf.getTimings();

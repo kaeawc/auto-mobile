@@ -68,16 +68,12 @@ export function createLifecycleHandlers() {
     }
     const stableTarget = resolveKillDeviceStableTarget(args.device, devicePool);
     const lifecycleLease = stableTarget
-      ? await reserveStableDeviceLifecycle(
-          stableTarget,
-          args.device,
-          deps.timer,
-          deadlineMs,
-          requestAbortSignal,
-          undefined,
-          "shutdown",
-          deps.lifecycleCoordinator,
-        )
+      ? await reserveStableDeviceLifecycle(stableTarget, args.device, deps.timer, deadlineMs, {
+          requestAbortSignal: requestAbortSignal,
+          timeoutError: undefined,
+          operation: "shutdown",
+          coordinator: deps.lifecycleCoordinator,
+        })
       : await deps.lifecycleCoordinator.reserve(
           { kind: "selector", platform: args.device.platform, selector: args.device.deviceId },
           { operation: "shutdown", deadlineMs, signal: requestAbortSignal },

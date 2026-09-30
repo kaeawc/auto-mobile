@@ -93,10 +93,13 @@ async function resolveAndroidStartupLeaseImageName(
       timer,
       lookupDeadlineMs,
       "Android AVD image lookup for the startup lease did not complete",
-      signal,
-      async (lookupSignal) => await deviceUtils.listDeviceImages("android", lookupSignal),
-      undefined,
-      "to name its Android startup lease",
+      {
+        requestAbortSignal: signal,
+        operation: async (lookupSignal) =>
+          await deviceUtils.listDeviceImages("android", lookupSignal),
+        timeoutMs: undefined,
+        phase: "to name its Android startup lease",
+      },
     );
     return images.some((image) => image.platform === "android" && image.name === deviceId)
       ? deviceId
@@ -213,19 +216,25 @@ async function ownsAndroidStartupOfflineRecovery(
       timer,
       lookupDeadlineMs,
       "Android startup lease running-device discovery did not complete",
-      signal,
-      async (signal) => {
-        const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
-          bypassAndroidDeviceListCache: true,
-          signal,
-        });
-        if (!discovery.succeededPlatforms.has("android")) {
-          throw new Error("Android startup lease running-device discovery was unavailable");
-        }
-        await reconcileDiscoveryObservation(discovery.devices, "android-startup-offline-recovery", {
-          signal,
-        });
-        return discovery.devices;
+      {
+        requestAbortSignal: signal,
+        operation: async (signal) => {
+          const discovery = await deviceUtils.getBootedDevicesDetailed("android", {
+            bypassAndroidDeviceListCache: true,
+            signal,
+          });
+          if (!discovery.succeededPlatforms.has("android")) {
+            throw new Error("Android startup lease running-device discovery was unavailable");
+          }
+          await reconcileDiscoveryObservation(
+            discovery.devices,
+            "android-startup-offline-recovery",
+            {
+              signal,
+            },
+          );
+          return discovery.devices;
+        },
       },
     );
     // An unresolved emulator name may be this AVD. Fail open rather than

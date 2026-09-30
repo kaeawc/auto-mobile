@@ -50,10 +50,12 @@ async function resolveSystemUiRecoveryImage({
     timer,
     totalDeadlineMs,
     "System UI recovery image lookup did not complete",
-    signal,
-    async () => await deviceManager.listDeviceImages("android"),
-    undefined,
-    "to resolve its AVD image for System UI ANR recovery",
+    {
+      requestAbortSignal: signal,
+      operation: async () => await deviceManager.listDeviceImages("android"),
+      timeoutMs: undefined,
+      phase: "to resolve its AVD image for System UI ANR recovery",
+    },
   );
   const image = images.find(
     (candidate) => candidate.platform === "android" && candidate.name === avdName,
@@ -230,11 +232,13 @@ async function shutdownAndroidForSystemUiAnr(
     timer,
     totalDeadlineMs,
     "System UI recovery shutdown command did not complete",
-    signal,
-    async (shutdownSignal, timeoutMs) =>
-      await deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs }),
-    undefined,
-    "to accept its System UI ANR recovery shutdown command",
+    {
+      requestAbortSignal: signal,
+      operation: async (shutdownSignal, timeoutMs) =>
+        await deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs }),
+      timeoutMs: undefined,
+      phase: "to accept its System UI ANR recovery shutdown command",
+    },
   );
   await operations.waitForDeviceShutdown({
     deviceManager,

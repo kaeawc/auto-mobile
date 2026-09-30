@@ -595,6 +595,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Push update callbacks
   private onPushUpdateCallbacks: Set<(hierarchy: XCTestHierarchy) => void> = new Set();
   private supportedCommands: Set<string> | null = null;
+  private readonly rejectedCommands = new Set<string>();
   private supportedFeatures: Set<string> | null = null;
   private sdkCapabilities: IosSdkCapabilities | null = null;
   private sdkCapabilitiesKnown = false;
@@ -1733,6 +1734,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cachedHierarchy = null;
     this.clearSdkScreenIdentity();
     this.supportedCommands = null;
+    this.rejectedCommands.clear();
     this.supportedFeatures = null;
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
@@ -2465,6 +2467,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Handle push messages (no requestId)
     if (type === "connected") {
+      this.rejectedCommands.clear();
       this.supportedCommands = Array.isArray(message.supportedCommands)
         ? new Set(message.supportedCommands)
         : null;
@@ -2532,6 +2535,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           return;
         }
         if (decoded.errorMessage !== undefined) {
+          this.rememberRejectedCommand(message.error);
           this.requestManager.resolveError(
             decoded.requestId,
             decoded.errorMessage,
@@ -2595,7 +2599,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   private isCommandSupported(messageType: string): boolean {
-    return this.supportedCommands === null || this.supportedCommands.has(messageType);
+    return (
+      !this.rejectedCommands.has(messageType) &&
+      (this.supportedCommands === null || this.supportedCommands.has(messageType))
+    );
+  }
+
+  private rememberRejectedCommand(error?: string): void {
+    const rejectedCommand = /^Unknown command type: (.+)$/.exec(error ?? "")?.[1];
+    if (rejectedCommand) {
+      this.rejectedCommands.add(rejectedCommand);
+    }
   }
 
   private isSdkCapabilityFailure(message: WebSocketMessage): boolean {

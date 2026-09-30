@@ -16,6 +16,7 @@ import {
 } from "../preferences/AndroidPreferencesXmlFile";
 import { getAndroidSharedPreferencesMutationCoordinator } from "../preferences/AndroidSharedPreferencesMutationCoordinator";
 import type { KeyValueType } from "./storageTypes";
+import { float32ToJavaString } from "../../utils/float32ToJavaString";
 
 /**
  * Direct-file fallback for the Android SharedPreferences key-value tools (`setKeyValue`,
@@ -337,7 +338,7 @@ function parseAndroidFloat(value: string): string {
   // reader can consume hexadecimal, signed, and over-precise inputs exactly as
   // the SDK route would after a read-back.
   const parsed = parseAndroidFloatLiteral(trimmed);
-  return String(Math.fround(parsed));
+  return float32ToJavaString(parsed);
 }
 
 function parseAndroidFloatLiteral(value: string): number {

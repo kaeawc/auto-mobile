@@ -278,12 +278,19 @@ describe("setAndroidKeyValueDirect", () => {
   });
 
   test.each([
-    ["+1.0", "1"],
-    ["1.", "1"],
-    ["1F", "1"],
-    ["1.e2", "100"],
-    ["0x1.0p0", "1"],
-    ["1.234567890", "1.2345678806304932"],
+    ["+1.0", "1.0"],
+    ["1.", "1.0"],
+    ["1F", "1.0"],
+    ["1.e2", "100.0"],
+    ["0x1.0p0", "1.0"],
+    ["1.234567890", "1.2345679"],
+    ["0.1", "0.1"],
+    ["3.4028235E38", "3.4028235E38"],
+    ["1.0E-5", "1.0E-5"],
+    ["NaN", "NaN"],
+    ["Infinity", "Infinity"],
+    ["-Infinity", "-Infinity"],
+    ["-0", "-0.0"],
   ])(
     "canonicalizes the SDK FLOAT spelling %s to its stored float32 value",
     async (value, expected) => {

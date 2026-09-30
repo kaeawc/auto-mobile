@@ -10,6 +10,7 @@ import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { logger } from "../../utils/logger";
+import { float32ToJavaString } from "../../utils/float32ToJavaString";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   arrayOfNodes,
@@ -145,13 +146,20 @@ export class AppPreferences {
     normalizedValue: PreferenceValue,
     readBack: PreferenceResult,
   ): PreferenceResult {
+    const parsedReadBackValue = readBack.found
+      ? parsePreferenceValue(stringValue(readBack.value), input.type)
+      : null;
     return {
       ...readBack,
       type: input.type,
-      value: readBack.found
-        ? parsePreferenceValue(stringValue(readBack.value), input.type)
-        : readBack.value,
-      verified: readBack.found && valuesEqual(readBack.value, normalizedValue, input.type),
+      value: readBack.found ? parsedReadBackValue : readBack.value,
+      verified:
+        readBack.found &&
+        (this.device.platform === "android" &&
+        input.scope === "sharedPreferences" &&
+        input.type === "float"
+          ? Math.fround(parsedReadBackValue as number) === Math.fround(normalizedValue as number)
+          : valuesEqual(parsedReadBackValue, normalizedValue, input.type)),
       warning: preferenceWriteWarning(this.device.platform, input.scope),
     };
   }
@@ -464,7 +472,7 @@ function androidNodeFor(
   return {
     $: {
       name: key,
-      value: stringValue(value),
+      value: type === "float" ? float32ToJavaString(value as number) : stringValue(value),
     },
   };
 }

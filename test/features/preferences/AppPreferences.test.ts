@@ -387,6 +387,31 @@ describe("AppPreferences", () => {
     expect(writtenXml).toContain('<int name="launch_count" value="3"/>');
   });
 
+  test("writes Android float preferences with the Java float32 spelling", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("cat shared_prefs/settings.xml", [
+      createExecResult("<map/>", ""),
+      createExecResult('<map><float name="ratio" value="0.1"/></map>', ""),
+    ]);
+
+    const preferences = new AppPreferences(androidDevice, { adbFactory: adbFactoryFor(adb) });
+    const result = await preferences.setPreference({
+      scope: "sharedPreferences",
+      appId: "com.example.app",
+      suite: "settings",
+      key: "ratio",
+      value: 0.1,
+      type: "float",
+    });
+
+    const writeCommand = commandText(
+      adb.getExecutedCommands(),
+      "base64 -d > shared_prefs/settings.xml",
+    );
+    expect(decodeBase64WritePayload(writeCommand)).toContain('<float name="ratio" value="0.1"/>');
+    expect(result).toMatchObject({ value: 0.1, verified: true });
+  });
+
   test("writes the first Android SharedPreferences entry when the XML map is empty", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("cat shared_prefs/settings.xml", [

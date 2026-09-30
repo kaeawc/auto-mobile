@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -33,12 +34,12 @@ describe("startDevice Android offline-recovery lease classification", () => {
     deviceUtils = new FakeDeviceUtils();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     setDeviceToolsDependencies({

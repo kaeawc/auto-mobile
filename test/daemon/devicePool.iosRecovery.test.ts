@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
 import { isRecoverableDaemonReleaseReason } from "../../src/db/deviceSessionRepository";
@@ -65,25 +66,14 @@ function createPool(
   onLoss = false,
 ): DevicePool {
   return new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss, maxAttempts: 1 },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    continuityEnabled,
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: continuityEnabled,
+    }),
   );
 }
 

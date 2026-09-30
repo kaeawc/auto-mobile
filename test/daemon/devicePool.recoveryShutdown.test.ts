@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -172,21 +173,15 @@ async function setup(
   const persistence = new FakeDeviceSessionPersistence();
   const sessions = new SessionManager(timer, persistence);
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    apps,
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: true, maxAttempts: 1 },
-    undefined,
-    emulatorLossIncidentStore,
-    cancelDeviceSessionExecutions,
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: apps,
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+      emulatorLossIncidentStore: emulatorLossIncidentStore,
+      cancelDeviceSessionExecutions: cancelDeviceSessionExecutions,
+    }),
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
@@ -208,25 +203,14 @@ async function setupPassiveRestart(release = true) {
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager();
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: false, maxAttempts: 1 },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    true,
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: true,
+    }),
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
@@ -266,18 +250,13 @@ async function setupAwaitingOwner(manager: LaggingShutdownManager) {
   await persistence.markReleased("session", "expired", 0, "daemon-restart");
   const sessions = new SessionManager(timer, persistence);
   const pool = new DevicePool(
-    sessions,
-    "restarted-daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: true, maxAttempts: 1 },
+    createDevicePoolDependencies(sessions, "restarted-daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    }),
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
@@ -439,25 +418,18 @@ test("same-serial emulator continuity is enabled when the recovery environment i
     const releaseCancellation = Promise.withResolvers<void>();
     let cancellationCalls = 0;
     const pool = new DevicePool(
-      sessions,
-      "daemon",
-      timer,
-      new FakeInstalledAppsRepository(),
-      manager,
-      new DefaultRetryExecutor(timer),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { onLoss: false, maxAttempts: 1 },
-      undefined,
-      undefined,
-      async () => {
-        cancellationCalls++;
-        await releaseCancellation.promise;
-        return 0;
-      },
+      createDevicePoolDependencies(sessions, "daemon", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: manager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+        cancelDeviceSessionExecutions: async () => {
+          cancellationCalls++;
+          await releaseCancellation.promise;
+          return 0;
+        },
+      }),
     );
     manager.bootedDevices = [original];
     await pool.addDevice(original, image);
@@ -507,25 +479,14 @@ test("continuity releases an externally closed emulator without relaunch and reh
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager("emulator-5599");
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: false, maxAttempts: 1 },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    true,
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: true,
+    }),
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);
@@ -595,25 +556,14 @@ test("a pool-allocated emulator without a recorded image still persists as devic
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager();
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: false, maxAttempts: 1 },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    true,
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: true,
+    }),
   );
   manager.bootedDevices = [original];
   // Discovery-only refresh -- no sourceImage, so unlike `addDevice(device, image)`
@@ -669,25 +619,14 @@ test("onLoss recovery does not actively relaunch a pool-allocated emulator witho
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager();
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: true, maxAttempts: 1 },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    true,
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: true,
+    }),
   );
   manager.bootedDevices = [original];
   await pool.refreshDevices();
@@ -722,25 +661,14 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
   const sessions = new SessionManager(timer, persistence);
   const manager = new KillTrackingShutdownManager();
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: false, maxAttempts: 1 },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    false,
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      deviceSessionContinuityEnabled: false,
+    }),
   );
   manager.bootedDevices = [original];
   await pool.addDevice(original, image);

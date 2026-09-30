@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -62,18 +63,13 @@ test("adoptOnly recovery does not relaunch an AVD still listed at the same seria
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new RealisticStartManager();
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: true, maxAttempts: 1 },
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    }),
   );
   try {
     manager.bootedDevices = [original];
@@ -135,18 +131,13 @@ test("adoptOnly recovery relaunches an AVD that really disappeared", async () =>
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const manager = new RealisticStartManager();
   const pool = new DevicePool(
-    sessions,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    manager,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: true, maxAttempts: 1 },
+    createDevicePoolDependencies(sessions, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: manager,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+    }),
   );
   try {
     manager.bootedDevices = [original];

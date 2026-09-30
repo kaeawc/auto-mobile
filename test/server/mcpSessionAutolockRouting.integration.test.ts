@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -119,11 +120,10 @@ describe("MCP session autolock routing", () => {
         ];
         fakeDeviceUtils.setBootedDevices("android", devices);
         const pool = new DevicePool(
-          sessionManager,
-          "daemon-test",
-          timer,
-          undefined,
-          fakeDeviceUtils,
+          createDevicePoolDependencies(sessionManager, "daemon-test", {
+            timer: timer,
+            deviceManager: fakeDeviceUtils,
+          }),
         );
         await pool.initializeWithDevices(devices);
         DaemonState.getInstance().initialize(sessionManager, pool);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
@@ -163,11 +164,10 @@ describe("ToolRegistry autolock session enforcement", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA, androidB]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -205,11 +205,10 @@ describe("ToolRegistry autolock session enforcement", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA, androidB]);
     await pool.bindOrReuseDeviceSession("owner-session", androidA.deviceId, "android");
@@ -250,11 +249,10 @@ describe("ToolRegistry autolock session enforcement", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA, androidB]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -295,11 +293,10 @@ describe("ToolRegistry autolock session enforcement", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA, androidB]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -40,7 +41,9 @@ describe("device-addressed resource reads pass both funnels", () => {
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [DEVICE]);
-    const pool = new DevicePool(manager, "daemon-test", timer, undefined, utils);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "daemon-test", { timer: timer, deviceManager: utils }),
+    );
     await pool.initializeWithDevices([DEVICE]);
     DaemonState.getInstance().initialize(manager, pool);
     return pool;

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -33,7 +34,12 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
         const utils = new FakeDeviceUtils();
         const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
         utils.setBootedDevices("android", [device]);
-        const pool = new DevicePool(manager, "daemon-test", timer, undefined, utils);
+        const pool = new DevicePool(
+          createDevicePoolDependencies(manager, "daemon-test", {
+            timer: timer,
+            deviceManager: utils,
+          }),
+        );
         await pool.initializeWithDevices([device]);
         if (route === "setActiveDevice") {
           DaemonState.getInstance().initialize(manager, pool);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   defaultAdbClientFactory,
@@ -41,7 +42,9 @@ describe("device-client admission seam", () => {
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [DEVICE]);
-    const pool = new DevicePool(manager, "daemon-test", timer, undefined, utils);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "daemon-test", { timer: timer, deviceManager: utils }),
+    );
     await pool.initializeWithDevices([DEVICE]);
     DaemonState.getInstance().initialize(manager, pool);
     await pool.reconcileDiscoveryObservation(

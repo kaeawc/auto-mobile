@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM } from "../../src/daemon/constants";
@@ -1444,7 +1445,12 @@ describe("post-handler cancellation guard scope", () => {
     timer.enableAutoAdvance();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const deviceUtils = new FakeDeviceUtils();
-    const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, deviceUtils);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-test", {
+        timer: timer,
+        deviceManager: deviceUtils,
+      }),
+    );
     DaemonState.getInstance().initialize(sessionManager, pool);
     const device = {
       name: "Pixel 8",
@@ -1530,7 +1536,12 @@ describe("post-handler cancellation guard scope", () => {
     timer.enableAutoAdvance();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const deviceUtils = new FakeDeviceUtils();
-    const pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, deviceUtils);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-test", {
+        timer: timer,
+        deviceManager: deviceUtils,
+      }),
+    );
     DaemonState.getInstance().initialize(sessionManager, pool);
     const device = { name: "Pixel 8", platform: "android" as const, deviceId: "reap-android-1" };
     // An idle Android entry is re-proved present against discovery before it is

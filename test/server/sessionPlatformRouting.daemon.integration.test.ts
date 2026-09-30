@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
@@ -74,13 +75,13 @@ beforeEach(async () => {
   utils.setBootedDevices("ios", [devices[1]]);
   PlatformDeviceManagerFactory.setInstance(utils);
   pool = new DevicePool(
-    manager,
-    "daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    utils,
-    new DefaultRetryExecutor(timer),
-    repository,
+    createDevicePoolDependencies(manager, "daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: utils,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      deviceSessionRepository: repository,
+    }),
   );
   await pool.initializeWithDevices(devices);
   DaemonState.getInstance().initialize(manager, pool);

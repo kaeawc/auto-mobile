@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   advanceDeviceIncarnation,
@@ -46,12 +47,12 @@ describe("deviceIncarnationToken", () => {
     const deviceManager = new FakeDeviceManager();
     const sessionManager = new SessionManager(timer);
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceManager,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceManager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     const device: BootedDevice = {
       name: "Pixel 8",
@@ -69,12 +70,12 @@ describe("deviceIncarnationToken", () => {
 
     // A fresh initialize installs a resolver for the NEW pool.
     const replacementPool = new DevicePool(
-      sessionManager,
-      "daemon-session-2",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceManager,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session-2", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceManager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     DaemonState.getInstance().initialize(sessionManager, replacementPool);
     await replacementPool.initializeWithDevices([device]);
@@ -87,12 +88,12 @@ describe("deviceIncarnationToken", () => {
     const deviceManager = new FakeDeviceManager();
     const sessionManager = new SessionManager(timer);
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceManager,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceManager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     const device: BootedDevice = {

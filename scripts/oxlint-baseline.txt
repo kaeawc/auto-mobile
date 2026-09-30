@@ -275,7 +275,7 @@
 1	src/vision/applyVisionFallback.ts	eslint(max-params)
 11	src/daemon/cli/runDaemonCommand.ts	eslint(max-depth)
 11	src/server/deviceToolsProvisioning.ts	eslint(max-params)
-10	src/daemon/devicePool.ts	eslint(max-params)
+9	src/daemon/devicePool.ts	eslint(max-params)
 2	src/daemon/deviceAutolockManager.ts	eslint(max-params)
 12	src/utils/IOSCtrlProxyManager.ts	eslint(max-depth)
 14	src/utils/DeepLinkManager.ts	eslint(max-depth)

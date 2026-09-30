@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "./devicePoolDependencies";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -43,24 +44,16 @@ export async function createIdentityQuarantinePool(
   };
   utils.setBootedDevices("android", [pooled]);
   const pool = new DevicePool(
-    manager,
-    "daemon-test",
-    timer,
-    new FakeInstalledAppsRepository(),
-    utils,
-    new DefaultRetryExecutor(timer),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    async () => {
-      onCancelExecutions();
-      return 0;
-    },
+    createDevicePoolDependencies(manager, "daemon-test", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: utils,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      cancelDeviceSessionExecutions: async () => {
+        onCancelExecutions();
+        return 0;
+      },
+    }),
   );
   DaemonState.getInstance().initialize(manager, pool);
   await pool.initializeWithDevices([pooled]);

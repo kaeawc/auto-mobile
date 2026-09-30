@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -393,7 +394,12 @@ describe("SessionHeartbeatMonitor", () => {
         { name: "Pixel 8", platform: "android" as const, deviceId: "emulator-5556" },
       ];
       fakeDeviceUtils.setBootedDevices("android", androidDevices);
-      pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, fakeDeviceUtils);
+      pool = new DevicePool(
+        createDevicePoolDependencies(sessionManager, "daemon-test", {
+          timer: timer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
       await pool.initializeWithDevices(androidDevices);
     });
 

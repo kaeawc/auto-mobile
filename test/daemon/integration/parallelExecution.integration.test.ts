@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { DevicePool } from "../../../src/daemon/devicePool";
@@ -37,12 +38,12 @@ describe("Parallel Execution Across Multiple Devices", function () {
     const fakeDeviceManager = new FakeDeviceManager();
     fakeDeviceManager.bootedDevices = [...devices];
     devicePool = new DevicePool(
-      sessionManager,
-      "test-daemon-session-id",
-      fakeTimer,
-      fakeAppsRepo,
-      fakeDeviceManager,
-      retryExecutor,
+      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+        timer: fakeTimer,
+        installedAppsRepository: fakeAppsRepo,
+        deviceManager: fakeDeviceManager,
+        retryExecutor: retryExecutor,
+      }),
     );
     await devicePool.initializeWithDevices(devices);
   });

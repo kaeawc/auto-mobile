@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { type Kysely, sql } from "kysely";
 import type { Database } from "../../src/db/types";
@@ -226,11 +227,10 @@ describe("DeviceSessionRepository", () => {
     fakeDeviceUtils.setBootedDevices("android", [returned]);
     const restartedManager = new SessionManager(timer, repo);
     const restartedPool = new DevicePool(
-      restartedManager,
-      "new-daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(restartedManager, "new-daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await restartedPool.initializeWithDevices([returned]);
 
@@ -793,13 +793,11 @@ describe("DeviceSessionRepository", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     const sessionManager = new SessionManager(timer, repo);
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session-1",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      undefined,
-      repo,
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        deviceSessionRepository: repo,
+      }),
     );
 
     try {
@@ -831,11 +829,10 @@ describe("DeviceSessionRepository", () => {
     fakeDeviceUtils.setBootedDevices("android", [physicalDevice]);
     const sessionManager = new SessionManager(timer, repo);
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session-1",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
 
     try {
@@ -872,13 +869,11 @@ describe("DeviceSessionRepository", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     const sessionManager = new SessionManager(timer, repo);
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session-1",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      undefined,
-      repo,
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        deviceSessionRepository: repo,
+      }),
     );
 
     try {

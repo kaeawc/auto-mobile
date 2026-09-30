@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test, beforeEach, afterAll, mock } from "bun:test";
 import os from "node:os";
 import path from "node:path";
@@ -302,7 +303,9 @@ steps:
       deviceId: "emulator-5556",
       name: "Android Emulator 2",
     };
-    const devicePool = new DevicePool(sessionManager, "daemon-session", timer);
+    const devicePool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", { timer: timer }),
+    );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     await sessionManager.createSession("base", androidDevice.deviceId, "android", 1_000);
     const executionTracker = new ExecutionTracker(timer);
@@ -404,7 +407,9 @@ steps:
   test("restores the previous device-label map when allocation fails", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const devicePool = new DevicePool(sessionManager, "daemon-session", timer);
+    const devicePool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", { timer: timer }),
+    );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
     await sessionManager.createSession("base", androidDevice.deviceId, "android");
     const previousDeviceLabels = { existing: "base" };

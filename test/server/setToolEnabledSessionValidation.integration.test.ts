@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -56,7 +57,12 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", devices);
-    pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, fakeDeviceUtils);
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-test", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
     await pool.initializeWithDevices(devices);
     DaemonState.getInstance().initialize(sessionManager, pool);
 

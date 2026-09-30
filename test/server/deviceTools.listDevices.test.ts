@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerDeviceTools,
@@ -98,12 +99,12 @@ describe("listDevices tool (#5870)", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
     await pool.assignDeviceToSession("rehydrated-session", "android", {
@@ -501,12 +502,12 @@ describe("listDevices tool (#5870)", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     const image = {
       platform: "android" as const,
@@ -538,12 +539,12 @@ describe("listDevices tool (#5870)", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
@@ -563,12 +564,12 @@ describe("listDevices tool (#5870)", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.addDevice(android, { platform: "android", name: android.name, isRunning: true });
@@ -652,12 +653,12 @@ describe("listDevices tool (#5870)", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     const registry = new DeviceSessionRegistry(timer);
     registry.onDeviceConnected({
@@ -683,12 +684,12 @@ describe("listDevices tool (#5870)", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     const admittedImage = {
       platform: "android" as const,

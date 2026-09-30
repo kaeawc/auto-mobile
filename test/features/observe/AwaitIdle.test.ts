@@ -154,3 +154,39 @@ describe("AwaitIdle UI stability deadline", () => {
     expect(adb.getCommandCalls()).toHaveLength(2);
   });
 });
+
+describe("AwaitIdle rotation polling", () => {
+  test("completes after the target rotation appears", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+      { stdout: "mRotation=0", stderr: "" },
+      { stdout: "mRotation=0", stderr: "" },
+      { stdout: "mRotation=1", stderr: "" },
+    ]);
+    const awaitIdle = createAwaitIdle(adb, timer);
+
+    await awaitIdle.waitForRotation(1, 100);
+
+    expect(adb.getCommandCalls()).toHaveLength(3);
+    expect(timer.now()).toBe(34);
+  });
+
+  test("throws when the rotation polling deadline expires", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse('shell dumpsys window | grep -i "mRotation="', {
+      stdout: "mRotation=0",
+      stderr: "",
+    });
+    const awaitIdle = createAwaitIdle(adb, timer);
+
+    await expect(awaitIdle.waitForRotation(1, 34)).rejects.toThrow(
+      "Timeout waiting for rotation to 1 after 34ms",
+    );
+    expect(adb.getCommandCalls()).toHaveLength(3);
+    expect(timer.now()).toBe(34);
+  });
+});

@@ -1747,6 +1747,7 @@
               "setDeviceState",
               "setKeyValue",
               "setNotificationPolicy",
+              "setPosture",
               "setPreference",
               "setUIState",
               "shake",
@@ -1870,6 +1871,7 @@
               "setDeviceState",
               "setKeyValue",
               "setNotificationPolicy",
+              "setPosture",
               "setPreference",
               "setUIState",
               "shake",
@@ -9173,6 +9175,7 @@
               "setDeviceState",
               "setKeyValue",
               "setNotificationPolicy",
+              "setPosture",
               "setPreference",
               "setUIState",
               "shake",
@@ -11409,6 +11412,50 @@
     }
   },
   {
+    "name": "setPosture",
+    "description": "Set the device posture, and optionally the Resizable emulator display preset",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "posture": {
+          "type": "string",
+          "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+        },
+        "displayPreset": {
+          "type": "string",
+          "enum": ["phone", "unfolded", "tablet"]
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["posture"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "setPreference",
     "description": "Write an Android system property, Android SharedPreferences key, or iOS UserDefaults key and return read-back verification.",
     "inputSchema": {
@@ -11551,6 +11598,7 @@
             "setDeviceState",
             "setKeyValue",
             "setNotificationPolicy",
+            "setPosture",
             "setPreference",
             "setUIState",
             "shake",
@@ -11640,6 +11688,7 @@
               "setDeviceState",
               "setKeyValue",
               "setNotificationPolicy",
+              "setPosture",
               "setPreference",
               "setUIState",
               "shake",

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseAndroidDeviceDisplays,
+  parseAndroidDeviceStates,
   parseAndroidPostures,
   readAndroidDeviceDisplays,
 } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
@@ -58,6 +59,17 @@ describe("Android physical display inventory", () => {
         "Supported states: [\nDeviceState{identifier=0, name='TENT'}\nDeviceState{identifier=1, name='MYSTERY'}\n]",
       ),
     ).toEqual(["tent", "unknown"]);
+  });
+
+  test("parses physical state identifiers and posture names", () => {
+    expect(
+      parseAndroidDeviceStates(
+        "Supported states: [\nDeviceState{identifier=0, name='CLOSED', app_accessible=true}\nDeviceState{identifier=7, name='HALF_OPENED', app_accessible=true}\n]",
+      ),
+    ).toEqual([
+      { identifier: 0, name: "CLOSED", posture: "closed" },
+      { identifier: 7, name: "HALF_OPENED", posture: "half_opened" },
+    ]);
   });
 
   test("ignores logical and virtual displays without physical IDs", () => {

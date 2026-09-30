@@ -1,0 +1,147 @@
+import { ActionableError } from "../../models/ActionableError";
+import type { BootedDevice, DisplayRef, Posture } from "../../models";
+import { RealObserveScreen } from "../observe/ObserveScreen";
+import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+
+export type RequestedPosture = Exclude<Posture, "unknown">;
+export type DisplayPreset = "phone" | "unfolded" | "tablet";
+
+export interface SetPostureResult {
+  posture: RequestedPosture;
+  display: DisplayRef;
+  locked?: boolean;
+}
+
+export interface SetPostureUnsupportedResult {
+  status: "unsupported";
+  message: string;
+}
+
+export type SetPostureOutput = SetPostureResult | SetPostureUnsupportedResult;
+
+export interface SetPostureDependencies {
+  adbFactory?: AdbClientFactory;
+  observeFactory?: (device: BootedDevice) => ObserveScreen;
+}
+
+const EMULATOR_POSTURE_IDS: Record<RequestedPosture, number> = {
+  closed: 1,
+  half_opened: 2,
+  opened: 3,
+  rear_display: 1,
+  flipped: 4,
+  tent: 5,
+};
+// IDs follow Android's documented `adb emu posture` order. rear_display uses
+// the closed state, which activates the emulator's cover display:
+// https://developer.android.com/blog/posts/emulator-control-for-adaptive-app-development
+
+const DISPLAY_PRESET_IDS: Record<DisplayPreset, number> = {
+  phone: 0,
+  unfolded: 1,
+  tablet: 2,
+};
+
+function isEmulator(device: BootedDevice): boolean {
+  return device.deviceId.startsWith("emulator-");
+}
+
+function validateInventoryPosture(device: BootedDevice, requested: RequestedPosture): void {
+  const supported = device.displays?.postures;
+  if (supported && !supported.includes(requested)) {
+    throw new ActionableError(
+      `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ")}.`,
+    );
+  }
+}
+
+async function setEmulatorPosture(
+  adb: ReturnType<AdbClientFactory["create"]>,
+  requested: RequestedPosture,
+  displayPreset?: DisplayPreset,
+): Promise<void> {
+  const command =
+    requested === "closed"
+      ? "emu fold"
+      : requested === "opened"
+        ? "emu unfold"
+        : `emu posture ${EMULATOR_POSTURE_IDS[requested]}`;
+  await adb.executeCommand(command);
+  if (displayPreset) {
+    await adb.executeCommand(`emu resize-display ${DISPLAY_PRESET_IDS[displayPreset]}`);
+  }
+}
+
+async function setPhysicalPosture(
+  adb: ReturnType<AdbClientFactory["create"]>,
+  requested: RequestedPosture,
+): Promise<void> {
+  const { stdout } = await adb.executeCommand("shell cmd device_state print-states");
+  const states = parseAndroidDeviceStates(stdout);
+  const match = states.find((state) => state.posture === requested);
+  if (!match && requested !== "opened") {
+    const supported = [...new Set(states.map((state) => state.posture))];
+    throw new ActionableError(
+      `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ")}.`,
+    );
+  }
+  const command = match
+    ? `shell cmd device_state state ${match.identifier}`
+    : "shell cmd device_state state reset";
+  await adb.executeCommand(command);
+}
+
+export class SetPosture {
+  private readonly adbFactory: AdbClientFactory;
+  private readonly observeFactory: (device: BootedDevice) => ObserveScreen;
+
+  constructor(
+    private readonly device: BootedDevice,
+    dependencies: SetPostureDependencies = {},
+  ) {
+    this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
+    this.observeFactory =
+      dependencies.observeFactory ?? ((target) => new RealObserveScreen(target));
+  }
+
+  async execute(
+    requested: RequestedPosture,
+    displayPreset?: DisplayPreset,
+  ): Promise<SetPostureOutput> {
+    if (this.device.platform === "ios") {
+      return {
+        status: "unsupported",
+        message:
+          "setPosture is not supported on iOS yet; the iPhone Duo posture is only available through Device Hub (#8254).",
+      };
+    }
+
+    validateInventoryPosture(this.device, requested);
+
+    const adb = this.adbFactory.create(this.device);
+    const emulator = isEmulator(this.device);
+    if (displayPreset && !emulator) {
+      throw new ActionableError(
+        "displayPreset is supported only by the Resizable Android emulator.",
+      );
+    }
+
+    if (emulator) {
+      await setEmulatorPosture(adb, requested, displayPreset);
+    } else {
+      await setPhysicalPosture(adb, requested);
+    }
+
+    const observation = await this.observeFactory(this.device).execute({});
+    return {
+      posture: requested,
+      display: observation.display,
+      ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
+    };
+  }
+}

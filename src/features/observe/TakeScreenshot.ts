@@ -46,6 +46,8 @@ import { shellQuote } from "../../utils/shellQuote";
 import {
   AndroidPhysicalDisplayIdResolver,
   assertValidPng,
+  decodePngBase64Output,
+  withAndroidScreenshotCaptureLock,
 } from "./android/AndroidPhysicalDisplayId";
 
 function replaceScreenshotExtension(filePath: string, extension: string): string {
@@ -494,7 +496,7 @@ export class TakeScreenshot implements ScreenshotService {
     logger.info(`[SCREENSHOT] Trying base64 approach`);
 
     const cmdStartTime = this.timer.now();
-    const tempFile = "/sdcard/screenshot.png";
+    const tempFile = `/data/local/tmp/am-shot-${screenshotTempIdToken(this.idGenerator.next())}.png`;
 
     // Single command: screencap -> base64 encode -> remove temp file
     const displayId = await this.physicalDisplayIdResolver.resolve(this.adb, this.device.deviceId);
@@ -502,7 +504,9 @@ export class TakeScreenshot implements ScreenshotService {
     const command = `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
     // Use larger maxBuffer (50MB) to handle high-resolution screenshots
     const maxBuffer = 50 * 1024 * 1024; // 50MB
-    const result = await this.adb.executeCommand(command, undefined, maxBuffer, undefined, signal);
+    const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () =>
+      this.adb.executeCommand(command, undefined, maxBuffer, undefined, signal),
+    );
     const cmdDuration = this.timer.now() - cmdStartTime;
     logger.info(`[SCREENSHOT] Combined ADB command took ${cmdDuration}ms`);
 
@@ -512,8 +516,7 @@ export class TakeScreenshot implements ScreenshotService {
 
     // Decode base64 data to buffer
     const decodeStartTime = this.timer.now();
-    const cleanedOutput = result.stdout.replace(/[\r\n]/g, "");
-    const imageBuffer = Buffer.from(cleanedOutput, "base64");
+    const imageBuffer = decodePngBase64Output(result.stdout);
     assertValidPng(imageBuffer);
     const decodeDuration = this.timer.now() - decodeStartTime;
     logger.info(

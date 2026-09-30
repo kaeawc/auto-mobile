@@ -89,7 +89,11 @@ import {
   CTRLPROXY_SCREENSHOT_TIMEOUT_ERROR,
   fallbackReasonForCtrlProxyFailure,
 } from "./screenshotFallbackReason";
-import { AndroidPhysicalDisplayIdResolver } from "./AndroidPhysicalDisplayId";
+import {
+  AndroidPhysicalDisplayIdResolver,
+  decodePngBase64Output,
+  withAndroidScreenshotCaptureLock,
+} from "./AndroidPhysicalDisplayId";
 import {
   normalizeAnr,
   normalizeCrash,
@@ -128,7 +132,10 @@ import { daemonDeviceAdmissionGate } from "../../../daemon/deviceAdmissionGate";
 import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
-import { defaultIdGenerator } from "../../../utils/IdGenerator";
+import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
+import { errorMessage } from "../../../utils/describeUnknownError";
+import { screenshotTempIdToken } from "../../../utils/screenshot/screenshotFormats";
+import { shellQuote } from "../../../utils/shellQuote";
 import {
   readLockOwnerPid,
   releaseExclusiveLock,
@@ -1376,6 +1383,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private device: BootedDevice;
   private adb: AdbExecutor;
   private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
+  private readonly idGenerator: IdGenerator;
 
   // Per-instance port allocation for multi-device support
   private localPort: number;
@@ -1554,6 +1562,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     certificateFileSystem?: CertificateFileSystem,
     ctrlProxyForwardLease?: CtrlProxyForwardLease,
     serviceManagerFactory: AndroidServiceManagerFactory = defaultAndroidServiceManagerFactory,
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
     super(
       timer ?? defaultTimer,
@@ -1567,6 +1576,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.loggerInstance = loggerInstance;
     this.device = device;
     this.adb = adb;
+    this.idGenerator = idGenerator;
     this.physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(this.timer);
     this.installedAppsRepository = installedAppsRepository ?? null;
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
@@ -1901,6 +1911,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
     ctrlProxyForwardLease?: CtrlProxyForwardLease,
     serviceManagerFactory?: AndroidServiceManagerFactory,
+    idGenerator?: IdGenerator,
   ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(
       device,
@@ -1916,6 +1927,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       certificateFileSystem,
       ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
       serviceManagerFactory ?? defaultAndroidServiceManagerFactory,
+      idGenerator,
     );
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
@@ -5565,21 +5577,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     const captureBinding = this.screenGeometry.bind() ?? undefined;
 
     try {
-      const tempFile = "/sdcard/screenshot_stream.png";
+      const tempFile = `/data/local/tmp/am-shot-${screenshotTempIdToken(this.idGenerator.next())}.png`;
       const displayId = await this.physicalDisplayIdResolver.resolve(
         this.adb,
         this.device.deviceId,
       );
       const displayArgument = displayId ? `-d ${displayId} ` : "";
-      const command = `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
+      const quotedTempFile = shellQuote(tempFile);
+      const command = `shell "screencap ${displayArgument}-p ${quotedTempFile} && base64 ${quotedTempFile} && rm ${quotedTempFile}"`;
       const maxBuffer = 50 * 1024 * 1024;
-      const result = await this.adb.executeCommand(command, undefined, maxBuffer);
+      const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () =>
+        this.adb.executeCommand(command, undefined, maxBuffer),
+      );
 
       if (!result.stdout || result.stdout.trim().length === 0) {
         return { success: false, error: "No data from ADB screencap" };
       }
 
-      const data = result.stdout.replace(/[\r\n]/g, "");
+      const data = decodePngBase64Output(result.stdout).toString("base64");
       const checksum = computeChecksum(data);
 
       return {
@@ -5591,7 +5606,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         screenshotFallbackReason: fallbackReason,
       };
     } catch (error) {
-      return { success: false, error: `ADB screencap failed: ${error}` };
+      const message = errorMessage(error);
+      this.loggerInstance.warn(`[CTRL_PROXY] ADB screencap failed: ${message}`, error);
+      return { success: false, error: `ADB screencap failed: ${message}` };
     }
   }
 

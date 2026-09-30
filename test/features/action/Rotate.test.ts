@@ -1245,6 +1245,73 @@ describe("Rotate", () => {
       }
     });
 
+    test("surfaces an unsupported-display response from the runner", async () => {
+      spyOn(fakeIOSCtrlProxy, "requestRotate").mockResolvedValue({
+        success: false,
+        totalTimeMs: 1,
+        previousOrientation: "unknown",
+        currentOrientation: "unknown",
+        value: 0,
+        rotationPerformed: false,
+        error: "Rotation is not supported on this display (the screen size did not change)",
+      });
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      Object.assign(iosRotate, {
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+        awaitIdle: fakeAwaitIdle,
+      });
+      try {
+        const result = await iosRotate.execute("landscape");
+        expect(result.success).toBe(false);
+        expect(result.error).toBe(
+          "Rotation is not supported on this display (the screen size did not change)",
+        );
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("rejects a claimed rotation from unknown when display size is unchanged", async () => {
+      spyOn(fakeIOSCtrlProxy, "requestRotate").mockResolvedValue({
+        success: true,
+        totalTimeMs: 1,
+        previousOrientation: "unknown",
+        currentOrientation: "landscape_left",
+        value: 1,
+        rotationPerformed: true,
+      });
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      Object.assign(iosRotate, {
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+        awaitIdle: fakeAwaitIdle,
+      });
+      try {
+        const result = await iosRotate.execute("landscape");
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("screen size did not change");
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("accepts a portrait no-op without a visual change", async () => {
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      Object.assign(iosRotate, {
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+        awaitIdle: fakeAwaitIdle,
+      });
+      try {
+        const result = await iosRotate.execute("portrait");
+        expect(result.success).toBe(true);
+        expect(result.rotationPerformed).toBe(false);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
     test("should use CtrlProxy to rotate to portrait on iOS", async () => {
       const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
       (iosRotate as any).observeScreen = fakeObserveScreen;

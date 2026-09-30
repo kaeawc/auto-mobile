@@ -81,6 +81,9 @@ if [[ "$1" == "scripts/lib/merge-junit-reports.ts" ]]; then
   exec "$REAL_BUN" "$@"
 fi
 printf '%s\n' "$*" >> "$BUN_ARGS_FILE"
+if [[ -n "${STUB_BUN_WALL_FILE:-}" ]]; then
+  printf '%s\n' "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-unset}" >> "$STUB_BUN_WALL_FILE"
+fi
 if [[ -n "${STUB_BUN_SLEEP_SECONDS:-}" ]]; then
   sleep "$STUB_BUN_SLEEP_SECONDS"
 fi
@@ -126,6 +129,7 @@ stub_junit_report_with_lines() {
 }
 report=""
 target=""
+shard=""
 while [[ "$#" -gt 0 ]]; do
   if [[ "$1" == "--reporter-outfile" ]]; then
     report="$2"
@@ -133,10 +137,19 @@ while [[ "$#" -gt 0 ]]; do
     continue
   fi
   case "$1" in
+    --shard=*) shard="${1#--shard=}" ;;
     *.test.ts) target="$1" ;;
   esac
   shift
 done
+if [[ -n "$shard" && "$shard" == "${STUB_CHANGED_FAIL_SHARD:-}" ]]; then
+  echo "simulated shard failure" >&2
+  exit 7
+fi
+if [[ -n "$shard" && ( "$shard" == "${STUB_CHANGED_EMPTY_SHARD:-}" || "${STUB_CHANGED_EMPTY_SHARD:-}" == all ) ]]; then
+  echo "Ran 0 tests across 0 files."
+  exit 0
+fi
 if [[ -n "${STUB_PER_FILE_FAIL:-}" && "$target" == *.integration.test.ts ]]; then
   printf '%s exit=1\n' "$target" >> "$STUB_BUN_EXIT_FILE"
   exit 1
@@ -500,9 +513,63 @@ EOF
 }
 
 @test "changed lane delegates affected selection to Bun" {
-  run_lane changed
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    AUTOMOBILE_UNIT_TEST_WORKERS=3 bash "$SCRIPT" changed
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c -- '--changed=origin/main')" -eq 3 ]
+  for shard in 1 2 3; do
+    [[ "$output" == *"--shard=$shard/3"* ]]
+  done
+}
+
+@test "changed shards use a per-shard 180s budget and write separate JUnit reports" {
+  report_dir="$BATS_TEST_TMPDIR/changed-reports"
+  wall_file="$BATS_TEST_TMPDIR/wall-budgets"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" STUB_BUN_WALL_FILE="$wall_file" \
+    bash "$SCRIPT" changed
+  [ "$status" -eq 0 ]
+  [ -s "$report_dir/changed-shard-1.xml" ]
+  [ -s "$report_dir/changed-shard-2.xml" ]
+  [ -f scratch/test-ts-changed-shards/shard-0.log ]
+  grep -q -- '--changed=origin/main --shard=1/2' "$BUN_ARGS_FILE"
+  [ "$(grep -c '^180$' "$wall_file")" -eq 2 ]
+}
+
+@test "changed lane names a failing shard" {
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    STUB_CHANGED_FAIL_SHARD=2/2 bash "$SCRIPT" changed
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL: changed shard 2 exited with status 7"* ]]
+}
+
+@test "changed lane accepts a shard with no selected files" {
+  report_dir="$BATS_TEST_TMPDIR/changed-reports"
+  run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    STUB_CHANGED_EMPTY_SHARD=2/2 AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
+    bash "$SCRIPT" changed
+  [ "$status" -eq 0 ]
+  [ -s "$report_dir/changed-shard-1.xml" ]
+  [ ! -e "$report_dir/changed-shard-2.xml" ]
+}
+
+@test "changed lane keeps explicit paths and passthrough args in one process" {
+  run_lane changed test/features/device/SetPosture.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/features/device/SetPosture.test.ts"* ]]
+  [[ "$output" != *"--shard="* ]]
+  [ "$(printf '%s\n' "$output" | grep -c -- '--changed=origin/main')" -eq 1 ]
+  run_lane changed --bail
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"--shard="* ]]
+}
+
+@test "Windows changed lane remains one process" {
+  run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 RUNNER_OS=Windows \
+    bash "$SCRIPT" changed
   [ "$status" -eq 0 ]
   [[ "$output" == *"--changed=origin/main"* ]]
+  [[ "$output" != *"--shard="* ]]
 }
 
 @test "changed lane accepts a base ref without package-script expansion" {
@@ -825,7 +892,15 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
   grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
-  grep -q -- "--parallel=3" "$BUN_ARGS_FILE"
+  grep -q -- "--shard=3/3" "$BUN_ARGS_FILE"
+}
+
+@test "timing gate accepts successful empty changed shards without JUnit files" {
+  run env PATH="$STUB_BIN:$PATH" BUN_TEST_TIMING_BASE_REF=origin/main \
+    TIMING_CHANGED_FILES='src/example.ts\n' AUTOMOBILE_UNIT_TEST_WORKERS=2 \
+    STUB_CHANGED_EMPTY_SHARD=all bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/empty-timings.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"No changed unit tests to validate"* ]]
 }
 
 @test "timing gate selects Bun-affected unit tests for testcase timing parser changes" {
@@ -837,7 +912,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
   grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
-  grep -q -- "--parallel=3" "$BUN_ARGS_FILE"
+  grep -q -- "--shard=3/3" "$BUN_ARGS_FILE"
 }
 
 @test "timing gate reuses complete unit-lane reports for source changes" {

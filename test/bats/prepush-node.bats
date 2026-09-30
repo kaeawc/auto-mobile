@@ -114,6 +114,8 @@ teardown() {
   [ "$status" -eq 0 ]
   grep -Fx 'bun run test:image:bun' "$COMMAND_LOG"
   grep -Fx 'bash scripts/test-ts.sh changed' "$COMMAND_LOG"
+  grep -Fx 'env AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports bash scripts/test-ts.sh changed' "$COMMAND_LOG"
+  ! grep -F 'AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720' "$COMMAND_LOG"
   grep -Fx 'bash scripts/validate-bun-test-timings.sh' "$COMMAND_LOG"
 }
 

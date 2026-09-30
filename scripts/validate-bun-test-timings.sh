@@ -160,6 +160,11 @@ fi
 
 set -- "$report_dir"/*.xml
 if [[ ! -f "$1" ]]; then
+  if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" && "$affects_unit_tests" == "true" && -z "${BUN_TEST_TIMING_REPORT_DIR:-}" ]]; then
+    # Bun exits successfully for empty --changed shards without writing JUnit.
+    echo "No changed unit tests to validate against the ${max_ms}ms budget."
+    exit 0
+  fi
   echo "No JUnit shard reports found in ${report_dir}." >&2
   exit 1
 fi

@@ -11,6 +11,12 @@ export class FakeSystemDetection implements SystemDetection {
   private existingFiles: Set<string> = new Set();
   private execResponses: Map<string, { stdout: string; stderr: string }> = new Map();
   private execErrors: Map<string, Error> = new Map();
+  executeCommandCallCount = 0;
+  private executeCommandGate: Promise<void> | undefined;
+
+  setExecuteCommandGate(gate: Promise<void> | undefined): void {
+    this.executeCommandGate = gate;
+  }
 
   private normalizePath(value: string): string {
     return value.replace(/\\/g, "/");
@@ -102,6 +108,8 @@ export class FakeSystemDetection implements SystemDetection {
   reset(): void {
     this.currentPlatform = "linux";
     this.currentHomeDir = "/home/testuser";
+    this.executeCommandCallCount = 0;
+    this.executeCommandGate = undefined;
     this.clearEnvVars();
     this.clearExistingFiles();
     this.clearExecResponses();
@@ -148,6 +156,8 @@ export class FakeSystemDetection implements SystemDetection {
     file: string,
     args: string[] = [],
   ): Promise<{ stdout: string; stderr: string }> {
+    this.executeCommandCallCount++;
+    await this.executeCommandGate;
     return this.exec([file, ...args].join(" "));
   }
 }

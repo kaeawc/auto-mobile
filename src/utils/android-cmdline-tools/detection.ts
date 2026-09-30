@@ -112,7 +112,14 @@ export function getAndroidHomeWithSystemImages(
 /**
  * In-memory cache for detection results
  */
-let cachedAndroidToolsLocations = new WeakMap<SystemDetection, AndroidToolsLocation[]>();
+interface AndroidToolsDetectionCacheEntry {
+  androidHome: string | undefined;
+  androidSdkRoot: string | undefined;
+  androidSdkHome: string | undefined;
+  promise: Promise<AndroidToolsLocation[]>;
+}
+
+let cachedAndroidToolsLocations = new WeakMap<SystemDetection, AndroidToolsDetectionCacheEntry>();
 
 /**
  * Clear cached detection results
@@ -504,12 +511,40 @@ async function detectAndroidToolsInPath(
 export async function detectAndroidCommandLineTools(
   systemDetection = defaultSystemDetection,
 ): Promise<AndroidToolsLocation[]> {
-  const cachedLocations = cachedAndroidToolsLocations.get(systemDetection);
-  if (cachedLocations !== undefined) {
+  const androidHome = systemDetection.getEnvVar("ANDROID_HOME");
+  const androidSdkRoot = systemDetection.getEnvVar("ANDROID_SDK_ROOT");
+  const androidSdkHome = systemDetection.getEnvVar("ANDROID_SDK_HOME");
+  const cachedEntry = cachedAndroidToolsLocations.get(systemDetection);
+  if (
+    cachedEntry !== undefined &&
+    cachedEntry.androidHome === androidHome &&
+    cachedEntry.androidSdkRoot === androidSdkRoot &&
+    cachedEntry.androidSdkHome === androidSdkHome
+  ) {
     logger.debug("Already cached Android tools locations. Returning cached result.");
-    return cachedLocations;
+    return cachedEntry.promise;
   }
 
+  const detectionPromise = detectAndroidCommandLineToolsUncached(systemDetection);
+  const cacheEntry: AndroidToolsDetectionCacheEntry = {
+    androidHome,
+    androidSdkRoot,
+    androidSdkHome,
+    promise: detectionPromise,
+  };
+  cachedAndroidToolsLocations.set(systemDetection, cacheEntry);
+  // Preserve the rejection for callers while allowing a later attempt to retry.
+  void detectionPromise.then(undefined, () => {
+    if (cachedAndroidToolsLocations.get(systemDetection) === cacheEntry) {
+      cachedAndroidToolsLocations.delete(systemDetection);
+    }
+  });
+  return detectionPromise;
+}
+
+async function detectAndroidCommandLineToolsUncached(
+  systemDetection: SystemDetection,
+): Promise<AndroidToolsLocation[]> {
   const locations: AndroidToolsLocation[] = [];
 
   logger.debug("Starting Android command line tools detection...");
@@ -563,7 +598,6 @@ export async function detectAndroidCommandLineTools(
     `Detection complete. Found ${uniqueLocations.length} unique Android tools installations.`,
   );
 
-  cachedAndroidToolsLocations.set(systemDetection, uniqueLocations);
   return uniqueLocations;
 }
 

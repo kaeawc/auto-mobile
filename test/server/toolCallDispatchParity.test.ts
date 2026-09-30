@@ -1,9 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION, INTERNAL_EXECUTION_ID_PARAM } from "../../src/daemon/constants";
+import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { ActionableError } from "../../src/models";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -32,6 +34,7 @@ const OK_TOOL = "__dispatch_parity_ok__";
 const FAIL_TOOL = "__dispatch_parity_fail__";
 const UNKNOWN_TOOL = "__dispatch_parity_unknown__";
 const DECLARED_SESSION_TOOL = "__dispatch_parity_declared_session__";
+const ERROR_CASE_TOOL = "__dispatch_parity_error_case__";
 
 interface Outcome {
   isError: boolean;
@@ -73,6 +76,19 @@ async function callThrough(
     };
   } catch (error) {
     return { isError: true, text: normalizeMessage(errorMessage(error)) };
+  }
+}
+
+async function callThroughClientVisible(
+  client: Client,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<Outcome> {
+  try {
+    const result = await client.callTool({ name, arguments: args });
+    return { isError: result.isError === true, text: firstText(result.content) };
+  } catch (error) {
+    return { isError: true, text: errorMessage(error) };
   }
 }
 
@@ -124,6 +140,25 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
         return { content: [{ type: "text", text: `session=${String(args.sessionUuid)}` }] };
       },
     );
+    ToolRegistry.register(
+      ERROR_CASE_TOOL,
+      "parity probe for shared error shaping",
+      z.object({ kind: z.string() }).strict(),
+      async ({ kind }: { kind: string }) => {
+        const errors: Record<string, unknown> = {
+          actionable: new ActionableError("actionable failure"),
+          mcp: new McpError(-32603, "MCP failure"),
+          plain: new Error("plain failure"),
+          nonError: "non-Error failure",
+          timeout: new McpTimeoutError({
+            toolName: ERROR_CASE_TOOL,
+            timeoutMs: 25,
+            origin: "test",
+          }),
+        };
+        throw errors[kind];
+      },
+    );
     await direct.setup();
     await daemonLoopback.setup();
 
@@ -159,6 +194,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     ToolRegistry.unregister(OK_TOOL);
     ToolRegistry.unregister(FAIL_TOOL);
     ToolRegistry.unregister(DECLARED_SESSION_TOOL);
+    ToolRegistry.unregister(ERROR_CASE_TOOL);
   });
 
   const entryPoints: Array<[string, CallEntryPoint]> = [
@@ -213,6 +249,27 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     row.expected(outcomes[0]);
     expect(outcomes).toEqual(outcomes.map(() => outcomes[0]));
   });
+
+  const sharedErrorCases = [
+    ["ActionableError", "actionable", "Error: actionable failure"],
+    ["McpError", "mcp", "Error: MCP failure"],
+    ["plain Error", "plain", "Error: plain failure"],
+    ["non-Error value", "nonError", "Error: non-Error failure"],
+    ["timeout", "timeout", `Error: MCP timeout: ${ERROR_CASE_TOOL} exceeded 25ms at test`],
+  ] as const;
+
+  test.each(sharedErrorCases)(
+    "%s has the same client-visible shape at each entry point",
+    async (_, kind, text) => {
+      const outcomes: Outcome[] = [];
+      const clients = [direct.client, daemonLoopback.client, proxyClient];
+      for (const [index] of entryPoints.entries()) {
+        outcomes.push(await callThroughClientVisible(clients[index], ERROR_CASE_TOOL, { kind }));
+      }
+
+      expect(outcomes).toEqual(entryPoints.map(() => ({ isError: true, text })));
+    },
+  );
 
   test("the live direct handler is the full dispatcher, not the SDK per-tool callback", async () => {
     await callThrough(direct.client, OK_TOOL, { count: 1 });

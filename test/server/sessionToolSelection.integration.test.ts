@@ -187,7 +187,9 @@ describe("per-session exact-tool selection", () => {
         ToolRegistry.notifySessionBindingReleased("released-session");
       }
       releaseLookup.resolve();
-      await expect(pending).rejects.toThrow(/released during acquisition/);
+      const response = await pending;
+      expect(response).toMatchObject({ isError: true });
+      expect(response.content[0].text).toMatch(/released during acquisition/);
       const routed = await fixture.client.request(
         { method: "tools/call", params: { name: "inspectRouting", arguments: {} } },
         z.any(),
@@ -1512,7 +1514,9 @@ describe("post-handler cancellation guard scope", () => {
     );
     siblingReused.resolve();
 
-    await expect(minterCall).rejects.toThrow(/cancelled during acquisition/);
+    const minterResponse = await minterCall;
+    expect(minterResponse).toMatchObject({ isError: true });
+    expect(minterResponse.content[0].text).toMatch(/cancelled during acquisition/);
 
     // The sibling already holds this handle: retiring it would strand the
     // client and idle the device it is still driving.
@@ -1579,12 +1583,12 @@ describe("post-handler cancellation guard scope", () => {
       { defaultEnabled: true },
     );
 
-    await expect(
-      fixture.client.request(
-        { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
-        z.any(),
-      ),
-    ).rejects.toThrow(/cancelled during acquisition/);
+    const response = await fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+      z.any(),
+    );
+    expect(response).toMatchObject({ isError: true });
+    expect(response.content[0].text).toMatch(/cancelled during acquisition/);
 
     // (a) Nothing is released synchronously: the device stays assigned.
     expect(releases).toEqual([]);
@@ -1652,12 +1656,12 @@ describe("post-handler cancellation guard scope", () => {
       { defaultEnabled: true },
     );
 
-    await expect(
-      fixture.client.request(
-        { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
-        z.any(),
-      ),
-    ).rejects.toThrow(/cancelled during acquisition/);
+    const response = await fixture.client.request(
+      { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+      z.any(),
+    );
+    expect(response).toMatchObject({ isError: true });
+    expect(response.content[0].text).toMatch(/cancelled during acquisition/);
 
     expect(resolveDirectSessionDevice("direct-minted-session")).toBeUndefined();
   });

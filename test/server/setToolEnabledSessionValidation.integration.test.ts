@@ -99,22 +99,22 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     await fixture.setup();
     const { client } = fixture.getContext();
 
-    await expect(
-      client.request(
-        {
-          method: "tools/call",
-          params: {
-            name: "setToolEnabled",
-            arguments: {
-              toolName: "clipboard",
-              enabled: true,
-              sessionUuid: "deadbeef-0000-4000-8000-000000000000",
-            },
+    const response = await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: {
+            toolName: "clipboard",
+            enabled: true,
+            sessionUuid: "deadbeef-0000-4000-8000-000000000000",
           },
         },
-        z.any(),
-      ),
-    ).rejects.toThrow("is not an active daemon session");
+      },
+      z.any(),
+    );
+    expect(response).toMatchObject({ isError: true });
+    expect(response.content[0].text).toContain("is not an active daemon session");
   });
 
   test("rejects a hidden tool before minting a connection profile", async () => {
@@ -187,18 +187,18 @@ describe("setToolEnabled sessionUuid validation (#6148)", () => {
     await fixture.setup();
     const { client } = fixture.getContext();
 
-    await expect(
-      client.request(
-        {
-          method: "tools/call",
-          params: {
-            name: "setToolEnabled",
-            arguments: { toolName: "clipboard", enabled: true, sessionUuid: fabricated },
-          },
+    const response = await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "setToolEnabled",
+          arguments: { toolName: "clipboard", enabled: true, sessionUuid: fabricated },
         },
-        z.any(),
-      ),
-    ).rejects.toThrow("is not an active daemon session");
+      },
+      z.any(),
+    );
+    expect(response).toMatchObject({ isError: true });
+    expect(response.content[0].text).toContain("is not an active daemon session");
   });
 
   test("a legitimate profile-only update (no explicit sessionUuid argument) still succeeds", async () => {

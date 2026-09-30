@@ -110,12 +110,14 @@ describe("terminal persisted recovery MCP transport", () => {
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
 
-    await expect(
-      fixture.client.callTool({
-        name: TOOL,
-        arguments: { sessionUuid: SESSION_UUID, platform: "android" },
-      }),
-    ).rejects.toThrow(`Cannot safely recover session ${SESSION_UUID}`);
+    const blockedRecovery = await fixture.client.callTool({
+      name: TOOL,
+      arguments: { sessionUuid: SESSION_UUID, platform: "android" },
+    });
+    expect(blockedRecovery).toMatchObject({ isError: true });
+    expect(blockedRecovery.content[0].text).toContain(
+      `Cannot safely recover session ${SESSION_UUID}`,
+    );
     expect(assignments).toBe(1);
     expect(persisted.release_reason).toBe("identity-recovery-target-busy");
 

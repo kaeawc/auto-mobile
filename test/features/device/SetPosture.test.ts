@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult, Posture } from "../../../src/models";
-import { SetPosture } from "../../../src/features/device/SetPosture";
+import { classifyIosPostureObservation, SetPosture } from "../../../src/features/device/SetPosture";
+import type { DisplayPanel } from "../../../src/models/DisplayPanel";
+import type { DisplayTransitionSink } from "../../../src/features/observe/DisplayTransition";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createExecResult } from "../../../src/utils/execResult";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const display = {
   key: "panel-inner",
@@ -15,6 +18,7 @@ const display = {
 } as const;
 const observation = {
   display,
+  screenSize: { width: 200, height: 300 },
   deviceLock: { locked: true, keyguardShowing: true },
 } as ObserveResult;
 
@@ -137,10 +141,28 @@ describe("SetPosture", () => {
     platform: "ios",
     deviceId: "34C35F33-224C-4E74-B8C0-668FF03E49F5",
     deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+    displays: {
+      panels: [
+        { key: "panel-inner", role: "inner", sizePx: { width: 600, height: 900 }, scale: 3 },
+        { key: "panel-cover", role: "cover", sizePx: { width: 400, height: 800 }, scale: 2 },
+      ],
+      postures: ["closed", "half_opened", "opened"],
+    },
   };
 
-  function makeIosFeature(device: BootedDevice = duo) {
+  function makeIosFeature(
+    device: BootedDevice = duo,
+    observations: ObserveResult[] = [observation],
+  ) {
     const client = new FakeIOSCtrlProxy();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sequence: string[] = [];
+    const transitionSink: DisplayTransitionSink = {
+      notifyTransition: (deviceId, reason) => {
+        sequence.push(`transition:${deviceId}:${reason}`);
+      },
+    };
     let observeCount = 0;
     const feature = new SetPosture(device, {
       iosClientProvider: () => client,
@@ -148,11 +170,14 @@ describe("SetPosture", () => {
         ({
           execute: async () => {
             observeCount += 1;
-            return observation;
+            sequence.push("observe");
+            return observations[Math.min(observeCount - 1, observations.length - 1)]!;
           },
         }) as ObserveScreen,
+      timer,
+      transitionSink,
     });
-    return { feature, client, getObserveCount: () => observeCount };
+    return { feature, client, timer, sequence, getObserveCount: () => observeCount };
   }
 
   test("sets each iPhone Duo simulator posture and observes its display", async () => {
@@ -161,11 +186,87 @@ describe("SetPosture", () => {
       ["half_opened", 130],
       ["opened", 180],
     ] as const) {
-      const { feature, client, getObserveCount } = makeIosFeature();
-      expect(await feature.execute(posture)).toEqual({ posture, display, locked: true });
+      const expectedDisplay = { ...display, role: posture === "closed" ? "cover" : "inner" };
+      const { feature, client, getObserveCount } = makeIosFeature(duo, [
+        { ...observation, display: expectedDisplay },
+      ]);
+      expect(await feature.execute(posture)).toEqual({
+        posture,
+        display: expectedDisplay,
+        locked: true,
+      });
       expect(client.getHingeAngleHistory()).toEqual([angle]);
       expect(getObserveCount()).toBe(1);
     }
+  });
+
+  test("polls until the iPhone Duo active display matches the requested posture", async () => {
+    const laterDisplay = { ...display, key: "panel-cover", role: "cover" };
+    const { feature, getObserveCount } = makeIosFeature(duo, [
+      observation,
+      observation,
+      { ...observation, display: laterDisplay },
+    ]);
+    expect(await feature.execute("closed")).toEqual({
+      posture: "closed",
+      display: laterDisplay,
+      locked: true,
+    });
+    expect(getObserveCount()).toBe(3);
+  });
+
+  test("notifies the transition exactly once before observing", async () => {
+    const expectedDisplay = { ...display, role: "cover" };
+    const { feature, sequence } = makeIosFeature(duo, [
+      { ...observation, display: expectedDisplay },
+    ]);
+    expect(await feature.execute("closed")).toEqual({
+      posture: "closed",
+      display: expectedDisplay,
+      locked: true,
+    });
+    expect(sequence).toEqual([
+      `transition:${duo.deviceId}:setPosture changed the iPhone Duo hinge angle`,
+      "observe",
+    ]);
+  });
+
+  test("returns an indeterminate observation without waiting", async () => {
+    const unknownObservation = {
+      ...observation,
+      display: { ...display, role: "unknown" },
+      screenSize: { width: 123, height: 456 },
+    };
+    const { feature, getObserveCount, timer } = makeIosFeature(duo, [unknownObservation]);
+    expect(await feature.execute("closed")).toMatchObject({ display: unknownObservation.display });
+    expect(getObserveCount()).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("throws when the old panel remains after polling to timeout", async () => {
+    const { feature, getObserveCount, timer } = makeIosFeature();
+    await expect(feature.execute("closed")).rejects.toThrow(
+      "hinge event was accepted, but the active display is still the inner panel after 3000 ms",
+    );
+    expect(getObserveCount()).toBe(13);
+    expect(timer.now()).toBe(3000);
+    expect(timer.getSleepHistory()).toEqual(Array(12).fill(250));
+  });
+
+  test("classifies panel sizes in pixels, points, and swapped orientation", () => {
+    const panels: DisplayPanel[] = [
+      { key: "inner", role: "inner", sizePx: { width: 600, height: 900 }, scale: 3 },
+      { key: "cover", role: "cover", sizePx: { width: 401, height: 801 }, scale: 2 },
+    ];
+    const classifySize = (width: number, height: number) =>
+      classifyIosPostureObservation(
+        { ...observation, display: { ...display, role: "unknown" }, screenSize: { width, height } },
+        panels,
+        "cover",
+      );
+    expect(classifySize(401, 801)).toBe("expected");
+    expect(classifySize(201, 401)).toBe("expected");
+    expect(classifySize(801, 401)).toBe("expected");
   });
 
   test("rejects unsupported Duo postures and display presets", async () => {
@@ -175,14 +276,16 @@ describe("SetPosture", () => {
     expect(client.getHingeAngleHistory()).toEqual([]);
   });
 
-  test("runner failure points to the runner update", async () => {
+  test("runner failure reports its error without a redundant runner update sentence", async () => {
     const { feature, client, getObserveCount } = makeIosFeature();
     client.setHingeAngleResult({
       success: false,
       error: "Unknown command type: set_hinge_angle",
       totalTimeMs: 0,
     });
-    await expect(feature.execute("opened")).rejects.toThrow("Update the iOS runner");
+    await expect(feature.execute("opened")).rejects.toMatchObject({
+      message: "Could not set iPhone Duo posture: Unknown command type: set_hinge_angle",
+    });
     expect(getObserveCount()).toBe(0);
   });
 
@@ -201,7 +304,10 @@ describe("SetPosture", () => {
   test("omits locked when the fresh observation has no lock signal", async () => {
     const adb = new FakeAdbExecutor();
     const adbFactory: AdbClientFactory = { create: () => adb };
-    const unlockedObservation = { display } as ObserveResult;
+    const unlockedObservation = {
+      display,
+      screenSize: { width: 200, height: 300 },
+    } as ObserveResult;
     const observeFactory = () => ({ execute: async () => unlockedObservation }) as ObserveScreen;
     const feature = new SetPosture(makeDevice(), { adbFactory, observeFactory });
     expect(await feature.execute("closed")).toEqual({ posture: "closed", display });

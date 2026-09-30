@@ -34,7 +34,7 @@ export class AwaitIdle implements AwaitIdleInterface {
   ) {
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
-    this.idle = new Idle(device, this.adbFactory);
+    this.idle = new Idle(device, this.adbFactory, timer);
     this.timer = timer;
   }
 
@@ -64,7 +64,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       }
 
       // Wait a short interval before checking again
-      await defaultTimer.sleep(this.pollIntervalMs);
+      await this.timer.sleep(this.pollIntervalMs);
     }
   }
 

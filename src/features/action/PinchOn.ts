@@ -21,7 +21,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { boundsArea, clamp } from "../../utils/bounds";
-import { buildContainerFromElement } from "../../utils/elementProperties";
+import { buildContainerFromElement, isTruthyFlag } from "../../utils/elementProperties";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../utils/screenBounds";
 import {
   DEFAULT_VISION_CONFIG,
@@ -48,6 +48,34 @@ interface PinchOnDependencies {
   visionConfig?: VisionFallbackConfig;
   screenshotCapturer?: ScreenshotCapturer;
   visionAnalyzer?: VisionAnalyzer;
+}
+
+export function scorePinchElement(element: Element, screenArea: number): number {
+  const area = boundsArea(element.bounds);
+  let score = area;
+  if (isTruthyFlag(element.clickable)) {
+    score *= 1.15;
+  }
+  if (isTruthyFlag(element.scrollable)) {
+    score *= 0.9;
+  }
+  if (area / screenArea >= 0.5) {
+    score *= 1.2;
+  }
+  return score;
+}
+
+export function isLikelyBottomSheet(element: Element, screenBounds: Element["bounds"]): boolean {
+  const height = Math.max(0, element.bounds.bottom - element.bounds.top);
+  const screenHeight = Math.max(1, screenBounds.bottom - screenBounds.top);
+  const bottomAligned = element.bounds.bottom >= screenBounds.bottom - screenHeight * 0.05;
+  const shorterThanScreen = height <= screenHeight * 0.65;
+  const scrollable = isTruthyFlag(element.scrollable);
+  const className = element["class"]?.toLowerCase() ?? "";
+  const classSuggestsSheet = className.includes("bottomsheet") || className.includes("sheet");
+  return (
+    (scrollable && bottomAligned && shorterThanScreen) || (classSuggestsSheet && bottomAligned)
+  );
 }
 
 export class PinchOn extends BaseVisualChange {
@@ -454,17 +482,8 @@ export class PinchOn extends BaseVisualChange {
       if (area <= 0) {
         continue;
       }
-      let score = area;
-      if (element.clickable) {
-        score *= 1.15;
-      }
-      if (element.scrollable) {
-        score *= 0.9;
-      }
-      if (area / screenArea >= 0.5) {
-        score *= 1.2;
-      }
-      if (this.isLikelyBottomSheet(element, screenBounds)) {
+      let score = scorePinchElement(element, screenArea);
+      if (isLikelyBottomSheet(element, screenBounds)) {
         score *= 0.2;
       }
 
@@ -554,20 +573,6 @@ export class PinchOn extends BaseVisualChange {
       bounds.left < screenBounds.right &&
       bounds.bottom > screenBounds.top &&
       bounds.top < screenBounds.bottom
-    );
-  }
-
-  private isLikelyBottomSheet(element: Element, screenBounds: Element["bounds"]): boolean {
-    const height = Math.max(0, element.bounds.bottom - element.bounds.top);
-    const screenHeight = Math.max(1, screenBounds.bottom - screenBounds.top);
-    const bottomAligned = element.bounds.bottom >= screenBounds.bottom - screenHeight * 0.05;
-    const shorterThanScreen = height <= screenHeight * 0.65;
-    const scrollable = element.scrollable === true;
-    const className = element["class"]?.toLowerCase() ?? "";
-    const classSuggestsSheet = className.includes("bottomsheet") || className.includes("sheet");
-
-    return (
-      (scrollable && bottomAligned && shorterThanScreen) || (classSuggestsSheet && bottomAligned)
     );
   }
 }

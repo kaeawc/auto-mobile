@@ -1,4 +1,5 @@
 import { FakeDeviceSessionRepository } from "../fakes/FakeDeviceSessionRepository";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -15,6 +16,8 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
+import * as appearanceSyncScheduler from "../../src/utils/appearance/AppearanceSyncScheduler";
 
 interface DaemonStartupInternals {
   devicePool: DevicePool;
@@ -71,6 +74,58 @@ describe("Daemon startup device discovery", () => {
   afterEach(() => {
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
+    }
+  });
+
+  test("an Android session syncs its device, and the iOS startup secret does not change that", async () => {
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousSync = process.env.AUTOMOBILE_APPEARANCE_SYNC;
+    const previousAllowlist = process.env.AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES;
+    const sync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
+      undefined,
+    );
+    delete process.env.AUTOMOBILE_APPEARANCE_SYNC;
+    delete process.env.AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES;
+    try {
+      for (const secret of [undefined, "live-acceptance-startup-secret-012345678901234567890"]) {
+        if (secret === undefined) {
+          delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+        } else {
+          process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = secret;
+        }
+        const daemon = buildDaemon(new FakeTimer());
+        const pool = (daemon as unknown as DaemonStartupInternals).devicePool;
+        try {
+          await pool.initializeWithDevices([
+            { deviceId: "android-a", name: "Pixel A", platform: "android" },
+            { deviceId: "android-b", name: "Pixel B", platform: "android" },
+          ]);
+          await daemon.getSessionManager().createSession("session-a", "android-a", "android");
+          expect(sync).toHaveBeenCalledTimes(1);
+          expect(sync.mock.calls[0]?.[0]).toMatchObject({ deviceId: "android-a" });
+          expect(sync).not.toHaveBeenCalledWith(expect.objectContaining({ deviceId: "android-b" }));
+        } finally {
+          daemon.getSessionManager().stopCleanupTimer();
+          sync.mockClear();
+        }
+      }
+    } finally {
+      sync.mockRestore();
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+      if (previousSync === undefined) {
+        delete process.env.AUTOMOBILE_APPEARANCE_SYNC;
+      } else {
+        process.env.AUTOMOBILE_APPEARANCE_SYNC = previousSync;
+      }
+      if (previousAllowlist === undefined) {
+        delete process.env.AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES = previousAllowlist;
+      }
     }
   });
 
@@ -234,9 +289,11 @@ describe("Daemon startup device discovery", () => {
     }
   });
 
-  test("ordinary daemon startup still warms discovered iOS devices", async () => {
+  test("ordinary startup leaves unowned discovered iOS devices cold", async () => {
     const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousAllowlist = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     const verifiedDeviceIds: string[] = [];
     const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
       verifyIosDevice: async (deviceId: string) => {
@@ -257,7 +314,7 @@ describe("Daemon startup device discovery", () => {
 
       await internals.initializeIosServices();
 
-      expect(verifiedDeviceIds).toEqual(["ordinary-simulator"]);
+      expect(verifiedDeviceIds).toEqual([]);
     } finally {
       pendingPrefetchSpy.mockRestore();
       getInstanceSpy.mockRestore();
@@ -266,12 +323,101 @@ describe("Daemon startup device discovery", () => {
       } else {
         process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
       }
+      if (previousAllowlist === undefined) {
+        delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = previousAllowlist;
+      }
+    }
+  });
+
+  test("rehydrated iOS session gets a runner after recovery without an allowlist", async () => {
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousAllowlist = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+    delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    await persistence.upsertActiveSession({
+      sessionUuid: "restored-ios-session",
+      deviceId: "owned-simulator",
+      stableDeviceId: "owned-simulator",
+      platform: "ios",
+      createdAtMs: 0,
+      lastUsedAtMs: 0,
+      expiresAtMs: 60_000,
+      sessionTimeoutMs: 60_000,
+      heartbeatTimeoutMs: 10_000,
+      hasReceivedHeartbeat: true,
+    });
+    await persistence.markReleased("restored-ios-session", "released", 0, "daemon-restart");
+    const verifiedDeviceIds: string[] = [];
+    const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
+      verifyIosDevice: async (deviceId: string) => {
+        verifiedDeviceIds.push(deviceId);
+      },
+    } as unknown as DeviceSessionManager);
+    const pendingPrefetchSpy = spyOn(IosCtrlProxyBuilder, "pendingPrefetch").mockReturnValue(null);
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      persistence as unknown as DeviceSessionRepository,
+      new CountingIdGenerator("daemon-session"),
+      new FakeDatabaseInitializer(),
+      new FakeStartupFailureTracker(),
+    );
+    const internals = daemon as unknown as DaemonStartupInternals;
+    const bootedDevices: BootedDevice[] = [
+      { deviceId: "owned-simulator", name: "Owned iPhone", platform: "ios" },
+      { deviceId: "foreign-simulator", name: "Foreign iPhone", platform: "ios" },
+    ];
+    try {
+      await internals.devicePool.initializeWithDevices(bootedDevices);
+      await internals.initializeIosServices();
+      expect(verifiedDeviceIds).toEqual([]);
+
+      const sessions = daemon.getSessionManager();
+      const summary = await sessions.rehydratePersistedSessions({
+        assignDeviceToSession: async (sessionId, _platform, target) => {
+          const session = await sessions.createSession(
+            sessionId,
+            "owned-simulator",
+            "ios",
+            target?.liveness?.sessionTimeoutMs,
+            target?.liveness?.heartbeatTimeoutMs,
+            target?.stableDeviceId,
+            target?.liveness,
+            target?.initialOwnership,
+          );
+          return session.assignedDevice;
+        },
+      });
+      expect(summary.rehydrated).toEqual(["restored-ios-session"]);
+      await internals.initializeIosServices();
+      expect(verifiedDeviceIds).toEqual(["owned-simulator"]);
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+      pendingPrefetchSpy.mockRestore();
+      getInstanceSpy.mockRestore();
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+      if (previousAllowlist === undefined) {
+        delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = previousAllowlist;
+      }
     }
   });
 
   test("daemon shutdown stops warm-up before verifying the next iOS device", async () => {
     const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const previousAllowlist = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
     delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = "first-simulator,second-simulator";
     const verifiedDeviceIds: string[] = [];
     let daemon: Daemon;
     const getInstanceSpy = spyOn(DeviceSessionManager, "getInstance").mockReturnValue({
@@ -299,6 +445,11 @@ describe("Daemon startup device discovery", () => {
         delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
       } else {
         process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
+      }
+      if (previousAllowlist === undefined) {
+        delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = previousAllowlist;
       }
     }
   });

@@ -17,6 +17,7 @@ import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
 import { SessionScopedStreamAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
+import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { DevicePool, type PooledDevice } from "./devicePool";
 import { isDeviceSessionContinuityEnabled, parseDeviceRecoveryPolicy } from "./poolConfig";
@@ -359,8 +360,7 @@ export class Daemon {
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
   private readonly liveAcceptanceStartupSecret: string | undefined;
-  private readonly skipIosStartupWarmup: boolean;
-  private readonly iosWarmupDeviceIds: ReadonlySet<string> | null;
+  private readonly passiveWorkPolicy: PassiveWorkPolicy;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -427,18 +427,11 @@ export class Daemon {
     this.liveAcceptanceStartupSecret = daemonLiveAcceptanceStartupSecret();
     // Even a malformed acceptance secret must not cause unsolicited simulator
     // launches. Capability validation remains strict in liveAcceptanceCapability.
-    this.skipIosStartupWarmup =
-      process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] !== undefined;
-    const iosWarmupDevices = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
-    this.iosWarmupDeviceIds =
-      iosWarmupDevices === undefined
-        ? null
-        : new Set(
-            iosWarmupDevices
-              .split(",")
-              .map((deviceId) => deviceId.trim())
-              .filter(Boolean),
-          );
+    this.passiveWorkPolicy = new PassiveWorkPolicy(
+      parsePassiveWorkSettings(process.env, DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV),
+      (deviceId) =>
+        this.sessionManager.getAllSessions().some((session) => session.assignedDevice === deviceId),
+    );
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -474,7 +467,7 @@ export class Daemon {
       this.setupNavigationGraphUpdateListener(
         NavigationGraphManager.getInstanceForSession(session.sessionId),
       );
-      if (!this.skipIosStartupWarmup && this.mayUseDeviceForPassiveWork(session.assignedDevice)) {
+      if (this.passiveWorkPolicy.allows("android", "appearance-sync", session.assignedDevice)) {
         const device = this.devicePool.getDevice(session.assignedDevice);
         if (device?.platform === "android") {
           void syncAppearanceForDevice({
@@ -710,10 +703,6 @@ export class Daemon {
       await this.initializeDevicePoolWithTimeout(5000);
       startupBenchmark.endPhase("deviceDiscovery");
 
-      // Initialize iOS CtrlProxy iOS connections for discovered iOS devices
-      // This establishes WebSocket connections early so observe calls are fast
-      await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
-
       try {
         await startupBenchmark.runPhase("sessionRehydration", () =>
           this.sessionManager.rehydratePersistedSessions(this.devicePool),
@@ -721,6 +710,9 @@ export class Daemon {
       } catch (error) {
         logger.warn(`[Daemon] Session rehydration failed; continuing startup: ${error}`);
       }
+
+      // Rehydrated sessions are now owned here and can safely warm their runners.
+      await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
 
       // Start Unix socket server AFTER device pool is ready
       logger.info(`Daemon host: "${this.host}", port: ${this.port}`);
@@ -815,7 +807,9 @@ export class Daemon {
         this.devicePool
           .getAllDevices()
           .filter(
-            (device) => device.platform === "android" && this.mayUseDeviceForPassiveWork(device.id),
+            (device) =>
+              device.platform === "android" &&
+              this.passiveWorkPolicy.allows("android", "appearance-sync", device.id),
           )
           .map((device) => ({
             deviceId: device.id,
@@ -823,7 +817,7 @@ export class Daemon {
             platform: "android",
             incarnation: device.incarnation,
           })),
-      isEnabled: () => !this.skipIosStartupWarmup,
+      isEnabled: () => this.passiveWorkPolicy.isAppearanceSyncEnabled(),
     });
     startPerformanceMonitor();
     this.startAdbMissingDeviceListener();
@@ -1601,6 +1595,20 @@ export class Daemon {
     }
   }
 
+  private logSkippedObservationStreamDevice(
+    platform: "android" | "ios",
+    deviceId: string,
+    action: string,
+  ): void {
+    const optInEnv =
+      platform === "android"
+        ? "AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES"
+        : "AUTOMOBILE_IOS_WARMUP_DEVICES";
+    logger.info(
+      `[Daemon] Skipping observation-stream ${action} for ${platform} device ${deviceId}: passive-work policy filtered it; set ${optInEnv} to opt in`,
+    );
+  }
+
   private setupDeviceDataStreamCallback(): void {
     const server = this.deviceDataStreamServer ?? getDeviceDataStreamServer();
     if (!server) {
@@ -1613,14 +1621,16 @@ export class Daemon {
         `[Daemon] IDE plugin subscribed to observation stream (device: ${deviceId ?? "all"}), ensuring WebSocket connections...`,
       );
 
-      // A stream subscription can cover every discovered device, but it does
-      // not acquire them. An iOS initial frame calls ensureConnected(), which
-      // can install and start a runner on a simulator with no owning session.
-      const allDevices = this.devicePool
-        .getAllDevices()
-        .filter(
-          (device) => device.platform !== "ios" || this.mayUseDeviceForPassiveWork(device.id),
-        );
+      // A stream subscription does not acquire devices. Initial frames can
+      // connect a CtrlProxy client, so both platforms need passive-work scope.
+      const pooledDevices = this.devicePool.getAllDevices();
+      const allDevices = pooledDevices.filter((device) => {
+        if (this.passiveWorkPolicy.allows(device.platform, "observation-stream", device.id)) {
+          return true;
+        }
+        this.logSkippedObservationStreamDevice(device.platform, device.id, "connect");
+        return false;
+      });
 
       pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
         streamServer: server,
@@ -1631,7 +1641,7 @@ export class Daemon {
         logger.warn(`[Daemon] Error pushing initial observation frame: ${error}`);
       });
 
-      if (allDevices.length === 0) {
+      if (pooledDevices.length === 0) {
         logger.info("[Daemon] No devices in pool to connect");
       }
     });
@@ -1643,11 +1653,16 @@ export class Daemon {
 
       for (const device of devices) {
         if (device.platform === "android") {
+          if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
+            this.logSkippedObservationStreamDevice("android", device.id, "screenshot cadence");
+            continue;
+          }
           AndroidCtrlProxyClient.getExistingInstance(
             device.id,
           )?.refreshObservationStreamScreenshotCadence();
         } else if (device.platform === "ios") {
-          if (!this.mayUseDeviceForPassiveWork(device.id)) {
+          if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
+            this.logSkippedObservationStreamDevice("ios", device.id, "screenshot cadence");
             continue;
           }
           IOSCtrlProxyClient.getExistingInstance(
@@ -1664,11 +1679,16 @@ export class Daemon {
 
       for (const device of devices) {
         if (device.platform === "android") {
+          if (!this.passiveWorkPolicy.allows("android", "observation-stream", device.id)) {
+            this.logSkippedObservationStreamDevice("android", device.id, "hierarchy cadence");
+            continue;
+          }
           AndroidCtrlProxyClient.getExistingInstance(
             device.id,
           )?.refreshObservationStreamHierarchyCadence();
         } else if (device.platform === "ios") {
-          if (!this.mayUseDeviceForPassiveWork(device.id)) {
+          if (!this.passiveWorkPolicy.allows("ios", "observation-stream", device.id)) {
+            this.logSkippedObservationStreamDevice("ios", device.id, "hierarchy cadence");
             continue;
           }
           const client = IOSCtrlProxyClient.getExistingInstance(device.id);
@@ -1753,19 +1773,6 @@ export class Daemon {
 
     // Wire up navigation graph updates to stream to IDE plugins
     this.setupNavigationGraphStreamListener(server);
-  }
-
-  /** A passive stream subscription must not provision an unclaimed simulator. */
-  private mayUseDeviceForPassiveWork(deviceId: string): boolean {
-    if (
-      this.sessionManager.getAllSessions().some((session) => session.assignedDevice === deviceId)
-    ) {
-      return true;
-    }
-    return (
-      !this.skipIosStartupWarmup &&
-      (this.iosWarmupDeviceIds === null || this.iosWarmupDeviceIds.has(deviceId))
-    );
   }
 
   /**
@@ -2956,15 +2963,15 @@ export class Daemon {
     // any device mutation. Warming every already-booted simulator here would
     // launch CtrlProxy on unrelated devices before that authenticated selection.
     // The later, explicit acquisition path still initializes its chosen target.
-    if (this.skipIosStartupWarmup) {
-      logger.info("[Daemon] Skipping pool-wide iOS CtrlProxy warm-up for live acceptance");
+    if (!this.passiveWorkPolicy.isIosPassiveWorkEnabled()) {
+      logger.info("[Daemon] Skipping iOS CtrlProxy warm-up for live acceptance");
       return;
     }
     const allDevices = this.devicePool.getAllDevices();
     const iosDevices = allDevices.filter(
       (device) =>
         device.platform === "ios" &&
-        (this.iosWarmupDeviceIds === null || this.iosWarmupDeviceIds.has(device.id)),
+        this.passiveWorkPolicy.allows("ios", "startup-warmup", device.id),
     );
     if (iosDevices.length === 0) {
       logger.debug("[Daemon] No iOS devices to initialize CtrlProxy iOS for");

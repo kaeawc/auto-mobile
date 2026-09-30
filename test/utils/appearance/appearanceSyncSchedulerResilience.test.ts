@@ -4,6 +4,7 @@ import type { AppearanceMode } from "../../../src/models";
 import type { AppearanceConfig } from "../../../src/server/appearanceManager";
 import { AppearanceSyncScheduler } from "../../../src/utils/appearance/AppearanceSyncScheduler";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { PassiveWorkPolicy, parsePassiveWorkSettings } from "../../../src/daemon/PassiveWorkPolicy";
 
 function makeTarget(incarnation: number): BootedDevice & { incarnation: number } {
   return { deviceId: "emulator-5554", name: "emulator-5554", platform: "android", incarnation };
@@ -83,6 +84,64 @@ describe("AppearanceSyncScheduler resilience", () => {
     await scheduler.trigger();
 
     expect(applied).toEqual(["emulator-5554"]);
+    await scheduler.stop();
+  });
+
+  test("daemon scope picks up acquired and allowlisted devices on later ticks", async () => {
+    const devices = [
+      makeTarget(1),
+      { ...makeTarget(1), deviceId: "emulator-5556" },
+      { ...makeTarget(1), deviceId: "emulator-5558" },
+    ];
+    const owned = new Set<string>();
+    const policy = new PassiveWorkPolicy(
+      parsePassiveWorkSettings(
+        { AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES: "emulator-5558" },
+        "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET",
+      ),
+      (id) => owned.has(id),
+    );
+    const applied: string[] = [];
+    const scheduler = makeScheduler(
+      () => [],
+      async (device) => {
+        applied.push(device.deviceId);
+      },
+    );
+    scheduler.setScope({
+      getTargets: () =>
+        devices.filter((device) => policy.allows("android", "appearance-sync", device.deviceId)),
+      isEnabled: () => policy.isAppearanceSyncEnabled(),
+    });
+
+    await scheduler.trigger();
+    expect(applied).toEqual(["emulator-5558"]);
+    owned.add("emulator-5554");
+    await scheduler.trigger();
+    expect(applied).toEqual(["emulator-5558", "emulator-5554"]);
+    await scheduler.stop();
+  });
+
+  test("daemon scope does not sync pooled Android devices without a session or allowlist", async () => {
+    const devices = [makeTarget(1), { ...makeTarget(1), deviceId: "emulator-5556" }];
+    const policy = new PassiveWorkPolicy(
+      parsePassiveWorkSettings({}, "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET"),
+      () => false,
+    );
+    const applied: string[] = [];
+    const scheduler = makeScheduler(
+      () => [],
+      async (device) => {
+        applied.push(device.deviceId);
+      },
+    );
+    scheduler.setScope({
+      getTargets: () =>
+        devices.filter((device) => policy.allows("android", "appearance-sync", device.deviceId)),
+    });
+
+    await scheduler.trigger();
+    expect(applied).toEqual([]);
     await scheduler.stop();
   });
 

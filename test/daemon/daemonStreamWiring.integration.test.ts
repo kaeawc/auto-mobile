@@ -27,6 +27,8 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeDatabaseInitializer } from "../fakes/FakeDatabaseInitializer";
 import { FakeStartupFailureTracker } from "../fakes/FakeStartupFailureTracker";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
+import { logger } from "../../src/utils/logger";
+import * as appearanceSyncScheduler from "../../src/utils/appearance/AppearanceSyncScheduler";
 import type {
   OnNavigationGraphRequestedCallback,
   OnObservationRequestedCallback,
@@ -175,6 +177,62 @@ describe("Daemon stream wiring", () => {
     NavigationGraphManager.resetInstance();
   });
 
+  test("an all-device subscriber connects owned Android and logs the skipped unowned device", async () => {
+    const previousAllowlist = process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
+    delete process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
+    const connected: string[] = [];
+    const client = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation((device) => {
+      connected.push(device.deviceId);
+      return { ensureConnected: async () => false } as unknown as AndroidCtrlProxyClient;
+    });
+    const sync = spyOn(appearanceSyncScheduler, "syncAppearanceForDevice").mockResolvedValue(
+      undefined,
+    );
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      new FakeTimer(),
+      new FakeDeviceSessionRepository(),
+      new CountingIdGenerator("device-session"),
+      new FakeDatabaseInitializer(),
+      new FakeStartupFailureTracker(),
+    );
+    const internals = daemon as unknown as DaemonStreamInternals;
+    const stream = new FakeDeviceDataStreamServer();
+    internals.getDeviceSessionRoutingTargets = () => targets(stream);
+    internals.setupNavigationGraphStreamListener = () => {};
+    try {
+      await (internals.devicePool as unknown as DevicePool).initializeWithDevices([
+        { deviceId: "android-owned", name: "Owned Pixel", platform: "android" },
+        { deviceId: "android-unowned", name: "Other Pixel", platform: "android" },
+      ]);
+      await daemon.getSessionManager().createSession("session-owned", "android-owned", "android");
+      internals.setupDeviceSessionRouting();
+      internals.setupDeviceDataStreamCallback();
+      stream.subscriberConnected?.(null);
+      await Promise.resolve();
+
+      expect(connected).toEqual(["android-owned"]);
+      expect(info).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Skipping observation-stream connect for android device android-unowned: passive-work policy filtered it; set AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES to opt in",
+        ),
+      );
+      expect(info).not.toHaveBeenCalledWith("[Daemon] No devices in pool to connect");
+    } finally {
+      daemon.getSessionManager().stopCleanupTimer();
+      client.mockRestore();
+      sync.mockRestore();
+      info.mockRestore();
+      if (previousAllowlist === undefined) {
+        delete process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES = previousAllowlist;
+      }
+    }
+  });
+
   test("an all-device stream reconnect after runner A restarts never starts idle runner B", async () => {
     const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
     const previousAllowlist = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
@@ -257,11 +315,15 @@ describe("Daemon stream wiring", () => {
           stream.screenshotCadenceChanged?.(null);
           await Promise.resolve();
 
-          expect(connectedDevices).toEqual(["sim-a", "sim-a", "sim-a", "sim-a"]);
+          expect(connectedDevices).toEqual(
+            environment.secret === undefined ? ["sim-a", "sim-a", "sim-a", "sim-a"] : [],
+          );
           expect(managerA.getCallCount("forceRestart")).toBe(1);
           expect(managerB.getCallCount("setup")).toBe(0);
-          expect(getInstance).toHaveBeenCalledTimes(2);
-          expect(getExistingInstance).toHaveBeenCalledWith("sim-a");
+          expect(getInstance).toHaveBeenCalledTimes(environment.secret === undefined ? 2 : 0);
+          if (environment.secret === undefined) {
+            expect(getExistingInstance).toHaveBeenCalledWith("sim-a");
+          }
           expect(getExistingInstance).not.toHaveBeenCalledWith("sim-b");
         } finally {
           connectedDevices.length = 0;
@@ -284,6 +346,90 @@ describe("Daemon stream wiring", () => {
         delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
       } else {
         process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = previousAllowlist;
+      }
+    }
+  });
+
+  test("stream subscribe and cadence skip unowned devices on both platforms", async () => {
+    const previousIos = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+    const previousAndroid = process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
+    const previousSecret = process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+    delete process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
+    delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+    const androidClient = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+      () => ({ ensureConnected: async () => false }) as unknown as AndroidCtrlProxyClient,
+    );
+    const iosClient = spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
+      () => ({ ensureConnected: async () => false }) as unknown as IOSCtrlProxyClient,
+    );
+    const androidExisting = spyOn(AndroidCtrlProxyClient, "getExistingInstance").mockReturnValue(
+      null,
+    );
+    const iosExisting = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(null);
+    try {
+      for (const allowlisted of [false, true]) {
+        if (allowlisted) {
+          process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = "sim-foreign";
+          process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES = "android-foreign";
+        }
+        const daemon = new Daemon(
+          {},
+          new FakeInstalledAppsRepository(),
+          new FakeTimer(),
+          new FakeDeviceSessionRepository(),
+          new CountingIdGenerator("device-session"),
+          new FakeDatabaseInitializer(),
+          new FakeStartupFailureTracker(),
+        );
+        const internals = daemon as unknown as DaemonStreamInternals;
+        const stream = new FakeDeviceDataStreamServer();
+        internals.getDeviceSessionRoutingTargets = () => targets(stream);
+        internals.setupNavigationGraphStreamListener = () => {};
+        try {
+          await (internals.devicePool as unknown as DevicePool).initializeWithDevices([
+            { deviceId: "sim-foreign", name: "Foreign iPhone", platform: "ios" },
+            { deviceId: "android-foreign", name: "Foreign Pixel", platform: "android" },
+          ]);
+          internals.setupDeviceSessionRouting();
+          internals.setupDeviceDataStreamCallback();
+          stream.subscriberConnected?.(null);
+          stream.screenshotCadenceChanged?.(null);
+          stream.hierarchyCadenceChanged?.(null);
+          await Promise.resolve();
+
+          expect(androidClient).toHaveBeenCalledTimes(allowlisted ? 1 : 0);
+          expect(iosClient).toHaveBeenCalledTimes(allowlisted ? 1 : 0);
+          expect(androidExisting).toHaveBeenCalledTimes(allowlisted ? 2 : 0);
+          expect(iosExisting).toHaveBeenCalledTimes(allowlisted ? 2 : 0);
+        } finally {
+          daemon.getSessionManager().stopCleanupTimer();
+          androidClient.mockClear();
+          iosClient.mockClear();
+          androidExisting.mockClear();
+          iosExisting.mockClear();
+          DaemonState.getInstance().reset();
+        }
+      }
+    } finally {
+      androidClient.mockRestore();
+      iosClient.mockRestore();
+      androidExisting.mockRestore();
+      iosExisting.mockRestore();
+      if (previousIos === undefined) {
+        delete process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_IOS_WARMUP_DEVICES = previousIos;
+      }
+      if (previousAndroid === undefined) {
+        delete process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES;
+      } else {
+        process.env.AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES = previousAndroid;
+      }
+      if (previousSecret === undefined) {
+        delete process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV];
+      } else {
+        process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] = previousSecret;
       }
     }
   });

@@ -131,7 +131,7 @@ if [[ "$changed_mode" -eq 1 ]]; then
   echo "Using changed unit-test selection against origin/main."
 fi
 unit_env=(env AUTOMOBILE_TEST_MODE=true AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports)
-if [[ "$runner_os" != "Windows" ]]; then
+if [[ "$runner_os" != "Windows" && "$unit_mode" == "unit" ]]; then
   unit_env=(env AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports)
 fi
 run_gate "${unit_mode} unit tests" "${unit_env[@]}" bash scripts/test-ts.sh "$unit_mode"

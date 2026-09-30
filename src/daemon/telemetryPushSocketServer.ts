@@ -202,17 +202,13 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     filter: TelemetryFilter,
     socket: Socket,
   ): void {
-    const subscriber = this.subscribers.get(subscriptionId);
-    if (subscriber) {
-      subscriber.backfilling = true;
-    }
+    this.startBackfill(subscriptionId);
     this.backfillRecentEvents(subscriptionId, filter, socket)
       .catch((err) => logger.warn(`[TelemetryPush] Backfill failed: ${err}`))
-      .finally(() => {
-        const sub = this.subscribers.get(subscriptionId);
-        if (sub) {
-          sub.backfilling = false;
-        }
+      .then(() => this.finishBackfill(subscriptionId))
+      .catch((err) => {
+        logger.warn(`[TelemetryPush] Failed to flush backfill queue: ${err}`);
+        socket.destroy();
       });
   }
 
@@ -427,6 +423,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     // Sort oldest-first so dashboard shows them in correct order
     events.sort((a, b) => a.timestamp - b.timestamp);
 
+    let written = 0;
     for (const event of events) {
       const subscriber = this.subscribers.get(subscriptionId);
       if (!subscriber || subscriber.socket !== socket) {
@@ -439,11 +436,18 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       // are already capped in the repository mapRow; this bounds log/storage.
       // Stamp the device-session key so every backfilled frame carries the same
       // attribution as live frames (epic #5256, AC1).
-      const msg = this.createPushMessage(
-        this.stampDeviceSession(boundBackfillEventText(event)),
-        subscriptionId,
-      );
-      this.sendJson(socket, msg);
+      const stamped = this.stampDeviceSession(boundBackfillEventText(event));
+      if (!this.recordBackfillEvent(subscriptionId, stamped)) {
+        continue;
+      }
+      const msg = this.createPushMessage(stamped, subscriptionId);
+      const ok = this.sendJson(socket, msg);
+      if (!ok && !(await this.waitForDrain(socket))) {
+        return;
+      }
+      if (++written % 50 === 0) {
+        await this.timer.sleep(0);
+      }
     }
 
     logger.info(`[TelemetryPush] Backfilled ${events.length} events to new subscriber`);
@@ -456,6 +460,18 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       data,
       subscriptionId,
     };
+  }
+
+  protected override pushEventKey(event: TelemetryEvent): string | null {
+    if (event.data === null || typeof event.data !== "object") {
+      return null;
+    }
+    const data = event.data as Record<string, unknown>;
+    const id = data.id ?? data.occurrenceId ?? data.sequenceNumber ?? data.requestId;
+    if (typeof id !== "string" && typeof id !== "number") {
+      return null;
+    }
+    return JSON.stringify([event.category, event.deviceId, event.sessionId, id]);
   }
 }
 

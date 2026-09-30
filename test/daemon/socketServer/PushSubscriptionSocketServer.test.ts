@@ -103,6 +103,26 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<
     return this.pushToSubscribers(data);
   }
 
+  beginBackfill(subscriptionId: string): void {
+    this.startBackfill(subscriptionId);
+  }
+
+  addBackfillEvent(subscriptionId: string, data: TestPushData): boolean {
+    return this.recordBackfillEvent(subscriptionId, data);
+  }
+
+  flushBackfill(subscriptionId: string): Promise<void> {
+    return this.finishBackfill(subscriptionId);
+  }
+
+  waitForDrainForTest(socket: FakeSocket): Promise<boolean> {
+    return this.waitForDrain(socket);
+  }
+
+  protected override pushEventKey(data: TestPushData): string {
+    return `${data.deviceId}:${data.value}`;
+  }
+
   protected parseSubscriptionFilter(request: Record<string, unknown>): TestFilter {
     return {
       deviceId: (request.deviceId as string) ?? null,
@@ -300,6 +320,81 @@ describe("PushSubscriptionSocketServer", () => {
   });
 
   describe("backpressure handling", () => {
+    it("flushes live events in order after backfill and skips overlapping identities", async () => {
+      const { socket, subscriptionId } = server.simulateSubscription({});
+      const event = (value: number): TestPushData => ({
+        deviceId: "device-1",
+        packageName: "com.app",
+        value,
+      });
+      server.beginBackfill(subscriptionId);
+      server.pushData(event(1));
+      server.pushData(event(2));
+      server.pushData(event(2));
+      expect(socket.getWrittenMessages()).toHaveLength(0);
+      expect(server.addBackfillEvent(subscriptionId, event(1))).toBe(true);
+      socket.write(JSON.stringify({ type: "test_push", data: event(1), subscriptionId }) + "\n");
+      await server.flushBackfill(subscriptionId);
+      expect(
+        socket.getWrittenMessages<TestPushMessage>().map((message) => message.data.value),
+      ).toEqual([1, 2]);
+      server.pushData(event(3));
+      expect(
+        socket.getWrittenMessages<TestPushMessage>().map((message) => message.data.value),
+      ).toEqual([1, 2, 3]);
+    });
+
+    it("closes only the overflowing subscriber with a structured error", () => {
+      const overflowing = server.simulateSubscription({});
+      const healthy = server.simulateSubscription({});
+      server.beginBackfill(overflowing.subscriptionId);
+      for (let value = 0; value <= 1_000; value++) {
+        server.pushData({ deviceId: "device-1", packageName: "com.app", value });
+      }
+      expect(overflowing.socket.destroyed).toBe(true);
+      expect(healthy.socket.destroyed).toBe(false);
+      expect(server.getSubscriberCount()).toBe(1);
+      expect(overflowing.socket.getWrittenMessages<SubscriptionResponse>()).toMatchObject([
+        {
+          type: "error",
+          success: false,
+          code: "BACKFILL_QUEUE_OVERFLOW",
+          subscriptionId: overflowing.subscriptionId,
+        },
+      ]);
+    });
+
+    it("keeps a second subscription on the same socket when the first overflows", async () => {
+      const socket = new FakeSocket();
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "first" }));
+      await server.simulateLine(socket, JSON.stringify({ command: "subscribe", id: "second" }));
+      server.beginBackfill("testpush-1");
+      for (let value = 0; value <= 1_000; value++) {
+        server.pushData({ deviceId: "device-1", packageName: "com.app", value });
+      }
+      expect(socket.destroyed).toBe(false);
+      expect(server.getSubscriberCount()).toBe(1);
+      expect(
+        socket
+          .getWrittenMessages<SubscriptionResponse>()
+          .some((message) => message.code === "BACKFILL_QUEUE_OVERFLOW"),
+      ).toBe(true);
+    });
+
+    it("ends a drain wait when the socket closes or errors", async () => {
+      const closed = new FakeSocket();
+      const closedWait = server.waitForDrainForTest(closed);
+      closed.destroy();
+      expect(await closedWait).toBe(false);
+      expect(closed.listenerCount("drain")).toBe(0);
+
+      const errored = new FakeSocket();
+      const errorWait = server.waitForDrainForTest(errored);
+      errored.simulateError(new Error("peer failed"));
+      expect(await errorWait).toBe(false);
+      expect(errored.listenerCount("drain")).toBe(0);
+    });
+
     it("does not drop healthy subscribers that return false from write()", () => {
       const { socket } = server.simulateSubscription({});
       // Simulate a large payload crossing the high-water mark — write() returns false

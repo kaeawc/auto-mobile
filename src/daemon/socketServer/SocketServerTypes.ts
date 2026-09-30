@@ -38,7 +38,7 @@ export interface Subscriber<TFilter = unknown> {
   subscriptionId: string;
   lastActivity: number;
   filter: TFilter;
-  /** When true, this subscriber is receiving backfill data and should be skipped by live pushes. */
+  /** When true, live pushes are queued for delivery after this subscriber's backfill. */
   backfilling: boolean;
   /** Guards against stacking multiple `'drain'` listeners when the socket stays backpressured. */
   drainPending: boolean;

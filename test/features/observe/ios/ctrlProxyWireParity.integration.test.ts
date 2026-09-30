@@ -68,6 +68,7 @@ const SWIFT_REQUEST_TYPES = [
   "request_activate_accessibility_link",
   "request_launch_app",
   "request_rotate",
+  "set_hinge_angle",
   "request_clipboard",
   "get_current_focus",
   "get_traversal_order",

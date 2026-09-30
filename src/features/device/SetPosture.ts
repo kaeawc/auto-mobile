@@ -7,6 +7,8 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
 export type RequestedPosture = Exclude<Posture, "unknown">;
 export type DisplayPreset = "phone" | "unfolded" | "tablet";
@@ -27,6 +29,7 @@ export type SetPostureOutput = SetPostureResult | SetPostureUnsupportedResult;
 export interface SetPostureDependencies {
   adbFactory?: AdbClientFactory;
   observeFactory?: (device: BootedDevice) => ObserveScreen;
+  iosClientProvider?: (device: BootedDevice) => IOSCtrlProxy;
 }
 
 const EMULATOR_POSTURE_IDS: Record<RequestedPosture, number> = {
@@ -99,6 +102,7 @@ async function setPhysicalPosture(
 export class SetPosture {
   private readonly adbFactory: AdbClientFactory;
   private readonly observeFactory: (device: BootedDevice) => ObserveScreen;
+  private readonly iosClientProvider: (device: BootedDevice) => IOSCtrlProxy;
 
   constructor(
     private readonly device: BootedDevice,
@@ -107,6 +111,8 @@ export class SetPosture {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.observeFactory =
       dependencies.observeFactory ?? ((target) => new RealObserveScreen(target));
+    this.iosClientProvider =
+      dependencies.iosClientProvider ?? ((target) => IOSCtrlProxyClient.getInstance(target));
   }
 
   async execute(
@@ -114,11 +120,7 @@ export class SetPosture {
     displayPreset?: DisplayPreset,
   ): Promise<SetPostureOutput> {
     if (this.device.platform === "ios") {
-      return {
-        status: "unsupported",
-        message:
-          "setPosture is not supported on iOS yet; the iPhone Duo posture is only available through Device Hub (#8254).",
-      };
+      return this.executeIos(requested, displayPreset);
     }
 
     validateInventoryPosture(this.device, requested);
@@ -137,6 +139,47 @@ export class SetPosture {
       await setPhysicalPosture(adb, requested);
     }
 
+    const observation = await this.observeFactory(this.device).execute({});
+    return {
+      posture: requested,
+      display: observation.display,
+      ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
+    };
+  }
+
+  private async executeIos(
+    requested: RequestedPosture,
+    displayPreset?: DisplayPreset,
+  ): Promise<SetPostureOutput> {
+    if (!isIosSimulatorUdid(this.device.deviceId)) {
+      return {
+        status: "unsupported",
+        message: "Physical iOS hinge posture can only be read, not set.",
+      };
+    }
+    if (this.device.deviceType && !this.device.deviceType.endsWith(".iPhone-Duo")) {
+      return { status: "unsupported", message: "This iOS simulator is not a foldable device." };
+    }
+    if (displayPreset) {
+      throw new ActionableError("displayPreset is not supported on iOS simulators.");
+    }
+    const angles: Partial<Record<RequestedPosture, number>> = {
+      closed: 0,
+      half_opened: 130,
+      opened: 180,
+    };
+    const angle = angles[requested];
+    if (angle === undefined) {
+      throw new ActionableError(
+        `Posture '${requested}' is not supported by the iPhone Duo. Supported postures: closed, half_opened, opened.`,
+      );
+    }
+    const result = await this.iosClientProvider(this.device).requestSetHingeAngle(angle);
+    if (!result.success) {
+      throw new ActionableError(
+        `Could not set iPhone Duo posture: ${result.error ?? "unknown runner error"}. Update the iOS runner to a version with set_hinge_angle support.`,
+      );
+    }
     const observation = await this.observeFactory(this.device).execute({});
     return {
       posture: requested,

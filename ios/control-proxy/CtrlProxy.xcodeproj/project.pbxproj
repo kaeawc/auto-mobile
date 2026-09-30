@@ -40,6 +40,7 @@
 		32BDADA8312454B31B84F83F /* DisplayLinkFPSMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 057109D870A95BFD61146C25 /* DisplayLinkFPSMonitor.swift */; };
 		32FAA8E9138A3B8F9269031F /* CommandHandling.swift in Sources */ = {isa = PBXBuildFile; fileRef = E149258ED6D95022384DDF77 /* CommandHandling.swift */; };
 		3452B2C13713364AC75057AE /* RotationOrientationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C38A7234C20C5AE0671BD0AA /* RotationOrientationTests.swift */; };
+		36B4527C3EF3884A2F5F8CB6 /* DefaultHingeAngleSetter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 839D9214C89EC891FE172750 /* DefaultHingeAngleSetter.swift */; };
 		36B9B3CDFEF99A0F321BEFA9 /* ScreenshotCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F99EC0C4EBE957660F3B7FD /* ScreenshotCapture.swift */; };
 		3815D1AF3FEEACD69AD59DBB /* SemanticLinkActivation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3B7971543104EE96224A55A /* SemanticLinkActivation.swift */; };
 		393E693F2762AAAA1B6E2B0C /* VoiceOverSetResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9083871ABBD1451244ACB5DD /* VoiceOverSetResponse.swift */; };
@@ -57,7 +58,10 @@
 		4502CAA5B22FAA56436436E7 /* WebSocketRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12E454CC966BAEEBCD73CA66 /* WebSocketRequest.swift */; };
 		4520DFD9279B241F211FC026 /* RequestAppendText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B24499F63112BDC8522C31 /* RequestAppendText.swift */; };
 		4534A3EB6D171F4DA9F8EDBD /* ObjCExceptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6857A73BC6AAAE5D1B811D6 /* ObjCExceptionBridge.swift */; };
+		47F12682E2BFE3D70AC6FC85 /* HingeAngleError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20D2973D1552196510C60019 /* HingeAngleError.swift */; };
+		48F32C0ABC2BB3CE87604F24 /* HingeAngleResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A5FC3F0B87E9AA971D1F979 /* HingeAngleResponse.swift */; };
 		4A99C099F2E5C6589CC24FB8 /* RequestClearText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F1048EB07A1C40FEE1C6E8 /* RequestClearText.swift */; };
+		4D62313547088F8C9BD70258 /* HingeAngleSetting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7366D3444D35815F837642AA /* HingeAngleSetting.swift */; };
 		51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		51FEF589F67C8A78E299A91A /* HierarchyIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */; };
 		543CE5608AD59EF3C64CE382 /* RequestGetPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5F8F7BAAAAC5FEA95C9792 /* RequestGetPreference.swift */; };
@@ -85,6 +89,7 @@
 		70A14D5C749D8BEECE8E1C25 /* StructuralHasher.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1C0DDBC340209721D727B86 /* StructuralHasher.swift */; };
 		7220409A615CBE920CE42B74 /* ResponseType.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49CD5FBFCBF89D0CFB030DAD /* ResponseType.swift */; };
 		72A66F5FBE1BD997634A2A4E /* SdkSemanticLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = E921F73A002B5C4CD43C7E95 /* SdkSemanticLink.swift */; };
+		73972DFD011D9B5BA6C5E924 /* RequestSetHingeAngle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BB16A51C97AE7C6DCA3941E /* RequestSetHingeAngle.swift */; };
 		73F557098D9FC3077A8BAC0F /* WebSocketResponding.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4DA629896133FA970953ED5 /* WebSocketResponding.swift */; };
 		75FC5F89BCC490E065CF5540 /* RequestActivateAccessibilityLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCF38859358C20DAD40D6ACC /* RequestActivateAccessibilityLink.swift */; };
 		760A66A0FCBBD82C78F6FC92 /* SdkHierarchyFetching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB3829011D3086CDB1E76EB /* SdkHierarchyFetching.swift */; };
@@ -271,11 +276,13 @@
 		17455E7D73C8111F059D3318 /* OSLogReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSLogReader.swift; sourceTree = "<group>"; };
 		1868673F60B008C4F3AF2D1C /* ConnectedEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectedEvent.swift; sourceTree = "<group>"; };
 		19D03FC766FA2A5D8003B3F1 /* StorageSuiteInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageSuiteInfo.swift; sourceTree = "<group>"; };
+		1BB16A51C97AE7C6DCA3941E /* RequestSetHingeAngle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetHingeAngle.swift; sourceTree = "<group>"; };
 		1BF44B809165C65F617A2C33 /* SystemVoiceOverDefaultsReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemVoiceOverDefaultsReader.swift; sourceTree = "<group>"; };
 		1D98F26E693E579BDEA4A7FB /* RequestSetHierarchyPollInterval.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetHierarchyPollInterval.swift; sourceTree = "<group>"; };
 		1E3FAB8FFDE4B4E8F05C7B0D /* StorageEntryResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageEntryResponse.swift; sourceTree = "<group>"; };
 		1EF253DD5B8287EC007EF32E /* GesturePerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerformer.swift; sourceTree = "<group>"; };
 		20284DBE10DF03299796897E /* PerformanceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceSnapshot.swift; sourceTree = "<group>"; };
+		20D2973D1552196510C60019 /* HingeAngleError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HingeAngleError.swift; sourceTree = "<group>"; };
 		21E0CD6E724FD9606E4C01CA /* RequestLaunchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestLaunchApp.swift; sourceTree = "<group>"; };
 		21F2375B58B11A865291F03A /* CommandError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandError.swift; sourceTree = "<group>"; };
 		22D3D6DA7D1F2F9F1299000D /* ErrorResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorResponse.swift; sourceTree = "<group>"; };
@@ -337,6 +344,7 @@
 		6E0C8F550D3A30C87BF84E67 /* PrivacyResourceMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivacyResourceMappingTests.swift; sourceTree = "<group>"; };
 		70078B2ADB6C85E6C05F0DE4 /* ConnectionRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionRegistry.swift; sourceTree = "<group>"; };
 		70A2F1DCB1D420472C7005A1 /* CurrentFocusResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CurrentFocusResponse.swift; sourceTree = "<group>"; };
+		7366D3444D35815F837642AA /* HingeAngleSetting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HingeAngleSetting.swift; sourceTree = "<group>"; };
 		76D1AFB114A68CF3595A65DB /* SdkGestureInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkGestureInfo.swift; sourceTree = "<group>"; };
 		7946430E328DC8DE651C1693 /* WebSocketConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketConnection.swift; sourceTree = "<group>"; };
 		7C7D0326E1B35DF9109E8677 /* SdkHierarchyCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCache.swift; sourceTree = "<group>"; };
@@ -349,6 +357,7 @@
 		8153B3AE17D4A41DCB7D8227 /* SystemTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemTimer.swift; sourceTree = "<group>"; };
 		8231D36A91EF815130B3C965 /* HierarchyResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyResult.swift; sourceTree = "<group>"; };
 		83588AF452C6D78137B7C92C /* RequestClearPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestClearPreferences.swift; sourceTree = "<group>"; };
+		839D9214C89EC891FE172750 /* DefaultHingeAngleSetter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultHingeAngleSetter.swift; sourceTree = "<group>"; };
 		83F1048EB07A1C40FEE1C6E8 /* RequestClearText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestClearText.swift; sourceTree = "<group>"; };
 		84ADB05144552602BFFBCBE9 /* ElementLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocator.swift; sourceTree = "<group>"; };
 		84C1B94B13CDEB3DE3915785 /* SystemTimeProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemTimeProvider.swift; sourceTree = "<group>"; };
@@ -357,6 +366,7 @@
 		87E74C67A2B4938D37B28965 /* StorageEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageEntry.swift; sourceTree = "<group>"; };
 		88A9C5EE38B7D10962649CC0 /* StorageInspecting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageInspecting.swift; sourceTree = "<group>"; };
 		88B194AD52B54ACDACF3999C /* SdkCoreDataStoreRegistration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkCoreDataStoreRegistration.swift; sourceTree = "<group>"; };
+		8A5FC3F0B87E9AA971D1F979 /* HingeAngleResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HingeAngleResponse.swift; sourceTree = "<group>"; };
 		8BD0B4C045DCDDB5F126F0FB /* KeyboardResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardResponse.swift; sourceTree = "<group>"; };
 		8EF6BFF065F9DB523A393ACB /* SdkHighlightOutcome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHighlightOutcome.swift; sourceTree = "<group>"; };
 		8F99EC0C4EBE957660F3B7FD /* ScreenshotCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenshotCapture.swift; sourceTree = "<group>"; };
@@ -483,6 +493,7 @@
 				70078B2ADB6C85E6C05F0DE4 /* ConnectionRegistry.swift */,
 				DB09CED5BD82B4553BAF8530 /* CtrlProxy.swift */,
 				CEBC55A3713496CF7629433A /* Data+SHA1.swift */,
+				839D9214C89EC891FE172750 /* DefaultHingeAngleSetter.swift */,
 				1183EB3E0EBDE3DC23A9500C /* DefaultStorageInspecting.swift */,
 				DBD92262189F3B0BAD4C3B31 /* DefaultVoiceOverStateProvider.swift */,
 				68D923F1DE4BB230AC35A73B /* DefaultVoiceOverToggle.swift */,
@@ -501,6 +512,8 @@
 				4DCBF492D0805C0F1317728E /* HierarchyExtracting.swift */,
 				0D5271665E4DA850CE98A15F /* HierarchyMerger.swift */,
 				8231D36A91EF815130B3C965 /* HierarchyResult.swift */,
+				20D2973D1552196510C60019 /* HingeAngleError.swift */,
+				7366D3444D35815F837642AA /* HingeAngleSetting.swift */,
 				6B0FF21979A287EB6DCB27FF /* HTTPRequesting.swift */,
 				5EE91327E1CDF30FE2822A6C /* MainThreadRunner.swift */,
 				45517B48E59B41FF3D502E97 /* MultiFingerSwipeDiagnostics.swift */,
@@ -590,6 +603,7 @@
 				CC7EB332268E7C1BB67B78E9 /* ExecuteSqlResponse.swift */,
 				EE0CE359175AEC9A446E5E1F /* HierarchyUpdateResponse.swift */,
 				5546E563FFB0CEE4BFC158E9 /* Highlight.swift */,
+				8A5FC3F0B87E9AA971D1F979 /* HingeAngleResponse.swift */,
 				8BD0B4C045DCDDB5F126F0FB /* KeyboardResponse.swift */,
 				929A3A8D39F74FF457388031 /* ListDatabasesResponse.swift */,
 				9629554D2EF790BD3B14B59D /* ListTablesResponse.swift */,
@@ -629,6 +643,7 @@
 				4BF6E895F1F331333F86EFE5 /* RequestResetPermissions.swift */,
 				3498BA01D6DD57FED426ED1E /* RequestRotate.swift */,
 				1D98F26E693E579BDEA4A7FB /* RequestSetHierarchyPollInterval.swift */,
+				1BB16A51C97AE7C6DCA3941E /* RequestSetHingeAngle.swift */,
 				671FD4BBCBE70EB8D9293AAD /* RequestSetNetworkErrorSimulation.swift */,
 				3B98B12598A786158E51133D /* RequestSetNetworkFaultRules.swift */,
 				41C220C155D0C4EB562356EB /* RequestSetNetworkMockRules.swift */,
@@ -910,6 +925,7 @@
 				7F0A1FBC49EE6CFD37F53294 /* CtrlProxyUITests.swift in Sources */,
 				AC1FEF3869AB46F56E668007 /* CurrentFocusResponse.swift in Sources */,
 				E0989A2F71DC6B3F6F81997E /* Data+SHA1.swift in Sources */,
+				36B4527C3EF3884A2F5F8CB6 /* DefaultHingeAngleSetter.swift in Sources */,
 				D158003FB90660819C190CF0 /* DefaultStorageInspecting.swift in Sources */,
 				C0702528FE9F997DBA9E34B9 /* DefaultVoiceOverStateProvider.swift in Sources */,
 				F7A215ECC8EE446115D39A21 /* DefaultVoiceOverToggle.swift in Sources */,
@@ -936,6 +952,9 @@
 				5ED1131AD64B510B6A1896F7 /* HierarchyResult.swift in Sources */,
 				5AB632C7B0EADA658817B7F7 /* HierarchyUpdateResponse.swift in Sources */,
 				215D4082B1E54F460C713BE9 /* Highlight.swift in Sources */,
+				47F12682E2BFE3D70AC6FC85 /* HingeAngleError.swift in Sources */,
+				48F32C0ABC2BB3CE87604F24 /* HingeAngleResponse.swift in Sources */,
+				4D62313547088F8C9BD70258 /* HingeAngleSetting.swift in Sources */,
 				1F00735008363BE2F7E28276 /* KeyboardResponse.swift in Sources */,
 				8042BC14FFCE449CF774EB8B /* ListDatabasesResponse.swift in Sources */,
 				886D4873F0DAB203910923CF /* ListTablesResponse.swift in Sources */,
@@ -989,6 +1008,7 @@
 				BA290F017F37A2042E0BAC39 /* RequestResetPermissions.swift in Sources */,
 				F3E5B6D9052EB6D79F0E2420 /* RequestRotate.swift in Sources */,
 				280AE2C224CEC5F44C34B11C /* RequestSetHierarchyPollInterval.swift in Sources */,
+				73972DFD011D9B5BA6C5E924 /* RequestSetHingeAngle.swift in Sources */,
 				5C0E02617246D6185D53DCD5 /* RequestSetNetworkErrorSimulation.swift in Sources */,
 				E4654E23D7ABA6B2230C4DE1 /* RequestSetNetworkFaultRules.swift in Sources */,
 				B2639C0F678E5916A4EB1FAA /* RequestSetNetworkMockRules.swift in Sources */,

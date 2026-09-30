@@ -269,6 +269,15 @@
       }
     },
     {
+      "name": "set_hinge_angle",
+      "builder": "CtrlProxyNavigation.requestSetHingeAngle",
+      "wire": {
+        "type": "set_hinge_angle",
+        "requestId": "fixture-request-id",
+        "angle": 130
+      }
+    },
+    {
       "name": "request_clipboard",
       "builder": "CtrlProxyClipboard.requestClipboard",
       "wire": {

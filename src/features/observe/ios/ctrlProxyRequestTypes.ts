@@ -58,6 +58,7 @@ export const IOS_KNOWN_REQUEST_TYPES = [
 
   // Device control
   "request_rotate",
+  "set_hinge_angle",
 
   // Clipboard
   "request_clipboard",

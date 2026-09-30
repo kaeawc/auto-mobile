@@ -15,6 +15,7 @@ import type {
   CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
+  CtrlProxyHingeAngleResult,
 } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
@@ -153,6 +154,31 @@ export class CtrlProxyNavigation {
         currentOrientation: "",
         value: 0,
         rotationPerformed: false,
+      }),
+    });
+  }
+
+  async requestSetHingeAngle(
+    angle: number,
+    timeoutMs: number = 5000,
+  ): Promise<CtrlProxyHingeAngleResult> {
+    return sendCommand<CtrlProxyHingeAngleResult>(this.context, {
+      idPrefix: "hingeAngle",
+      responseType: "hingeAngle",
+      messageType: "set_hinge_angle",
+      params: { angle },
+      timeoutMs,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, totalTimeMs: 0, error: "Not connected" }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: (timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        error: `Set hinge angle timed out after ${timeout}ms`,
       }),
     });
   }

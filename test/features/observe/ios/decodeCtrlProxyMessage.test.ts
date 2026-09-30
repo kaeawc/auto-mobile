@@ -256,6 +256,27 @@ describe("decodeCtrlProxyMessage", () => {
     expect(decoded?.result).toEqual({ success: true, totalTimeMs: 5, error: undefined });
   });
 
+  test("hinge_angle_result resolves runner failures and preserves the requested angle", () => {
+    expect(
+      decodeCtrlProxyMessage(
+        msg({
+          type: "hinge_angle_result",
+          success: false,
+          error: "dispatch failed",
+          totalTimeMs: 8,
+        }),
+      ),
+    ).toEqual({
+      requestId: REQ,
+      result: { success: false, angle: undefined, error: "dispatch failed", totalTimeMs: 8 },
+    });
+    expect(
+      decodeCtrlProxyMessage(
+        msg({ type: "hinge_angle_result", success: true, angle: 130, totalTimeMs: 3 }),
+      )?.result,
+    ).toEqual({ success: true, angle: 130, error: undefined, totalTimeMs: 3 });
+  });
+
   test("highlight_response defaults success to false and echoes requestId/timestamp", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "highlight_response", timestamp: 42 }));
     expect(decoded?.result).toEqual({
@@ -596,8 +617,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     "set_network_fault_rules_result",
   ];
 
-  test("Swift ResponseType declares exactly 48 rawValues", () => {
-    expect(rawValues.length).toBe(48);
+  test("Swift ResponseType declares exactly 49 rawValues", () => {
+    expect(rawValues.length).toBe(49);
   });
 
   test("rawValues are unique (no accidental duplicate)", () => {
@@ -610,8 +631,8 @@ describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)"
     }
   });
 
-  test("the decoder explicitly reshapes exactly 41 response types", () => {
-    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(41);
+  test("the decoder explicitly reshapes exactly 42 response types", () => {
+    expect(rawValues.filter(isExplicitlyDecoded).length).toBe(42);
   });
 
   test("the only unhandled ResponseType (excluding fire-and-forget) is shake_result", () => {
@@ -654,6 +675,7 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     { type: "reset_permissions_result", expected: true },
     { type: "keyboard_result", expected: true },
     { type: "rotate_result", expected: true },
+    { type: "hinge_angle_result", expected: false },
     { type: "ime_action_result", expected: true },
     { type: "action_result", expected: true },
     { type: "voiceover_state_result", expected: true },
@@ -728,8 +750,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     expect(decoded?.result).toMatchObject({ success: false, error: "key failed", verified: false });
   });
 
-  test("the default table covers all 41 explicitly-decoded types", () => {
-    expect(DEFAULT_WHEN_ABSENT.length).toBe(41);
+  test("the default table covers all 42 explicitly-decoded types", () => {
+    expect(DEFAULT_WHEN_ABSENT.length).toBe(42);
   });
 
   for (const { type, expected } of DEFAULT_WHEN_ABSENT) {
@@ -767,8 +789,8 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   });
 
-  test("the passthrough set is the 40 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(40);
+  test("the passthrough set is the 41 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(41);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {

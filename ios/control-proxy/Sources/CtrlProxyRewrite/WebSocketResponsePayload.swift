@@ -30,6 +30,7 @@ extension HierarchyUpdateResponse: WebSocketResponsePayload {}
 extension ScreenshotResponse: WebSocketResponsePayload {}
 extension KeyboardResponse: WebSocketResponsePayload {}
 extension RotateResponse: WebSocketResponsePayload {}
+extension HingeAngleResponse: WebSocketResponsePayload {}
 extension CurrentFocusResponse: WebSocketResponsePayload {}
 extension TraversalOrderResponse: WebSocketResponsePayload {}
 extension VoiceOverStateResponse: WebSocketResponsePayload {}

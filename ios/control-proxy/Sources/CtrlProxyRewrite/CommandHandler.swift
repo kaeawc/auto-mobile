@@ -60,6 +60,7 @@ final class CommandHandler: CommandHandling {
     private let hierarchyDebouncer: (any HierarchyDebouncing)?
     private let voiceOverStateProvider: any VoiceOverStateProviding
     private let voiceOverToggle: any VoiceOverToggling
+    private let hingeAngleSetter: any HingeAngleSetting
     private let frameContext: FrameContext
 
     init(
@@ -74,6 +75,7 @@ final class CommandHandler: CommandHandling {
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
+        hingeAngleSetter: any HingeAngleSetting = DefaultHingeAngleSetter(),
         frameContext: FrameContext = FrameContext()
     ) {
         self.elementLocator = elementLocator
@@ -87,6 +89,7 @@ final class CommandHandler: CommandHandling {
         self.hierarchyDebouncer = hierarchyDebouncer
         self.voiceOverStateProvider = voiceOverStateProvider
         self.voiceOverToggle = voiceOverToggle
+        self.hingeAngleSetter = hingeAngleSetter
         self.frameContext = frameContext
     }
 
@@ -180,6 +183,9 @@ final class CommandHandler: CommandHandling {
             // Device control
             case let .rotate(payload):
                 return try await handleRotate(payload, startTime: startTime)
+
+            case let .setHingeAngle(payload):
+                return await handleSetHingeAngle(payload, startTime: startTime)
 
             // Clipboard commands
             case let .clipboard(payload):
@@ -1539,6 +1545,38 @@ final class CommandHandler: CommandHandling {
     }
 
     // MARK: - Storage
+
+    private func handleSetHingeAngle(
+        _ request: RequestSetHingeAngle,
+        startTime: Date
+    )
+        async -> HingeAngleResponse
+    {
+        guard request.angle.isFinite, (0 ... 180).contains(request.angle) else {
+            return HingeAngleResponse(
+                requestId: request.requestId,
+                success: false,
+                error: "Hinge angle must be a finite number from 0 to 180 degrees.",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        do {
+            try await hingeAngleSetter.setHingeAngle(request.angle)
+            return HingeAngleResponse(
+                requestId: request.requestId,
+                success: true,
+                angle: request.angle,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return HingeAngleResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
 
     /// A localhost SDK server may belong to a different foreground app. Check both
     /// the requested bundle and the server owner before any preference operation.

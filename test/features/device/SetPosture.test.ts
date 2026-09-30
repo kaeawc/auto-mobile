@@ -4,6 +4,7 @@ import { SetPosture } from "../../../src/features/device/SetPosture";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createExecResult } from "../../../src/utils/execResult";
 
 const display = {
@@ -131,20 +132,70 @@ describe("SetPosture", () => {
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("returns a structured iOS unsupported result that references issue 8254", async () => {
-    const iosDevice: BootedDevice = {
-      name: "iPhone Duo",
-      platform: "ios",
-      deviceId: "ios-simulator-udid",
-    };
-    const adb = new FakeAdbExecutor();
-    const { feature } = makeFeature(iosDevice, adb);
-    expect(await feature.execute("opened")).toEqual({
-      status: "unsupported",
-      message:
-        "setPosture is not supported on iOS yet; the iPhone Duo posture is only available through Device Hub (#8254).",
+  const duo: BootedDevice = {
+    name: "iPhone Duo",
+    platform: "ios",
+    deviceId: "34C35F33-224C-4E74-B8C0-668FF03E49F5",
+    deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+  };
+
+  function makeIosFeature(device: BootedDevice = duo) {
+    const client = new FakeIOSCtrlProxy();
+    let observeCount = 0;
+    const feature = new SetPosture(device, {
+      iosClientProvider: () => client,
+      observeFactory: () =>
+        ({
+          execute: async () => {
+            observeCount += 1;
+            return observation;
+          },
+        }) as ObserveScreen,
     });
-    expect(adb.getExecutedCommands()).toEqual([]);
+    return { feature, client, getObserveCount: () => observeCount };
+  }
+
+  test("sets each iPhone Duo simulator posture and observes its display", async () => {
+    for (const [posture, angle] of [
+      ["closed", 0],
+      ["half_opened", 130],
+      ["opened", 180],
+    ] as const) {
+      const { feature, client, getObserveCount } = makeIosFeature();
+      expect(await feature.execute(posture)).toEqual({ posture, display, locked: true });
+      expect(client.getHingeAngleHistory()).toEqual([angle]);
+      expect(getObserveCount()).toBe(1);
+    }
+  });
+
+  test("rejects unsupported Duo postures and display presets", async () => {
+    const { feature, client } = makeIosFeature();
+    await expect(feature.execute("tent")).rejects.toThrow("closed, half_opened, opened");
+    await expect(feature.execute("opened", "tablet")).rejects.toThrow("displayPreset");
+    expect(client.getHingeAngleHistory()).toEqual([]);
+  });
+
+  test("runner failure points to the runner update", async () => {
+    const { feature, client, getObserveCount } = makeIosFeature();
+    client.setHingeAngleResult({
+      success: false,
+      error: "Unknown command type: set_hinge_angle",
+      totalTimeMs: 0,
+    });
+    await expect(feature.execute("opened")).rejects.toThrow("Update the iOS runner");
+    expect(getObserveCount()).toBe(0);
+  });
+
+  test("physical iOS and non-Duo simulators report unsupported", async () => {
+    const physical = makeIosFeature({ ...duo, deviceId: "00008120-001C191E0E99003A" });
+    expect(await physical.feature.execute("opened")).toMatchObject({ status: "unsupported" });
+    const ordinary = makeIosFeature({
+      ...duo,
+      deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+    });
+    expect(await ordinary.feature.execute("opened")).toMatchObject({ status: "unsupported" });
+    expect(physical.client.getHingeAngleHistory()).toEqual([]);
+    expect(ordinary.client.getHingeAngleHistory()).toEqual([]);
   });
 
   test("omits locked when the fresh observation has no lock signal", async () => {

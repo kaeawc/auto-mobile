@@ -155,6 +155,15 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       };
       break;
 
+    case "hinge_angle_result":
+      result = {
+        success: message.success ?? false,
+        angle: message.angle,
+        error: message.error,
+        totalTimeMs: message.totalTimeMs ?? 0,
+      };
+      break;
+
     case "ime_action_result":
     case "action_result":
       result = {

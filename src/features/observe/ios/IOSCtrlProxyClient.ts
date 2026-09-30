@@ -223,6 +223,7 @@ import type {
   CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
+  CtrlProxyHingeAngleResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyResetPermissionsResult,
   CtrlProxyPerfTiming,
@@ -411,6 +412,8 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyRotateResult>;
+
+  requestSetHingeAngle(angle: number, timeoutMs?: number): Promise<CtrlProxyHingeAngleResult>;
 
   requestLaunchApp(
     bundleId: string,
@@ -3042,6 +3045,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyRotateResult> {
     return this.navigation.requestRotate(orientation, timeoutMs, perf);
+  }
+
+  async requestSetHingeAngle(
+    angle: number,
+    timeoutMs?: number,
+  ): Promise<CtrlProxyHingeAngleResult> {
+    return this.navigation.requestSetHingeAngle(angle, timeoutMs);
   }
 
   async requestLaunchApp(

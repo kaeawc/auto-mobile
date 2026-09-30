@@ -86,6 +86,7 @@ import {
 import { DaemonState } from "../../daemon/daemonState";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
 import { displayTransitions } from "./DisplayTransition";
+import { DisplaySelectionError, resolveTargetDisplay } from "./DisplaySelection";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -508,6 +509,7 @@ export class RealObserveScreen implements ObserveScreen {
   private adbFactory: AdbClientFactory;
   private timer: Timer;
   private readonly observedAndroidDisplayCache: ObservedAndroidDisplayCache;
+  private readonly requestedDisplay?: string;
   private idGenerator: IdGenerator;
 
   private viewHierarchy: ViewHierarchyInterface;
@@ -615,6 +617,7 @@ export class RealObserveScreen implements ObserveScreen {
     this.adb = adbFactory.create(device);
     this.timer = timer;
     this.observedAndroidDisplayCache = new ObservedAndroidDisplayCache(timer);
+    this.requestedDisplay = dependencies?.display;
     this.idGenerator = idGenerator;
 
     // Data sources (either injected or default)
@@ -762,6 +765,7 @@ export class RealObserveScreen implements ObserveScreen {
    * Execute the observe command.
    */
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+    const displayRequest = options?.display ?? this.requestedDisplay;
     const queryOptions = options?.queryOptions;
     const perf = options?.perf ?? new NoOpPerformanceTracker();
     const skipWaitForFresh = options?.freshness
@@ -789,7 +793,26 @@ export class RealObserveScreen implements ObserveScreen {
           : undefined;
       if (observedAndroid) {
         result.display = observedAndroid.display;
-        displayTransitions.checkIdentity(this.device.deviceId, result.display);
+      }
+
+      const explicitlyRouted = displayRequest !== undefined && displayRequest !== "active";
+      const requestedPanel = explicitlyRouted
+        ? resolveTargetDisplay(this.device.displays, displayRequest, {
+            activePanelKey: observedAndroid?.display.key,
+            posture: result.display.posture,
+          })
+        : undefined;
+      const requestedDisplayId =
+        requestedPanel && this.device.platform === "android"
+          ? await this.observedAndroidDisplayCache.logicalIdForPanel(
+              this.device,
+              this.adb,
+              requestedPanel.key,
+              signal,
+            )
+          : undefined;
+      if (requestedPanel && this.device.platform === "android") {
+        result.display = { ...result.display, key: requestedPanel.key, role: requestedPanel.role };
       }
 
       // Capture the device's cache generation before the hierarchy is captured so
@@ -814,14 +837,26 @@ export class RealObserveScreen implements ObserveScreen {
       );
 
       let capturedHierarchy: ViewHierarchyResult | undefined;
-      if (options?.freshness) {
-        try {
-          const captured = await this.hierarchyCapture.capture({
-            freshness: options.freshness,
-            minTimestamp: minTimestamp > 0 ? minTimestamp : undefined,
-            signal,
-            timeoutMs: options.timeoutMs,
+      const captureRequest = {
+        freshness: options?.freshness ?? ("fresh" as const),
+        minTimestamp: minTimestamp > 0 ? minTimestamp : undefined,
+        signal,
+        timeoutMs: options?.timeoutMs,
+        displayId: requestedDisplayId,
+      };
+      if (requestedDisplayId !== undefined) {
+        const captured = await this.hierarchyCapture
+          .capture(captureRequest)
+          .catch((error: unknown) => {
+            throw new DisplaySelectionError(
+              `Unable to read selected display "${requestedPanel?.key}": ${String(error)}`,
+              { cause: error },
+            );
           });
+        capturedHierarchy = captured.hierarchy;
+      } else if (options?.freshness) {
+        try {
+          const captured = await this.hierarchyCapture.capture(captureRequest);
           capturedHierarchy = captured.hierarchy;
         } catch (error) {
           // A failed pre-capture can be retried and reported by the hierarchy collector.
@@ -841,7 +876,7 @@ export class RealObserveScreen implements ObserveScreen {
         options?.skipRecompositionTracking === true,
         capturedHierarchy,
         options?.timeoutMs,
-        observedAndroid?.logicalId ?? 0,
+        requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
       );
 
       // A caller may omit back-stack collection for an intermediate capture.
@@ -876,7 +911,91 @@ export class RealObserveScreen implements ObserveScreen {
         this.platformValidator,
       );
 
-      const postCaptureForeground = await this.reconcileActiveWindowAttribution(result, signal);
+      // Routed reads retain their selected hierarchy; attribution recaptures use the
+      // focused display and would silently replace it with another panel's tree.
+      const postCaptureForeground = explicitlyRouted
+        ? { sampled: false, identity: undefined, activityAttributionMismatch: false }
+        : await this.reconcileActiveWindowAttribution(result, signal);
+
+      // Reconciliation can replace the tree. Bind the final hierarchy's panel
+      // before screenshot routing or transition fencing observes this result.
+      if (this.device.platform === "ios") {
+        result.display = observedIosDisplay(this.device, result.viewHierarchy);
+        const panel = resolveTargetDisplay(this.device.displays, displayRequest, {
+          focusedPanelKey: result.display.key,
+          activePanelKey: result.display.key,
+          posture: result.display.posture,
+        });
+        if (explicitlyRouted && panel.key !== result.display.key) {
+          throw new DisplaySelectionError(
+            `Display "${panel.key}" is not the active panel on iOS. Active panel: ${result.display.key}`,
+          );
+        }
+      } else if (this.device.displays?.panels.length) {
+        const reportedId = result.viewHierarchy?.displayId;
+        const panelUniqueId = result.viewHierarchy?.panelUniqueId;
+        if (requestedDisplayId !== undefined && typeof reportedId !== "number" && !panelUniqueId) {
+          throw new DisplaySelectionError(
+            "CtrlProxy APK too old for display routing; update it and retry the observation.",
+          );
+        }
+        if (
+          requestedDisplayId !== undefined &&
+          typeof reportedId === "number" &&
+          reportedId !== requestedDisplayId
+        ) {
+          throw new DisplaySelectionError(
+            `Selected display "${requestedPanel?.key}" returned hierarchy for display ${reportedId}; retry the observation.`,
+          );
+        }
+        const focusedPanel =
+          typeof reportedId === "number" || panelUniqueId
+            ? await this.observedAndroidDisplayCache.panelForLogicalId(
+                this.device,
+                this.adb,
+                reportedId,
+                signal,
+                panelUniqueId,
+                explicitlyRouted,
+              )
+            : undefined;
+        if (requestedPanel && focusedPanel && requestedPanel.key !== focusedPanel.key) {
+          throw new DisplaySelectionError(
+            `Selected display "${requestedPanel.key}" returned content from "${focusedPanel.key}"; retry the observation.`,
+          );
+        }
+        const geometryChanged = displayTransitions.geometryChanged(
+          this.device.deviceId,
+          result.screenSize,
+        );
+        const refreshed =
+          geometryChanged && !explicitlyRouted
+            ? await this.observedAndroidDisplayCache.resolve(this.device, this.adb, signal, true)
+            : observedAndroid;
+        result.display.posture = await this.observedAndroidDisplayCache.posture(
+          this.device,
+          this.adb,
+          signal,
+          geometryChanged && !explicitlyRouted,
+        );
+        const panel =
+          requestedPanel ??
+          resolveTargetDisplay(this.device.displays, displayRequest, {
+            focusedPanelKey: focusedPanel?.key,
+            activePanelKey: refreshed?.display.key,
+            posture: result.display.posture,
+          });
+        result.display = { ...result.display, key: panel.key, role: panel.role };
+        if (!explicitlyRouted) {
+          displayTransitions.checkIdentity(this.device.deviceId, result.display);
+        }
+      }
+      const panels = this.device.displays?.panels;
+      if (panels && panels.length > 1) {
+        result.otherDisplays = panels
+          .filter((panel) => panel.key !== result.display.key)
+          .map((panel) => ({ key: panel.key, role: panel.role, size: panel.sizePx }));
+      }
 
       // Hierarchy collection and accepted recaptures each replace `screenSize`.
       // Stamp its output-only unit marker after all of them, before the result is
@@ -895,6 +1014,7 @@ export class RealObserveScreen implements ObserveScreen {
 
       // The hierarchy has completed before any capture starts.
       if (screenshotMode !== "none") {
+        const screenshotDisplayId = requestedDisplayId;
         result.screenshotCaptureAttempted = true;
         if (screenshotMode === "settled") {
           result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
@@ -903,11 +1023,17 @@ export class RealObserveScreen implements ObserveScreen {
             perf,
             signal,
             options?.screenshot === "settled",
+            screenshotDisplayId,
           );
         } else if (serverConfig.getAccessibilityAuditConfig()) {
-          await this.screenshotRecorder.capture(result.observationId, perf, signal);
+          await this.screenshotRecorder.capture(
+            result.observationId,
+            perf,
+            signal,
+            screenshotDisplayId,
+          );
         } else {
-          this.screenshotRecorder.start(result.observationId, perf, signal);
+          this.screenshotRecorder.start(result.observationId, perf, signal, screenshotDisplayId);
         }
       } else {
         result.screenshotCaptureAttempted = false;
@@ -1018,29 +1144,13 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
-      // Reconciliation may replace the captured hierarchy. Stamp its final
-      // panel and the forwarded sequence belonging to that exact hierarchy.
-      if (this.device.platform === "ios") {
-        result.display = observedIosDisplay(this.device, result.viewHierarchy);
-      } else {
-        if (
-          observedAndroid &&
-          (this.device.displays?.panels.length ?? 0) > 1 &&
-          displayTransitions.geometryChanged(this.device.deviceId, result.screenSize)
-        ) {
-          const refreshed = await this.observedAndroidDisplayCache.resolve(
-            this.device,
-            this.adb,
-            signal,
-            true,
-          );
-          result.display = refreshed.display;
-          displayTransitions.checkIdentity(this.device.deviceId, result.display);
-        }
+      // The forwarded sequence belongs to this exact hierarchy, not a new counter.
+      if (this.device.platform === "android") {
         // Zero means no forwarded captureSequence was assigned, not a second counter.
         result.display.generation = result.viewHierarchy?.captureSequence ?? 0;
       }
-      const geometryTransition = displayTransitions.record(this.device.deviceId, result);
+      const geometryTransition =
+        !explicitlyRouted && displayTransitions.record(this.device.deviceId, result);
       if (geometryTransition) {
         cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
       }
@@ -1082,7 +1192,10 @@ export class RealObserveScreen implements ObserveScreen {
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
     } catch (err) {
-      if (err instanceof StrictSettledScreenshotCaptureError) {
+      if (
+        err instanceof StrictSettledScreenshotCaptureError ||
+        err instanceof DisplaySelectionError
+      ) {
         throw err;
       }
       const errorMessage = err instanceof Error ? err.stack || err.message : String(err);
@@ -1136,6 +1249,23 @@ export class RealObserveScreen implements ObserveScreen {
    * post-action and waitFor flows use this after their final observation so a
    * retry/poll loop creates at most one screenshot.
    */
+  private async screenshotDisplayId(signal?: AbortSignal): Promise<number | undefined> {
+    if (
+      this.device.platform !== "android" ||
+      !this.requestedDisplay ||
+      this.requestedDisplay === "active"
+    ) {
+      return undefined;
+    }
+    const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {});
+    return this.observedAndroidDisplayCache.logicalIdForPanel(
+      this.device,
+      this.adb,
+      panel.key,
+      signal,
+    );
+  }
+
   async captureScreenshot(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
@@ -1143,6 +1273,7 @@ export class RealObserveScreen implements ObserveScreen {
     screenshot?: ScreenshotMode,
   ): Promise<void> {
     const screenshotObservation = observation ?? this.createBaseResult();
+    const displayId = await this.screenshotDisplayId(signal);
     const screenshotMode = resolveScreenshotMode(screenshot);
     if (observation) {
       observation.screenshotCaptureAttempted = true;
@@ -1156,9 +1287,15 @@ export class RealObserveScreen implements ObserveScreen {
         perf,
         signal,
         screenshot === "settled",
+        displayId,
       );
     } else {
-      await this.screenshotRecorder.captureFresh(screenshotObservation.observationId, perf, signal);
+      await this.screenshotRecorder.captureFresh(
+        screenshotObservation.observationId,
+        perf,
+        signal,
+        displayId,
+      );
     }
     if (observation) {
       await this.runAccessibilityAudit(observation, perf);
@@ -1170,6 +1307,7 @@ export class RealObserveScreen implements ObserveScreen {
     perf: PerformanceTracker,
     signal: AbortSignal | undefined,
     strict: boolean,
+    displayId?: number,
   ): Promise<void> {
     try {
       if (!this.screenshotRecorder.captureSettled) {
@@ -1179,6 +1317,7 @@ export class RealObserveScreen implements ObserveScreen {
         observation.observationId,
         perf,
         signal,
+        displayId,
       );
       observation.screenshotSettled = true;
       observation.screenshotPath = path;

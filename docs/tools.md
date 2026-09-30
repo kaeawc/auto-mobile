@@ -11,6 +11,20 @@ the exact arguments supported by your connection.
 
 ## Observe & navigate
 
+`observe` accepts an optional `display` panel key, a panel role (`inner`,
+`cover`, `rear`, or `external`), or `"active"`. With no argument, it follows
+the focused window's panel when available, then the current posture's default
+panel. The returned `display` stamp identifies the panel actually observed.
+For Android it uses the physical panel key from the hierarchy's `panelUniqueId`
+or mapped `displayId`; for iOS it uses the matched simulator screen name. Its
+`role` comes from inventory. Android foldables include the current device-state
+`posture` when available; iOS and single-panel devices report `unknown`.
+When inventory has two or more panels, `otherDisplays` lists each remaining
+panel's `key`, `role`, and pixel `size` (`width`, `height`).
+`display: "all"` is not supported yet. Android routes the hierarchy and
+screenshot reads to the selected display; on iOS, only the currently live
+simulator panel can be observed. This selector does not route interaction tools.
+
 ### Screen-coordinate contract
 
 `observe` reports platform-native, current-orientation screen coordinates. The

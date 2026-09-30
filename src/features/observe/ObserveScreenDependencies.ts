@@ -20,6 +20,8 @@ import type { DaemonStateLike } from "../../daemon/daemonState";
  * All properties are optional - defaults will be created if not provided.
  */
 export interface ObserveScreenDependencies {
+  /** Tool-level display request retained through waitFor polls. */
+  display?: string;
   // Data sources
   viewHierarchy?: ViewHierarchy;
   hierarchyCapture?: HierarchyCapture;

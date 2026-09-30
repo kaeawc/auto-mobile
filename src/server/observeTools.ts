@@ -536,6 +536,12 @@ const observeBaseSchema = withJsonSchemaOverride(
           .describe(
             "Screenshot mode: await a fresh validated capture, use background capture, or skip",
           ),
+        display: z
+          .string()
+          .optional()
+          .describe(
+            "Panel key, role (inner, cover, rear, external), or active; all is not supported yet",
+          ),
         project: z
           .enum(["full", "skeleton"])
           .optional()
@@ -1381,6 +1387,7 @@ export function registerObserveTools() {
     assertActiveWindowWaitForSupportedOnPlatform(device.platform, waitFor);
     try {
       const observeScreen = new RealObserveScreen(device, undefined, {
+        display: args.display,
         onAvailabilityLost:
           device.platform === "android"
             ? (reason) => {

@@ -18,6 +18,8 @@ export interface ObserveScreenExecuteOptions {
   skipScreenshot?: boolean;
   /** Per-call override; omitted reads the env and persisted flag. */
   screenshot?: ScreenshotMode;
+  /** Physical display panel key or role; "active" follows focus. */
+  display?: string;
   /** Skip screenshot-dependent accessibility auditing for intermediate observations. */
   skipAccessibilityAudit?: boolean;
   /**

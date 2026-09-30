@@ -136,6 +136,8 @@ async function main() {
   const appearanceSocketServer = await import("./daemon/appearanceSocketServer");
   const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
   const appearanceSyncScheduler = await import("./utils/appearance/AppearanceSyncScheduler");
+  const { isAppearanceSyncEnabled } = await import("./daemon/PassiveWorkPolicy");
+  const { DeviceSessionManager } = await import("./utils/DeviceSessionManager");
   const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
   const { serverConfig } = await import("./utils/ServerConfig");
   const { AndroidCtrlProxyManager } = await import("./ctrlProxy/CtrlProxyManager");
@@ -652,7 +654,13 @@ async function main() {
         await startDeviceSnapshotSocketServer();
         await startAppearanceSocketServer();
         await startWebRtcStreamSocketServer();
-        startAppearanceSyncScheduler();
+        startAppearanceSyncScheduler({
+          getTargets: () => {
+            const current = DeviceSessionManager.getInstance().getCurrentDevice();
+            return current?.platform === "android" ? [current] : [];
+          },
+          isEnabled: () => isAppearanceSyncEnabled(process.env.AUTOMOBILE_APPEARANCE_SYNC),
+        });
       }
 
       // Detect when the MCP client disconnects (stdin closes / pipe breaks).

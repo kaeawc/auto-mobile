@@ -123,16 +123,34 @@ export AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT=true
 
 ## Device behavior
 
-At daemon startup, AutoMobile warms CtrlProxy on every already booted iOS
-device by default. Set `AUTOMOBILE_IOS_WARMUP_DEVICES` to a comma-separated
-list of simulator UDIDs to warm only those devices. An empty value disables
-pool-wide iOS warm-up. This setting affects startup only; an explicit device
-acquisition and an existing device's runner restart can still start CtrlProxy
-for that device. Setting `AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET`
-also disables pool-wide warm-up, regardless of the allowlist.
+The daemon's passive device work is limited to devices with a session in this
+daemon. At startup, it warms iOS CtrlProxy only for rehydrated sessions. An
+explicit acquisition can also start a runner for its device. Previously an unset
+`AUTOMOBILE_IOS_WARMUP_DEVICES` warmed every booted simulator; now unset or
+empty means no extra simulators. Set it to a comma-separated list of simulator
+UDIDs to allow iOS startup warm-up and observation-stream connections for those
+devices even without a session. The live-acceptance startup secret suppresses
+both iOS passive paths, including allowlisted devices.
 
 ```bash
 export AUTOMOBILE_IOS_WARMUP_DEVICES=00000000-0000-0000-0000-000000000001
+```
+
+Android appearance sync also defaults to session-owned devices. It runs when a
+session acquires a device and on later scheduler ticks. IDE-only use without a
+session no longer syncs appearance unless the device serial is in
+`AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES`. Set `AUTOMOBILE_APPEARANCE_SYNC` to
+`0`, `false`, `off`, or `no` (case-insensitive, with surrounding whitespace
+ignored) to turn off appearance sync in daemon and direct mode. Android
+observation-stream initial connections and cadence refreshes follow the same
+session-owned default; use
+`AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES` to opt in unowned serials.
+These Android settings do not affect iOS warm-up. Each device list is a
+comma-separated list of IDs; an empty value adds no devices.
+
+```bash
+export AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES=emulator-5554
+export AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES=emulator-5554
 ```
 
 AutoMobile does not create an emulator or simulator by default. The legacy

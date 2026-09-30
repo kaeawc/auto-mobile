@@ -60,6 +60,22 @@ class HierarchyRunnerError extends Error {
   }
 }
 
+type HierarchySyncResult = {
+  hierarchy: AccessibilityHierarchy;
+  perfTiming?: AndroidPerfTiming[];
+  frameContext?: string;
+} | null;
+
+interface HierarchySyncFlight {
+  disableAllFiltering: boolean;
+  minReceivedAt: number;
+  timeoutMs: number;
+  controller: AbortController;
+  waiters: number;
+  diagnostics: HierarchySyncDiagnostics;
+  promise: Promise<HierarchySyncResult>;
+}
+
 /**
  * Delegate class for handling hierarchy retrieval and caching.
  *
@@ -88,6 +104,7 @@ export class CtrlProxyHierarchy {
     string,
     { reject: (error: string) => void; disconnect: () => void }
   >();
+  private readonly hierarchySyncFlights = new Set<HierarchySyncFlight>();
 
   constructor(context: HierarchyDelegateContext) {
     this.context = context;
@@ -593,14 +610,76 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     timeoutMs: number = 10000,
     diagnostics?: HierarchySyncDiagnostics,
-  ): Promise<{
-    hierarchy: AccessibilityHierarchy;
-    perfTiming?: AndroidPerfTiming[];
-    frameContext?: string;
-  } | null> {
+  ): Promise<HierarchySyncResult> {
     const startTime = this.context.timer.now();
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
 
+    try {
+      throwIfAborted(signal);
+      // The wait accepts cache entries received at or after its dispatch floor. A flight with
+      // an earlier floor could return data too old for this caller, so it cannot be joined.
+      // Keep timeout budgets equal so joining does not shorten or extend either caller's wait.
+      let flight = [...this.hierarchySyncFlights].find(
+        (candidate) =>
+          candidate.disableAllFiltering === disableAllFiltering &&
+          candidate.minReceivedAt >= startTime &&
+          candidate.timeoutMs === effectiveTimeoutMs,
+      );
+      if (!flight) {
+        const controller = new AbortController();
+        const sharedDiagnostics: HierarchySyncDiagnostics = {};
+        flight = {
+          disableAllFiltering,
+          minReceivedAt: startTime,
+          timeoutMs: effectiveTimeoutMs,
+          controller,
+          waiters: 0,
+          diagnostics: sharedDiagnostics,
+          promise: this.runHierarchySync(
+            perf,
+            disableAllFiltering,
+            controller.signal,
+            effectiveTimeoutMs,
+            sharedDiagnostics,
+            startTime,
+          ),
+        };
+        const createdFlight = flight;
+        flight.promise = flight.promise.finally(() => {
+          this.hierarchySyncFlights.delete(createdFlight);
+        });
+        this.hierarchySyncFlights.add(flight);
+      }
+
+      flight.waiters += 1;
+      try {
+        const result = await awaitWhileRequestIsLive(flight.promise, signal);
+        if (flight.diagnostics.runnerError && diagnostics) {
+          diagnostics.runnerError = flight.diagnostics.runnerError;
+        }
+        return result;
+      } finally {
+        flight.waiters -= 1;
+        if (flight.waiters === 0) {
+          // Only the final detached caller stops work; one abort cannot cancel another caller.
+          this.hierarchySyncFlights.delete(flight);
+          flight.controller.abort();
+        }
+      }
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] Sync hierarchy caller stopped: ${error}`);
+      return null;
+    }
+  }
+
+  private async runHierarchySync(
+    perf: PerformanceTracker,
+    disableAllFiltering: boolean,
+    signal: AbortSignal,
+    effectiveTimeoutMs: number,
+    diagnostics: HierarchySyncDiagnostics,
+    startTime: number,
+  ): Promise<HierarchySyncResult> {
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 

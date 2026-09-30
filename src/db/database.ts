@@ -23,6 +23,9 @@ import {
 import { resetDbWriteBarrier } from "./dbWriteBarrier";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+
+const boundedPromiseTimeout = Symbol("bounded promise timeout");
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
 type BunDatabase = import("bun:sqlite").Database;
@@ -625,19 +628,23 @@ export async function awaitPromiseBounded(
     return true;
   }
 
-  let handle: NodeJS.Timeout | undefined;
-  const timeout = new Promise<boolean>((resolve) => {
-    handle = timer.setTimeout(() => resolve(false), timeoutMs);
-  });
-
   try {
     // `inFlight` is resolve-never-reject by construction (ensureMigrationsStarted),
     // so this race never rejects.
-    return await Promise.race([inFlight.then(() => true), timeout]);
-  } finally {
-    if (handle !== undefined) {
-      timer.clearTimeout(handle);
+    return await raceWithDeadline(
+      inFlight.then(() => true),
+      {
+        timer,
+        timeoutMs,
+        label: "Database migration wait",
+        timeoutError: () => boundedPromiseTimeout,
+      },
+    );
+  } catch (error) {
+    if (error === boundedPromiseTimeout) {
+      return false;
     }
+    throw error;
   }
 }
 

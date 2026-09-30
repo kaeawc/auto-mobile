@@ -1,6 +1,7 @@
 import {
   STABLE_VIEW_ID_PREFIX,
   STABLE_VIEW_ID_HASH_LENGTH,
+  STABLE_VIEW_ID_TEXT_HASH_LENGTH,
 } from "../observe/android/StableNodeIdentity";
 
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
@@ -11,9 +12,13 @@ import type { ElementBounds } from "../../models/ElementBounds";
 import { defaultRandom } from "../../utils/Random";
 import { isEditableElementProperties } from "../../utils/elementProperties";
 import type { Element } from "../../models/Element";
+import { compareSelectionRank } from "./selectionRank";
 
 const ordinalNodeKey = new RegExp(
   `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}-\\d+$`,
+);
+const syntheticNodeKey = new RegExp(
+  `^${STABLE_VIEW_ID_PREFIX}[0-9a-f]{${STABLE_VIEW_ID_HASH_LENGTH}}(?:-\\d+|~[0-9a-f]{${STABLE_VIEW_ID_TEXT_HASH_LENGTH}})?$`,
 );
 
 // Keep label promotion within a parent or grandparent, away from distant editable ancestors.
@@ -393,7 +398,8 @@ export class ElementResolver {
         : actionTarget(candidate) !== null ||
           (hasVisibleBounds(candidate, intent) && candidate.affordances.length > 0);
     result.candidates = result.candidates.filter(actionableCandidate);
-    this.choose(result, selector, actionTarget, intent);
+    this.rankCandidates(result, selector, actionTarget, intent);
+    this.choose(result, selector, actionTarget);
     if (siblingCandidateNodes) {
       // Preserve the complete observed candidate list without letting another
       // anchor's smaller target override the first anchor's chosen sibling.
@@ -414,6 +420,34 @@ export class ElementResolver {
       }
     }
     return result;
+  }
+
+  private rankCandidates(
+    result: ElementResolution,
+    selector: ResolverSelector,
+    actionTarget: (node: SearchableEntry | undefined) => SearchableEntry | null,
+    intent: ResolutionIntent,
+  ): void {
+    if (selector.sibling || intent.action === "scroll") {
+      return;
+    }
+    const rawTextMatch = new Set(
+      result.matches.filter((match) => match.textOrigin === "raw").map((match) => match.node),
+    );
+    const rank = (candidate: SearchableEntry) => {
+      const target = actionTarget(candidate) ?? candidate;
+      return {
+        windowRank: target.windowRank,
+        area: target.bounds ? boundsArea(target.bounds) : Infinity,
+        order: target.index,
+        interactive: intent.preferTap
+          ? target.affordances.includes("tap") || target.affordances.includes("toggle")
+          : target.affordances.length > 0,
+        input: target.affordances.includes("input"),
+        raw: rawTextMatch.has(candidate),
+      };
+    };
+    result.candidates.sort((a, b) => compareSelectionRank(rank(a), rank(b), intent.preferTap));
   }
 
   private prepareMatches(
@@ -441,11 +475,7 @@ export class ElementResolver {
     result: ElementResolution,
     selector: ResolverSelector,
     actionTarget: (node: SearchableEntry | undefined) => SearchableEntry | null,
-    intent: ResolutionIntent,
   ): ElementResolution {
-    const rawTextMatch = new Set(
-      result.matches.filter((match) => match.textOrigin === "raw").map((match) => match.node),
-    );
     const actionable = [
       ...new Set(
         result.candidates
@@ -462,21 +492,7 @@ export class ElementResolver {
           Math.min(actionable.length - 1, Math.floor(this.random() * actionable.length))
         ] ?? null;
     } else {
-      result.chosen =
-        [...actionable].sort(
-          (a, b) =>
-            (intent.preferTap
-              ? Number(!a.affordances.includes("tap") && !a.affordances.includes("toggle")) -
-                Number(!b.affordances.includes("tap") && !b.affordances.includes("toggle"))
-              : 0) ||
-            a.windowRank - b.windowRank ||
-            // Within the exact tier and window, a real text field wins over a
-            // displayed-form-only alias, preserving a formerly unique raw match.
-            Number(!rawTextMatch.has(a)) - Number(!rawTextMatch.has(b)) ||
-            (a.bounds ? boundsArea(a.bounds) : Infinity) -
-              (b.bounds ? boundsArea(b.bounds) : Infinity) ||
-            a.index - b.index,
-        )[0] ?? null;
+      result.chosen = result.candidates.map(actionTarget).find((node) => node !== null) ?? null;
     }
     if (result.chosen) {
       result.indexInMatches =
@@ -897,6 +913,17 @@ export class ElementResolver {
     const direct = nodes.filter(
       (node) => node.nodeKey === query && (!intent.requireBounds || node.bounds),
     );
+    if (
+      direct.length > 1 &&
+      !syntheticNodeKey.test(query) &&
+      direct.every((node) => !node.nativeId)
+    ) {
+      return {
+        matches: [],
+        matchMode,
+        error: `Skeleton element id "${query}" is ambiguous: ${direct.length} id-less nodes share this view-id. Use text with index instead.`,
+      };
+    }
     if (direct.length) {
       return {
         matches: direct.map((node) => ({

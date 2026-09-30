@@ -121,9 +121,15 @@ export function contractCases(capture: ContractCapture): ContractCase[] {
     }
     if (observed.label) {
       const peers = skeleton.filter((entry) => entry.label === observed.label);
+      const rankedPeers = [...peers].sort((a, b) => {
+        const area = (entry: SkeletonElement) =>
+          (entry.bounds[2] - entry.bounds[0]) * (entry.bounds[3] - entry.bounds[1]);
+        return area(a) - area(b) || skeleton.indexOf(a) - skeleton.indexOf(b);
+      });
       const index =
         peers.length > 1
-          ? skeleton.slice(0, row).filter((entry) => entry.label === observed.label).length
+          ? ((observed.elementId === undefined ? observed.index : undefined) ??
+            rankedPeers.indexOf(observed))
           : undefined;
       queries.push({ kind: "text", value: observed.label, index });
       if (observed.affordances.includes("input")) {
@@ -227,7 +233,7 @@ export class LegacyContractResolver implements ContractResolver {
           query.value,
           query.container,
           false,
-          query.index !== undefined,
+          false,
         ),
         chosen: this.selector.selectByResourceId(hierarchy, query.value, options).element,
       };
@@ -238,7 +244,7 @@ export class LegacyContractResolver implements ContractResolver {
           hierarchy,
           query.value,
           query.container,
-          query.index !== undefined,
+          false,
         ),
         chosen: this.selector.selectByTestTag(hierarchy, query.value, options).element,
       };
@@ -266,8 +272,8 @@ export class LegacyContractResolver implements ContractResolver {
         query.container,
         true,
         false,
-        query.index !== undefined,
-        query.index === undefined && query.strategy !== "random",
+        false,
+        true,
         query.intent ?? "tap",
       ),
       chosen: this.selector.selectByText(hierarchy, query.value, {

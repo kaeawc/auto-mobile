@@ -7,13 +7,6 @@ import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/
 import { defaultRandom } from "../../utils/Random";
 import { DefaultElementFinder } from "./ElementFinder";
 
-function shouldIncludeWindowsForTextSelection(
-  index: number | undefined,
-  strategy: ElementSelectionStrategy,
-): boolean {
-  return index === undefined && strategy === "first";
-}
-
 export class DefaultElementSelector implements ElementSelector {
   private finder: ElementFinder;
   private random: () => number;
@@ -39,15 +32,14 @@ export class DefaultElementSelector implements ElementSelector {
     } = {},
   ): ElementSelectionResult {
     const strategy = options.strategy ?? "first";
-    const includeWindows = shouldIncludeWindowsForTextSelection(options.index, strategy);
     const matches = this.finder.findElementsByText(
       viewHierarchy,
       text,
       options.container ?? null,
       options.partialMatch ?? true,
       options.caseSensitive ?? false,
-      options.index !== undefined,
-      includeWindows,
+      false,
+      true,
       options.selectionIntent,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options.index);
@@ -69,7 +61,7 @@ export class DefaultElementSelector implements ElementSelector {
       resourceId,
       options?.container ?? null,
       options?.partialMatch ?? false,
-      options?.index !== undefined,
+      false,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
@@ -88,7 +80,7 @@ export class DefaultElementSelector implements ElementSelector {
       viewHierarchy,
       testTag,
       options?.container ?? null,
-      options?.index !== undefined,
+      false,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }

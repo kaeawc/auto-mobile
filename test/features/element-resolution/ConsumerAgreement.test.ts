@@ -138,6 +138,6 @@ test("debug, tap and highlight agree on scoped default target and ranked explici
   expect(highlight.element?.["resource-id"]).toBe("label");
   expect(
     selector.selectByText(hierarchy, "Save", { container, index: 0 }).element?.["resource-id"],
-  ).toBe("first");
+  ).toBe("second");
   expect(result.matches.some((entry) => entry.resourceId === "outside")).toBe(false);
 });

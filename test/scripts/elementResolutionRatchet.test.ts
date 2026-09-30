@@ -60,6 +60,25 @@ test("signature removal requires the corresponding exception to be removed", () 
   expect(() => assertSignatureRatchetDoesNotDrift("{}", '{"a":"target"}', "{}")).not.toThrow();
 });
 
+test("only the reviewed indexed Settings child signatures may change", () => {
+  const index0 =
+    'diff/scroll-after.json:{"kind":"text","value":"Settings","index":0}:524,488,850,635';
+  const index1 =
+    'diff/scroll-after.json:{"kind":"text","value":"Settings","index":1}:826,2127,1080,2337';
+  const previous = { [index1]: "566,530,629,593" };
+  const reviewed = { [index0]: "566,530,629,593", [index1]: "890,2253,1016,2295" };
+  expect(() =>
+    assertSignatureRatchetDoesNotDrift(JSON.stringify(reviewed), JSON.stringify(previous), "{}"),
+  ).not.toThrow();
+  expect(() =>
+    assertSignatureRatchetDoesNotDrift(
+      JSON.stringify({ ...reviewed, [index1]: "wrong-row" }),
+      JSON.stringify(previous),
+      "{}",
+    ),
+  ).toThrow("only shrink");
+});
+
 test("ratchet cannot restore gaps removed from a later baseline", () => {
   const gaps = readFileSync("test/features/element-resolution/observeContractGaps.json", "utf8");
   const signatures = readFileSync(

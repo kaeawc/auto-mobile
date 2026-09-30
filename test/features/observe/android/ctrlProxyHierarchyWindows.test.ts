@@ -71,8 +71,8 @@ test.each([false, true])(
     expect(resolve().candidates).toHaveLength(3);
     expect(resolve().chosen?.nodeKey).toBe(roots[1].node["view-id"]);
     expect(resolve(0).chosen?.nodeKey).toBe(roots[1].node["view-id"]);
-    expect(resolve(1).chosen?.nativeId).toBe("large-main");
-    expect(resolve(2).chosen?.nativeId).toBe("small-main");
+    expect(resolve(1).chosen?.nativeId).toBe("small-main");
+    expect(resolve(2).chosen?.nativeId).toBe("large-main");
     const elements = new DefaultObserveElementCollector().collect(projected, "android")!;
     expect(elements.clickable).toHaveLength(3);
     expect(elements.clickable?.map((element) => element["resource-id"])).toEqual([
@@ -87,11 +87,11 @@ test.each([false, true])(
       (index) => liveSelector.selectByText(projected, "Open", { index }).element,
     );
     expect(selectedRows.map((element) => element?.["resource-id"])).toEqual([
-      "large-main",
-      "small-main",
       undefined,
+      "small-main",
+      "large-main",
     ]);
-    expect(selectedRows[2]?.["view-id"]).toBe(roots[1].node["view-id"]);
+    expect(selectedRows[0]?.["view-id"]).toBe(roots[1].node["view-id"]);
   },
 );
 

@@ -41,7 +41,7 @@ test("unindexed duplicate labels use the displayed default row in every captured
   const duplicates = [...groups.entries()].filter(([, entries]) => entries.length > 1);
   expect(duplicates).toHaveLength(6);
   for (const [key, entries] of duplicates) {
-    const first = entries[0];
+    const first = entries.find((entry) => entry.query.index === 0) ?? entries[0];
     const query = { ...first.query, index: undefined };
     const current = new ResolverContractAdapter(first).resolve(first.capture, query);
     expect(current.candidates.map(candidateIdentity)).toEqual(observedCandidates(first, cases));
@@ -51,8 +51,11 @@ test("unindexed duplicate labels use the displayed default row in every captured
     });
     const previous = legacy.resolve(first.capture, query);
     const previousChoice = previous.chosen && candidateIdentity(previous.chosen);
-    if (key.includes("diff/scroll-") && key.endsWith(":Settings")) {
-      // Legacy chooses the smaller descendant; S2 keeps the advertised parent row.
+    if (
+      (key.includes("diff/scroll-") && key.endsWith(":Settings")) ||
+      (key.startsWith("ios-reminders-") && key.endsWith(":Buy milk"))
+    ) {
+      // Legacy chooses a different child or list row; S2 keeps the ranked observed control.
       expect(previousChoice).not.toEqual(candidateIdentity(current.chosen!));
     } else {
       expect(previousChoice).toEqual(candidateIdentity(current.chosen!));

@@ -1,9 +1,21 @@
 import { ActionableError } from "../models";
 import type { Timer } from "./SystemTimer";
 
+type DeadlineTimer = Pick<Timer, "setTimeout" | "clearTimeout">;
+
+function hasUnref(handle: NodeJS.Timeout): handle is NodeJS.Timeout & { unref: () => unknown } {
+  return (
+    typeof handle === "object" &&
+    handle !== null &&
+    "unref" in handle &&
+    typeof handle.unref === "function"
+  );
+}
+
 interface RaceWithDeadlineOptions {
-  timer: Timer;
+  timer: DeadlineTimer;
   timeoutMs?: number;
+  unref?: boolean;
   signal?: AbortSignal;
   label: string;
   /** Opt into phase-labelled cancellation when downstream code does not classify raw abort reasons. */
@@ -38,6 +50,7 @@ export async function raceWithDeadline<T>(
   {
     timer,
     timeoutMs,
+    unref = false,
     signal,
     label,
     relabelDefaultAbort = false,
@@ -73,6 +86,9 @@ export async function raceWithDeadline<T>(
             );
             onTimeout?.();
           }, timeoutMs);
+          if (unref && hasUnref(timeoutHandle)) {
+            timeoutHandle.unref();
+          }
         });
 
   try {

@@ -739,22 +739,26 @@ export async function waitForProvisionDeviceSettlement(
   timer: Pick<Timer, "setTimeout" | "clearTimeout">,
   timeoutMs: number,
 ): Promise<boolean> {
-  let timeout: NodeJS.Timeout | undefined;
+  const deadline = new Error("Provision device settlement wait timed out");
   try {
-    return await Promise.race([
+    return await raceWithDeadline(
       // Only settlement matters; the original lifecycle failure is handled by its owner.
       operation.then(
         () => true,
         () => true,
       ),
-      new Promise<boolean>((resolve) => {
-        timeout = timer.setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timeout) {
-      timer.clearTimeout(timeout);
+      {
+        timer,
+        timeoutMs,
+        label: "Provision device settlement",
+        timeoutError: () => deadline,
+      },
+    );
+  } catch (error) {
+    if (error === deadline) {
+      return false;
     }
+    throw error;
   }
 }
 
@@ -3595,38 +3599,13 @@ export async function awaitProvisionDeviceOperationBegin<T>(
   if (remainingMs <= 0) {
     throw provisionDeviceTimeoutError("starting provision operation");
   }
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  let removeAbortListener: (() => void) | undefined;
-  try {
-    return await Promise.race([
-      begin,
-      new Promise<never>((_resolve, reject) => {
-        timeoutHandle = timer.setTimeout(
-          () => reject(provisionDeviceTimeoutError("starting provision operation")),
-          remainingMs,
-        );
-      }),
-      ...(requestSignal
-        ? [
-            new Promise<never>((_resolve, reject) => {
-              const rejectForAbort = () => reject(requestSignal.reason);
-              if (requestSignal.aborted) {
-                rejectForAbort();
-                return;
-              }
-              requestSignal.addEventListener("abort", rejectForAbort, { once: true });
-              removeAbortListener = () =>
-                requestSignal.removeEventListener("abort", rejectForAbort);
-            }),
-          ]
-        : []),
-    ]);
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
-    removeAbortListener?.();
-  }
+  return await raceWithDeadline(begin, {
+    timer,
+    timeoutMs: remainingMs,
+    signal: requestSignal,
+    label: "starting provision operation",
+    timeoutError: () => provisionDeviceTimeoutError("starting provision operation"),
+  });
 }
 
 export async function runOperationWithinDeadline<T>(

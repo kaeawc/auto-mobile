@@ -294,4 +294,46 @@ describe("raceWithDeadline", () => {
     );
     expect(timer.scheduled).toBe(0);
   });
+
+  test("accepts a narrow timeout timer and unreferences a supported handle", async () => {
+    let unrefCalls = 0;
+    const narrowTimer = {
+      setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
+        const handle = global.setTimeout(callback, ms);
+        const originalUnref = handle.unref.bind(handle);
+        handle.unref = () => {
+          unrefCalls++;
+          return originalUnref();
+        };
+        return handle;
+      },
+      clearTimeout(handle: NodeJS.Timeout): void {
+        global.clearTimeout(handle);
+      },
+    };
+
+    expect(
+      await raceWithDeadline(Promise.resolve("done"), {
+        timer: narrowTimer,
+        timeoutMs: 100,
+        unref: true,
+        label: "narrow timer",
+      }),
+    ).toBe("done");
+    expect(unrefCalls).toBe(1);
+  });
+
+  test("does not require unref on FakeTimer handles", async () => {
+    const timer = new FakeTimer();
+    const raced = raceWithDeadline(deferred<string>().promise, {
+      timer,
+      timeoutMs: 25,
+      unref: true,
+      label: "fake timer",
+    });
+
+    timer.advanceTime(25);
+    await expect(raced).rejects.toBeInstanceOf(ActionableError);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
 });

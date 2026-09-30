@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DefaultAccessibilityDetector } from "../../src/utils/AccessibilityDetector";
+import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT } from "../../src/ctrlProxy/constants";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { ExecResult, BootedDevice, AndroidUser } from "../../src/models";
@@ -36,7 +37,7 @@ class FakeAdbExecutor implements AdbExecutor {
       throw new Error("ADB error");
     }
 
-    const output = this.responses.get("default") || "null";
+    const output = this.responses.get("default") ?? "null";
     return {
       stdout: output,
       stderr: "",
@@ -137,14 +138,55 @@ describe("AccessibilityDetector - Unit Tests", () => {
       expect(service).toBe("talkback");
     });
 
-    test("detects TalkBack when TalkBackService is present", async () => {
-      fakeAdb.setResponse("com.android.talkback/TalkBackService");
+    test("detects TalkBack alongside CtrlProxy", async () => {
+      fakeAdb.setResponse(
+        `${CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT}:com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService`,
+      );
 
       const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
       expect(enabled).toBe(true);
 
       const service = await detector.detectMethod("device123", fakeAdb);
       expect(service).toBe("talkback");
+    });
+
+    test("treats CtrlProxy alone as disabled", async () => {
+      fakeAdb.setResponse(CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT);
+
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
+      expect(enabled).toBe(false);
+
+      const service = await detector.detectMethod("device123", fakeAdb);
+      expect(service).toBe("unknown");
+    });
+
+    test("treats CtrlProxy plus another service as enabled unknown", async () => {
+      fakeAdb.setResponse(
+        `${CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT}:com.example.reader/com.example.reader.ReaderService`,
+      );
+
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
+      expect(enabled).toBe(true);
+
+      const service = await detector.detectMethod("device123", fakeAdb);
+      expect(service).toBe("unknown");
+    });
+
+    test("treats a non-CtrlProxy service as enabled unknown", async () => {
+      fakeAdb.setResponse("com.example.reader/com.example.reader.ReaderService");
+
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
+      expect(enabled).toBe(true);
+
+      const service = await detector.detectMethod("device123", fakeAdb);
+      expect(service).toBe("unknown");
+    });
+
+    test("excludes the short CtrlProxy component form", async () => {
+      fakeAdb.setResponse("dev.jasonpearson.automobile.ctrlproxy/.CtrlProxy");
+
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
+      expect(enabled).toBe(false);
     });
 
     test("returns false when no accessibility services are enabled", async () => {
@@ -188,6 +230,13 @@ describe("AccessibilityDetector - Unit Tests", () => {
 
       const service = await detector.detectMethod("device123", fakeAdb);
       expect(service).toBe("unknown");
+    });
+
+    test("treats an empty service list as disabled", async () => {
+      fakeAdb.setResponse("");
+
+      const enabled = await detector.isAccessibilityEnabled("device123", fakeAdb);
+      expect(enabled).toBe(false);
     });
   });
 

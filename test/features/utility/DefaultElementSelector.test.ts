@@ -34,6 +34,17 @@ const createViewHierarchy = (nodes: NodeSpec[]): ViewHierarchyResult => {
 };
 
 describe("DefaultElementSelector", () => {
+  test("uses hierarchy screen dimensions when filtering a match", () => {
+    const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
+    const viewHierarchy = createViewHierarchy([
+      { bounds: { left: 20, top: 20, right: 40, bottom: 40 }, text: "Match" },
+    ]);
+
+    const match = selector.selectByText(viewHierarchy, "Match");
+
+    expect(match.element?.text).toBe("Match");
+  });
+
   test("first strategy returns smallest exact match", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([

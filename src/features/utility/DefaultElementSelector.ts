@@ -6,6 +6,7 @@ import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { defaultRandom } from "../../utils/Random";
 import { DefaultElementFinder } from "./ElementFinder";
+import { isElementCenterOffScreen, resolveElementScreenSize } from "./ElementGeometry";
 
 export class DefaultElementSelector implements ElementSelector {
   private finder: ElementFinder;
@@ -166,18 +167,7 @@ export class DefaultElementSelector implements ElementSelector {
   }
 
   private isElementCenterOffScreen(element: Element, viewHierarchy: ViewHierarchyResult): boolean {
-    if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight || !element.bounds) {
-      return false;
-    }
-
-    const centerX = (element.bounds.left + element.bounds.right) / 2;
-    const centerY = (element.bounds.top + element.bounds.bottom) / 2;
-    return (
-      centerX < 0 ||
-      centerX > viewHierarchy.screenWidth ||
-      centerY < 0 ||
-      centerY > viewHierarchy.screenHeight
-    );
+    return isElementCenterOffScreen(element.bounds, resolveElementScreenSize(viewHierarchy));
   }
 
   private pickMatch(

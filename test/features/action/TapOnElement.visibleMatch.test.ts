@@ -101,6 +101,7 @@ async function run(
   textAny = false,
   transformSelection?: (selection: ElementSelectionResult) => ElementSelectionResult,
   text = "Forms & Input",
+  observationScreenSize = { width: 402, height: 874 },
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -126,7 +127,7 @@ async function run(
   const observation: ObserveResult = {
     observationId: "visible-match",
     updatedAt: 1,
-    screenSize: { width: 402, height: 874 },
+    screenSize: observationScreenSize,
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
     viewHierarchy: initial,
   };
@@ -154,6 +155,23 @@ async function run(
 }
 
 describe("tapOn visible matched element", () => {
+  test("uses hierarchy dimensions when observation dimensions differ", async () => {
+    const label = { left: 84, top: 389, right: 198, bottom: 400 };
+    const row = { left: 16, top: 364, right: 386, bottom: 442 };
+    const { result, points } = await run(
+      "ios",
+      hierarchy(label, row),
+      hierarchy(label, row),
+      false,
+      false,
+      undefined,
+      "Forms & Input",
+      { width: 100, height: 100 },
+    );
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 141, y: 394 }]);
+  });
+
   test("iOS taps the control inside a labelled UISwitch row", async () => {
     const capture = iosFormsSwitch("true");
     const { result, points } = await run(

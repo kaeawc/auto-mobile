@@ -156,6 +156,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   // Static cache for service availability
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
   private static readonly AVAILABILITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+  private static readonly NEGATIVE_CACHE_TTL = 5 * 1000; // 5 seconds
   private cachedVersionCheck: {
     result: AccessibilityVersionCheckResult;
     timestamp: number;
@@ -809,9 +810,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   async isInstalled(): Promise<boolean> {
     // Check cache first
-    if (this.cachedInstallation && this.cachedInstallation.isInstalled) {
+    if (this.cachedInstallation) {
       const cacheAge = this.timer.now() - this.cachedInstallation.timestamp;
-      if (cacheAge < AndroidCtrlProxyManager.STATUS_CACHE_TTL) {
+      const ttl = this.cachedInstallation.isInstalled
+        ? AndroidCtrlProxyManager.STATUS_CACHE_TTL
+        : AndroidCtrlProxyManager.NEGATIVE_CACHE_TTL;
+      if (cacheAge < ttl) {
         logger.debug(
           `[CTRL_PROXY] Using cached installation status (age: ${cacheAge}ms): ${this.cachedInstallation.isInstalled ? "installed" : "not installed"}`,
         );
@@ -861,9 +865,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   async isEnabled(): Promise<boolean> {
     // Check cache first
-    if (this.cachedEnabled && this.cachedEnabled.isEnabled) {
+    if (this.cachedEnabled) {
       const cacheAge = this.timer.now() - this.cachedEnabled.timestamp;
-      if (cacheAge < AndroidCtrlProxyManager.STATUS_CACHE_TTL) {
+      const ttl = this.cachedEnabled.isEnabled
+        ? AndroidCtrlProxyManager.STATUS_CACHE_TTL
+        : AndroidCtrlProxyManager.NEGATIVE_CACHE_TTL;
+      if (cacheAge < ttl) {
         logger.debug(
           `[CTRL_PROXY] Using cached enabled status (age: ${cacheAge}ms): ${this.cachedEnabled.isEnabled ? "enabled" : "disabled"}`,
         );
@@ -1255,9 +1262,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const startTime = this.timer.now();
 
     // Check cache first
-    if (this.cachedAvailability && this.cachedAvailability.isAvailable) {
+    if (this.cachedAvailability) {
       const cacheAge = this.timer.now() - this.cachedAvailability.timestamp;
-      if (cacheAge < AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL) {
+      const ttl = this.cachedAvailability.isAvailable
+        ? AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL
+        : AndroidCtrlProxyManager.NEGATIVE_CACHE_TTL;
+      if (cacheAge < ttl) {
         logger.debug(
           `[CTRL_PROXY] Using cached overall availability (age: ${cacheAge}ms): ${this.cachedAvailability.isAvailable}`,
         );
@@ -1275,6 +1285,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       const available = installed && enabled;
       const duration = this.timer.now() - startTime;
+
+      if (available) {
+        const timestamp = this.timer.now();
+        this.cachedInstallation = { isInstalled: true, timestamp };
+        this.cachedEnabled = { isEnabled: true, timestamp };
+      }
 
       // Cache the result
       this.cachedAvailability = {
@@ -1604,7 +1620,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     } catch (reinstallError) {
       const reinstallMessage = errorMessage(reinstallError);
       logger.warn(`[CTRL_PROXY] APK reinstall failed: ${reinstallMessage}`, reinstallError);
-      this.clearServiceAvailabilityCache();
+      this.clearAvailabilityCache();
       return {
         ...result,
         status: "failed",
@@ -1718,6 +1734,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * This cleans up the old package name left over from before the rename to CtrlProxy.
    */
   private async uninstallLegacyPackageIfPresent(): Promise<void> {
+    let uninstallAttempted = false;
     try {
       const result = await this.adb.executeCommand(
         `shell pm list packages | grep ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
@@ -1731,6 +1748,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.info(
         `[CTRL_PROXY] Found legacy package ${AndroidCtrlProxyManager.LEGACY_PACKAGE}, uninstalling`,
       );
+      uninstallAttempted = true;
       await this.adb.executeCommand(
         `shell pm uninstall ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
         CTRL_PROXY_INSTALL_TIMEOUT_MS,
@@ -1738,6 +1756,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to check/uninstall legacy package: ${error}`);
+    } finally {
+      if (uninstallAttempted) {
+        this.clearAvailabilityCache();
+      }
     }
   }
 
@@ -1763,7 +1785,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
 
       logger.info("APK installed successfully");
+      this.clearAvailabilityCache();
     } catch (error) {
+      // A failed adb install can still have changed package state before the
+      // command reported an error.
+      this.clearAvailabilityCache();
       throw new Error(`Failed to install APK: ${errorMessage(error)}`);
     }
   }

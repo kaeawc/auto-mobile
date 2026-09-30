@@ -290,7 +290,7 @@ interface DevicePoolRecoveryInternals {
     { sessionId?: string; recoveryGeneration?: number; resolve(): void }
   >;
   recoveringAndroidImages: Map<string, DeviceInfo>;
-  recoveringAndroidImageSettlements: Map<string, unknown>;
+  recoveryCoordinator: { recoveringAndroidImageSettlements: Map<string, unknown> };
   recoveringAndroidDeviceIds: Set<string>;
   recoveringSessionLosses: Map<string, { generation: number }>;
   failedTerminalRecoveryReleases: Set<string>;
@@ -316,7 +316,9 @@ function assertNoRecoveryReservationsRemain(pool: DevicePool, sessionId: string)
   expect(internals.adbServerResetQuarantinedSessions.has(sessionId)).toBe(false);
   expect(internals.failedTerminalRecoveryReleases.has(sessionId)).toBe(false);
   expect(internals.recoveringAndroidImages.has(original.name)).toBe(false);
-  expect(internals.recoveringAndroidImageSettlements.has(original.name)).toBe(false);
+  expect(internals.recoveryCoordinator.recoveringAndroidImageSettlements.has(original.name)).toBe(
+    false,
+  );
   expect(internals.adbServerResetRecoveryReservations.has(original.name)).toBe(false);
   expect(internals.recoveringAndroidDeviceIds.has(original.deviceId)).toBe(false);
   expect(internals.androidRecoveryHandoffOwners.has(original.deviceId)).toBe(false);
@@ -1618,7 +1620,9 @@ test("a stale due-recovery snapshot does not finalize a record another sweep is 
     expect(internals.recoveringSessionLosses.has("session-2")).toBe(false);
     expect(internals.adbServerResetQuarantinedSessions.has("session-2")).toBe(false);
     expect(internals.recoveringAndroidImages.has(second.name)).toBe(false);
-    expect(internals.recoveringAndroidImageSettlements.has(second.name)).toBe(false);
+    expect(internals.recoveryCoordinator.recoveringAndroidImageSettlements.has(second.name)).toBe(
+      false,
+    );
   } finally {
     sessions.stopCleanupTimer();
   }
@@ -2065,11 +2069,11 @@ test("startup lease does not cool down when matching recovery clears before sett
     let releaseLease: (() => Promise<void>) | undefined;
     const internals = pool as unknown as {
       afterAndroidStartupRecoverySnapshot?: () => void;
-      clearRecoveringAndroidImage(avdName: string): void;
+      recoveryCoordinator: { clearRecoveringAndroidImage(avdName: string): void };
     };
     internals.afterAndroidStartupRecoverySnapshot = () => {
       manager.releaseReadiness.resolve();
-      internals.clearRecoveringAndroidImage(original.name);
+      internals.recoveryCoordinator.clearRecoveringAndroidImage(original.name);
     };
     const recoverySettledAt = timer.now();
     const lease = pool.reserveAndroidStartupLease(original.name, true).then((release) => {

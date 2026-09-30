@@ -66,6 +66,7 @@ const FRESH_OFFLINE_POST_RECOVERY_POLL_INTERVAL_MS = 5_000;
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
 const EMULATOR_CONSOLE_PORT_STEP = 2;
+const TERMINAL_RESERVATION_TTL_MS = 30_000;
 const MAX_READINESS_DIAGNOSTIC_CHARS = 512;
 const PRIMARY_USER_UNLOCK_WAIT_MS = 5_000;
 const PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS = 250;
@@ -593,6 +594,7 @@ type EmulatorDeviceIdReservation = {
 type TerminalEmulatorReservation = {
   readonly generation: number;
   readonly ports: EmulatorPortPair;
+  readonly releasedAt: number;
 };
 
 type EmulatorDeviceIdSnapshot = {
@@ -3131,9 +3133,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   private async allocateReservedEmulatorPorts(
     avdName: string,
-    preexistingDeviceIds: ReadonlySet<string>,
+    preLaunchSnapshot: EmulatorDeviceIdSnapshot,
     signal?: AbortSignal,
   ): Promise<EmulatorDeviceIdReservation> {
+    this.pruneExpiredTerminalReservations(preLaunchSnapshot);
+    const preexistingDeviceIds = preLaunchSnapshot.deviceIds;
     const unavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
     for (
       let port = MIN_EMULATOR_CONSOLE_PORT;
@@ -3146,6 +3150,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         !unavailablePorts.has(ports.adbPort) &&
         (await this.areEmulatorPortsAvailableOnHost(ports, signal))
       ) {
+        this.pruneExpiredTerminalReservations(preLaunchSnapshot);
         const currentUnavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
         if (
           !currentUnavailablePorts.has(ports.consolePort) &&
@@ -3222,7 +3227,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private assertEmulatorPortsNotReserved(
     ports: EmulatorPortPair,
     preexistingDeviceIds: ReadonlySet<string> | undefined,
+    preLaunchSnapshot?: EmulatorDeviceIdSnapshot,
   ): void {
+    this.pruneExpiredTerminalReservations(preLaunchSnapshot);
     const unavailablePorts = this.unavailableEmulatorPorts(preexistingDeviceIds);
     if (unavailablePorts.has(ports.consolePort) || unavailablePorts.has(ports.adbPort)) {
       throw new ActionableError(
@@ -3236,15 +3243,16 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     ports: EmulatorPortPair,
     preexistingDeviceIds: ReadonlySet<string> | undefined,
     signal?: AbortSignal,
+    preLaunchSnapshot?: EmulatorDeviceIdSnapshot,
   ): Promise<void> {
-    this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds);
+    this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds, preLaunchSnapshot);
     if (!(await this.areEmulatorPortsAvailableOnHost(ports, signal))) {
       throw new ActionableError(
         `Cannot safely launch an Android emulator: emulator port pair ` +
           `${ports.consolePort}/${ports.adbPort} is already in use`,
       );
     }
-    this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds);
+    this.assertEmulatorPortsNotReserved(ports, preexistingDeviceIds, preLaunchSnapshot);
   }
 
   private reservePendingEmulatorDeviceId(
@@ -3286,13 +3294,19 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     }
     const ports = configuredPorts ?? expectedEmulatorPorts;
     if (ports) {
-      await this.assertEmulatorPortsAvailable(ports, preLaunchSnapshot?.deviceIds, signal);
+      this.pruneExpiredTerminalReservations(preLaunchSnapshot);
+      await this.assertEmulatorPortsAvailable(
+        ports,
+        preLaunchSnapshot?.deviceIds,
+        signal,
+        preLaunchSnapshot,
+      );
       return this.reservePendingEmulatorDeviceId(avdName, ports, configuredPorts === undefined);
     }
     if (!preLaunchSnapshot?.isComplete) {
       return undefined;
     }
-    return this.allocateReservedEmulatorPorts(avdName, preLaunchSnapshot.deviceIds, signal);
+    return this.allocateReservedEmulatorPorts(avdName, preLaunchSnapshot, signal);
   }
 
   private async addReservedEmulatorPort(
@@ -3436,11 +3450,24 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     if (reservation) {
       AndroidEmulatorClient.reservedLaunchDeviceIds.delete(childProcess);
       // ADB can retain an exited emulator briefly. Keep its port unavailable
-      // until a later successful snapshot confirms the serial has disappeared.
+      // until a complete snapshot confirms disappearance or its bounded TTL expires.
       AndroidEmulatorClient.terminalReservedDeviceIds.set(reservation.deviceId, {
         generation: ++AndroidEmulatorClient.terminalReservationGeneration,
         ports: reservation.ports,
+        releasedAt: this.timer.now(),
       });
+    }
+  }
+
+  private pruneExpiredTerminalReservations(snapshot: EmulatorDeviceIdSnapshot | undefined): void {
+    const now = this.timer.now();
+    for (const [deviceId, reservation] of AndroidEmulatorClient.terminalReservedDeviceIds) {
+      if (snapshot?.isComplete && snapshot.deviceIds.has(deviceId)) {
+        continue;
+      }
+      if (now - reservation.releasedAt > TERMINAL_RESERVATION_TTL_MS) {
+        AndroidEmulatorClient.terminalReservedDeviceIds.delete(deviceId);
+      }
     }
   }
 

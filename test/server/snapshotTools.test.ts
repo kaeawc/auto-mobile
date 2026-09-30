@@ -20,6 +20,7 @@ describe("snapshot tool", () => {
   let captureCalls: Array<Record<string, unknown>>;
   let restoreCalls: Array<Record<string, unknown>>;
   let restoreFailures: NonNullable<RestoreSnapshotResult["failures"]>;
+  let restoreOverrides: Partial<RestoreSnapshotResult>;
 
   const device: BootedDevice = {
     deviceId: "ios-device-1",
@@ -36,6 +37,7 @@ describe("snapshot tool", () => {
     captureCalls = [];
     restoreCalls = [];
     restoreFailures = [];
+    restoreOverrides = {};
 
     await setDeviceSnapshotManagerDependencies({
       snapshotRepository: repository as any,
@@ -84,6 +86,7 @@ describe("snapshot tool", () => {
             restoredAt: new Date(fakeTimer.now()).toISOString(),
             success: restoreFailures.length === 0,
             failures: restoreFailures,
+            ...restoreOverrides,
           };
         },
       }),
@@ -98,6 +101,7 @@ describe("snapshot tool", () => {
     captureCalls = [];
     restoreCalls = [];
     restoreFailures = [];
+    restoreOverrides = {};
   });
 
   afterAll(() => {
@@ -209,6 +213,49 @@ describe("snapshot tool", () => {
     expect(payload.success).toBe(true);
     expect(payload.failures).toEqual([]);
     expect(restoreCalls).toHaveLength(1);
+  });
+
+  test("surfaces settings-only mode and VM degradation note", async () => {
+    const timestamp = new Date(fakeTimer.now()).toISOString();
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "degraded-vm-restore",
+      timestamp,
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: device.platform,
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: true,
+    };
+    await repository.insertSnapshot({
+      snapshotName: manifest.snapshotName,
+      deviceId: manifest.deviceId,
+      deviceName: manifest.deviceName,
+      platform: manifest.platform,
+      snapshotType: manifest.snapshotType,
+      includeAppData: manifest.includeAppData,
+      includeSettings: manifest.includeSettings,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    restoreOverrides = {
+      snapshotType: "adb",
+      restoreMode: "settings_only",
+      restoreNote: "VM state was not restored; only captured Android settings were applied.",
+    };
+
+    const tool = ToolRegistry.getTool("deviceSnapshot");
+    const response = await tool!.deviceAwareHandler!(device, {
+      action: "restore",
+      snapshotName: manifest.snapshotName,
+    });
+    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
+
+    expect(payload.snapshotType).toBe("adb");
+    expect(payload.restoreMode).toBe("settings_only");
+    expect(payload.restoreNote).toContain("VM state was not restored");
   });
 
   test("reports a partial restore and its failed items", async () => {

@@ -94,6 +94,8 @@ export function registerSnapshotTools() {
             : `Snapshot '${args.snapshotName}' partially restored: ${failures.length} item(s) failed`,
           snapshotName: args.snapshotName,
           snapshotType: result.snapshotType,
+          restoreMode: result.restoreMode,
+          restoreNote: result.restoreNote,
           restoredAt: result.restoredAt,
           success,
           failures,

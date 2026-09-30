@@ -462,6 +462,77 @@ describe("deviceSnapshotManager", () => {
     expect(updated?.lastAccessedAt).toBe(nowIso);
   });
 
+  test("restoreDeviceSnapshot rejects a snapshot owned by another device", async () => {
+    const timestamp = new Date(0).toISOString();
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "foreign-snapshot",
+      timestamp,
+      deviceId: "other-device",
+      deviceName: "Other Device",
+      platform: "android",
+      snapshotType: "adb",
+      includeAppData: false,
+      includeSettings: true,
+    };
+    await repository.insertSnapshot({
+      snapshotName: manifest.snapshotName,
+      deviceId: manifest.deviceId,
+      deviceName: manifest.deviceName,
+      platform: manifest.platform,
+      snapshotType: manifest.snapshotType,
+      includeAppData: manifest.includeAppData,
+      includeSettings: manifest.includeSettings,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+
+    await expect(
+      restoreDeviceSnapshot(TEST_DEVICE, { snapshotName: manifest.snapshotName }),
+    ).rejects.toThrow(
+      /belongs to android device 'Other Device' \(other-device\).*capture a snapshot/i,
+    );
+    expect(restoreCalls).toEqual([]);
+  });
+
+  test("restoreDeviceSnapshot accepts an emulator using the same AVD name", async () => {
+    const timestamp = new Date(0).toISOString();
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "avd-snapshot",
+      timestamp,
+      deviceId: "emulator-5554",
+      deviceName: "Pixel_7",
+      platform: "android",
+      snapshotType: "adb",
+      includeAppData: false,
+      includeSettings: true,
+    };
+    await repository.insertSnapshot({
+      snapshotName: manifest.snapshotName,
+      deviceId: manifest.deviceId,
+      deviceName: manifest.deviceName,
+      platform: manifest.platform,
+      snapshotType: manifest.snapshotType,
+      includeAppData: manifest.includeAppData,
+      includeSettings: manifest.includeSettings,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    const restartedEmulator: BootedDevice = {
+      deviceId: "emulator-5556",
+      name: "Pixel_7",
+      platform: "android",
+    };
+
+    await restoreDeviceSnapshot(restartedEmulator, { snapshotName: manifest.snapshotName });
+
+    expect(restoreCalls).toHaveLength(1);
+    expect(restoreCalls[0]?.manifest).toEqual(manifest);
+  });
+
   test("restoreDeviceSnapshot invalidates an Android VM device incarnation after restore", async () => {
     const vmDevice: BootedDevice = {
       ...TEST_DEVICE,
@@ -702,7 +773,8 @@ describe("deviceSnapshotManager", () => {
     const stored = await repository.getSnapshot("ios-settings-snapshot");
     expect(stored?.manifest.iosSettings).toEqual(manifest.iosSettings);
 
-    const { manifest: returnedManifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+    const iosDevice: BootedDevice = { ...TEST_DEVICE, platform: "ios" };
+    const { manifest: returnedManifest } = await restoreDeviceSnapshot(iosDevice, {
       snapshotName: "ios-settings-snapshot",
     });
 
@@ -1194,7 +1266,12 @@ describe("deviceSnapshotManager", () => {
         expect(await repository.getSnapshot(snapshotName)).toBeNull();
 
         // No listDeviceSnapshots() call first — restore must find it on its own.
-        const { result, manifest: returnedManifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+        const matchingAvd: BootedDevice = {
+          deviceId: "emulator-5556",
+          name: "Pixel_7",
+          platform: "android",
+        };
+        const { result, manifest: returnedManifest } = await restoreDeviceSnapshot(matchingAvd, {
           snapshotName,
         });
 
@@ -1234,7 +1311,12 @@ describe("deviceSnapshotManager", () => {
 
         expect(await repository.getSnapshot(snapshotName)).toBeNull();
 
-        const { result, manifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+        const matchingAvd: BootedDevice = {
+          deviceId: "emulator-5556",
+          name: "Pixel_7",
+          platform: "android",
+        };
+        const { result, manifest } = await restoreDeviceSnapshot(matchingAvd, {
           snapshotName,
         });
 

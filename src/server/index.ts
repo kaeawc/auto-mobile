@@ -1153,6 +1153,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         ? routingBaseSessionUuid
         : routingSessionUuid;
     const executionSessionId = requestMcpSessionId ?? sessionId;
+    const targetArgs = toolParams as Record<string, unknown>;
+    const untargetedDeviceCall =
+      tool.requiresDevice &&
+      !executionSessionUuid &&
+      !("deviceId" in targetArgs) &&
+      !("platform" in targetArgs) &&
+      !("device" in targetArgs) &&
+      !("sessionUuid" in targetArgs);
     let execution: ReturnType<typeof executionTracker.startExecution>;
     try {
       execution = executionTracker.startExecution(
@@ -1160,6 +1168,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         executionSessionId,
         executionSessionUuid,
         sessionId,
+        untargetedDeviceCall ? implicitAutolockMcpSessionId : undefined,
       );
     } catch (error) {
       if (error instanceof DaemonRestartPendingError) {
@@ -1186,6 +1195,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         resolvedImplicitAutolockSessionUuid,
       );
     }
+    let executionEnded = false;
+    const endExecutionOnce = (): void => {
+      if (!executionEnded) {
+        executionEnded = true;
+        executionTracker.endExecution(execution.id);
+      }
+    };
     const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
     const handlerParams =
       parsedParams && typeof parsedParams === "object"
@@ -1250,8 +1266,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         const unregister = ToolRegistry.registerSessionBindingReleaseHandler({ onSessionReleased });
         const unsubscribe = SessionReleaseBroadcaster.subscribe(onSessionReleased);
         cleanupAcquisitionRelease = () => {
-          unregister();
-          unsubscribe();
+          try {
+            unregister();
+          } finally {
+            unsubscribe();
+          }
         };
       }
       if (
@@ -1549,7 +1568,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         // Recovery drains cancelled executions before rebooting. This handler's
         // remaining work only enriches the response from that same recovery, so
         // stop tracking it first to avoid making recovery wait on itself.
-        executionTracker.endExecution(execution.id);
+        endExecutionOnce();
         const elapsedMs = Math.max(0, defaultTimer.now() - execution.startTime);
         const incidentWaitTimeoutMs = remainingDeviceLossIncidentWaitMs(
           requestTimeoutMs,
@@ -1566,8 +1585,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // protocol schema.
       return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
     } finally {
-      cleanupAcquisitionRelease?.();
-      executionTracker.endExecution(execution.id);
+      try {
+        cleanupAcquisitionRelease?.();
+      } finally {
+        endExecutionOnce();
+      }
     }
   };
   installToolCallDispatcher(server, {

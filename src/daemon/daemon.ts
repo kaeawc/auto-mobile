@@ -577,6 +577,10 @@ export class Daemon {
       idGenerator: this.idGenerator,
       deviceSessionContinuityEnabled: isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
     });
+    executionTracker.setAutolockSessionResolver({
+      autolockSessionForMcpSession: (mcpSessionId) =>
+        this.devicePool.captureAutolockSessionForMcpSession(mcpSessionId),
+    });
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(
       this.sessionManager,

@@ -229,6 +229,95 @@ describe("ExecutionTracker", function () {
     expect(tracker.hasActiveAutolockSessionExecutions("autolock-session")).toBe(false);
   });
 
+  test("cancels and drains an implicit call before its target resolves", async function () {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["implicit"]));
+    const autolockSessions = new Map([["mcp-session", "device-session"]]);
+    tracker.setAutolockSessionResolver({
+      autolockSessionForMcpSession: (mcpSessionId) => autolockSessions.get(mcpSessionId),
+    });
+    const execution = tracker.startExecution(
+      "tapOn",
+      "mcp-session",
+      undefined,
+      undefined,
+      "mcp-session",
+    );
+
+    expect(tracker.hasActiveAutolockSessionExecutions("device-session")).toBe(true);
+    autolockSessions.set("mcp-session", "replacement-session");
+    expect(tracker.hasActiveAutolockSessionExecutions("device-session")).toBe(true);
+    expect(tracker.hasActiveAutolockSessionExecutions("replacement-session")).toBe(false);
+    expect(
+      await tracker.cancelDeviceSessionExecutions(
+        "device-session",
+        "device-disconnected:emulator-5554",
+      ),
+    ).toBe(1);
+    expect(execution.abortController.signal.aborted).toBe(true);
+    expect(execution.cancelReason).toBeInstanceOf(DeviceLostError);
+
+    const drained = tracker.waitForDeviceSessionExecutionsToEnd("device-session", 1_000);
+    tracker.setResolvedAutolockSessionUuid(execution.id, "device-session");
+    tracker.setResolvedAutolockSessionUuid(execution.id, "device-session");
+    expect(tracker.hasActiveAutolockSessionExecutions("device-session")).toBe(true);
+    expect(tracker.hasActiveAutolockSessionExecutions("replacement-session")).toBe(false);
+
+    tracker.endExecution(execution.id);
+    await expect(drained).resolves.toBe(true);
+    expect(tracker.getActiveExecutionCount()).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("releases the pinned session when routing selects another session or none", async function () {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["different", "none"]),
+    );
+    tracker.setAutolockSessionResolver({ autolockSessionForMcpSession: () => "session-a" });
+    const different = tracker.startExecution("tapOn", "mcp", undefined, undefined, "mcp");
+    const none = tracker.startExecution("swipeOn", "mcp", undefined, undefined, "mcp");
+    const drainedA = tracker.waitForDeviceSessionExecutionsToEnd("session-a", 1_000);
+
+    tracker.setResolvedAutolockSessionUuid(different.id, "session-b");
+    tracker.setResolvedAutolockSessionUuid(none.id, undefined);
+
+    expect(tracker.hasActiveAutolockSessionExecutions("session-a")).toBe(false);
+    expect(tracker.hasActiveAutolockSessionExecutions("session-b")).toBe(true);
+    expect(await tracker.cancelDeviceSessionExecutions("session-a")).toBe(0);
+    expect(different.abortController.signal.aborted).toBe(false);
+    expect(none.abortController.signal.aborted).toBe(false);
+    await expect(drainedA).resolves.toBe(true);
+    await expect(tracker.waitForDeviceSessionExecutionsToEnd("session-a", 1_000)).resolves.toBe(
+      true,
+    );
+  });
+
+  test("an unresolved implicit call blocks drain and expiry until it ends", async function () {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["implicit"]));
+    tracker.setAutolockSessionResolver({
+      autolockSessionForMcpSession: (mcpSessionId) =>
+        mcpSessionId === "mcp-session" ? "device-session" : undefined,
+    });
+    const execution = tracker.startExecution(
+      "tapOn",
+      "mcp-session",
+      undefined,
+      undefined,
+      "mcp-session",
+    );
+    const drained = tracker.waitForDeviceSessionExecutionsToEnd("device-session", 1_000);
+
+    expect(tracker.hasActiveAutolockSessionExecutions("device-session")).toBe(true);
+    await timer.advanceTimeAsync(1_000);
+    await expect(drained).resolves.toBe(false);
+
+    tracker.endExecution(execution.id);
+    expect(tracker.hasActiveAutolockSessionExecutions("device-session")).toBe(false);
+    expect(tracker.getActiveExecutionCount()).toBe(0);
+  });
+
   test("cancels explicit and implicit work for one device session", async function () {
     const tracker = new ExecutionTracker(
       new FakeTimer(),

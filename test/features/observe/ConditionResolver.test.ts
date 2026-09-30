@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { appear, disappear, countStable } from "../../../src/features/observe/ConditionPredicates";
+import { appear, disappear } from "../../../src/features/observe/ConditionPredicates";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import type { ObserveResult } from "../../../src/models";
 
@@ -9,12 +9,25 @@ const observation = (...nodes: object[]): ObserveResult =>
     viewHierarchy: { hierarchy: { node: nodes.map((node) => ({ bounds, ...node })) } },
   }) as ObserveResult;
 
-test("positive waits keep exact text matching across later polls", () => {
-  const predicate = countStable(new ElementResolver(), { text: "Account" });
-  expect(predicate(observation({ text: "Account settings" })).matched).toBe(false);
-  const next = predicate(observation({ text: "Account settings" }, { text: "Account" }));
-  expect(next.candidates).toHaveLength(1);
-  expect(next.matched).toBe(false);
+test("positive waits lock contains mode when the first poll falls back from exact", () => {
+  const modes: Array<string | undefined> = [];
+  const elementResolver = new ElementResolver();
+  const resolver = {
+    resolve: (
+      snapshot: Parameters<ElementResolver["resolve"]>[0],
+      selector: Parameters<ElementResolver["resolve"]>[1],
+      intent: Parameters<ElementResolver["resolve"]>[2],
+    ) => {
+      modes.push(intent.matchMode);
+      return elementResolver.resolve(snapshot, selector, intent);
+    },
+  };
+  const predicate = appear(resolver, { text: "Account" });
+  expect(predicate(observation({ text: "Account settings" })).matched).toBe(true);
+  expect(predicate(observation({ text: "Account settings" }, { text: "Account" })).matched).toBe(
+    true,
+  );
+  expect(modes).toEqual([undefined, "contains"]);
 });
 
 test("exact-first wait does not switch to contains if the exact label later disappears", () => {

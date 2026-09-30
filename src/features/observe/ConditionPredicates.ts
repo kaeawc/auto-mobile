@@ -23,7 +23,7 @@ function searchForWait(
   intent: ResolutionIntent,
 ) {
   const projection = new SearchableHierarchy();
-  let matchMode: MatchMode | undefined = intent.matchMode ?? "exact";
+  let matchMode: MatchMode | undefined = intent.matchMode;
   return (observation: ObserveResult): ElementResolution | undefined => {
     if (!observation.viewHierarchy) {
       return undefined;
@@ -194,7 +194,7 @@ export function clickable(
   resolver: ConditionResolver,
   selector: ConditionSelector,
 ): ConditionPredicate {
-  const search = searchForWait(resolver, selector, { action: "inspect" });
+  const search = searchForWait(resolver, selector, { action: "inspect", matchMode: "exact" });
   return (observation): ConditionEvaluation => {
     const result = search(observation);
     const source = result?.matches.find(({ node }) => node === result.chosen)?.sourceNodes?.[0];
@@ -277,7 +277,7 @@ export function countStable(
   selector: ConditionSelector,
   options: CountStableOptions = {},
 ): ConditionPredicate {
-  const search = searchForWait(resolver, selector, { action: "inspect" });
+  const search = searchForWait(resolver, selector, { action: "inspect", matchMode: "exact" });
   const stableReads = options.stableReads ?? 2;
   let previousCount: number | undefined;
   let equalRun = 0;

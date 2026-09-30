@@ -163,12 +163,27 @@ test("appear retains partial ID candidates for an exact ID miss", () => {
   );
 });
 
-test("declarative text predicates keep exact matching", () => {
+test("positive text appearance falls back to contains after exact matching", () => {
   const observation = obs([node({ text: "Submit now", clickable: true })]);
-  expect(appear(new ElementResolver(), { text: "Submit" })(observation).matched).toBe(false);
+  expect(appear(new ElementResolver(), { text: "Submit" })(observation).matched).toBe(true);
   expect(clickable(new ElementResolver(), { text: "Submit" })(observation).matched).toBe(false);
   const stable = countStable(new ElementResolver(), { text: "Submit" });
   expect(stable(observation).candidates).toEqual([]);
+});
+
+test("positive text appearance prefers an exact node when it exists", () => {
+  const evaluation = appear(new ElementResolver(), { text: "Account" })(
+    obs([node({ text: "Account settings" }), node({ text: "Account" })]),
+  );
+  expect(evaluation.matched).toBe(true);
+  expect(evaluation.matchedElement?.text).toBe("Account");
+});
+
+test("disappear does not treat a substring as a matching text node", () => {
+  expect(
+    disappear(new ElementResolver(), { text: "Account" })(obs([node({ text: "Account settings" })]))
+      .matched,
+  ).toBe(true);
 });
 
 test("text containers retain contains matching ahead of a later exact peer", () => {

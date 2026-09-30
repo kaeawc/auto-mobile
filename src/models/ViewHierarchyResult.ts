@@ -34,6 +34,8 @@ export type CtrlProxyIncompleteReason = "null_root" | "discarded_windows" | "ext
  * Represents the ViewHierarchy dump result from a device.
  */
 export interface ViewHierarchyResult {
+  displayId?: number | null;
+  panelUniqueId?: string | null;
   /** Daemon-assigned sequence if this exact hierarchy was forwarded to the observation stream. */
   captureSequence?: number;
   hierarchy: Hierarchy;
@@ -174,6 +176,8 @@ export type HierarchyUnavailableReason =
   | "incomplete_capture";
 
 export interface ViewHierarchyWindowInfo {
+  displayId?: number | null;
+  panelUniqueId?: string | null;
   id?: number;
   type?: number;
   isActive?: boolean;
@@ -190,6 +194,8 @@ export interface NodeAttributes {
 }
 
 export interface ViewHierarchyNode {
+  displayId?: number | null;
+  panelUniqueId?: string | null;
   $?: NodeAttributes;
   node?: ViewHierarchyNode[];
   /**

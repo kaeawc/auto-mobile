@@ -86,8 +86,29 @@ internal fun pinchResultFrame(
     if (error != null) put("error", error)
   }
 
-internal fun screenshotErrorFrame(requestId: String?, error: String): String =
-  resultFrame("screenshot_error", requestId) { put("error", error) }
+internal fun screenshotErrorFrame(
+  requestId: String?,
+  error: String,
+  displayId: Int? = null,
+  panelUniqueId: String? = null,
+): String =
+  resultFrame("screenshot_error", requestId) {
+    put("error", error)
+    if (displayId != null) put("displayId", displayId)
+    if (panelUniqueId != null) put("panelUniqueId", panelUniqueId)
+  }
+
+internal fun displayTransitionFrame(transition: DisplayTransition): String =
+  resultFrame("display_transition", null) {
+    put("change", transition.change)
+    put("displayId", transition.displayId)
+    if (transition.panelUniqueId != null) put("panelUniqueId", transition.panelUniqueId)
+    if (transition.width != null) put("width", transition.width)
+    if (transition.height != null) put("height", transition.height)
+    if (transition.state != null) put("state", transition.state)
+    if (transition.rotation != null) put("rotation", transition.rotation)
+    if (transition.deviceState != null) put("deviceState", transition.deviceState)
+  }
 
 internal fun currentFocusErrorFrame(
   requestId: String?,

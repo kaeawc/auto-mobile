@@ -281,11 +281,66 @@ interface WsScreenshotMessage extends WsMessageBase, ScreenshotPerformanceMetada
   format?: string;
   frameContext?: string;
   rotation?: number;
+  displayId?: number | null;
+  panelUniqueId?: string | null;
+}
+
+export interface AndroidDisplayTransition {
+  change: "added" | "changed" | "removed" | "device_state";
+  displayId: number;
+  panelUniqueId?: string;
+  width?: number;
+  height?: number;
+  state?: number;
+  rotation?: number;
+  deviceState?: number;
+}
+
+interface WsDisplayTransitionMessage extends WsMessageBase, AndroidDisplayTransition {
+  type: "display_transition";
+}
+
+export function displayTransitionFromWire(value: unknown): AndroidDisplayTransition | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const event = value as Record<string, unknown>;
+  if (
+    !["added", "changed", "removed", "device_state"].includes(String(event.change)) ||
+    !Number.isInteger(event.displayId)
+  ) {
+    return null;
+  }
+  const result: AndroidDisplayTransition = {
+    change: event.change as AndroidDisplayTransition["change"],
+    displayId: event.displayId as number,
+  };
+  if (typeof event.panelUniqueId === "string") {
+    result.panelUniqueId = event.panelUniqueId;
+  }
+  if (typeof event.width === "number") {
+    result.width = event.width;
+  }
+  if (typeof event.height === "number") {
+    result.height = event.height;
+  }
+  if (typeof event.state === "number") {
+    result.state = event.state;
+  }
+  if (Number.isInteger(event.rotation)) {
+    result.rotation = event.rotation as number;
+  }
+  if (typeof event.deviceState === "number") {
+    result.deviceState = event.deviceState;
+  }
+  return result;
 }
 
 interface WsScreenshotErrorMessage extends WsMessageBase {
   type: "screenshot_error";
   requestId: string;
+  displayId?: number | null;
+  panelUniqueId?: string | null;
 }
 
 function screenshotPerformanceMetadataFrom(
@@ -832,6 +887,7 @@ type WebSocketMessage =
   | WsConnectedMessage
   | WsHierarchyUpdateMessage
   | WsScreenshotMessage
+  | WsDisplayTransitionMessage
   | WsScreenshotErrorMessage
   | WsErrorMessage
   | WsSwipeResultMessage
@@ -1312,6 +1368,8 @@ const defaultAndroidServiceManagerFactory: AndroidServiceManagerFactory = (devic
 const CTRL_PROXY_CLIENT_PURPOSE = "to drive the device through CtrlProxy";
 
 export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
+  /** Optional observer for display and posture changes. */
+  onDisplayTransition?: (event: AndroidDisplayTransition) => void;
   private readonly streamedCaptureSequences = new WeakMap<object, number>();
   private static readonly DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS = 250;
 
@@ -3768,6 +3826,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private async dispatchScreenshotRequest(
     sentRequestId: string,
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<void> {
     if (signal?.aborted) {
       // Settle the registration we just made so it neither waits out its
@@ -3779,7 +3838,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       throw new Error("WebSocket not connected");
     }
     const message = serializeCtrlProxyRequest(
-      ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId }),
+      ctrlProxyRequests.requestScreenshot({ requestId: sentRequestId, displayId }),
     );
     // Shared rate-limit floor accounting (issue #4927): a one-shot screenshot (observe /
     // junit-runner) and the observation-stream scheduler both hit the same rate-limited
@@ -3829,6 +3888,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     suppressObservationStreamPush: boolean = false,
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     let suppressedRequestId: string | undefined;
@@ -3864,7 +3924,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         }),
       );
 
-      await perf.track("sendRequest", () => this.dispatchScreenshotRequest(sentRequestId, signal));
+      await perf.track("sendRequest", () =>
+        this.dispatchScreenshotRequest(sentRequestId, signal, displayId),
+      );
 
       removeAbortListener = this.registerPostDispatchAbort(sentRequestId, signal);
 
@@ -4448,6 +4510,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
     },
 
+    display_transition: (message) => {
+      const event = displayTransitionFromWire(message);
+      if (event) {
+        this.onDisplayTransition?.(event);
+      }
+    },
+
     screenshot: (message) => {
       if (message.requestId) {
         const cancelledAfterDispatch = this.lateCancelledScreenshotRequestIds.delete(
@@ -4486,6 +4555,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           timestamp: message.timestamp,
           frameContext: message.frameContext,
           rotation: message.rotation,
+          displayId: message.displayId,
+          panelUniqueId: message.panelUniqueId,
           ...screenshotPerformanceMetadataFrom(message),
         });
       }
@@ -4500,6 +4571,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.requestManager.resolve<ScreenshotResult>(message.requestId, {
           success: false,
           error: message.error || "Unknown error",
+          displayId: message.displayId,
+          panelUniqueId: message.panelUniqueId,
         });
       }
     },

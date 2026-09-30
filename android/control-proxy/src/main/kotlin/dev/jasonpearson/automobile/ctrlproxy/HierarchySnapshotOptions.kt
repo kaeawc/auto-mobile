@@ -9,6 +9,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 data class HierarchySnapshotOptions(
   val maxDepth: Int = 100,
   val maxNodes: Int = 10_000,
+  val displayId: Int? = null,
   val isCancelled: () -> Boolean = { false },
 ) {
   init {

@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.models
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -8,6 +10,7 @@ import kotlinx.serialization.Serializable
  * framework
  */
 @Serializable
+@OptIn(ExperimentalSerializationApi::class)
 data class ViewHierarchy
 @JvmOverloads
 constructor(
@@ -15,6 +18,8 @@ constructor(
   val packageName: String? = null,
   /** Android user that owns the accessibility service that captured this hierarchy. */
   val userId: Int? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val displayId: Int? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val panelUniqueId: String? = null,
   val hierarchy: UIElementInfo? = null,
   val windowInfo: WindowInfo? = null,
   val windows: List<WindowInfo>? = null,

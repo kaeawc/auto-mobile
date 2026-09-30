@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import {
+  AndroidCtrlProxyClient,
+  type AndroidDisplayTransition,
+} from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import type {
   AndroidSdkEventIngestor,
   AndroidSdkEventPayload,
@@ -13,6 +16,8 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 interface DispatchTestClient {
+  onDisplayTransition?: (event: AndroidDisplayTransition) => void;
+  cachedHierarchy?: { hierarchy: { displayId?: number; panelUniqueId?: string } };
   handleWebSocketMessage(data: string): Promise<void>;
   webSocketMessageHandlers: Record<string, unknown>;
   requestManager: RequestManager;
@@ -61,7 +66,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   test("has an own handler for every typed wire variant", () => {
     // The `satisfies WebSocketMessageHandlers` clause is the union-wide compile-time check.
     // There is no separate runtime list of the union's string literals.
-    expect(Object.keys(client.webSocketMessageHandlers)).toHaveLength(55);
+    expect(Object.keys(client.webSocketMessageHandlers)).toHaveLength(56);
     expect(Object.hasOwn(client.webSocketMessageHandlers, "custom_event")).toBe(false);
     for (const type of [
       "network_event",
@@ -72,6 +77,69 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     ]) {
       expect(Object.hasOwn(client.webSocketMessageHandlers, type)).toBe(true);
     }
+  });
+
+  test("parses a display transition without changing observation state", async () => {
+    const received: AndroidDisplayTransition[] = [];
+    client.onDisplayTransition = (event) => received.push(event);
+    await client.handleWebSocketMessage(
+      JSON.stringify({
+        type: "display_transition",
+        change: "changed",
+        displayId: 3,
+        panelUniqueId: "local:cover",
+        width: 1080,
+        height: 2520,
+        state: 2,
+        rotation: 1,
+      }),
+    );
+    await client.handleWebSocketMessage('{"type":"display_transition","change":"changed"}');
+    expect(received).toEqual([
+      {
+        change: "changed",
+        displayId: 3,
+        panelUniqueId: "local:cover",
+        width: 1080,
+        height: 2520,
+        state: 2,
+        rotation: 1,
+      },
+    ]);
+  });
+
+  test("retains optional display identity on hierarchy and screenshot responses", async () => {
+    await client.handleWebSocketMessage(
+      JSON.stringify({
+        type: "hierarchy_update",
+        data: {
+          updatedAt: 10,
+          packageName: "example.app",
+          displayId: 5,
+          panelUniqueId: "panel-rear",
+        },
+      }),
+    );
+    expect(client.cachedHierarchy?.hierarchy.displayId).toBe(5);
+    expect(client.cachedHierarchy?.hierarchy.panelUniqueId).toBe("panel-rear");
+
+    const pending = client.requestManager.register("shot-display", "screenshot", 1000, () => ({
+      success: false,
+    }));
+    await client.handleWebSocketMessage(
+      JSON.stringify({
+        type: "screenshot",
+        requestId: "shot-display",
+        data: "AA==",
+        displayId: 5,
+        panelUniqueId: "panel-rear",
+      }),
+    );
+    expect(await pending).toMatchObject({
+      success: true,
+      displayId: 5,
+      panelUniqueId: "panel-rear",
+    });
   });
 
   test("resolves a pending settings response through the shared helper", async () => {

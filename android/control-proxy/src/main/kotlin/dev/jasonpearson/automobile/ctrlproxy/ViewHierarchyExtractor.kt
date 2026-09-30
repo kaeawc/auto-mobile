@@ -1,10 +1,13 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.os.Build
 import android.text.Spanned
 import android.text.style.ClickableSpan
 import android.util.Log
+import android.util.SparseArray
+import android.view.Display
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion
@@ -28,6 +31,97 @@ internal constructor(
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
   internal val logOptimizationDecisions: Boolean = false,
 ) {
+
+  internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
+
+  internal fun selectDisplayWindows(
+    service: AccessibilityService,
+    requestedDisplayId: Int? = null,
+  ): DisplayWindows {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+      val id = requestedDisplayId ?: Display.DEFAULT_DISPLAY
+      return DisplayWindows(id, windowsForDisplay(service, id))
+    }
+    val all = service.windowsOnAllDisplays
+    val id = targetDisplayId(all, requestedDisplayId)
+    return DisplayWindows(id, windowsForDisplay(all, id))
+  }
+
+  /** The framework's all-display map is available from Android R onward. */
+  internal fun windowsForDisplay(
+    service: AccessibilityService,
+    displayId: Int,
+  ): List<AccessibilityWindowInfo> {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+      return if (displayId == Display.DEFAULT_DISPLAY) service.windows.orEmpty() else emptyList()
+    }
+    return windowsForDisplay(service.windowsOnAllDisplays, displayId)
+  }
+
+  internal fun windowsForDisplay(
+    windowsByDisplay: SparseArray<List<AccessibilityWindowInfo>>,
+    displayId: Int,
+  ): List<AccessibilityWindowInfo> {
+    val selected = windowsByDisplay[displayId].orEmpty()
+    if (displayId != Display.DEFAULT_DISPLAY || selected.none { it.isFocused || it.isActive }) {
+      return selected
+    }
+    val overlays =
+      (0 until windowsByDisplay.size()).flatMap { index ->
+        windowsByDisplay.valueAt(index).filter { window ->
+          window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD ||
+            window.root?.let { root ->
+              try {
+                root.packageName?.toString() == "com.android.systemui"
+              } finally {
+                root.recycle()
+              }
+            } == true
+        }
+      }
+    return (selected + overlays).distinctBy { it.id }
+  }
+
+  internal fun targetDisplayId(
+    windowsByDisplay: SparseArray<List<AccessibilityWindowInfo>>,
+    requestedDisplayId: Int? = null,
+  ): Int {
+    requestedDisplayId?.let {
+      return it
+    }
+    if (windowsByDisplay[Display.DEFAULT_DISPLAY].orEmpty().any { it.isFocused || it.isActive }) {
+      return Display.DEFAULT_DISPLAY
+    }
+    for (index in 0 until windowsByDisplay.size()) {
+      if (windowsByDisplay.valueAt(index).any { it.isFocused }) return windowsByDisplay.keyAt(index)
+    }
+    for (index in 0 until windowsByDisplay.size()) {
+      if (windowsByDisplay.valueAt(index).any { it.isActive }) return windowsByDisplay.keyAt(index)
+    }
+    return Display.DEFAULT_DISPLAY
+  }
+
+  internal fun rootForDisplay(
+    activeRoot: AccessibilityNodeInfo?,
+    windows: List<AccessibilityWindowInfo>,
+    displayId: Int,
+  ): AccessibilityNodeInfo? {
+    val rootWindow = activeRoot?.window
+    val belongsToTarget =
+      (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && rootWindow?.displayId == displayId) ||
+        windows.any {
+          it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.id == activeRoot?.windowId
+        } ||
+        (displayId == Display.DEFAULT_DISPLAY && windows.isEmpty() && rootWindow == null)
+    if (belongsToTarget) return activeRoot
+    return windows
+      .firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isFocused }
+      ?.root
+      ?: windows
+        .firstOrNull { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.isActive }
+        ?.root
+      ?: windows.firstOrNull { it.isFocused || it.isActive }?.root
+  }
 
   companion object {
     private const val TAG = "ViewHierarchyExtractor"
@@ -77,6 +171,8 @@ internal constructor(
     dedupeTextContentDesc: Boolean = true,
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
+    displayId: Int? = null,
+    panelUniqueId: String? = null,
   ): ViewHierarchy? {
     if (rootNode == null) {
       Log.w(TAG, "Root node is null")
@@ -126,7 +222,11 @@ internal constructor(
         detectNotificationPermissionDialog(it, rootNode.packageName?.toString())
       }
 
-      val unifiedHierarchy = processedElement?.let { UIElementInfo(children = listOf(it)) }
+      val unifiedHierarchy = processedElement?.let {
+        UIElementInfo(
+          children = listOf(it.copy(displayId = displayId, panelUniqueId = panelUniqueId))
+        )
+      }
 
       // Find the accessibility-focused element in the unified hierarchy
       val accessibilityFocusedElement = unifiedHierarchy?.let {
@@ -177,6 +277,8 @@ internal constructor(
     disableAllFiltering: Boolean = false,
     occlusionEnabled: Boolean = true,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
+    displayId: Int? = null,
+    panelUniqueId: String? = null,
   ): ViewHierarchy {
     if (windows.isEmpty() && activeWindowRoot == null) {
       Log.w(TAG, "No windows available for extraction")
@@ -286,6 +388,11 @@ internal constructor(
           windowInfos.add(
             WindowInfo(
               id = window.id,
+              displayId =
+                displayId
+                  ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.displayId
+                  else Display.DEFAULT_DISPLAY,
+              panelUniqueId = panelUniqueId,
               type = window.type,
               windowLayer = windowLayer,
               isActive = window.isActive,
@@ -412,6 +519,8 @@ internal constructor(
             windowInfos.add(
               WindowInfo(
                 id = fallbackWindowId,
+                displayId = displayId,
+                panelUniqueId = panelUniqueId,
                 type = AccessibilityWindowInfo.TYPE_APPLICATION,
                 windowLayer = activeWindowLayer,
                 isActive = true,
@@ -494,11 +603,17 @@ internal constructor(
             if (it.windowType == "input_method" && !it.packageName.isNullOrBlank()) {
               it.hierarchy.copy(
                 windowId = it.windowId,
+                displayId = windowInfos.firstOrNull { info -> info.id == it.windowId }?.displayId,
+                panelUniqueId = panelUniqueId,
                 extras =
                   it.hierarchy.extras.orEmpty() + ("automobile:imePackage" to it.packageName),
               )
             } else {
-              it.hierarchy.copy(windowId = it.windowId)
+              it.hierarchy.copy(
+                windowId = it.windowId,
+                displayId = windowInfos.firstOrNull { info -> info.id == it.windowId }?.displayId,
+                panelUniqueId = panelUniqueId,
+              )
             }
           }
       val unifiedHierarchy =

@@ -10,6 +10,106 @@ import org.junit.Test
 
 class RotationProvenanceTrackerTest {
 
+  interface TestStateCallback {
+    fun onStateChanged(state: Int)
+  }
+
+  @Test
+  fun `device state proxy has identity semantics and ignores the initial state`() {
+    val states = mutableListOf<Int>()
+    val callback =
+      DeviceStateTransitions.callback(TestStateCallback::class.java) { states += it }
+        as TestStateCallback
+    assertTrue(callback == callback)
+    assertFalse(callback == Any())
+    assertEquals(System.identityHashCode(callback), callback.hashCode())
+    assertTrue(callback.toString().startsWith("DeviceStateCallback@"))
+
+    callback.onStateChanged(0)
+    callback.onStateChanged(0)
+    assertTrue(states.isEmpty())
+    callback.onStateChanged(1)
+    assertEquals(listOf(1), states)
+  }
+
+  @Test
+  fun `unchanged phone state leaves its first capture proven`() {
+    val changes = FakeRotationChangeSignal()
+    val provenance = RotationProvenanceTracker(changes)
+    val frames = mutableListOf<Int>()
+    val observer = DeviceStateTransitions.StateObserver {
+      frames += it
+      changes.emitRotationChanged(0)
+    }
+    val capture = provenance.beginCapture()
+    observer.accept(0)
+    observer.accept(0)
+    assertTrue(frames.isEmpty())
+    assertEquals(0, provenance.rotationIfUnchanged(capture, 0, 0))
+  }
+
+  @Test
+  fun `identical display callbacks are ignored and a size burst emits once`() {
+    val frames = mutableListOf<DisplayTransition>()
+    val scheduled = mutableListOf<Runnable>()
+    var width = 1080
+    val signal =
+      DisplayRotationChangeSignal(
+        null,
+        onTransition = { frames += it },
+        snapshotOverride = { id, change ->
+          DisplayTransition(change, id, "panel", width, 2400, 2, rotation = 0)
+        },
+        scheduleTransition = { action, delay ->
+          assertEquals(100L, delay)
+          scheduled += action
+        },
+      )
+    signal.handleDisplayCallback("added", 0)
+    scheduled.removeAt(0).run()
+    frames.clear()
+    repeat(3) { signal.handleDisplayCallback("changed", 0) }
+    assertTrue(frames.isEmpty())
+    assertTrue(scheduled.isEmpty())
+    width = 1200
+    signal.handleDisplayCallback("changed", 0)
+    width = 1300
+    signal.handleDisplayCallback("changed", 0)
+    assertEquals(1, scheduled.size)
+    scheduled.removeAt(0).run()
+    assertEquals(1, frames.size)
+    assertEquals(1300, frames.single().width)
+    assertEquals(0, frames.single().rotation)
+  }
+
+  @Test
+  fun `non-default display callbacks emit typed transition frames`() {
+    val frames = mutableListOf<String>()
+    var width = 1080
+    val signal =
+      DisplayRotationChangeSignal(
+        null,
+        onTransition = { frames += displayTransitionFrame(it) },
+        snapshotOverride = { displayId, change ->
+          DisplayTransition(change, displayId, "panel-rear", width, 2520, 2)
+        },
+      )
+    signal.handleDisplayCallback("added", 4)
+    width = 1200
+    signal.handleDisplayCallback("changed", 4)
+    signal.handleDisplayCallback("removed", 4)
+
+    assertEquals(3, frames.size)
+    assertTrue(frames[0].contains("\"change\":\"added\""))
+    assertTrue(frames[1].contains("\"change\":\"changed\""))
+    assertTrue(frames[2].contains("\"change\":\"removed\""))
+    frames.forEach { frame ->
+      assertTrue(frame.contains("\"type\":\"display_transition\""))
+      assertTrue(frame.contains("\"displayId\":4"))
+      assertTrue(frame.contains("\"panelUniqueId\":\"panel-rear\""))
+    }
+  }
+
   @Test
   fun `queued A to B to A display changes make the capture rotation unproven`() {
     val changes = FakeRotationChangeSignal()
@@ -44,6 +144,19 @@ class RotationProvenanceTrackerTest {
         rotationAtCaptureEnd = 1,
       ),
     )
+  }
+
+  @Test
+  fun `a secondary display change does not invalidate the default display capture`() {
+    val changes = FakeRotationChangeSignal()
+    val provenance = RotationProvenanceTracker(changes)
+    val defaultCapture = provenance.beginCapture(0)
+    val secondaryCapture = provenance.beginCapture(4)
+
+    changes.emitRotationChanged(1, displayId = 4)
+
+    assertEquals(0, provenance.rotationIfUnchanged(defaultCapture, 0, 0, displayId = 0))
+    assertNull(provenance.rotationIfUnchanged(secondaryCapture, 0, 0, displayId = 4))
   }
 
   @Test
@@ -104,7 +217,7 @@ class RotationProvenanceTrackerTest {
       val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
       assertTrue(
         "$route must capture the display-change generation before acquiring capture inputs",
-        "rotationProvenance.beginCapture()" in body,
+        "rotationProvenance.beginCapture(targetDisplayId)" in body,
       )
       assertTrue(
         "$route must retain rotation only when the display-change generation is stable",
@@ -121,9 +234,20 @@ class RotationProvenanceTrackerTest {
     }
   }
 
+  @Test
+  fun `screenshot capture passes the requested display to the platform`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
+    val start = source.indexOf("private suspend fun takeScreenshotAsync")
+    assertTrue(start >= 0)
+    val bodyOpen = source.indexOf('{', start)
+    val body = source.substring(bodyOpen, KotlinSourceScan.matchBrace(source, bodyOpen))
+    assertTrue(body.contains("takeScreenshot(\n              targetDisplayId,"))
+    assertFalse(body.contains("takeScreenshot(\n              Display.DEFAULT_DISPLAY,"))
+  }
+
   private class FakeRotationChangeSignal(private val synchronizeResult: Boolean = true) :
     RotationChangeSignal {
-    private var listener: (() -> Unit)? = null
+    private var listener: ((Int) -> Unit)? = null
     private val pendingListeners = mutableListOf<() -> Unit>()
     var rotation: Int = 0
       private set
@@ -134,7 +258,7 @@ class RotationProvenanceTrackerTest {
     val pendingChangeCount: Int
       get() = pendingListeners.size
 
-    override fun register(listener: () -> Unit): Boolean {
+    override fun register(listener: (Int) -> Unit): Boolean {
       this.listener = listener
       return true
     }
@@ -152,9 +276,9 @@ class RotationProvenanceTrackerTest {
       pendingListeners.clear()
     }
 
-    fun emitRotationChanged(rotation: Int) {
+    fun emitRotationChanged(rotation: Int, displayId: Int = 0) {
       this.rotation = rotation
-      pendingListeners += requireNotNull(listener)
+      pendingListeners += { requireNotNull(listener)(displayId) }
     }
   }
 

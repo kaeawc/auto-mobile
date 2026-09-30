@@ -42,6 +42,7 @@ import type { SettingsNamespace, SettingsValueType } from "./types";
 export interface RequestHierarchyMessage {
   type: "request_hierarchy";
   requestId: string;
+  displayId?: number;
   disableAllFiltering: boolean;
   maxDepth?: number;
   maxNodes?: number;
@@ -71,6 +72,7 @@ export interface SetHierarchyIntervalMessage {
 export interface RequestScreenshotMessage {
   type: "request_screenshot";
   requestId: string;
+  displayId?: number;
 }
 
 // =============================================================================
@@ -790,6 +792,7 @@ export function serializeCtrlProxyRequest(request: CtrlProxyRequest): string {
 export const ctrlProxyRequests = {
   requestHierarchy(args: {
     requestId: string;
+    displayId?: number;
     disableAllFiltering: boolean;
     maxDepth?: number;
     maxNodes?: number;
@@ -797,6 +800,7 @@ export const ctrlProxyRequests = {
     return {
       type: "request_hierarchy",
       requestId: args.requestId,
+      ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       disableAllFiltering: args.disableAllFiltering,
       maxDepth: args.maxDepth,
       maxNodes: args.maxNodes,
@@ -818,8 +822,12 @@ export const ctrlProxyRequests = {
     return { type: "set_hierarchy_interval", intervalMs: args.intervalMs };
   },
 
-  requestScreenshot(args: { requestId: string }): RequestScreenshotMessage {
-    return { type: "request_screenshot", requestId: args.requestId };
+  requestScreenshot(args: { requestId: string; displayId?: number }): RequestScreenshotMessage {
+    return {
+      type: "request_screenshot",
+      requestId: args.requestId,
+      ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
+    };
   },
 
   requestAction(args: {

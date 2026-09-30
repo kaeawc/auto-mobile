@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.graphics.Rect
 import android.text.SpannableString
 import android.text.style.ClickableSpan
+import android.util.SparseArray
 import android.view.View
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
@@ -24,6 +25,81 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class ViewHierarchyExtractorTest {
+
+  @Test
+  fun `window extraction selects only the requested display roots`() {
+    val inner =
+      fakeWindow(201, 0, fakeNode(packageName = "app.inner", text = "Inner"), focused = true)
+    val cover = fakeWindow(202, 0, fakeNode(packageName = "app.cover", text = "Cover"))
+    val all =
+      SparseArray<List<AccessibilityWindowInfo>>().apply {
+        put(0, listOf(inner))
+        put(2, listOf(cover))
+      }
+
+    assertEquals(0, extractor.targetDisplayId(all))
+    assertEquals(2, extractor.targetDisplayId(all, requestedDisplayId = 2))
+    val selected = extractor.windowsForDisplay(all, 2)
+    val hierarchy =
+      extractor.extractFromAllWindows(
+        selected,
+        null,
+        disableAllFiltering = true,
+        displayId = 2,
+        panelUniqueId = "panel-cover",
+      )
+    val serialized = json.encodeToString(ViewHierarchy.serializer(), hierarchy)
+    assertTrue(serialized.contains("Cover"))
+    assertFalse(serialized.contains("Inner"))
+    assertEquals(2, hierarchy.windows?.single()?.displayId)
+    assertEquals("panel-cover", hierarchy.windows?.single()?.panelUniqueId)
+  }
+
+  @Test
+  fun `active default display wins over focused virtual display`() {
+    val phone = fakeWindow(1, 0, fakeNode(packageName = "phone", text = "Phone"), active = true)
+    val virtual = fakeWindow(2, 0, fakeNode(packageName = "virtual"), focused = true)
+    val all =
+      SparseArray<List<AccessibilityWindowInfo>>().apply {
+        put(0, listOf(phone))
+        put(2, listOf(virtual))
+      }
+    assertEquals(0, extractor.targetDisplayId(all))
+    assertEquals("Phone", extractor.rootForDisplay(virtual.root, listOf(phone), 0)?.text)
+  }
+
+  @Test
+  fun `phone window selection includes IME from either display bucket`() {
+    val phone = fakeWindow(1, 0, fakeNode(packageName = "phone"), focused = true)
+    val localIme =
+      fakeWindow(
+        2,
+        1,
+        fakeNode(packageName = "ime"),
+        type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+      )
+    val shiftedIme =
+      fakeWindow(
+        3,
+        1,
+        fakeNode(packageName = "ime"),
+        type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+      )
+    val systemUi =
+      fakeWindow(
+        4,
+        2,
+        fakeNode(packageName = "com.android.systemui"),
+        type = AccessibilityWindowInfo.TYPE_SYSTEM,
+      )
+    val all =
+      SparseArray<List<AccessibilityWindowInfo>>().apply {
+        put(0, listOf(phone, localIme))
+        put(2, listOf(shiftedIme, systemUi))
+      }
+    assertEquals(listOf(1, 2, 3, 4), extractor.windowsForDisplay(all, 0).map { it.id })
+    assertEquals(listOf(3, 4), extractor.windowsForDisplay(all, 2).map { it.id })
+  }
 
   private lateinit var extractor: ViewHierarchyExtractor
   private val json = Json { ignoreUnknownKeys = true }

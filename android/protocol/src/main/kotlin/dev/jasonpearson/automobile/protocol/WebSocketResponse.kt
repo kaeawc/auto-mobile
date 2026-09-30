@@ -304,6 +304,8 @@ data class AnrData(
 data class ScreenshotResult(
   override val timestamp: Long,
   val requestId: String? = null,
+  val displayId: Int? = null,
+  val panelUniqueId: String? = null,
   val data: String, // Base64 encoded image
   val format: String = "jpeg",
   val width: Int? = null,

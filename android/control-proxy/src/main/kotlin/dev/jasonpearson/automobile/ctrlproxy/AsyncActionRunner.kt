@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
+import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.coroutines.CoroutineScope
@@ -62,17 +64,19 @@ class AsyncActionRunner(
     // with
     // the correlation id attached, letting the scope-level [ServiceScopeGuard] emit a *correlated*
     // error frame instead of a null-id one. The common `Exception` case is handled by the reporter.
-    scope.launch(RequestIdContext(requestId)) {
-      val launchScope = this
-      reporter.guarding(
-        requestId = requestId,
-        failureLogMessage = { "Async action '$action' failed (requestId=$requestId)" },
-        errorMessagePrefix = { "Action '$action' failed" },
-        doubleFailureLogMessage = {
-          "Failed to broadcast async error for action '$action' (requestId=$requestId)"
-        },
-      ) {
-        block(launchScope)
+    scope.launch(RequestIdContext(requestId) + PerfRequestContext(requestId)) {
+      PerfProvider.instance.withRequestScope(requestId) {
+        val launchScope = this
+        reporter.guarding(
+          requestId = requestId,
+          failureLogMessage = { "Async action '$action' failed (requestId=$requestId)" },
+          errorMessagePrefix = { "Action '$action' failed" },
+          doubleFailureLogMessage = {
+            "Failed to broadcast async error for action '$action' (requestId=$requestId)"
+          },
+        ) {
+          block(launchScope)
+        }
       }
     }
 

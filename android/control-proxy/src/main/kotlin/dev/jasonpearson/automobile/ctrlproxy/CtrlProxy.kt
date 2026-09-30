@@ -50,6 +50,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
+import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
@@ -610,7 +611,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private fun launchRequestScope(
     requestId: String?,
     block: suspend CoroutineScope.() -> Unit,
-  ): Job = serviceScope.launch(context = RequestIdContext(requestId), block = block)
+  ): Job =
+    serviceScope.launch(context = RequestIdContext(requestId) + PerfRequestContext(requestId)) {
+      perfProvider.withRequestScope(requestId) {
+        block()
+      }
+    }
 
   /**
    * Wraps fire-and-forget action launches so a throw inside the launched coroutine broadcasts a
@@ -3545,12 +3551,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
-      if (sync) {
-        // Enqueue in call order; each client's sender preserves FIFO without waiting for delivery.
-        webSocketServer.broadcastWithPerfSync(messageBuilder)
-      } else {
-        // Async broadcast - for normal event-driven updates
-        webSocketServer.broadcastWithPerf(messageBuilder)
+      withContext(PerfRequestContext(null)) {
+        if (sync) {
+          // Enqueue in call order; each client's sender preserves FIFO without waiting for
+          // delivery.
+          webSocketServer.broadcastWithPerfSync(messageBuilder)
+        } else {
+          // Async broadcast - for normal event-driven updates
+          webSocketServer.broadcastWithPerf(messageBuilder)
+        }
       }
       Log.d(
         TAG,

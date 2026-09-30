@@ -2,6 +2,32 @@
 import os
 import XCTest
 
+final class CtrlProxyStartupActivationTests: XCTestCase {
+    func testExplicitBundleIdActivatesAndTracksRequestedApp() {
+        let plan = CtrlProxy.startupActivationPlan(
+            explicitBundleId: "com.example.requested",
+            detectedForeground: "com.example.foreground"
+        )
+        XCTAssertEqual(plan.activate, "com.example.requested")
+        XCTAssertEqual(plan.track, "com.example.requested")
+    }
+
+    func testDetectedForegroundIsTrackedWithoutActivation() {
+        let plan = CtrlProxy.startupActivationPlan(
+            explicitBundleId: nil,
+            detectedForeground: "com.example.foreground"
+        )
+        XCTAssertNil(plan.activate)
+        XCTAssertEqual(plan.track, "com.example.foreground")
+    }
+
+    func testDetectionMissTracksSpringboardWithoutActivation() {
+        let plan = CtrlProxy.startupActivationPlan(explicitBundleId: nil, detectedForeground: nil)
+        XCTAssertNil(plan.activate)
+        XCTAssertEqual(plan.track, CtrlProxy.defaultBundleId)
+    }
+}
+
 @MainActor
 final class CtrlProxyLifecycleTests: XCTestCase {
     private final class FakeServer: Sendable {

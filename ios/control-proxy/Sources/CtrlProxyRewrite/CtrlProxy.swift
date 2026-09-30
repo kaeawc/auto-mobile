@@ -19,6 +19,17 @@ import Foundation
 @MainActor
 public final class CtrlProxy {
     public static let defaultPort: UInt16 = 8765
+    public nonisolated static let defaultBundleId = "com.apple.springboard"
+
+    /// Only an explicitly requested app should be brought to the foreground.
+    nonisolated static func startupActivationPlan(
+        explicitBundleId: String?,
+        detectedForeground: String?
+    )
+        -> (activate: String?, track: String)
+    {
+        (explicitBundleId, explicitBundleId ?? detectedForeground ?? defaultBundleId)
+    }
 
     private let port: UInt16
     private let perf: PerfProvider
@@ -230,9 +241,6 @@ public final class CtrlProxy {
     }
 
     #if canImport(XCTest) && os(iOS)
-        /// Default bundle ID to use when none is specified (iOS Springboard/home screen).
-        public static let defaultBundleId = "com.apple.springboard"
-
         /// Sets the application under test with its bundle ID.
         public func setApplication(_ app: XCUIApplication, bundleId: String? = nil) {
             application = app
@@ -244,15 +252,23 @@ public final class CtrlProxy {
             gesturePerformer.setApplication(app)
         }
 
-        /// Activates the target application and starts the service. Sampler start/stop is
+        /// Activates an explicitly requested app and starts the service. Sampler start/stop is
         /// gated on client presence via the server's presence seam (wired in `init`), so an
         /// idle session with no client places no continuous load on the app under test (#5477).
         public func start(bundleId: String? = nil) throws {
-            let targetBundleId = bundleId ?? Self.defaultBundleId
-            let app = XCUIApplication(bundleIdentifier: targetBundleId)
-            app.activate()
-            setApplication(app, bundleId: targetBundleId)
-            print("[CtrlProxy] Activated app: \(targetBundleId)")
+            let detectedForeground = bundleId == nil ? elementLocator.refreshForegroundBundleId() : nil
+            let plan = Self.startupActivationPlan(
+                explicitBundleId: bundleId,
+                detectedForeground: detectedForeground
+            )
+            let app = XCUIApplication(bundleIdentifier: plan.track)
+            if plan.activate != nil {
+                app.activate()
+                print("[CtrlProxy] Activated app: \(plan.track)")
+            } else {
+                print("[CtrlProxy] Tracking foreground app: \(plan.track)")
+            }
+            setApplication(app, bundleId: plan.track)
 
             do {
                 try startServer()

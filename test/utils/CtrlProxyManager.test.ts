@@ -157,6 +157,92 @@ describe("CtrlProxyManager", function () {
     }
   });
 
+  describe("status cache TTLs", () => {
+    const installedCommand = `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`;
+
+    function createManager(timer: FakeTimer, adb: FakeAdbExecutor): AndroidCtrlProxyManager {
+      return AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
+    }
+
+    test("caches a negative installation result briefly and re-probes after expiry", async () => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      const manager = createManager(timer, adb);
+
+      await expect(manager.isInstalled()).resolves.toBe(false);
+      await expect(manager.isInstalled()).resolves.toBe(false);
+      expect(
+        adb.getCommandCalls().filter((call) => call.command === installedCommand),
+      ).toHaveLength(1);
+
+      timer.advanceTime(5_001);
+      await expect(manager.isInstalled()).resolves.toBe(false);
+      expect(
+        adb.getCommandCalls().filter((call) => call.command === installedCommand),
+      ).toHaveLength(2);
+    });
+
+    test("clears a negative installation result after a successful install", async () => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      const manager = createManager(timer, adb);
+
+      await expect(manager.isInstalled()).resolves.toBe(false);
+      adb.setCommandResponseSequence(installedCommand, [
+        { stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`, stderr: "" },
+      ]);
+      adb.setCommandResponse('install "/tmp/ctrlproxy.apk"', { stdout: "Success", stderr: "" });
+      await manager.install("/tmp/ctrlproxy.apk");
+
+      await expect(manager.isInstalled()).resolves.toBe(true);
+      expect(
+        adb.getCommandCalls().filter((call) => call.command === installedCommand),
+      ).toHaveLength(2);
+      await expect(manager.isInstalled()).resolves.toBe(true);
+      expect(
+        adb.getCommandCalls().filter((call) => call.command === installedCommand),
+      ).toHaveLength(2);
+    });
+
+    test("keeps a positive installation result cached", async () => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(installedCommand, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}`,
+        stderr: "",
+      });
+      const manager = createManager(timer, adb);
+
+      await expect(manager.isInstalled()).resolves.toBe(true);
+      await expect(manager.isInstalled()).resolves.toBe(true);
+      expect(
+        adb.getCommandCalls().filter((call) => call.command === installedCommand),
+      ).toHaveLength(1);
+    });
+
+    test("clears a negative enabled result after enabling via settings", async () => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      const enabledCommand = "shell settings get secure enabled_accessibility_services";
+      adb.setCommandResponseSequence(enabledCommand, [
+        { stdout: "", stderr: "" },
+        { stdout: "", stderr: "" },
+        { stdout: `enabled:${AndroidCtrlProxyManager.PACKAGE}`, stderr: "" },
+      ]);
+      adb.setCommandResponse("shell getprop ro.kernel.qemu", { stdout: "1", stderr: "" });
+      adb.setCommandResponse("shell getprop ro.build.version.sdk", { stdout: "35", stderr: "" });
+      const manager = createManager(timer, adb);
+
+      await expect(manager.isEnabled()).resolves.toBe(false);
+      await manager.enableViaSettings();
+
+      await expect(manager.isEnabled()).resolves.toBe(true);
+      expect(adb.getCommandCalls().filter((call) => call.command === enabledCommand)).toHaveLength(
+        3,
+      );
+    });
+  });
+
   test("gives a direct APK install its full transfer budget", async () => {
     fakeAdb.setCommandResponse("install ", { stdout: "Success", stderr: "" });
     await accessibilityServiceClient.install("/tmp/ctrlproxy.apk");

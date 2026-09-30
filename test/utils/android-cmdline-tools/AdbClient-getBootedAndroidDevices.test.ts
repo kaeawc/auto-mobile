@@ -49,6 +49,48 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     ]);
   });
 
+  test("shares one fresh devices read between readiness states and online devices", async () => {
+    let calls = 0;
+    const adb = new AdbClient(null, async (command: string): Promise<ExecResult> => {
+      if (command.includes("adb devices")) {
+        calls += 1;
+        return createExecResult(
+          "List of devices attached\nemulator-5554\toffline\nemulator-5556\tdevice\n",
+        );
+      }
+      return createExecResult("");
+    });
+
+    const snapshot = await adb.getReadinessDeviceSnapshot({ timeoutMs: 250 });
+
+    expect(calls).toBe(1);
+    expect(snapshot.states).toEqual([
+      { deviceId: "emulator-5554", state: "offline" },
+      { deviceId: "emulator-5556", state: "device" },
+    ]);
+    expect(snapshot.devices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
+  });
+
+  test("publishes a readiness snapshot to the shared device-list cache", async () => {
+    let calls = 0;
+    const adb = new AdbClient(null, async (command: string): Promise<ExecResult> => {
+      if (command.includes("adb devices")) {
+        calls += 1;
+        return createExecResult(
+          `List of devices attached\nemulator-${calls === 1 ? 5554 : 5556}\tdevice\n`,
+        );
+      }
+      return createExecResult("");
+    });
+
+    await adb.getBootedAndroidDevices();
+    await adb.getReadinessDeviceSnapshot({ timeoutMs: 10_000 });
+    const cached = await adb.getBootedAndroidDevices();
+
+    expect(calls).toBe(2);
+    expect(cached.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
+  });
+
   afterEach(() => {
     resetAdbClientCaches();
   });

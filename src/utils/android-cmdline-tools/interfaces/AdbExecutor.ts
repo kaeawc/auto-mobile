@@ -122,6 +122,12 @@ export interface AdbExecutor {
     signal?: AbortSignal;
   }): Promise<AdbDeviceState[]>;
 
+  /** One fresh ADB observation for readiness, including offline and online rows. */
+  getReadinessDeviceSnapshot?(options: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+  }): Promise<{ states: AdbDeviceState[]; devices: BootedDevice[] }>;
+
   /**
    * Check if the device screen is currently on
    * @returns Promise<boolean> - true if screen is on (Awake), false otherwise

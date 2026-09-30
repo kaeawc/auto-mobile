@@ -171,7 +171,7 @@ export class AdbClient implements AdbExecutor {
   private readonly retryExecutor: RetryExecutor;
   private readonly timer: Timer;
 
-  private static readonly DEVICE_LIST_TIMEOUT_MS = 10000;
+  static readonly DEVICE_LIST_TIMEOUT_MS = 10_000;
   private static readonly DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
   private static readonly MAX_ADB_RETRIES = 3;
   private static readonly ADB_RETRY_BACKOFF = sequenceBackoff([200, 500, 1000]);
@@ -1482,11 +1482,15 @@ export class AdbClient implements AdbExecutor {
         ];
       });
 
+    this.publishDeviceList(generation, devices);
+    return devices;
+  }
+
+  private publishDeviceList(generation: number, devices: BootedDevice[]): void {
     if (generation >= deviceListPublishedGeneration) {
       deviceListPublishedGeneration = generation;
       getDeviceListCache(this.timer).set("devices", devices);
     }
-    return devices;
   }
 
   /**
@@ -1495,9 +1499,12 @@ export class AdbClient implements AdbExecutor {
    * device that is absent from one that is present but stuck offline.
    */
   async getDeviceStates(
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: { timeoutMs?: number; signal?: AbortSignal; throwOnMissingAdb?: boolean } = {},
   ): Promise<AdbDeviceState[]> {
     if (this.shouldSkipMissingAdbProbe()) {
+      if (options.throwOnMissingAdb) {
+        throw new AdbUnavailableError("ADB executable is unavailable");
+      }
       return [];
     }
 
@@ -1512,6 +1519,11 @@ export class AdbClient implements AdbExecutor {
       );
     } catch (error) {
       if (this.isMissingExecutableError(error)) {
+        if (options.throwOnMissingAdb) {
+          throw new AdbUnavailableError(
+            `ADB executable is unavailable: ${(error as Error).message}`,
+          );
+        }
         // Preserve the diagnostic path while treating an unavailable ADB as no connected devices.
         logger.debug(
           `[ADB] Unable to query device states because adb is unavailable: ${(error as Error).message}`,
@@ -1529,6 +1541,25 @@ export class AdbClient implements AdbExecutor {
         const [deviceId, state] = line.trim().split(/\s+/);
         return deviceId && state ? [{ deviceId, state }] : [];
       });
+  }
+
+  async getReadinessDeviceSnapshot(options: {
+    timeoutMs: number;
+    signal?: AbortSignal;
+  }): Promise<{ states: AdbDeviceState[]; devices: BootedDevice[] }> {
+    const generation = ++deviceListGeneration;
+    const states = await this.getDeviceStates({ ...options, throwOnMissingAdb: true });
+    const observedAt = this.observationSequence.next();
+    const devices = states
+      .filter((state) => state.state === "device")
+      .map(({ deviceId }) => ({
+        name: deviceId,
+        platform: "android" as const,
+        deviceId,
+        observedAt,
+      }));
+    this.publishDeviceList(generation, devices);
+    return { states, devices };
   }
 
   /**

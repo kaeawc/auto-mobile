@@ -12,6 +12,7 @@ import { shellQuote } from "../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
 import { readAndroidDeviceApiLevel } from "../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import {
   AndroidUserTargetResolver,
@@ -63,6 +64,10 @@ export interface SharedStorageUserResolver {
 export interface StageSharedStorageRequest extends Omit<StageSharedStorageArgs, "device"> {
   device: BootedDevice;
   signal?: AbortSignal;
+  /** Roll back files written by this call if any write or media index fails. */
+  rollbackOnFailure?: boolean;
+  /** Treat a file that was not indexed as a batch failure. */
+  requireMediaIndexing?: boolean;
 }
 
 export interface SharedStorageService {
@@ -130,12 +135,14 @@ class DefaultSharedStorageService implements SharedStorageService {
       }
       await execute(adb, `shell mkdir -p ${shellQuote(destinationDirectory)}`, request.signal);
 
-      const files: StagedSharedStorageFile[] = [];
-      for (const file of preparedFiles) {
-        files.push(
-          await this.stageFile(adb, request, namespace, destinationDirectory, user.userId, file),
-        );
-      }
+      const files = await this.stagePreparedFiles({
+        adb,
+        request,
+        namespace,
+        destinationDirectory,
+        userId: user.userId,
+        files: preparedFiles,
+      });
       return {
         success: true,
         deviceId: request.device.deviceId,
@@ -184,14 +191,16 @@ class DefaultSharedStorageService implements SharedStorageService {
     }
   }
 
-  private async stageFile(
-    adb: AdbExecutor,
-    request: StageSharedStorageRequest,
-    namespace: string,
-    destinationDirectory: string,
-    userId: number,
-    file: PreparedSharedStorageFile,
-  ): Promise<StagedSharedStorageFile> {
+  private async stageFile(context: {
+    adb: AdbExecutor;
+    request: StageSharedStorageRequest;
+    namespace: string;
+    destinationDirectory: string;
+    userId: number;
+    file: PreparedSharedStorageFile;
+    onPushed?: () => void;
+  }): Promise<StagedSharedStorageFile> {
+    const { adb, request, namespace, destinationDirectory, userId, file, onPushed } = context;
     const destinationPath = file.destinationPath;
     const destination = posix.join(destinationDirectory, destinationPath);
     // Re-check the joined result so future path changes cannot widen the reset namespace.
@@ -205,6 +214,7 @@ class DefaultSharedStorageService implements SharedStorageService {
       request.signal,
       SHARED_STORAGE_PUSH_TIMEOUT_MS,
     );
+    onPushed?.();
     const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
       ? await indexMediaFile(adb, destination, destinationPath, userId, this.timer, request.signal)
       : {
@@ -212,6 +222,57 @@ class DefaultSharedStorageService implements SharedStorageService {
           reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true),
         };
     return { destinationPath, byteCount: file.source.byteCount, mediaIndexing };
+  }
+
+  private async stagePreparedFiles(context: {
+    adb: AdbExecutor;
+    request: StageSharedStorageRequest;
+    namespace: string;
+    destinationDirectory: string;
+    userId: number;
+    files: PreparedSharedStorageFile[];
+  }): Promise<StagedSharedStorageFile[]> {
+    const { adb, request, namespace, destinationDirectory, userId, files } = context;
+    const stagedFiles: StagedSharedStorageFile[] = [];
+    const writtenPaths: string[] = [];
+    let failedPath = "unknown destination";
+    try {
+      for (const file of files) {
+        failedPath = file.destinationPath;
+        const staged = await this.stageFile({
+          adb,
+          request,
+          namespace,
+          destinationDirectory,
+          userId,
+          file,
+          onPushed: () => writtenPaths.push(file.destinationPath),
+        });
+        if (request.requireMediaIndexing && staged.mediaIndexing.status !== "completed") {
+          throw new ActionableError(
+            `MediaStore did not index ${staged.destinationPath}: ${staged.mediaIndexing.reason ?? "indexing was not completed"}`,
+          );
+        }
+        stagedFiles.push(staged);
+      }
+      return stagedFiles;
+    } catch (error) {
+      if (!request.rollbackOnFailure) {
+        throw error;
+      }
+      const rollback = await rollbackStagedFiles(
+        adb,
+        destinationDirectory,
+        writtenPaths,
+        request.signal,
+      );
+      throw new ActionableError(
+        `Android media-library batch staging failed for ${failedPath}: ${errorMessage(error)} ` +
+          `Rolled back: ${rollback.rolledBack.length > 0 ? rollback.rolledBack.join(", ") : "none"}. ` +
+          `Rollback failures: ${rollback.failures.length > 0 ? rollback.failures.join("; ") : "none"}.`,
+        { cause: error },
+      );
+    }
   }
 
   private async prepareSource(
@@ -239,6 +300,28 @@ class DefaultSharedStorageService implements SharedStorageService {
 interface PreparedSharedStorageFile {
   destinationPath: string;
   source: { path: string; byteCount: number; cleanup?: () => Promise<void> };
+}
+
+async function rollbackStagedFiles(
+  adb: AdbExecutor,
+  destinationDirectory: string,
+  writtenPaths: string[],
+  signal?: AbortSignal,
+): Promise<{ rolledBack: string[]; failures: string[] }> {
+  const rolledBack: string[] = [];
+  const failures: string[] = [];
+  for (const relativePath of [...writtenPaths].reverse()) {
+    const path = posix.join(destinationDirectory, relativePath);
+    try {
+      await execute(adb, `shell rm -f ${shellQuote(path)}`, signal);
+      rolledBack.push(relativePath);
+    } catch (error) {
+      const failure = `${relativePath}: ${errorMessage(error)}`;
+      failures.push(failure);
+      logger.warn(`[SharedStorage] Failed to roll back staged media file ${failure}`, error);
+    }
+  }
+  return { rolledBack, failures };
 }
 
 async function execute(

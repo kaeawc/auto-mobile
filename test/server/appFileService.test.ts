@@ -16,6 +16,8 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
+import { logger } from "../../src/utils/logger";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 function execResult(stdout: string, stderr = "") {
   return {
@@ -233,6 +235,142 @@ describe("AppFileService", () => {
     expect(
       executor.getExecutedCommands().some((command) => command.includes("content query")),
     ).toBe(true);
+  });
+
+  test("rolls back earlier media files when writing the third of five fails", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    executor.setCommandError("third.png", new Error("index query failed"));
+    const sharedStorageService = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+      }),
+    });
+    const service = createAppFileServiceForTesting({ sharedStorageService });
+
+    await expect(
+      service.putFile({
+        device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+        target: { domain: "media_library" },
+        files: ["first", "second", "third", "fourth", "fifth"].map((name) => ({
+          contentBase64: "AQID",
+          destinationPath: `${name}.png`,
+        })),
+      }),
+    ).rejects.toThrow(
+      "failed for third.png: Android shared-storage operation failed: index query failed Rolled back: second.png, first.png",
+    );
+
+    expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
+    expect(
+      executor.getExecutedCommands().filter((command) => command.includes("shell rm -f")),
+    ).toEqual([
+      "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png'",
+      "shell rm -f '/storage/emulated/12/Download/automobile-media/first.png'",
+    ]);
+  });
+
+  test("rolls back the staged prefix when MediaStore indexing fails", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponseSequence("content query", [
+      execResult("Row: 0 _id=42"),
+      execResult("Row: 0 _id=42"),
+      execResult(""),
+    ]);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const sharedStorageService = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      timer,
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+      }),
+    });
+    const service = createAppFileServiceForTesting({ sharedStorageService });
+
+    await expect(
+      service.putFile({
+        device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+        target: { domain: "media_library" },
+        files: ["first", "second", "third", "fourth", "fifth"].map((name) => ({
+          contentBase64: "AQID",
+          destinationPath: `${name}.png`,
+        })),
+      }),
+    ).rejects.toThrow(
+      "failed for third.png: Android media indexing did not complete for /storage/emulated/12/Download/automobile-media/third.png within 5 seconds. Rolled back: third.png, second.png, first.png",
+    );
+
+    expect(executor.getExecutedArgv().filter((args) => args[0] === "push")).toHaveLength(3);
+    expect(
+      executor.getExecutedCommands().filter((command) => command.includes("shell rm -f")),
+    ).toHaveLength(3);
+  });
+
+  test("validates the entire media batch before writing any file", async () => {
+    const executor = new FakeAdbExecutor();
+    const sharedStorageService = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+      }),
+    });
+    const service = createAppFileServiceForTesting({ sharedStorageService });
+
+    await expect(
+      service.putFile({
+        device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+        target: { domain: "media_library" },
+        files: [
+          { contentBase64: "AQID", destinationPath: "first.png" },
+          { contentBase64: "BAUG", destinationPath: "unsupported.txt" },
+        ],
+      }),
+    ).rejects.toThrow("supported by Android MediaStore");
+
+    expect(executor.getExecutedCommands()).toEqual([]);
+    expect(executor.getExecutedArgv()).toEqual([]);
+  });
+
+  test("reports and warns when rolling back a media file fails", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    executor.setCommandError("third.png", new Error("index query failed"));
+    executor.setCommandError(
+      "shell rm -f '/storage/emulated/12/Download/automobile-media/second.png'",
+      new Error("device unavailable"),
+    );
+    const sharedStorageService = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+      }),
+    });
+    const service = createAppFileServiceForTesting({ sharedStorageService });
+    const warnings: string[] = [];
+    const originalWarn = logger.warn;
+    logger.warn = (message) => warnings.push(message);
+
+    try {
+      await expect(
+        service.putFile({
+          device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+          target: { domain: "media_library" },
+          files: ["first", "second", "third"].map((name) => ({
+            contentBase64: "AQID",
+            destinationPath: `${name}.png`,
+          })),
+        }),
+      ).rejects.toThrow(
+        "Rollback failures: second.png: Android shared-storage operation failed: device unavailable",
+      );
+    } finally {
+      logger.warn = originalWarn;
+    }
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Failed to roll back staged media file second.png");
   });
 
   test("imports iOS Simulator media through an injected argv-safe client and preserves filenames", async () => {

@@ -281,6 +281,26 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close_icon" }]);
   });
 
+  test("contentDesc selector also matches the documented accessible label", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          {
+            $: {
+              "ios-accessibility-label": "Save",
+              "resource-id": "com.example:id/save",
+              bounds: bounds(0, 0, 80, 40),
+            },
+          },
+        ]),
+      ),
+    );
+
+    await makeFeature().execute({ action: "set", contentDesc: "Save" });
+
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/save" }]);
+  });
+
   test("mixed selector fields retain resource ID then text precedence", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(

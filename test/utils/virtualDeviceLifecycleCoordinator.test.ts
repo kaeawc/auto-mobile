@@ -166,6 +166,61 @@ describe("InMemoryVirtualDeviceLifecycleCoordinator", () => {
     selectorReuse.release();
   });
 
+  test("canonical waiter releases its selector for unrelated work", async () => {
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    const stable = { kind: "stable", platform: "android", stableId: "Pixel_8" } as const;
+    const selector = { kind: "selector", platform: "android", selector: "phone" } as const;
+    const owner = await coordinator.reserve(stable, { operation: "start", deadlineMs: 1_000 });
+    const waiting = await coordinator.reserve(selector, { operation: "start", deadlineMs: 1_000 });
+    const binding = waiting.bindCanonicalIdentity(stable, async () => stable);
+    const unrelated = await coordinator.reserve(selector, {
+      operation: "start",
+      deadlineMs: 1_000,
+    });
+    expect(unrelated.signal.aborted).toBe(false);
+    unrelated.release();
+    owner.release();
+    await binding;
+    waiting.release();
+  });
+
+  test("opposite-order canonical binds make progress", async () => {
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    const first = { kind: "stable", platform: "android", stableId: "Pixel_8" } as const;
+    const second = { kind: "stable", platform: "android", stableId: "Pixel_9" } as const;
+    const firstLease = await coordinator.reserve(first, { operation: "start", deadlineMs: 1_000 });
+    const secondLease = await coordinator.reserve(second, {
+      operation: "start",
+      deadlineMs: 1_000,
+    });
+    await Promise.all([
+      firstLease.bindCanonicalIdentity(second, async () => second),
+      secondLease.bindCanonicalIdentity(first, async () => first),
+    ]);
+    firstLease.release();
+    secondLease.release();
+  });
+
+  test("rejects an identity that changed during canonical wait", async () => {
+    const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+    const selected = { kind: "stable", platform: "android", stableId: "Pixel_8" } as const;
+    const changed = { platform: "android", stableId: "Pixel_9" } as const;
+    const owner = await coordinator.reserve(selected, { operation: "start", deadlineMs: 1_000 });
+    const waiting = await coordinator.reserve(
+      { kind: "selector", platform: "android", selector: "phone" },
+      { operation: "start", deadlineMs: 1_000 },
+    );
+    let revalidated = false;
+    const binding = waiting.bindCanonicalIdentity(selected, async () => {
+      revalidated = true;
+      return changed;
+    });
+    owner.release();
+    await expect(binding).rejects.toThrow("Device identity changed while waiting");
+    expect(revalidated).toBe(true);
+    waiting.release();
+  });
+
   test("canonical binding retains teardown priority after a lease transfer", async () => {
     const timer = new FakeTimer();
     const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);

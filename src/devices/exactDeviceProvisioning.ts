@@ -359,10 +359,31 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
           `Exact iOS simulator '${request.name}' has no UDID.`,
         );
       }
-      await lease.bindCanonicalIdentity({
-        platform: result.device.platform,
-        stableId,
-      });
+      await lease.bindCanonicalIdentity(
+        {
+          platform: result.device.platform,
+          stableId,
+        },
+        async () => {
+          const images = await this.dependencies.listDeviceImages(result.device.platform);
+          const current = images.find(
+            (image) =>
+              image.platform === result.device.platform &&
+              (result.device.platform === "android"
+                ? image.name === request.name
+                : image.deviceId === stableId),
+          );
+          if (!current) {
+            throw new ActionableError(
+              `Provisioned device '${stableId}' disappeared during lifecycle wait`,
+            );
+          }
+          return {
+            platform: current.platform,
+            stableId: current.platform === "android" ? current.name : current.deviceId!,
+          };
+        },
+      );
       return result;
     } finally {
       if (ownLease) {

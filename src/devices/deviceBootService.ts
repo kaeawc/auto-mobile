@@ -293,6 +293,7 @@ export interface DeviceBootServiceDependencies {
 }
 
 interface BootDeadlineContext {
+  request: DeviceBootRequest;
   operationName: string;
   startedAtMs: number;
   deadlineMs: number;
@@ -327,6 +328,7 @@ export class DeviceBootService {
   async boot(request: DeviceBootRequest, progress?: DeviceBootProgress): Promise<DeviceBootResult> {
     const timeoutMs = request.timeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const context: BootDeadlineContext = {
+      request,
       operationName: request.operationName ?? "startDevice",
       startedAtMs: this.timer.now(),
       deadlineMs: request.totalDeadlineMs ?? this.timer.now() + timeoutMs,
@@ -380,9 +382,10 @@ export class DeviceBootService {
   private async bindLifecycleIdentity(
     context: BootDeadlineContext,
     identity: StableVirtualDeviceIdentity,
+    revalidate: () => Promise<StableVirtualDeviceIdentity> = async () => identity,
   ): Promise<void> {
     if (context.lifecycleLease) {
-      await context.lifecycleLease.bindCanonicalIdentity(identity);
+      await context.lifecycleLease.bindCanonicalIdentity(identity, revalidate);
     }
     await this.dependencies.onIdentityResolved?.(identity);
   }
@@ -841,18 +844,26 @@ export class DeviceBootService {
     progress?: DeviceBootProgress,
   ): Promise<DeviceBootResult> {
     if (device.platform === "ios") {
-      await this.bindLifecycleIdentity(context, {
-        platform: "ios",
-        stableId: device.deviceId,
-      });
+      await this.bindLifecycleIdentity(
+        context,
+        {
+          platform: "ios",
+          stableId: device.deviceId,
+        },
+        async () => await this.revalidateRunningIdentity(device, context),
+      );
     } else if (
       device.deviceId.startsWith("emulator-") &&
       device.name !== `Unknown (${device.deviceId})`
     ) {
-      await this.bindLifecycleIdentity(context, {
-        platform: "android",
-        stableId: device.name,
-      });
+      await this.bindLifecycleIdentity(
+        context,
+        {
+          platform: "android",
+          stableId: device.name,
+        },
+        async () => await this.revalidateRunningIdentity(device, context),
+      );
     }
     const recoveryTarget: DeviceInfo = { ...device, isRunning: true };
     let attempts = 0;
@@ -877,6 +888,75 @@ export class DeviceBootService {
     );
   }
 
+  private async revalidateRunningIdentity(
+    device: BootedDevice,
+    context: BootDeadlineContext,
+  ): Promise<StableVirtualDeviceIdentity> {
+    const devices = await this.discoverBootedDevices(
+      device.platform,
+      context,
+      "revalidating the running device after lifecycle wait",
+      device.platform === "android",
+    );
+    const current = devices.find((candidate) => candidate.deviceId === device.deviceId);
+    if (!current) {
+      throw new ActionableError(
+        "Selected running device disappeared during lifecycle wait; retry device selection",
+      );
+    }
+    return {
+      platform: current.platform,
+      stableId: current.platform === "android" ? current.name : current.deviceId,
+    };
+  }
+
+  private async revalidateImageIdentity(
+    image: DeviceInfo,
+    context: BootDeadlineContext,
+  ): Promise<StableVirtualDeviceIdentity> {
+    const images = await this.runPhase(
+      context,
+      "revalidating the device image after lifecycle wait",
+      (signal) => this.dependencies.deviceManager.listDeviceImages(image.platform, signal),
+    );
+    const request = context.request;
+    const criteria: DeviceMatchCriteria = {
+      platform: request.platform,
+      name: request.name,
+      minOsVersion: request.matchNamedDeviceIgnoringOsVersion ? undefined : request.minOsVersion,
+      maxOsVersion: request.matchNamedDeviceIgnoringOsVersion ? undefined : request.maxOsVersion,
+      formFactor: request.formFactor,
+      requires: request.requires,
+      screenSize: request.screenSize,
+    };
+    const eligible = images.filter(
+      (candidate) =>
+        !request.excludeDeviceNames?.has(candidate.name) &&
+        matchesDeviceCriteria(candidate, criteria),
+    );
+    const current = request.deviceId
+      ? eligible.find(
+          (candidate) =>
+            candidate.deviceId === request.deviceId || candidate.name === request.deviceId,
+        )
+      : request.matchExactName && request.name
+        ? eligible.find((candidate) => candidate.name === request.name)
+        : this.dependencies.deviceMatcher.matchDeviceImage(
+            criteria,
+            eligible,
+            this.dependencies.matchingStrategy,
+          );
+    if (!current) {
+      throw new ActionableError(
+        "Selected device image disappeared during lifecycle wait; retry device selection",
+      );
+    }
+    return {
+      platform: current.platform,
+      stableId: current.platform === "android" ? current.name : current.deviceId!,
+    };
+  }
+
   private async bootImage(
     image: DeviceInfo,
     context: BootDeadlineContext,
@@ -888,10 +968,14 @@ export class DeviceBootService {
     if (image.platform === "ios" && !image.deviceId) {
       throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
     }
-    await this.bindLifecycleIdentity(context, {
-      platform: image.platform,
-      stableId: image.platform === "android" ? image.name : image.deviceId!,
-    });
+    await this.bindLifecycleIdentity(
+      context,
+      {
+        platform: image.platform,
+        stableId: image.platform === "android" ? image.name : image.deviceId!,
+      },
+      async () => await this.revalidateImageIdentity(image, context),
+    );
     if (adoptRunningAfterLease && image.platform === "android") {
       const booted = await this.discoverBootedDevices(
         image.platform,

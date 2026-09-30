@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -155,8 +156,8 @@ internal constructor(
     debounceJob?.start()
   }
 
-  // Flag to temporarily suppress flow emissions (during setText operations)
-  @Volatile private var suppressFlowEmissions: Boolean = false
+  // Each overlapping UI operation owns one suppression until its extraction finishes.
+  private val flowEmissionSuppressionDepth = AtomicInteger()
 
   // Timestamp of last accessibility event (for quiescence detection)
   @Volatile private var lastEventTimestamp: Long = 0
@@ -180,7 +181,7 @@ internal constructor(
 
     // Skip all extractions if flow emissions are suppressed (setText/imeAction in progress)
     // The operation will call extractAfterQuiescence which does its own final extraction
-    if (suppressFlowEmissions) {
+    if (flowEmissionSuppressionDepth.get() > 0) {
       Log.d(TAG, "Skipping extraction (operation in progress, flow suppressed)")
       return
     }
@@ -290,13 +291,13 @@ internal constructor(
     val initialTimestamp = lastEventTimestamp // Capture timestamp BEFORE the action
 
     // Suppress flow emissions to prevent racing broadcasts from debounced extractions
-    suppressFlowEmissions = true
-    Log.d(
-      TAG,
-      "extractAfterQuiescence: suppressing flow emissions, waiting for first event then quiescence (${quiescenceMs}ms quiet)",
-    )
-
+    flowEmissionSuppressionDepth.incrementAndGet()
     try {
+      Log.d(
+        TAG,
+        "extractAfterQuiescence: suppressing flow emissions, waiting for first event then quiescence (${quiescenceMs}ms quiet)",
+      )
+
       // Cancel only a queued job. An active extraction retains ownership through its finally.
       synchronized(eventLock) {
         if (!extractionInFlight) {
@@ -378,9 +379,15 @@ internal constructor(
 
       return hierarchy
     } finally {
-      // Always unsuppress flow emissions
-      suppressFlowEmissions = false
-      Log.d(TAG, "extractAfterQuiescence: flow emissions re-enabled")
+      // Release only this call's suppression; other overlapping calls retain theirs.
+      val remaining = flowEmissionSuppressionDepth.updateAndGet { depth ->
+        if (depth > 0) depth - 1 else 0
+      }
+      Log.d(
+        TAG,
+        if (remaining == 0) "extractAfterQuiescence: flow emissions re-enabled"
+        else "extractAfterQuiescence: flow emissions remain suppressed ($remaining calls active)",
+      )
     }
   }
 
@@ -477,10 +484,11 @@ internal constructor(
 
     // Emit AFTER perf block is closed - this can suspend without causing nesting issues
     // Only emit to flow if not skipped AND emissions are not suppressed
-    // suppressFlowEmissions is used during setText operations to prevent racing broadcasts
-    if (!skipFlowEmit && !suppressFlowEmissions) {
+    // Suppression stays active until every overlapping UI operation completes.
+    val emissionsSuppressed = flowEmissionSuppressionDepth.get() > 0
+    if (!skipFlowEmit && !emissionsSuppressed) {
       resultToEmit?.let { _hierarchyFlow.emit(it) }
-    } else if (suppressFlowEmissions) {
+    } else if (emissionsSuppressed) {
       Log.d(TAG, "Flow emission suppressed (setText operation in progress)")
     }
     return hierarchyToCache

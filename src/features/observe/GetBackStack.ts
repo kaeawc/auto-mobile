@@ -8,6 +8,7 @@ import { logger } from "../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { BackStack } from "./interfaces/BackStack";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { parseResumedActivityForDisplay } from "../../utils/android-cmdline-tools/parseResumedActivity";
 
 /**
  * Legacy task header, printed by the pre-Android-10 `dumpsys` layout as either
@@ -536,6 +537,12 @@ export class GetBackStack implements BackStack {
    * @returns Current ActivityInfo or undefined
    */
   private getCurrentActivity(dumpsysOutput: string): ActivityInfo | undefined {
+    const scoped = parseResumedActivityForDisplay(dumpsysOutput);
+    if (scoped.displayCount > 0) {
+      return scoped.activity
+        ? { name: scoped.activity.activityName, taskId: scoped.activity.taskId }
+        : undefined;
+    }
     const lines = dumpsysOutput.split(/\r?\n/);
 
     for (const line of lines) {
@@ -615,6 +622,7 @@ export class GetBackStack implements BackStack {
         activities,
         tasks,
         currentActivity,
+        displayCount: parseResumedActivityForDisplay(dumpsysOutput.stdout).displayCount,
         currentTaskId,
         capturedAt: this.timer.now(),
         source: "adb",

@@ -1,0 +1,9 @@
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #0 (activities from top to bottom):
+  * Task{one #8 type=standard I=com.android.contacts/.activities.PeopleActivity U=0 visible=true sz=1}
+    mResumedActivity: ActivityRecord{one u0 com.android.contacts/.activities.PeopleActivity t8}
+    * Hist  #0: ActivityRecord{one u0 com.android.contacts/.activities.PeopleActivity t8}
+  ResumedActivity: ActivityRecord{one u0 com.android.contacts/.activities.PeopleActivity t8}
+
+ActivityTaskSupervisor state:
+  topDisplayFocusedRootTask=Task{one #8 type=standard I=com.android.contacts/.activities.PeopleActivity}

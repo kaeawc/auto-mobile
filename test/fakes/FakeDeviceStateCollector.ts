@@ -8,6 +8,7 @@ type ObservedState = Pick<
   | "collectDeviceLock"
   | "collectActiveWindow"
   | "collectForegroundIdentity"
+  | "collectForegroundSnapshot"
 >;
 
 /** Keeps the older observe fixture's array-shaped back stack unchanged. */
@@ -20,6 +21,10 @@ export class FakeDeviceStateCollector implements ObservedState {
 
   async collectForegroundIdentity(): Promise<string | undefined> {
     return undefined;
+  }
+
+  async collectForegroundSnapshot(): Promise<null> {
+    return null;
   }
 
   async collectBackStack(result: ObserveResult): Promise<void> {

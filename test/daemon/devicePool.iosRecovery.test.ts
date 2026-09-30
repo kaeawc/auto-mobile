@@ -50,7 +50,7 @@ interface DevicePoolRecoveryInternals {
   evictMissingPooledDevice(
     device: PooledDevice,
     reason: string,
-    attemptDeviceLossRecovery?: boolean,
+    options?: { attemptDeviceLossRecovery?: boolean },
   ): Promise<void>;
   getSessionPreservingRecoveryTarget(
     deviceId: string,
@@ -106,7 +106,7 @@ async function evictAsMissing(pool: DevicePool, device: PooledDevice): Promise<v
   await (pool as unknown as DevicePoolRecoveryInternals).evictMissingPooledDevice(
     device,
     "not present in iOS simulator discovery",
-    true,
+    { attemptDeviceLossRecovery: true },
   );
 }
 

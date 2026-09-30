@@ -45,9 +45,6 @@ import {
   DeviceAllocationCriteria,
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
-import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
-import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
-import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import {
@@ -96,6 +93,11 @@ import {
   type EmulatorProcessLifecyclePoolPort,
   type EmulatorProcessOutputTail,
 } from "./emulatorProcessLifecycle";
+import {
+  MissingDeviceLiveness,
+  type MissingDeviceEvictionOptions,
+  type MissingDeviceLivenessPoolPort,
+} from "./missingDeviceLiveness";
 import {
   DeviceDisconnectHandler,
   INCARNATION_ANY,
@@ -557,6 +559,7 @@ export interface DevicePoolDependencies {
   adbServerResetQuarantineFactory?: (
     pool: AdbServerResetQuarantinePoolPort,
   ) => AdbServerResetQuarantine;
+  missingDeviceLivenessFactory?: (pool: MissingDeviceLivenessPoolPort) => MissingDeviceLiveness;
   emulatorProcessLifecycleFactory?: (
     pool: EmulatorProcessLifecyclePoolPort,
   ) => EmulatorProcessLifecycle;
@@ -575,6 +578,13 @@ function createEmulatorProcessLifecycle(
   factory?: DevicePoolDependencies["emulatorProcessLifecycleFactory"],
 ): EmulatorProcessLifecycle {
   return factory ? factory(port) : new EmulatorProcessLifecycle(port);
+}
+
+function createMissingDeviceLiveness(
+  port: MissingDeviceLivenessPoolPort,
+  factory?: DevicePoolDependencies["missingDeviceLivenessFactory"],
+): MissingDeviceLiveness {
+  return factory ? factory(port) : new MissingDeviceLiveness(port);
 }
 
 export class DevicePool {
@@ -647,6 +657,7 @@ export class DevicePool {
     return this.recoveryCoordinator.sessionPreservingRecoveries;
   }
   private readonly emulatorProcessLifecycle: EmulatorProcessLifecycle;
+  private readonly missingDeviceLiveness: MissingDeviceLiveness;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
@@ -738,7 +749,6 @@ export class DevicePool {
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
-  private readonly REFRESH_MISSING_DEVICE_MISS_THRESHOLD = 2;
 
   // Device wait configuration for parallel test execution
   private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
@@ -771,6 +781,7 @@ export class DevicePool {
     consoleBusyRegistry,
     adbServerResetQuarantineFactory,
     emulatorProcessLifecycleFactory,
+    missingDeviceLivenessFactory,
     deviceSessionContinuityEnabled,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
@@ -780,6 +791,44 @@ export class DevicePool {
     this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
+    const missingDevicePort: MissingDeviceLivenessPoolPort = {
+      getDevices: () => this.devices,
+      getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
+      getAssignmentMutex: () => this.assignmentMutex,
+      getDeviceManager: () => this.deviceManager,
+      getRefreshGeneration: () => this.refreshGeneration,
+      shouldRebootDisconnectedAndroidDevice: (device) =>
+        this.shouldRebootDisconnectedAndroidDevice(device),
+      matchesRuntimeIdentity: (device, booted) => this.matchesRuntimeIdentity(device, booted),
+      reconcilePooledIdentityResolution: (device, booted) =>
+        this.reconcilePooledIdentityResolution(device, booted),
+      comparePooledIdentityEvidence: (device, observed) =>
+        this.comparePooledIdentityEvidence(device, observed),
+      replacePooledDeviceForRuntimeIdentity: (device, booted) =>
+        this.replacePooledDeviceForRuntimeIdentity(device, booted),
+      finishSessionPreservingRecoveryPreparation: (preparation) =>
+        this.finishSessionPreservingRecoveryPreparation(preparation),
+      tryPreserveSessionForMissingDevice: (device, attempt, incidentId) =>
+        this.tryPreserveSessionForMissingDevice(device, attempt, incidentId),
+      releaseSessionForEvictedDevice: (device, incidentId, observation) =>
+        this.releaseSessionForEvictedDevice(device, incidentId, observation),
+      finishEmulatorLossIncident: (incidentId, outcome) =>
+        this.finishEmulatorLossIncident(incidentId, outcome),
+      removeDisconnectedDevice: (deviceId, mayBeStaleSignal, incidentId) =>
+        this.removeDisconnectedDevice(deviceId, mayBeStaleSignal, incidentId),
+      completeEmulatorLossRecovery: (incidentId, outcome) =>
+        this.completeEmulatorLossRecovery(incidentId, outcome),
+      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      recordEmulatorLossIncident: (deviceId, path, exit, state) =>
+        this.recordEmulatorLossIncident(deviceId, path, exit, state),
+    };
+    this.missingDeviceLiveness = createMissingDeviceLiveness(
+      missingDevicePort,
+      missingDeviceLivenessFactory,
+    );
     const emulatorProcessPort: EmulatorProcessLifecyclePoolPort = {
       getTimer: () => this.timer,
       getStartedDeviceProcesses: () => this.startedDeviceProcesses,
@@ -795,7 +844,12 @@ export class DevicePool {
         this.recordEmulatorLossIncident(id, path, exit),
       finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
       evictMissingPooledDevice: (device, reason, attempt, incidentId, captured, preparation) =>
-        this.evictMissingPooledDevice(device, reason, attempt, incidentId, captured, preparation),
+        this.evictMissingPooledDevice(device, reason, {
+          attemptDeviceLossRecovery: attempt,
+          incidentId,
+          incidentCaptureComplete: captured,
+          recoveryPreparation: preparation,
+        }),
     };
     this.emulatorProcessLifecycle = createEmulatorProcessLifecycle(
       emulatorProcessPort,
@@ -1518,11 +1572,7 @@ export class DevicePool {
       await this.evictMissingPooledDevice(
         pooledDevice,
         `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
-        false,
-        undefined,
-        false,
-        undefined,
-        bootedDevice,
+        { identityObservation: bootedDevice },
       );
       const replacement = this.pendingIdentityReplacements.get(bootedDevice.deviceId);
       if (!replacement || this.devices.has(replacement.deviceId)) {
@@ -1744,95 +1794,6 @@ export class DevicePool {
       incarnation: expectedDevice.incarnation,
       refreshGeneration: this.refreshGeneration,
     });
-  }
-
-  private async removeDevicesMissingFrom(
-    bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
-  ): Promise<number> {
-    let removedCount = 0;
-
-    for (const device of Array.from(this.devices.values())) {
-      if (bootedDeviceIds.has(device.id)) {
-        this.refreshMissingDeviceMisses.delete(device.id);
-        continue;
-      }
-      if (device.sessionId) {
-        logger.warn(
-          `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`,
-        );
-        continue;
-      }
-      // The source that would have listed this device failed or was unavailable
-      // this refresh, so we cannot confirm the device is gone. Retain it rather
-      // than pruning a device that may still be running (e.g. simctl failed
-      // while devicectl and Android discovery succeeded). Asking per source
-      // rather than per platform keeps one failing iOS half from either
-      // freezing the other half's pruning or pruning its own devices (#5683).
-      if (
-        !didSourceSucceedForDevice(
-          { succeededPlatforms, succeededSources },
-          device.platform,
-          device.id,
-        )
-      ) {
-        this.refreshMissingDeviceMisses.delete(device.id);
-        logger.warn(
-          `Device ${device.id} retained: ${device.platform} discovery did not succeed this refresh`,
-        );
-        continue;
-      }
-      // Discovery succeeded but returned no devices for this platform at all.
-      // Tolerate brief reboot/boot races with a small consecutive-miss threshold
-      // before removing.
-      if (!bootedPlatforms.has(device.platform)) {
-        const misses = (this.refreshMissingDeviceMisses.get(device.id) ?? 0) + 1;
-        this.refreshMissingDeviceMisses.set(device.id, misses);
-        logger.warn(
-          `Device ${device.id} missing from ${device.platform} refresh discovery ` +
-            `(miss ${misses}/${this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD}); retaining until confirmed`,
-        );
-        if (misses < this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD) {
-          continue;
-        }
-      }
-
-      if (this.shouldRebootDisconnectedAndroidDevice(device)) {
-        // This prune runs inside assignmentMutex; the recovery reboot must not (#6391).
-        this.startDetachedRecoveringEviction(device, "not present in refresh discovery");
-      } else {
-        await this.evictMissingPooledDevice(device, "not present in refresh discovery", true);
-      }
-      removedCount++;
-    }
-
-    return removedCount;
-  }
-
-  private async removeMissingDevicesForRefresh(
-    assignmentLockHeld: boolean,
-    refreshGeneration: number,
-    bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
-  ): Promise<number | undefined> {
-    const removeMissingDevices = async () => {
-      if (refreshGeneration !== this.refreshGeneration) {
-        return undefined;
-      }
-      return await this.removeDevicesMissingFrom(
-        bootedDeviceIds,
-        bootedPlatforms,
-        succeededPlatforms,
-        succeededSources,
-      );
-    };
-    return assignmentLockHeld
-      ? await removeMissingDevices()
-      : await this.assignmentMutex.runExclusive(removeMissingDevices);
   }
 
   /**
@@ -2566,31 +2527,6 @@ export class DevicePool {
   }
 
   /**
-   * Whether a pooled entry must be re-proved PRESENT before it is handed out.
-   *
-   * Every Android entry must: a handset unplugged after the last refresh is
-   * gone from `adb devices` but still sitting in the pool, and assigning it
-   * hands a session a device that cannot answer (#6863 review).
-   */
-  private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
-    return device.platform === "android";
-  }
-
-  /**
-   * Whether a pooled entry's serial can be REASSIGNED to a different runtime.
-   *
-   * Emulator console ports are the reused identifiers: `emulator-5554` is handed
-   * to whichever AVD boots into that console slot next, so a serial that is
-   * present still has to prove it is the same runtime. A handset serial is
-   * globally unique and never reassigned, so presence is the whole question
-   * there — and its name (`ro.product.model`) is not identity, so running it
-   * through identity reconciliation could only produce false replacements.
-   */
-  private hasReusableSerial(device: PooledDevice): boolean {
-    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
-  }
-
-  /**
    * The shared assignability gate every hand-out path runs an Android entry
    * through: idle selection, exact `bindOrReuseDeviceSession`, autolock and the
    * pre-allocation sweeps. It answers one question — may this entry be handed to
@@ -2604,7 +2540,7 @@ export class DevicePool {
     idleEviction: boolean = false,
     discovery?: BootedDeviceDiscovery,
   ): Promise<boolean> {
-    const present = await this.ensurePooledDevicePresent(
+    const present = await this.missingDeviceLiveness.ensurePooledDevicePresent(
       device,
       deferRecovery,
       assignmentLockHeld,
@@ -2612,252 +2548,6 @@ export class DevicePool {
       discovery,
     );
     return present && this.isPooledDeviceIdentityAssignable(device);
-  }
-
-  private async ensurePooledDevicePresent(
-    device: PooledDevice,
-    deferRecovery: boolean,
-    assignmentLockHeld: boolean,
-    idleEviction: boolean,
-    snapshot?: BootedDeviceDiscovery,
-  ): Promise<boolean> {
-    if (!this.shouldValidatePooledDevicePresence(device)) {
-      return true;
-    }
-
-    const discovery = snapshot ?? (await this.takeFreshPresenceDiscovery(device.platform));
-    if (!discovery.succeededPlatforms.has(device.platform)) {
-      logger.warn(
-        `Retaining ${device.id}: ${device.platform} discovery did not succeed during assignment liveness check`,
-      );
-      return true;
-    }
-
-    const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
-    if (bootedDevice) {
-      return this.hasReusableSerial(device)
-        ? await this.reconcileDiscoveredPooledDevice(device, bootedDevice, assignmentLockHeld)
-        : this.confirmLivePooledDevice(device);
-    }
-
-    if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
-      this.startDetachedRecoveringEviction(device, "not present in adb devices");
-      return false;
-    }
-    if (idleEviction) {
-      const claimed = await this.assignmentMutex.runExclusive(() => {
-        // The discovery ran without the lock. A newer bind or incarnation wins
-        // over its absent snapshot; claim before any other bind can select it.
-        if (
-          this.devices.get(device.id) !== device ||
-          device.status !== "idle" ||
-          device.sessionId !== null
-        ) {
-          return false;
-        }
-        device.status = "error";
-        return true;
-      });
-      if (!claimed) {
-        return true;
-      }
-      const deferEviction = this.shouldRebootDisconnectedAndroidDevice(device);
-      const eviction = this.evictMissingPooledDevice(
-        device,
-        "not present in adb devices",
-        true,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        true,
-      );
-      if (deferEviction) {
-        void eviction.catch((error) => {
-          logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
-        });
-        return false;
-      }
-      await eviction;
-      return false;
-    }
-    await this.evictMissingPooledDevice(device, "not present in adb devices", true);
-    return false;
-  }
-
-  /**
-   * One cache-busted discovery sweep for presence checks. The adb device-list
-   * cache is reset so the answer reflects the transport right now, not a list up
-   * to one TTL old.
-   */
-  private async takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
-    resetAdbDeviceListCache();
-    resetBootedDevicesResourceCache();
-    resetAndroidDeviceImageResourceCache();
-    return await this.deviceManager.getBootedDevicesDetailed(platform);
-  }
-
-  /**
-   * Settle a liveness check for a serial discovery still reports as booted:
-   * either the pooled entry is the runtime that answered, or a different one
-   * has taken the serial and the entry must be replaced.
-   */
-  private async reconcileDiscoveredPooledDevice(
-    device: PooledDevice,
-    bootedDevice: BootedDevice,
-    assignmentLockHeld: boolean,
-  ): Promise<boolean> {
-    if (this.matchesRuntimeIdentity(device, bootedDevice)) {
-      await this.reconcilePooledIdentityResolution(device, bootedDevice);
-      return this.confirmLivePooledDevice(device);
-    }
-    if (this.comparePooledIdentityEvidence(device, bootedDevice) === "stale") {
-      return this.confirmLivePooledDevice(device);
-    }
-    const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
-      device,
-      bootedDevice,
-      assignmentLockHeld,
-    );
-    return !replaced && this.devices.get(device.id) === device;
-  }
-
-  /**
-   * Accept a pooled entry discovery just confirmed is present.
-   *
-   * Guarded on entry identity: a concurrent re-add can have replaced this entry
-   * while discovery was in flight, and serial, platform and name cannot tell the
-   * incarnations apart — only the pool's own entry object can — so the captured
-   * object would be a previous incarnation and must not be handed out.
-   */
-  private confirmLivePooledDevice(device: PooledDevice): boolean {
-    if (this.devices.get(device.id) !== device) {
-      logger.debug(`Rejecting superseded pooled incarnation of ${device.id} after liveness check`);
-      return false;
-    }
-    this.refreshMissingDeviceMisses.delete(device.id);
-    return true;
-  }
-
-  private async replaceIdlePooledDeviceForLivenessCheck(
-    device: PooledDevice,
-    bootedDevice: BootedDevice,
-    assignmentLockHeld: boolean,
-  ): Promise<boolean> {
-    const replaceIfStillIdle = async () => {
-      if (
-        this.devices.get(device.id) !== device ||
-        device.status !== "idle" ||
-        device.sessionId !== null
-      ) {
-        return false;
-      }
-      if (this.comparePooledIdentityEvidence(device, bootedDevice) === "stale") {
-        return false;
-      }
-      return await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
-    };
-    return assignmentLockHeld
-      ? await replaceIfStillIdle()
-      : await this.assignmentMutex.runExclusive(replaceIfStillIdle);
-  }
-
-  /**
-   * Start a recovering eviction without awaiting it, marking the entry
-   * unassignable meanwhile. The Android recovery it runs stops and cold-boots an
-   * emulator for minutes, so no assignmentMutex critical section may await it
-   * (#6391): the lifecycle lease serializes the boot instead, and the eviction
-   * re-validates pool identity after each await.
-   */
-  private startDetachedRecoveringEviction(device: PooledDevice, reason: string): void {
-    const eviction = this.evictMissingPooledDevice(device, reason, true);
-    if (this.devices.get(device.id) === device) {
-      device.status = "error";
-    }
-    void eviction.catch((error) => {
-      logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
-    });
-  }
-
-  private async evictMissingPooledDevice(
-    device: PooledDevice,
-    reason: string,
-    attemptDeviceLossRecovery: boolean = false,
-    incidentId?: string,
-    incidentCaptureComplete: boolean = false,
-    recoveryPreparation?: SessionRecoveryPreparation,
-    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    lockPoolRemoval?: boolean,
-  ): Promise<void> {
-    if (this.shouldAbortEvictionUpfront(device, reason, identityObservation)) {
-      return;
-    }
-    logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
-    const correlatedIncidentId = await this.resolveMissingDeviceIncident(
-      device,
-      attemptDeviceLossRecovery,
-      incidentId,
-      incidentCaptureComplete,
-    );
-    this.finishSessionPreservingRecoveryPreparation(recoveryPreparation);
-    if (
-      await this.tryPreserveSessionForMissingDevice(
-        device,
-        attemptDeviceLossRecovery,
-        correlatedIncidentId,
-      )
-    ) {
-      return;
-    }
-    if (
-      device.sessionId &&
-      !(await this.releaseSessionForEvictedDevice(
-        device,
-        correlatedIncidentId,
-        identityObservation,
-      ))
-    ) {
-      return;
-    }
-    if (this.devices.get(device.id) !== device) {
-      await this.finishEmulatorLossIncident(correlatedIncidentId, "not-attempted");
-      return;
-    }
-    this.prepareEvictedDeviceForRemoval(device, lockPoolRemoval);
-    if (attemptDeviceLossRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
-      if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-        return;
-      }
-      await this.removeDisconnectedDevice(device.id, false, correlatedIncidentId);
-      return;
-    }
-    await this.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
-    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-      return;
-    }
-    await this.removeEvictedDevice(device, lockPoolRemoval);
-    this.settleEmulatorLossIncident(correlatedIncidentId);
-  }
-
-  private async removeEvictedDevice(
-    device: PooledDevice,
-    lockPoolRemoval?: boolean,
-  ): Promise<void> {
-    if (!lockPoolRemoval) {
-      await this.removeDevice(device.id, true, device);
-      return;
-    }
-    // Incident and recovery I/O completed before assignmentMutex. Only the
-    // compare-and-delete runs under the lock, after any lifecycle lease settles.
-    await this.assignmentMutex.runExclusive(() => this.removeDevice(device.id, false, device));
-  }
-
-  private prepareEvictedDeviceForRemoval(device: PooledDevice, lockPoolRemoval?: boolean): void {
-    // An idle preallocation eviction already claimed this entry as error under
-    // assignmentMutex; keep it unavailable until its guarded removal completes.
-    if (!lockPoolRemoval) {
-      device.status = "idle";
-    }
   }
 
   private async releaseSessionForEvictedDevice(
@@ -2910,57 +2600,6 @@ export class DevicePool {
     return true;
   }
 
-  private shouldAbortEvictionUpfront(
-    device: PooledDevice,
-    reason: string,
-    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-  ): boolean {
-    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-      return true;
-    }
-    if (this.isReservedForShutdown(device)) {
-      // killDevice alone owns a shutdown-reserved incarnation until it either
-      // retires it or atomically hands off a same-ID replacement. Discovery
-      // pruning must not remove it in the middle of that handoff.
-      logger.debug(`Deferring eviction of shutdown-reserved device ${device.id}: ${reason}`);
-      return true;
-    }
-    return false;
-  }
-
-  private shouldAbortEvictionForStaleIdentityObservation(
-    device: PooledDevice,
-    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-  ): boolean {
-    if (
-      !identityObservation ||
-      this.comparePooledIdentityEvidence(device, identityObservation) !== "stale"
-    ) {
-      return false;
-    }
-    logger.debug(
-      `[DevicePool] Aborting eviction of ${device.id}: a newer identity observation confirmed it during eviction`,
-    );
-    return true;
-  }
-
-  private async resolveMissingDeviceIncident(
-    device: PooledDevice,
-    attemptDeviceLossRecovery: boolean,
-    incidentId: string | undefined,
-    incidentCaptureComplete: boolean,
-  ): Promise<string | undefined> {
-    if (incidentId || !attemptDeviceLossRecovery || incidentCaptureComplete) {
-      return incidentId;
-    }
-    return await this.recordEmulatorLossIncident(
-      device.id,
-      "device-discovery-miss",
-      undefined,
-      "absent",
-    );
-  }
-
   private async tryPreserveSessionForMissingDevice(
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
@@ -2979,6 +2618,44 @@ export class DevicePool {
       (await this.recoverSessionBoundDeviceAfterLoss(device.id, incidentId, device)) !==
       "not-attempted"
     );
+  }
+
+  private removeMissingDevicesForRefresh(
+    assignmentLockHeld: boolean,
+    refreshGeneration: number,
+    bootedDeviceIds: Set<string>,
+    bootedPlatforms: Set<Platform>,
+    succeededPlatforms: Set<Platform>,
+    succeededSources?: Set<DiscoverySource>,
+  ): Promise<number | undefined> {
+    return this.missingDeviceLiveness.removeMissingDevicesForRefresh(
+      assignmentLockHeld,
+      refreshGeneration,
+      bootedDeviceIds,
+      bootedPlatforms,
+      succeededPlatforms,
+      succeededSources,
+    );
+  }
+
+  private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
+    return this.missingDeviceLiveness.shouldValidatePooledDevicePresence(device);
+  }
+
+  private hasReusableSerial(device: PooledDevice): boolean {
+    return this.missingDeviceLiveness.hasReusableSerial(device);
+  }
+
+  private takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+    return this.missingDeviceLiveness.takeFreshPresenceDiscovery(platform);
+  }
+
+  private evictMissingPooledDevice(
+    device: PooledDevice,
+    reason: string,
+    options: MissingDeviceEvictionOptions = {},
+  ): Promise<void> {
+    return this.missingDeviceLiveness.evictMissingPooledDevice(device, reason, options);
   }
 
   private shouldRebootDisconnectedAndroidDevice(

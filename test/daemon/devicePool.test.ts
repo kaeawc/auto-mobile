@@ -5423,9 +5423,15 @@ describe("DevicePool", () => {
           code: number | null,
           signal: NodeJS.Signals | null,
         ): Promise<void>;
-        resolveMissingDeviceIncident(...args: unknown[]): Promise<string | undefined>;
       };
-      internals.resolveMissingDeviceIncident = async (...args) => {
+      const livenessInternals = (
+        devicePool as unknown as {
+          missingDeviceLiveness: {
+            resolveMissingDeviceIncident(...args: unknown[]): Promise<string | undefined>;
+          };
+        }
+      ).missingDeviceLiveness;
+      livenessInternals.resolveMissingDeviceIncident = async (...args) => {
         incidentResolutionStarted.resolve();
         await releaseIncidentResolution.promise;
         return args[2] as string | undefined;
@@ -8286,11 +8292,13 @@ describe("DevicePool", () => {
         assignmentMutex: {
           runExclusive<T>(callback: () => Promise<T>): Promise<T>;
         };
-        reconcileDiscoveredPooledDevice(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-          assignmentLockHeld: boolean,
-        ): Promise<boolean>;
+        missingDeviceLiveness: {
+          reconcileDiscoveredPooledDevice(
+            pooledDevice: PooledDevice,
+            bootedDevice: BootedDevice,
+            assignmentLockHeld: boolean,
+          ): Promise<boolean>;
+        };
         replacePooledDeviceForRuntimeIdentity(
           pooledDevice: PooledDevice,
           bootedDevice: BootedDevice,
@@ -8314,7 +8322,11 @@ describe("DevicePool", () => {
       };
       try {
         // The early liveness check accepts stamp 2, then blocks on the mutex.
-        const liveness = internals.reconcileDiscoveredPooledDevice(pooled, replacement, false);
+        const liveness = internals.missingDeviceLiveness.reconcileDiscoveredPooledDevice(
+          pooled,
+          replacement,
+          false,
+        );
 
         // Discovery is intentionally outside the assignment mutex. Its newer
         // confirmation must invalidate the queued liveness replacement.
@@ -8344,25 +8356,30 @@ describe("DevicePool", () => {
 
       type DevicePoolInternals = {
         addDevice(device: BootedDevice): Promise<void>;
-        reconcileDiscoveredPooledDevice(
-          pooledDevice: PooledDevice,
-          bootedDevice: BootedDevice,
-          assignmentLockHeld: boolean,
-        ): Promise<boolean>;
-        resolveMissingDeviceIncident(
-          pooledDevice: PooledDevice,
-          recoverAndroidEmulator: boolean,
-          incidentId: string | undefined,
-          incidentCaptureComplete: boolean,
-        ): Promise<string | undefined>;
+        missingDeviceLiveness: {
+          reconcileDiscoveredPooledDevice(
+            pooledDevice: PooledDevice,
+            bootedDevice: BootedDevice,
+            assignmentLockHeld: boolean,
+          ): Promise<boolean>;
+          resolveMissingDeviceIncident(
+            pooledDevice: PooledDevice,
+            recoverAndroidEmulator: boolean,
+            incidentId: string | undefined,
+            incidentCaptureComplete: boolean,
+          ): Promise<string | undefined>;
+        };
       };
       const internals = devicePool as unknown as DevicePoolInternals;
       const evictionEntered = Promise.withResolvers<void>();
       const releaseEviction = Promise.withResolvers<void>();
-      const resolveMissingDeviceIncident = internals.resolveMissingDeviceIncident.bind(devicePool);
+      const resolveMissingDeviceIncident =
+        internals.missingDeviceLiveness.resolveMissingDeviceIncident.bind(
+          internals.missingDeviceLiveness,
+        );
       const addDevice = internals.addDevice.bind(devicePool);
       let adds = 0;
-      internals.resolveMissingDeviceIncident = async (...args) => {
+      internals.missingDeviceLiveness.resolveMissingDeviceIncident = async (...args) => {
         // This awaits within eviction before either destructive removal branch,
         // unlike the assignment-mutex gate in the preceding regression test.
         evictionEntered.resolve();
@@ -8375,7 +8392,11 @@ describe("DevicePool", () => {
       };
       try {
         // Stamp 2 passes the liveness replacement's initial stale-observation check.
-        const liveness = internals.reconcileDiscoveredPooledDevice(pooled, replacement, true);
+        const liveness = internals.missingDeviceLiveness.reconcileDiscoveredPooledDevice(
+          pooled,
+          replacement,
+          true,
+        );
         await evictionEntered.promise;
 
         // Discovery reconciliation is intentionally outside assignmentMutex and
@@ -8388,7 +8409,7 @@ describe("DevicePool", () => {
         expect(devicePool.getDevice("emulator-5554")?.name).toBe("Pixel_8_API_35");
         expect(adds).toBe(0);
       } finally {
-        internals.resolveMissingDeviceIncident = resolveMissingDeviceIncident;
+        internals.missingDeviceLiveness.resolveMissingDeviceIncident = resolveMissingDeviceIncident;
         internals.addDevice = addDevice;
         releaseEviction.resolve();
       }
@@ -8409,11 +8430,7 @@ describe("DevicePool", () => {
         evictMissingPooledDevice(
           pooledDevice: PooledDevice,
           reason: string,
-          recoverAndroidEmulator?: boolean,
-          incidentId?: string,
-          incidentCaptureComplete?: boolean,
-          recoveryPreparation?: unknown,
-          identityObservation?: Pick<BootedDevice, "name" | "observedAt">,
+          options?: { identityObservation?: Pick<BootedDevice, "name" | "observedAt"> },
         ): Promise<void>;
         releaseSessionForDisconnectedDevice(
           sessionId: string,

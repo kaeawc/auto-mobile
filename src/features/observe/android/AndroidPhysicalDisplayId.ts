@@ -2,6 +2,7 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import type { Timer } from "../../../utils/SystemTimer";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
+import { ActionableError } from "../../../models/ActionableError";
 import {
   parseAndroidDisplayInfos,
   parseSurfaceFlingerDisplayIds,
@@ -11,11 +12,57 @@ const SURFACE_FLINGER_DISPLAY_IDS_COMMAND = "shell dumpsys SurfaceFlinger --disp
 const DEFAULT_DISPLAY_INFO_COMMAND = "shell cmd display get-displays";
 export const PHYSICAL_DISPLAY_ID_CACHE_TTL_MS = 10_000;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const screenshotCaptureTails = new Map<string, Promise<void>>();
+
+/** Serialize device-side screenshot captures so Android's capture pipeline is not overlapped. */
+export async function withAndroidScreenshotCaptureLock<T>(
+  deviceId: string,
+  capture: () => Promise<T>,
+): Promise<T> {
+  const previous = screenshotCaptureTails.get(deviceId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => current);
+  screenshotCaptureTails.set(deviceId, tail);
+
+  await previous;
+  try {
+    return await capture();
+  } finally {
+    release();
+    if (screenshotCaptureTails.get(deviceId) === tail) {
+      screenshotCaptureTails.delete(deviceId);
+    }
+  }
+}
 
 export function assertValidPng(buffer: Buffer): void {
   if (buffer.length < PNG_SIGNATURE.length || !buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
-    throw new Error("Screencap output is not a valid PNG (missing PNG signature)");
+    throw new ActionableError(
+      "Android screencap returned data without a PNG signature; verify the device display and retry the screenshot.",
+    );
   }
+}
+
+/** Remove warning text that some Android builds print before screencap output. */
+export function stripLeadingPngNoise(buffer: Buffer): Buffer {
+  const signatureIndex = buffer.indexOf(PNG_SIGNATURE);
+  if (signatureIndex < 0) {
+    assertValidPng(buffer);
+  }
+  return buffer.subarray(signatureIndex);
+}
+
+/** Decode base64 screencap output after discarding any plain-text warning prefix. */
+export function decodePngBase64Output(output: string): Buffer {
+  const cleanedOutput = output.replace(/[\r\n]/g, "");
+  const signatureOffset = cleanedOutput.indexOf("iVBORw0KGgo");
+  if (signatureOffset < 0) {
+    assertValidPng(Buffer.from(cleanedOutput, "base64"));
+  }
+  return stripLeadingPngNoise(Buffer.from(cleanedOutput.slice(signatureOffset), "base64"));
 }
 
 /**

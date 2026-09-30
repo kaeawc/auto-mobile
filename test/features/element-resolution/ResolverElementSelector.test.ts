@@ -4,8 +4,26 @@ import { identifyObservedHierarchy } from "../../../src/features/observe/Hierarc
 import { attachRawViewHierarchy } from "../../../src/utils/viewHierarchySearch";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 import { projectSkeleton } from "../../../src/features/observe/output/SkeletonProjection";
+import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
 
 afterEach(() => serverConfig.setRawElementSearchEnabled(false));
+
+test("a checkable SwiftUI Toggle ranks its smaller control ahead of the labelled row", () => {
+  const capture = iosFormsSwitch("true");
+  const row = capture.hierarchy.node;
+  if (!row || Array.isArray(row)) {
+    throw new Error("Expected the iOS application node");
+  }
+  const toggleRow = row.node?.[0];
+  if (!toggleRow) {
+    throw new Error("Expected the toggle row");
+  }
+  toggleRow.$!.class = "SwiftUIToggle";
+  toggleRow.node![0].$!.class = "SwiftUIToggle";
+
+  const selected = new ResolverElementSelector().selectByText(capture, "Enable Notifications");
+  expect(selected.element?.bounds).toEqual({ left: 301, top: 296, right: 364, bottom: 324 });
+});
 const bounds = { left: 0, top: 0, right: 100, bottom: 100 };
 const hierarchy = {
   hierarchy: {

@@ -8,7 +8,7 @@ import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { PortManager } from "../../src/utils/PortManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
-import { BoundedAndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
+import { BoundedAndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import {
   DEFAULT_VIDEO_RECORDING_CONFIG,

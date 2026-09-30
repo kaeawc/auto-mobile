@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { requireBootedDevice } from "../../src/utils/requireBootedDevice";
+import { requireBootedDevice } from "../../src/devices/requireBootedDevice";
 
 const FN = "Test.getInstance";
 

@@ -43,8 +43,24 @@ export interface SearchableNode {
 
 type SearchableProperties = Omit<Partial<Element>, "bounds"> & { bounds?: unknown };
 
+const IOS_EDITABLE_HINT_CLASSES = new Set([
+  "UITextField",
+  "UISecureTextField",
+  "UITextView",
+  "UISearchBar",
+  "XCUIElementTypeTextField",
+  "XCUIElementTypeSecureTextField",
+]);
+
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function getIosEditableHint(properties: SearchableProperties): string | undefined {
+  const className = String(properties.class ?? properties.className ?? "");
+  return IOS_EDITABLE_HINT_CLASSES.has(className)
+    ? nonEmptyString(properties["hint-text"])
+    : undefined;
 }
 
 function deriveAffordances(properties: SearchableProperties): Affordance[] {
@@ -80,6 +96,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
   const description = nonEmptyString(properties["content-desc"]);
   const accessibleLabel = nonEmptyString(properties["ios-accessibility-label"]);
   const editable = isEditableElementProperties(properties);
+  const iosEditableHint = getIosEditableHint(properties);
   const capturedValue =
     editable && typeof properties.value === "string" ? properties.value : undefined;
   const value = nonEmptyString(capturedValue);
@@ -89,6 +106,7 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
     text,
     description,
     accessibleLabel,
+    iosEditableHint,
   ].find(Boolean);
   const displayedLabel = displayedSearchableLabel(label);
   const parsedBounds = parseBounds(properties.bounds);
@@ -112,12 +130,13 @@ export function toSearchable(properties: SearchableProperties): SearchableNode {
         "content-desc": description,
         "ios-accessibility-label": accessibleLabel,
         value: capturedValue,
+        "hint-text": iosEditableHint,
       }).filter((entry): entry is [string, string] => entry[1] !== undefined),
     ),
     capturedTextLength: typeof properties.text === "string" ? properties.text.length : undefined,
     textFields: [
       ...new Set(
-        [displayedLabel, label, value, text, description, accessibleLabel].filter(
+        [displayedLabel, label, value, text, description, accessibleLabel, iosEditableHint].filter(
           (field): field is string => field !== undefined,
         ),
       ),

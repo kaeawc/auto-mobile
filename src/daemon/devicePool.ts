@@ -39,15 +39,12 @@ import {
   deviceRestartReleaseReason,
   isDeviceRestartReleaseReason,
 } from "../db/deviceSessionRepository";
-import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../utils/androidDeviceReboot";
+import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../devices/androidDeviceReboot";
 import {
   DeviceCriteriaMatcher,
   DeviceAllocationCriteria,
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
-import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
-import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
-import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import {
@@ -71,8 +68,6 @@ import {
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
-import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
-import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   DeviceLostError,
   deviceLossCancellationReason,
@@ -93,6 +88,21 @@ import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
 } from "./adbServerResetQuarantine";
+import {
+  EmulatorProcessLifecycle,
+  type EmulatorProcessLifecyclePoolPort,
+  type EmulatorProcessOutputTail,
+} from "./emulatorProcessLifecycle";
+import {
+  MissingDeviceLiveness,
+  type MissingDeviceEvictionOptions,
+  type MissingDeviceLivenessPoolPort,
+} from "./missingDeviceLiveness";
+import {
+  DeviceShutdownReservations,
+  type DeviceShutdownReservationsPoolPort,
+  type ShutdownDeviceReservation,
+} from "./deviceShutdownReservations";
 import {
   DeviceDisconnectHandler,
   INCARNATION_ANY,
@@ -393,7 +403,7 @@ export type SessionAssignmentSnapshot = Pick<
   "sessionId" | "status" | "lastUsedAt" | "assignmentCount" | "errorCount" | "autolockSessionId"
 >;
 
-interface ShutdownIdentityReservation {
+export interface ShutdownIdentityReservation {
   device: PooledDevice | undefined;
   assignmentCount: number | undefined;
   session: Session | undefined;
@@ -470,11 +480,6 @@ export type DeviceReadinessReservation = (() => Promise<void>) & {
   readonly owner: symbol;
 };
 
-interface ReadinessReservationTarget {
-  deviceId: string;
-  incarnation: number;
-}
-
 export interface AdbServerResetRecoveryReservation {
   deviceId: string;
   image: DeviceInfo;
@@ -523,71 +528,6 @@ export type IOSSimulatorRecoveryDevice = PooledDevice & {
 export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimulatorRecoveryDevice;
 
 /**
- * A process can emit output after readiness. Capture its redacted bounded tail
- * so a later unexpected exit has the same useful evidence as an early launch
- * failure without retaining unbounded process output.
- */
-class EmulatorProcessOutputTail {
-  private output = "";
-  private readonly stdoutRedactor = new AndroidCommandOutputStreamRedactor();
-  private readonly stderrRedactor = new AndroidCommandOutputStreamRedactor();
-  private readonly streamsClosed: Promise<void>;
-
-  constructor(
-    childProcess: ChildProcess,
-    private readonly timer: Timer,
-  ) {
-    const hasStreams =
-      (childProcess.stdout !== null && childProcess.stdout !== undefined) ||
-      (childProcess.stderr !== null && childProcess.stderr !== undefined);
-    this.streamsClosed = hasStreams
-      ? new Promise((resolve) => childProcess.once("close", resolve))
-      : Promise.resolve();
-    childProcess.stdout?.on("data", (value) => this.append(value, this.stdoutRedactor));
-    childProcess.stderr?.on("data", (value) => this.append(value, this.stderrRedactor));
-  }
-
-  snapshot(): string | undefined {
-    const output = boundedEmulatorOutputTail(
-      this.output + this.stdoutRedactor.snapshot() + this.stderrRedactor.snapshot(),
-    );
-    return output.length > 0 ? output : undefined;
-  }
-
-  async finalize(): Promise<string | undefined> {
-    await this.waitForStreamClose();
-    this.output = boundedEmulatorOutputTail(
-      this.output + this.stdoutRedactor.flush() + this.stderrRedactor.flush(),
-    );
-    return this.output.length > 0 ? this.output : undefined;
-  }
-
-  private append(value: unknown, redactor: AndroidCommandOutputStreamRedactor): void {
-    const text = typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString() : "";
-    if (!text) {
-      return;
-    }
-    this.output = boundedEmulatorOutputTail(this.output + redactor.append(text));
-  }
-
-  private async waitForStreamClose(): Promise<void> {
-    const timedOut = Symbol("stream-close-timeout");
-    try {
-      await raceWithDeadline(this.streamsClosed, {
-        timer: this.timer,
-        timeoutMs: 1_000,
-        label: "Emulator output streams",
-        timeoutError: () => timedOut,
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-    }
-  }
-}
-
-/**
  * Device Pool
  *
  * Manages a pool of Android devices for parallel test execution:
@@ -619,6 +559,13 @@ export interface DevicePoolDependencies {
   adbServerResetQuarantineFactory?: (
     pool: AdbServerResetQuarantinePoolPort,
   ) => AdbServerResetQuarantine;
+  missingDeviceLivenessFactory?: (pool: MissingDeviceLivenessPoolPort) => MissingDeviceLiveness;
+  deviceShutdownReservationsFactory?: (
+    pool: DeviceShutdownReservationsPoolPort,
+  ) => DeviceShutdownReservations;
+  emulatorProcessLifecycleFactory?: (
+    pool: EmulatorProcessLifecyclePoolPort,
+  ) => EmulatorProcessLifecycle;
   deviceSessionContinuityEnabled?: boolean;
 }
 
@@ -627,6 +574,27 @@ function createAdbServerResetQuarantine(
   factory?: DevicePoolDependencies["adbServerResetQuarantineFactory"],
 ): AdbServerResetQuarantine {
   return factory ? factory(port) : new AdbServerResetQuarantine(port);
+}
+
+function createEmulatorProcessLifecycle(
+  port: EmulatorProcessLifecyclePoolPort,
+  factory?: DevicePoolDependencies["emulatorProcessLifecycleFactory"],
+): EmulatorProcessLifecycle {
+  return factory ? factory(port) : new EmulatorProcessLifecycle(port);
+}
+
+function createMissingDeviceLiveness(
+  port: MissingDeviceLivenessPoolPort,
+  factory?: DevicePoolDependencies["missingDeviceLivenessFactory"],
+): MissingDeviceLiveness {
+  return factory ? factory(port) : new MissingDeviceLiveness(port);
+}
+
+function createDeviceShutdownReservations(
+  port: DeviceShutdownReservationsPoolPort,
+  factory?: DevicePoolDependencies["deviceShutdownReservationsFactory"],
+): DeviceShutdownReservations {
+  return factory ? factory(port) : new DeviceShutdownReservations(port);
 }
 
 export class DevicePool {
@@ -698,6 +666,9 @@ export class DevicePool {
   private get sessionPreservingRecoveries(): Map<string, SessionPreservingRecovery> {
     return this.recoveryCoordinator.sessionPreservingRecoveries;
   }
+  private readonly emulatorProcessLifecycle: EmulatorProcessLifecycle;
+  private readonly missingDeviceLiveness: MissingDeviceLiveness;
+  private readonly shutdownReservationCoordinator: DeviceShutdownReservations;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
@@ -732,22 +703,6 @@ export class DevicePool {
     string,
     { incarnation: number; refreshGeneration: number }
   >();
-  private readonly readinessReservationCounts: Map<string, number> = new Map();
-  /**
-   * Stable runtime names reserved while a booted serial is being replaced,
-   * keyed by reservation owner to its exact device incarnation. Concurrent
-   * readiness for the same device can share that device, while a replacement
-   * serial or incarnation remains unavailable until its owner transfers the
-   * reservation.
-   */
-  private readonly readinessReservationNames: Map<string, Map<symbol, ReadinessReservationTarget>> =
-    new Map();
-  /**
-   * Captured incarnations that an explicit shutdown is retiring. Unlike a
-   * readiness reservation, this excludes direct startDevice/autolock binding
-   * as well as ordinary pool allocation.
-   */
-  private readonly shutdownReservations: Map<string, PooledDevice> = new Map();
   /** Exact session incarnation last assigned to each pooled-device incarnation. */
   private readonly pooledSessionIdentities: WeakMap<PooledDevice, Session> = new WeakMap();
   /**
@@ -789,7 +744,6 @@ export class DevicePool {
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
-  private readonly REFRESH_MISSING_DEVICE_MISS_THRESHOLD = 2;
 
   // Device wait configuration for parallel test execution
   private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
@@ -821,6 +775,9 @@ export class DevicePool {
     lifecycleCoordinator,
     consoleBusyRegistry,
     adbServerResetQuarantineFactory,
+    emulatorProcessLifecycleFactory,
+    missingDeviceLivenessFactory,
+    deviceShutdownReservationsFactory,
     deviceSessionContinuityEnabled,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
@@ -830,6 +787,93 @@ export class DevicePool {
     this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
+    const shutdownReservationsPort: DeviceShutdownReservationsPoolPort = {
+      getDevices: () => this.devices,
+      getAssignmentMutex: () => this.assignmentMutex,
+      getIntentionalShutdowns: () => this.intentionalShutdowns,
+      assertReadinessReservationOwner: (device, client) =>
+        this.assertReadinessReservationOwner(device, client),
+      assertRuntimeIdentity: (device, identity) => this.assertRuntimeIdentity(device, identity),
+      assertAndroidRecoveryExclusionForReadinessReservation: (device, identity, name, enforce) =>
+        this.assertAndroidRecoveryExclusionForReadinessReservation(device, identity, name, enforce),
+      reserveShutdownSessionIdentity: (deviceId) => this.reserveShutdownSessionIdentity(deviceId),
+      completeShutdownSessionIdentity: (deviceId, device, identity) =>
+        this.completeShutdownSessionIdentity(deviceId, device, identity),
+      reserveMcpSessionRecoveryLease: (sessionId, device, token) =>
+        this.reserveMcpSessionRecoveryLease(sessionId, device, token),
+      releaseMcpSessionRecoveryLease: (sessionId, token) =>
+        this.releaseMcpSessionRecoveryLease(sessionId, token),
+      getOwnedAutolockSession: (device, client) =>
+        this.autolockManager.getOwnedAutolockSession(device, client),
+    };
+    this.shutdownReservationCoordinator = createDeviceShutdownReservations(
+      shutdownReservationsPort,
+      deviceShutdownReservationsFactory,
+    );
+    const missingDevicePort: MissingDeviceLivenessPoolPort = {
+      getDevices: () => this.devices,
+      getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
+      getAssignmentMutex: () => this.assignmentMutex,
+      getDeviceManager: () => this.deviceManager,
+      getRefreshGeneration: () => this.refreshGeneration,
+      shouldRebootDisconnectedAndroidDevice: (device) =>
+        this.shouldRebootDisconnectedAndroidDevice(device),
+      matchesRuntimeIdentity: (device, booted) => this.matchesRuntimeIdentity(device, booted),
+      reconcilePooledIdentityResolution: (device, booted) =>
+        this.reconcilePooledIdentityResolution(device, booted),
+      comparePooledIdentityEvidence: (device, observed) =>
+        this.comparePooledIdentityEvidence(device, observed),
+      replacePooledDeviceForRuntimeIdentity: (device, booted) =>
+        this.replacePooledDeviceForRuntimeIdentity(device, booted),
+      finishSessionPreservingRecoveryPreparation: (preparation) =>
+        this.finishSessionPreservingRecoveryPreparation(preparation),
+      tryPreserveSessionForMissingDevice: (device, attempt, incidentId) =>
+        this.tryPreserveSessionForMissingDevice(device, attempt, incidentId),
+      releaseSessionForEvictedDevice: (device, incidentId, observation) =>
+        this.releaseSessionForEvictedDevice(device, incidentId, observation),
+      finishEmulatorLossIncident: (incidentId, outcome) =>
+        this.finishEmulatorLossIncident(incidentId, outcome),
+      removeDisconnectedDevice: (deviceId, mayBeStaleSignal, incidentId) =>
+        this.removeDisconnectedDevice(deviceId, mayBeStaleSignal, incidentId),
+      completeEmulatorLossRecovery: (incidentId, outcome) =>
+        this.completeEmulatorLossRecovery(incidentId, outcome),
+      settleEmulatorLossIncident: (incidentId) => this.settleEmulatorLossIncident(incidentId),
+      removeDevice: (deviceId, awaitCacheCleanup, expectedDevice) =>
+        this.removeDevice(deviceId, awaitCacheCleanup, expectedDevice),
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      recordEmulatorLossIncident: (deviceId, path, exit, state) =>
+        this.recordEmulatorLossIncident(deviceId, path, exit, state),
+    };
+    this.missingDeviceLiveness = createMissingDeviceLiveness(
+      missingDevicePort,
+      missingDeviceLivenessFactory,
+    );
+    const emulatorProcessPort: EmulatorProcessLifecyclePoolPort = {
+      getTimer: () => this.timer,
+      getStartedDeviceProcesses: () => this.startedDeviceProcesses,
+      getStartedDeviceProcessOutput: () => this.startedDeviceProcessOutput,
+      getDevices: () => this.devices,
+      getSessionManager: () => this.sessionManager,
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      prepareSessionPreservingRecovery: (id, device) =>
+        this.prepareSessionPreservingRecovery(id, device),
+      finishSessionPreservingRecoveryPreparation: (preparation) =>
+        this.finishSessionPreservingRecoveryPreparation(preparation),
+      recordEmulatorLossIncident: (id, path, exit) =>
+        this.recordEmulatorLossIncident(id, path, exit),
+      finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
+      evictMissingPooledDevice: (device, reason, attempt, incidentId, captured, preparation) =>
+        this.evictMissingPooledDevice(device, reason, {
+          attemptDeviceLossRecovery: attempt,
+          incidentId,
+          incidentCaptureComplete: captured,
+          recoveryPreparation: preparation,
+        }),
+    };
+    this.emulatorProcessLifecycle = createEmulatorProcessLifecycle(
+      emulatorProcessPort,
+      emulatorProcessLifecycleFactory,
+    );
     this.idleDeviceReaper = new IdleDeviceReaper(
       {
         getDevice: (deviceId) => this.getDevice(deviceId),
@@ -1547,11 +1591,7 @@ export class DevicePool {
       await this.evictMissingPooledDevice(
         pooledDevice,
         `runtime identity changed to ${bootedDevice.platform}:${bootedDevice.name}`,
-        false,
-        undefined,
-        false,
-        undefined,
-        bootedDevice,
+        { identityObservation: bootedDevice },
       );
       const replacement = this.pendingIdentityReplacements.get(bootedDevice.deviceId);
       if (!replacement || this.devices.has(replacement.deviceId)) {
@@ -1773,95 +1813,6 @@ export class DevicePool {
       incarnation: expectedDevice.incarnation,
       refreshGeneration: this.refreshGeneration,
     });
-  }
-
-  private async removeDevicesMissingFrom(
-    bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
-  ): Promise<number> {
-    let removedCount = 0;
-
-    for (const device of Array.from(this.devices.values())) {
-      if (bootedDeviceIds.has(device.id)) {
-        this.refreshMissingDeviceMisses.delete(device.id);
-        continue;
-      }
-      if (device.sessionId) {
-        logger.warn(
-          `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`,
-        );
-        continue;
-      }
-      // The source that would have listed this device failed or was unavailable
-      // this refresh, so we cannot confirm the device is gone. Retain it rather
-      // than pruning a device that may still be running (e.g. simctl failed
-      // while devicectl and Android discovery succeeded). Asking per source
-      // rather than per platform keeps one failing iOS half from either
-      // freezing the other half's pruning or pruning its own devices (#5683).
-      if (
-        !didSourceSucceedForDevice(
-          { succeededPlatforms, succeededSources },
-          device.platform,
-          device.id,
-        )
-      ) {
-        this.refreshMissingDeviceMisses.delete(device.id);
-        logger.warn(
-          `Device ${device.id} retained: ${device.platform} discovery did not succeed this refresh`,
-        );
-        continue;
-      }
-      // Discovery succeeded but returned no devices for this platform at all.
-      // Tolerate brief reboot/boot races with a small consecutive-miss threshold
-      // before removing.
-      if (!bootedPlatforms.has(device.platform)) {
-        const misses = (this.refreshMissingDeviceMisses.get(device.id) ?? 0) + 1;
-        this.refreshMissingDeviceMisses.set(device.id, misses);
-        logger.warn(
-          `Device ${device.id} missing from ${device.platform} refresh discovery ` +
-            `(miss ${misses}/${this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD}); retaining until confirmed`,
-        );
-        if (misses < this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD) {
-          continue;
-        }
-      }
-
-      if (this.shouldRebootDisconnectedAndroidDevice(device)) {
-        // This prune runs inside assignmentMutex; the recovery reboot must not (#6391).
-        this.startDetachedRecoveringEviction(device, "not present in refresh discovery");
-      } else {
-        await this.evictMissingPooledDevice(device, "not present in refresh discovery", true);
-      }
-      removedCount++;
-    }
-
-    return removedCount;
-  }
-
-  private async removeMissingDevicesForRefresh(
-    assignmentLockHeld: boolean,
-    refreshGeneration: number,
-    bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
-  ): Promise<number | undefined> {
-    const removeMissingDevices = async () => {
-      if (refreshGeneration !== this.refreshGeneration) {
-        return undefined;
-      }
-      return await this.removeDevicesMissingFrom(
-        bootedDeviceIds,
-        bootedPlatforms,
-        succeededPlatforms,
-        succeededSources,
-      );
-    };
-    return assignmentLockHeld
-      ? await removeMissingDevices()
-      : await this.assignmentMutex.runExclusive(removeMissingDevices);
   }
 
   /**
@@ -2595,31 +2546,6 @@ export class DevicePool {
   }
 
   /**
-   * Whether a pooled entry must be re-proved PRESENT before it is handed out.
-   *
-   * Every Android entry must: a handset unplugged after the last refresh is
-   * gone from `adb devices` but still sitting in the pool, and assigning it
-   * hands a session a device that cannot answer (#6863 review).
-   */
-  private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
-    return device.platform === "android";
-  }
-
-  /**
-   * Whether a pooled entry's serial can be REASSIGNED to a different runtime.
-   *
-   * Emulator console ports are the reused identifiers: `emulator-5554` is handed
-   * to whichever AVD boots into that console slot next, so a serial that is
-   * present still has to prove it is the same runtime. A handset serial is
-   * globally unique and never reassigned, so presence is the whole question
-   * there — and its name (`ro.product.model`) is not identity, so running it
-   * through identity reconciliation could only produce false replacements.
-   */
-  private hasReusableSerial(device: PooledDevice): boolean {
-    return device.platform === "android" && consolePortFromSerial(device.id) !== null;
-  }
-
-  /**
    * The shared assignability gate every hand-out path runs an Android entry
    * through: idle selection, exact `bindOrReuseDeviceSession`, autolock and the
    * pre-allocation sweeps. It answers one question — may this entry be handed to
@@ -2633,7 +2559,7 @@ export class DevicePool {
     idleEviction: boolean = false,
     discovery?: BootedDeviceDiscovery,
   ): Promise<boolean> {
-    const present = await this.ensurePooledDevicePresent(
+    const present = await this.missingDeviceLiveness.ensurePooledDevicePresent(
       device,
       deferRecovery,
       assignmentLockHeld,
@@ -2641,252 +2567,6 @@ export class DevicePool {
       discovery,
     );
     return present && this.isPooledDeviceIdentityAssignable(device);
-  }
-
-  private async ensurePooledDevicePresent(
-    device: PooledDevice,
-    deferRecovery: boolean,
-    assignmentLockHeld: boolean,
-    idleEviction: boolean,
-    snapshot?: BootedDeviceDiscovery,
-  ): Promise<boolean> {
-    if (!this.shouldValidatePooledDevicePresence(device)) {
-      return true;
-    }
-
-    const discovery = snapshot ?? (await this.takeFreshPresenceDiscovery(device.platform));
-    if (!discovery.succeededPlatforms.has(device.platform)) {
-      logger.warn(
-        `Retaining ${device.id}: ${device.platform} discovery did not succeed during assignment liveness check`,
-      );
-      return true;
-    }
-
-    const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
-    if (bootedDevice) {
-      return this.hasReusableSerial(device)
-        ? await this.reconcileDiscoveredPooledDevice(device, bootedDevice, assignmentLockHeld)
-        : this.confirmLivePooledDevice(device);
-    }
-
-    if (deferRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
-      this.startDetachedRecoveringEviction(device, "not present in adb devices");
-      return false;
-    }
-    if (idleEviction) {
-      const claimed = await this.assignmentMutex.runExclusive(() => {
-        // The discovery ran without the lock. A newer bind or incarnation wins
-        // over its absent snapshot; claim before any other bind can select it.
-        if (
-          this.devices.get(device.id) !== device ||
-          device.status !== "idle" ||
-          device.sessionId !== null
-        ) {
-          return false;
-        }
-        device.status = "error";
-        return true;
-      });
-      if (!claimed) {
-        return true;
-      }
-      const deferEviction = this.shouldRebootDisconnectedAndroidDevice(device);
-      const eviction = this.evictMissingPooledDevice(
-        device,
-        "not present in adb devices",
-        true,
-        undefined,
-        false,
-        undefined,
-        undefined,
-        true,
-      );
-      if (deferEviction) {
-        void eviction.catch((error) => {
-          logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
-        });
-        return false;
-      }
-      await eviction;
-      return false;
-    }
-    await this.evictMissingPooledDevice(device, "not present in adb devices", true);
-    return false;
-  }
-
-  /**
-   * One cache-busted discovery sweep for presence checks. The adb device-list
-   * cache is reset so the answer reflects the transport right now, not a list up
-   * to one TTL old.
-   */
-  private async takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
-    resetAdbDeviceListCache();
-    resetBootedDevicesResourceCache();
-    resetAndroidDeviceImageResourceCache();
-    return await this.deviceManager.getBootedDevicesDetailed(platform);
-  }
-
-  /**
-   * Settle a liveness check for a serial discovery still reports as booted:
-   * either the pooled entry is the runtime that answered, or a different one
-   * has taken the serial and the entry must be replaced.
-   */
-  private async reconcileDiscoveredPooledDevice(
-    device: PooledDevice,
-    bootedDevice: BootedDevice,
-    assignmentLockHeld: boolean,
-  ): Promise<boolean> {
-    if (this.matchesRuntimeIdentity(device, bootedDevice)) {
-      await this.reconcilePooledIdentityResolution(device, bootedDevice);
-      return this.confirmLivePooledDevice(device);
-    }
-    if (this.comparePooledIdentityEvidence(device, bootedDevice) === "stale") {
-      return this.confirmLivePooledDevice(device);
-    }
-    const replaced = await this.replaceIdlePooledDeviceForLivenessCheck(
-      device,
-      bootedDevice,
-      assignmentLockHeld,
-    );
-    return !replaced && this.devices.get(device.id) === device;
-  }
-
-  /**
-   * Accept a pooled entry discovery just confirmed is present.
-   *
-   * Guarded on entry identity: a concurrent re-add can have replaced this entry
-   * while discovery was in flight, and serial, platform and name cannot tell the
-   * incarnations apart — only the pool's own entry object can — so the captured
-   * object would be a previous incarnation and must not be handed out.
-   */
-  private confirmLivePooledDevice(device: PooledDevice): boolean {
-    if (this.devices.get(device.id) !== device) {
-      logger.debug(`Rejecting superseded pooled incarnation of ${device.id} after liveness check`);
-      return false;
-    }
-    this.refreshMissingDeviceMisses.delete(device.id);
-    return true;
-  }
-
-  private async replaceIdlePooledDeviceForLivenessCheck(
-    device: PooledDevice,
-    bootedDevice: BootedDevice,
-    assignmentLockHeld: boolean,
-  ): Promise<boolean> {
-    const replaceIfStillIdle = async () => {
-      if (
-        this.devices.get(device.id) !== device ||
-        device.status !== "idle" ||
-        device.sessionId !== null
-      ) {
-        return false;
-      }
-      if (this.comparePooledIdentityEvidence(device, bootedDevice) === "stale") {
-        return false;
-      }
-      return await this.replacePooledDeviceForRuntimeIdentity(device, bootedDevice);
-    };
-    return assignmentLockHeld
-      ? await replaceIfStillIdle()
-      : await this.assignmentMutex.runExclusive(replaceIfStillIdle);
-  }
-
-  /**
-   * Start a recovering eviction without awaiting it, marking the entry
-   * unassignable meanwhile. The Android recovery it runs stops and cold-boots an
-   * emulator for minutes, so no assignmentMutex critical section may await it
-   * (#6391): the lifecycle lease serializes the boot instead, and the eviction
-   * re-validates pool identity after each await.
-   */
-  private startDetachedRecoveringEviction(device: PooledDevice, reason: string): void {
-    const eviction = this.evictMissingPooledDevice(device, reason, true);
-    if (this.devices.get(device.id) === device) {
-      device.status = "error";
-    }
-    void eviction.catch((error) => {
-      logger.warn(`[DevicePool] Deferred eviction failed for ${device.id}: ${error}`, error);
-    });
-  }
-
-  private async evictMissingPooledDevice(
-    device: PooledDevice,
-    reason: string,
-    attemptDeviceLossRecovery: boolean = false,
-    incidentId?: string,
-    incidentCaptureComplete: boolean = false,
-    recoveryPreparation?: SessionRecoveryPreparation,
-    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    lockPoolRemoval?: boolean,
-  ): Promise<void> {
-    if (this.shouldAbortEvictionUpfront(device, reason, identityObservation)) {
-      return;
-    }
-    logger.warn(`Evicting device ${device.id} from pool: ${reason}`);
-    const correlatedIncidentId = await this.resolveMissingDeviceIncident(
-      device,
-      attemptDeviceLossRecovery,
-      incidentId,
-      incidentCaptureComplete,
-    );
-    this.finishSessionPreservingRecoveryPreparation(recoveryPreparation);
-    if (
-      await this.tryPreserveSessionForMissingDevice(
-        device,
-        attemptDeviceLossRecovery,
-        correlatedIncidentId,
-      )
-    ) {
-      return;
-    }
-    if (
-      device.sessionId &&
-      !(await this.releaseSessionForEvictedDevice(
-        device,
-        correlatedIncidentId,
-        identityObservation,
-      ))
-    ) {
-      return;
-    }
-    if (this.devices.get(device.id) !== device) {
-      await this.finishEmulatorLossIncident(correlatedIncidentId, "not-attempted");
-      return;
-    }
-    this.prepareEvictedDeviceForRemoval(device, lockPoolRemoval);
-    if (attemptDeviceLossRecovery && this.shouldRebootDisconnectedAndroidDevice(device)) {
-      if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-        return;
-      }
-      await this.removeDisconnectedDevice(device.id, false, correlatedIncidentId);
-      return;
-    }
-    await this.completeEmulatorLossRecovery(correlatedIncidentId, "not-attempted");
-    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-      return;
-    }
-    await this.removeEvictedDevice(device, lockPoolRemoval);
-    this.settleEmulatorLossIncident(correlatedIncidentId);
-  }
-
-  private async removeEvictedDevice(
-    device: PooledDevice,
-    lockPoolRemoval?: boolean,
-  ): Promise<void> {
-    if (!lockPoolRemoval) {
-      await this.removeDevice(device.id, true, device);
-      return;
-    }
-    // Incident and recovery I/O completed before assignmentMutex. Only the
-    // compare-and-delete runs under the lock, after any lifecycle lease settles.
-    await this.assignmentMutex.runExclusive(() => this.removeDevice(device.id, false, device));
-  }
-
-  private prepareEvictedDeviceForRemoval(device: PooledDevice, lockPoolRemoval?: boolean): void {
-    // An idle preallocation eviction already claimed this entry as error under
-    // assignmentMutex; keep it unavailable until its guarded removal completes.
-    if (!lockPoolRemoval) {
-      device.status = "idle";
-    }
   }
 
   private async releaseSessionForEvictedDevice(
@@ -2939,57 +2619,6 @@ export class DevicePool {
     return true;
   }
 
-  private shouldAbortEvictionUpfront(
-    device: PooledDevice,
-    reason: string,
-    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-  ): boolean {
-    if (this.shouldAbortEvictionForStaleIdentityObservation(device, identityObservation)) {
-      return true;
-    }
-    if (this.isReservedForShutdown(device)) {
-      // killDevice alone owns a shutdown-reserved incarnation until it either
-      // retires it or atomically hands off a same-ID replacement. Discovery
-      // pruning must not remove it in the middle of that handoff.
-      logger.debug(`Deferring eviction of shutdown-reserved device ${device.id}: ${reason}`);
-      return true;
-    }
-    return false;
-  }
-
-  private shouldAbortEvictionForStaleIdentityObservation(
-    device: PooledDevice,
-    identityObservation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-  ): boolean {
-    if (
-      !identityObservation ||
-      this.comparePooledIdentityEvidence(device, identityObservation) !== "stale"
-    ) {
-      return false;
-    }
-    logger.debug(
-      `[DevicePool] Aborting eviction of ${device.id}: a newer identity observation confirmed it during eviction`,
-    );
-    return true;
-  }
-
-  private async resolveMissingDeviceIncident(
-    device: PooledDevice,
-    attemptDeviceLossRecovery: boolean,
-    incidentId: string | undefined,
-    incidentCaptureComplete: boolean,
-  ): Promise<string | undefined> {
-    if (incidentId || !attemptDeviceLossRecovery || incidentCaptureComplete) {
-      return incidentId;
-    }
-    return await this.recordEmulatorLossIncident(
-      device.id,
-      "device-discovery-miss",
-      undefined,
-      "absent",
-    );
-  }
-
   private async tryPreserveSessionForMissingDevice(
     device: PooledDevice,
     attemptDeviceLossRecovery: boolean,
@@ -3008,6 +2637,44 @@ export class DevicePool {
       (await this.recoverSessionBoundDeviceAfterLoss(device.id, incidentId, device)) !==
       "not-attempted"
     );
+  }
+
+  private removeMissingDevicesForRefresh(
+    assignmentLockHeld: boolean,
+    refreshGeneration: number,
+    bootedDeviceIds: Set<string>,
+    bootedPlatforms: Set<Platform>,
+    succeededPlatforms: Set<Platform>,
+    succeededSources?: Set<DiscoverySource>,
+  ): Promise<number | undefined> {
+    return this.missingDeviceLiveness.removeMissingDevicesForRefresh(
+      assignmentLockHeld,
+      refreshGeneration,
+      bootedDeviceIds,
+      bootedPlatforms,
+      succeededPlatforms,
+      succeededSources,
+    );
+  }
+
+  private shouldValidatePooledDevicePresence(device: PooledDevice): boolean {
+    return this.missingDeviceLiveness.shouldValidatePooledDevicePresence(device);
+  }
+
+  private hasReusableSerial(device: PooledDevice): boolean {
+    return this.missingDeviceLiveness.hasReusableSerial(device);
+  }
+
+  private takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
+    return this.missingDeviceLiveness.takeFreshPresenceDiscovery(platform);
+  }
+
+  private evictMissingPooledDevice(
+    device: PooledDevice,
+    reason: string,
+    options: MissingDeviceEvictionOptions = {},
+  ): Promise<void> {
+    return this.missingDeviceLiveness.evictMissingPooledDevice(device, reason, options);
   }
 
   private shouldRebootDisconnectedAndroidDevice(
@@ -3936,10 +3603,7 @@ export class DevicePool {
     deviceId: string,
     retainLeaseUntil?: (settlement: Promise<unknown>) => void,
   ): Promise<void> {
-    const childProcess = this.startedDeviceProcesses.get(deviceId);
-    await this.stopEmulatorProcess(childProcess, retainLeaseUntil);
-    this.startedDeviceProcesses.delete(deviceId);
-    this.startedDeviceProcessOutput.delete(deviceId);
+    return this.emulatorProcessLifecycle.stopTrackedEmulatorProcess(deviceId, retainLeaseUntil);
   }
 
   private async stopDiscoveredEmulatorByAvdName(
@@ -4069,149 +3733,27 @@ export class DevicePool {
     childProcess: ChildProcess | null | undefined,
     retainLeaseUntil?: (settlement: Promise<unknown>) => void,
   ): Promise<void> {
-    if (!childProcess || typeof childProcess.kill !== "function") {
-      return;
-    }
-
-    const exitCode = (childProcess as { exitCode?: number | null }).exitCode;
-    if (exitCode === undefined) {
-      childProcess.kill();
-      return;
-    }
-    const signalCode = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
-    if (exitCode !== null || (signalCode !== null && signalCode !== undefined)) {
-      return;
-    }
-
-    const exited = new Promise<void>((resolve) => {
-      childProcess.once("exit", () => resolve());
-    });
-    await this.terminateEmulatorProcess(childProcess, exited, retainLeaseUntil);
-  }
-
-  private async terminateEmulatorProcess(
-    childProcess: ChildProcess,
-    exited: Promise<void>,
-    retainLeaseUntil?: (settlement: Promise<unknown>) => void,
-  ): Promise<void> {
-    try {
-      childProcess.kill("SIGTERM");
-      if (await this.waitForTrackedProcessExit(exited, 1_000)) {
-        return;
-      }
-      childProcess.kill("SIGKILL");
-    } catch (error) {
-      retainLeaseUntil?.(exited);
-      throw error;
-    }
-    if (!(await this.waitForTrackedProcessExit(exited, 1_000))) {
-      retainLeaseUntil?.(exited);
-      throw new Error(
-        `emulator process ${childProcess.pid ?? "unknown"} did not exit after SIGKILL`,
-      );
-    }
-  }
-
-  private async waitForTrackedProcessExit(
-    exited: Promise<void>,
-    timeoutMs: number,
-  ): Promise<boolean> {
-    const timedOut = Symbol("process-exit-timeout");
-    try {
-      await raceWithDeadline(exited, {
-        timer: this.timer,
-        timeoutMs,
-        label: "Emulator process exit",
-        timeoutError: () => timedOut,
-      });
-      return true;
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-      return false;
-    }
+    return this.emulatorProcessLifecycle.stopEmulatorProcess(childProcess, retainLeaseUntil);
   }
 
   private async trackStartedDeviceProcess(
     device: BootedDevice,
     childProcess: ChildProcess | null | undefined,
   ): Promise<void> {
-    if (device.platform !== "android" || consolePortFromSerial(device.deviceId) === null) {
-      return;
-    }
-    if (!childProcess || typeof childProcess.once !== "function") {
-      return;
-    }
-
-    this.startedDeviceProcesses.set(device.deviceId, childProcess);
-    this.startedDeviceProcessOutput.set(
-      device.deviceId,
-      new EmulatorProcessOutputTail(childProcess, this.timer),
-    );
-    let exitHandled = false;
-    const handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-      if (exitHandled) {
-        return;
-      }
-      exitHandled = true;
-      if (this.startedDeviceProcesses.get(device.deviceId) !== childProcess) {
-        return;
-      }
-      void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal).catch((error) => {
-        logger.warn(
-          `[DevicePool] Failed to evict ${device.deviceId} after emulator process exit: ${error}`,
-          error,
-        );
-      });
-    };
-    childProcess.once("exit", handleExit);
-    const completedExit = this.getCompletedProcessExit(childProcess);
-    if (completedExit) {
-      exitHandled = true;
-      const pooledDeviceAtExit = this.devices.get(device.deviceId);
-      if (
-        await this.handleCompletedProcessExit(device.deviceId, completedExit, pooledDeviceAtExit)
-      ) {
-        return;
-      }
-      throw new Error(
-        `Android emulator ${device.deviceId} exited before process tracking completed ` +
-          `(code=${completedExit.code ?? "null"}, signal=${completedExit.signal ?? "none"})`,
-      );
-    }
+    return this.emulatorProcessLifecycle.trackStartedDeviceProcess(device, childProcess);
   }
 
   hasStartedDeviceProcess(
     deviceId: string,
     childProcess: ChildProcess | null | undefined,
   ): boolean {
-    return (
-      childProcess !== null &&
-      childProcess !== undefined &&
-      this.startedDeviceProcesses.get(deviceId) === childProcess
-    );
+    return this.emulatorProcessLifecycle.hasStartedDeviceProcess(deviceId, childProcess);
   }
 
   private getCompletedProcessExit(
     childProcess: ChildProcess,
   ): { code: number | null; signal: NodeJS.Signals | null } | undefined {
-    const code = (childProcess as { exitCode?: number | null }).exitCode;
-    const signal = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
-    if (code === undefined || (code === null && (signal === null || signal === undefined))) {
-      return undefined;
-    }
-    return { code, signal: signal ?? null };
-  }
-
-  private async handleCompletedProcessExit(
-    deviceId: string,
-    exit: { code: number | null; signal: NodeJS.Signals | null },
-    pooledDeviceAtExit: PooledDevice | undefined,
-  ): Promise<boolean> {
-    await this.evictStartedDeviceAfterProcessExit(deviceId, exit.code, exit.signal);
-    const replacement = this.devices.get(deviceId);
-    return Boolean(replacement && replacement !== pooledDeviceAtExit);
+    return this.emulatorProcessLifecycle.getCompletedProcessExit(childProcess);
   }
 
   private async evictStartedDeviceAfterProcessExit(
@@ -4219,47 +3761,7 @@ export class DevicePool {
     code: number | null,
     signal: NodeJS.Signals | null,
   ): Promise<void> {
-    const device = this.devices.get(deviceId);
-    if (!device) {
-      return;
-    }
-    if (this.isReservedForShutdown(device)) {
-      // An explicit kill owns this incarnation until it confirms physical exit
-      // and retires ownership. Its tracked process exit is expected and must
-      // not cancel the initiating request or plan through normal loss cleanup.
-      return;
-    }
-
-    const assignmentCountAtExit = device.assignmentCount;
-    const sessionIdAtExit = device.sessionId;
-    const sessionAtExit = sessionIdAtExit ? this.sessionManager.getSession(sessionIdAtExit) : null;
-    const preparation = this.prepareSessionPreservingRecovery(deviceId, device);
-    try {
-      const incidentId = await this.recordEmulatorLossIncident(deviceId, "watched-process-exit", {
-        code,
-        signal,
-      });
-      if (
-        this.devices.get(deviceId) !== device ||
-        device.assignmentCount !== assignmentCountAtExit ||
-        device.sessionId !== sessionIdAtExit ||
-        (sessionAtExit !== null &&
-          this.sessionManager.getSession(sessionAtExit.sessionId) !== sessionAtExit)
-      ) {
-        await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-        return;
-      }
-      await this.evictMissingPooledDevice(
-        device,
-        `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-        true,
-        incidentId,
-        true,
-        preparation,
-      );
-    } finally {
-      this.finishSessionPreservingRecoveryPreparation(preparation);
-    }
+    return this.emulatorProcessLifecycle.evictStartedDeviceAfterProcessExit(deviceId, code, signal);
   }
 
   private suppressAutoStartForDevice(device: PooledDevice): void {
@@ -5433,14 +4935,7 @@ export class DevicePool {
     this.lastReleasedDeviceId = device.id;
   }
 
-  /**
-   * Keep an exact device out of general pool allocation while startDevice
-   * verifies its runner. The reservation does not create a user-visible
-   * session; session ownership is transferred only after readiness succeeds.
-   * Android recovery exclusion defaults off because recovery handoffs reserve
-   * their target while ownership transfer is still in flight.
-   */
-  async reserveDeviceForReadiness(
+  reserveDeviceForReadiness(
     deviceId: string,
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
@@ -5448,76 +4943,44 @@ export class DevicePool {
     autolockClient?: AutolockClient,
     enforceAndroidRecoveryExclusion = false,
   ): Promise<DeviceReadinessReservation> {
-    // The stable-name reservation exists to bridge an Android emulator changing
-    // serials across a reboot. iOS UDIDs are stable, so a name reservation there
-    // only hides other idle simulators that share a (non-unique) display name.
-    const stableRuntimeKey = this.readinessReservationNameKey({
-      name: stableRuntimeName,
-      platform: expectedIdentity.platform,
-    });
-    const owner = Symbol("readiness-reservation");
-    let trackStableName = false;
-    await this.assignmentMutex.runExclusive(async () => {
-      throwIfRequestAborted();
-      const pooled = this.devices.get(deviceId);
-      if (pooled) {
-        // Acquisition may reboot a device during readiness recovery. Prove
-        // ownership before reserving it or beginning those side effects.
-        this.assertReadinessReservationOwner(pooled, autolockClient);
-        this.assertRuntimeIdentity(pooled, expectedIdentity);
-      }
-      throwIfRequestAborted();
-      const current = this.devices.get(deviceId);
-      this.assertAndroidRecoveryExclusionForReadinessReservation(
-        current,
-        expectedIdentity,
-        stableRuntimeName,
-        enforceAndroidRecoveryExclusion,
-      );
-      trackStableName =
-        current?.platform === "android" &&
-        current.id.startsWith("emulator-") &&
-        (current.avdName === stableRuntimeName || verifiedAndroidAvdName === stableRuntimeName);
-      this.readinessReservationCounts.set(
-        deviceId,
-        (this.readinessReservationCounts.get(deviceId) ?? 0) + 1,
-      );
-      if (trackStableName && current) {
-        const owners =
-          this.readinessReservationNames.get(stableRuntimeKey) ??
-          new Map<symbol, ReadinessReservationTarget>();
-        owners.set(owner, { deviceId: current.id, incarnation: current.incarnation });
-        this.readinessReservationNames.set(stableRuntimeKey, owners);
-      }
-    });
+    return this.shutdownReservationCoordinator.reserveDeviceForReadiness(
+      deviceId,
+      expectedIdentity,
+      stableRuntimeName,
+      verifiedAndroidAvdName,
+      autolockClient,
+      enforceAndroidRecoveryExclusion,
+    );
+  }
 
-    let released = false;
-    const release = async (): Promise<void> => {
-      if (released) {
-        return;
-      }
-      released = true;
-      await this.assignmentMutex.runExclusive(() => {
-        const count = this.readinessReservationCounts.get(deviceId);
-        if (count === undefined || count <= 1) {
-          this.readinessReservationCounts.delete(deviceId);
-        } else {
-          this.readinessReservationCounts.set(deviceId, count - 1);
-        }
-        if (!trackStableName) {
-          return;
-        }
-        const owners = this.readinessReservationNames.get(stableRuntimeKey);
-        if (!owners) {
-          return;
-        }
-        owners.delete(owner);
-        if (owners.size === 0) {
-          this.readinessReservationNames.delete(stableRuntimeKey);
-        }
-      });
-    };
-    return Object.assign(release, { owner });
+  reserveDeviceForShutdown(
+    deviceId: string,
+    abortSignal?: AbortSignal,
+    autolockClient?: AutolockClient,
+  ): Promise<ShutdownDeviceReservation | undefined> {
+    return this.shutdownReservationCoordinator.reserveDeviceForShutdown(
+      deviceId,
+      abortSignal,
+      autolockClient,
+    );
+  }
+
+  private isReservedForReadiness(deviceId: string): boolean {
+    return this.shutdownReservationCoordinator.isReservedForReadiness(deviceId);
+  }
+
+  private hasReadinessNameReservation(
+    device: PooledDevice,
+    readinessReservationOwners?: ReadonlySet<symbol>,
+  ): boolean {
+    return this.shutdownReservationCoordinator.hasReadinessNameReservation(
+      device,
+      readinessReservationOwners,
+    );
+  }
+
+  private isReservedForShutdown(device: PooledDevice): boolean {
+    return this.shutdownReservationCoordinator.isReservedForShutdown(device);
   }
 
   private assertReadinessReservationOwner(
@@ -5567,145 +5030,9 @@ export class DevicePool {
     );
   }
 
-  private isReservedForReadiness(deviceId: string): boolean {
-    return (this.readinessReservationCounts.get(deviceId) ?? 0) > 0;
-  }
-
-  private readinessReservationNameKey(device: Pick<BootedDevice, "name" | "platform">): string {
-    return `${device.platform}:${device.name}`;
-  }
-
-  private hasReadinessNameReservation(
-    device: PooledDevice,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-  ): boolean {
-    return (
-      this.hasReadinessReservationName(
-        this.readinessReservationNameKey(device),
-        device,
-        readinessReservationOwners,
-      ) ||
-      (device.avdName !== undefined &&
-        this.hasReadinessReservationName(
-          this.readinessReservationNameKey({ name: device.avdName, platform: device.platform }),
-          device,
-          readinessReservationOwners,
-        ))
-    );
-  }
-
-  private hasReadinessReservationName(
-    nameKey: string,
-    device: PooledDevice,
-    readinessReservationOwners: ReadonlySet<symbol> | undefined,
-  ): boolean {
-    const owners = this.readinessReservationNames.get(nameKey);
-    return (
-      owners !== undefined &&
-      Array.from(owners).some(
-        ([owner, target]) =>
-          (target.deviceId !== device.id || target.incarnation !== device.incarnation) &&
-          !readinessReservationOwners?.has(owner),
-      )
-    );
-  }
-
-  /**
-   * Exclusively reserve a captured incarnation while killDevice confirms it is
-   * gone and retires its ownership. A replacement with the same ID remains
-   * independently assignable once it has been atomically installed.
-   */
-  async reserveDeviceForShutdown(
-    deviceId: string,
-    abortSignal?: AbortSignal,
-    autolockClient?: AutolockClient,
-  ): Promise<
-    | {
-        device: PooledDevice;
-        session?: Session;
-        release: () => Promise<void>;
-        releaseRecoveryRouteLease: () => void;
-      }
-    | undefined
-  > {
-    if (abortSignal?.aborted) {
-      throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
-    }
-    const identity = this.reserveShutdownSessionIdentity(deviceId);
-    const recoveryRouteLease =
-      autolockClient?.mcpSessionId && "expectedSessionId" in autolockClient ? Symbol() : undefined;
-    const expectedDevice = await this.reserveShutdownDeviceWithAbort(
-      deviceId,
-      identity,
-      abortSignal,
-      autolockClient,
-      recoveryRouteLease,
-    );
-    if (!expectedDevice) {
-      identity.releaseSession?.();
-      return undefined;
-    }
-    const capturedDevice = expectedDevice;
-
-    let released = false;
-    const release = async () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      // Reservation ownership is identity-scoped. Releasing it does not mutate
-      // the pool, so it must not queue behind a refresh holding assignmentMutex.
-      if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
-        this.shutdownReservations.delete(capturedDevice.id);
-      }
-      identity.releaseSession?.();
-    };
-    const releaseRecoveryRouteLease = () =>
-      this.releaseMcpSessionRecoveryLease(autolockClient?.mcpSessionId, recoveryRouteLease);
-    return {
-      device: capturedDevice,
-      session: identity.session,
-      release,
-      releaseRecoveryRouteLease,
-    };
-  }
-
-  private async reserveShutdownDeviceWithAbort(
-    deviceId: string,
-    identity: ShutdownIdentityReservation,
-    abortSignal: AbortSignal | undefined,
-    autolockClient: AutolockClient | undefined,
-    recoveryRouteLease: symbol | undefined,
-  ): Promise<PooledDevice | undefined> {
-    const releaseSessionOnAbort = () => identity.releaseSession?.();
-    abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
-    try {
-      const expectedDevice = await this.reserveShutdownDeviceUnderLock(
-        deviceId,
-        identity,
-        abortSignal,
-        autolockClient,
-        recoveryRouteLease,
-      );
-      if (abortSignal?.aborted) {
-        if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
-          this.shutdownReservations.delete(deviceId);
-        }
-        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
-      }
-      return expectedDevice;
-    } catch (error) {
-      this.releaseMcpSessionRecoveryLease(autolockClient?.mcpSessionId, recoveryRouteLease);
-      identity.releaseSession?.();
-      throw error;
-    } finally {
-      abortSignal?.removeEventListener("abort", releaseSessionOnAbort);
-    }
-  }
-
   private reserveShutdownSessionIdentity(deviceId: string): ShutdownIdentityReservation {
     const device = this.devices.get(deviceId);
-    if (device && this.shutdownReservations.get(deviceId) === device) {
+    if (device && this.shutdownReservationCoordinator.isReservedForShutdown(device)) {
       throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
     }
     const candidate = device ? this.pooledSessionIdentities.get(device) : undefined;
@@ -5724,47 +5051,6 @@ export class DevicePool {
         ? this.sessionManager.reserveSessionForTerminalRelease(session, deviceId)
         : undefined,
     };
-  }
-
-  private async reserveShutdownDeviceUnderLock(
-    deviceId: string,
-    identity: ShutdownIdentityReservation,
-    abortSignal: AbortSignal | undefined,
-    autolockClient: AutolockClient | undefined,
-    recoveryRouteLease: symbol | undefined,
-  ): Promise<PooledDevice | undefined> {
-    return await this.assignmentMutex.runExclusive(() => {
-      if (abortSignal?.aborted) {
-        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
-      }
-      const currentDevice = this.devices.get(deviceId);
-      if (
-        identity.device &&
-        (currentDevice !== identity.device ||
-          currentDevice.assignmentCount !== identity.assignmentCount)
-      ) {
-        throw new ActionableError(
-          `Device '${deviceId}' changed while its shutdown was being reserved.`,
-        );
-      }
-      if (!currentDevice) {
-        return undefined;
-      }
-      // A readiness await can outlive this client's ownership. Check it while
-      // reserving shutdown so a stale request cannot reboot another session's device.
-      this.autolockManager.getOwnedAutolockSession(currentDevice, autolockClient);
-      if (this.shutdownReservations.get(deviceId) === currentDevice) {
-        throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
-      }
-      this.completeShutdownSessionIdentity(deviceId, currentDevice, identity);
-      this.reserveMcpSessionRecoveryLease(
-        autolockClient?.mcpSessionId,
-        currentDevice,
-        recoveryRouteLease,
-      );
-      this.shutdownReservations.set(deviceId, currentDevice);
-      return currentDevice;
-    });
   }
 
   private reserveMcpSessionRecoveryLease(
@@ -5833,17 +5119,13 @@ export class DevicePool {
     );
   }
 
-  private isReservedForShutdown(device: PooledDevice): boolean {
-    return this.shutdownReservations.get(device.id) === device;
-  }
-
   private isReservedForAssignment(device: PooledDevice): boolean {
     return (
       this.isReservedForReadiness(device.id) ||
       this.hasReadinessNameReservation(device) ||
       this.recoveryCoordinator.isAndroidRecoveryHandoffReserved(device.id) ||
       this.isReservedForShutdown(device) ||
-      this.isDeviceUnderShutdown(device.id)
+      this.shutdownReservationCoordinator.isDeviceUnderShutdown(device.id)
     );
   }
 
@@ -7263,7 +6545,10 @@ export class DevicePool {
     if (assignedDeviceId) {
       this.assertDeviceActionable(assignedDeviceId, "to run");
     }
-    if (assignedDeviceId && this.isDeviceUnderShutdown(assignedDeviceId)) {
+    if (
+      assignedDeviceId &&
+      this.shutdownReservationCoordinator.isDeviceUnderShutdown(assignedDeviceId)
+    ) {
       throw new ActionableError(
         `Session '${sessionId}' is bound to device '${assignedDeviceId}', which is shutting down. ` +
           `Retry after the device is released or reassigned.`,
@@ -7271,35 +6556,9 @@ export class DevicePool {
     }
   }
 
-  /**
-   * Whether the currently-bound incarnation of a device is being killed: either
-   * held under an active shutdown reservation, or carrying an intentional-shutdown
-   * marker that applies to the current incarnation. Incarnation-gated (mirroring
-   * {@link DeviceDisconnectHandler.applyIntentionalShutdownOnDisconnect}) so a same-serial replacement,
-   * whose own marker/reservation lifecycle is independent, is not blocked by a
-   * stale marker left behind by a device that is already gone.
-   */
-  private isDeviceUnderShutdown(deviceId: string): boolean {
-    const device = this.devices.get(deviceId);
-    const reservation = this.shutdownReservations.get(deviceId);
-    if (reservation !== undefined && (device === undefined || reservation === device)) {
-      return true;
-    }
-    const markerIncarnation = this.intentionalShutdowns.get(deviceId);
-    if (markerIncarnation === undefined) {
-      return false;
-    }
-    return (
-      device === undefined ||
-      markerIncarnation === INCARNATION_ANY ||
-      markerIncarnation === device.incarnation
-    );
-  }
-
   /** Read the shutdown fence under the assignment lock used to install it. */
-  // Do not call inside assignmentMutex.runExclusive: this accessor takes the same mutex.
-  async isShutdownReserved(deviceId: string): Promise<boolean> {
-    return await this.assignmentMutex.runExclusive(() => this.isDeviceUnderShutdown(deviceId));
+  isShutdownReserved(deviceId: string): Promise<boolean> {
+    return this.shutdownReservationCoordinator.isShutdownReserved(deviceId);
   }
 
   /**

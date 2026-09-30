@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { SetUIState } from "../../../src/features/action/SetUIState";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import iosFormsEmptyFields from "../../fixtures/observe/ios-forms-empty-fields";
+import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
 import {
   MIN_SET_UI_STATE_MCP_TIMEOUT_MS,
   ProgressExtendableDeadline,
@@ -1055,6 +1058,101 @@ describe("SetUIState", () => {
       expect(result.error).toContain("Fields not found after scrolling");
       expect(result.error).toContain("nonexistent");
     });
+  });
+});
+
+describe("SetUIState iOS Forms nodes", () => {
+  const device: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "ios-sim" };
+
+  test("sets a UITextField found by its hint-text placeholder", async () => {
+    const hierarchy = structuredClone(iosFormsEmptyFields);
+    for (const field of hierarchy.hierarchy.node?.node ?? []) {
+      field.node = [];
+    }
+    const tap = new FakeTapOnElement();
+    const input = new FakeInputText();
+    const clear = new FakeClearText();
+    const observe = new FakeObserveScreenForSetUIState();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    observe.setResultFactory(() => ({
+      updatedAt: timer.now(),
+      screenSize: { width: 393, height: 852 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: hierarchy,
+    }));
+    const action = new SetUIState(device, null, {
+      tapOnElement: tap,
+      inputText: input,
+      clearText: clear,
+      swipeOn: new FakeSwipeOn(),
+      observeScreen: observe,
+      timer,
+    });
+
+    const result = await action.execute({
+      fields: [{ selector: { text: "Name" }, value: "Fold Test" }],
+    });
+
+    expect(result.fields[0]).toMatchObject({ success: true, fieldType: "text" });
+    expect(tap.getCalls()[0].options).toMatchObject({ elementId: "name-field", action: "focus" });
+    expect(clear.getCallCount()).toBe(1);
+    expect(input.getCalls()[0].text).toBe("Fold Test");
+  });
+
+  test("reads the control's checked state and taps to set it false", async () => {
+    const tap = new FakeTapOnElement();
+    let tappedBounds: Element["bounds"] | undefined;
+    let tapPoint: { x: number; y: number } | undefined;
+    const tapOnElement = {
+      execute: async (...args: Parameters<FakeTapOnElement["execute"]>) => {
+        const [options] = args;
+        const selected = new ResolverElementSelector().selectByText(
+          iosFormsSwitch("true"),
+          options.text!,
+          { intentAction: "tap" },
+        );
+        tappedBounds = selected.element?.bounds;
+        if (tappedBounds) {
+          tapPoint = {
+            x: (tappedBounds.left + tappedBounds.right) / 2,
+            y: (tappedBounds.top + tappedBounds.bottom) / 2,
+          };
+        }
+        return tap.execute(...args);
+      },
+    };
+    const observe = new FakeObserveScreenForSetUIState();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    observe.setResultFactory(() => ({
+      updatedAt: timer.now(),
+      screenSize: { width: 402, height: 874 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+      viewHierarchy: iosFormsSwitch(tap.getCallCount() === 0 ? "true" : "false"),
+    }));
+    const action = new SetUIState(device, null, {
+      tapOnElement,
+      inputText: new FakeInputText(),
+      clearText: new FakeClearText(),
+      swipeOn: new FakeSwipeOn(),
+      observeScreen: observe,
+      timer,
+    });
+
+    const result = await action.execute({
+      fields: [{ selector: { text: "Enable Notifications" }, selected: false }],
+    });
+
+    expect(result.fields[0]).toMatchObject({ success: true, verified: true, fieldType: "toggle" });
+    expect(tap.getCalls().map((call) => call.options)).toEqual([
+      { text: "Enable Notifications", action: "tap" },
+    ]);
+    expect(tappedBounds).toEqual({ left: 301, top: 296, right: 364, bottom: 324 });
+    expect(tapPoint?.x).toBeGreaterThanOrEqual(301);
+    expect(tapPoint?.x).toBeLessThan(364);
+    expect(tapPoint?.y).toBeGreaterThanOrEqual(296);
+    expect(tapPoint?.y).toBeLessThan(324);
   });
 });
 

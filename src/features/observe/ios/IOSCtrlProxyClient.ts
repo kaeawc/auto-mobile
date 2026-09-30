@@ -34,7 +34,7 @@ import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
-import { requireBootedDevice } from "../../../utils/requireBootedDevice";
+import { requireBootedDevice } from "../../../devices/requireBootedDevice";
 import {
   IOSCtrlProxyManager,
   CtrlProxyIosManager,

@@ -2,7 +2,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { runDetachedFromPerf, trackAmbient } from "../utils/PerfContext";
 import { logger } from "../utils/logger";
 import { BootedDevice } from "../models";
-import { requireBootedDevice } from "../utils/requireBootedDevice";
+import { requireBootedDevice } from "../devices/requireBootedDevice";
 import {
   NoOpPerformanceTracker,
   createGlobalPerformanceTracker,

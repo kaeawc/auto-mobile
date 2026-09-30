@@ -5,7 +5,7 @@ import { DeviceBootService, type DeviceBootRequest } from "../devices/deviceBoot
 import { DefaultDeviceMatcher } from "../utils/deviceMatcher";
 import { createDefaultDeviceProvisioner } from "../devices/deviceProvisioning";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
-import { createCiIosBootConfiguration } from "../utils/deviceBootRecovery";
+import { createCiIosBootConfiguration } from "../devices/deviceBootRecovery";
 
 function readValue(args: string[], index: number, flag: string): string {
   const value = args[index + 1];

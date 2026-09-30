@@ -1,7 +1,7 @@
 import type { DeviceInfo } from "../models";
-import type { Timer } from "./SystemTimer";
-import { sequenceBackoff } from "./Backoff";
-import { logger } from "./logger";
+import type { Timer } from "../utils/SystemTimer";
+import { sequenceBackoff } from "../utils/Backoff";
+import { logger } from "../utils/logger";
 
 /**
  * What a reboot callback reports back to the retry policy. `"cancelled"`

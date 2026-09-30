@@ -35,8 +35,6 @@ src/utils/appearance/AppearanceSyncScheduler.ts -> src/daemon/daemonState
 src/utils/appearance/AppearanceSyncScheduler.ts -> src/server/appearanceManager
 src/utils/appearance/applyAppearanceOnConnect.ts -> src/server/appearanceManager
 src/utils/configuredDeviceInventory.ts -> src/server/deviceDescription
-src/utils/deviceBootRecovery.ts -> src/devices/deviceBootService
-src/utils/deviceBootRecovery.ts -> src/devices/deviceProvisioning
 src/utils/deviceUtils.ts -> src/daemon/deviceIdentityEvidence
 src/utils/deviceUtils.ts -> src/devices/virtualDeviceLifecycleCoordinator
 src/utils/interfaces/AccessibilityDetector.ts -> src/features/featureFlags/FeatureFlagService

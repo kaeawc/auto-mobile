@@ -55,9 +55,14 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 6,
+      calls: 5,
       reason:
-        "The pool IS the funnel: refresh sweep and assignment-time liveness checks reconcile through the pool.",
+        "The pool IS the funnel: refresh sweep and remaining discovery checks reconcile through the pool.",
+    },
+    "src/daemon/missingDeviceLiveness.ts": {
+      calls: 1,
+      reason:
+        "Assignment-time liveness discovery moved from devicePool; reused Android serials reconcile through the pool port.",
     },
     "src/daemon/deviceDisconnectHandler.ts": {
       calls: 1,

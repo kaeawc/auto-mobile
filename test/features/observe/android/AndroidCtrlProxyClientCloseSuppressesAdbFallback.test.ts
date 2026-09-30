@@ -6,6 +6,7 @@ import { AndroidCtrlProxyManager } from "../../../../src/ctrlProxy/CtrlProxyMana
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeIdGenerator } from "../../../fakes/FakeIdGenerator";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 
 // Regression coverage for #5493: when killDevice closes the per-device
@@ -23,7 +24,10 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
     fakeAdb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
     // Configure a *successful* screencap so any fallback that fires would visibly
     // succeed — the suppression under test is the only reason it must not.
-    fakeAdb.setCommandResponse("screencap", { stdout: "aGVsbG8=", stderr: "" });
+    fakeAdb.setCommandResponse("screencap", {
+      stdout: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64"),
+      stderr: "",
+    });
     fakeAdb.setScreenState(true);
     testDevice = {
       deviceId: "test-device-close-fallback",
@@ -49,6 +53,17 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
       fakeAdb,
       (url) => new FakeWebSocket(url, "none", 0, fakeTimer) as unknown as WebSocket,
       fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new FakeIdGenerator(["ctrlproxy-fallback"]),
     );
   }
 
@@ -96,8 +111,11 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
       const result = await client.captureScreenshotForObservationStream();
 
       expect(result.success).toBe(true);
-      expect(fakeAdb.getExecutedCommands()).toContain(
-        'shell "screencap -p /sdcard/screenshot_stream.png && base64 /sdcard/screenshot_stream.png && rm /sdcard/screenshot_stream.png"',
+      const captureCommand = fakeAdb
+        .getExecutedCommands()
+        .find((command) => command.includes("screencap"));
+      expect(captureCommand).toMatch(
+        /^shell "screencap -p '\/data\/local\/tmp\/am-shot-[A-Za-z0-9-]+\.png' && base64 '\/data\/local\/tmp\/am-shot-[A-Za-z0-9-]+\.png' && rm '\/data\/local\/tmp\/am-shot-[A-Za-z0-9-]+\.png'"$/,
       );
     } finally {
       await client.close();
@@ -126,8 +144,11 @@ describe("AndroidCtrlProxyClient close() suppresses the ADB screencap fallback",
       const result = await client.captureScreenshotForObservationStream();
 
       expect(result.success).toBe(true);
-      expect(fakeAdb.getExecutedCommands()).toContain(
-        'shell "screencap -d 4619827259835644673 -p /sdcard/screenshot_stream.png && base64 /sdcard/screenshot_stream.png && rm /sdcard/screenshot_stream.png"',
+      const captureCommand = fakeAdb
+        .getExecutedCommands()
+        .find((command) => command.includes("screencap"));
+      expect(captureCommand).toMatch(
+        /^shell "screencap -d 4619827259835644673 -p '\/data\/local\/tmp\/am-shot-[A-Za-z0-9-]+\.png' && base64 '\/data\/local\/tmp\/am-shot-[A-Za-z0-9-]+\.png' && rm '\/data\/local\/tmp\/am-shot-[A-Za-z0-9-]+\.png'"$/,
       );
     } finally {
       await client.close();

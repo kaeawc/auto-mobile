@@ -46,6 +46,118 @@ function trackAbortListeners(signal: AbortSignal): () => void {
 }
 
 describe("raceWithDeadline", () => {
+  test("first settling array member wins and clears the deadline", async () => {
+    const timer = new TrackingTimer();
+    const first = deferred<string>();
+    const second = deferred<string>();
+    const raced = raceWithDeadline([first.promise, second.promise], {
+      timer,
+      timeoutMs: 25,
+      label: "device readiness",
+    });
+
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    second.resolve("second finished first");
+    expect(await raced).toBe("second finished first");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    first.resolve("first finished later");
+    timer.advanceTime(25);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a losing array member's late rejection is handled", async () => {
+    const timer = new TrackingTimer();
+    const winner = deferred<string>();
+    const loser = deferred<string>();
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const raced = raceWithDeadline([winner.promise, loser.promise], {
+        timer,
+        timeoutMs: 25,
+        label: "device readiness",
+      });
+
+      winner.resolve("ready");
+      expect(await raced).toBe("ready");
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      loser.reject(new Error("late failure"));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+    }
+  });
+
+  test("array members that stay pending hit the labelled deadline", async () => {
+    const timer = new TrackingTimer();
+    const first = deferred<string>();
+    const second = deferred<string>();
+    const raced = raceWithDeadline([first.promise, second.promise], {
+      timer,
+      timeoutMs: 25,
+      label: "device readiness",
+    });
+
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    timer.advanceTime(25);
+    const error = await raced.catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toBe("device readiness timed out after 25ms");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("races independent operations under one deadline", async () => {
+    const timer = new TrackingTimer();
+    const readiness = deferred<boolean>();
+    const processFailure = deferred<never>();
+    const raced = raceWithDeadline([readiness.promise, processFailure.promise], {
+      timer,
+      timeoutMs: 25,
+      label: "Final daemon readiness check",
+    });
+
+    const failure = new Error("daemon exited");
+    processFailure.reject(failure);
+    await expect(raced).rejects.toBe(failure);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("arms the deadline before invoking a thunk and clears it on completion", async () => {
+    const timer = new TrackingTimer();
+    const work = deferred<string>();
+    const raced = raceWithDeadline(
+      () => {
+        expect(timer.scheduled).toBe(1);
+        expect(timer.getPendingTimeoutCount()).toBe(1);
+        return work.promise;
+      },
+      { timer, timeoutMs: 25, label: "lookup" },
+    );
+
+    work.resolve("done");
+    expect(await raced).toBe("done");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("clears an armed deadline when a thunk throws synchronously", async () => {
+    const timer = new TrackingTimer();
+    const failure = new Error("startup failed");
+    const raced = raceWithDeadline<string>(
+      () => {
+        expect(timer.getPendingTimeoutCount()).toBe(1);
+        throw failure;
+      },
+      { timer, timeoutMs: 25, label: "lookup" },
+    );
+
+    await expect(raced).rejects.toBe(failure);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("operation resolution clears the deadline and abort listener", async () => {
     const timer = new TrackingTimer();
     const controller = new AbortController();

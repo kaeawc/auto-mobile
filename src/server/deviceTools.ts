@@ -1357,32 +1357,6 @@ export async function notifyResourcesAfterShutdown(
   }
 }
 
-function abortPromise(signal: AbortSignal | undefined): {
-  promise: Promise<never> | undefined;
-  cleanup: () => void;
-} {
-  if (!signal) {
-    return { promise: undefined, cleanup: () => undefined };
-  }
-  let onAbort: (() => void) | undefined;
-  const promise = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason ?? new Error("Operation cancelled"));
-    if (signal.aborted) {
-      onAbort();
-      return;
-    }
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  return {
-    promise,
-    cleanup: () => {
-      if (onAbort) {
-        signal.removeEventListener("abort", onAbort);
-      }
-    },
-  };
-}
-
 /**
  * Resolves when `operation` settles or after `boundMs`, whichever comes first.
  * Never rejects: the caller only needs to know the wait is over.
@@ -1439,50 +1413,45 @@ export async function runWithinShutdownDeadline<T>(
   const signal = requestAbortSignal
     ? AbortSignal.any([requestAbortSignal, deadlineController.signal])
     : deadlineController.signal;
-  let timeout: NodeJS.Timeout | undefined;
   let timedOut = false;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = timer.setTimeout(() => {
-      timedOut = true;
-      deadlineController.abort();
-      reject(shutdownTimeoutError(device, detail, reportedTimeoutMs, phase));
-    }, remainingMs);
-  });
-  const requestAbort = abortPromise(requestAbortSignal);
   let operationSettled = false;
-  const operationPromise = runWithAbortSignal(signal, () => operation(signal, remainingMs)).then(
-    (result) => {
-      operationSettled = true;
-      return result;
-    },
-    (error) => {
-      operationSettled = true;
-      if (timedOut) {
-        throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
-      }
-      throw error;
-    },
-  );
+  const operationPromise = Promise.resolve()
+    .then(() => runWithAbortSignal(signal, () => operation(signal, remainingMs)))
+    .then(
+      (result) => {
+        operationSettled = true;
+        return result;
+      },
+      (error) => {
+        operationSettled = true;
+        if (timedOut) {
+          throw shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
+        }
+        throw error;
+      },
+    );
   // If the deadline wins while a platform command ignores abort, the race is
   // settled but the underlying promise remains observed rather than leaking an
   // unhandled rejection when it eventually completes.
   operationPromise.catch(() => undefined);
   try {
-    return await Promise.race([
-      operationPromise,
-      timeoutPromise,
-      ...(requestAbort.promise ? [requestAbort.promise] : []),
-    ]);
+    return await raceWithDeadline(operationPromise, {
+      timer,
+      timeoutMs: remainingMs,
+      signal: requestAbortSignal,
+      label: "Device shutdown",
+      relabelDefaultAbort: false,
+      timeoutError: () => {
+        timedOut = true;
+        deadlineController.abort();
+        return shutdownTimeoutError(device, detail, reportedTimeoutMs, phase);
+      },
+    });
   } catch (error) {
     if (!operationSettled) {
       onOrphan?.(operationPromise);
     }
     throw error;
-  } finally {
-    if (timeout) {
-      timer.clearTimeout(timeout);
-    }
-    requestAbort.cleanup();
   }
 }
 
@@ -3629,6 +3598,7 @@ export async function awaitProvisionDeviceOperationBegin<T>(
     timeoutMs: remainingMs,
     signal: requestSignal,
     label: "starting provision operation",
+    relabelDefaultAbort: false,
     timeoutError: () => provisionDeviceTimeoutError("starting provision operation"),
   });
 }
@@ -3650,8 +3620,6 @@ export async function runOperationWithinDeadline<T>(
   const signal = requestSignal
     ? AbortSignal.any([requestSignal, controller.signal])
     : controller.signal;
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  let removeAbortListener: (() => void) | undefined;
   let operationSettled = false;
   const operationPromise = runWithAbortSignal(signal, () => operation(signal)).finally(() => {
     operationSettled = true;
@@ -3659,40 +3627,22 @@ export async function runOperationWithinDeadline<T>(
   void operationPromise.catch(() => {});
 
   try {
-    return await Promise.race([
-      operationPromise,
-      new Promise<never>((_resolve, reject) => {
-        timeoutHandle = timer.setTimeout(() => {
-          const error = timeoutError();
-          controller.abort(error);
-          reject(error);
-        }, remainingMs);
-      }),
-      ...(requestSignal
-        ? [
-            new Promise<never>((_resolve, reject) => {
-              const rejectForAbort = () => reject(requestSignal.reason);
-              if (requestSignal.aborted) {
-                rejectForAbort();
-                return;
-              }
-              requestSignal.addEventListener("abort", rejectForAbort, { once: true });
-              removeAbortListener = () =>
-                requestSignal.removeEventListener("abort", rejectForAbort);
-            }),
-          ]
-        : []),
-    ]);
+    return await raceWithDeadline(operationPromise, {
+      timer,
+      timeoutMs: remainingMs,
+      signal: requestSignal,
+      label: "Provision operation",
+      timeoutError: () => {
+        const error = timeoutError();
+        controller.abort(error);
+        return error;
+      },
+    });
   } catch (error) {
     if (!operationSettled) {
       onOrphan?.(operationPromise);
     }
     throw error;
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
-    removeAbortListener?.();
   }
 }
 
@@ -3711,6 +3661,7 @@ export async function waitForSharedOperation<T>(
     timer: defaultTimer,
     signal,
     label: "Shared provision operation",
+    relabelDefaultAbort: false,
   });
 }
 

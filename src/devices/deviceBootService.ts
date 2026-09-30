@@ -23,6 +23,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { runWithAbortSignal } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { StableVirtualDeviceIdentity } from "./virtualDeviceLifecycleCoordinator";
 import {
   getVirtualDeviceLifecycleCoordinator,
@@ -315,41 +316,6 @@ interface BootDeadlineContext {
   ownsLifecycleLease: boolean;
   /** A fresh provision's cold boot opts Android readiness into offline recovery (#7054). */
   freshProvision?: boolean;
-}
-
-interface PhaseCancellation {
-  promise: Promise<never>;
-  throwIfCancelled(): void;
-  dispose(): void;
-}
-
-function createPhaseCancellation(
-  signal: AbortSignal | undefined,
-  phase: string,
-): PhaseCancellation {
-  const never = new Promise<never>(() => undefined);
-  const throwIfCancelled = () => {
-    if (signal?.aborted) {
-      throw new ActionableError(`startDevice cancelled while ${phase}`);
-    }
-  };
-  if (!signal || signal.aborted) {
-    return { promise: never, throwIfCancelled, dispose: () => {} };
-  }
-
-  let rejectCancellation!: (error: ActionableError) => void;
-  const promise = new Promise<never>((_resolve, reject) => {
-    rejectCancellation = reject;
-  });
-  const abort = () => {
-    rejectCancellation(new ActionableError(`startDevice cancelled while ${phase}`));
-  };
-  signal.addEventListener("abort", abort, { once: true });
-  return {
-    promise,
-    throwIfCancelled,
-    dispose: () => signal.removeEventListener("abort", abort),
-  };
 }
 
 /**
@@ -1079,33 +1045,14 @@ export class DeviceBootService {
     awaitAbortSettlement = true,
   ): Promise<T> {
     const remainingMs = this.remaining(context, phase);
-    const cancellation = createPhaseCancellation(context.signal, phase);
-    cancellation.throwIfCancelled();
+    if (context.signal?.aborted) {
+      throw new ActionableError(`startDevice cancelled while ${phase}`);
+    }
     const controller = new AbortController();
     const externalSignal = context.signal;
     const signal = externalSignal
       ? AbortSignal.any([externalSignal, controller.signal])
       : controller.signal;
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    let removeExternalAbortListener: (() => void) | undefined;
-    const externalAbortPromise = externalSignal
-      ? new Promise<never>((_resolve, reject) => {
-          const rejectForAbort = () => {
-            reject(
-              isDefaultAbortReason(externalSignal.reason)
-                ? new ActionableError(`startDevice request cancelled while ${phase}`)
-                : externalSignal.reason,
-            );
-          };
-          if (externalSignal.aborted) {
-            rejectForAbort();
-            return;
-          }
-          externalSignal.addEventListener("abort", rejectForAbort, { once: true });
-          removeExternalAbortListener = () =>
-            externalSignal.removeEventListener("abort", rejectForAbort);
-        })
-      : undefined;
     let operationFailureRecorded = false;
     let operationFailure: unknown;
     const operationPromise = runWithAbortSignal(signal, () => operation(signal)).catch((error) => {
@@ -1115,25 +1062,23 @@ export class DeviceBootService {
     });
     void operationPromise.catch(() => {});
     try {
-      return await Promise.race([
-        operationPromise,
-        ...(externalAbortPromise ? [externalAbortPromise] : []),
-        new Promise<never>((_resolve, reject) => {
-          timeoutHandle = this.timer.setTimeout(() => {
-            const error = this.timeoutError(context, phase);
-            controller.abort(error);
-            reject(error);
-          }, remainingMs);
-        }),
-        cancellation.promise,
-      ]);
+      return await raceWithDeadline(operationPromise, {
+        timer: this.timer,
+        timeoutMs: remainingMs,
+        signal: externalSignal,
+        label: phase,
+        timeoutError: () => {
+          const error = this.timeoutError(context, phase);
+          controller.abort(error);
+          return error;
+        },
+      });
     } catch (error) {
       await this.awaitAbortSettlementIfNeeded(
         operationPromise,
         awaitAbortSettlement && (controller.signal.aborted || externalSignal?.aborted === true),
       );
       this.throwExternalAbortReason(externalSignal, phase);
-      cancellation.throwIfCancelled();
       if (controller.signal.aborted) {
         throw this.phaseTimeoutFailure(
           context,
@@ -1144,12 +1089,6 @@ export class DeviceBootService {
         );
       }
       throw error;
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
-      cancellation.dispose();
-      removeExternalAbortListener?.();
     }
   }
 
@@ -1194,20 +1133,23 @@ export class DeviceBootService {
   }
 
   private async awaitAbortSettlement(operation: Promise<unknown>): Promise<void> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timedOut = Symbol("abort settlement grace");
     try {
-      await Promise.race([
+      await raceWithDeadline(
         operation.then(
           () => undefined,
           () => undefined,
         ),
-        new Promise<void>((resolve) => {
-          timeoutHandle = this.timer.setTimeout(resolve, ABORT_SETTLEMENT_GRACE_MS);
-        }),
-      ]);
-    } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
+        {
+          timer: this.timer,
+          timeoutMs: ABORT_SETTLEMENT_GRACE_MS,
+          label: "Abort settlement",
+          timeoutError: () => timedOut,
+        },
+      );
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
     }
   }

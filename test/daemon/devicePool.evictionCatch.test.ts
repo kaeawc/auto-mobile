@@ -124,11 +124,11 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     child.stdout.emit("data", Buffer.from("should-not-leak\n"));
     (child as unknown as EventEmitter).emit("close", 1, null);
 
-    for (let i = 0; i < 10; i++) {
+    let [incident] = await incidentStore.list();
+    for (let turn = 0; turn < 30 && incident?.recovery.outcome === undefined; turn++) {
       await Promise.resolve();
+      [incident] = await incidentStore.list();
     }
-
-    const [incident] = await incidentStore.list();
     expect(incident).toMatchObject({
       deviceId: "emulator-5554",
       avdName: "Pixel_7",

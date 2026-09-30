@@ -2917,27 +2917,29 @@ export class UnixSocketServer {
       throw new McpClientReconnectDeadlineError();
     }
 
-    let deadlineTimer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<never>((_resolve, reject) => {
-      deadlineTimer = this.timer.setTimeout(
-        () => reject(new McpClientReconnectDeadlineError()),
-        remainingMs,
-      );
-    });
-    const connection = this.getMcpClient(
-      input.route.clientKey,
-      input.route.sessionUuid,
-      input.route.toolSelectionProfileUuid,
-      input.route.releasedSessionUuid,
-    );
-    // getMcpClient registers its pending creation synchronously, so this snapshot
-    // identifies the attempt this wait started. Staggered deadlines can share a
-    // clientKey; without this fence a longer wait's expiry would unconditionally
-    // tear down whatever occupies the key, closing a replacement client that a
-    // sibling wait or an unrelated request already installed (issue #5499).
-    const pendingCreation = this.mcpClientPromises.get(input.route.clientKey);
+    let connection!: Promise<Client>;
+    let pendingCreation: Promise<Client> | undefined;
     try {
-      const client = await Promise.race([connection, deadline]);
+      const client = await raceWithDeadline(
+        () => {
+          connection = this.getMcpClient(
+            input.route.clientKey,
+            input.route.sessionUuid,
+            input.route.toolSelectionProfileUuid,
+            input.route.releasedSessionUuid,
+          );
+          // getMcpClient registers its pending creation synchronously, so this
+          // snapshot fences cleanup to the attempt this wait started (#5499).
+          pendingCreation = this.mcpClientPromises.get(input.route.clientKey);
+          return connection;
+        },
+        {
+          timer: this.timer,
+          timeoutMs: remainingMs,
+          label: "MCP client reconnect",
+          timeoutError: () => new McpClientReconnectDeadlineError(),
+        },
+      );
       // Do not cancel `connection`: it may be shared by a live sibling. This
       // owner simply must not reuse the client after its socket was cancelled.
       input.signal?.throwIfAborted();
@@ -2947,10 +2949,6 @@ export class UnixSocketServer {
         this.discardTimedOutMcpReconnect(input.route.clientKey, connection, pendingCreation);
       }
       throw error;
-    } finally {
-      if (deadlineTimer) {
-        this.timer.clearTimeout(deadlineTimer);
-      }
     }
   }
 
@@ -5277,7 +5275,7 @@ export class UnixSocketServer {
     assertSocketInputNotAborted(signal);
     const remainingTimeoutMs = deadline - this.timer.now();
     if (remainingTimeoutMs <= 0) {
-      // Defensive: in practice the outer Promise.race timeout fires first, so
+      // Defensive: in practice the outer deadline race fires first, so
       // this path is only reached if set-text spends the entire budget before
       // the submit action starts.
       return withAppendProgress({
@@ -5307,33 +5305,25 @@ export class UnixSocketServer {
     operation: () => Promise<T>,
     timeoutError?: (timeout: McpTimeoutError) => Error | undefined,
   ): Promise<T> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
     let timedOut = false;
     const operationPromise = operation();
-    const timeout = new Promise<"timeout">((resolve) => {
-      timeoutHandle = this.timer.setTimeout(() => {
-        timedOut = true;
-        resolve("timeout");
-      }, remainingTimeoutMs);
-    });
-
     try {
-      const result = await Promise.race([operationPromise, timeout]);
-      if (result !== "timeout") {
-        return result;
-      }
-
-      const error = new McpTimeoutError({
-        toolName,
-        timeoutMs: totalTimeoutMs,
-        origin,
-        detail: `operation exceeded remaining budget ${remainingTimeoutMs}ms`,
+      return await raceWithDeadline(operationPromise, {
+        timer: this.timer,
+        timeoutMs: remainingTimeoutMs,
+        label: "Input operation",
+        timeoutError: () => {
+          timedOut = true;
+          const error = new McpTimeoutError({
+            toolName,
+            timeoutMs: totalTimeoutMs,
+            origin,
+            detail: `operation exceeded remaining budget ${remainingTimeoutMs}ms`,
+          });
+          return timeoutError?.(error) ?? error;
+        },
       });
-      throw timeoutError?.(error) ?? error;
     } finally {
-      if (timeoutHandle) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
       if (timedOut) {
         // Hold the per-device queue until the in-flight CtrlProxy request
         // settles so a following same-device input cannot interleave its text
@@ -6154,24 +6144,16 @@ export class UnixSocketServer {
   private async closeMcpClient(key: string, client: Client): Promise<void> {
     const transport = client.transport;
     if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
-      let timeout: NodeJS.Timeout | undefined;
       try {
-        await Promise.race([
-          transport.terminateSession(),
-          new Promise<never>((_resolve, reject) => {
-            timeout = this.timer.setTimeout(
-              () => reject(new Error("MCP session termination timed out")),
-              MCP_SESSION_TERMINATION_TIMEOUT_MS,
-            );
-          }),
-        ]);
+        await raceWithDeadline(transport.terminateSession(), {
+          timer: this.timer,
+          timeoutMs: MCP_SESSION_TERMINATION_TIMEOUT_MS,
+          label: "MCP session termination",
+          timeoutError: () => new Error("MCP session termination timed out"),
+        });
       } catch (error) {
         // A failed DELETE is best-effort; closing the local client still releases its resources.
         logger.debug(`Could not terminate MCP session for key ${key}: ${error}`);
-      } finally {
-        if (timeout) {
-          this.timer.clearTimeout(timeout);
-        }
       }
     }
     await client.close();
@@ -6357,27 +6339,25 @@ export class UnixSocketServer {
       return;
     }
 
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(
-        () => resolve(false),
-        DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS,
-      );
-    });
+    const timedOut = Symbol("notification drain timeout");
+    let drained = true;
     try {
-      const drained = await Promise.race([
-        Promise.allSettled(pendingWrites).then(() => true),
-        timeout,
-      ]);
-      if (!drained) {
-        logger.warn(
-          `Timed out waiting for ${pendingWrites.length} session-release notification(s) to flush during shutdown`,
-        );
+      await raceWithDeadline(Promise.allSettled(pendingWrites), {
+        timer: this.timer,
+        timeoutMs: DAEMON_NOTIFICATION_WRITE_DRAIN_TIMEOUT_MS,
+        label: "Session release notification drain",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
+      drained = false;
+    }
+    if (!drained) {
+      logger.warn(
+        `Timed out waiting for ${pendingWrites.length} session-release notification(s) to flush during shutdown`,
+      );
     }
   }
 
@@ -6491,25 +6471,25 @@ export class UnixSocketServer {
       return;
     }
 
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(
-        () => resolve(false),
-        DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS,
-      );
-    });
-
+    const timedOut = Symbol("request handler drain timeout");
+    let drained = true;
     try {
-      const drained = await Promise.race([Promise.allSettled(handlers).then(() => true), timeout]);
-      if (!drained) {
-        logger.warn(
-          `Timed out waiting for ${handlers.length} in-flight Unix socket request handler(s) to finish during shutdown`,
-        );
+      await raceWithDeadline(Promise.allSettled(handlers), {
+        timer: this.timer,
+        timeoutMs: DAEMON_REQUEST_HANDLER_DRAIN_TIMEOUT_MS,
+        label: "Unix socket request drain",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
-      }
+      drained = false;
+    }
+    if (!drained) {
+      logger.warn(
+        `Timed out waiting for ${handlers.length} in-flight Unix socket request handler(s) to finish during shutdown`,
+      );
     }
   }
 

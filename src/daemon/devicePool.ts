@@ -16,6 +16,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../utils/deviceUtils";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -568,17 +569,17 @@ class EmulatorProcessOutputTail {
   }
 
   private async waitForStreamClose(): Promise<void> {
-    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = Symbol("stream-close-timeout");
     try {
-      await Promise.race([
-        this.streamsClosed,
-        new Promise<void>((resolve) => {
-          timeout = this.timer.setTimeout(resolve, 1_000);
-        }),
-      ]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      await raceWithDeadline(this.streamsClosed, {
+        timer: this.timer,
+        timeoutMs: 1_000,
+        label: "Emulator output streams",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
     }
   }
@@ -3956,108 +3957,107 @@ export class DevicePool {
     const timeoutError = new ActionableError(
       `Android emulator '${avdName}' shutdown was not confirmed within ${timeoutMs}ms; recovery will not relaunch it`,
     );
-    const timeout = this.timer.setTimeout(() => deadlineController.abort(timeoutError), timeoutMs);
-    let removeAbortListener: (() => void) | undefined;
-    const cancelled = new Promise<never>((_resolve, reject) => {
-      const abort = () => reject(signal.reason);
-      if (signal.aborted) {
-        abort();
-      } else {
-        signal.addEventListener("abort", abort, { once: true });
-        removeAbortListener = () => signal.removeEventListener("abort", abort);
-      }
-    });
-    const shutdown = runWithAbortSignal(signal, async (): Promise<"stopped" | "same-avd"> => {
-      const discover = async () => {
-        signal.throwIfAborted();
-        const discovery = await this.deviceManager.getBootedDevicesDetailed("android", {
-          bypassAndroidDeviceListCache: true,
-        });
-        signal.throwIfAborted();
-        if (!discovery.succeededPlatforms.has("android")) {
-          throw new ActionableError(
-            `Android discovery failed while confirming '${avdName}' shutdown; recovery will not relaunch it`,
-          );
-        }
-        if (discovery.devices.some((device) => device.name.startsWith("Unknown ("))) {
-          throw new ActionableError(
-            `Android discovery contains an unresolved emulator identity while stopping '${avdName}'; recovery will not relaunch it`,
-          );
-        }
-        return discovery.devices;
-      };
-      const booted = await discover();
-      const matchingAvds = booted.filter(
-        (device) => device.platform === "android" && device.name === avdName,
-      );
-      if (matchingAvds.length > 1) {
-        throw new ActionableError(
-          `Multiple running emulators identify as '${avdName}'; recovery will not relaunch it`,
-        );
-      }
-      const matchingAvd = matchingAvds[0];
-      if (!matchingAvd) {
-        return "stopped";
-      }
-      if (matchingAvd.deviceId !== disconnectedDevice.id || adoptOnly) {
-        if (matchingAvd.deviceId === disconnectedDevice.id) {
-          if (
-            this.devices.get(disconnectedDevice.id) !== disconnectedDevice ||
-            !this.detachSessionForAndroidRecovery(
-              disconnectedDevice,
-              preservedSessionId,
-              preservedSession,
-            )
-          ) {
+    let shutdown: Promise<"stopped" | "same-avd"> | undefined;
+    const startShutdown = () =>
+      (shutdown = runWithAbortSignal(signal, async (): Promise<"stopped" | "same-avd"> => {
+        const discover = async () => {
+          signal.throwIfAborted();
+          const discovery = await this.deviceManager.getBootedDevicesDetailed("android", {
+            bypassAndroidDeviceListCache: true,
+          });
+          signal.throwIfAborted();
+          if (!discovery.succeededPlatforms.has("android")) {
             throw new ActionableError(
-              `Android emulator '${avdName}' changed ownership during recovery; recovery will not relaunch it`,
+              `Android discovery failed while confirming '${avdName}' shutdown; recovery will not relaunch it`,
             );
           }
-          this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(
-            matchingAvd.deviceId,
-            handoffOwner,
-          );
-          await this.removeDevice(disconnectedDevice.id, true, disconnectedDevice);
-        } else {
-          this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(
-            matchingAvd.deviceId,
-            handoffOwner,
+          if (discovery.devices.some((device) => device.name.startsWith("Unknown ("))) {
+            throw new ActionableError(
+              `Android discovery contains an unresolved emulator identity while stopping '${avdName}'; recovery will not relaunch it`,
+            );
+          }
+          return discovery.devices;
+        };
+        const booted = await discover();
+        const matchingAvds = booted.filter(
+          (device) => device.platform === "android" && device.name === avdName,
+        );
+        if (matchingAvds.length > 1) {
+          throw new ActionableError(
+            `Multiple running emulators identify as '${avdName}'; recovery will not relaunch it`,
           );
         }
-        await this.addDevice(matchingAvd, disconnectedDevice.androidImage);
-        signal.throwIfAborted();
-        return "same-avd";
-      }
-      await this.deviceManager.killDevice(matchingAvd, {
-        timeoutMs: Math.max(1, deadlineMs - this.timer.now()),
-        signal,
-      });
-      signal.throwIfAborted();
-      for (;;) {
-        const devices = await discover();
-        // A same-AVD replacement still holds the image's locks; a different
-        // AVD reusing the old serial must be preserved without another kill.
-        const stillPresent = devices.some((device) => device.name === avdName);
-        if (!stillPresent) {
-          logger.info(
-            `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
-          );
+        const matchingAvd = matchingAvds[0];
+        if (!matchingAvd) {
           return "stopped";
         }
-        await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
+        if (matchingAvd.deviceId !== disconnectedDevice.id || adoptOnly) {
+          if (matchingAvd.deviceId === disconnectedDevice.id) {
+            if (
+              this.devices.get(disconnectedDevice.id) !== disconnectedDevice ||
+              !this.detachSessionForAndroidRecovery(
+                disconnectedDevice,
+                preservedSessionId,
+                preservedSession,
+              )
+            ) {
+              throw new ActionableError(
+                `Android emulator '${avdName}' changed ownership during recovery; recovery will not relaunch it`,
+              );
+            }
+            this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(
+              matchingAvd.deviceId,
+              handoffOwner,
+            );
+            await this.removeDevice(disconnectedDevice.id, true, disconnectedDevice);
+          } else {
+            this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(
+              matchingAvd.deviceId,
+              handoffOwner,
+            );
+          }
+          await this.addDevice(matchingAvd, disconnectedDevice.androidImage);
+          signal.throwIfAborted();
+          return "same-avd";
+        }
+        await this.deviceManager.killDevice(matchingAvd, {
+          timeoutMs: Math.max(1, deadlineMs - this.timer.now()),
+          signal,
+        });
         signal.throwIfAborted();
-      }
-    });
+        for (;;) {
+          const devices = await discover();
+          // A same-AVD replacement still holds the image's locks; a different
+          // AVD reusing the old serial must be preserved without another kill.
+          const stillPresent = devices.some((device) => device.name === avdName);
+          if (!stillPresent) {
+            logger.info(
+              `[DevicePool] Confirmed untracked Android emulator ${avdName} stopped before recovery`,
+            );
+            return "stopped";
+          }
+          await this.timer.sleep(Math.min(1_000, Math.max(0, deadlineMs - this.timer.now())));
+          signal.throwIfAborted();
+        }
+      }));
     try {
-      return await Promise.race([shutdown, cancelled]);
+      return await raceWithDeadline(startShutdown, {
+        timer: this.timer,
+        timeoutMs,
+        signal: callerSignal,
+        label: "Android emulator shutdown confirmation",
+        timeoutError: () => {
+          deadlineController.abort(timeoutError);
+          return timeoutError;
+        },
+      });
     } catch (error) {
       // A late command must settle before another lifecycle owner may mutate
       // this AVD. Failure propagates before pool/session detachment or relaunch.
-      retainLeaseUntil(shutdown);
+      if (shutdown) {
+        retainLeaseUntil(shutdown);
+      }
       throw new UnconfirmedRecoveryShutdownError(avdName, error);
-    } finally {
-      this.timer.clearTimeout(timeout);
-      removeAbortListener?.();
     }
   }
 
@@ -4112,18 +4112,20 @@ export class DevicePool {
     exited: Promise<void>,
     timeoutMs: number,
   ): Promise<boolean> {
-    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = Symbol("process-exit-timeout");
     try {
-      return await Promise.race([
-        exited.then(() => true),
-        new Promise<boolean>((resolve) => {
-          timeout = this.timer.setTimeout(() => resolve(false), timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      await raceWithDeadline(exited, {
+        timer: this.timer,
+        timeoutMs,
+        label: "Emulator process exit",
+        timeoutError: () => timedOut,
+      });
+      return true;
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
+      return false;
     }
   }
 

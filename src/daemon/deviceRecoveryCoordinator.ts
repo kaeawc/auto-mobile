@@ -1,6 +1,7 @@
 import type { DeviceInfo } from "../models";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { toActionableError } from "../models/ActionableError";
 import type {
   AndroidRecoveryRecord,
@@ -405,24 +406,11 @@ export class DeviceRecoveryCoordinator {
     if (settlements.length === 0) {
       return;
     }
-    let abortListener: (() => void) | undefined;
-    const cancellation = signal
-      ? new Promise<never>((_resolve, reject) => {
-          abortListener = () => reject(signal.reason ?? new Error("Device preparation cancelled"));
-          if (signal.aborted) {
-            abortListener();
-            return;
-          }
-          signal.addEventListener("abort", abortListener, { once: true });
-        })
-      : undefined;
-    try {
-      await Promise.race([Promise.all(settlements), ...(cancellation ? [cancellation] : [])]);
-    } finally {
-      if (abortListener) {
-        signal?.removeEventListener("abort", abortListener);
-      }
-    }
+    await raceWithDeadline(Promise.all(settlements), {
+      timer: this.pool.getTimer(),
+      signal,
+      label: "Device preparation",
+    });
   }
 
   private async waitForAndroidRecoveryDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -430,22 +418,11 @@ export class DeviceRecoveryCoordinator {
       await this.pool.getTimer().sleep(delayMs);
       return;
     }
-    let abortListener: (() => void) | undefined;
-    const cancellation = new Promise<never>((_resolve, reject) => {
-      abortListener = () => reject(signal.reason ?? new Error("Device preparation cancelled"));
-      if (signal.aborted) {
-        abortListener();
-        return;
-      }
-      signal.addEventListener("abort", abortListener, { once: true });
+    await raceWithDeadline(this.pool.getTimer().sleep(delayMs), {
+      timer: this.pool.getTimer(),
+      signal,
+      label: "Device preparation delay",
     });
-    try {
-      await Promise.race([this.pool.getTimer().sleep(delayMs), cancellation]);
-    } finally {
-      if (abortListener) {
-        signal.removeEventListener("abort", abortListener);
-      }
-    }
   }
 
   isAndroidRecoveryHandoffReserved(deviceId: string, allowedOwners?: ReadonlySet<symbol>): boolean {

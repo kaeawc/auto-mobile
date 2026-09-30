@@ -2,6 +2,7 @@ import { ActionableError, toActionableError } from "../models";
 import type { DeviceTeardownOperationStore } from "../db/deviceTeardownOperationRepository";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import type { Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type {
   StableVirtualDeviceIdentity,
   VirtualDeviceLifecycleCoordinator,
@@ -565,19 +566,10 @@ export class DeviceTeardownService {
     if (signal.aborted) {
       throw signal.reason ?? new ActionableError("Device teardown caller cancelled");
     }
-    let removeAbortListener: (() => void) | undefined;
-    try {
-      return await Promise.race([
-        promise,
-        new Promise<never>((_resolve, reject) => {
-          const abort = () =>
-            reject(signal.reason ?? new ActionableError("Device teardown caller cancelled"));
-          signal.addEventListener("abort", abort, { once: true });
-          removeAbortListener = () => signal.removeEventListener("abort", abort);
-        }),
-      ]);
-    } finally {
-      removeAbortListener?.();
-    }
+    return await raceWithDeadline(promise, {
+      timer: this.dependencies.timer,
+      signal,
+      label: "Device teardown caller",
+    });
   }
 }

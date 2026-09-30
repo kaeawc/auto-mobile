@@ -1098,6 +1098,7 @@ export class LaunchApp extends BaseVisualChange {
         timer: this.timer,
         signal,
         label: "Android preflight",
+        relabelDefaultAbort: false,
       });
     } catch (error) {
       await this.awaitAndroidPreflightSettlement(preflight);
@@ -1115,7 +1116,12 @@ export class LaunchApp extends BaseVisualChange {
     }
     try {
       signal.throwIfAborted();
-      return await raceWithDeadline(retarget, { timer: this.timer, signal, label: "iOS retarget" });
+      return await raceWithDeadline(retarget, {
+        timer: this.timer,
+        signal,
+        label: "iOS retarget",
+        relabelDefaultAbort: false,
+      });
     } catch (error) {
       if (!signal.aborted) {
         throw error;

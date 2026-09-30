@@ -6,6 +6,7 @@
 import type { DoctorProbeOptions } from "./types";
 import { combineAbortSignals, combineWithAmbientAbort } from "../utils/AbortContext";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 export class DoctorDeadlineError extends Error {
   constructor() {
@@ -106,17 +107,9 @@ export async function awaitDoctorProbe<T>(
     return await work;
   }
 
-  let removeAbortListener: (() => void) | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<never>((_resolve, reject) => {
-        const abort = () => reject(probe.signal?.reason ?? new DoctorDeadlineError());
-        probe.signal?.addEventListener("abort", abort, { once: true });
-        removeAbortListener = () => probe.signal?.removeEventListener("abort", abort);
-      }),
-    ]);
-  } finally {
-    removeAbortListener?.();
-  }
+  return await raceWithDeadline(work, {
+    timer: probe.timer ?? defaultTimer,
+    signal: probe.signal,
+    label: "Doctor probe",
+  });
 }

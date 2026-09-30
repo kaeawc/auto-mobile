@@ -301,6 +301,14 @@ async function readinessFailureAfterTimeout(
  * @returns The booted device once ready
  * @throws Re-throws the original readiness error after cancelling the boot
  */
+function readinessFailureReason(
+  signal: AbortSignal | undefined,
+  timeoutError: ActionableError,
+  error: unknown,
+): unknown {
+  return signal?.aborted && !(signal.reason instanceof Error) ? timeoutError : error;
+}
+
 export async function waitForDeviceReadyOrCancel(
   deviceManager: PlatformDeviceManager,
   device: DeviceInfo,
@@ -317,8 +325,6 @@ export async function waitForDeviceReadyOrCancel(
   );
   const controller = new AbortController();
   const readinessSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  let abortListener: (() => void) | undefined;
   const settlement: ReadinessSettlement = { settled: false };
   let readinessPromise!: Promise<BootedDevice>;
 
@@ -345,22 +351,23 @@ export async function waitForDeviceReadyOrCancel(
     // The deadline race below can settle first when a device manager ignores
     // cancellation. Keep a late device-manager rejection from becoming unhandled.
     void readinessPromise.catch(() => {});
-    const abortPromise = new Promise<never>((_resolve, reject) => {
-      abortListener = () => {
-        reject(readinessSignal.reason instanceof Error ? readinessSignal.reason : timeoutError);
-      };
-      if (readinessSignal.aborted) {
-        abortListener();
-        return;
-      }
-      readinessSignal.addEventListener("abort", abortListener, { once: true });
+    return await raceWithDeadline(readinessPromise, {
+      timer,
+      timeoutMs,
+      signal,
+      label: "Device readiness",
+      timeoutError: () => {
+        const error = createTimeoutError?.() ?? timeoutError;
+        controller.abort(error);
+        return error;
+      },
     });
-    timeoutHandle = timer.setTimeout(() => {
-      controller.abort(createTimeoutError?.() ?? timeoutError);
-    }, timeoutMs);
-    return await Promise.race([readinessPromise, abortPromise]);
   } catch (error) {
-    const failure = await readinessFailureAfterTimeout(controller, settlement, error);
+    const failure = await readinessFailureAfterTimeout(
+      controller,
+      settlement,
+      readinessFailureReason(signal, timeoutError, error),
+    );
     if (handle) {
       logger.warn(
         `[startDevice] readiness failed for ${device.deviceId ?? device.name}; ` +
@@ -370,13 +377,6 @@ export async function waitForDeviceReadyOrCancel(
       await (cancelOwnedBoot ?? (() => handle.kill()))();
     }
     throw failure;
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
-    if (abortListener) {
-      readinessSignal.removeEventListener("abort", abortListener);
-    }
   }
 }
 

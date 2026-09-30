@@ -1427,6 +1427,9 @@ describe("UnixSocketServer MCP session reconnect", () => {
       reconnectAttempted: true,
       replayAttempted: false,
     });
+    for (let turn = 0; turn < 12 && closeCalls < 2; turn++) {
+      await Promise.resolve();
+    }
     expect(closeCalls).toBe(2);
     expect((server as any).mcpClients.size).toBe(0);
   });

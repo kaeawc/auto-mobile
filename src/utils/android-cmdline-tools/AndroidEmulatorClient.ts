@@ -1555,7 +1555,6 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   private async runAccelerationCheckInner(): Promise<string> {
     const controller = new AbortController();
-    let timeout: NodeJS.Timeout | undefined;
     const probe = Promise.resolve()
       .then(() => this.execAsync(this.emulatorPath, ["-accel-check"], controller.signal))
       .then(
@@ -1565,20 +1564,23 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           ),
         (error) => this.diagnosticOutputFromError(error),
       );
-    const timeoutResult = new Promise<string>((resolve) => {
-      timeout = this.timer.setTimeout(() => {
-        controller.abort();
-        logger.debug(`Emulator acceleration check timed out after ${ACCEL_CHECK_TIMEOUT_MS}ms`);
-        resolve("");
-      }, ACCEL_CHECK_TIMEOUT_MS);
-    });
-
+    const timedOut = Symbol("emulator acceleration timeout");
     try {
-      return await Promise.race([probe, timeoutResult]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      return await raceWithDeadline(probe, {
+        timer: this.timer,
+        timeoutMs: ACCEL_CHECK_TIMEOUT_MS,
+        label: "Emulator acceleration check",
+        timeoutError: () => {
+          controller.abort();
+          return timedOut;
+        },
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
+      logger.debug(`Emulator acceleration check timed out after ${ACCEL_CHECK_TIMEOUT_MS}ms`);
+      return "";
     }
   }
 

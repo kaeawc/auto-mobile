@@ -18,6 +18,7 @@ import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { releaseVersion } from "../utils/mcpVersion";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS, DAEMON_VERSION } from "./constants";
 
 export interface DaemonLaunchCommand {
@@ -455,17 +456,22 @@ export class DaemonLauncher {
     processFailure: Promise<never>,
     readinessAbort: AbortController,
   ): Promise<boolean> {
-    let timeout: NodeJS.Timeout | undefined;
-    const deadline = new Promise<boolean>((resolve) => {
-      timeout = this.timer.setTimeout(() => resolve(false), DAEMON_SHUTDOWN_TIMEOUT_MS);
-    });
+    const timedOut = Symbol("final readiness timeout");
     try {
-      return await Promise.race([readinessCheck, processFailure, deadline]);
+      // Process failure and readiness are independent outcomes of the same startup attempt.
+      return await raceWithDeadline([readinessCheck, processFailure], {
+        timer: this.timer,
+        timeoutMs: DAEMON_SHUTDOWN_TIMEOUT_MS,
+        label: "Final daemon readiness check",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
+      }
+      return false;
     } finally {
       readinessAbort.abort();
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
     }
   }
 
@@ -485,12 +491,12 @@ export class DaemonLauncher {
     }
 
     const signalledProcessGroup = this.signalProcessGroup(process, pid, "SIGTERM");
-    let timeout: NodeJS.Timeout | undefined;
+    let deadlineHandle: NodeJS.Timeout | undefined;
     const deadline = new Promise<void>((resolve) => {
-      timeout = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
+      deadlineHandle = this.timer.setTimeout(resolve, DAEMON_SHUTDOWN_TIMEOUT_MS);
     });
-
     try {
+      // oxlint-disable-next-line auto-mobile/no-raw-promise-race -- Reuse the group grace deadline; another timer would change its expiry.
       const wrapperExited = await Promise.race([
         exitPromise.then(() => true),
         deadline.then(() => false),
@@ -510,8 +516,8 @@ export class DaemonLauncher {
       }
       await exitPromise;
     } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      if (deadlineHandle !== undefined) {
+        this.timer.clearTimeout(deadlineHandle);
       }
     }
   }

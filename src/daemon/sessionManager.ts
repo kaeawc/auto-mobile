@@ -1575,10 +1575,17 @@ export class SessionManager {
       try {
         const recoveryPromise = this.registerRehydrationRecovery(sessionId, devicePool, persisted);
         const remaining = Math.max(0, deadlineAt - this.timer.now());
-        const recoveryResult = await Promise.race([
-          recoveryPromise,
-          this.timer.sleep(remaining).then(() => recoveryDeadlineWon),
-        ]);
+        const recoveryResult = await raceWithDeadline(recoveryPromise, {
+          timer: this.timer,
+          timeoutMs: remaining,
+          label: "Session rehydration",
+          timeoutError: () => recoveryDeadlineWon,
+        }).catch((error: unknown) => {
+          if (error !== recoveryDeadlineWon) {
+            throw error;
+          }
+          return recoveryDeadlineWon;
+        });
         if (recoveryResult === recoveryDeadlineWon) {
           void recoveryPromise.catch((error) =>
             logger.warn(
@@ -1639,10 +1646,20 @@ export class SessionManager {
     const deadlineWon = Symbol("startup-deadline");
     const recoverableSessions =
       this.deviceSessionRepository.listRecoverableSessions?.() ?? Promise.resolve([]);
-    const result = await Promise.race([
-      recoverableSessions,
-      this.timer.sleep(Math.max(0, deadlineAt - this.timer.now())).then(() => deadlineWon),
-    ]);
+    let result: typeof deadlineWon | DeviceSession[];
+    try {
+      result = await raceWithDeadline(recoverableSessions, {
+        timer: this.timer,
+        timeoutMs: Math.max(0, deadlineAt - this.timer.now()),
+        label: "Recoverable session listing",
+        timeoutError: () => deadlineWon,
+      });
+    } catch (error) {
+      if (error !== deadlineWon) {
+        throw error;
+      }
+      result = deadlineWon;
+    }
     if (typeof result !== "symbol") {
       return result;
     }

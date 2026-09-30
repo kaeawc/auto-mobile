@@ -2,6 +2,7 @@ import { promises as fsPromises } from "node:fs";
 import { errorMessage } from "./describeUnknownError";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { logger } from "./logger";
+import { raceWithDeadline } from "./raceWithDeadline";
 
 export const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
@@ -247,16 +248,20 @@ async function waitForExitOrTimeout(
   timeoutMs: number,
   timer: Timer,
 ): Promise<"exited" | "timeout"> {
-  let timeoutId: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<"timeout">((resolve) => {
-    timeoutId = timer.setTimeout(() => resolve("timeout"), Math.max(0, timeoutMs));
-  });
+  const timedOut = Symbol("process exit deadline");
   try {
-    return await Promise.race([exitPromise.then(() => "exited" as const), timeoutPromise]);
-  } finally {
-    if (timeoutId) {
-      timer.clearTimeout(timeoutId);
+    await raceWithDeadline(exitPromise, {
+      timer,
+      timeoutMs: Math.max(0, timeoutMs),
+      label: "Process exit",
+      timeoutError: () => timedOut,
+    });
+    return "exited";
+  } catch (error) {
+    if (error !== timedOut) {
+      throw error;
     }
+    return "timeout";
   }
 }
 

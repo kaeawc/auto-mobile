@@ -1,5 +1,6 @@
 import { defaultTimer, type Timer } from "./utils/SystemTimer";
 import { writeEmergencyLog } from "./utils/loggingConfig";
+import { raceWithDeadline } from "./utils/raceWithDeadline";
 
 export type ShutdownSignal = "SIGINT" | "SIGTERM" | "stdin";
 
@@ -73,12 +74,6 @@ export class ProcessLifecycleHandlers {
   private installed = false;
   private stdinShutdownHandlersInstalled = false;
   private shutdownInProgress = false;
-  private shutdownTimeoutArmed = false;
-  private shutdownTimeoutHandle: NodeJS.Timeout | undefined;
-  private resolveShutdownTimeout!: (value: false) => void;
-  private readonly shutdownTimeout = new Promise<false>((resolve) => {
-    this.resolveShutdownTimeout = resolve;
-  });
   private shutdownHandler: ProcessShutdownHandler | undefined;
   private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
@@ -161,26 +156,21 @@ export class ProcessLifecycleHandlers {
       return true;
     }
 
-    this.armShutdownTimeout();
-
+    const timedOut = Symbol("shutdown timeout");
     try {
-      return (await Promise.race([handler(signal), this.shutdownTimeout])) !== false;
-    } finally {
-      if (this.shutdownTimeoutHandle !== undefined) {
-        this.timer.clearTimeout(this.shutdownTimeoutHandle);
-        this.shutdownTimeoutHandle = undefined;
+      await raceWithDeadline(() => Promise.resolve(handler(signal)), {
+        timer: this.timer,
+        timeoutMs: this.shutdownTimeoutMs,
+        label: "Process shutdown",
+        timeoutError: () => timedOut,
+      });
+      return true;
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
+      return false;
     }
-  }
-
-  private armShutdownTimeout(): void {
-    if (this.shutdownTimeoutArmed) {
-      return;
-    }
-    this.shutdownTimeoutArmed = true;
-    this.shutdownTimeoutHandle = this.timer.setTimeout(() => {
-      this.resolveShutdownTimeout(false);
-    }, this.shutdownTimeoutMs);
   }
 
   private async runShutdownTimeoutHandler(): Promise<ProcessShutdownTimeoutResult | undefined> {
@@ -193,22 +183,22 @@ export class ProcessLifecycleHandlers {
       this.shutdownTimeoutMs,
       PROCESS_SHUTDOWN_FINALIZATION_TIMEOUT_MS,
     );
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<undefined>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(() => {
-        writeEmergencyLog(
-          `Shutdown finalization timed out after ${finalizationTimeoutMs}ms; forcing exit`,
-        );
-        resolve(undefined);
-      }, finalizationTimeoutMs);
-    });
-
+    const timedOut = Symbol("shutdown finalization timeout");
     try {
-      return await Promise.race([Promise.resolve(handler()), timedOut]);
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
+      return await raceWithDeadline(Promise.resolve(handler()), {
+        timer: this.timer,
+        timeoutMs: finalizationTimeoutMs,
+        label: "Shutdown finalization",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
+      writeEmergencyLog(
+        `Shutdown finalization timed out after ${finalizationTimeoutMs}ms; forcing exit`,
+      );
+      return undefined;
     }
   }
 

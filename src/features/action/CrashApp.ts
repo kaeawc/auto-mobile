@@ -5,6 +5,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import {
   findAndroidPackageProcesses,
+  readAndroidPackageProcesses,
   type AndroidPackageProcess,
 } from "../../utils/android-cmdline-tools/androidProcessState";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -138,14 +139,10 @@ export class CrashApp {
       };
     }
 
-    const initialProcesses = await this.adb.executeCommand(
-      PROCESS_STATE_COMMAND,
-      PREFLIGHT_COMMAND_TIMEOUT_MS,
-      undefined,
-      true,
+    const { processes: packageProcesses } = await readAndroidPackageProcesses(this.adb, appId, {
       signal,
-    );
-    const packageProcesses = findAndroidPackageProcesses(initialProcesses.stdout, appId);
+      timer: this.timer,
+    });
     if (packageProcesses.length === 0) {
       return {
         ...base,
@@ -262,17 +259,13 @@ export class CrashApp {
     base: AndroidCrashResultBase,
     signal?: AbortSignal,
   ): Promise<AndroidDispatchPreparation | CrashAppResult> {
-    const dispatchProcessesOutput = await this.adb.executeCommand(
-      PROCESS_STATE_COMMAND,
-      PREFLIGHT_COMMAND_TIMEOUT_MS,
-      undefined,
-      true,
+    const dispatchProcessState = await readAndroidPackageProcesses(this.adb, appId, {
       signal,
+      timer: this.timer,
+    });
+    const targetedProcesses = dispatchProcessState.processes.filter(
+      (process) => process.userId === userId,
     );
-    const targetedProcesses = findAndroidPackageProcesses(
-      dispatchProcessesOutput.stdout,
-      appId,
-    ).filter((process) => process.userId === userId);
     if (targetedProcesses.length === 0) {
       return {
         ...base,

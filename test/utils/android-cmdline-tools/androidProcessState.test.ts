@@ -1,9 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   findAndroidPackageProcessId,
   findAndroidPackageProcesses,
   isAndroidPackageRunning,
+  readAndroidPackageProcesses,
 } from "../../../src/utils/android-cmdline-tools/androidProcessState";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
+
+const COMMAND = "shell dumpsys activity processes";
+const PROCESS_LIST = "  *APP* UID 10001 ProcessRecord{abc 1234:com.example.app/u0a1}";
 
 describe("androidProcessState", () => {
   test("finds the main process PID for the selected app user", () => {
@@ -69,3 +75,98 @@ describe("androidProcessState", () => {
     expect(findAndroidPackageProcessId(output, "com.example.app", 10)).toBe(777);
   });
 });
+
+describe("readAndroidPackageProcesses", () => {
+  test("returns running state and process identities for a matching package", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(COMMAND, result(PROCESS_LIST));
+
+    const state = await readAndroidPackageProcesses(adb, "com.example.app", { userId: 0 });
+
+    expect(state.isRunning).toBe(true);
+    expect(state.processes).toEqual([{ pid: 1234, processName: "com.example.app", userId: 0 }]);
+    expect(adb.getCommandCalls()).toEqual([
+      expect.objectContaining({ command: COMMAND, timeoutMs: 5_000, noRetry: true }),
+    ]);
+  });
+
+  test("returns false for a package with no matching process or a different user", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(COMMAND, result(PROCESS_LIST));
+    expect(
+      (await readAndroidPackageProcesses(adb, "com.example.app", { userId: 10 })).isRunning,
+    ).toBe(false);
+    expect((await readAndroidPackageProcesses(adb, "com.example.other")).isRunning).toBe(false);
+  });
+
+  test("retries one transient failure through the injected timer", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    adb.setCommandResponse(COMMAND, result(PROCESS_LIST));
+    const execute = adb.executeCommand.bind(adb);
+    let attempts = 0;
+    const calls: Parameters<typeof adb.executeCommand>[] = [];
+    spyOn(adb, "executeCommand").mockImplementation(async (...args) => {
+      attempts += 1;
+      calls.push(args);
+      if (attempts === 1) {
+        throw new Error("adb: device offline");
+      }
+      return execute(...args);
+    });
+
+    const state = await readAndroidPackageProcesses(adb, "com.example.app", { timer });
+
+    expect(state.isRunning).toBe(true);
+    expect(calls).toEqual([
+      [COMMAND, 5_000, undefined, true, undefined],
+      [COMMAND, 5_000, undefined, true, undefined],
+    ]);
+    expect(timer.now()).toBe(200);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("surfaces a second offline failure after exactly one retry", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let attempts = 0;
+    spyOn(adb, "executeCommand").mockImplementation(async () => {
+      attempts += 1;
+      throw new Error("adb: device offline");
+    });
+
+    await expect(readAndroidPackageProcesses(adb, "com.example.app", { timer })).rejects.toThrow(
+      "device offline",
+    );
+    expect(attempts).toBe(2);
+    expect(timer.now()).toBe(200);
+  });
+
+  test("does not retry a non-transient failure", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    let attempts = 0;
+    spyOn(adb, "executeCommand").mockImplementation(async () => {
+      attempts += 1;
+      throw new Error("unknown command");
+    });
+
+    await expect(readAndroidPackageProcesses(adb, "com.example.app", { timer })).rejects.toThrow(
+      "unknown command",
+    );
+    expect(attempts).toBe(1);
+    expect(timer.now()).toBe(0);
+  });
+});
+
+function result(stdout: string) {
+  return {
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (search: string) => stdout.includes(search),
+  };
+}

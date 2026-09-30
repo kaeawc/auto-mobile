@@ -1,3 +1,8 @@
+import type { AdbExecutor } from "./interfaces/AdbExecutor";
+import { fixedBackoff } from "../Backoff";
+import { DefaultRetryExecutor } from "../retry/RetryExecutor";
+import { defaultTimer, type Timer } from "../SystemTimer";
+
 const PROCESS_RECORD_PATTERN =
   /(?:^|\s)(\d+):([A-Za-z0-9_.:]+)\/(u(\d+)(?:a\d+(?:i\d+)?|i\d+)|\d+)(?=[\s}]|$)/gm;
 
@@ -5,6 +10,37 @@ export interface AndroidPackageProcess {
   pid: number;
   processName: string;
   userId: number;
+}
+
+/** Read the process table with one retry for a transient offline device. */
+export async function readAndroidPackageProcesses(
+  adb: AdbExecutor,
+  packageName: string,
+  options: { userId?: number; signal?: AbortSignal; timer?: Timer } = {},
+): Promise<{ processes: AndroidPackageProcess[]; isRunning: boolean }> {
+  const output = await new DefaultRetryExecutor(options.timer ?? defaultTimer).executeOrThrow(
+    () =>
+      adb.executeCommand(
+        "shell dumpsys activity processes",
+        5_000,
+        undefined,
+        true,
+        options.signal,
+      ),
+    {
+      maxAttempts: 2,
+      delays: fixedBackoff(200),
+      signal: options.signal,
+      shouldRetry: (error) => /device offline/i.test(error.message),
+    },
+  );
+  const processes = findAndroidPackageProcesses(output.stdout, packageName);
+  return {
+    processes,
+    isRunning: processes.some(
+      (process) => options.userId === undefined || process.userId === options.userId,
+    ),
+  };
 }
 
 /**

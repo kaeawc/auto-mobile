@@ -35,7 +35,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
-import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
+import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
@@ -813,14 +813,17 @@ export class LaunchApp extends BaseVisualChange {
 
       // Check if app is running
       const isRunning = await perf.track("checkRunning", async () => {
-        const isRunningArgs = ["shell", "dumpsys", "activity", "processes", packageName];
+        const isRunningArgs = ["shell", "dumpsys", "activity", "processes"];
         logger.info(`[LaunchApp] Checking if app is running: ${isRunningArgs.join(" ")}`);
-        const isRunningOutput = await this.adb.execute(isRunningArgs, { signal });
-        const result = isAndroidPackageRunning(isRunningOutput.stdout, packageName, targetUserId);
+        const result = await readAndroidPackageProcesses(this.adb, packageName, {
+          userId: targetUserId,
+          signal,
+          timer: this.timer,
+        });
         logger.info(
-          `[LaunchApp] App running: ${result} (output: "${isRunningOutput.stdout.trim()}")`,
+          `[LaunchApp] App running: ${result.isRunning} (processes: ${JSON.stringify(result.processes)})`,
         );
-        return result;
+        return result.isRunning;
       });
       this.assertLaunchNotAborted(signal);
 

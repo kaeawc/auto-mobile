@@ -79,6 +79,24 @@ const dependencies = (overrides: Partial<CrashAppDependencies> = {}): CrashAppDe
 });
 
 describe("CrashApp (Android)", () => {
+  test("checks Android running state through the shared process-state command", async () => {
+    const adb = new FakeAdbClient();
+    adb.setCommandResult("shell dumpsys activity processes", "no processes");
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: false, wasRunning: false });
+    expect(adb.getCommandCalls()).toContainEqual(
+      expect.objectContaining({
+        command: "shell dumpsys activity processes",
+        timeoutMs: 5_000,
+        noRetry: true,
+      }),
+    );
+  });
+
   test("ties Android evidence summary to the target PID's crash block", () => {
     const output = [
       "E AndroidRuntime: FATAL EXCEPTION: main",

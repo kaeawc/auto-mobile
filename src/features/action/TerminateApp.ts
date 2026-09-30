@@ -18,7 +18,7 @@ import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { RealObserveScreen } from "../observe/ObserveScreen";
-import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
+import { readAndroidPackageProcesses } from "../../utils/android-cmdline-tools/androidProcessState";
 import { registerDeviceIncarnationListener } from "../../utils/deviceIncarnation";
 
 /**
@@ -179,15 +179,11 @@ export class TerminateApp extends BaseVisualChange {
         // make this operation report that the selected profile was running.
         const isRunning = await perf.track("checkRunning", async () => {
           try {
-            // Filter stdout here: grep's exit status conflates an expected
-            // no-match (the app is already stopped) with a real ADB failure.
-            const result = await this.adb.executeCommand(
-              "shell dumpsys activity processes",
-              undefined,
-              undefined,
-              true,
-            );
-            return isAndroidPackageRunning(result.stdout, packageName, targetUserId);
+            const result = await readAndroidPackageProcesses(this.adb, packageName, {
+              userId: targetUserId,
+              timer: this.timer,
+            });
+            return result.isRunning;
           } catch (error) {
             logger.warn(
               `[TerminateApp] Running-state check failed for user ${targetUserId}`,

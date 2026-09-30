@@ -24,9 +24,6 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
-import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -132,6 +129,24 @@ describe("LaunchApp", () => {
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
 
+  test("checks Android running state through the shared process-state command", async () => {
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
+
+    await launchApp.execute(packageName, false, false);
+
+    expect(fakeAdb.getCommandCalls()).toContainEqual(
+      expect.objectContaining({
+        command: "shell dumpsys activity processes",
+        timeoutMs: 5_000,
+        noRetry: true,
+      }),
+    );
+  });
+
   test("keeps nested launch command spans on an outer ambient tracker", async () => {
     setDebugPerfEnabled(true);
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -191,26 +206,14 @@ describe("LaunchApp", () => {
   });
 
   function routeProcessChecksThroughClient(exec: () => Promise<ExecResult>) {
-    const client = new AdbClient(
-      device,
-      exec,
-      null,
-      new DefaultRetryExecutor(fakeTimer),
-      fakeTimer,
-    );
-    (
-      client as unknown as {
-        getBaseCommandParts(): Promise<{ adbPath: string; baseArgs: string[] }>;
+    const calls: Parameters<typeof fakeAdb.executeCommand>[] = [];
+    const originalExecute = fakeAdb.executeCommand.bind(fakeAdb);
+    const spy = spyOn(fakeAdb, "executeCommand").mockImplementation(async (...args) => {
+      if (args[0] === "shell dumpsys activity processes") {
+        calls.push(args);
+        return exec();
       }
-    ).getBaseCommandParts = async () => ({ adbPath: "adb", baseArgs: [] });
-    const calls: Array<{ args: string[]; options?: AdbExecuteOptions }> = [];
-    const originalExecute = fakeAdb.execute.bind(fakeAdb);
-    const spy = spyOn(fakeAdb, "execute").mockImplementation(async (args, options) => {
-      if (args.join(" ") === `shell dumpsys activity processes ${packageName}`) {
-        calls.push({ args, options });
-        return client.execute(args, options);
-      }
-      return originalExecute(args, options);
+      return originalExecute(...args);
     });
     return { calls, spy };
   }
@@ -254,10 +257,8 @@ describe("LaunchApp", () => {
       expect(result.success).toBe(true);
       expect(result.alreadyForeground).toBe(true);
       expect(calls).toEqual([
-        {
-          args: ["shell", "dumpsys", "activity", "processes", packageName],
-          options: { signal: controller.signal },
-        },
+        ["shell dumpsys activity processes", 5_000, undefined, true, controller.signal],
+        ["shell dumpsys activity processes", 5_000, undefined, true, controller.signal],
       ]);
       expect(dispatches).toBe(2);
       expect(fakeTimer.now()).toBe(200);
@@ -293,10 +294,9 @@ describe("LaunchApp", () => {
 
     try {
       await expect(launchApp.execute(packageName, false, false)).rejects.toThrow("device offline");
-      expect(calls).toHaveLength(1);
-      expect(dispatches).toBe(4);
-      expect(fakeTimer.getSleepHistory()).toEqual([200, 500, 1000]);
-      expect(fakeTimer.now()).toBe(1_700);
+      expect(calls).toHaveLength(2);
+      expect(dispatches).toBe(2);
+      expect(fakeTimer.now()).toBe(200);
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
     } finally {
       spy.mockRestore();

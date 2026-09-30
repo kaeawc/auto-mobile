@@ -15,6 +15,8 @@ import type { Platform } from "../models";
  */
 export const SNAPSHOT_REPLACING_SUFFIX = ".replacing";
 
+type SnapshotJournalState = "pending-existing" | "pending-new" | "committed";
+
 export interface SnapshotPathOptions {
   platform?: Platform;
   deviceId?: string;
@@ -122,22 +124,22 @@ export class DeviceSnapshotStore {
   ): Promise<T> {
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
     const asidePath = `${snapshotPath}${SNAPSHOT_REPLACING_SUFFIX}`;
+    const journalPath = this.getJournalPath(snapshotPath);
 
-    // Clear any set-aside leftover from a prior interrupted overwrite so the
-    // rename below can't collide with stale state.
-    await fs.rm(asidePath, { recursive: true, force: true });
-
-    let hadExisting = false;
+    await this.recoverSnapshotData(snapshotName, options);
+    const hadExisting = await this.pathExists(snapshotPath);
+    await this.writeJournal(journalPath, hadExisting ? "pending-existing" : "pending-new");
     try {
-      await fs.rename(snapshotPath, asidePath);
-      hadExisting = true;
+      if (hadExisting) {
+        await fs.rename(snapshotPath, asidePath);
+        await this.syncParent(snapshotPath);
+      }
     } catch (error) {
-      // ENOENT means there was nothing to replace (first capture of this name),
-      // which is normal. Any other error means we could not move the existing
-      // data aside — fail rather than risk a dirty, half-overwritten snapshot.
+      // A concurrently removed directory is equivalent to a first capture.
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
       }
+      await this.writeJournal(journalPath, "pending-new");
     }
 
     let result: T;
@@ -149,10 +151,7 @@ export class DeviceSnapshotStore {
       // here must not mask the real capture error, so log-and-continue and
       // rethrow the original (CLAUDE.md catch convention).
       try {
-        await fs.rm(snapshotPath, { recursive: true, force: true });
-        if (hadExisting) {
-          await fs.rename(asidePath, snapshotPath);
-        }
+        await this.recoverSnapshotData(snapshotName, options);
       } catch (rollbackError) {
         logger.warn(
           `Failed to roll back snapshot '${snapshotName}' after a failed overwrite; ` +
@@ -162,20 +161,109 @@ export class DeviceSnapshotStore {
       throw error;
     }
 
-    // Capture succeeded and the record is already committed. Removing the
-    // set-aside copy is best-effort cleanup — its failure must NOT roll back the
-    // committed snapshot (that would leave the DB record describing the fresh
-    // capture while the directory reverted to the old data). Log and continue;
-    // the next overwrite clears it and the legacy scan skips *.replacing dirs.
+    // Capture includes the record write. Persist the commit decision before
+    // deleting the only previous copy; recovery must never revert this result.
+    await this.writeJournal(journalPath, "committed");
     try {
-      await fs.rm(asidePath, { recursive: true, force: true });
+      await this.recoverSnapshotData(snapshotName, options);
     } catch (cleanupError) {
       logger.warn(
-        `Failed to remove set-aside snapshot copy '${asidePath}' after a successful ` +
-          `overwrite; it will be cleaned up on the next capture: ${cleanupError}`,
+        `Failed to clean committed snapshot journal '${journalPath}'; ` +
+          `it will be cleaned up on the next capture: ${cleanupError}`,
       );
     }
     return result;
+  }
+
+  /** Recover one snapshot at startup or before its next capture. */
+  async recoverSnapshotData(snapshotName: string, options?: SnapshotPathOptions): Promise<void> {
+    const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
+    const asidePath = `${snapshotPath}${SNAPSHOT_REPLACING_SUFFIX}`;
+    const journalPath = this.getJournalPath(snapshotPath);
+    const tempPath = this.getTempJournalPath(journalPath);
+    const parentPath = path.dirname(snapshotPath);
+    await fs.mkdir(parentPath, { recursive: true });
+    const entries = await fs.readdir(parentPath);
+    if (entries.includes(path.basename(tempPath))) {
+      await fs.rm(tempPath);
+    }
+    const state = entries.includes(path.basename(journalPath))
+      ? await fs.readFile(journalPath, "utf-8")
+      : undefined;
+
+    const asideExists = await this.pathExists(asidePath);
+    if (state === undefined) {
+      if (asideExists) {
+        await this.recoverLegacyAside(snapshotPath, asidePath);
+      }
+      return;
+    }
+    if (state !== "pending-existing" && state !== "pending-new" && state !== "committed") {
+      throw new Error(`Invalid snapshot journal at '${journalPath}': '${state}'`);
+    }
+    if (state === "committed") {
+      await fs.rm(asidePath, { recursive: true, force: true });
+    } else if (asideExists) {
+      if (state !== "pending-existing") {
+        throw new Error(`Unexpected set-aside snapshot for new capture at '${asidePath}'`);
+      }
+      await fs.rm(snapshotPath, { recursive: true, force: true });
+      await fs.rename(asidePath, snapshotPath);
+    } else if (state === "pending-new") {
+      await fs.rm(snapshotPath, { recursive: true, force: true });
+    }
+    await this.syncParent(snapshotPath);
+    await fs.rm(journalPath);
+    await this.syncParent(snapshotPath);
+  }
+
+  private async recoverLegacyAside(snapshotPath: string, asidePath: string): Promise<void> {
+    if (await this.pathExists(snapshotPath)) {
+      logger.warn(
+        `Removing legacy set-aside snapshot '${asidePath}' because '${snapshotPath}' exists`,
+      );
+      await fs.rm(asidePath, { recursive: true, force: true });
+    } else {
+      logger.warn(`Restoring legacy set-aside snapshot '${asidePath}' to '${snapshotPath}'`);
+      await fs.rename(asidePath, snapshotPath);
+    }
+    await this.syncParent(snapshotPath);
+  }
+
+  private getJournalPath(snapshotPath: string): string {
+    // The reserved suffix prevents either sibling file from being a user snapshot.
+    return `${snapshotPath}.journal${SNAPSHOT_REPLACING_SUFFIX}`;
+  }
+
+  private getTempJournalPath(journalPath: string): string {
+    return `${journalPath.slice(0, -SNAPSHOT_REPLACING_SUFFIX.length)}.tmp${SNAPSHOT_REPLACING_SUFFIX}`;
+  }
+
+  private async writeJournal(journalPath: string, state: SnapshotJournalState): Promise<void> {
+    const tempPath = this.getTempJournalPath(journalPath);
+    const handle = await fs.open(tempPath, "wx");
+    try {
+      await handle.writeFile(state);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(tempPath, journalPath);
+    await this.syncParent(journalPath);
+  }
+
+  private async syncParent(filePath: string): Promise<void> {
+    const handle = await fs.open(path.dirname(filePath), "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async pathExists(filePath: string): Promise<boolean> {
+    const entries = await fs.readdir(path.dirname(filePath));
+    return entries.includes(path.basename(filePath));
   }
 
   async deleteSnapshotData(snapshotName: string, options?: SnapshotPathOptions): Promise<void> {

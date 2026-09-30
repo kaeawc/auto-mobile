@@ -3,6 +3,7 @@ import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
+import { logger } from "../../src/utils/logger";
 
 describe("DeviceSnapshotStore", () => {
   let store: DeviceSnapshotStore;
@@ -135,6 +136,9 @@ describe("DeviceSnapshotStore", () => {
   });
 
   describe("replaceSnapshotData (#5713)", () => {
+    const journal = (dest: string) => `${dest}.journal.replacing`;
+    const tempJournal = (dest: string) => `${dest}.journal.tmp.replacing`;
+
     it("replaces existing contents so no stale files survive", async () => {
       const snapshotName = "replace-me";
       const dest = store.getSnapshotPath(snapshotName);
@@ -142,6 +146,8 @@ describe("DeviceSnapshotStore", () => {
       await fs.writeFile(path.join(dest, "stale.txt"), "old");
 
       const result = await store.replaceSnapshotData(snapshotName, undefined, async () => {
+        expect(await fs.readFile(journal(dest), "utf-8")).toBe("pending-existing");
+        expect(await fs.readFile(path.join(`${dest}.replacing`, "stale.txt"), "utf-8")).toBe("old");
         await fs.mkdir(dest, { recursive: true });
         await fs.writeFile(path.join(dest, "fresh.txt"), "new");
         return "captured";
@@ -152,6 +158,7 @@ describe("DeviceSnapshotStore", () => {
       expect(entries.sort()).toEqual(["fresh.txt"]);
       // The set-aside copy must be cleaned up on success.
       expect(await store.snapshotDirectoryExists(`${snapshotName}.replacing`)).toBe(false);
+      expect(await fs.readdir(testBasePath)).toEqual([snapshotName]);
     });
 
     it("restores the prior snapshot when the capture fails", async () => {
@@ -173,6 +180,7 @@ describe("DeviceSnapshotStore", () => {
       expect(entries.sort()).toEqual(["original.txt"]);
       expect(await fs.readFile(path.join(dest, "original.txt"), "utf-8")).toBe("keep");
       expect(await store.snapshotDirectoryExists(`${snapshotName}.replacing`)).toBe(false);
+      expect(await fs.readdir(testBasePath)).toEqual([snapshotName]);
     });
 
     it("captures cleanly when no prior snapshot exists", async () => {
@@ -180,6 +188,7 @@ describe("DeviceSnapshotStore", () => {
       const dest = store.getSnapshotPath(snapshotName);
 
       await store.replaceSnapshotData(snapshotName, undefined, async () => {
+        expect(await fs.readFile(journal(dest), "utf-8")).toBe("pending-new");
         await fs.mkdir(dest, { recursive: true });
         await fs.writeFile(path.join(dest, "data.txt"), "value");
       });
@@ -187,6 +196,123 @@ describe("DeviceSnapshotStore", () => {
       expect(await store.snapshotDirectoryExists(snapshotName)).toBe(true);
       expect(await fs.readFile(path.join(dest, "data.txt"), "utf-8")).toBe("value");
       expect(await store.snapshotDirectoryExists(`${snapshotName}.replacing`)).toBe(false);
+      expect(await fs.readdir(testBasePath)).toEqual([snapshotName]);
+    });
+
+    it("restores an interrupted overwrite before the next capture", async () => {
+      const name = "interrupted";
+      const dest = store.getSnapshotPath(name);
+      await fs.mkdir(`${dest}.replacing`);
+      await fs.writeFile(path.join(`${dest}.replacing`, "old.txt"), "old");
+      await fs.mkdir(dest);
+      await fs.writeFile(path.join(dest, "partial.txt"), "partial");
+      await fs.writeFile(journal(dest), "pending-existing");
+
+      await store.replaceSnapshotData(name, undefined, async () => {
+        expect(await fs.readFile(path.join(`${dest}.replacing`, "old.txt"), "utf-8")).toBe("old");
+        expect(await store.snapshotDirectoryExists(name)).toBe(false);
+        await fs.mkdir(dest);
+        await fs.writeFile(path.join(dest, "new.txt"), "new");
+      });
+
+      expect(await fs.readdir(dest)).toEqual(["new.txt"]);
+      expect(await fs.readdir(testBasePath)).toEqual([name]);
+    });
+
+    it("restores old data from an uncommitted journal at startup", async () => {
+      const name = "startup-recovery";
+      const dest = store.getSnapshotPath(name);
+      await fs.mkdir(`${dest}.replacing`);
+      await fs.writeFile(path.join(`${dest}.replacing`, "old.txt"), "old");
+      await fs.mkdir(dest);
+      await fs.writeFile(path.join(dest, "partial.txt"), "partial");
+      await fs.writeFile(journal(dest), "pending-existing");
+
+      expect(await store.listSubdirectoryNames(testBasePath)).toEqual([name, `${name}.replacing`]);
+      await new DeviceSnapshotStore(testBasePath).recoverSnapshotData(name);
+
+      expect(await fs.readdir(dest)).toEqual(["old.txt"]);
+      expect(await fs.readdir(testBasePath)).toEqual([name]);
+    });
+
+    it("keeps a committed destination and removes its stale aside", async () => {
+      const name = "committed";
+      const dest = store.getSnapshotPath(name);
+      await fs.mkdir(dest);
+      await fs.writeFile(path.join(dest, "new.txt"), "new");
+      await fs.mkdir(`${dest}.replacing`);
+      await fs.writeFile(path.join(`${dest}.replacing`, "old.txt"), "old");
+      await fs.writeFile(journal(dest), "committed");
+
+      await new DeviceSnapshotStore(testBasePath).recoverSnapshotData(name);
+
+      expect(await fs.readFile(path.join(dest, "new.txt"), "utf-8")).toBe("new");
+      expect(await fs.readdir(testBasePath)).toEqual([name]);
+    });
+
+    it("removes an orphan temp journal without changing the snapshot", async () => {
+      const name = "temp-orphan";
+      const dest = store.getSnapshotPath(name);
+      await fs.mkdir(dest);
+      await fs.writeFile(path.join(dest, "old.txt"), "old");
+      await fs.writeFile(tempJournal(dest), "pending-existing");
+
+      expect(await store.listSubdirectoryNames(testBasePath)).toEqual([name]);
+
+      await store.recoverSnapshotData(name);
+
+      expect(await fs.readFile(path.join(dest, "old.txt"), "utf-8")).toBe("old");
+      expect(await fs.readdir(testBasePath)).toEqual([name]);
+    });
+
+    it("discards an interrupted first capture with no previous copy", async () => {
+      const name = "new-interrupted";
+      const dest = store.getSnapshotPath(name);
+      await fs.mkdir(dest);
+      await fs.writeFile(path.join(dest, "partial.txt"), "partial");
+      await fs.writeFile(journal(dest), "pending-new");
+
+      await store.recoverSnapshotData(name);
+
+      expect(await fs.readdir(testBasePath)).toEqual([]);
+    });
+
+    it("removes a legacy unjournaled aside when the destination exists", async () => {
+      const name = "legacy-committed";
+      const dest = store.getSnapshotPath(name);
+      await fs.mkdir(dest);
+      await fs.writeFile(path.join(dest, "new.txt"), "new");
+      await fs.mkdir(`${dest}.replacing`);
+      await fs.writeFile(path.join(`${dest}.replacing`, "old.txt"), "old");
+
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await store.recoverSnapshotData(name);
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("Removing legacy set-aside"));
+      } finally {
+        warning.mockRestore();
+      }
+
+      expect(await fs.readFile(path.join(dest, "new.txt"), "utf-8")).toBe("new");
+      expect(await fs.readdir(testBasePath)).toEqual([name]);
+    });
+
+    it("restores a legacy unjournaled aside when the destination is missing", async () => {
+      const name = "legacy-interrupted";
+      const dest = store.getSnapshotPath(name);
+      await fs.mkdir(`${dest}.replacing`);
+      await fs.writeFile(path.join(`${dest}.replacing`, "old.txt"), "old");
+
+      const warning = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        await store.recoverSnapshotData(name);
+        expect(warning).toHaveBeenCalledWith(expect.stringContaining("Restoring legacy set-aside"));
+      } finally {
+        warning.mockRestore();
+      }
+
+      expect(await fs.readFile(path.join(dest, "old.txt"), "utf-8")).toBe("old");
+      expect(await fs.readdir(testBasePath)).toEqual([name]);
     });
   });
 

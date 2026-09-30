@@ -525,14 +525,20 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async isDeviceImageRunning(device: DeviceInfo): Promise<boolean> {
     switch (device.platform) {
       case "android": {
-        const booted = await this.emulator.getBootedDevicesChecked();
+        const booted = await this.emulator.getBootedDevicesChecked(false, {
+          bypassDeviceListCache: true,
+        });
         return booted.some((emulator) => emulator.name === device.name);
       }
       case "ios":
         if (!(await this.canDiscoverIosLocally())) {
           return false;
         }
-        return (await this.simctl.getBootedSimulatorsChecked()).some(
+        return (
+          await this.simctl.getBootedSimulatorsChecked(undefined, undefined, {
+            bypassCache: true,
+          })
+        ).some(
           (simulator) =>
             simulator.deviceId === device.deviceId ||
             (device.deviceId === undefined && simulator.name === device.name),

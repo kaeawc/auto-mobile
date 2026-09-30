@@ -10,6 +10,7 @@ import type { VirtualDeviceLifecycleCoordinator } from "../../src/devices/virtua
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import { logger } from "../../src/utils/logger";
+import type { BootedDeviceScanOptions } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 
 async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
   const original = process.platform;
@@ -754,6 +755,61 @@ describe("MultiPlatformDeviceManager", () => {
     const isRunning = await manager.isDeviceImageRunning(device);
 
     expect(isRunning).toBe(true);
+  });
+
+  test("isDeviceImageRunning bypasses the Android device-list cache", async () => {
+    let receivedOptions: BootedDeviceScanOptions | undefined;
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      null,
+      createFakeAndroidEmulator({
+        getBootedDevicesChecked: async (_onlyEmulators, options) => {
+          receivedOptions = options;
+          return [{ name: "Pixel 9", platform: "android", deviceId: "emulator-5554" }];
+        },
+      }),
+    );
+
+    const isRunning = await manager.isDeviceImageRunning({
+      name: "Pixel 9",
+      platform: "android",
+      isRunning: false,
+    });
+
+    expect(isRunning).toBe(true);
+    expect(receivedOptions).toEqual({ bypassDeviceListCache: true });
+  });
+
+  test("isDeviceImageRunning bypasses the iOS simulator-list cache", async () => {
+    await withProcessPlatform("darwin", async () => {
+      let receivedOptions: { bypassCache?: boolean } | undefined;
+      const fakeSimctl = {
+        isAvailable: async () => true,
+        getBootedSimulatorsChecked: async (
+          _timeoutMs?: number,
+          _signal?: AbortSignal,
+          options?: { bypassCache?: boolean },
+        ) => {
+          receivedOptions = options;
+          return [{ name: "iPhone 15", platform: "ios", deviceId: "booted-1" }];
+        },
+      } as unknown as SimCtlClient;
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        null,
+      );
+
+      const isRunning = await manager.isDeviceImageRunning({
+        name: "iPhone 15",
+        platform: "ios",
+        isRunning: false,
+        deviceId: "booted-1",
+      });
+
+      expect(isRunning).toBe(true);
+      expect(receivedOptions).toEqual({ bypassCache: true });
+    });
   });
 
   test("isDeviceImageRunning falls back to name-based check for iOS without UDID", async () => {

@@ -2,6 +2,10 @@ import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interface
 import type { Timer } from "../../../utils/SystemTimer";
 import { defaultTimer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
+import {
+  parseAndroidDisplayInfos,
+  parseSurfaceFlingerDisplayIds,
+} from "../../../utils/android-cmdline-tools/AndroidDisplayParsers";
 
 const SURFACE_FLINGER_DISPLAY_IDS_COMMAND = "shell dumpsys SurfaceFlinger --display-id";
 const DEFAULT_DISPLAY_INFO_COMMAND = "shell cmd display get-displays";
@@ -63,15 +67,15 @@ async function resolvePhysicalDisplay(adb: AdbExecutor): Promise<PhysicalDisplay
 
     // A single physical display needs no explicit selection and keeps the
     // existing screencap command unchanged.
-    if (physicalIds.length === 1) {
+    if (physicalIds.size === 1) {
       return { kind: "single" };
     }
-    if (physicalIds.length === 0) {
+    if (physicalIds.size === 0) {
       return { kind: "unresolved" };
     }
 
     const defaultPhysicalId = parseDefaultDisplayPhysicalId(displayInfo.stdout);
-    return defaultPhysicalId !== null && physicalIds.includes(defaultPhysicalId)
+    return defaultPhysicalId !== null && physicalIds.has(defaultPhysicalId)
       ? { kind: "display", id: defaultPhysicalId }
       : { kind: "unresolved" };
   } catch (error) {
@@ -82,37 +86,10 @@ async function resolvePhysicalDisplay(adb: AdbExecutor): Promise<PhysicalDisplay
   }
 }
 
-function parseSurfaceFlingerDisplayIds(output: string): string[] {
-  const ids = new Set<string>();
-  for (const line of output.split(/\r?\n/)) {
-    const tokens = line.trim().split(/[\s():]+/);
-    if (tokens[0] === "Display" && /^\d+$/.test(tokens[1] ?? "")) {
-      ids.add(tokens[1]);
-    }
-  }
-  return [...ids];
-}
-
 function parseDefaultDisplayPhysicalId(output: string): string | null {
-  let physicalId: string | null = null;
-  let foundDefaultDisplay = false;
-  for (const line of output.split(/\r?\n/)) {
-    const header = line.trim().split(/\s+/, 4);
-    if (header[0] !== "Display" || header[1] !== "id" || header[2] !== "0:") {
-      continue;
-    }
-    if (foundDefaultDisplay) {
-      return null;
-    }
-    foundDefaultDisplay = true;
-    const tokens = line
-      .trim()
-      .split(/[\s"{},]+/)
-      .filter(Boolean);
-    const uniqueIdIndex = tokens.findIndex((token) => token === "uniqueId");
-    const uniqueId = uniqueIdIndex >= 0 ? tokens[uniqueIdIndex + 1] : undefined;
-    const match = uniqueId?.match(/^local:(\d+)$/);
-    physicalId = match?.[1] ?? null;
+  const defaults = parseAndroidDisplayInfos(output).filter((record) => record.logicalId === "0");
+  if (defaults.length !== 1) {
+    return null;
   }
-  return physicalId;
+  return /^local:(\d+)$/.exec(defaults[0].uniqueId ?? "")?.[1] ?? null;
 }

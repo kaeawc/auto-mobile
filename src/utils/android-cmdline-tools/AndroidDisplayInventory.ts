@@ -2,45 +2,12 @@ import type { DeviceDisplays, DisplayPanel, PanelRole, Posture } from "../../mod
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
-
-/** Parse physical IDs as strings: JavaScript numbers cannot represent them exactly. */
-export function parsePhysicalDisplayIds(output: string): Set<string> {
-  const ids = new Set<string>();
-  for (const line of output.split(/\r?\n/)) {
-    const match = /^Display (\d+) \(HWC display \d+\):/.exec(line.trim());
-    if (match) {
-      ids.add(match[1]);
-    }
-  }
-  return ids;
-}
+import { parseAndroidDisplayInfos, parseSurfaceFlingerDisplayIds } from "./AndroidDisplayParsers";
 
 interface AndroidDisplayRecord {
   key: string;
   type: "INTERNAL" | "EXTERNAL" | "VIRTUAL";
   sizePx: DisplayPanel["sizePx"];
-}
-
-/** Read each DisplayInfo record's named fields, never its changing logical display id. */
-export function parseAndroidDisplayInfos(output: string): AndroidDisplayRecord[] {
-  const records: AndroidDisplayRecord[] = [];
-  for (const line of output.split(/\r?\n/)) {
-    if (!line.includes("DisplayInfo{")) {
-      continue;
-    }
-    const id = /\buniqueId "(?:local|external|virtual):([^\"]+)"/.exec(line);
-    const type = /\btype (INTERNAL|EXTERNAL|VIRTUAL)\b/.exec(line)?.[1];
-    const size = /\breal (\d+) x (\d+)\b/.exec(line);
-    if (!id || !size || (type !== "INTERNAL" && type !== "EXTERNAL" && type !== "VIRTUAL")) {
-      continue;
-    }
-    records.push({
-      key: id[1],
-      type,
-      sizePx: { width: Number(size[1]), height: Number(size[2]) },
-    });
-  }
-  return records;
 }
 
 const STATE_POSTURES: Record<string, Posture> = {
@@ -74,9 +41,15 @@ export function parseAndroidDeviceDisplays(
   displayInfosOutput: string,
   statesOutput: string,
 ): DeviceDisplays | undefined {
-  const ids = parsePhysicalDisplayIds(physicalIdsOutput);
-  const records = parseAndroidDisplayInfos(displayInfosOutput).filter((record) =>
-    ids.has(record.key),
+  const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
+  const records: AndroidDisplayRecord[] = parseAndroidDisplayInfos(displayInfosOutput).flatMap(
+    (record) => {
+      const key = /^(?:local|external|virtual):(.+)$/.exec(record.uniqueId ?? "")?.[1];
+      if (!record.hasDisplayInfo || !key || !record.sizePx || !record.type || !ids.has(key)) {
+        return [];
+      }
+      return [{ key, type: record.type, sizePx: record.sizePx }];
+    },
   );
   // Single-screen devices retain their pre-existing inventory JSON shape.
   if (records.length < 2) {

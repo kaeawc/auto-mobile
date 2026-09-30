@@ -266,6 +266,7 @@ interface ReadinessUpgradeFlight {
   work: Promise<void>;
   settled: boolean;
   waiters: number;
+  devicePreparationStarted: boolean;
 }
 
 const readinessUpgradeInFlight = new WeakMap<Session, ReadinessUpgradeFlight>();
@@ -303,11 +304,16 @@ async function ensureReadinessUpgraded(
 
     const inFlight = readinessUpgradeInFlight.get(session);
     if (inFlight) {
-      // A flight whose final subscriber already left is being cancelled. A
-      // later caller must not inherit that unrelated cancellation; wait for
-      // its cleanup to settle, then establish or join a fresh flight.
+      // A flight cancelled while still queued for the device lock must settle
+      // before a new caller starts another attempt.
       if (inFlight.controller.signal.aborted) {
-        await inFlight.work.catch(() => undefined);
+        await inFlight.work.catch((error: unknown) => {
+          // This is the expected result of the last waiter leaving before
+          // device preparation; the next loop iteration starts a fresh flight.
+          logger.debug("[ToolExecutionContext] Readiness flight ended before device preparation", {
+            error,
+          });
+        });
         continue;
       }
       // Another caller is already upgrading this session's readiness — wait
@@ -327,12 +333,16 @@ async function ensureReadinessUpgraded(
       work: Promise.resolve(),
       settled: false,
       waiters: 0,
+      devicePreparationStarted: false,
     };
     flight.work = runDeviceReadinessSetup(
       session,
       sessionManager,
       requiredReadiness,
       controller.signal,
+      () => {
+        flight.devicePreparationStarted = true;
+      },
     ).finally(() => {
       flight.settled = true;
       if (readinessUpgradeInFlight.get(session) === flight) {
@@ -346,9 +356,9 @@ async function ensureReadinessUpgraded(
 }
 
 /**
- * A request may stop waiting for shared readiness work without cancelling a
- * still-interested joiner. If every subscriber leaves, stop the background
- * setup instead of continuing a cancelled request's device mutation.
+ * A request may stop waiting without cancelling shared device preparation.
+ * While the flight is still queued for the device lock, the final waiter may
+ * abort it; once preparation starts, it must finish under its own signal.
  */
 async function awaitReadinessFlight(
   flight: ReadinessUpgradeFlight,
@@ -359,8 +369,10 @@ async function awaitReadinessFlight(
     await awaitReadinessWork(flight.work, signal);
   } finally {
     flight.waiters -= 1;
-    if (flight.waiters === 0 && !flight.settled && !flight.controller.signal.aborted) {
-      flight.controller.abort(signal?.reason);
+    if (flight.waiters === 0 && !flight.settled && !flight.devicePreparationStarted) {
+      flight.controller.abort(
+        new ActionableError("Readiness setup cancelled before device preparation"),
+      );
     }
   }
 }
@@ -425,6 +437,7 @@ async function runDeviceReadinessSetup(
   sessionManager: SessionManager,
   requiredReadiness: DeviceReadinessLevel,
   signal?: AbortSignal,
+  onDevicePreparationStart?: () => void,
 ): Promise<void> {
   signal?.throwIfAborted();
   if (session.platform === "android" && requiredReadiness !== "booted") {
@@ -440,8 +453,9 @@ async function runDeviceReadinessSetup(
     // one lock and setup on a device is never run concurrently.
     await withDeviceReadinessLock(
       deviceReadinessLockKey(session.platform, session.assignedDevice),
-      () =>
-        runWithAbortSignal(signal, () =>
+      () => {
+        onDevicePreparationStart?.();
+        return runWithAbortSignal(signal, () =>
           // #7541: reuse the SessionManager's own injected Timer (a FakeTimer
           // in tests) rather than hard-wiring defaultTimer, so this retry
           // path's delays are fake-clock testable instead of sleeping in real
@@ -453,7 +467,8 @@ async function runDeviceReadinessSetup(
             sessionManager.getTimer(),
             signal,
           ),
-        ),
+        );
+      },
       { signal },
     );
   }

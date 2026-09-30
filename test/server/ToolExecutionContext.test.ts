@@ -363,8 +363,8 @@ describe("ToolExecutionContext", () => {
   );
 
   // Issue #7541: an abort during the retry delay must reject promptly with
-  // the caller's own reason instead of waiting out the 3s sleep — and must
-  // not start a second `setup()` call once cancelled.
+  // the caller's own reason instead of waiting out the 3s sleep. Shared
+  // preparation continues its own bounded retry after that caller detaches.
   test("rejects promptly with the caller's reason when aborted during the retry sleep (#7541)", async () => {
     let setupCalls = 0;
     let resolveFirstSetup!: () => void;
@@ -377,13 +377,14 @@ describe("ToolExecutionContext", () => {
         setupCalls++;
         if (setupCalls === 1) {
           queueMicrotask(() => resolveFirstSetup());
+          return {
+            success: false,
+            message: "Failed to setup Accessibility Service due to device connection issue",
+            error: "error: device offline",
+            category: "deviceConnection" as const,
+          };
         }
-        return {
-          success: false,
-          message: "Failed to setup Accessibility Service due to device connection issue",
-          error: "error: device offline",
-          category: "deviceConnection" as const,
-        };
+        return { success: true, message: "ok" };
       },
       waitForConnection: async () => true,
       isInstalled: async () => true,
@@ -408,9 +409,16 @@ describe("ToolExecutionContext", () => {
     controller.abort(new Error("caller cancelled during retry sleep"));
     await expect(context).rejects.toThrow("caller cancelled during retry sleep");
     expect(setupCalls).toBe(1);
+    await createToolExecutionContext(
+      "session-abort-retry-sleep",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    expect(setupCalls).toBe(2);
   });
 
-  test("already preserves the caller's abort reason when setup itself is cancelled", async () => {
+  test("preserves the caller's abort reason while shared setup completes", async () => {
     const setupStarted = Promise.withResolvers<void>();
     const finishSetup = Promise.withResolvers<void>();
     let setupCalls = 0;
@@ -420,7 +428,7 @@ describe("ToolExecutionContext", () => {
         setupCalls++;
         setupStarted.resolve();
         await finishSetup.promise;
-        return { success: false, message: "Operation cancelled", category: "unknown" };
+        return { success: true, message: "ok" };
       },
       waitForConnection: async () => true,
       isInstalled: async () => true,
@@ -1586,16 +1594,18 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
-  test("retries after the sole cancelled readiness flight settles (#6280)", async () => {
+  test("joins readiness work after its first caller cancels (#6280, #6400)", async () => {
     let resolveSetup!: () => void;
     const setupStarted = new Promise<void>((resolve) => {
       resolveSetup = resolve;
     });
+    const setupEntered = Promise.withResolvers<void>();
     let setupCalls = 0;
     setDeviceReadinessProxyDriverProviderForTesting(() => ({
       resetSetupState: () => {},
       setup: async () => {
         setupCalls += 1;
+        setupEntered.resolve();
         await setupStarted;
         return { success: true, message: "ok" };
       },
@@ -1616,13 +1626,12 @@ describe("ToolExecutionContext", () => {
       false,
       cancelled.signal,
     );
-    await new Promise((resolve) => setImmediate(resolve));
+    await setupEntered.promise;
     cancelled.abort(new Error("first request cancelled"));
     await expect(first).rejects.toThrow("first request cancelled");
 
-    // This request arrives after the sole subscriber has aborted but before
-    // its setup work settles. It must wait and retry rather than join that
-    // aborted flight.
+    // This request arrives after the first caller has cancelled but before
+    // shared setup settles. It joins that flight and observes its result.
     const later = createToolExecutionContext(
       "session-cancelled-flight-retry",
       sessionManager,
@@ -1632,7 +1641,105 @@ describe("ToolExecutionContext", () => {
     resolveSetup();
 
     await expect(later).resolves.toMatchObject({ deviceId: "device-1" });
-    expect(setupCalls).toBe(2);
+    expect(setupCalls).toBe(1);
+  });
+
+  test("cancelled callers detach while their shared CtrlProxy setup completes (#6400)", async () => {
+    const setupEntered = Promise.withResolvers<void>();
+    const finishSetup = Promise.withResolvers<void>();
+    let resetCalls = 0;
+    let setupCalls = 0;
+    let completedSetups = 0;
+    let setupSignal: AbortSignal | undefined;
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {
+        resetCalls += 1;
+      },
+      setup: async () => {
+        setupCalls += 1;
+        setupSignal = getAbortSignal();
+        setupEntered.resolve();
+        await finishSetup.promise;
+        setupSignal?.throwIfAborted();
+        completedSetups += 1;
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-shared-cancellation", "device-1", "android");
+
+    const firstController = new AbortController();
+    const first = createToolExecutionContext(
+      "session-shared-cancellation",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+      undefined,
+      undefined,
+      false,
+      firstController.signal,
+    );
+    await setupEntered.promise;
+    expect(resetCalls).toBe(1);
+    expect(setupCalls).toBe(1);
+
+    firstController.abort(new Error("first caller cancelled"));
+    await expect(first).rejects.toThrow("first caller cancelled");
+    expect(setupSignal?.aborted).toBe(false);
+    expect(completedSetups).toBe(0);
+
+    const later = createToolExecutionContext(
+      "session-shared-cancellation",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
+    finishSetup.resolve();
+    await expect(later).resolves.toMatchObject({ deviceId: "device-1" });
+    expect(setupSignal?.aborted).toBe(false);
+    expect(completedSetups).toBe(1);
+    expect(resetCalls).toBe(1);
+    expect(setupCalls).toBe(1);
+    expect(sessionManager.getDeviceReadiness("session-shared-cancellation")).toBe(
+      "automationReady",
+    );
+  });
+
+  test("an already-aborted caller does not start shared readiness setup (#6400)", async () => {
+    let resetCalls = 0;
+    let setupCalls = 0;
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {
+        resetCalls += 1;
+      },
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-preaborted-readiness", "device-1", "android");
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled before readiness"));
+
+    await expect(
+      createToolExecutionContext(
+        "session-preaborted-readiness",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        undefined,
+        undefined,
+        false,
+        controller.signal,
+      ),
+    ).rejects.toThrow("cancelled before readiness");
+    expect(resetCalls).toBe(0);
+    expect(setupCalls).toBe(0);
   });
 
   test("should not run accessibility setup for existing sessions", async () => {

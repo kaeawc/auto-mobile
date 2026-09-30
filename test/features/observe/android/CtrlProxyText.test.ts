@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import type WebSocket from "ws";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
-import { CtrlProxyText } from "../../../../src/features/observe/android/CtrlProxyText";
+import {
+  CtrlProxyText,
+  imeCommitSegmentCount,
+  imeCommitTimeoutMs,
+} from "../../../../src/features/observe/android/CtrlProxyText";
 import type { DelegateContext } from "../../../../src/features/observe/android/types";
 import type { BootedDevice } from "../../../../src/models";
 import { RequestManager } from "../../../../src/utils/RequestManager";
@@ -48,6 +53,32 @@ async function waitForSent(sent: Record<string, unknown>[], count: number): Prom
 }
 
 describe("Android CtrlProxyText", () => {
+  test("scales commit timeout by spans and characters within the tool budget", async () => {
+    const timer = new FakeTimer();
+    const socket = new CapturingWebSocket("ws://localhost", "none", 0, timer);
+    await waitForSocketOpen(socket);
+    const requestManager = new RequestManager(timer);
+    const context: DelegateContext = {
+      getWebSocket: () => socket as unknown as WebSocket,
+      requestManager,
+      timer,
+      ensureConnected: async () => true,
+      cancelScreenshotBackoff: () => {},
+    };
+    const text = "one *bold* two `code` tail";
+    expect(imeCommitSegmentCount(text)).toBe(3);
+    const expected = 10_000 + 750 * 2 + 20 * text.length;
+    expect(imeCommitTimeoutMs(text)).toBe(expected);
+    expect(imeCommitTimeoutMs("*x* ".repeat(100))).toBe(25_000);
+
+    const resultPromise = new CtrlProxyText(context).commitViaIme(text);
+    const request = await waitForRequest(socket, "request_commit_text");
+    expect(timer.getPendingTimeouts()).toContain(expected);
+    requestManager.resolve(request.requestId as string, { success: true });
+    expect(await resultPromise).toMatchObject({ success: true });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("commit timeout reports unknown editor state", async () => {
     const timer = new FakeTimer();
     const requestManager = new RequestManager(timer);
@@ -63,7 +94,7 @@ describe("Android CtrlProxyText", () => {
 
     const resultPromise = new CtrlProxyText(context).commitViaIme("text", "prior");
     await waitForSent(sent, 1);
-    timer.advanceTime(10_000);
+    timer.advanceTime(imeCommitTimeoutMs("text"));
     await waitForSent(sent, 2);
     timer.advanceTime(2_000);
 
@@ -90,7 +121,7 @@ describe("Android CtrlProxyText", () => {
     const resultPromise = new CtrlProxyText(context).commitViaIme("text", "prior");
     await waitForSent(sent, 1);
     const commit = sent[0]!;
-    timer.advanceTime(10_000);
+    timer.advanceTime(imeCommitTimeoutMs("text"));
     await waitForSent(sent, 2);
     const cancel = sent[1]!;
     expect(cancel).toMatchObject({

@@ -1114,6 +1114,43 @@ describe("DefaultSendKeysCommandExecutor", () => {
     ).toBeLessThan(events.indexOf(`adb:shell ime disable ${commitImeId}`));
   });
 
+  test.each([
+    ["prefix one *bold* two `code` tail", true, false],
+    ["prefix one *bold* two `code` tai", false, false],
+    ["", true, true],
+    [null, true, false],
+  ])("checks multi-span IME suffix when readable: %s", async (fieldText, success, secure) => {
+    const timer = new FakeTimer();
+    const text = "one *bold* two `code` tail";
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("shell settings get secure default_input_method", [
+      { stdout: priorImeId, stderr: "" },
+      { stdout: commitImeId, stderr: "" },
+    ]);
+    const observer = createObserver(
+      fieldText === null
+        ? ({ timestamp: timer.now() } as ObserveResult)
+        : focusedAndroidObservation(fieldText, secure ? { password: "true" } : {}, timer.now()),
+    );
+    const textClient = createTextClient();
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      observer,
+      { textClient: textClient.client },
+    );
+
+    const result = await executor.type({ action: "type", text, mode: "ime" });
+    expect(result.success).toBe(success);
+    expect(result.partialApplication).toBe(success ? undefined : true);
+    if (!success) {
+      expect(result.error).toContain("IME partial commit");
+    }
+    expect(observer.options).toContainEqual({ signal: undefined, freshness: "fresh" });
+    expect(textClient.commitViaImeCalls).toEqual([{ text, priorImeId }]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("ime mode preserves a companion keyboard that was already enabled", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("shell ime list -s", {

@@ -1,6 +1,10 @@
 import { describe, expect, test, it } from "bun:test";
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
 import type { Element } from "../../../src/models/Element";
+import {
+  isElementCenterOffScreen,
+  resolveElementScreenSize,
+} from "../../../src/features/utility/ElementGeometry";
 
 function elementWithBounds(bounds: {
   left: number;
@@ -136,5 +140,44 @@ describe("ElementGeometry getVisibleBounds", () => {
   it("returns the element bounds unchanged when fully on screen", () => {
     const bounds = { left: 10, top: 20, right: 100, bottom: 200 };
     expect(geometry.getVisibleBounds(elementWithBounds(bounds), 1080, 1920)).toEqual(bounds);
+  });
+});
+
+describe("element center screen geometry", () => {
+  const screen = { width: 100, height: 80 };
+
+  test("treats a center exactly on each screen edge as on-screen", () => {
+    expect(isElementCenterOffScreen({ left: 90, right: 100, top: 0, bottom: 10 }, screen)).toBe(
+      false,
+    );
+    expect(isElementCenterOffScreen({ left: 0, right: 10, top: 70, bottom: 80 }, screen)).toBe(
+      false,
+    );
+  });
+
+  test("keeps missing bounds and zero dimensions on-screen", () => {
+    expect(isElementCenterOffScreen(undefined, screen)).toBe(false);
+    expect(
+      isElementCenterOffScreen(
+        { left: -2, right: -1, top: 0, bottom: 1 },
+        { width: 0, height: 80 },
+      ),
+    ).toBe(false);
+  });
+
+  test("detects a negative center and a center past the far edge", () => {
+    expect(isElementCenterOffScreen({ left: -4, right: -2, top: 1, bottom: 3 }, screen)).toBe(true);
+    expect(isElementCenterOffScreen({ left: 100, right: 102, top: 1, bottom: 3 }, screen)).toBe(
+      true,
+    );
+  });
+
+  test("prefers complete hierarchy dimensions and falls back when either is missing", () => {
+    expect(resolveElementScreenSize({ screenWidth: 120, screenHeight: 90 }, screen)).toEqual({
+      width: 120,
+      height: 90,
+    });
+    expect(resolveElementScreenSize({ screenWidth: 120 }, screen)).toBe(screen);
+    expect(resolveElementScreenSize({}, undefined)).toBeUndefined();
   });
 });

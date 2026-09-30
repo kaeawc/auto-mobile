@@ -26,7 +26,11 @@ import {
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
-import { DefaultElementGeometry } from "../utility/ElementGeometry";
+import {
+  DefaultElementGeometry,
+  isElementCenterOffScreen,
+  resolveElementScreenSize,
+} from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -738,14 +742,13 @@ export class TapAnyElement extends BaseVisualChange {
 
   private isElementCenterOffScreen(
     element: Element,
+    viewHierarchy: ViewHierarchyResult,
     screenSize?: ObserveResult["screenSize"],
   ): boolean {
-    if (!screenSize?.width || !screenSize?.height || !element.bounds) {
-      return false;
-    }
-    const centerX = (element.bounds.left + element.bounds.right) / 2;
-    const centerY = (element.bounds.top + element.bounds.bottom) / 2;
-    return centerX < 0 || centerX > screenSize.width || centerY < 0 || centerY > screenSize.height;
+    return isElementCenterOffScreen(
+      element.bounds,
+      resolveElementScreenSize(viewHierarchy, screenSize),
+    );
   }
 
   private findClickableElement(
@@ -754,13 +757,24 @@ export class TapAnyElement extends BaseVisualChange {
     screenSize?: ObserveResult["screenSize"],
   ): { element: Element | null; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
-    const selection = this.elementSelector.selectClickable(viewHierarchy, {
+    const effectiveScreenSize = resolveElementScreenSize(viewHierarchy, screenSize);
+    const hierarchyWithResolvedSize = effectiveScreenSize
+      ? {
+          ...viewHierarchy,
+          screenWidth: effectiveScreenSize.width,
+          screenHeight: effectiveScreenSize.height,
+        }
+      : viewHierarchy;
+    const selection = this.elementSelector.selectClickable(hierarchyWithResolvedSize, {
       container: options.container,
       strategy: options.selectionStrategy,
       intentAction: options.action === "longPress" ? "long-press" : "tap",
       scrollableContainer: options.scrollableContainer,
     });
-    if (selection.element && this.isElementCenterOffScreen(selection.element, screenSize)) {
+    if (
+      selection.element &&
+      this.isElementCenterOffScreen(selection.element, viewHierarchy, screenSize)
+    ) {
       return { element: null, containerFound };
     }
     return { element: selection.element, containerFound };

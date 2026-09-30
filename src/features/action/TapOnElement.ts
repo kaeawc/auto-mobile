@@ -33,7 +33,7 @@ import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
-import { DefaultElementGeometry } from "../utility/ElementGeometry";
+import { DefaultElementGeometry, resolveElementScreenSize } from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -1270,14 +1270,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private getScreenSizeFromHierarchy(
     viewHierarchy: ViewHierarchyResult,
   ): ObserveResult["screenSize"] | undefined {
-    if (!viewHierarchy.screenWidth || !viewHierarchy.screenHeight) {
-      return undefined;
-    }
-
-    return {
-      width: viewHierarchy.screenWidth,
-      height: viewHierarchy.screenHeight,
-    };
+    return resolveElementScreenSize(viewHierarchy);
   }
 
   /**

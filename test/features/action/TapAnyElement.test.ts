@@ -180,6 +180,33 @@ describe("TapAnyElement", () => {
       expect(result.element).not.toBeNull();
     });
 
+    test("uses hierarchy dimensions over a different observation screen size", async () => {
+      const element = {
+        bounds: { left: 20, top: 20, right: 40, bottom: 40 },
+        text: "Visible",
+        clickable: "true",
+      } as any;
+      const adb = new FakeAdbClient();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const tapAny = new TapAnyElement(
+        { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+        adb,
+        { timer, elementSelector: new FakeElementSelector(element) },
+      );
+      const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
+      tapAny.observedInteraction = (action) =>
+        action({ viewHierarchy, screenSize: { width: 10, height: 10 } });
+      tapAny.setRefreshViewHierarchyForTesting(async () => null);
+
+      const result = await tapAny.execute({ action: "tap" });
+
+      expect(result.success).toBe(true);
+      expect(
+        adb.getCommandCalls().some((call) => call.command.includes("input touchscreen tap")),
+      ).toBe(true);
+    });
+
     test("keeps element when screenSize is not provided", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapAny = createTapAnyElement(selector);

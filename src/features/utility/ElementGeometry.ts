@@ -1,7 +1,33 @@
 import { Element } from "../../models/Element";
 import { Point } from "../../models/Point";
-import { ElementBounds } from "../../models";
+import type { ElementBounds } from "../../models/ElementBounds";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
+import type { ScreenSize } from "../../models/ScreenSize";
+import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
+
+/** Returns whether an element's center lies outside the screen. */
+export function isElementCenterOffScreen(
+  bounds: ElementBounds | undefined,
+  screenSize: ScreenSize | undefined,
+): boolean {
+  if (!bounds || !screenSize?.width || !screenSize.height) {
+    return false;
+  }
+  const centerX = (bounds.left + bounds.right) / 2;
+  const centerY = (bounds.top + bounds.bottom) / 2;
+  return centerX < 0 || centerX > screenSize.width || centerY < 0 || centerY > screenSize.height;
+}
+
+/** Prefer dimensions captured with the hierarchy, then use the observation fallback. */
+export function resolveElementScreenSize(
+  hierarchy: Pick<ViewHierarchyResult, "screenWidth" | "screenHeight">,
+  fallback?: ScreenSize,
+): ScreenSize | undefined {
+  if (hierarchy.screenWidth && hierarchy.screenHeight) {
+    return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+  }
+  return fallback;
+}
 
 /**
  * Handles bounds and coordinate calculations for UI elements

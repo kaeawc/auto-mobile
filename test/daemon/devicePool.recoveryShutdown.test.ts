@@ -695,16 +695,13 @@ test("continuity-disabled emulator loss keeps a terminal released settlement", a
       evictMissingPooledDevice(
         device: PooledDevice,
         reason: string,
-        attemptDeviceLossRecovery: boolean,
-        incidentId: string,
+        options: { attemptDeviceLossRecovery: boolean; incidentId: string },
       ): Promise<void>;
     };
-    await eviction.evictMissingPooledDevice(
-      captured,
-      "not present in adb devices",
-      true,
+    await eviction.evictMissingPooledDevice(captured, "not present in adb devices", {
+      attemptDeviceLossRecovery: true,
       incidentId,
-    );
+    });
 
     expect(await persistence.getSession?.("session")).toMatchObject({
       status: "released",

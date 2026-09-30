@@ -12,10 +12,11 @@ protocol SdkPreferenceFetching: Sendable {
         key: String,
         value: String,
         type: String,
-        sessionId: String?
+        sessionId: String?,
+        mutationToken: String?
     ) async throws
-    func remove(appId: String, suiteName: String, key: String, sessionId: String?) async throws
-    func clear(appId: String, suiteName: String, sessionId: String?) async throws
+    func remove(appId: String, suiteName: String, key: String, sessionId: String?, mutationToken: String?) async throws
+    func clear(appId: String, suiteName: String, sessionId: String?, mutationToken: String?) async throws
 }
 
 final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
@@ -23,7 +24,7 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
     private let transport: any HTTPRequesting
 
     convenience init(port: UInt16 = 8766) {
-        let url = URL(string: "http://localhost:\(port)")! // swiftlint:disable:this force_unwrapping
+        let url = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5
@@ -57,7 +58,8 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
         key: String,
         value: String,
         type: String,
-        sessionId: String?
+        sessionId: String?,
+        mutationToken: String?
     )
         async throws
     {
@@ -68,22 +70,38 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
             key: key,
             value: value,
             valueType: type,
-            sessionId: sessionId
+            sessionId: sessionId,
+            mutationToken: mutationToken
         ))
     }
 
-    func remove(appId: String, suiteName: String, key: String, sessionId: String?) async throws {
+    func remove(
+        appId: String,
+        suiteName: String,
+        key: String,
+        sessionId: String?,
+        mutationToken: String?
+    )
+        async throws
+    {
         _ = try await post(.init(
             operation: "remove",
             appId: appId,
             suiteName: suiteName,
             key: key,
-            sessionId: sessionId
+            sessionId: sessionId,
+            mutationToken: mutationToken
         ))
     }
 
-    func clear(appId: String, suiteName: String, sessionId: String?) async throws {
-        _ = try await post(.init(operation: "clear", appId: appId, suiteName: suiteName, sessionId: sessionId))
+    func clear(appId: String, suiteName: String, sessionId: String?, mutationToken: String?) async throws {
+        _ = try await post(.init(
+            operation: "clear",
+            appId: appId,
+            suiteName: suiteName,
+            sessionId: sessionId,
+            mutationToken: mutationToken
+        ))
     }
 
     private func post(_ payload: PreferenceRequest) async throws -> PreferenceResponse {
@@ -133,6 +151,7 @@ private struct PreferenceRequest: Encodable {
     var value: String?
     var valueType: String?
     var sessionId: String?
+    var mutationToken: String?
 }
 
 private struct PreferenceResponse: Decodable {

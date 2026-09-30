@@ -10,7 +10,8 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         key: String? = nil,
         value: String? = nil,
         type: String? = nil,
-        sessionId: String? = nil
+        sessionId: String? = nil,
+        mutationToken: String? = nil
     )
         throws -> Data
     {
@@ -19,6 +20,7 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         if let value { fields["value"] = value }
         if let type { fields["valueType"] = type }
         if let sessionId { fields["sessionId"] = sessionId }
+        if let mutationToken { fields["mutationToken"] = mutationToken }
         return try JSONSerialization.data(withJSONObject: fields)
     }
 
@@ -26,6 +28,7 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         DatabaseInspector.shared.configure(StorageInspectionConfiguration())
         DatabaseInspector.shared.authorizeHostMutations(false)
         DatabaseInspector.shared.authorizeSessionMutations(sessionId: nil)
+        DatabaseInspector.shared.authorizeMutationToken("")
         super.tearDown()
     }
 
@@ -57,6 +60,46 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         driver.setValue(suiteName: "duoStore", key: "other", value: "x", type: .string)
         XCTAssertEqual(try handler.handle(body: request("clear", sessionId: "session-1")).statusCode, 200)
         XCTAssertTrue(driver.getValues(suiteName: "duoStore").isEmpty)
+    }
+
+    func testListDoesNotExposeSdkSessionOrToken() throws {
+        DatabaseInspector.shared.authorizeMutationToken("launch-secret")
+        let handler = SdkPreferenceRouteHandler(
+            driver: { FakeUserDefaultsDriver() },
+            bundleId: { "com.example.app" },
+            currentSessionId: { "active-sdk-session" }
+        )
+        let response = try handler.handle(body: request("list"))
+        XCTAssertEqual(response.statusCode, 200)
+        let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: response.body) as? [String: Any])
+        XCTAssertNil(payload["sessionId"])
+        XCTAssertNil(payload["mutationToken"])
+    }
+
+    func testLaunchScopedMutationTokenAuthorizesWrites() throws {
+        let driver = FakeUserDefaultsDriver()
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(allowMutations: true))
+        DatabaseInspector.shared.authorizeHostMutations(true)
+        DatabaseInspector.shared.authorizeMutationToken("launch-token")
+        let handler = SdkPreferenceRouteHandler(
+            driver: { driver }, bundleId: { "com.example.app" }, currentSessionId: { "session-1" }
+        )
+        for token in [nil, "wrong", ""] as [String?] {
+            XCTAssertEqual(try handler.handle(body: request(
+                "set", key: "key", value: "value", type: "STRING", mutationToken: token
+            )).statusCode, 403)
+        }
+        XCTAssertNil(driver.getValue(suiteName: "duoStore", key: "key"))
+        XCTAssertEqual(try handler.handle(body: request(
+            "set", key: "key", value: "value", type: "STRING", mutationToken: "launch-token"
+        )).statusCode, 200)
+        XCTAssertEqual(try handler.handle(body: request(
+            "remove", key: "key", mutationToken: "launch-token"
+        )).statusCode, 200)
+        DatabaseInspector.shared.authorizeHostMutations(false)
+        XCTAssertEqual(try handler.handle(body: request(
+            "set", key: "key", value: "value", type: "STRING", mutationToken: "launch-token"
+        )).statusCode, 403)
     }
 
     func testRejectsMissingSdkInspectorAndWrongAppWithoutWriting() throws {

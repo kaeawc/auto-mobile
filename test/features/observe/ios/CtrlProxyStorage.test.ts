@@ -8,6 +8,14 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { ActionableError } from "../../../../src/models/ActionableError";
+import { iosMutationTokens } from "../../../../src/features/storage/IosMutationTokens";
+import { ToolRegistry } from "../../../../src/server/toolRegistry";
+import { serverConfig } from "../../../../src/utils/ServerConfig";
+import {
+  registerStorageTools,
+  resetStorageToolsDependencies,
+  setStorageToolsDependenciesForTesting,
+} from "../../../../src/server/storageTools";
 
 describe("CtrlProxyStorage (iOS)", function () {
   let testDevice: BootedDevice;
@@ -142,6 +150,8 @@ describe("CtrlProxyStorage (iOS)", function () {
                 entryCount: 3,
               },
             ],
+            sessionId: "hidden-session",
+            mutationToken: "hidden-token",
             totalTimeMs: 10,
           }),
         );
@@ -150,6 +160,8 @@ describe("CtrlProxyStorage (iOS)", function () {
         expect(result).toHaveLength(2);
         expect(result[0].name).toBe("Standard");
         expect(result[0].path).toBe("Standard");
+        expect(JSON.stringify(result)).not.toContain("hidden-session");
+        expect(JSON.stringify(result)).not.toContain("hidden-token");
         expect(result[0].displayName).toBe("Standard");
         expect(result[1].name).toBe("group.com.example");
         expect(result[1].path).toBe("group.com.example");
@@ -323,6 +335,7 @@ describe("CtrlProxyStorage (iOS)", function () {
       );
 
       try {
+        iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
         client.bindSession("session-1");
         const resultPromise = client.setPreference(
           "com.example.app",
@@ -333,7 +346,7 @@ describe("CtrlProxyStorage (iOS)", function () {
         );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        await waitForSentMessages(socket, 1);
+        await waitForSentMessages(socket!, 1);
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("set_preference");
@@ -343,6 +356,7 @@ describe("CtrlProxyStorage (iOS)", function () {
         expect(sentMsg.value).toBe("dark");
         expect(sentMsg.valueType).toBe("STRING");
         expect(sentMsg.sessionId).toBe("session-1");
+        expect(sentMsg.mutationToken).toBe("launch-secret");
 
         socket!.simulateMessage(
           JSON.stringify({
@@ -355,6 +369,7 @@ describe("CtrlProxyStorage (iOS)", function () {
 
         await resultPromise; // should not throw
       } finally {
+        iosMutationTokens.clear(testDevice.deviceId, "com.example.app");
         await client.close();
       }
     });
@@ -378,7 +393,7 @@ describe("CtrlProxyStorage (iOS)", function () {
         );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        await waitForSentMessages(socket, 1);
+        await waitForSentMessages(socket!, 1);
 
         const sentMsg = commandPayloads(socket!)[0];
 
@@ -397,7 +412,99 @@ describe("CtrlProxyStorage (iOS)", function () {
         await client.close();
       }
     });
+
+    test("maps the runner's SDK authorization error after decoding the real response", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      try {
+        const resultPromise = client.setPreference(
+          "com.example.app",
+          "duoStore",
+          "key",
+          "42",
+          "INT",
+        );
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket!, 1);
+        const request = commandPayloads(socket!)[0];
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "set_preference_result",
+            requestId: request.requestId,
+            success: false,
+            error:
+              "iOS key-value storage mutation is not authorized for this session: mutation_not_authorized",
+            totalTimeMs: 1,
+          }),
+        );
+        await expect(resultPromise).rejects.toThrow(
+          "StorageInspectionConfiguration(allowMutations: true)",
+        );
+      } finally {
+        await client.close();
+      }
+    });
   });
+
+  test.each([
+    ["setKeyValue", "set_preference_result"],
+    ["removeKeyValue", "remove_preference_result"],
+  ])(
+    "%s surfaces the runner authorization error through the registered tool",
+    async (toolName, responseType) => {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      ToolRegistry.clearTools();
+      serverConfig.setEmbeddedSdkEnabled(true);
+      registerStorageTools();
+      setStorageToolsDependenciesForTesting({ iosClientFactory: () => client });
+      try {
+        iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
+        const toolPromise = ToolRegistry.getTool(toolName)!.deviceAwareHandler!(testDevice, {
+          appId: "com.example.app",
+          name: "duoStore",
+          key: "key",
+          ...(toolName === "setKeyValue" ? { value: 42, type: "INT" } : {}),
+        });
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket!, 1);
+        const request = commandPayloads(socket!)[0];
+        expect(request.sessionId).toBeUndefined();
+        expect(request.mutationToken).toBe("launch-secret");
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: responseType,
+            requestId: request.requestId,
+            success: false,
+            error:
+              "iOS key-value storage mutation is not authorized for this session: mutation_not_authorized",
+            totalTimeMs: 1,
+          }),
+        );
+        await expect(toolPromise).rejects.toThrow(
+          "StorageInspectionConfiguration(allowMutations: true)",
+        );
+      } finally {
+        iosMutationTokens.clear(testDevice.deviceId, "com.example.app");
+        resetStorageToolsDependencies();
+        serverConfig.setEmbeddedSdkEnabled(false);
+        ToolRegistry.clearTools();
+        await client.close();
+      }
+    },
+  );
 
   // ---------------------------------------------------------------------------
   // removePreference
@@ -418,7 +525,7 @@ describe("CtrlProxyStorage (iOS)", function () {
         const resultPromise = client.removePreference("com.example.app", "Standard", "theme");
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        await waitForSentMessages(socket, 1);
+        await waitForSentMessages(socket!, 1);
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("remove_preference");
@@ -437,6 +544,36 @@ describe("CtrlProxyStorage (iOS)", function () {
         );
 
         await resultPromise; // should not throw
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("maps the runner's SDK authorization error for removal", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      try {
+        const resultPromise = client.removePreference("com.example.app", "duoStore", "key");
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket!, 1);
+        const request = commandPayloads(socket!)[0];
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "remove_preference_result",
+            requestId: request.requestId,
+            success: false,
+            error:
+              "iOS key-value storage mutation is not authorized for this session: mutation_not_authorized",
+            totalTimeMs: 1,
+          }),
+        );
+        await expect(resultPromise).rejects.toThrow("authorizeHostMutations(true)");
       } finally {
         await client.close();
       }
@@ -465,7 +602,7 @@ describe("CtrlProxyStorage (iOS)", function () {
         );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
-        await waitForSentMessages(socket, 1);
+        await waitForSentMessages(socket!, 1);
 
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("clear_preferences");

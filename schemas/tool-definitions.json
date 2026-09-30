@@ -2810,6 +2810,13 @@
           "description": "Cold boot app (default false)",
           "type": "boolean"
         },
+        "launchArguments": {
+          "description": "Arguments passed to the launched iOS app. Android does not support launch arguments.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
           "type": "boolean"

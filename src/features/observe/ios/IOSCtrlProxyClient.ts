@@ -86,6 +86,7 @@ import {
 } from "../ScreenshotMetadata";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
+import { iosMutationTokens } from "../../storage/IosMutationTokens";
 
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
@@ -1347,7 +1348,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       (value) => {
         this._storage = value;
       },
-      () => new CtrlProxyStorage(this.createDelegateContext(), () => this.boundSessionId),
+      () =>
+        new CtrlProxyStorage(
+          this.createDelegateContext(),
+          () => this.boundSessionId,
+          (appId) => iosMutationTokens.get(this.device.deviceId, appId),
+        ),
     );
   }
 
@@ -3336,6 +3342,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       query,
       timeoutMs,
       this.boundSessionId ?? undefined,
+      iosMutationTokens.get(this.device.deviceId, appId),
     );
   }
 

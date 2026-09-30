@@ -245,7 +245,7 @@ describe("Storage Tools Registration", () => {
           type: "INT",
         }),
       ).rejects.toThrow(
-        "the app must opt in with StorageInspectionPolicy(allowMutations: true), in DEBUG builds only.",
+        "in a DEBUG build, configure StorageInspectionConfiguration(allowMutations: true)",
       );
     });
 

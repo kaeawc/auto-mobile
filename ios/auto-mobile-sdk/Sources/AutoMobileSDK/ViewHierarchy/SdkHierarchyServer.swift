@@ -46,7 +46,8 @@
 
         init(
             tracker: any SdkHierarchyServing,
-            listenerFactory: @escaping () throws -> any SdkHierarchyListener = SdkHierarchyServer.makeListener,
+            listenerFactory: @escaping () throws
+                -> any SdkHierarchyListener = { try SdkHierarchyServer.makeListener() },
             lifecycleLock: any NSLocking = NSLock()
         ) {
             self.tracker = tracker
@@ -76,7 +77,7 @@
                     case .ready:
                         InternalLogger.debug("[SdkHierarchyServer] Ready on port \(Self.port)")
                     case let .failed(error):
-                        InternalLogger.debug("[SdkHierarchyServer] Failed: \(error)")
+                        InternalLogger.warning("[SdkHierarchyServer] Failed: \(error)")
                     default:
                         break
                     }
@@ -88,7 +89,7 @@
 
                 nwListener.start(queue: queue)
             } catch {
-                InternalLogger.debug("[SdkHierarchyServer] Failed to create listener: \(error)")
+                InternalLogger.warning("[SdkHierarchyServer] Failed to create listener: \(error)")
             }
         }
 
@@ -100,10 +101,17 @@
             listenerToCancel?.cancel()
         }
 
-        private static func makeListener() throws -> any SdkHierarchyListener {
+        static func makeListener(port: UInt16 = SdkHierarchyServer.port) throws -> any SdkHierarchyListener {
+            let parameters = listenerParameters(port: port)
+            return try NWListener(using: parameters)
+        }
+
+        static func listenerParameters(port: UInt16 = SdkHierarchyServer.port) -> NWParameters {
             let parameters = NWParameters.tcp
+            // Bind the SDK listener to loopback.
+            parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(integerLiteral: port))
             parameters.allowLocalEndpointReuse = true
-            return try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
+            return parameters
         }
 
         // MARK: - Connection Handling

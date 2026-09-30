@@ -49,18 +49,18 @@
                         .map(redact)
                 ))
             case "set":
-                guard canMutate(request.sessionId) else { return error(403, "mutation_not_authorized") }
+                guard canMutate(request) else { return error(403, "mutation_not_authorized") }
                 guard let key = request.key, let value = request.value, let type = request.valueType,
                       let parsed = Self.parse(value, type: type) else { return error(400, "invalid_preference_value") }
                 driver.setValue(suiteName: suite, key: key, value: parsed.value, type: parsed.type)
                 return encode(SdkPreferencePayload())
             case "remove":
-                guard canMutate(request.sessionId) else { return error(403, "mutation_not_authorized") }
+                guard canMutate(request) else { return error(403, "mutation_not_authorized") }
                 guard let key = request.key else { return error(400, "missing_key") }
                 driver.removeValue(suiteName: suite, key: key)
                 return encode(SdkPreferencePayload())
             case "clear":
-                guard canMutate(request.sessionId) else { return error(403, "mutation_not_authorized") }
+                guard canMutate(request) else { return error(403, "mutation_not_authorized") }
                 driver.clear(suiteName: suite)
                 return encode(SdkPreferencePayload())
             default:
@@ -68,8 +68,11 @@
             }
         }
 
-        private func canMutate(_ sessionId: String?) -> Bool {
-            DatabaseInspector.shared.canMutate(sessionId: sessionId, currentSessionId: currentSessionId())
+        private func canMutate(_ request: SdkPreferenceRequest) -> Bool {
+            DatabaseInspector.shared.canMutate(
+                sessionId: request.sessionId, currentSessionId: currentSessionId(),
+                mutationToken: request.mutationToken
+            )
         }
 
         private func redact(_ pair: KeyValuePair) -> SdkPreferenceEntry {
@@ -133,6 +136,7 @@
         let value: String?
         let valueType: String?
         let sessionId: String?
+        let mutationToken: String?
     }
 
     private struct SdkPreferenceError: Encodable {

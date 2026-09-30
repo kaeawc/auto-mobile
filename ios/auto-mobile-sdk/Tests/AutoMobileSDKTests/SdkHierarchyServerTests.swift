@@ -4,10 +4,36 @@ import Network
 import XCTest
 
 final class SdkHierarchyServerTests: XCTestCase {
+    func testListenerRequiresLoopbackEndpoint() {
+        guard case let .hostPort(host, port)? = SdkHierarchyServer.listenerParameters().requiredLocalEndpoint else {
+            return XCTFail("Expected a local host and port")
+        }
+        XCTAssertEqual(host.debugDescription, "127.0.0.1")
+        XCTAssertEqual(port.rawValue, SdkHierarchyServer.port)
+    }
+
+    func testRealLoopbackListenerBecomesReady() throws {
+        let listener = try SdkHierarchyServer.makeListener(port: 0)
+        let ready = expectation(description: "real loopback listener becomes ready")
+        listener.stateUpdateHandler = { state in
+            if case .ready = state {
+                ready.fulfill()
+            }
+        }
+        listener.newConnectionHandler = { connection in
+            connection.cancel()
+        }
+        listener.start(queue: DispatchQueue(label: "sdk-hierarchy-listener-test"))
+        defer { listener.cancel() }
+
+        wait(for: [ready], timeout: 5)
+    }
+
     private final class FakeHierarchyTracker: SdkHierarchyServing {
         var bundleId: String? {
             "test.bundle"
         }
+
         var isApplicationActive: Bool { true }
 
         func getLatestHierarchy() -> SdkViewHierarchy? {
@@ -248,7 +274,9 @@ final class SdkHierarchyServerTests: XCTestCase {
     private func withRunningServer(
         tracker: any SdkHierarchyServing,
         _ body: (NWEndpoint.Port) throws -> Void
-    ) throws {
+    )
+        throws
+    {
         let listener = try LoopbackListener()
         let server = SdkHierarchyServer(tracker: tracker, listenerFactory: { listener })
         server.start()

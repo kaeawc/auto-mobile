@@ -278,7 +278,7 @@ export interface SimCtl {
    */
   launchApp(
     bundleId: string,
-    options?: { foregroundIfRunning?: boolean },
+    options?: { foregroundIfRunning?: boolean; launchArguments?: string[] },
     deviceId?: string,
   ): Promise<{
     success: boolean;
@@ -824,8 +824,18 @@ export class SimCtlClient implements SimCtl {
     logger.debug(`[iOS] Executing command: ${fullCommand}`);
 
     const callerSignal = explicitSignal ?? getAbortSignal();
-    const runCommand = (signal?: AbortSignal) =>
-      this.execAsync("xcrun", localArgs, undefined, signal);
+    const runCommand = async (signal?: AbortSignal) => {
+      try {
+        return await this.execAsync("xcrun", localArgs, undefined, signal);
+      } catch (error) {
+        const tokenIndex = args.indexOf("--automobile-mutation-token");
+        const token = tokenIndex >= 0 ? args[tokenIndex + 1] : undefined;
+        if (!token) {
+          throw error;
+        }
+        throw new ActionableError(errorMessage(error).split(token).join("[REDACTED]"));
+      }
+    };
 
     // On timeout we abort the
     // controller so the underlying child process is killed rather than left
@@ -2593,7 +2603,7 @@ export class SimCtlClient implements SimCtl {
    */
   async launchApp(
     bundleId: string,
-    options?: { foregroundIfRunning?: boolean },
+    options?: { foregroundIfRunning?: boolean; launchArguments?: string[] },
     deviceId?: string,
   ): Promise<{
     success: boolean;
@@ -2604,7 +2614,12 @@ export class SimCtlClient implements SimCtl {
     logger.debug(`Launching app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
-      const result = await this.executeCommandArgs(["launch", targetDevice, bundleId]);
+      const launchArgs = ["launch", targetDevice, bundleId, ...(options?.launchArguments ?? [])];
+      const result = await this.executeCommandArgv(
+        launchArgs,
+        undefined,
+        `launch ${targetDevice} ${bundleId} [app arguments redacted]`,
+      );
 
       // Parse the output to extract PID if available
       // Example output: "com.example.app: 12345"

@@ -1693,14 +1693,16 @@ final class CommandHandler: CommandHandling {
                 key: request.key,
                 value: value,
                 type: request.valueType,
-                sessionId: request.sessionId
+                sessionId: request.sessionId,
+                mutationToken: request.mutationToken
             )
         } else {
             try await client.remove(
                 appId: appId,
                 suiteName: request.fileName ?? "Standard",
                 key: request.key,
-                sessionId: request.sessionId
+                sessionId: request.sessionId,
+                mutationToken: request.mutationToken
             )
         }
         return WebSocketResponse.success(
@@ -1721,7 +1723,8 @@ final class CommandHandler: CommandHandling {
             appId: appId,
             suiteName: request.fileName ?? "Standard",
             key: request.key,
-            sessionId: request.sessionId
+            sessionId: request.sessionId,
+            mutationToken: request.mutationToken
         )
         return WebSocketResponse.success(
             type: ResponseType.removePreferenceResult.rawValue,
@@ -1737,7 +1740,12 @@ final class CommandHandler: CommandHandling {
         async throws -> WebSocketResponse
     {
         let (appId, client) = try await preferenceClient(request.appId)
-        try await client.clear(appId: appId, suiteName: request.fileName ?? "Standard", sessionId: request.sessionId)
+        try await client.clear(
+            appId: appId,
+            suiteName: request.fileName ?? "Standard",
+            sessionId: request.sessionId,
+            mutationToken: request.mutationToken
+        )
         return WebSocketResponse.success(
             type: ResponseType.clearPreferencesResult.rawValue,
             requestId: request.requestId,
@@ -1778,7 +1786,8 @@ final class CommandHandler: CommandHandling {
             let result = try await client.executeSQL(
                 databasePath: databasePath,
                 query: query,
-                sessionId: request.sessionId
+                sessionId: request.sessionId,
+                mutationToken: request.mutationToken
             )
             if let error = result.error {
                 return ExecuteSqlResponse(

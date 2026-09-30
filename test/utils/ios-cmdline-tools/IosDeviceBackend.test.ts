@@ -99,6 +99,35 @@ describe("resolveIosDeviceBackend", () => {
 });
 
 describe("resolveIosLaunchBackend", () => {
+  test("passes launch arguments through simulator and physical backends", async () => {
+    const launchArguments = ["--automobile-mutation-token", "test-token"];
+    const simulatorCalls: Array<{ bundleId: string; options?: { launchArguments?: string[] } }> =
+      [];
+    const launcher = new FakeDeviceAppLauncher();
+    const deps = {
+      simctl: {
+        launchApp: async (id: string, options?: { launchArguments?: string[] }) => {
+          simulatorCalls.push({ bundleId: id, options });
+          return { success: true };
+        },
+      },
+      deviceAppLauncher: launcher,
+    };
+
+    await resolveIosLaunchBackend(simulatorUdid, deps).launchApp(bundleId, {
+      foregroundIfRunning: false,
+      launchArguments,
+    });
+    await resolveIosLaunchBackend(physicalUdid, deps).launchApp(bundleId, { launchArguments });
+
+    expect(simulatorCalls).toEqual([
+      { bundleId, options: { foregroundIfRunning: false, launchArguments } },
+    ]);
+    expect(launcher.launchCalls).toEqual([
+      { deviceUdid: physicalUdid, bundleId, terminateExisting: true, launchArguments },
+    ]);
+  });
+
   test("simulator cold and warm launches preserve simctl argv", async () => {
     const commands: Array<{ file: string; args: string[] }> = [];
     const simctl = new SimCtlClient(

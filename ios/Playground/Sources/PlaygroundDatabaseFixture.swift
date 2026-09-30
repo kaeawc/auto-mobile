@@ -10,6 +10,7 @@ protocol PlaygroundFileSystem {
 protocol PlaygroundDatabaseInspecting {
     func configure(_ configuration: StorageInspectionConfiguration)
     func setEnabled(_ enabled: Bool)
+    func authorizeHostMutations(_ authorized: Bool)
 }
 
 enum PlaygroundDatabaseFixtureError: LocalizedError {
@@ -97,6 +98,7 @@ struct PlaygroundDatabaseFixture {
             )
         )
         inspector.setEnabled(true)
+        inspector.authorizeHostMutations(allowMutations)
 
         return databaseURL
     }
@@ -126,5 +128,9 @@ private struct DefaultPlaygroundDatabaseInspector: PlaygroundDatabaseInspecting 
 
     func setEnabled(_ enabled: Bool) {
         DatabaseInspector.shared.setEnabled(enabled)
+    }
+
+    func authorizeHostMutations(_ authorized: Bool) {
+        DatabaseInspector.shared.authorizeHostMutations(authorized)
     }
 }

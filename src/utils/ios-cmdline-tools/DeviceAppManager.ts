@@ -40,6 +40,13 @@ const defaultDependencies: DeviceAppManagerDependencies = {
   logger,
 };
 
+function redactedLaunchError(error: unknown, launchArguments: string[] | undefined): string {
+  const tokenIndex = launchArguments?.indexOf("--automobile-mutation-token") ?? -1;
+  const token = tokenIndex >= 0 ? launchArguments?.[tokenIndex + 1] : undefined;
+  const message = getErrorMessage(error);
+  return token ? message.split(token).join("[REDACTED]") : message;
+}
+
 /**
  * Lowest major iOS version whose physical-device process management
  * (`devicectl device process launch`/`terminate`) is supported. devicectl gained
@@ -725,7 +732,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
   public async launchApp(
     deviceUdid: string,
     bundleId: string,
-    options: { terminateExisting?: boolean } = {},
+    options: { terminateExisting?: boolean; launchArguments?: string[] } = {},
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
     const precondition = this.getLaunchPrecondition();
     if (!precondition.ok) {
@@ -757,6 +764,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
         jsonPath,
         "--quiet",
         bundleId,
+        ...(options.launchArguments?.length ? ["--", ...options.launchArguments] : []),
       ];
       await this.execute("xcrun", args);
 
@@ -764,7 +772,7 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
       const pid = findProcessIdentifier(JSON.parse(raw));
       return { success: true, pid };
     } catch (error) {
-      return { success: false, error: getErrorMessage(error) };
+      return { success: false, error: redactedLaunchError(error, options.launchArguments) };
     } finally {
       await this.deps.rm(tempDir);
     }

@@ -43,6 +43,8 @@ import {
 } from "./appResources";
 import { logger } from "../utils/logger";
 import { isDeviceLostError } from "./deviceLossOutcome";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 
 export interface InstalledAppResourceRefresh {
   invalidate(deviceId: string): void;
@@ -112,6 +114,7 @@ export interface LaunchAppExecutor {
     userId?: number,
     skipUiStability?: boolean,
     signal?: AbortSignal,
+    launchArguments?: string[],
   ): Promise<LaunchAppResult>;
 }
 
@@ -121,6 +124,7 @@ export interface LaunchAppExecutor {
 // is covered by a test rather than only the response builder (issue #6868).
 export interface LaunchAppToolDependencies {
   createLaunchApp(device: BootedDevice): LaunchAppExecutor;
+  idGenerator: IdGenerator;
 }
 
 let launchAppToolDependencies: LaunchAppToolDependencies | null = null;
@@ -129,6 +133,7 @@ function getLaunchAppToolDependencies(): LaunchAppToolDependencies {
   if (!launchAppToolDependencies) {
     launchAppToolDependencies = {
       createLaunchApp: (device) => new LaunchApp(device),
+      idGenerator: defaultIdGenerator,
     };
   }
   return launchAppToolDependencies;
@@ -138,6 +143,7 @@ export function setLaunchAppToolDependencies(deps: Partial<LaunchAppToolDependen
   const currentDeps = getLaunchAppToolDependencies();
   launchAppToolDependencies = {
     createLaunchApp: deps.createLaunchApp ?? currentDeps.createLaunchApp,
+    idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
   };
 }
 
@@ -485,6 +491,12 @@ export const launchAppSchema = withAppIdAliases(
           .optional()
           .describe("Clear app data before launch (default false)"),
         coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
+        launchArguments: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Arguments passed to the launched iOS app. Android does not support launch arguments.",
+          ),
         ...responseShapeControlFields,
       })
       // #6154: the advertised `additionalProperties: false` was not actually
@@ -697,8 +709,42 @@ export interface LaunchAppActionArgs {
   appId: string;
   clearAppData?: boolean;
   coldBoot?: boolean;
+  launchArguments?: string[];
   raw?: boolean;
   project?: "full" | "skeleton";
+}
+
+function prepareLaunchArguments(
+  device: BootedDevice,
+  args: LaunchAppActionArgs,
+): { launchArguments?: string[]; mutationToken?: string } {
+  if (args.launchArguments?.includes("--automobile-mutation-token")) {
+    throw new ActionableError("launchArguments contains a reserved argument");
+  }
+  if (device.platform !== "ios") {
+    return { launchArguments: args.launchArguments };
+  }
+
+  iosMutationTokens.clear(device.deviceId, args.appId);
+  if (!args.launchArguments?.includes("--allow-storage-mutations")) {
+    return { launchArguments: args.launchArguments };
+  }
+  const mutationToken = getLaunchAppToolDependencies().idGenerator.next();
+  iosMutationTokens.set(device.deviceId, args.appId, mutationToken);
+  return {
+    launchArguments: [...args.launchArguments, "--automobile-mutation-token", mutationToken],
+    mutationToken,
+  };
+}
+
+function redactLaunchMessage(message: string, token: string | undefined): string {
+  return token ? message.split(token).join("[REDACTED]") : message;
+}
+
+function redactLaunchError(error: unknown, token: string | undefined): unknown {
+  return token && String(error).includes(token)
+    ? new Error(redactLaunchMessage(String(error), token))
+    : error;
 }
 
 export interface InstallAppArgs {
@@ -859,8 +905,11 @@ export function registerAppTools() {
     signal?: AbortSignal,
   ) => {
     let mutationMayHaveHappened = false;
+    let mutationToken: string | undefined;
     try {
       signal?.throwIfAborted();
+      const prepared = prepareLaunchArguments(device, args);
+      mutationToken = prepared.mutationToken;
       const launchApp = getLaunchAppToolDependencies().createLaunchApp(device);
       mutationMayHaveHappened = true;
       const result = await launchApp.execute(
@@ -871,21 +920,29 @@ export function registerAppTools() {
         undefined,
         undefined,
         signal,
+        prepared.launchArguments,
       );
       signal?.throwIfAborted();
 
-      return createJSONToolResponse(buildLaunchAppResponse(args.appId, result));
+      const safeResult = result.error
+        ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
+        : result;
+      return createJSONToolResponse(buildLaunchAppResponse(args.appId, safeResult));
     } catch (error) {
+      if (mutationToken) {
+        iosMutationTokens.clear(device.deviceId, args.appId, mutationToken);
+      }
+      const safeError = redactLaunchError(error, mutationToken);
       if (isDeviceLostError(error)) {
-        throw error;
+        throw safeError;
       }
       // A typed launch failure (uninstalled package, foreground mismatch) is
       // already an actionable error — surface it verbatim rather than re-wrapping
       // it as "Failed to launch app: Error: ..." (#5868).
-      if (error instanceof ActionableError) {
-        throw error;
+      if (safeError instanceof ActionableError) {
+        throw safeError;
       }
-      throw toActionableError(error, `Failed to launch app`);
+      throw toActionableError(safeError, `Failed to launch app`);
     } finally {
       if (mutationMayHaveHappened) {
         await refreshInstalledAppResources(device.deviceId);
@@ -903,6 +960,9 @@ export function registerAppTools() {
     let mutationMayHaveHappened = false;
     try {
       signal?.throwIfAborted();
+      if (device.platform === "ios") {
+        iosMutationTokens.clear(device.deviceId, args.appId);
+      }
       const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
       mutationMayHaveHappened = true;
       const result = await terminateApp.execute(args.appId, {

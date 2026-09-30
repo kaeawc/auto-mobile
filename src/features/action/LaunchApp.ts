@@ -100,7 +100,7 @@ export interface DeviceAppLauncher {
   launchApp(
     deviceUdid: string,
     bundleId: string,
-    options?: { terminateExisting?: boolean },
+    options?: { terminateExisting?: boolean; launchArguments?: string[] },
   ): Promise<{ success: boolean; pid?: number; error?: string }>;
 }
 
@@ -379,13 +379,19 @@ export class LaunchApp extends BaseVisualChange {
     userId?: number,
     skipUiStability?: boolean,
     signal?: AbortSignal,
+    launchArguments?: string[],
   ): Promise<LaunchAppResult> {
     logger.info("execute");
     signal?.throwIfAborted();
     switch (this.device.platform) {
       case "ios":
-        return this.executeiOS(packageName, clearAppData, coldBoot, signal);
+        return this.executeiOS(packageName, clearAppData, coldBoot, signal, launchArguments);
       case "android":
+        if (launchArguments?.length) {
+          throw new ActionableError(
+            "launchArguments are supported on iOS only. Android launch intent extras require a separate interface.",
+          );
+        }
         return this.executeAndroidWithSamplingPriority(
           packageName,
           clearAppData,
@@ -443,6 +449,7 @@ export class LaunchApp extends BaseVisualChange {
     clearAppData: boolean,
     coldBoot: boolean,
     signal?: AbortSignal,
+    launchArguments?: string[],
   ): Promise<LaunchAppResult> {
     const perf = this.performanceTrackerFactory();
     perf.serial("launchApp");
@@ -466,7 +473,8 @@ export class LaunchApp extends BaseVisualChange {
           // Clearing app data always implies a fresh process: the app is
           // terminated, its sandbox wiped, then relaunched. Treat it as a cold
           // boot so we go through the terminate → clearCache → launch path.
-          const needsColdStart = coldBoot || clearAppData;
+          // Arguments are consumed only when a new app process starts.
+          const needsColdStart = coldBoot || clearAppData || Boolean(launchArguments?.length);
 
           // Simulators launch/terminate via simctl; physical devices via devicectl
           // (parity with installApp/uninstallApp). Resolve once so cold and warm
@@ -532,14 +540,16 @@ export class LaunchApp extends BaseVisualChange {
               bundleId,
             );
             launchResult = await perf.track("launch", () =>
-              backend.launchApp(bundleId, { foregroundIfRunning: false }),
+              backend.launchApp(bundleId, { foregroundIfRunning: false, launchArguments }),
             );
             this.assertLaunchNotAborted(signal);
           } else {
             // Warm launch. Simulator: simctl launch foregrounds a backgrounded app
             // and is faster than the CtrlProxy WebSocket round-trip (~4-5s). Device:
             // devicectl has no foreground verb, so relaunch via --terminate-existing.
-            launchResult = await perf.track("launch", () => backend.launchApp(bundleId));
+            launchResult = await perf.track("launch", () =>
+              backend.launchApp(bundleId, { launchArguments }),
+            );
             this.assertLaunchNotAborted(signal);
 
             if (!launchResult.success) {

@@ -74,11 +74,18 @@ export class CtrlProxyDatabase {
     query: string,
     timeoutMs: number = 5000,
     sessionId?: string,
+    mutationToken?: string,
   ): Promise<SQLResult> {
     const result = await this.request<ExecuteSqlResult>(
       "execute_sql",
       "execute_sql_result",
-      { appId, databasePath, query, ...(sessionId ? { sessionId } : {}) },
+      {
+        appId,
+        databasePath,
+        query,
+        ...(sessionId ? { sessionId } : {}),
+        ...(mutationToken ? { mutationToken } : {}),
+      },
       timeoutMs,
       "Execute SQL",
     );

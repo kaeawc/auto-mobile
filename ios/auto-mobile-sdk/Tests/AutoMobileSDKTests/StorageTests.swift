@@ -64,7 +64,9 @@ final class UserDefaultsInspectorTests: XCTestCase {
     /// buffer, seed the baseline snapshot, and return the pieces a diff test needs.
     private func makeDiffHarness(
         seed: [(key: String, value: String, type: KeyValueType)] = []
-    ) -> (driver: FakeUserDefaultsDriver, buffer: SdkEventBuffer, events: () -> [SdkStorageChangedEvent]) {
+    )
+        -> (driver: FakeUserDefaultsDriver, buffer: SdkEventBuffer, events: () -> [SdkStorageChangedEvent])
+    {
         AutoMobileSDK.shared.setEnabled(true)
 
         let fakeDriver = FakeUserDefaultsDriver()
@@ -700,6 +702,35 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         XCTAssertEqual(payload.diagnostic?.code, "mutation_not_authorized")
     }
 
+    func testDatabaseMutationRequiresLaunchScopedToken() throws {
+        let driver = RouteFakeDatabaseDriver()
+        driver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(driver)
+        DatabaseInspector.shared.setEnabled(true)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+            allowedDatabasePaths: ["/app/Documents/app.db"],
+            allowMutations: true
+        ))
+        DatabaseInspector.shared.authorizeHostMutations(true)
+        DatabaseInspector.shared.authorizeMutationToken("launch-token")
+
+        for token in [nil, "wrong"] as [String?] {
+            let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+                databasePath: "/app/Documents/app.db", query: "DELETE FROM notes", mutationToken: token
+            ))
+            XCTAssertEqual(SdkDatabaseRouteHandler().handleExecuteSql(body: body).statusCode, 403)
+        }
+        XCTAssertTrue(driver.executeSqlCalls.isEmpty)
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db", query: "DELETE FROM notes", mutationToken: "launch-token"
+        ))
+        XCTAssertEqual(SdkDatabaseRouteHandler().handleExecuteSql(body: body).statusCode, 200)
+        XCTAssertEqual(driver.executeSqlCalls.count, 1)
+    }
+
     func testPragmaMutationRequiresExplicitAuthorization() throws {
         let fakeDriver = RouteFakeDatabaseDriver()
         fakeDriver.databases = [
@@ -961,7 +992,7 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
         let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
 
         let decoded = try XCTUnwrap(
-            try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [Any]
+            JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [Any]
         )
         XCTAssertEqual(decoded.count, 3)
         XCTAssertEqual(decoded[0] as? String, "a")
@@ -974,7 +1005,7 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
         let encoded = DefaultUserDefaultsDriver.encode(dict, as: .dictionary)
 
         let decoded = try XCTUnwrap(
-            try JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any]
+            JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any]
         )
         XCTAssertEqual(decoded["name"] as? String, "widget")
         XCTAssertEqual(decoded["count"] as? Int, 3)

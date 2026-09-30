@@ -148,6 +148,15 @@ describe("LaunchApp", () => {
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
 
+  test("rejects Android launch arguments before invoking device commands", async () => {
+    await expect(
+      launchApp.execute(packageName, false, false, undefined, undefined, undefined, undefined, [
+        "--flag",
+      ]),
+    ).rejects.toThrow("launchArguments are supported on iOS only");
+    expect(fakeAdb.getExecutedCommands()).toHaveLength(0);
+  });
+
   test("checks Android running state through the shared process-state command", async () => {
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", {
@@ -2977,9 +2986,11 @@ describe("LaunchApp", () => {
       } as unknown as IOSCtrlProxyManager);
 
       const simctlCalls: string[] = [];
+      const simctlLaunchArguments: Array<string[] | undefined> = [];
       const fakeSimctl = {
-        launchApp: async (id: string) => {
+        launchApp: async (id: string, options?: { launchArguments?: string[] }) => {
           simctlCalls.push(`launch:${id}`);
+          simctlLaunchArguments.push(options?.launchArguments);
           return { success: true, pid: 999 };
         },
         terminateApp: async (id: string) => {
@@ -3035,6 +3046,7 @@ describe("LaunchApp", () => {
         iosLaunchApp,
         deviceAppLauncher,
         simctlCalls,
+        simctlLaunchArguments,
         clearCalls,
         cleanup: () => {
           ctrlProxySpy.mockRestore();
@@ -3042,6 +3054,53 @@ describe("LaunchApp", () => {
         },
       };
     }
+
+    test("launch arguments force a fresh simulator process and reach simctl", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, simctlCalls, simctlLaunchArguments, cleanup } = createDeviceHarness({
+        deviceId: simulatorUdid,
+      });
+      try {
+        await iosLaunchApp.execute(
+          userBundleId,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          ["--allow-storage-mutations"],
+        );
+        expect(simctlCalls).toEqual([`terminate:${userBundleId}`, `launch:${userBundleId}`]);
+        expect(simctlLaunchArguments).toEqual([["--allow-storage-mutations"]]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("launch arguments reach devicectl on a physical iOS device", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, deviceAppLauncher, cleanup } = createDeviceHarness({
+        deviceId: physicalUdid,
+      });
+      try {
+        await iosLaunchApp.execute(
+          userBundleId,
+          false,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          ["--allow-storage-mutations"],
+        );
+        expect(deviceAppLauncher.launchCalls[0]?.launchArguments).toEqual([
+          "--allow-storage-mutations",
+        ]);
+      } finally {
+        cleanup();
+      }
+    });
 
     test("cold boot on a physical device launches via devicectl (not simctl) and propagates the PID", async () => {
       fakeTimer.enableAutoAdvance();

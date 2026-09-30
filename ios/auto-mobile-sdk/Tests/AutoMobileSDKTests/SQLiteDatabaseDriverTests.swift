@@ -371,6 +371,42 @@ final class SQLiteDatabaseRouteClassificationTests: XCTestCase {
         XCTAssertEqual(selection.rows, [["committed"]])
     }
 
+    #if DEBUG
+        func testLaunchTokenAuthorizesRouteTransactionWithoutSession() throws {
+            DatabaseInspector.shared.configure(StorageInspectionConfiguration(
+                allowedDatabasePaths: [databaseURL.path],
+                allowMutations: true
+            ))
+            DatabaseInspector.shared.authorizeHostMutations(true)
+            DatabaseInspector.shared.authorizeMutationToken("launch-token")
+            defer { _ = driver.executeSQL(databasePath: databaseURL.path, query: "ROLLBACK") }
+
+            for (index, token) in ([nil, "wrong"] as [String?]).enumerated() {
+                let response = try routeResponse("BEGIN IMMEDIATE TRANSACTION", mutationToken: token)
+                XCTAssertEqual(response.statusCode, 403)
+                let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
+                XCTAssertEqual(payload.error, "mutation_not_authorized")
+
+                let write = driver.executeSQL(
+                    databasePath: databaseURL.path,
+                    query: "INSERT INTO notes VALUES (\(index + 2), 'direct')"
+                )
+                XCTAssertNil(write.error)
+                let begin = driver.executeSQL(databasePath: databaseURL.path, query: "BEGIN")
+                XCTAssertNil(begin.error)
+                let commit = driver.executeSQL(databasePath: databaseURL.path, query: "COMMIT")
+                XCTAssertNil(commit.error)
+            }
+
+            for query in ["BEGIN IMMEDIATE TRANSACTION", "COMMIT"] {
+                let response = try routeResponse(query, mutationToken: "launch-token")
+                XCTAssertEqual(response.statusCode, 200, query)
+                let payload = try JSONDecoder().decode(SdkExecuteSqlPayload.self, from: response.body)
+                XCTAssertNil(payload.error, query)
+            }
+        }
+    #endif
+
     func testReadQueriesRemainAvailable() throws {
         let queries = [
             "SELECT body FROM notes WHERE id = 1",
@@ -413,6 +449,7 @@ final class SQLiteDatabaseRouteClassificationTests: XCTestCase {
     private func routeResponse(
         _ query: String,
         sessionId: String? = nil,
+        mutationToken: String? = nil,
         handler: SdkDatabaseRouteHandler = SdkDatabaseRouteHandler()
     )
         throws -> SdkRouteResponse
@@ -420,7 +457,8 @@ final class SQLiteDatabaseRouteClassificationTests: XCTestCase {
         let request = SdkExecuteSqlRequest(
             databasePath: databaseURL.path,
             query: query,
-            sessionId: sessionId
+            sessionId: sessionId,
+            mutationToken: mutationToken
         )
         let body = try JSONEncoder().encode(request)
         return handler.handleExecuteSql(body: body)

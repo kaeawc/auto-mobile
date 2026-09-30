@@ -6,6 +6,7 @@ public struct RequestExecuteSql: Decodable, Sendable {
     public var databasePath: String?
     public var query: String?
     public var sessionId: String?
+    public var mutationToken: String?
 }
 
 extension RequestExecuteSql: CommandPayload {}

@@ -56,6 +56,7 @@ final class CommandHandler: CommandHandling {
     private let sdkHierarchyClient: (any SdkHierarchyFetching)?
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
     private let sdkDatabaseClient: (any SdkDatabaseFetching)?
+    private let sdkPreferenceClient: (any SdkPreferenceFetching)?
     private let hierarchyDebouncer: (any HierarchyDebouncing)?
     private let voiceOverStateProvider: any VoiceOverStateProviding
     private let voiceOverToggle: any VoiceOverToggling
@@ -69,6 +70,7 @@ final class CommandHandler: CommandHandling {
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         sdkDatabaseClient: (any SdkDatabaseFetching)? = nil,
+        sdkPreferenceClient: (any SdkPreferenceFetching)? = nil,
         hierarchyDebouncer: (any HierarchyDebouncing)? = nil,
         voiceOverStateProvider: any VoiceOverStateProviding = DefaultVoiceOverStateProvider(),
         voiceOverToggle: any VoiceOverToggling = DefaultVoiceOverToggle(),
@@ -81,6 +83,7 @@ final class CommandHandler: CommandHandling {
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
         self.sdkDatabaseClient = sdkDatabaseClient
+        self.sdkPreferenceClient = sdkPreferenceClient
         self.hierarchyDebouncer = hierarchyDebouncer
         self.voiceOverStateProvider = voiceOverStateProvider
         self.voiceOverToggle = voiceOverToggle
@@ -1460,29 +1463,46 @@ final class CommandHandler: CommandHandling {
 
     // MARK: - Storage
 
-    /// Resolve suite name from request fileName: nil/empty/"Standard" -> nil (UserDefaults.standard).
-    private func resolveSuiteName(_ fileName: String?) -> String? {
-        guard let name = fileName, !name.isEmpty, name != "Standard" else { return nil }
-        return name
+    /// A localhost SDK server may belong to a different foreground app. Check both
+    /// the requested bundle and the server owner before any preference operation.
+    private func preferenceClient(_ requested: String?) async throws -> (String, any SdkPreferenceFetching) {
+        guard let appId = normalizedBundleId(requested) else {
+            throw CommandError.missingParameter("appId")
+        }
+        guard normalizedBundleId(await elementLocator.refreshForegroundBundleId()) == appId else {
+            throw CommandError.executionFailed("iOS key-value storage requires \(appId) to be the foreground app")
+        }
+        guard normalizedBundleId(await sdkHierarchyClient?.fetchServerInfo()?.bundleId) == appId else {
+            throw CommandError.executionFailed(
+                "iOS key-value storage requires \(appId) to embed and initialize the AutoMobile SDK "
+                    + "and call UserDefaultsInspector.shared.setEnabled(true)"
+            )
+        }
+        guard let client = sdkPreferenceClient else {
+            throw CommandError
+                .executionFailed("iOS key-value storage requires the target app to embed the AutoMobile SDK")
+        }
+        return (appId, client)
     }
 
     private func handleListPreferenceFiles(_ request: RequestEnvelope, startTime: Date) async -> StorageFilesResponse {
-        guard let inspector = storageInspector else {
+        do {
+            let (appId, client) = try await preferenceClient(request.appId)
+            let files = try await client.list(appId: appId)
+            return StorageFilesResponse(
+                requestId: request.requestId,
+                success: true,
+                files: files,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
             return StorageFilesResponse(
                 requestId: request.requestId,
                 success: false,
-                error: "Storage inspection not available",
+                error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
-
-        let suites = inspector.listSuites()
-        return StorageFilesResponse(
-            requestId: request.requestId,
-            success: true,
-            files: suites,
-            totalTimeMs: totalTimeMs(from: startTime)
-        )
     }
 
     private func handleGetPreferences(
@@ -1491,62 +1511,45 @@ final class CommandHandler: CommandHandling {
     )
         async -> StorageEntriesResponse
     {
-        guard let inspector = storageInspector else {
+        do {
+            let (appId, client) = try await preferenceClient(request.appId)
+            let entries = try await client.entries(appId: appId, suiteName: request.fileName ?? "Standard")
+            return StorageEntriesResponse(
+                requestId: request.requestId,
+                success: true,
+                entries: entries,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
             return StorageEntriesResponse(
                 requestId: request.requestId,
                 success: false,
-                error: "Storage inspection not available",
+                error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
-
-        let suiteName = resolveSuiteName(request.fileName)
-        let entries = inspector.getEntries(suiteName: suiteName)
-        return StorageEntriesResponse(
-            requestId: request.requestId,
-            success: true,
-            entries: entries,
-            totalTimeMs: totalTimeMs(from: startTime)
-        )
     }
 
     private func handleGetPreference(_ request: RequestGetPreference, startTime: Date) async -> StorageEntryResponse {
-        guard let inspector = storageInspector else {
+        do {
+            let (appId, client) = try await preferenceClient(request.appId)
+            guard let key = request.key else { throw CommandError.missingParameter("key") }
+            let entry = try await client.get(appId: appId, suiteName: request.fileName ?? "Standard", key: key)
+            return StorageEntryResponse(
+                requestId: request.requestId,
+                success: true,
+                found: entry != nil,
+                key: entry?.key,
+                value: entry?.value,
+                valueType: entry?.type,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
             return StorageEntryResponse(
                 requestId: request.requestId,
                 success: false,
                 found: false,
-                error: "Storage inspection not available",
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-
-        guard let key = request.key else {
-            return StorageEntryResponse(
-                requestId: request.requestId,
-                success: false,
-                found: false,
-                error: "Missing required parameter: key",
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-
-        let suiteName = resolveSuiteName(request.fileName)
-        if let entry = inspector.getEntry(suiteName: suiteName, key: key) {
-            return StorageEntryResponse(
-                requestId: request.requestId,
-                success: true,
-                found: true,
-                key: entry.key,
-                value: entry.value,
-                valueType: entry.type,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        } else {
-            return StorageEntryResponse(
-                requestId: request.requestId,
-                success: true,
-                found: false,
+                error: error.localizedDescription,
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
@@ -1558,18 +1561,24 @@ final class CommandHandler: CommandHandling {
     )
         async throws -> WebSocketResponse
     {
-        guard let inspector = storageInspector else {
-            return WebSocketResponse.error(
-                type: ResponseType.setPreferenceResult.rawValue,
-                requestId: request.requestId,
-                error: "Storage inspection not available",
-                totalTimeMs: totalTimeMs(from: startTime)
+        let (appId, client) = try await preferenceClient(request.appId)
+        if let value = request.value {
+            try await client.set(
+                appId: appId,
+                suiteName: request.fileName ?? "Standard",
+                key: request.key,
+                value: value,
+                type: request.valueType,
+                sessionId: request.sessionId
+            )
+        } else {
+            try await client.remove(
+                appId: appId,
+                suiteName: request.fileName ?? "Standard",
+                key: request.key,
+                sessionId: request.sessionId
             )
         }
-
-        let suiteName = resolveSuiteName(request.fileName)
-        try inspector.setEntry(suiteName: suiteName, key: request.key, value: request.value, type: request.valueType)
-
         return WebSocketResponse.success(
             type: ResponseType.setPreferenceResult.rawValue,
             requestId: request.requestId,
@@ -1583,18 +1592,13 @@ final class CommandHandler: CommandHandling {
     )
         async throws -> WebSocketResponse
     {
-        guard let inspector = storageInspector else {
-            return WebSocketResponse.error(
-                type: ResponseType.removePreferenceResult.rawValue,
-                requestId: request.requestId,
-                error: "Storage inspection not available",
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-
-        let suiteName = resolveSuiteName(request.fileName)
-        try inspector.removeEntry(suiteName: suiteName, key: request.key)
-
+        let (appId, client) = try await preferenceClient(request.appId)
+        try await client.remove(
+            appId: appId,
+            suiteName: request.fileName ?? "Standard",
+            key: request.key,
+            sessionId: request.sessionId
+        )
         return WebSocketResponse.success(
             type: ResponseType.removePreferenceResult.rawValue,
             requestId: request.requestId,
@@ -1608,18 +1612,8 @@ final class CommandHandler: CommandHandling {
     )
         async throws -> WebSocketResponse
     {
-        guard let inspector = storageInspector else {
-            return WebSocketResponse.error(
-                type: ResponseType.clearPreferencesResult.rawValue,
-                requestId: request.requestId,
-                error: "Storage inspection not available",
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
-
-        let suiteName = resolveSuiteName(request.fileName)
-        try inspector.clearEntries(suiteName: suiteName)
-
+        let (appId, client) = try await preferenceClient(request.appId)
+        try await client.clear(appId: appId, suiteName: request.fileName ?? "Standard", sessionId: request.sessionId)
         return WebSocketResponse.success(
             type: ResponseType.clearPreferencesResult.rawValue,
             requestId: request.requestId,

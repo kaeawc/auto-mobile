@@ -205,7 +205,10 @@ const setKeyValueSchema = advertiseStorageNameRequirement(
             name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
             fileName: z.string().optional().describe(legacyFileNameDescription),
             key: z.string().describe("Key"),
-            value: z.string().nullable().describe("Value string; null clears"),
+            value: z
+              .union([z.string(), z.number(), z.boolean()])
+              .nullable()
+              .describe("Value; null clears"),
             type: z.enum(KEY_VALUE_TYPES).describe("Value type"),
           })
           .strict(),
@@ -254,7 +257,7 @@ interface SetKeyValueArgs {
   name?: string;
   fileName?: string;
   key: string;
-  value: string | null;
+  value: string | number | boolean | null;
   type: KeyValueType;
 }
 
@@ -348,7 +351,8 @@ export function registerStorageTools(): void {
   const setKeyValueHandler = async (device: BootedDevice, args: SetKeyValueArgs) => {
     try {
       const storageName = resolveStorageName(args);
-      if (args.value !== null) {
+      const value = args.value === null ? null : String(args.value);
+      if (value !== null) {
         validateTypeForPlatform(device.platform, args.type);
       }
 
@@ -360,11 +364,11 @@ export function registerStorageTools(): void {
           args.appId,
           storageName,
           () =>
-            args.value === null
+            value === null
               ? client.removePreference(args.appId, storageName, args.key)
-              : client.setPreference(args.appId, storageName, args.key, args.value!, args.type),
+              : client.setPreference(args.appId, storageName, args.key, value, args.type),
           (adb) =>
-            args.value === null
+            value === null
               ? removeAndroidKeyValueDirect(adb, device.deviceId, args.appId, storageName, args.key)
               : setAndroidKeyValueDirect(
                   adb,
@@ -372,16 +376,16 @@ export function registerStorageTools(): void {
                   args.appId,
                   storageName,
                   args.key,
-                  args.value!,
+                  value,
                   args.type,
                 ),
         ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
-        if (args.value === null) {
+        if (value === null) {
           await client.removePreference(args.appId, storageName, args.key);
         } else {
-          await client.setPreference(args.appId, storageName, args.key, args.value, args.type);
+          await client.setPreference(args.appId, storageName, args.key, value, args.type);
         }
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);

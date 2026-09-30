@@ -76,6 +76,18 @@ export function unwrapSchema(schema: any): any {
   return definition?.innerType ?? definition?.type ?? definition?.schema ?? null;
 }
 
+function acceptsScalarString(schema: any): boolean {
+  const options = schema?._def?.options;
+  if (!Array.isArray(options)) {
+    return false;
+  }
+  const types = options.map((option: any) => resolveDeclaredType(option).type);
+  return (
+    types.includes("string") &&
+    types.every((type: string) => ["string", "number", "boolean", "bigint"].includes(type))
+  );
+}
+
 export function resolveDeclaredType(schema: any): DeclaredType {
   let current = schema;
   let nullable = false;
@@ -86,6 +98,11 @@ export function resolveDeclaredType(schema: any): DeclaredType {
     }
     if (name === "literal") {
       return { type: typeof (current._def?.value ?? current._def?.values?.[0]), nullable };
+    }
+    if (name === "union" && acceptsScalarString(current)) {
+      // A CLI token has no native scalar type. Keep the spelling for unions
+      // that accept strings; a separate `type` argument selects storage typing.
+      return { type: "string", nullable };
     }
     if (!SCHEMA_WRAPPER_TYPES.has(name)) {
       return { type: name, nullable };

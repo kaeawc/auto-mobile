@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
+import { ActionableError } from "../../../../src/models/ActionableError";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
@@ -8,11 +9,13 @@ function context(
   timer: FakeTimer,
   ensureConnected: () => Promise<boolean>,
   send: (data: string) => void,
+  socketReadyState: number | null = WebSocket.OPEN,
 ): { context: HierarchyDelegateContext; requestManager: RequestManager } {
   const requestManager = new RequestManager(timer);
   return {
     context: {
-      getWebSocket: () => ({ readyState: 1, send }) as never,
+      getWebSocket: () =>
+        socketReadyState === null ? null : ({ readyState: socketReadyState, send } as never),
       requestManager,
       timer,
       ensureConnected,
@@ -114,6 +117,73 @@ describe("CtrlProxyHierarchy synchronous deadline", () => {
     controller.abort(new Error("caller cancelled"));
 
     await expect(request).rejects.toThrow("caller cancelled");
+    expect(harness.requestManager.getPendingCount()).toBe(0);
+  });
+
+  test("rejects immediately when the CtrlProxy socket is closed", async () => {
+    const timer = new FakeTimer();
+    const harness = context(
+      timer,
+      async () => true,
+      () => {},
+      WebSocket.CLOSED,
+    );
+
+    const request = new CtrlProxyHierarchy(harness.context).requestHierarchySync(
+      undefined,
+      false,
+      undefined,
+      5_000,
+    );
+
+    await expect(request).rejects.toBeInstanceOf(ActionableError);
+    await expect(request).rejects.toThrow("CtrlProxy socket is not connected");
+    expect(timer.now()).toBe(0);
+    expect(harness.requestManager.getPendingCount()).toBe(0);
+  });
+
+  test("rejects immediately when the CtrlProxy socket is null", async () => {
+    const timer = new FakeTimer();
+    const harness = context(
+      timer,
+      async () => true,
+      () => {},
+      null,
+    );
+
+    const request = new CtrlProxyHierarchy(harness.context).requestHierarchySync(
+      undefined,
+      false,
+      undefined,
+      5_000,
+    );
+
+    await expect(request).rejects.toBeInstanceOf(ActionableError);
+    await expect(request).rejects.toThrow("CtrlProxy socket is not connected");
+    expect(timer.now()).toBe(0);
+    expect(harness.requestManager.getPendingCount()).toBe(0);
+  });
+
+  test("rejects immediately and clears the waiter when socket send throws", async () => {
+    const timer = new FakeTimer();
+    const harness = context(
+      timer,
+      async () => true,
+      () => {
+        throw new Error("socket write failed");
+      },
+    );
+
+    const request = new CtrlProxyHierarchy(harness.context).requestHierarchySync(
+      undefined,
+      false,
+      undefined,
+      5_000,
+    );
+
+    await expect(request).rejects.toBeInstanceOf(ActionableError);
+    await expect(request).rejects.toThrow("CtrlProxy socket is not connected");
+    expect(timer.now()).toBe(0);
     expect(harness.requestManager.getPendingCount()).toBe(0);
   });
 

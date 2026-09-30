@@ -6,6 +6,7 @@
  */
 
 import type { SemanticLink, ViewHierarchyResult } from "../../../models";
+import { ActionableError } from "../../../models/ActionableError";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes } from "../../../models/ViewHierarchyResult";
 import { isDeepStrictEqual } from "node:util";
@@ -487,7 +488,21 @@ export class CtrlProxyHierarchy {
       // Rejecting the registered request first keeps that cancellation from
       // leaking a pending RequestManager entry.
       throwIfAborted(signal);
-      ws?.send(JSON.stringify(message));
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        this.context.requestManager.reject(
+          requestId,
+          new ActionableError("CtrlProxy socket is not connected"),
+        );
+      } else {
+        try {
+          ws.send(JSON.stringify(message));
+        } catch (error) {
+          this.context.requestManager.reject(
+            requestId,
+            new ActionableError("CtrlProxy socket is not connected", { cause: error }),
+          );
+        }
+      }
 
       const result = await promise;
       // A response that races with cancellation must not be accepted. The

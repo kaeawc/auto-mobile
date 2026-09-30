@@ -106,6 +106,13 @@ export interface SanitizeObserveConfig {
 /** Positional order of a compacted bounds tuple: `[left, top, right, bottom]`. */
 export type CompactBounds = [number, number, number, number];
 
+export type ObserveResultCloner = (obs: ObserveResult) => ObserveResult;
+
+function cloneObserveResult(obs: ObserveResult): ObserveResult {
+  // Match the wire's JSON semantics, including omitted undefined/functions.
+  return JSON.parse(JSON.stringify(obs)) as ObserveResult;
+}
+
 /**
  * Return an output-only copy of `obs` shrunk for serialization. Applies, in
  * order: perf-audit strip (always), top-level debug-perf telemetry reduction
@@ -116,12 +123,13 @@ export type CompactBounds = [number, number, number, number];
 export function sanitizeObserveResult(
   obs: ObserveResult,
   cfg: SanitizeObserveConfig,
+  clone: ObserveResultCloner = cloneObserveResult,
 ): ObserveResult {
   // Deep-clone boundary: mutate only the copy that goes to the wire. The
   // JSON round-trip matches the repo's hierarchy-cloning convention
   // (ViewHierarchy.ts) and the wire's own JSON semantics (undefined/functions
   // dropped), so it can never throw on a value structuredClone would reject.
-  const out = JSON.parse(JSON.stringify(obs)) as ObserveResult;
+  const out = clone(obs);
 
   stripPerformanceAudit(out);
   reduceTopLevelDebugPerfTelemetry(out);
@@ -160,6 +168,19 @@ export function sanitizeObserveResult(
     out.layoutWarnings = capLayoutWarnings(out.layoutWarnings);
   }
 
+  return out;
+}
+
+/** Derive the skeleton from an already-sanitized full tree without cloning it. */
+export function projectSanitizedObserveSkeleton(
+  sanitized: ObserveResult,
+  source: ObserveResult,
+): ObserveResult {
+  const out = { ...sanitized };
+  delete out.layoutWarnings;
+  delete out.performanceAudit;
+  // The original still carries non-enumerable ancestry provenance on elements.
+  projectSkeletonOnto(out, source);
   return out;
 }
 

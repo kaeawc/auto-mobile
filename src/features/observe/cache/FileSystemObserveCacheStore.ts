@@ -8,6 +8,7 @@ import {
   writeFileAsync,
 } from "../../../utils/io";
 import { logger } from "../../../utils/logger";
+import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import type { ObserveResult } from "../../../models";
@@ -73,16 +74,21 @@ export type ObserveCacheFileWriter = (filePath: string, data: string) => Promise
  *
  * Behaviour parity with the previous `RealObserveScreen` static cache:
  * - In-memory map keyed by `${deviceId}:${timestamp}`.
- * - On-disk files named `observe_${sanitizedDeviceId}_${timestamp}.json`.
+ * - On-disk files carry a process instance and generation stamp; only this
+ *   process's files can be restored after an in-memory miss.
  * - A repeated `observationId` updates its original key and file in place.
  * - Cache directory is `getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS)`.
  * - 5 minute TTL; expired entries are evicted from memory lazily on read.
  */
 export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
+  // The default generator is shared across stores in one daemon process.
+  private static readonly instanceIds = new WeakMap<IdGenerator, string>();
   private readonly cache: Map<string, ObserveResultCacheEntry> = new Map();
   private readonly cacheDir: string;
   private readonly timer: Timer;
   private readonly writeFile: ObserveCacheFileWriter;
+  private readonly instanceId: string;
+  private readonly unlinkFile: typeof unlinkAsync;
   private pendingDiskCleanup: Promise<void> = Promise.resolve();
 
   /**
@@ -102,10 +108,19 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     timer: Timer = defaultTimer,
     cacheDir?: string,
     writeFile: ObserveCacheFileWriter = writeFileAsync,
+    idGenerator: IdGenerator = defaultIdGenerator,
+    unlinkFile: typeof unlinkAsync = unlinkAsync,
   ) {
     this.timer = timer;
     this.cacheDir = cacheDir ?? getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS);
     this.writeFile = writeFile;
+    let instanceId = FileSystemObserveCacheStore.instanceIds.get(idGenerator);
+    if (instanceId === undefined) {
+      instanceId = idGenerator.next();
+      FileSystemObserveCacheStore.instanceIds.set(idGenerator, instanceId);
+    }
+    this.instanceId = encodeURIComponent(instanceId);
+    this.unlinkFile = unlinkFile;
     this.ensureCacheDirExists();
   }
 
@@ -337,10 +352,14 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
           continue;
         }
 
+        // A prior daemon's entry may describe a rebooted or replaced device.
+        // Legacy files without an instance stamp are likewise untrusted.
+        if (this.parseInstanceFromFilename(file) !== this.instanceId) {
+          await this.deleteForeignDiskFile(file);
+          continue;
+        }
         // Residual 2: never re-warm memory from a file whose stamped generation
-        // is older than the device's current generation — a clear() has advanced
-        // past it (issue #5892). Unstamped files can't be proven stale; serve
-        // them (back-compat, backstopped by the freshness check).
+        // is older than the device's current generation (issue #5892).
         const fileGeneration = this.parseGenerationFromFilename(file);
         if (fileGeneration !== undefined && fileGeneration < currentGeneration) {
           logger.debug(
@@ -388,18 +407,22 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   /**
    * Disk filename for a cache entry, stamped with the generation it is written
-   * under: `observe_<sanitizedDeviceId>_<timestamp>_g<generation>.json`. The
+   * under: `observe_<sanitizedDeviceId>_<timestamp>_i<instance>_g<generation>.json`. The
    * `_g<generation>` suffix lets {@link checkDisk} and the post-write re-check
    * prove a file stale after a later `clear()` (issue #5892).
    */
   private diskFilename(cacheKey: string, generation: number): string {
-    return `observe_${cacheKey.replace(/:/g, "_")}_g${generation}.json`;
+    return `observe_${cacheKey.replace(/:/g, "_")}_i${this.instanceId}_g${generation}.json`;
   }
 
   /** Extract the host cache timestamp embedded in current and legacy filenames. */
   private parseTimestampFromFilename(filename: string): number | undefined {
-    const match = /_(\d+)(?:_g\d+)?\.json$/.exec(filename);
+    const match = /_(\d+)(?:_i.+)?(?:_g\d+)?\.json$/.exec(filename);
     return match ? Number(match[1]) : undefined;
+  }
+
+  private parseInstanceFromFilename(filename: string): string | undefined {
+    return /_i(.+)_g\d+\.json$/.exec(filename)?.[1];
   }
 
   private findEntryByObservationId(
@@ -425,8 +448,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   /**
    * Parse the `_g<generation>` stamp from a cache filename. Returns undefined for
-   * a legacy (pre-#5892) or cross-instance file with no stamp — such a file
-   * cannot be proven stale and is served, backstopped by the freshness check.
+   * a legacy (pre-#5892) file with no stamp.
    */
   private parseGenerationFromFilename(filename: string): number | undefined {
     const match = /_g(\d+)\.json$/.exec(filename);
@@ -448,9 +470,18 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   private async deleteDiskFile(filename: string): Promise<void> {
     try {
-      await unlinkAsync(path.join(this.cacheDir, filename));
+      await this.unlinkFile(path.join(this.cacheDir, filename));
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Failed to delete stale cache file ${filename}: ${error}`);
+    }
+  }
+
+  private async deleteForeignDiskFile(filename: string): Promise<void> {
+    try {
+      await this.unlinkFile(path.join(this.cacheDir, filename));
+    } catch (error) {
+      // Foreign files cannot be served, so failed cleanup is only diagnostic.
+      logger.debug(`[OBSERVE_CACHE] Failed to delete foreign cache file ${filename}: ${error}`);
     }
   }
 
@@ -514,7 +545,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     const cleanup = Promise.all(
       matches.map(async (file) => {
         try {
-          await unlinkAsync(path.join(this.cacheDir, file));
+          await this.unlinkFile(path.join(this.cacheDir, file));
         } catch (error) {
           logger.warn(`[OBSERVE_CACHE] Failed to delete cache file ${file}: ${error}`);
         }

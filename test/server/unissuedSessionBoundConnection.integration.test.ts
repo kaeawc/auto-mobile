@@ -12,6 +12,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { BootedDevice } from "../../src/models";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 /**
  * #6069 — public-path guard for the residual ownership bypass.
@@ -45,6 +46,7 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
     { name: "Pixel B", platform: "android", deviceId: "emulator-5556" },
   ];
   let handlerDevices: string[] = [];
+  let restoreDisplayInventory: () => void;
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -73,6 +75,9 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
 
     handlerDevices = [];
     ToolRegistry.clearTools();
+    restoreDisplayInventory = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     ToolRegistry.registerDeviceAware(
       "observeProbe",
       "observeProbe",
@@ -102,6 +107,7 @@ describe("unissued sessionUuid on a bound connection (#6069)", () => {
       fixture = undefined;
     }
     ToolRegistry.clearTools();
+    restoreDisplayInventory();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
     AndroidCtrlProxyManager.getInstance = origMgr;

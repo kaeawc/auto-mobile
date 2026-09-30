@@ -12,6 +12,8 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { CachingDisplayInventoryProvider } from "../../../src/devices/DisplayInventoryProvider";
+import { FakeDisplayInventorySource } from "../../fakes/FakeDisplayInventoryProvider";
 import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
 import type { ObserveScreenshotRecorder } from "../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 
@@ -62,7 +64,7 @@ describe("display read routing", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", {
       stdout:
-        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
       stderr: "",
     });
     adb.setCommandResponse("shell cmd device_state state", { stdout: "State: 0", stderr: "" });
@@ -71,6 +73,22 @@ describe("display read routing", () => {
       stderr: "",
     });
     const hierarchy = new FakeViewHierarchy();
+    // ToolRegistry receives this bare production shape and hydrates it before observation.
+    const source = new FakeDisplayInventorySource({
+      displays: {
+        panels: [
+          { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } },
+          { key: "cover", role: "cover", sizePx: { width: 100, height: 100 } },
+        ],
+        postures: ["closed", "opened"],
+      },
+      degraded: false,
+    });
+    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    const hydrated = await provider.hydrate(
+      { name: device.name, deviceId: device.deviceId, platform: device.platform },
+      "pool-incarnation-1",
+    );
     hierarchy.configureHierarchy({
       hierarchy: { node: { bounds: { left: 0, top: 0, right: 200, bottom: 200 } } },
       displayId: 2,
@@ -79,7 +97,7 @@ describe("display read routing", () => {
     });
     try {
       const screen = new RealObserveScreen(
-        device,
+        hydrated,
         new FakeAdbClientFactory(adb),
         {
           viewHierarchy: hierarchy,
@@ -94,11 +112,37 @@ describe("display read routing", () => {
         skipRecompositionTracking: true,
         skipAccessibilityAudit: true,
       });
-      expect(result.display).toMatchObject({ key: "external", role: "external" });
+      expect(result.display).toMatchObject({ key: "inner", role: "inner" });
       expect(result.display.posture).toBe("closed");
       expect(result.otherDisplays).toEqual([
         { key: "cover", role: "cover", size: { width: 100, height: 100 } },
       ]);
+      expect(source.reads).toBe(1);
+      const coverScreen = new RealObserveScreen(
+        hydrated,
+        new FakeAdbClientFactory(adb),
+        {
+          hierarchyCapture: {
+            capture: async (request) => ({
+              captureId: "cover-capture",
+              platform: "android",
+              requestedFreshness: request.freshness,
+              receivedAt: 0,
+              hierarchy: {
+                hierarchy: { node: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } } },
+                displayId: request.displayId,
+                screenWidth: 100,
+                screenHeight: 100,
+              },
+              nodes: [],
+            }),
+          },
+          cacheStore: new FakeObserveCacheStore(timer),
+        },
+        timer,
+      );
+      const cover = await coverScreen.execute({ ...readOptions, display: "cover" });
+      expect(cover.display).toMatchObject({ key: "cover", role: "cover" });
       const second = await screen.execute({
         skipScreenshot: true,
         skipBackStack: true,
@@ -401,11 +445,16 @@ describe("display read routing", () => {
       screenWidth: 100,
       screenHeight: 100,
     });
-    const singleDevice: BootedDevice = {
-      ...device,
-      deviceId: "single-panel-test",
-      displays: undefined,
-    };
+    const singleSource = new FakeDisplayInventorySource({ degraded: false });
+    const singleDevice = await new CachingDisplayInventoryProvider(
+      singleSource,
+      singleSource,
+      timer,
+    ).hydrate(
+      { name: device.name, platform: "android", deviceId: "single-panel-test" },
+      "pool-incarnation-1",
+    );
+    expect(Object.hasOwn(singleDevice, "displays")).toBe(false);
     try {
       const screen = new RealObserveScreen(
         singleDevice,
@@ -483,7 +532,7 @@ describe("display read routing", () => {
   test("iPhone Duo stamps the matched inner panel and lists the cover", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
-    const iosDevice: BootedDevice = {
+    const iosInventory: BootedDevice = {
       ...device,
       platform: "ios",
       deviceId: "ios-duo-stamp-test",
@@ -495,6 +544,18 @@ describe("display read routing", () => {
         postures: ["unknown"],
       },
     };
+    const iosSource = new FakeDisplayInventorySource({
+      displays: iosInventory.displays,
+      degraded: false,
+    });
+    const iosDevice = await new CachingDisplayInventoryProvider(
+      iosSource,
+      iosSource,
+      timer,
+    ).hydrate(
+      { name: iosInventory.name, deviceId: iosInventory.deviceId, platform: "ios" },
+      "pool-incarnation-1",
+    );
     const raw = {
       updatedAt: 1,
       packageName: "com.test.app",

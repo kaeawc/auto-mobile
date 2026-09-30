@@ -9,6 +9,7 @@ import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
+import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -486,6 +487,7 @@ export class Daemon {
       );
       NavigationGraphManager.releaseSession(sessionId);
       RealObserveScreen.clearCache(deviceId);
+      defaultDisplayInventoryProvider.invalidate(deviceId);
       // Clear the per-device CtrlProxy client's binding to the released session
       // (#4984) so a nav/hierarchy event arriving before the next session binds the
       // still-connected device is never attributed to the ended session, and its
@@ -505,6 +507,7 @@ export class Daemon {
         NavigationGraphManager.getInstanceForSession(sessionId),
       );
       RealObserveScreen.clearCache(deviceId);
+      defaultDisplayInventoryProvider.invalidate(deviceId);
       AndroidCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
       IOSCtrlProxyClient.getExistingInstance(deviceId)?.releaseSessionBinding(sessionId);
     });
@@ -543,6 +546,7 @@ export class Daemon {
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryConfiguration.policy,
       onDeviceRemoved: (deviceId, platform) => {
+        defaultDisplayInventoryProvider.invalidate(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
         if (platform === "ios") {
           const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);

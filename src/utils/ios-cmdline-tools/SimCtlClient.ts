@@ -47,6 +47,7 @@ import {
   simulatorDeviceDisplays,
   type SimulatorDisplay,
 } from "./SimulatorDisplays";
+import type { DeviceDisplays } from "../../models/DisplayPanel";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
@@ -2260,6 +2261,24 @@ export class SimCtlClient implements SimCtl {
       logger.warn(`Failed to get iOS device info for ${udid}: ${error}`);
       return null;
     }
+  }
+
+  /** Read the physical screens of one booted simulator without enumerating every device. */
+  async readDeviceDisplays(
+    udid: string,
+    signal?: AbortSignal,
+  ): Promise<DeviceDisplays | undefined> {
+    signal?.throwIfAborted();
+    const device = await this.getDeviceInfo(udid);
+    signal?.throwIfAborted();
+    if (!device) {
+      throw new Error(`Unable to read display inventory: simulator ${udid} was not found`);
+    }
+    if (device.state !== "Booted") {
+      return undefined;
+    }
+    const displays = await this.enumerateDisplays(udid, 2_000, signal);
+    return simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
   }
 
   /**

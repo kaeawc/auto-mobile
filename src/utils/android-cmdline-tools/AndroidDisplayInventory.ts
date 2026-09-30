@@ -201,6 +201,13 @@ export async function readAndroidDeviceDisplays(
   adb: Pick<AdbExecutor, "executeCommand">,
   signal?: AbortSignal,
 ): Promise<DeviceDisplays | undefined> {
+  return (await readAndroidDeviceDisplaysChecked(adb, signal)).displays;
+}
+
+export async function readAndroidDeviceDisplaysChecked(
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+): Promise<{ displays?: DeviceDisplays; degraded: boolean }> {
   const commands = [
     "shell dumpsys SurfaceFlinger --display-id",
     "shell dumpsys display",
@@ -220,5 +227,8 @@ export async function readAndroidDeviceDisplays(
   }
   const output = (index: number): string =>
     results[index].status === "fulfilled" ? results[index].value.stdout : "";
-  return parseAndroidDeviceDisplays(output(0), output(1), output(2));
+  return {
+    displays: parseAndroidDeviceDisplays(output(0), output(1), output(2)),
+    degraded: results[0].status === "rejected" || results[1].status === "rejected",
+  };
 }

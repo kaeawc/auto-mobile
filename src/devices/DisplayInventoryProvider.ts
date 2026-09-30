@@ -1,0 +1,115 @@
+import type { BootedDevice } from "../models";
+import type { DeviceDisplays } from "../models/DisplayPanel";
+import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { readAndroidDeviceDisplaysChecked } from "../utils/android-cmdline-tools/AndroidDisplayInventory";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
+import { awaitWhileRequestIsLive } from "../utils/toolUtils";
+
+export interface DisplayInventoryProvider {
+  hydrate(device: BootedDevice, identityToken: string, signal?: AbortSignal): Promise<BootedDevice>;
+  invalidate(deviceId: string): void;
+}
+
+export interface DisplayInventorySource {
+  read(device: BootedDevice): Promise<{ displays?: DeviceDisplays; degraded: boolean }>;
+}
+
+interface InventoryEntry {
+  token: string;
+  displays: DeviceDisplays | null;
+  retryAt?: number;
+  pending?: Promise<void>;
+}
+
+export class CachingDisplayInventoryProvider implements DisplayInventoryProvider {
+  private readonly entries = new Map<string, InventoryEntry>();
+
+  constructor(
+    private readonly androidSource: DisplayInventorySource,
+    private readonly iosSource: DisplayInventorySource,
+    private readonly timer: Pick<Timer, "now"> = defaultTimer,
+    private readonly degradedRetryMs = 5_000,
+    private readonly failureRetryMs = 30_000,
+  ) {}
+
+  async hydrate(
+    device: BootedDevice,
+    identityToken: string,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice> {
+    if (device.displays?.panels.length) {
+      return device;
+    }
+    const key = `${device.platform}:${device.deviceId}`;
+    let entry = this.entries.get(key);
+    if (!entry || entry.token !== identityToken) {
+      entry = { token: identityToken, displays: null };
+      this.entries.set(key, entry);
+      entry.pending = this.fetch(key, entry, device);
+      await awaitWhileRequestIsLive(entry.pending, signal);
+    } else if (!entry.pending && entry.retryAt !== undefined && this.timer.now() >= entry.retryAt) {
+      // An incarnation's first read is the only one that may delay a tool call.
+      entry.pending = this.fetch(key, entry, device);
+    } else if (entry.pending && entry.retryAt === undefined) {
+      // Join the initial read, with this caller's cancellation limited to its own wait.
+      await awaitWhileRequestIsLive(entry.pending, signal);
+    }
+    return entry.displays ? { ...device, displays: entry.displays } : device;
+  }
+
+  invalidate(deviceId: string): void {
+    for (const key of this.entries.keys()) {
+      if (key.endsWith(`:${deviceId}`)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
+  private async fetch(key: string, entry: InventoryEntry, device: BootedDevice): Promise<void> {
+    try {
+      const source = device.platform === "android" ? this.androidSource : this.iosSource;
+      // The shared read has its own bounded source timeout, not a caller's signal.
+      const result = await source.read(device);
+      if (this.entries.get(key) === entry) {
+        if (result.displays || !result.degraded) {
+          entry.displays = result.displays ?? null;
+        }
+        entry.retryAt = result.degraded ? this.timer.now() + this.degradedRetryMs : undefined;
+      }
+    } catch (error) {
+      logger.warn(
+        `[DisplayInventoryProvider] Inventory read failed for ${device.deviceId}: ${error}`,
+        error,
+      );
+      if (this.entries.get(key) === entry) {
+        entry.retryAt = this.timer.now() + this.failureRetryMs;
+      }
+    } finally {
+      entry.pending = undefined;
+    }
+  }
+}
+
+export function createDisplayInventoryProvider(
+  adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  simctl: Pick<SimCtlClient, "readDeviceDisplays"> = new SimCtlClient(null),
+  timer: Pick<Timer, "now"> = defaultTimer,
+): DisplayInventoryProvider {
+  return new CachingDisplayInventoryProvider(
+    {
+      read: (device) => readAndroidDeviceDisplaysChecked(adbFactory.create(device)),
+    },
+    {
+      read: async (device) => ({
+        displays: await simctl.readDeviceDisplays(device.deviceId),
+        degraded: false,
+      }),
+    },
+    timer,
+  );
+}
+
+export const defaultDisplayInventoryProvider = createDisplayInventoryProvider();

@@ -586,6 +586,86 @@ jobs:
           echo "build took ${SECONDS}s"
 
   # =============================================================================
+  # Foldable posture integration tests
+  # =============================================================================
+  # The APK is reused from the build-control-proxy-apk job above.
+  foldable-posture-tests:
+    name: "Foldable Posture (${{ matrix.profile }})"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 25
+    needs: build-control-proxy-apk
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [pixel_10_pro_fold, resizable]
+    env:
+      AUTOMOBILE_FOLDABLE_LANE: "1"
+      AUTOMOBILE_FOLDABLE_PROFILE: ${{ matrix.profile }}
+      AUTOMOBILE_FOLDABLE_DEVICE_ID: emulator-5554
+      AUTOMOBILE_DATA_DIR: ${{ github.workspace }}/scratch/foldable-lane/data
+      AUTOMOBILE_LOG_DIR: ${{ github.workspace }}/scratch/foldable-lane/logs
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Download CtrlProxy APK"
+        uses: actions/download-artifact@v7
+        with:
+          name: control-proxy-apk
+          path: android/control-proxy/build/outputs/apk/debug
+
+      - name: "Start display server for Resizable emulator"
+        if: matrix.profile == 'resizable'
+        shell: bash
+        run: |
+          command -v Xvfb
+          Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp > "$RUNNER_TEMP/foldable-xvfb.log" 2>&1 &
+          for attempt in {1..20}; do
+            if test -S /tmp/.X11-unix/X99; then
+              break
+            fi
+            sleep 0.25
+          done
+          test -S /tmp/.X11-unix/X99
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/android-emulator
+        with:
+          api_level: "36"
+          target: google_apis
+          avd-name: foldable-${{ matrix.profile }}
+          profile: ${{ matrix.profile }}
+          windowed: ${{ matrix.profile == 'resizable' }}
+          working-directory: "./android/"
+          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          script: |
+            cd "$GITHUB_WORKSPACE"
+            mkdir -p scratch/foldable-lane
+            export AUTOMOBILE_CTRL_PROXY_APK_PATH="$GITHUB_WORKSPACE/android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
+            if bun test test/integration/foldablePostureRoundTrip.integration.test.ts > scratch/foldable-lane/test.log 2>&1; then
+              cat scratch/foldable-lane/test.log
+            else
+              cat scratch/foldable-lane/test.log
+              exit 1
+            fi
+
+      - name: "Upload foldable diagnostics and screenshots"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: foldable-posture-${{ matrix.profile }}
+          path: |
+            scratch/foldable-lane/
+            android-emulator-diagnostics/
+          if-no-files-found: ignore
+
+  # =============================================================================
   # Android emulator integration tests
   # =============================================================================
   # Moved off PR and merge (low signal, runner-heavy). The APK is reused from the

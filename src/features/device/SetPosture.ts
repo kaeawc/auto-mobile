@@ -105,16 +105,13 @@ async function observeIosPosture(
   return observation;
 }
 
-const EMULATOR_POSTURE_IDS: Record<RequestedPosture, number> = {
-  closed: 1,
+const EMULATOR_POSTURE_IDS: Partial<Record<RequestedPosture, number>> = {
   half_opened: 2,
-  opened: 3,
-  rear_display: 1,
   flipped: 4,
   tent: 5,
 };
-// IDs follow Android's documented `adb emu posture` order. rear_display uses
-// the closed state, which activates the emulator's cover display:
+// IDs follow Android's documented `adb emu posture` order. Closed and opened
+// use the dedicated fold/unfold commands; rear display is a device state:
 // https://developer.android.com/blog/posts/emulator-control-for-adaptive-app-development
 
 const DISPLAY_PRESET_IDS: Record<DisplayPreset, number> = {
@@ -140,7 +137,11 @@ async function setEmulatorPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   displayPreset?: DisplayPreset,
+  supportsRearDisplay = false,
 ): Promise<void> {
+  if (requested === "opened" && supportsRearDisplay) {
+    await adb.executeCommand("shell cmd device_state state reset");
+  }
   const command =
     requested === "closed"
       ? "emu fold"
@@ -169,6 +170,9 @@ async function setPhysicalPosture(
   const command = match
     ? `shell cmd device_state state ${match.identifier}`
     : "shell cmd device_state state reset";
+  if (requested === "opened" && match && states.some((state) => state.posture === "rear_display")) {
+    await adb.executeCommand("shell cmd device_state state reset");
+  }
   await adb.executeCommand(command);
 }
 
@@ -210,8 +214,15 @@ export class SetPosture {
       );
     }
 
-    if (emulator) {
-      await setEmulatorPosture(adb, requested, displayPreset);
+    if (requested === "rear_display") {
+      await setPhysicalPosture(adb, requested);
+    } else if (emulator) {
+      await setEmulatorPosture(
+        adb,
+        requested,
+        displayPreset,
+        this.device.displays?.postures.includes("rear_display") ?? false,
+      );
     } else {
       await setPhysicalPosture(adb, requested);
     }

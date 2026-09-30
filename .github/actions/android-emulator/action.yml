@@ -23,6 +23,14 @@ inputs:
     description: "AVD name created by the snapshot-preparation action"
     default: "test"
     required: "true"
+  profile:
+    description: "Hardware profile ID passed to avdmanager"
+    default: ""
+    required: "false"
+  windowed:
+    description: "Run the emulator with a display server for resize-display support"
+    default: "false"
+    required: "false"
   target:
     description: "System image target"
     default: "google_apis"
@@ -115,11 +123,11 @@ runs:
           ~/.android/avd/*
           ~/.android/adb*
           /usr/local/lib/android/sdk/system-images/*
-        key: avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-${{ inputs.arch }}-${{ inputs.target }}
+        key: avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}${{ inputs.api_level }}-${{ inputs.arch }}-${{ inputs.target }}
         restore-keys: |
-          avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-${{ inputs.arch }}-
-          avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-
-          avd-${{ runner.os }}-${{ inputs.avd-name }}-
+          avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}${{ inputs.api_level }}-${{ inputs.arch }}-
+          avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}${{ inputs.api_level }}-
+          avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}
 
     - name: Create AVD and generate snapshot for caching
       if: steps.avd-cache.outputs.cache-hit != 'true'
@@ -129,8 +137,9 @@ runs:
         arch: ${{ inputs.arch }}
         target: ${{ inputs.target }}
         avd-name: ${{ inputs.avd-name }}
+        profile: ${{ inputs.profile }}
         force-avd-creation: false
-        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        emulator-options: ${{ inputs.windowed == 'true' && '-gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none' || '-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none' }}
         disable-animations: false
         script: |
           echo "=========================================="
@@ -173,7 +182,7 @@ runs:
       shell: ${{ inputs.shell }}
       working-directory: ${{ inputs.working-directory }}
       run: |
-        export AUTOMOBILE_EMULATOR_ARGS='["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]'
+        export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-1"
         "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
@@ -208,7 +217,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       run: |
         echo "Starting emulator retry attempt 2."
-        export AUTOMOBILE_EMULATOR_ARGS='["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]'
+        export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-2"
         "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"

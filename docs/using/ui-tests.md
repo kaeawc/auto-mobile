@@ -263,3 +263,25 @@ bunx @kaeawc/auto-mobile@0.0.81 --cli doctor
 Replace `0.0.81` with the version used by your test runner dependency.
 
 `--cli doctor` is status-only; repair is intentionally out of scope ([issue #7143](https://github.com/kaeawc/auto-mobile/issues/7143)). Use `--daemon restart` or `--daemon diagnose` for daemon remedies.
+
+# Foldable posture lane
+
+The nightly workflow and manual workflow dispatch run the opt-in foldable
+scenario on API 36 `google_apis` AVD profiles `pixel_10_pro_fold` and
+`resizable`. This new job is advisory until the profiles and display server are
+verified on the hosted Linux runner. To run it locally, boot one of those AVDs,
+build AutoMobile, install the matching CtrlProxy APK, then run:
+
+```bash
+AUTOMOBILE_FOLDABLE_LANE=1 AUTOMOBILE_FOLDABLE_PROFILE=pixel_10_pro_fold \
+  AUTOMOBILE_FOLDABLE_DEVICE_ID=emulator-5554 \
+  bun test test/integration/foldablePostureRoundTrip.integration.test.ts
+```
+
+Use `AUTOMOBILE_FOLDABLE_PROFILE=resizable` for the Resizable AVD. The Pixel
+Fold exercises the inner/cover swap and rear-display state; Resizable exercises
+the phone/unfolded presets. The nightly Resizable job uses Xvfb because the
+emulator does not support `resize-display` in headless mode. Generic foldable
+AVD profiles model hinge posture only and cannot emulate a cover screen.
+Samsung FlexWindow and Razr external displays cannot be emulated by these
+profiles.

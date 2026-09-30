@@ -103,10 +103,13 @@ function parseAndroidDisplayDeviceInfo(line: string): AndroidDisplayRecord | und
   }
   const start = marker + "DisplayDeviceInfo{".length;
   const fields = splitDisplayDeviceFields(line, start).map((field) => field.trim());
+  // API 36 separates the quoted display name from the fields with a colon,
+  // while older output (and some vendors) use a comma. Keep splitting only at
+  // top-level commas, then anchor on the structured uniqueId token so either
+  // separator works and punctuation inside the quoted name is ignored.
   const uniqueId = fields
-    .find((field) => field.startsWith("uniqueId="))
-    ?.slice("uniqueId=".length)
-    .replace(/^"|"$/g, "");
+    .map((field) => /(?:^|\s)uniqueId="([^"]+)"/.exec(field)?.[1])
+    .find((value): value is string => value !== undefined);
   const type = parseDisplayType(fields.find((field) => field.startsWith("type "))?.slice(5));
   const dimensions = /^(\d+)\s+x\s+(\d+)$/.exec(
     fields.find((field) => /^(\d+)\s+x\s+(\d+)$/.test(field)) ?? "",

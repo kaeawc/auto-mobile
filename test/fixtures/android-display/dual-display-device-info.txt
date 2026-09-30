@@ -1,4 +1,4 @@
   mDisplayDevices=[
-    DisplayDeviceInfo{"Built-in Screen", uniqueId="local:4619827259835644672", 2256 x 2504, modeId 1, defaultModeId 1, supportedModes [{id=1, width=2256, height=2504, fps=60.0}], touch INTERNAL, type INTERNAL}
-    DisplayDeviceInfo{"Built-in Screen", uniqueId="local:4619827259835644673", 1080 x 2520, modeId 2, defaultModeId 2, supportedModes [{id=2, width=1080, height=2520, fps=60.0}], touch INTERNAL, type INTERNAL}
+    DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4619827259835644672", 2256 x 2504, modeId 1, defaultModeId 1, supportedModes [{id=1, width=2256, height=2504, fps=60.0}], density 420, 420.0 x 420.0 dpi, touch INTERNAL, type INTERNAL, FLAG_DEFAULT_DISPLAY}
+    DisplayDeviceInfo{"Built-in Screen": uniqueId="local:4619827551948147201", 1080 x 2520, modeId 2, defaultModeId 2, supportedModes [{id=2, width=1080, height=2520, fps=60.0}], density 420, 420.0 x 420.0 dpi, touch INTERNAL, type INTERNAL, FLAG_DEFAULT_DISPLAY}
   ]

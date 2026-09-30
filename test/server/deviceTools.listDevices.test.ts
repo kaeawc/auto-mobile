@@ -186,6 +186,20 @@ describe("listDevices tool (#5870)", () => {
     ).toBe(true);
   });
 
+  test("publishes discovered panels in listDevices", async () => {
+    const displays = {
+      panels: [
+        { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 } },
+        { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 } },
+      ],
+      postures: ["unknown"],
+    } satisfies NonNullable<BootedDevice["displays"]>;
+    fakeDeviceUtils.setBootedDevices("ios", [{ ...ios, displays }]);
+
+    const payload = await callListDevices({ platform: "ios" });
+    expect(payload.devices[0].displays).toEqual(displays);
+  });
+
   test("normalizes unknown booted form factors canonically", async () => {
     const payload = await callListDevices({ platform: "android" });
     const device = payload.devices[0];

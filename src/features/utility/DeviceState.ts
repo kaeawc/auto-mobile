@@ -292,6 +292,7 @@ export interface DeviceStateResult {
   success: boolean;
   deviceId: string;
   platform: "android" | "ios";
+  displays?: BootedDevice["displays"];
   doNotDisturb?: DoNotDisturbState;
   connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;
@@ -1105,6 +1106,7 @@ export class DeviceState {
       success: !failedState,
       deviceId: this.device.deviceId,
       platform: this.device.platform,
+      ...(this.device.displays ? { displays: this.device.displays } : {}),
       ...selected,
       ...(unsupported.length > 0 ? { unsupported } : {}),
       ...(failedState?.error ? { error: failedState.error } : {}),

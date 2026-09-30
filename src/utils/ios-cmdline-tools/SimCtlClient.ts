@@ -42,7 +42,11 @@ import {
   type SimulatorDeviceTypeProfile,
   type SimulatorDeviceTypeProfileSource,
 } from "./SimulatorDeviceTypeProfiles";
-import { parseSimulatorDisplays, type SimulatorDisplay } from "./SimulatorDisplays";
+import {
+  parseSimulatorDisplays,
+  simulatorDeviceDisplays,
+  type SimulatorDisplay,
+} from "./SimulatorDisplays";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
@@ -1975,6 +1979,7 @@ export class SimCtlClient implements SimCtl {
           ? await this.profileForDeviceType(device.deviceTypeIdentifier, deadlineMs, signal)
           : null;
         const displays = await this.displaysForBootedSimulator(device, deadlineMs, signal);
+        const deviceDisplays = simulatorDeviceDisplays(displays, device.deviceTypeIdentifier);
         devices.push({
           name: device.name,
           platform: "ios",
@@ -1996,18 +2001,7 @@ export class SimCtlClient implements SimCtl {
           screenWidth: profile?.pixelWidth ?? undefined,
           screenHeight: profile?.pixelHeight ?? undefined,
           screenDensity: profile?.dpi ?? undefined,
-          ...(displays.length > 1
-            ? {
-                displays: displays.map((display) => ({
-                  id: display.id,
-                  name: display.name,
-                  width: display.width,
-                  height: display.height,
-                  density: null,
-                  units: "physical-pixels" as const,
-                })),
-              }
-            : {}),
+          ...(deviceDisplays ? { displays: deviceDisplays } : {}),
           capabilityInventory: iosSimulatorCapabilityInventory({
             isAvailable: device.isAvailable,
             availabilityError: device.availabilityError,
@@ -2220,6 +2214,7 @@ export class SimCtlClient implements SimCtl {
             deviceType: device.deviceType,
             model: device.model,
             architecture: device.architecture,
+            displays: device.displays,
           }) as BootedDevice,
       )
       .sort((a, b) => a.deviceId.localeCompare(b.deviceId));

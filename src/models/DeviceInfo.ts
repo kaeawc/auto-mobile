@@ -1,15 +1,7 @@
 import { Platform } from "./Platform";
 import { FormFactor } from "./DeviceMatchCriteria";
 import type { VirtualDeviceCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
-
-export interface DeviceDisplayInfo {
-  id: string | null;
-  name: string | null;
-  width: number;
-  height: number;
-  density: number | null;
-  units: "physical-pixels";
-}
+import type { DeviceDisplays } from "./DisplayPanel";
 
 export interface DeviceInfo {
   name: string;
@@ -29,7 +21,8 @@ export interface DeviceInfo {
   screenWidth?: number;
   screenHeight?: number;
   screenDensity?: number;
-  displays?: DeviceDisplayInfo[];
+  /** Multi-panel inventory; omitted for ordinary single-display devices. */
+  displays?: DeviceDisplays;
   /**
    * Exact system-image identifier: the Android AVD package (for example,
    * `system-images;android-36;google_apis;arm64-v8a`) or iOS simctl runtime identifier.
@@ -73,7 +66,8 @@ export interface BootedDevice {
   screenHeight?: number;
   /** Optional live metadata threaded from discovery or the admitted image. */
   screenDensity?: number;
-  displays?: DeviceDisplayInfo[];
+  /** Multi-panel inventory; omitted for ordinary single-display devices. */
+  displays?: DeviceDisplays;
   /**
    * Exact system-image identifier: the Android AVD package (for example,
    * `system-images;android-36;google_apis;arm64-v8a`) or iOS simctl runtime identifier.

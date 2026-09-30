@@ -1,3 +1,5 @@
+import type { DeviceDisplays, DisplayPanel } from "../../models/DisplayPanel";
+
 /** One integrated screen reported by `simctl io <udid> enumerate`. */
 export interface SimulatorDisplay {
   id: string | null;
@@ -93,6 +95,37 @@ export function parseSimulatorDisplays(output: string): SimulatorDisplay[] {
   }
   finish();
   return displays;
+}
+
+/** The larger of the Duo's two Integrated screens is its inner panel. */
+export function simulatorDeviceDisplays(
+  displays: readonly SimulatorDisplay[],
+  deviceTypeIdentifier?: string,
+): DeviceDisplays | undefined {
+  // Single-screen inventory keeps the existing JSON payload unchanged.
+  if (displays.length < 2) {
+    return undefined;
+  }
+  const areas = displays.map((display) => display.width * display.height);
+  const largest = Math.max(...areas);
+  const smallest = Math.min(...areas);
+  const isDuo = deviceTypeIdentifier?.endsWith(".iPhone-Duo") === true;
+  const panels: DisplayPanel[] = displays.flatMap((display, index) => {
+    if (!display.name) {
+      return [];
+    }
+    const role =
+      !isDuo || largest === smallest ? "unknown" : areas[index] === largest ? "inner" : "cover";
+    return [
+      {
+        key: display.name,
+        role,
+        sizePx: { width: display.width, height: display.height },
+        ...(display.uiScale ? { scale: display.uiScale } : {}),
+      },
+    ];
+  });
+  return panels.length > 1 ? { panels, postures: ["unknown"] } : undefined;
 }
 
 /** Select only when the live runner size identifies one screen unambiguously. */

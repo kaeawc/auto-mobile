@@ -1,0 +1,2 @@
+Displays:
+  Display id 0: DisplayInfo{"Built-in Screen", displayId 0, real 1080 x 2400, rotation 0, state ON, type INTERNAL, uniqueId "local:4619827259835644672", app 1080 x 2400, density 420 dpi}

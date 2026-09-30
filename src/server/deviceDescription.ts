@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import type { PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../models";
-import type { DeviceDisplayInfo } from "../models/DeviceInfo";
+import type { DeviceDisplays } from "../models/DisplayPanel";
 import type { ExactProvisionedDevice } from "../utils/exactDeviceProvisioning";
 import type { StableConfiguredDeviceImage } from "../utils/configuredDeviceInventory";
 import { iosSimulatorCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
@@ -54,7 +54,7 @@ export interface DeviceDescription {
     density: number | null;
     units: Extract<ObservationInsets["units"], "physical-pixels">;
   };
-  displays?: DeviceDisplayInfo[];
+  displays?: DeviceDisplays;
   capabilityInventory: CapabilityInventory | null;
   image: {
     path: string | null;
@@ -246,7 +246,7 @@ function describeImage(
     identity: { stableId },
     ...staticFacts,
     display: displayFrom(image),
-    ...(image.displays?.length ? { displays: image.displays } : {}),
+    ...(image.displays?.panels.length ? { displays: image.displays } : {}),
     capabilityInventory: capabilityInventory(image, true),
     image: {
       path: platform === "android" ? (androidProvenance?.path ?? imageLinkFrom(image).path) : null,
@@ -312,7 +312,7 @@ function describeBooted(
     identity: { stableId },
     ...staticFacts,
     display: displayFrom(merged),
-    ...(merged.displays?.length ? { displays: merged.displays } : {}),
+    ...(merged.displays?.panels.length ? { displays: merged.displays } : {}),
     capabilityInventory: capabilityInventory(merged, isVirtual),
     image: imageLinkWithConfiguredFallback(admittedImage, configured),
     availabilityError: device.platform === "ios" ? (merged.availabilityError ?? null) : null,
@@ -648,18 +648,22 @@ export const deviceDescriptionSchema = z
       })
       .strict(),
     displays: z
-      .array(
-        z
-          .object({
-            id: nullableString,
-            name: nullableString,
-            width: z.number(),
-            height: z.number(),
-            density: nullableNumber,
-            units: z.literal("physical-pixels"),
-          })
-          .strict(),
-      )
+      .object({
+        panels: z.array(
+          z
+            .object({
+              key: z.string(),
+              role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+              sizePx: z.object({ width: z.number(), height: z.number() }).strict(),
+              scale: z.number().optional(),
+            })
+            .strict(),
+        ),
+        postures: z.array(
+          z.enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"]),
+        ),
+      })
+      .strict()
       .optional(),
     capabilityInventory: z
       .object({

@@ -132,24 +132,13 @@ describe("device description projections", () => {
         screenWidth: 2007,
         screenHeight: 2853,
         screenDensity: 460,
-        displays: [
-          {
-            id: "0",
-            name: "primary",
-            width: 2007,
-            height: 2853,
-            density: null,
-            units: "physical-pixels",
-          },
-          {
-            id: "1",
-            name: "primary-1",
-            width: 1398,
-            height: 2034,
-            density: null,
-            units: "physical-pixels",
-          },
-        ],
+        displays: {
+          panels: [
+            { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 } },
+            { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 } },
+          ],
+          postures: ["unknown"],
+        },
       },
     });
     expect(description.display).toEqual({
@@ -158,7 +147,7 @@ describe("device description projections", () => {
       density: 460,
       units: "physical-pixels",
     });
-    expect(listDevicesEntrySchema.parse(description).displays).toHaveLength(2);
+    expect(listDevicesEntrySchema.parse(description).displays?.panels).toHaveLength(2);
   });
 
   test.each([

@@ -12,6 +12,7 @@ import {
 } from "../HostCommandExecutor";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
+import { readAndroidDeviceDisplays } from "./AndroidDisplayInventory";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
@@ -1944,6 +1945,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         ]);
         runningDevices.push(this.discoveredPhysicalDevice(device, model, architecture));
       }
+      await Promise.all(
+        runningDevices.map(async (device) => {
+          const displays = await readAndroidDeviceDisplays(this.adbFactory.create(device), signal);
+          if (displays) {
+            device.displays = displays;
+          }
+        }),
+      );
       perf.endOperation("avdNameResolution");
 
       return { devices: runningDevices, diagnostics };

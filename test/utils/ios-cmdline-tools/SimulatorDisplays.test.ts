@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseSimulatorDisplays,
+  simulatorDeviceDisplays,
   selectLiveSimulatorDisplay,
 } from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
@@ -21,6 +22,19 @@ describe("simctl display discovery", () => {
     expect(selectLiveSimulatorDisplay(displays, 1398, 2034)?.name).toBe("primary");
     expect(selectLiveSimulatorDisplay(displays, 2034, 1398)?.name).toBe("primary");
     expect(selectLiveSimulatorDisplay(displays, 2007, 2853)?.name).toBe("primary-1");
+    expect(
+      simulatorDeviceDisplays(displays, "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo"),
+    ).toEqual({
+      panels: [
+        { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
+        { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
+      ],
+      postures: ["unknown"],
+    });
+    expect(simulatorDeviceDisplays(displays)?.panels.map((panel) => panel.role)).toEqual([
+      "unknown",
+      "unknown",
+    ]);
   });
 
   test("parses one Integrated screen when the LCD-1 block is removed", () => {
@@ -28,6 +42,7 @@ describe("simctl display discovery", () => {
     const displays = parseSimulatorDisplays(singleEnumerate);
     expect(displays).toEqual([{ id: "1", name: "primary", width: 1398, height: 2034, uiScale: 3 }]);
     expect(selectLiveSimulatorDisplay(displays, 2007, 2853)).toBeNull();
+    expect(simulatorDeviceDisplays(displays)).toBeUndefined();
   });
 
   test("rejects an unknown or ambiguous live size", () => {

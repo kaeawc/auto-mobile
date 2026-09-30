@@ -1,5 +1,6 @@
 import type { Platform } from "../models";
 import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
+import { observeMissingDevice } from "./missingDeviceLiveness";
 
 export type DisconnectCandidateIncarnation = number | string;
 
@@ -53,7 +54,6 @@ export interface DisconnectMonitorEvaluationInput {
   candidateIncarnations?: Map<string, DisconnectCandidateIncarnation>;
   deviceDisconnectMissIncarnations?: Map<string, DisconnectCandidateIncarnation>;
   forceDisconnectedDeviceIds?: Set<string>;
-  missThreshold: number;
 }
 
 /**
@@ -124,7 +124,7 @@ export function evaluateDeviceDisconnects(
   const deviceDisconnectMissIncarnations =
     input.deviceDisconnectMissIncarnations ?? new Map<string, number>();
   const clearMiss = (deviceId: string): void => {
-    input.deviceDisconnectMisses.delete(deviceId);
+    observeMissingDevice(input.deviceDisconnectMisses, deviceId, "present");
     deviceDisconnectMissIncarnations.delete(deviceId);
   };
 
@@ -156,6 +156,9 @@ export function evaluateDeviceDisconnects(
     input.succeededPlatforms.size === 0 &&
     (input.succeededSources?.size ?? 0) === 0
   ) {
+    for (const deviceId of input.candidateDeviceIds) {
+      clearMiss(deviceId);
+    }
     return { disconnected, missed, skippedAllDiscoveryFailed: true };
   }
 
@@ -185,24 +188,32 @@ export function evaluateDeviceDisconnects(
       input.candidatePlatforms.get(deviceId) ??
       (forceDisconnectedDeviceIds.has(deviceId) ? "android" : undefined);
     if (!platform || !didSourceSucceedForDevice(input, platform, deviceId)) {
-      clearMiss(deviceId);
+      observeMissingDevice(input.deviceDisconnectMisses, deviceId, "source-unavailable");
+      deviceDisconnectMissIncarnations.delete(deviceId);
       continue;
     }
 
     const candidateIncarnation = candidateIncarnations.get(deviceId);
+    const countedIncarnation = deviceDisconnectMissIncarnations.get(deviceId);
     const priorMisses =
-      candidateIncarnation === deviceDisconnectMissIncarnations.get(deviceId)
+      countedIncarnation === undefined || candidateIncarnation === countedIncarnation
         ? (input.deviceDisconnectMisses.get(deviceId) ?? 0)
         : 0;
-    const misses = Math.min(priorMisses + 1, input.missThreshold);
-    input.deviceDisconnectMisses.set(deviceId, misses);
+    if (priorMisses === 0) {
+      input.deviceDisconnectMisses.delete(deviceId);
+    }
+    const { misses, confirmedGone } = observeMissingDevice(
+      input.deviceDisconnectMisses,
+      deviceId,
+      "missing",
+    );
     if (candidateIncarnation === undefined) {
       deviceDisconnectMissIncarnations.delete(deviceId);
     } else {
       deviceDisconnectMissIncarnations.set(deviceId, candidateIncarnation);
     }
     missed.push({ deviceId, misses });
-    if (misses >= input.missThreshold) {
+    if (confirmedGone) {
       disconnected.push(deviceId);
     }
   }

@@ -185,6 +185,7 @@ import {
   selectOfflineRecoveryCandidates,
   type DisconnectCandidateIncarnation,
 } from "./disconnectMonitor";
+import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
@@ -223,7 +224,7 @@ const HTTP_SESSION_IDLE_TIMEOUT_MS = 30 * 60_000;
 type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; error: string };
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
-const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
+const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // Upper bound on how long graceful shutdown waits for in-flight best-effort DB
 // writes to quiesce before closing the connection (issue #2792). Best-effort
@@ -552,6 +553,7 @@ export class Daemon {
       sessionManager: this.sessionManager,
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
+      missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
       deviceSessionRepository: this.deviceSessionRepository,
       releaseSessionForDisconnectedDevice: (sessionId, _deviceId, releaseReason, shouldCommit) =>
@@ -2357,7 +2359,6 @@ export class Daemon {
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,
             forceDisconnectedDeviceIds: this.forceDisconnectedDeviceIds,
-            missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
           });
 
           if (disconnectResult.skippedAllDiscoveryFailed) {

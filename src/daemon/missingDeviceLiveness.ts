@@ -2,7 +2,6 @@ import { logger } from "../utils/logger";
 import { Mutex } from "async-mutex";
 import type { BootedDevice, Platform } from "../models";
 import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
-import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
 import { resetBootedDevicesResourceCache } from "../server/bootedDeviceResources";
 import { resetAndroidDeviceImageResourceCache } from "../server/deviceImageResources";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
@@ -10,7 +9,30 @@ import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discov
 import type { PooledDevice, SessionRecoveryPreparation } from "./devicePool";
 import type { IdentityComparison } from "../devices/deviceIdentityEvidence";
 
-const REFRESH_MISSING_DEVICE_MISS_THRESHOLD = 2;
+/** Consecutive successful discovery sweeps required to confirm absence. */
+export const MISSING_DEVICE_MISS_THRESHOLD = 3;
+
+export function classifyMissingDeviceObservation(
+  sourceSucceeded: boolean,
+  devicePresent: boolean,
+): "present" | "missing" | "source-unavailable" {
+  return !sourceSucceeded ? "source-unavailable" : devicePresent ? "present" : "missing";
+}
+
+/** A failed source supplies no evidence of absence and breaks the miss streak. */
+export function observeMissingDevice(
+  missesByDevice: Map<string, number>,
+  deviceId: string,
+  observation: "present" | "missing" | "source-unavailable",
+): { misses: number; confirmedGone: boolean } {
+  if (observation !== "missing") {
+    missesByDevice.delete(deviceId);
+    return { misses: 0, confirmedGone: false };
+  }
+  const misses = Math.min((missesByDevice.get(deviceId) ?? 0) + 1, MISSING_DEVICE_MISS_THRESHOLD);
+  missesByDevice.set(deviceId, misses);
+  return { misses, confirmedGone: misses >= MISSING_DEVICE_MISS_THRESHOLD };
+}
 type IdentityObservation = Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
 
 export interface MissingDeviceEvictionOptions {
@@ -95,7 +117,7 @@ export class MissingDeviceLiveness {
 
     for (const device of Array.from(this.pool.getDevices().values())) {
       if (bootedDeviceIds.has(device.id)) {
-        this.pool.getRefreshMissingDeviceMisses().delete(device.id);
+        observeMissingDevice(this.pool.getRefreshMissingDeviceMisses(), device.id, "present");
         continue;
       }
       if (device.sessionId) {
@@ -117,25 +139,27 @@ export class MissingDeviceLiveness {
           device.id,
         )
       ) {
-        this.pool.getRefreshMissingDeviceMisses().delete(device.id);
+        observeMissingDevice(
+          this.pool.getRefreshMissingDeviceMisses(),
+          device.id,
+          "source-unavailable",
+        );
         logger.warn(
           `Device ${device.id} retained: ${device.platform} discovery did not succeed this refresh`,
         );
         continue;
       }
-      // Discovery succeeded but returned no devices for this platform at all.
-      // Tolerate brief reboot/boot races with a small consecutive-miss threshold
-      // before removing.
-      if (!bootedPlatforms.has(device.platform)) {
-        const misses = (this.pool.getRefreshMissingDeviceMisses().get(device.id) ?? 0) + 1;
-        this.pool.getRefreshMissingDeviceMisses().set(device.id, misses);
-        logger.warn(
-          `Device ${device.id} missing from ${device.platform} refresh discovery ` +
-            `(miss ${misses}/${REFRESH_MISSING_DEVICE_MISS_THRESHOLD}); retaining until confirmed`,
-        );
-        if (misses < REFRESH_MISSING_DEVICE_MISS_THRESHOLD) {
-          continue;
-        }
+      const { misses, confirmedGone } = observeMissingDevice(
+        this.pool.getRefreshMissingDeviceMisses(),
+        device.id,
+        "missing",
+      );
+      logger.warn(
+        `Device ${device.id} missing from ${device.platform} refresh discovery ` +
+          `(miss ${misses}/${MISSING_DEVICE_MISS_THRESHOLD}, platform empty=${!bootedPlatforms.has(device.platform)})`,
+      );
+      if (!confirmedGone) {
+        continue;
       }
 
       if (this.pool.shouldRebootDisconnectedAndroidDevice(device)) {
@@ -214,20 +238,32 @@ export class MissingDeviceLiveness {
     }
 
     const discovery = snapshot ?? (await this.takeFreshPresenceDiscovery(device.platform));
-    if (!discovery.succeededPlatforms.has(device.platform)) {
+    const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
+    const observation = classifyMissingDeviceObservation(
+      didSourceSucceedForDevice(discovery, device.platform, device.id),
+      bootedDevice !== undefined,
+    );
+    if (observation === "source-unavailable") {
+      observeMissingDevice(
+        this.pool.getRefreshMissingDeviceMisses(),
+        device.id,
+        "source-unavailable",
+      );
       logger.warn(
         `Retaining ${device.id}: ${device.platform} discovery did not succeed during assignment liveness check`,
       );
       return true;
     }
 
-    const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
-    if (bootedDevice) {
+    if (observation === "present" && bootedDevice) {
       return this.hasReusableSerial(device)
         ? await this.reconcileDiscoveredPooledDevice(device, bootedDevice, assignmentLockHeld)
         : this.confirmLivePooledDevice(device);
     }
 
+    // Assignment must reject an absent target now: handing it to a session
+    // would fail immediately. The issue explicitly permits this single-shot
+    // confirmation while background refresh and monitor sweeps are debounced.
     if (deferRecovery && this.pool.shouldRebootDisconnectedAndroidDevice(device)) {
       this.startDetachedRecoveringEviction(device, "not present in adb devices");
       return false;
@@ -270,15 +306,15 @@ export class MissingDeviceLiveness {
   }
 
   /**
-   * One cache-busted discovery sweep for presence checks. The adb device-list
-   * cache is reset so the answer reflects the transport right now, not a list up
-   * to one TTL old.
+   * One fresh discovery sweep for presence checks. Bypass the Android device-list
+   * cache for this read without invalidating other callers' cached snapshot.
    */
   async takeFreshPresenceDiscovery(platform: Platform): Promise<BootedDeviceDiscovery> {
-    resetAdbDeviceListCache();
     resetBootedDevicesResourceCache();
     resetAndroidDeviceImageResourceCache();
-    return await this.pool.getDeviceManager().getBootedDevicesDetailed(platform);
+    return await this.pool
+      .getDeviceManager()
+      .getBootedDevicesDetailed(platform, { bypassAndroidDeviceListCache: true });
   }
 
   /**

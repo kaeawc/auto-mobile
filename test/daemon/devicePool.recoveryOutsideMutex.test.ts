@@ -78,6 +78,8 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
   test("refresh prune does not block allocation while the emulator reboots", async () => {
     // Discovery succeeds for Android but no longer lists the emulator.
     deviceManager.parkRecoveryStart = true;
+    await pool.refreshDevices();
+    await pool.refreshDevices();
     let refreshSettled = false;
     const refresh = pool.refreshDevices().finally(() => {
       refreshSettled = true;
@@ -109,6 +111,8 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
 
   test("the detached recovery still reboots the missing emulator", async () => {
     deviceManager.parkRecoveryStart = true;
+    await pool.refreshDevices();
+    await pool.refreshDevices();
     await pool.refreshDevices();
     await flushMicrotasks();
     expect(deviceManager.parkedRecoveryStarts).toHaveLength(1);

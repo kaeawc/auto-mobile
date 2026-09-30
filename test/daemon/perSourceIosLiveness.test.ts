@@ -324,7 +324,6 @@ describe("disconnect monitor ages out only devices whose own source succeeded (#
         [PHYSICAL_UDID, "ios"],
         [SIMULATOR_UDID, "ios"],
       ]),
-      missThreshold: 2,
     });
     return result.missed.map((entry) => entry.deviceId).sort();
   };

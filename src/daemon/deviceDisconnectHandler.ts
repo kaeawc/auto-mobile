@@ -7,6 +7,7 @@ import type { BootedDevice, DeviceInfo } from "../models";
 import type { DeviceRecoveryPolicy } from "./poolConfig";
 import type { PooledDevice } from "./devicePool";
 import type { EmulatorLossDetectionPath } from "./emulatorLossIncident";
+import { classifyMissingDeviceObservation } from "./missingDeviceLiveness";
 
 export type CurrentDisconnectStatus = "current" | "recovered" | "unknown";
 /**
@@ -248,17 +249,20 @@ export class DeviceDisconnectHandler {
       resetBootedDevicesResourceCache();
       resetAndroidDeviceImageResourceCache();
       const discovery = await this.pool.getDeviceManager().getBootedDevicesDetailed("android");
-      if (!discovery.succeededPlatforms.has("android")) {
+      const observation = classifyMissingDeviceObservation(
+        discovery.succeededPlatforms.has("android"),
+        discovery.devices.some((candidate) =>
+          this.pool.androidRediscoveryMatches(candidate, device.id, avdName),
+        ),
+      );
+      if (observation === "source-unavailable") {
         logger.warn(
           `[DevicePool] Retained ${device.id}: Android discovery failed during stale-disconnect check`,
         );
         return "unknown";
       }
-      if (
-        !discovery.devices.some((candidate) =>
-          this.pool.androidRediscoveryMatches(candidate, device.id, avdName),
-        )
-      ) {
+      // A stale-signal check is already downstream of the monitor's debounce.
+      if (observation === "missing") {
         return "not-rediscovered";
       }
       logger.info(

@@ -2,10 +2,18 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import {
   MissingDeviceLiveness,
+  MISSING_DEVICE_MISS_THRESHOLD,
   type MissingDeviceLivenessPoolPort,
 } from "../../src/daemon/missingDeviceLiveness";
+import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import type { PooledDevice } from "../../src/daemon/devicePool";
-import type { PlatformDeviceManager, BootedDeviceDiscovery } from "../../src/devices/deviceUtils";
+import type {
+  PlatformDeviceManager,
+  BootedDeviceDiscovery,
+  BootedDeviceDiscoveryOptions,
+} from "../../src/devices/deviceUtils";
+import { AdbClient, resetAdbClientCaches } from "../../src/utils/android-cmdline-tools/AdbClient";
+import type { ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
 
@@ -140,11 +148,155 @@ function emptyRefresh(h: ReturnType<typeof harness>) {
 }
 
 describe("MissingDeviceLiveness", () => {
-  test("retains one empty refresh then evicts on the second", async () => {
+  test("fresh presence bypasses only its own adb read while a concurrent caller keeps the cached list", async () => {
+    resetAdbClientCaches();
+    const h = harness();
+    const freshRead = Promise.withResolvers<ExecResult>();
+    const optionsSeen: (BootedDeviceDiscoveryOptions | undefined)[] = [];
+    let adbReads = 0;
+    const exec = async (): Promise<ExecResult> => {
+      adbReads++;
+      if (adbReads === 2) {
+        return freshRead.promise;
+      }
+      const stdout = `List of devices attached\nemulator-${adbReads === 1 ? 5554 : 5556}\tdevice\n`;
+      return {
+        stdout,
+        stderr: "",
+        toString: () => stdout,
+        trim: () => stdout.trim(),
+        includes: (searchString: string) => stdout.includes(searchString),
+      };
+    };
+    const livenessAdb = new AdbClient(null, exec, null, undefined, h.timer);
+    const normalAdb = new AdbClient(null, exec, null, undefined, h.timer);
+    h.port.getDeviceManager = () =>
+      ({
+        getBootedDevicesDetailed: async (_platform, options) => {
+          optionsSeen.push(options);
+          const devices = await livenessAdb.getBootedAndroidDevices({
+            bypassCache: options?.bypassAndroidDeviceListCache,
+          });
+          return { devices, succeededPlatforms: new Set(["android"]) };
+        },
+      }) as PlatformDeviceManager;
+
+    try {
+      expect((await normalAdb.getBootedAndroidDevices()).map((device) => device.deviceId)).toEqual([
+        "emulator-5554",
+      ]);
+      const presence = h.liveness.takeFreshPresenceDiscovery("android");
+      await flushUntil(() => adbReads === 2);
+      expect(optionsSeen).toEqual([{ bypassAndroidDeviceListCache: true }]);
+      expect((await normalAdb.getBootedAndroidDevices()).map((device) => device.deviceId)).toEqual([
+        "emulator-5554",
+      ]);
+      expect(adbReads).toBe(2);
+
+      const stdout = "List of devices attached\nemulator-5556\tdevice\n";
+      freshRead.resolve({
+        stdout,
+        stderr: "",
+        toString: () => stdout,
+        trim: () => stdout.trim(),
+        includes: (searchString: string) => stdout.includes(searchString),
+      });
+      expect((await presence).devices.map((device) => device.deviceId)).toEqual(["emulator-5556"]);
+      expect((await normalAdb.getBootedAndroidDevices()).map((device) => device.deviceId)).toEqual([
+        "emulator-5556",
+      ]);
+      expect(adbReads).toBe(2);
+    } finally {
+      freshRead.resolve({
+        stdout: "List of devices attached\n",
+        stderr: "",
+        toString: () => "",
+        trim: () => "",
+        includes: () => false,
+      });
+      resetAdbClientCaches();
+    }
+  });
+
+  test("refresh and monitor share one consecutive-miss streak", async () => {
     const h = harness();
     h.devices.set(deviceId, pooled());
     expect(await emptyRefresh(h)).toBe(0);
     expect(h.misses.get(deviceId)).toBe(1);
+
+    h.timer.advanceTime(5_000);
+    const monitor = evaluateDeviceDisconnects({
+      deviceDisconnectMisses: h.misses,
+      confirmedDisconnectedDeviceIds: new Set(),
+      bootedDeviceIds: new Set(),
+      candidateDeviceIds: new Set([deviceId]),
+      succeededPlatforms: new Set(["android"]),
+      candidatePlatforms: new Map([[deviceId, "android"]]),
+      candidateIncarnations: new Map([[deviceId, 1]]),
+      deviceDisconnectMissIncarnations: new Map(),
+    });
+    expect(monitor.missed).toEqual([{ deviceId, misses: 2 }]);
+    expect(monitor.disconnected).toEqual([]);
+    expect(h.devices.has(deviceId)).toBe(true);
+
+    expect(await emptyRefresh(h)).toBe(1);
+    expect(h.devices.has(deviceId)).toBe(false);
+  });
+
+  test.each([false, true])(
+    "monitor and refresh confirm the same miss with another platform device present=%s",
+    async (platformHasAnotherDevice) => {
+      const h = harness();
+      h.devices.set(deviceId, pooled());
+      const monitorMisses = new Map<string, number>();
+      const bootedPlatforms = new Set<"android">(platformHasAnotherDevice ? ["android"] : []);
+      const evaluate = (sourceSucceeded: boolean) =>
+        evaluateDeviceDisconnects({
+          deviceDisconnectMisses: monitorMisses,
+          confirmedDisconnectedDeviceIds: new Set(),
+          bootedDeviceIds: new Set(),
+          candidateDeviceIds: new Set([deviceId]),
+          succeededPlatforms: new Set(sourceSucceeded ? ["android" as const] : []),
+          candidatePlatforms: new Map([[deviceId, "android" as const]]),
+        });
+      const refresh = (sourceSucceeded: boolean) =>
+        h.liveness.removeMissingDevicesForRefresh(
+          false,
+          1,
+          new Set(),
+          bootedPlatforms,
+          new Set(sourceSucceeded ? ["android" as const] : []),
+        );
+
+      for (let miss = 1; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {
+        h.timer.advanceTime(5_000);
+        expect(evaluate(true).disconnected).toEqual([]);
+        expect(await refresh(true)).toBe(0);
+        expect(h.devices.has(deviceId)).toBe(true);
+      }
+      expect(evaluate(false).disconnected).toEqual([]);
+      expect(await refresh(false)).toBe(0);
+      expect(monitorMisses.has(deviceId)).toBe(false);
+      expect(h.misses.has(deviceId)).toBe(false);
+      for (let miss = 1; miss < MISSING_DEVICE_MISS_THRESHOLD; miss++) {
+        h.timer.advanceTime(5_000);
+        expect(evaluate(true).disconnected).toEqual([]);
+        expect(await refresh(true)).toBe(0);
+      }
+      h.timer.advanceTime(5_000);
+      expect(evaluate(true).disconnected).toEqual([deviceId]);
+      expect(await refresh(true)).toBe(1);
+      expect(h.devices.has(deviceId)).toBe(false);
+    },
+  );
+
+  test("retains two empty refreshes then evicts on the third", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    expect(await emptyRefresh(h)).toBe(0);
+    expect(h.misses.get(deviceId)).toBe(1);
+    expect(await emptyRefresh(h)).toBe(0);
+    expect(h.misses.get(deviceId)).toBe(2);
     expect(await emptyRefresh(h)).toBe(1);
     expect(h.devices.has(deviceId)).toBe(false);
     expect(h.calls).toEqual(["record", "finish preparation", "complete", "remove", "settle"]);

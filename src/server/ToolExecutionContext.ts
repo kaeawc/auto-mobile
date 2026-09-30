@@ -31,6 +31,9 @@ import type { ProxySetupErrorCategory, ProxySetupResult } from "../utils/interfa
  */
 const pendingSetupTimings = new Map<string, TimingData>();
 
+const MAX_DEVICE_ACQUISITION_SETUP_ITERATIONS = 5;
+const DEVICE_ACQUISITION_SETUP_DEADLINE_MS = 300_000;
+
 /**
  * Store setup timing for a device.
  * Called after accessibility service setup completes.
@@ -143,23 +146,15 @@ export async function createToolExecutionContext(
   // readiness. Waiting for its marker *inside* trackSessionSetup therefore
   // forms a cycle. Keep marker-only waits outside the tracked mutation and
   // retry if a new acquisition begins while setup is being admitted.
-  do {
-    await awaitPendingDeviceAcquisitionReadiness(session, signal);
-    await awaitReadinessWork(
-      sessionManager.trackSessionSetup(session, () =>
-        runWithAbortSignal(signal, () =>
-          setupSession(
-            session,
-            existingSession === session,
-            sessionManager,
-            sessionOptions,
-            signal,
-          ),
-        ),
+  const timer = sessionManager.getTimer();
+  const deadline = timer.now() + DEVICE_ACQUISITION_SETUP_DEADLINE_MS;
+  await runDeviceAcquisitionSetupLoop(session, signal, timer, deadline, () =>
+    sessionManager.trackSessionSetup(session, () =>
+      runWithAbortSignal(signal, () =>
+        setupSession(session, existingSession === session, sessionManager, sessionOptions, signal),
       ),
-      signal,
-    );
-  } while (await awaitPendingDeviceAcquisitionReadiness(session, signal));
+    ),
+  );
   ensureSessionIsCurrent(session, sessionManager);
 
   return {
@@ -169,6 +164,54 @@ export async function createToolExecutionContext(
     sessionManager,
     devicePool,
   };
+}
+
+async function runDeviceAcquisitionSetupLoop(
+  session: Session,
+  signal: AbortSignal | undefined,
+  timer: Timer,
+  deadline: number,
+  setup: () => Promise<void>,
+): Promise<void> {
+  const deviceId = session.assignedDevice;
+  let iteration = 0;
+  for (;;) {
+    if (iteration > 0) {
+      logger.warn(
+        `[ToolExecutionContext] Re-entering device acquisition readiness setup for deviceId=${deviceId}, iteration=${iteration + 1}`,
+      );
+    }
+    iteration += 1;
+    await awaitReadinessWork(awaitPendingDeviceAcquisitionReadiness(session, signal), signal);
+    await awaitReadinessWork(setup(), signal);
+    const acquisitionObserved = await awaitReadinessWork(
+      awaitPendingDeviceAcquisitionReadiness(session, signal),
+      signal,
+    );
+    if (!acquisitionObserved) {
+      break;
+    }
+    if (timer.now() >= deadline) {
+      throw deviceAcquisitionSetupBoundError("deadline", deviceId);
+    }
+    if (iteration >= MAX_DEVICE_ACQUISITION_SETUP_ITERATIONS) {
+      throw deviceAcquisitionSetupBoundError("max-iterations", deviceId, iteration);
+    }
+  }
+}
+
+function deviceAcquisitionSetupBoundError(
+  bound: "max-iterations" | "deadline",
+  deviceId: string,
+  iterations?: number,
+): ActionableError {
+  const detail =
+    bound === "max-iterations"
+      ? `iterations exhausted after ${iterations} setup passes`
+      : `elapsed deadline of ${DEVICE_ACQUISITION_SETUP_DEADLINE_MS}ms reached`;
+  return new ActionableError(
+    `Device acquisition readiness setup ${detail} for device ${deviceId}; repeated device-acquisition readiness markers on the device readiness key prevented setup from converging`,
+  );
 }
 
 async function awaitPendingDeviceAcquisitionReadiness(

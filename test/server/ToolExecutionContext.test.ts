@@ -1635,6 +1635,83 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(2);
   });
 
+  test("bounds repeated device acquisition readiness setup iterations", async () => {
+    let setupCalls = 0;
+    let setupPasses = 0;
+    const readinessKey = deviceReadinessLockKey("android", "device-1");
+    const trackSessionSetup = sessionManager.trackSessionSetup.bind(sessionManager);
+    sessionManager.trackSessionSetup = (session, setup) =>
+      trackSessionSetup(session, async () => {
+        await setup();
+        setupPasses += 1;
+        let resolveAcquisition!: () => void;
+        const acquisitionDone = new Promise<void>((resolve) => {
+          resolveAcquisition = resolve;
+        });
+        void trackDeviceAcquisitionReadiness(readinessKey, () => acquisitionDone);
+        fakeTimer.setTimeout(resolveAcquisition, 1);
+      });
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-acquisition-loop-bound", "device-1", "android");
+
+    await expect(
+      createToolExecutionContext("session-acquisition-loop-bound", sessionManager, devicePool, {
+        ...sessionOptions,
+        deviceReadiness: "automationReady",
+      }),
+    ).rejects.toThrow(/iterations exhausted.*device-1/i);
+    expect(setupPasses).toBe(5);
+  });
+
+  test("bounds device acquisition setup by elapsed fake time", async () => {
+    let setupCalls = 0;
+    let setupPasses = 0;
+    const readinessKey = deviceReadinessLockKey("android", "device-1");
+    const trackSessionSetup = sessionManager.trackSessionSetup.bind(sessionManager);
+    sessionManager.trackSessionSetup = (session, setup) =>
+      trackSessionSetup(session, async () => {
+        await setup();
+        setupPasses += 1;
+        if (setupPasses === 2) {
+          fakeTimer.advanceTime(300_001);
+        }
+        let resolveAcquisition!: () => void;
+        const acquisitionDone = new Promise<void>((resolve) => {
+          resolveAcquisition = resolve;
+        });
+        void trackDeviceAcquisitionReadiness(readinessKey, () => acquisitionDone);
+        fakeTimer.setTimeout(resolveAcquisition, 1);
+      });
+    setDeviceReadinessProxyDriverProviderForTesting(() => ({
+      resetSetupState: () => {},
+      setup: async () => {
+        setupCalls += 1;
+        return { success: true, message: "ok" };
+      },
+      waitForConnection: async () => true,
+      isInstalled: async () => true,
+      isVersionCompatible: async () => true,
+    }));
+    await sessionManager.createSession("session-acquisition-deadline", "device-1", "android");
+
+    await expect(
+      createToolExecutionContext("session-acquisition-deadline", sessionManager, devicePool, {
+        ...sessionOptions,
+        deviceReadiness: "automationReady",
+      }),
+    ).rejects.toThrow(/deadline.*device-1/i);
+    expect(setupCalls).toBe(1);
+  });
+
   test("should not run accessibility setup for existing sessions", async () => {
     let setupCalls = 0;
     AndroidCtrlProxyManager.getInstance = () =>

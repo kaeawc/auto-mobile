@@ -11,6 +11,7 @@ export type SwipeDirection = "up" | "down" | "left" | "right";
 export type GestureType = "swipeFingerTowardsDirection" | "scrollTowardsDirection";
 
 export interface SwipeOnOptions {
+  display?: string;
   // Include system insets (status/navigation bars)
   includeSystemInsets?: boolean; // Include status/navigation bars (default false)
 

@@ -21,6 +21,8 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
+import { logger } from "../../utils/logger";
 import { serverConfig } from "../../utils/ServerConfig";
 import {
   DEFAULT_VISION_CONFIG,
@@ -48,6 +50,7 @@ const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
 const IOS_HIERARCHY_REFRESH_TIMEOUT_MS = 15000;
 
 interface DragAndDropDeps {
+  lastRenderedObservation?: RenderedObservationReader;
   hierarchyCapture?: HierarchyCapture;
   selector?: ElementSelector;
   visionConfig?: VisionFallbackConfig;
@@ -56,6 +59,7 @@ interface DragAndDropDeps {
 }
 
 export class DragAndDrop extends BaseVisualChange {
+  private readonly lastRenderedObservation?: RenderedObservationReader;
   private selector: ElementSelector;
   private hierarchyCapture: HierarchyCapture;
   private geometry: ElementGeometry;
@@ -71,6 +75,7 @@ export class DragAndDrop extends BaseVisualChange {
     deps: DragAndDropDeps = {},
   ) {
     super(device, adb, timer);
+    this.lastRenderedObservation = deps.lastRenderedObservation;
     this.selector = deps.selector ?? new ResolverElementSelector();
     this.hierarchyCapture =
       deps.hierarchyCapture ??
@@ -83,11 +88,90 @@ export class DragAndDrop extends BaseVisualChange {
     this.visionAnalyzer = deps.visionAnalyzer;
   }
 
+  private async executeOnAndroidDisplay(
+    options: DragAndDropOptions,
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
+    signal?: AbortSignal,
+  ): Promise<DragAndDropResult> {
+    const hierarchy = target.observation.viewHierarchy;
+    if (!hierarchy) {
+      throw new ActionableError("Selected display has no view hierarchy");
+    }
+    const select = (value: DragAndDropOptions["source"]) =>
+      value.elementId
+        ? this.selector.selectByResourceId(hierarchy, value.elementId)
+        : this.selector.selectByText(hierarchy, value.text ?? "");
+    const source = select(options.source).element;
+    const destination = select(options.target).element;
+    if (!source || !destination) {
+      throw new ActionableError("Drag target not found on selected display");
+    }
+    const start = this.geometry.getElementCenter(source);
+    const end = this.geometry.getElementCenter(destination);
+    const duration = options.dragDurationMs ?? 600;
+    target.assertCurrent();
+    await this.adb.executeCommand(
+      `shell input -d ${target.displayId} touchscreen draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
+    const after = await this.observeScreen.execute({
+      display: options.display,
+      freshness: "fresh",
+      signal,
+    });
+    return {
+      success: true,
+      duration,
+      distance: Math.hypot(end.x - start.x, end.y - start.y),
+      observation: after,
+    };
+  }
+
+  private async executeExplicitDisplay(
+    options: DragAndDropOptions,
+    signal?: AbortSignal,
+  ): Promise<DragAndDropResult | undefined> {
+    if (options.display !== undefined) {
+      try {
+        if (options.pressDurationMs !== undefined) {
+          throw new ActionableError("pressDurationMs is not supported with `display` yet");
+        }
+        if (options.holdDurationMs !== undefined) {
+          throw new ActionableError("holdDurationMs is not supported with `display` yet");
+        }
+        const target = await prepareTargetDisplayAction(
+          this.device,
+          options.display,
+          this.observeScreen,
+          this.adb,
+          this.lastRenderedObservation,
+          signal,
+        );
+        if (this.device.platform === "android") {
+          return await this.executeOnAndroidDisplay(options, target, signal);
+        }
+      } catch (error) {
+        logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
+        return { success: false, duration: 0, distance: 0, error: errorMessage(error) };
+      }
+    }
+    return undefined;
+  }
+
   async execute(
     options: DragAndDropOptions,
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<DragAndDropResult> {
+    if (options.display !== undefined) {
+      const result = await this.executeExplicitDisplay(options, signal);
+      if (result) {
+        return result;
+      }
+    }
     const perf = createGlobalPerformanceTracker();
     perf.serial("dragAndDrop");
 

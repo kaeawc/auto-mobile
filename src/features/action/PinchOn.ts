@@ -1,6 +1,7 @@
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
+import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   ActionableError,
   BootedDevice,
@@ -41,6 +42,7 @@ type PinchTarget = {
 };
 
 interface PinchOnDependencies {
+  lastRenderedObservation?: RenderedObservationReader;
   resolver?: Pick<ElementResolver, "resolve">;
   capture?: HierarchyCapture;
   visionConfig?: VisionFallbackConfig;
@@ -49,6 +51,7 @@ interface PinchOnDependencies {
 }
 
 export class PinchOn extends BaseVisualChange {
+  private readonly lastRenderedObservation?: RenderedObservationReader;
   private readonly resolver: Pick<ElementResolver, "resolve">;
   private readonly capture: HierarchyCapture;
   private visionConfig: VisionFallbackConfig;
@@ -57,6 +60,7 @@ export class PinchOn extends BaseVisualChange {
 
   constructor(device: BootedDevice, adb: AdbClient | null = null, deps: PinchOnDependencies = {}) {
     super(device, adb);
+    this.lastRenderedObservation = deps.lastRenderedObservation;
     this.resolver = deps.resolver ?? new ElementResolver();
     this.capture =
       deps.capture ?? createDeviceHierarchyCapture(device, { adbFactory: this.adbFactory });
@@ -84,6 +88,25 @@ export class PinchOn extends BaseVisualChange {
   }
 
   async execute(options: PinchOnOptions, progress?: ProgressCallback): Promise<PinchOnResult> {
+    if (options.display !== undefined) {
+      try {
+        await prepareTargetDisplayAction(
+          this.device,
+          options.display,
+          this.observeScreen,
+          this.adb,
+          this.lastRenderedObservation,
+        );
+        if (this.device.platform === "android") {
+          return this.createErrorResult(
+            "Android CtrlProxy does not expose per-display pinch dispatch; a targeted two-finger gesture requires CtrlProxy displayId support.",
+            options,
+          );
+        }
+      } catch (error) {
+        return this.createErrorResult(errorMessage(error), options);
+      }
+    }
     const perf = createGlobalPerformanceTracker();
     perf.serial("pinchOn");
 

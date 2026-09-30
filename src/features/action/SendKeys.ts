@@ -15,6 +15,7 @@ import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } fro
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
 import type { KeyboardProfileId } from "./keyboardProfiles";
 import { TapOnElement } from "./TapOnElement";
+import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
@@ -173,11 +174,13 @@ export interface SendKeysTargetFocuser {
   focus(
     selector: SendKeysSelector,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<{ success: boolean; error?: string }>;
 }
 
 export interface SendKeysObserver {
   execute(options?: {
+    display?: string;
     signal?: AbortSignal;
     freshness?: HierarchyCaptureRequest["freshness"];
     minTimestamp?: number;
@@ -189,11 +192,20 @@ export interface SendKeysTimestampProvider {
 }
 
 export interface SendKeysDependencies {
+  lastRenderedObservation?: RenderedObservationReader;
   executor?: SendKeysCommandExecutor;
   focuser?: SendKeysTargetFocuser;
   observer?: SendKeysObserver;
   timestampProvider?: SendKeysTimestampProvider;
   timer?: Timer;
+}
+
+interface SendKeysRouting {
+  onDispatch?: () => void;
+  onCommandResult?: (result: SendKeysCommandResult) => void;
+  display?: string;
+  displayId?: number;
+  assertCurrent?: () => void;
 }
 
 export type TextActionResult = {
@@ -1346,13 +1358,15 @@ export class SendKeys {
   private readonly observer: SendKeysObserver;
   private readonly timestampProvider: SendKeysTimestampProvider;
   private readonly timer: Timer;
+  private readonly lastRenderedObservation?: RenderedObservationReader;
 
   constructor(
     private readonly device: BootedDevice,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     dependencies: SendKeysDependencies = {},
   ) {
     this.timer = dependencies.timer ?? defaultTimer;
+    this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
     this.timestampProvider =
       dependencies.timestampProvider ??
@@ -1365,9 +1379,15 @@ export class SendKeys {
     this.focuser =
       dependencies.focuser ??
       ({
-        focus: async (selector, signal) => {
-          const result = await new TapOnElement(device).execute(
-            { ...selector, action: "focus" },
+        focus: async (selector, signal, display) => {
+          const tap = display
+            ? new TapOnElement(device, adbFactory.create(device), {
+                timer: this.timer,
+                lastRenderedObservation: this.lastRenderedObservation,
+              })
+            : new TapOnElement(device);
+          const result = await tap.execute(
+            { ...selector, action: "focus", display },
             undefined,
             signal,
           );
@@ -1381,15 +1401,85 @@ export class SendKeys {
     selector?: SendKeysSelector,
     progress?: ProgressCallback,
     signal?: AbortSignal,
+    display?: string,
   ): Promise<SendKeysResult> {
+    let displayId: number | undefined;
+    let assertCurrent: (() => void) | undefined;
+    if (display !== undefined) {
+      const preflight = this.preflightCommands(commands);
+      if (preflight) {
+        return {
+          success: false,
+          completedCommands: 0,
+          failedIndex: preflight.failure.index,
+          commands: preflight.results,
+          error: preflight.failure.error,
+        };
+      }
+      try {
+        const target = await this.prepareExplicitDisplay(commands, selector, display, signal);
+        displayId = target.displayId;
+        selector = target.selector;
+        assertCurrent = target.assertCurrent;
+      } catch (error) {
+        logger.warn(`sendKeys display routing failed: ${errorMessage(error)}`, error);
+        return {
+          success: false,
+          completedCommands: 0,
+          failedIndex: 0,
+          commands: [],
+          error: errorMessage(error),
+        };
+      }
+    }
     const semanticKey =
       commands.length === 1 && commands[0]?.action === "key" && isSemanticKey(commands[0].key)
         ? commands[0].key
         : undefined;
     if (this.device.platform === "ios" && semanticKey) {
-      return this.executeBoundedIosIme(commands, selector, progress, signal, semanticKey);
+      return this.executeBoundedIosIme(commands, selector, progress, signal, semanticKey, {
+        display,
+        assertCurrent,
+      });
     }
-    return this.executeUnbounded(commands, selector, progress, signal);
+    return this.executeUnbounded(commands, selector, progress, signal, {
+      display,
+      displayId,
+      assertCurrent,
+    });
+  }
+
+  private async prepareExplicitDisplay(
+    commands: SendKeysCommand[],
+    selector: SendKeysSelector | undefined,
+    display: string,
+    signal?: AbortSignal,
+  ): Promise<{ displayId?: number; selector?: SendKeysSelector; assertCurrent: () => void }> {
+    const target = await prepareTargetDisplayAction(
+      this.device,
+      display,
+      this.observer,
+      this.adbFactory.create(this.device),
+      this.lastRenderedObservation,
+      signal,
+    );
+    if (
+      this.device.platform === "android" &&
+      !selector &&
+      commands.some((command) => command.action !== "key" || isSemanticKey(command.key))
+    ) {
+      throw new Error(
+        `sendKeys on display "${target.observation.display.key}" requires a selector for text, clear, or IME keys so the field can be focused on that panel.`,
+      );
+    }
+    if (selector && this.device.platform === "android") {
+      const focused = await this.focuser.focus(selector, signal, display);
+      if (!focused.success) {
+        throw new Error(focused.error ?? "Unable to focus target field");
+      }
+      return { displayId: target.displayId, assertCurrent: target.assertCurrent };
+    }
+    return { displayId: target.displayId, selector, assertCurrent: target.assertCurrent };
   }
 
   private async executeBoundedIosIme(
@@ -1398,6 +1488,7 @@ export class SendKeys {
     progress: ProgressCallback | undefined,
     signal: AbortSignal | undefined,
     key: SendKeysSemanticKey,
+    target: Pick<SendKeysRouting, "display" | "assertCurrent">,
   ): Promise<SendKeysResult> {
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -1410,18 +1501,15 @@ export class SendKeys {
     const deadline = Symbol("IME action deadline");
     let interaction!: Promise<SendKeysResult>;
     const startInteraction = () =>
-      (interaction = this.executeUnbounded(
-        commands,
-        selector,
-        progress,
-        controller.signal,
-        () => {
+      (interaction = this.executeUnbounded(commands, selector, progress, controller.signal, {
+        onDispatch: () => {
           dispatched = true;
         },
-        (result) => {
+        onCommandResult: (result) => {
           actionResult = result;
         },
-      ));
+        ...target,
+      }));
     try {
       try {
         return await raceWithDeadline(startInteraction, {
@@ -1477,8 +1565,7 @@ export class SendKeys {
     selector?: SendKeysSelector,
     progress?: ProgressCallback,
     signal?: AbortSignal,
-    onDispatch?: () => void,
-    onCommandResult?: (result: SendKeysCommandResult) => void,
+    routing: SendKeysRouting = {},
   ): Promise<SendKeysResult> {
     signal?.throwIfAborted();
     const preflight = this.preflightCommands(commands);
@@ -1490,11 +1577,12 @@ export class SendKeys {
       preflight ??
       (focusFailure
         ? { results: [], failure: focusFailure }
-        : await this.executeCommands(commands, progress, signal, onDispatch, onCommandResult));
+        : await this.executeCommands(commands, progress, signal, routing));
     const minTimestamp = preflight || focusFailure ? undefined : actionStartTimestamp;
     signal?.throwIfAborted();
     await progress?.(commands.length, commands.length, "Observing final keyboard input state");
     const observation = await this.observer.execute({
+      display: routing.display,
       signal,
       freshness: "fresh",
       minTimestamp,
@@ -1552,8 +1640,7 @@ export class SendKeys {
     commands: SendKeysCommand[],
     progress?: ProgressCallback,
     signal?: AbortSignal,
-    onDispatch?: () => void,
-    onCommandResult?: (result: SendKeysCommandResult) => void,
+    routing: SendKeysRouting = {},
   ): Promise<{ results: SendKeysCommandResult[]; failure?: SendKeysFailure }> {
     const results: SendKeysCommandResult[] = [];
     for (let index = 0; index < commands.length; index++) {
@@ -1563,10 +1650,10 @@ export class SendKeys {
       if (!command) {
         continue;
       }
-
       let result: SendKeysCommandResult;
       try {
-        result = await this.executeCommand(command, signal, onDispatch);
+        routing.assertCurrent?.();
+        result = await this.executeCommand(command, signal, routing.onDispatch, routing.displayId);
       } catch (error) {
         signal?.throwIfAborted();
         logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
@@ -1578,7 +1665,7 @@ export class SendKeys {
         };
       }
       result.index = index;
-      onCommandResult?.(result);
+      routing.onCommandResult?.(result);
       results.push(result);
       if (!result.success) {
         return {
@@ -1614,15 +1701,33 @@ export class SendKeys {
     };
   }
 
-  private executeCommand(
+  private async executeCommand(
     command: SendKeysCommand,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    displayId?: number,
   ): Promise<SendKeysCommandResult> {
     switch (command.action) {
       case "type":
         return this.executor.type(command, signal);
       case "key":
+        if (displayId !== undefined && !isSemanticKey(command.key)) {
+          const result = await new InputKey(this.device, this.adbFactory).press(
+            command.key,
+            undefined,
+            undefined,
+            command.modifiers,
+            { displayId, signal, onDispatch },
+          );
+          return {
+            index: -1,
+            action: "key",
+            key: command.key,
+            modifiers: command.modifiers,
+            success: result.success,
+            ...(result.error ? { error: result.error } : {}),
+          };
+        }
         return this.executor.key(command, signal, onDispatch);
       case "clear":
         return this.executor.clear(signal).then((result) => ({

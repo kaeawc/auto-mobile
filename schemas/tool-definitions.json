@@ -1158,6 +1158,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
         "source": {
           "type": "object",
           "additionalProperties": false,
@@ -8538,6 +8542,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
         "direction": {
           "description": "Pinch direction",
           "type": "string",
@@ -10411,6 +10419,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
         "selector": {
           "description": "Field to focus once before executing the ordered command sequence",
           "anyOf": [
@@ -12390,6 +12402,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
         "includeSystemInsets": {
           "description": "Use full screen including status/nav bars",
           "type": "boolean"
@@ -12727,6 +12743,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
+        },
         "x": {
           "description": "Absolute screen x coordinate in the native observe coordinate space",
           "type": "number"
@@ -12824,6 +12844,10 @@
               "required": ["textAny"]
             }
           ]
+        },
+        "display": {
+          "description": "Target panel key, role, or active",
+          "type": "string"
         },
         "sibling": {
           "description": "Tap a clickable sibling of the match, e.g. checkbox beside label",

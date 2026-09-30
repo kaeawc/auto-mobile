@@ -99,6 +99,7 @@ import type {
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
+import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   checkAndroidTapHierarchyChange,
   POST_TAP_REFRESH_TIMEOUT_MS,
@@ -173,6 +174,7 @@ function findTapTargetNode(
  * Dependencies for TapOnElement that can be injected for testing.
  */
 interface TapOnElementDependencies {
+  lastRenderedObservation?: RenderedObservationReader;
   hierarchyCapture?: HierarchyCapture;
   visionConfig?: VisionFallbackConfig;
   screenshotCapturer?: ScreenshotCapturer;
@@ -243,6 +245,7 @@ export interface TapPreTapStabilitySeam {
  * Command to tap on UI element containing specified text
  */
 export class TapOnElement extends BaseVisualChange implements TapPreTapStabilitySeam {
+  private readonly lastRenderedObservation?: RenderedObservationReader;
   private finder: ElementFinder;
   private geometry: ElementGeometry;
   private elementParser: ElementParser;
@@ -333,6 +336,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapOnElementDependencies = {},
   ) {
     super(device, adb, options.timer);
+    this.lastRenderedObservation = options.lastRenderedObservation;
     this.waitForCondition =
       options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
     this.finder = new DefaultElementFinder();
@@ -2769,6 +2773,117 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return { element, usedParent: false };
   }
 
+  private async executeOnAndroidDisplay(
+    options: TapOnElementOptions,
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
+    signal?: AbortSignal,
+  ): Promise<TapOnElementResult> {
+    const hierarchy = target.observation.viewHierarchy;
+    if (!hierarchy) {
+      throw new ActionableError("Selected display has no view hierarchy");
+    }
+    const element = this.selectElementOnDisplay(options, hierarchy);
+    if (!element?.bounds) {
+      throw new ActionableError("Element not found on selected display");
+    }
+    const x = Math.round((element.bounds.left + element.bounds.right) / 2);
+    const y = Math.round((element.bounds.top + element.bounds.bottom) / 2);
+    const tap = `shell input -d ${target.displayId} touchscreen tap ${x} ${y}`;
+    target.assertCurrent();
+    if (options.action === "longPress") {
+      await this.adb.executeCommand(
+        `shell input -d ${target.displayId} touchscreen swipe ${x} ${y} ${x} ${y} ${options.duration ?? 800}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+    } else {
+      await this.adb.executeCommand(tap, undefined, undefined, undefined, signal);
+      if (options.action === "doubleTap") {
+        await this.adb.executeCommand(tap, undefined, undefined, undefined, signal);
+      }
+    }
+    const after = await this.observeScreen.execute({
+      display: options.display,
+      freshness: "fresh",
+      signal,
+    });
+    return { success: true, action: options.action, element, observation: after };
+  }
+
+  private selectElementOnDisplay(
+    options: TapOnElementOptions,
+    hierarchy: ViewHierarchyResult,
+  ): Element | undefined {
+    const selectorOptions = {
+      container: options.container,
+      strategy: options.selectionStrategy,
+      index: options.index,
+      intentAction: options.action === "longPress" ? ("long-press" as const) : ("tap" as const),
+    };
+    const selected = options.elementId
+      ? this.elementSelector.selectByResourceId(hierarchy, options.elementId, selectorOptions)
+      : options.testTag
+        ? this.elementSelector.selectByTestTag(hierarchy, options.testTag, selectorOptions)
+        : this.elementSelector.selectByText(
+            hierarchy,
+            options.text ?? options.textAny?.[0] ?? "",
+            selectorOptions,
+          );
+    return selected.element ?? undefined;
+  }
+
+  private async executeOnDisplay(
+    options: TapOnElementOptions,
+    signal?: AbortSignal,
+  ): Promise<TapOnElementResult | undefined> {
+    if (options.display !== undefined) {
+      try {
+        const unsupported = (
+          [
+            "ensureChecked",
+            "sibling",
+            "subtext",
+            "searchUntil",
+            "retryIfNoChange",
+            "ensureTap",
+            "accessibilityLink",
+            "focusFirst",
+            "screenReaderNavigation",
+            "preTapStability",
+          ] as const
+        ).find((key) => options[key] !== undefined);
+        if (unsupported) {
+          throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
+        }
+        if (options.textAny && options.textAny.length !== 1) {
+          throw new ActionableError(
+            "textAny with multiple values is not supported with `display` yet",
+          );
+        }
+        if (options.action === "focus") {
+          throw new ActionableError("focus is not supported with `display` yet");
+        }
+        const target = await prepareTargetDisplayAction(
+          this.device,
+          options.display,
+          this.observeScreen,
+          this.adb,
+          this.lastRenderedObservation,
+          signal,
+        );
+        if (this.device.platform === "android") {
+          return await this.executeOnAndroidDisplay(options, target, signal);
+        }
+      } catch (error) {
+        logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);
+        return this.createErrorResult(options.action, errorMessage(error));
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Execute a tap on text
    * @param options - Command options
@@ -2780,6 +2895,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<TapOnElementResult> {
+    if (options.display !== undefined) {
+      const result = await this.executeOnDisplay(options, signal);
+      if (result) {
+        return result;
+      }
+    }
     if (!options.action) {
       return this.createErrorResult(options.action, "tap on action is required");
     }

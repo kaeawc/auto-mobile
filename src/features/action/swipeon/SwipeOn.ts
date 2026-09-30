@@ -58,11 +58,41 @@ import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { buildContainerFromElement } from "../../../utils/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
+import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
+import { ResolverElementSelector } from "../../utility/ResolverElementSelector";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
+function displaySwipeCoordinates(
+  options: SwipeOnOptions,
+  observation: ObserveResult,
+  bounds?: Element["bounds"],
+): { x1: number; y1: number; x2: number; y2: number } {
+  const rect = bounds ?? {
+    left: 0,
+    top: 0,
+    right: observation.screenSize.width,
+    bottom: observation.screenSize.height,
+  };
+  const centerX = Math.round((rect.left + rect.right) / 2);
+  const centerY = Math.round((rect.top + rect.bottom) / 2);
+  const dx = Math.round((rect.right - rect.left) * 0.6) / 2;
+  const dy = Math.round((rect.bottom - rect.top) * 0.6) / 2;
+  switch (options.direction) {
+    case "left":
+      return { x1: centerX + dx, y1: centerY, x2: centerX - dx, y2: centerY };
+    case "right":
+      return { x1: centerX - dx, y1: centerY, x2: centerX + dx, y2: centerY };
+    case "up":
+      return { x1: centerX, y1: centerY + dy, x2: centerX, y2: centerY - dy };
+    default:
+      return { x1: centerX, y1: centerY - dy, x2: centerX, y2: centerY + dy };
+  }
+}
+
 export class SwipeOn extends BaseVisualChange {
+  private readonly lastRenderedObservation?: RenderedObservationReader;
   private executeGesture: GestureExecutor;
   private finder: ElementFinder;
   private geometry: ElementGeometry;
@@ -86,6 +116,7 @@ export class SwipeOn extends BaseVisualChange {
     dependencies: SwipeOnDependencies = {},
   ) {
     super(device, adb);
+    this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     const parser = dependencies.parser ?? new DefaultElementParser();
     this.finder = dependencies.finder ?? new DefaultElementFinder();
@@ -214,23 +245,126 @@ export class SwipeOn extends BaseVisualChange {
     return candidates;
   }
 
-  async execute(options: SwipeOnOptions, progress?: ProgressCallback): Promise<SwipeOnResult> {
+  private async executeOnAndroidDisplay(
+    options: SwipeOnOptions,
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
+    signal?: AbortSignal,
+  ): Promise<SwipeOnResult> {
+    const observation = target.observation;
+    const bounds = this.selectedDisplayContainerBounds(options, observation);
+    if (options.container && !bounds) {
+      throw new ActionableError("Swipe container not found on selected display");
+    }
+    const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, bounds);
+    const duration = options.duration ?? 300;
+    target.assertCurrent();
+    await this.adb.executeCommand(
+      `shell input -d ${target.displayId} touchscreen swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
+    const after = await this.observeScreen.execute({
+      display: options.display,
+      freshness: "fresh",
+      signal,
+    });
+    return {
+      success: true,
+      targetType: bounds ? "element" : "screen",
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      observation: after,
+    };
+  }
+
+  private selectedDisplayContainerBounds(
+    options: SwipeOnOptions,
+    observation: ObserveResult,
+  ): Element["bounds"] | undefined {
+    if (!options.container || !observation.viewHierarchy) {
+      return undefined;
+    }
+    const selector = new ResolverElementSelector();
+    const selected = options.container.elementId
+      ? selector.selectByResourceId(observation.viewHierarchy, options.container.elementId)
+      : selector.selectByText(observation.viewHierarchy, options.container.text ?? "");
+    return selected.element?.bounds;
+  }
+
+  private async executeExplicitDisplay(
+    options: SwipeOnOptions,
+    signal?: AbortSignal,
+  ): Promise<SwipeOnResult | undefined> {
+    if (options.display !== undefined) {
+      try {
+        const unsupported = (
+          [
+            "lookFor",
+            "focusTarget",
+            "boomerang",
+            "apexPause",
+            "returnSpeed",
+            "speed",
+            "autoTarget",
+            "includeSystemInsets",
+            "scrollMode",
+          ] as const
+        ).find((key) => options[key] !== undefined);
+        if (unsupported) {
+          throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
+        }
+        const target = await prepareTargetDisplayAction(
+          this.device,
+          options.display,
+          this.observeScreen,
+          this.adb,
+          this.lastRenderedObservation,
+          signal,
+        );
+        if (this.device.platform === "android") {
+          return await this.executeOnAndroidDisplay(options, target, signal);
+        }
+      } catch (error) {
+        logger.warn(`swipeOn display routing failed: ${errorMessage(error)}`, error);
+        return this.createErrorResult(errorMessage(error));
+      }
+    }
+    return undefined;
+  }
+
+  async execute(
+    options: SwipeOnOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<SwipeOnResult> {
+    const targeted = await this.executeExplicitDisplay(options, signal);
+    if (targeted) {
+      return targeted;
+    }
+    return this.executeLegacy(options, progress);
+  }
+
+  private async executeLegacy(
+    options: SwipeOnOptions,
+    progress?: ProgressCallback,
+  ): Promise<SwipeOnResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("swipeOn");
-
-    // Validate options
     const validationError = this.validateOptions(options);
     if (validationError) {
       perf.end();
       return this.createErrorResult(validationError);
     }
-
     const resolvedDirection = resolveSwipeDirection(options);
     if (resolvedDirection.error) {
       perf.end();
       return this.createErrorResult(resolvedDirection.error);
     }
-
     const normalizedOptions: SwipeOnResolvedOptions = {
       ...options,
       direction: resolvedDirection.direction as SwipeDirection,

@@ -19,6 +19,7 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { displayTransitions } from "../observe/DisplayTransition";
+import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   BaseVisualChange,
   STALE_DISPLAY_COORDINATES_ERROR,
@@ -145,6 +146,7 @@ export interface TapAtCoordinateDependencies {
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
   invalidateIosCache?: () => void;
+  lastRenderedObservation?: RenderedObservationReader;
 }
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
@@ -154,6 +156,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly androidCoordinateTap: AndroidCoordinateTapDispatch;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
+  private readonly lastRenderedObservation?: RenderedObservationReader;
 
   constructor(
     device: BootedDevice,
@@ -170,6 +173,50 @@ export class TapAtCoordinate extends BaseVisualChange {
     this.invalidateIosCache =
       dependencies.invalidateIosCache ??
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
+    this.lastRenderedObservation = dependencies.lastRenderedObservation;
+  }
+
+  private async executeOnDisplay(
+    options: TapAtOptions,
+    display: string,
+    signal?: AbortSignal,
+  ): Promise<TapAtResult> {
+    const { observation, displayId, assertCurrent } = await prepareTargetDisplayAction(
+      this.device,
+      display,
+      this.observeScreen,
+      this.adb,
+      this.lastRenderedObservation,
+      signal,
+    );
+    const resolved = this.resolveCoordinates(options, observation);
+    if ("error" in resolved) {
+      return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
+    }
+    assertCurrent();
+    if (this.device.platform === "android") {
+      await this.adb.executeCommand(
+        `shell input -d ${displayId} touchscreen tap ${resolved.x} ${resolved.y}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
+    } else {
+      await this.iosCoordinateTap(
+        this.iosClient,
+        resolved.x,
+        resolved.y,
+        IOS_TAP_DURATION_MS,
+        observation.viewHierarchy?.frameContext,
+      );
+    }
+    const after = await this.observeScreen.execute({
+      display,
+      freshness: "fresh",
+      signal,
+    });
+    return { success: true, x: resolved.x, y: resolved.y, observation: after };
   }
 
   async execute(
@@ -185,6 +232,9 @@ export class TapAtCoordinate extends BaseVisualChange {
 
     try {
       throwIfAborted(signal);
+      if (options.display !== undefined) {
+        return await this.executeOnDisplay(options, options.display, signal);
+      }
       const callerRevision = this.renderedDisplayRevision(this.device.deviceId);
       if (callerRevision !== undefined && callerRevision !== transitionRevision) {
         return {

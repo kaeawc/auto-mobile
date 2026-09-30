@@ -11,6 +11,10 @@ import {
 import { toActionableError } from "../models/ActionableError";
 import { CrashApp } from "../features/action/CrashApp";
 import { LaunchApp } from "../features/action/LaunchApp";
+import {
+  getLaunchObservationPackageNames,
+  isLaunchPermissionDialogObservation,
+} from "../features/action/launchObservationPackages";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
@@ -262,33 +266,15 @@ export function resetInstallAppToolDependencies(): void {
   installAppToolDependencies = null;
 }
 
-/**
- * Extract the package name from `viewHierarchy.foregroundActivity` (issue
- * #6220 follow-up): the raw accessibility signal, in the standard
- * `package/activity` (or `package/.RelativeActivity`) wire format. Mirrors
- * `LaunchApp.packageFromForegroundActivity` — kept as a matching one-liner
- * here (not a shared import) the same way `ObserveScreen.ts` already inlines
- * this exact parse at each of its own call sites — so the attribution driving
- * `observedAppId` here and the match/mismatch decision in `LaunchApp.execute`
- * can never disagree about which app a `foregroundActivity` names.
- */
-function packageFromForegroundActivity(
-  observation: LaunchAppResult["observation"],
-): string | undefined {
-  const foregroundActivity = observation?.viewHierarchy?.foregroundActivity;
-  if (!foregroundActivity) {
-    return undefined;
-  }
-  return foregroundActivity.split("/")[0] || undefined;
-}
-
+/** Report the first identity signal from the shared launch observation resolver. */
 function isVerifiedLaunchObservation(
   appId: string,
-  observedAppId: string | undefined,
   observation: LaunchAppResult["observation"],
 ): boolean {
+  const packageNames = getLaunchObservationPackageNames(observation);
   return (
-    observedAppId === appId &&
+    packageNames.length > 0 &&
+    packageNames.every((packageName) => packageName === appId) &&
     observation?.freshness?.isFresh !== false &&
     observation?.freshness?.verified !== false
   );
@@ -296,17 +282,23 @@ function isVerifiedLaunchObservation(
 
 /**
  * Reason a launch could not be verified (issue #6220), for the case where no
- * foreground application window was observed at all — as opposed to an
- * observed-but-different foreground (an accepted surface, e.g. a permission
- * dialog, which `LaunchApp.execute` already treats as success and this
- * response layer must not second-guess with a misleading `verified: false`).
+ * foreground application window was observed at all, or foreground identity
+ * signals conflict with each other or the requested app.
  */
-type LaunchVerificationFailureReason = "no_observation" | "no_foreground_window";
+type LaunchVerificationFailureReason =
+  | "no_observation"
+  | "no_foreground_window"
+  | `foreground signals disagree: activeWindow=${string}, hierarchy=${string}`
+  | `foreground package ${string} does not match requested ${string}`;
 
 function launchVerificationFailureReason(
+  appId: string,
   observedAppId: string | undefined,
   observation: LaunchAppResult["observation"],
 ): LaunchVerificationFailureReason | undefined {
+  if (isLaunchPermissionDialogObservation(observation)) {
+    return undefined;
+  }
   if (observation === undefined) {
     return "no_observation";
   }
@@ -319,13 +311,25 @@ function launchVerificationFailureReason(
   if (!observedAppId || resolveMissingForegroundWindow(observation) !== undefined) {
     return "no_foreground_window";
   }
+  const activeWindowPackage = observation.activeWindow?.appId;
+  const hierarchyPackage = observation.viewHierarchy?.packageName;
+  if (activeWindowPackage && hierarchyPackage && activeWindowPackage !== hierarchyPackage) {
+    return `foreground signals disagree: activeWindow=${activeWindowPackage}, hierarchy=${hierarchyPackage}`;
+  }
+  if (observedAppId !== appId) {
+    return `foreground package ${observedAppId} does not match requested ${appId}`;
+  }
   return undefined;
 }
 
 function launchVerificationFailureMessage(reason: LaunchVerificationFailureReason): string {
-  return reason === "no_observation"
-    ? "no observation was captured after launch"
-    : "no foreground application window could be observed after launch";
+  if (reason === "no_observation") {
+    return "no observation was captured after launch";
+  }
+  if (reason === "no_foreground_window") {
+    return "no foreground application window could be observed after launch";
+  }
+  return reason;
 }
 
 function buildLaunchMessage(
@@ -363,35 +367,23 @@ function buildLaunchMessage(
  * foreground appId and whether it matched, so a client can skip a confirming
  * `observe` round-trip.
  *
- * `verified` is a three-way signal, never a silent `undefined` when the launch
- * genuinely could not be confirmed (issue #6220): `true` on an exact foreground
- * match against a fresh, verified observation; `false` (with `verifyFailureReason`
- * naming why) when no foreground window could be observed for the launched app at
- * all; and `undefined` only for the deliberately-ambiguous case of an observed,
- * DIFFERENT real foreground (an accepted surface such as a permission dialog,
- * which `LaunchApp.execute` already accepted as success) or a matching-but-stale
- * observation, where asserting `false` would contradict the tool's own success.
  */
-/**
- * Mirror `LaunchApp`'s own reconciliation, which accepts the active window's
- * appId, the view hierarchy's packageName, OR the package parsed out of
- * `viewHierarchy.foregroundActivity` — the one remaining app-identity signal
- * on a hierarchy with no screen dimensions (so `ObserveScreen` never derives
- * `activeWindow`) and no `packageName` (issue #6220 follow-up). `||` (not
- * `??`) throughout so an empty-string appId (no foreground window
- * identified, issue #6220) falls through each fallback rather than being
- * treated as a real observed app.
- */
+/** Report the first reconciled package; verification requires every signal to agree. */
 function resolveLaunchObservedAppId(
   observation: LaunchAppResult["observation"],
 ): string | undefined {
-  return (
-    observation?.activeWindow?.appId ||
-    observation?.viewHierarchy?.packageName ||
-    packageFromForegroundActivity(observation)
-  );
+  return getLaunchObservationPackageNames(observation)[0];
 }
 
+/**
+ * Build the launchApp response from a successful launch result. `verified` is
+ * `true` when every reconciled foreground package matches the requested app in
+ * a fresh, verified observation. It is `false` with a reason when no foreground
+ * window is available, foreground identity signals disagree, or the observed
+ * package differs from the requested app. It remains `undefined` for an
+ * accepted notification permission surface or matching-but-stale observation,
+ * where the surface or freshness prevents confirmation.
+ */
 export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   if (!result.success) {
     // `||` not `??`: an empty-string error must still yield the non-empty
@@ -403,11 +395,12 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   // Only assert verification on an exact foreground match with a fresh, verified
   // observation. `LaunchApp.execute` retries an unverified observation, but this
   // response-level guard preserves the true-or-undefined contract for any direct
-  // caller that supplies one.
-  const isVerified = isVerifiedLaunchObservation(appId, observedAppId, result.observation);
+  // caller that supplies one. Identity conflicts and mismatches are then
+  // surfaced as a structured verification failure below.
+  const isVerified = isVerifiedLaunchObservation(appId, result.observation);
   const verifyFailureReason = isVerified
     ? undefined
-    : launchVerificationFailureReason(observedAppId, result.observation);
+    : launchVerificationFailureReason(appId, observedAppId, result.observation);
   const verified = isVerified ? true : verifyFailureReason ? false : undefined;
 
   return {

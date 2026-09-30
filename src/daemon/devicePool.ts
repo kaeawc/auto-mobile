@@ -1,13 +1,12 @@
 import type { ChildProcess } from "child_process";
+export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
 import {
   SessionManager,
   SessionRecoveryIdentityLossError,
   type Session,
-  type SessionExecutionMetadata,
   type SessionRecoveryTarget,
 } from "./sessionManager";
-import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import { Mutex } from "async-mutex";
 import {
@@ -32,8 +31,6 @@ import {
   getDeviceRecoveryWindowMs,
   type DeviceRecoveryPolicy,
   isDeviceSessionContinuityEnabled,
-  isDevicePoolAutolockEnabled,
-  getDevicePoolTimeoutMs,
 } from "./poolConfig";
 import {
   DeviceSessionRepository,
@@ -85,6 +82,8 @@ import {
 } from "./emulatorLossIncident";
 import { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import { IdleDeviceReaper } from "./idleDeviceReaper";
+import { DeviceAutolockManager, type AutolockClient } from "./deviceAutolockManager";
+export { McpSessionRecoveryInProgressError } from "./deviceAutolockManager";
 import {
   AndroidRebootCoordinator,
   UnconfirmedRecoveryShutdownError,
@@ -104,19 +103,9 @@ import {
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";
 
-type AutolockClient = { mcpSessionId?: string; expectedSessionId?: string };
-
 interface McpSessionRecoveryLease {
   readonly device: PooledDevice;
   readonly token: symbol;
-}
-
-export class McpSessionRecoveryInProgressError extends ActionableError {
-  constructor(mcpSessionId: string) {
-    super(
-      `MCP session '${mcpSessionId}' is recovering a device and cannot remap until recovery finishes.`,
-    );
-  }
 }
 
 function resolveLifecycleCoordinator(
@@ -391,7 +380,7 @@ interface RollbackAssignment {
   session: Session;
 }
 
-type SessionAssignmentSnapshot = Pick<
+export type SessionAssignmentSnapshot = Pick<
   PooledDevice,
   "sessionId" | "status" | "lastUsedAt" | "assignmentCount" | "errorCount" | "autolockSessionId"
 >;
@@ -653,12 +642,6 @@ export class DevicePool {
    * adopt it through an idempotent getAndroid/getApple/startDevice call.
    */
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
-  private readonly mcpSessionAcquiredAutolocks = new Map<string, Set<string>>();
-  // This map keeps only the latest autolock per MCP session, overwriting the
-  // prior entry; re-acquiring an older owned autolock can therefore hit the
-  // reservation-race path through this benign, over-strict false-negative,
-  // not a false grant. Use mcpSessionAcquiredAutolocks if this needs fixing.
-  private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
@@ -709,6 +692,7 @@ export class DevicePool {
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
   private readonly androidRecoveryRecordLedger: AndroidRecoveryRecordLedger;
   private readonly idleDeviceReaper: IdleDeviceReaper;
+  private readonly autolockManager: DeviceAutolockManager;
   private readonly androidRebootCoordinator: AndroidRebootCoordinator;
   private get recoveringSessionLosses(): Map<string, AndroidRecoveryRecord> {
     return this.androidRecoveryRecordLedger.recoveringSessionLosses;
@@ -869,6 +853,45 @@ export class DevicePool {
     );
     this.retryExecutor = retryExecutor;
     this.deviceSessionRepository = deviceSessionRepository;
+    this.autolockManager = new DeviceAutolockManager(
+      {
+        getSessionManager: () => this.sessionManager,
+        getDeviceManager: () => this.deviceManager,
+        getDaemonSessionId: () => this.daemonSessionId,
+        getDevice: (id) => this.devices.get(id),
+        withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
+        addDevice: (device, image, evidence) => this.addDevice(device, image, true, evidence),
+        identityEvidenceForBootedDevice: (device) => this.identityEvidenceForBootedDevice(device),
+        assertRuntimeIdentity: (device, identity) => this.assertRuntimeIdentity(device, identity),
+        assertNotReservedForShutdown: (device, message) =>
+          this.assertNotReservedForShutdown(device, message),
+        recordSourceAndroidAvd: (id, image) => this.recordSourceAndroidAvd(id, image),
+        notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+        trackStartedDeviceProcess: (device, process) =>
+          this.trackStartedDeviceProcess(device, process),
+        assertIdleDeviceAssignable: (device, message, owners) =>
+          this.assertIdleDeviceAssignable(device, message, owners),
+        validateOrReloadIdlePooledDevice: (device, identity, message, owners) =>
+          this.validateOrReloadIdlePooledDevice(device, identity, message, owners),
+        assertDeviceCleanupComplete: (id) => this.assertDeviceCleanupComplete(id),
+        snapshotSessionAssignment: (device) => this.snapshotSessionAssignment(device),
+        nextLastUsedAt: () => this.nextLastUsedAt(),
+        createSessionOrRestore: (device, snapshot, create) =>
+          this.createSessionOrRestore(device, snapshot, create),
+        stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
+        recordMcpSessionOwnership: (client, session) =>
+          this.recordMcpSessionOwnership(client, session),
+        restoreSessionAssignment: (device, snapshot) =>
+          this.restoreSessionAssignment(device, snapshot),
+        isSessionAssignmentCurrent: (device, session) =>
+          this.isSessionAssignmentCurrent(device, session),
+        getPooledSessionIdentity: (device) => this.pooledSessionIdentities.get(device),
+        getMcpSessionRecoveryDevice: (client) => this.mcpSessionRecoveryDevices.get(client)?.device,
+        isAdbServerResetQuarantined: (id) => this.adbServerResetQuarantinedSessions.has(id),
+      },
+      this.deviceSessionRepository,
+      this.idGenerator,
+    );
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
@@ -1031,7 +1054,7 @@ export class DevicePool {
         this.releaseExpiredSessionDevice(sessionId, deviceId);
       } else {
         this.captureReleasedDevice(sessionId, deviceId);
-        this.clearReleasedAutolockState(sessionId, deviceId);
+        this.autolockManager.clearReleasedAutolockState(sessionId, deviceId);
       }
       this.finalizeReleasedRecoverySession(sessionId);
     });
@@ -6578,7 +6601,7 @@ export class DevicePool {
       return;
     }
     if (device.autolockSessionId) {
-      this.getOwnedAutolockSession(device, client);
+      this.autolockManager.getOwnedAutolockSession(device, client);
       return;
     }
     this.assertMcpSessionOwnsDeviceSession(client?.mcpSessionId, session, device);
@@ -6801,7 +6824,7 @@ export class DevicePool {
       }
       // A readiness await can outlive this client's ownership. Check it while
       // reserving shutdown so a stale request cannot reboot another session's device.
-      this.getOwnedAutolockSession(currentDevice, autolockClient);
+      this.autolockManager.getOwnedAutolockSession(currentDevice, autolockClient);
       if (this.shutdownReservations.get(deviceId) === currentDevice) {
         throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
       }
@@ -8106,526 +8129,36 @@ export class DevicePool {
     }
   }
 
-  /**
-   * Lock a device with an autolock session ID.
-   *
-   * Creates a session UUID or reuses the proven caller's live autolock. When enabled,
-   * subsequent tool calls from the same MCP session can resolve this UUID
-   * implicitly; other clients must include it explicitly. The session has a
-   * configurable idle timeout (AUTO_MOBILE_DEVICE_POOL_TIMEOUT).
-   *
-   * @param deviceId - The device to lock
-   * @param platform - Device platform
-   * @returns The assigned session ID, or undefined if autolock is disabled
-   */
-  async autolockDevice(
-    deviceId: string,
-    platform: Platform,
-    mcpSessionId?: string,
-    sourceImage?: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-    verifiedAndroidAvdIdentity?: DeviceInfo,
-    achievedReadiness: DeviceReadinessLevel = "automationReady",
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
+  autolockDevice(
+    ...args: Parameters<DeviceAutolockManager["autolockDevice"]>
   ): Promise<string | undefined> {
-    if (!isDevicePoolAutolockEnabled()) {
-      return undefined;
-    }
-    return this.assignmentMutex.runExclusive(() =>
-      this.autolockDeviceExclusive(
-        deviceId,
-        platform,
-        mcpSessionId,
-        sourceImage,
-        childProcess,
-        expectedIdentity,
-        readinessReservationOwners,
-        verifiedAndroidAvdIdentity,
-        achievedReadiness,
-        collectCancellationSettlement,
-      ),
-    );
-  }
-
-  private async autolockDeviceExclusive(
-    deviceId: string,
-    platform: Platform,
-    mcpSessionId?: string,
-    sourceImage?: DeviceInfo,
-    childProcess?: ChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-    verifiedAndroidAvdIdentity?: DeviceInfo,
-    achievedReadiness: DeviceReadinessLevel = "automationReady",
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
-  ): Promise<string> {
-    throwIfRequestAborted();
-    const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
-
-    // Ensure device is in the pool (it may have been freshly booted)
-    const alreadyPooled = this.devices.has(deviceId);
-    if (!alreadyPooled) {
-      const bootedDevices = await this.deviceManager.getBootedDevices(platform);
-      const booted = bootedDevices.find((d) => d.deviceId === deviceId);
-      if (booted) {
-        await this.addDevice(
-          booted,
-          androidAvdIdentity,
-          true,
-          this.identityEvidenceForBootedDevice(booted),
-        );
-      }
-    }
-
-    // Assign the device to the generated session
-    throwIfRequestAborted();
-    let device = this.devices.get(deviceId);
-    if (!device) {
-      throw new ActionableError(
-        `Device '${deviceId}' is not available for autolock.\n` +
-          `The device may have been shut down or disconnected.\n\n` +
-          `Options:\n` +
-          `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-          `  - Use the returned sessionUuid to target this specific device\n` +
-          `  - Use 'listDevices' to see currently available devices`,
-      );
-    }
-    this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
-    this.assertRuntimeIdentity(device, expectedIdentity);
-    this.assertNotReservedForShutdown(
-      device,
-      `Device '${deviceId}' is shutting down and cannot be autolocked.`,
-    );
-    if (alreadyPooled) {
-      this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
-      this.notifyDeviceReady(deviceId);
-    }
-    await this.trackStartedDeviceProcess(
-      {
-        deviceId: device.id,
-        name: device.name,
-        platform: device.platform,
-      },
-      childProcess,
-    );
-    if (this.devices.get(deviceId) !== device) {
-      throw new ActionableError(`Device '${deviceId}' exited before it could be autolocked.`);
-    }
-    this.throwIfFreshStartAlreadyBound(device, sourceImage, mcpSessionId);
-    await this.assertIdleDeviceAssignable(
-      device,
-      `Device '${deviceId}' is not available for autolock.\n` +
-        `The device may have been shut down or disconnected.`,
-      readinessReservationOwners,
-    );
-
-    device = await this.validateOrReloadIdlePooledDevice(
-      device,
-      expectedIdentity,
-      `Device '${deviceId}' is not available for autolock.\n` +
-        `The device may have been shut down or disconnected.\n\n` +
-        `Options:\n` +
-        `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-        `  - Use the returned sessionUuid to target this specific device\n` +
-        `  - Use 'listDevices' to see currently available devices`,
-      readinessReservationOwners,
-    );
-
-    throwIfRequestAborted();
-    const reusedSessionId = await this.reuseOwnedAutolockSession(
-      device,
-      mcpSessionId,
-      achievedReadiness,
-    );
-    if (reusedSessionId) {
-      return reusedSessionId;
-    }
-
-    this.assertDeviceCleanupComplete(deviceId);
-    const sessionId = this.idGenerator.next();
-    const assignmentSnapshot = this.snapshotSessionAssignment(device);
-    device.sessionId = sessionId;
-    device.status = "busy";
-    device.lastUsedAt = this.nextLastUsedAt();
-    device.assignmentCount++;
-    device.autolockSessionId = sessionId;
-
-    const timeoutMs = getDevicePoolTimeoutMs();
-    // Autolock clients (CLI/agents) do not send heartbeats, so align the heartbeat
-    // timeout with the idle timeout. Otherwise the daemon's heartbeat watchdog
-    // (10s default) would reap the lock far sooner than the configured idle timeout.
-    // Interactions still bump lastHeartbeat, so an active client stays locked while
-    // a truly idle one is released after the idle timeout.
-    const session = await this.createSessionOrRestore(device, assignmentSnapshot, () =>
-      this.sessionManager.createSession(
-        sessionId,
-        deviceId,
-        platform,
-        timeoutMs,
-        timeoutMs,
-        this.stableDeviceIdFor(device),
-      ),
-    );
-    // #6227 (round 9): record the achieved readiness BEFORE publishing the
-    // autolock route below. `mcpSessionAutolockMap.set` makes this session
-    // reachable to a concurrent tool call from the same MCP client (via
-    // `resolveAutolockSessionForMcpClient`); if that call resolved the session
-    // and consulted `getDeviceReadiness` before the caller recorded the level,
-    // it would see an unrecorded readiness and redundantly re-run (or wrongly
-    // skip) setup. The setter is monotonic, so recording here is safe even for
-    // a restored session that already reached a higher level.
-    this.sessionManager.setDeviceReadiness(sessionId, achievedReadiness);
-    if (mcpSessionId) {
-      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
-      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
-      acquired.add(sessionId);
-      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
-      this.recordMcpSessionOwnership(mcpSessionId, sessionId);
-    }
-    await this.persistAcquiredAutolockSession(
-      device,
-      session,
-      assignmentSnapshot,
-      mcpSessionId,
-      collectCancellationSettlement,
-    );
-
-    logger.info(
-      `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
-    );
-    return sessionId;
-  }
-
-  private async persistAcquiredAutolockSession(
-    device: PooledDevice,
-    session: Session,
-    snapshot: SessionAssignmentSnapshot,
-    mcpSessionId?: string,
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
-  ): Promise<void> {
-    const signal = getAbortSignal();
-    const cancelPublishedSession = async () => {
-      // Only this newly minted session may be compensated; never a replacement.
-      await this.sessionManager.releaseSessionIfOwned(
-        session.sessionId,
-        session,
-        device.id,
-        "session-creation-cancelled",
-      );
-    };
-    let abort: (() => void) | undefined;
-    const cancelled = signal
-      ? new Promise<never>((_resolve, reject) => {
-          abort = () => reject(signal.reason);
-          signal.addEventListener("abort", abort, { once: true });
-        })
-      : undefined;
-    try {
-      signal?.throwIfAborted();
-      const persistence = this.deviceSessionRepository.markAutolockSession(session.sessionId, {
-        mcpSessionId: mcpSessionId ?? null,
-        daemonSessionId: this.daemonSessionId,
-        lastUsedAtMs: session.lastUsedAt,
-        expiresAtMs: session.expiresAt,
-      });
-      await Promise.race([persistence, ...(cancelled ? [cancelled] : [])]);
-      signal?.throwIfAborted();
-    } catch (error) {
-      // Session release fences automation admission synchronously, then may
-      // wait for teardown/durable persistence. Neither that wait nor the late
-      // metadata write may hold the global assignment mutex after cancellation.
-      // The repository's active-row guard prevents the late metadata write from
-      // overwriting a completed terminal release.
-      const cancellationSettlement = cancelPublishedSession();
-      collectCancellationSettlement?.(cancellationSettlement);
-      void cancellationSettlement.catch((releaseError) =>
-        logger.warn(`Cancelled autolock release failed: ${releaseError}`),
-      );
-      this.restoreCancelledAutolockAssignment(device, session, snapshot);
-      throw error;
-    } finally {
-      if (abort) {
-        signal?.removeEventListener("abort", abort);
-      }
-    }
-  }
-
-  private restoreCancelledAutolockAssignment(
-    device: PooledDevice,
-    session: Session,
-    snapshot: SessionAssignmentSnapshot,
-  ): void {
-    if (
-      session.assignedDevice === device.id &&
-      this.sessionManager.isLatestSessionIdentity(session)
-    ) {
-      this.clearMcpAutolockMappings(session.sessionId);
-    }
-    if (
-      this.devices.get(device.id) === device &&
-      device.sessionId === session.sessionId &&
-      device.assignmentCount === snapshot.assignmentCount + 1 &&
-      this.pooledSessionIdentities.get(device) === session
-    ) {
-      this.restoreSessionAssignment(device, snapshot);
-    }
-  }
-
-  private assertMcpSessionCanAutolockDevice(
-    mcpSessionId: string | undefined,
-    device: PooledDevice,
-  ): void {
-    if (
-      mcpSessionId &&
-      this.mcpSessionRecoveryDevices.get(mcpSessionId)?.device !== undefined &&
-      this.mcpSessionRecoveryDevices.get(mcpSessionId)?.device !== device
-    ) {
-      throw new McpSessionRecoveryInProgressError(mcpSessionId);
-    }
-  }
-
-  /** Warm acquisition must prove ownership before reusing a live autolock. */
-  private async reuseOwnedAutolockSession(
-    device: PooledDevice,
-    mcpSessionId: string | undefined,
-    achievedReadiness: DeviceReadinessLevel,
-  ): Promise<string | undefined> {
-    const session = this.getOwnedAutolockSession(device, { mcpSessionId });
-    if (!session) {
-      return undefined;
-    }
-    const refreshed = await this.sessionManager.getOrCreateSession(session.sessionId);
-    // Release can finish while activity persistence yields, even under the
-    // assignment mutex. Do not report success for a retired ownership identity.
-    if (
-      refreshed !== session ||
-      !this.isSessionAssignmentCurrent(device, session) ||
-      !this.sessionManager.isAdmittedForAutomation(session)
-    ) {
-      throw new ActionableError(`Device '${device.id}' was released during autolock acquisition.`);
-    }
-    this.sessionManager.setDeviceReadiness(session.sessionId, achievedReadiness);
-    return session.sessionId;
-  }
-
-  private getOwnedAutolockSession(
-    device: PooledDevice,
-    client: AutolockClient | undefined,
-  ): Session | undefined {
-    if (!client) {
-      return undefined;
-    }
-    const { mcpSessionId } = client;
-    if (
-      "expectedSessionId" in client &&
-      mcpSessionId &&
-      this.mcpSessionAutolockMap.get(mcpSessionId) !== client.expectedSessionId
-    ) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
-    }
-    const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
-    if (!session) {
-      return undefined;
-    }
-    if (!this.isOwnedAutolockSession(device, session, mcpSessionId)) {
-      throw new ActionableError(
-        `Device '${device.id}' is already assigned to another session. ` +
-          "Acquire a different device or wait for its owner to release it.",
-      );
-    }
-    return session;
-  }
-
-  private isOwnedAutolockSession(
-    device: PooledDevice,
-    session: Session,
-    mcpSessionId: string | undefined,
-  ): boolean {
-    return (
-      mcpSessionId !== undefined &&
-      this.mcpSessionAutolockMap.get(mcpSessionId) === session.sessionId &&
-      device.autolockSessionId === session.sessionId &&
-      this.isSessionAssignmentCurrent(device, session) &&
-      this.sessionManager.isAdmittedForAutomation(session)
-    );
+    return this.autolockManager.autolockDevice(...args);
   }
 
   captureAutolockSessionForMcpSession(mcpSessionId: string | undefined): string | undefined {
-    return mcpSessionId ? this.mcpSessionAutolockMap.get(mcpSessionId) : undefined;
+    return this.autolockManager.captureAutolockSessionForMcpSession(mcpSessionId);
   }
 
-  private throwIfFreshStartAlreadyBound(
-    device: PooledDevice,
-    sourceImage: DeviceInfo | undefined,
-    mcpSessionId: string | undefined,
-  ): void {
-    if (!sourceImage || !device.sessionId) {
-      return;
-    }
-    const existingSession = this.sessionManager.getSession(device.sessionId);
-    if (
-      existingSession &&
-      existingSession.assignedDevice === device.id &&
-      existingSession.platform === device.platform
-    ) {
-      if (this.isOwnedAutolockSession(device, existingSession, mcpSessionId)) {
-        return;
-      }
-      throw new ActionableError(
-        `Freshly started device '${device.id}' was assigned to session ` +
-          `${existingSession.sessionId} before its owning session could reserve it.`,
-      );
-    }
-  }
-
-  /**
-   * Resolve the autolock session associated with an MCP client session.
-   *
-   * startDevice binds its generated device-session UUID to the MCP session that
-   * called it. Later tool calls from the same MCP session can omit sessionUuid;
-   * this lookup restores the device-session UUID while it is still live.
-   */
   resolveAutolockSessionForMcpSession(
-    mcpSessionId: string | undefined,
-    platform?: Platform,
-    execution?: SessionExecutionMetadata,
-    deviceId?: string,
+    ...args: Parameters<DeviceAutolockManager["resolveAutolockSessionForMcpSession"]>
   ): string | undefined {
-    if (!mcpSessionId) {
-      return undefined;
-    }
-
-    if (platform || deviceId) {
-      const selected = this.resolveAutolockDeviceSelector(
-        mcpSessionId,
-        platform,
-        execution,
-        deviceId,
-      );
-      if (selected || deviceId) {
-        return selected;
-      }
-    }
-
-    return this.resolveLatestAutolockSession(mcpSessionId, platform, execution);
+    return this.autolockManager.resolveAutolockSessionForMcpSession(...args);
   }
 
-  private resolveLatestAutolockSession(
-    mcpSessionId: string,
-    platform: Platform | undefined,
-    execution: SessionExecutionMetadata | undefined,
-  ): string | undefined {
-    const sessionId = this.mcpSessionAutolockMap.get(mcpSessionId);
-    if (!sessionId) {
-      return undefined;
-    }
-
-    const session = this.sessionManager.getSessionForNewExecution(sessionId, execution);
-    if (!session) {
-      this.mcpSessionAutolockMap.delete(mcpSessionId);
-      return undefined;
-    }
-
-    const device = this.devices.get(session.assignedDevice);
-    if (!device || device.autolockSessionId !== sessionId) {
-      if (this.adbServerResetQuarantinedSessions.has(sessionId)) {
-        return !platform || session.platform === platform ? sessionId : undefined;
-      }
-      this.mcpSessionAutolockMap.delete(mcpSessionId);
-      return undefined;
-    }
-
-    if (platform && device.platform !== platform) {
-      return undefined;
-    }
-
-    return sessionId;
-  }
-
-  private resolveAutolockDeviceSelector(
-    mcpSessionId: string,
-    platform: Platform | undefined,
-    execution: SessionExecutionMetadata | undefined,
-    deviceId: string | undefined,
-  ): string | undefined {
-    const candidates = [...(this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? [])].flatMap(
-      (id) => {
-        const session = this.sessionManager.getSessionForNewExecution(id, execution);
-        if (!session) {
-          return [];
-        }
-        const device = this.devices.get(session.assignedDevice);
-        if (device && device.autolockSessionId === id && device.sessionId === id) {
-          return [
-            { sessionId: id, deviceId: device.id, platform: device.platform, recovering: false },
-          ];
-        }
-        // A session detached by a process-wide ADB reset is still owned by this
-        // MCP connection; its device is simply absent from the pool while the
-        // reset is recovered. Dropping it here would let an implicit selector
-        // silently route to the connection's *other* device (#6807).
-        return this.adbServerResetQuarantinedSessions.has(id)
-          ? [
-              {
-                sessionId: id,
-                deviceId: session.assignedDevice,
-                platform: session.platform,
-                recovering: true,
-              },
-            ]
-          : [];
-      },
-    );
-    const matches = candidates.filter(
-      (candidate) =>
-        (!platform || candidate.platform === platform) &&
-        (!deviceId || candidate.deviceId === deviceId),
-    );
-    if (matches.length === 1) {
-      // A lone recovering match is not ambiguous: returning it lets the caller
-      // surface the recovery error for the device the client actually owns.
-      return matches[0].sessionId;
-    }
-    if (candidates.length > 0 && !deviceId) {
-      throw new ActionableError(
-        `Cannot resolve requested platform/deviceId unambiguously. Candidate sessions: ${candidates
-          .map(
-            (candidate) =>
-              `${candidate.sessionId} (${candidate.deviceId}, ${candidate.platform}` +
-              `${candidate.recovering ? ", recovering" : ""})`,
-          )
-          .join(", ")}. Pass an explicit sessionUuid/deviceId.`,
-      );
-    }
-    return undefined;
-  }
-
-  /** Restore retained capabilities without letting an older queued request reset the default. */
-  async restoreAutolockSessionsForMcpSession(
-    sessionIds: readonly string[],
-    mcpSessionId: string,
+  restoreAutolockSessionsForMcpSession(
+    ...args: Parameters<DeviceAutolockManager["restoreAutolockSessionsForMcpSession"]>
   ): Promise<void> {
-    for (const id of sessionIds) {
-      // Nothing left to restore for a session this connection already holds
-      // while it also already has a default. Re-checked each iteration rather
-      // than snapshotted, so an attachment cannot act on a stale reading.
-      if (
-        this.mcpSessionAcquiredAutolocks.get(mcpSessionId)?.has(id) &&
-        this.resolveAutolockSessionForMcpSession(mcpSessionId) !== undefined
-      ) {
-        continue;
-      }
-      // "if-absent" defers the default decision to attach time, under the
-      // assignment mutex. A pre-loop snapshot would be stale by the time the
-      // second attachment runs, letting restoration clobber a `setActiveDevice`
-      // that landed in between (#6807).
-      await this.attachAutolockSessionToMcpSession(id, mcpSessionId, "if-absent");
-    }
+    return this.autolockManager.restoreAutolockSessionsForMcpSession(...args);
+  }
+
+  attachAutolockSessionToMcpSession(
+    ...args: Parameters<DeviceAutolockManager["attachAutolockSessionToMcpSession"]>
+  ): Promise<void> {
+    return this.autolockManager.attachAutolockSessionToMcpSession(...args);
+  }
+
+  assertAutolockAccess(deviceId: string, sessionUuid: string | undefined): void {
+    this.autolockManager.assertAutolockAccess(deviceId, sessionUuid);
   }
 
   /**
@@ -8656,51 +8189,8 @@ export class DevicePool {
   /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */
   releaseMcpSessionBindings(mcpSessionId: string): void {
     this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
-    this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
-    this.mcpSessionAutolockMap.delete(mcpSessionId);
+    this.autolockManager.releaseMcpSessionBindings(mcpSessionId);
     this.mcpSessionRecoveryDevices.delete(mcpSessionId);
-  }
-
-  /**
-   * Associate a live autolock session with a reconnected MCP client session.
-   */
-  async attachAutolockSessionToMcpSession(
-    sessionId: string,
-    mcpSessionId: string | undefined,
-    makeDefault: boolean | "if-absent" = true,
-  ): Promise<void> {
-    if (!mcpSessionId) {
-      return;
-    }
-    await this.assignmentMutex.runExclusive(async () => {
-      const session = this.sessionManager.getSession(sessionId);
-      const device = session ? this.devices.get(session.assignedDevice) : undefined;
-      if (
-        !session ||
-        !device ||
-        device.sessionId !== sessionId ||
-        device.autolockSessionId !== sessionId
-      ) {
-        return;
-      }
-      this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
-      await this.deviceSessionRepository.markAutolockSession(sessionId, {
-        mcpSessionId,
-        daemonSessionId: this.daemonSessionId,
-        lastUsedAtMs: session.lastUsedAt,
-        expiresAtMs: session.expiresAt,
-      });
-      if (
-        makeDefault === true ||
-        (makeDefault === "if-absent" &&
-          this.resolveAutolockSessionForMcpSession(mcpSessionId) === undefined)
-      ) {
-        this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
-      }
-      const acquired = this.mcpSessionAcquiredAutolocks.get(mcpSessionId) ?? new Set<string>();
-      acquired.add(sessionId);
-      this.mcpSessionAcquiredAutolocks.set(mcpSessionId, acquired);
-    });
   }
 
   /**
@@ -8723,7 +8213,11 @@ export class DevicePool {
     void release
       .then(() => {
         if (!cleanup) {
-          this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount);
+          this.autolockManager.clearExpiredAutolockStateWhenIdle(
+            sessionId,
+            device,
+            assignmentCount,
+          );
         }
         logger.info(`Released device ${deviceId} from session ${sessionId}`);
       })
@@ -8732,53 +8226,16 @@ export class DevicePool {
       });
     if (cleanup) {
       void cleanup
-        .then(() => this.clearExpiredAutolockStateWhenIdle(sessionId, device, assignmentCount))
+        .then(() =>
+          this.autolockManager.clearExpiredAutolockStateWhenIdle(
+            sessionId,
+            device,
+            assignmentCount,
+          ),
+        )
         .catch((error) => {
           logger.warn(`Failed to finish expired-session cleanup for ${deviceId}: ${error}`, error);
         });
-    }
-  }
-
-  private clearExpiredAutolockStateWhenIdle(
-    sessionId: string,
-    expectedDevice: PooledDevice,
-    expectedAssignmentCount: number,
-  ): void {
-    if (
-      this.devices.get(expectedDevice.id) !== expectedDevice ||
-      expectedDevice.assignmentCount !== expectedAssignmentCount ||
-      expectedDevice.sessionId !== null ||
-      expectedDevice.autolockSessionId !== sessionId
-    ) {
-      return;
-    }
-
-    expectedDevice.autolockSessionId = undefined;
-    this.clearMcpAutolockMappings(sessionId);
-  }
-
-  /** Clear autolock-only state for an explicit release without freeing early. */
-  private clearReleasedAutolockState(sessionId: string, deviceId: string): void {
-    const device = this.devices.get(deviceId);
-    if (!device || device.autolockSessionId !== sessionId) {
-      return;
-    }
-
-    device.autolockSessionId = undefined;
-    this.clearMcpAutolockMappings(sessionId);
-  }
-
-  private clearMcpAutolockMappings(sessionId: string): void {
-    for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredAutolocks) {
-      acquired.delete(sessionId);
-      if (acquired.size === 0) {
-        this.mcpSessionAcquiredAutolocks.delete(mcpSessionId);
-      }
-    }
-    for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
-      if (mappedSessionId === sessionId) {
-        this.mcpSessionAutolockMap.delete(mcpSessionId);
-      }
     }
   }
 
@@ -8788,36 +8245,6 @@ export class DevicePool {
       if (acquired.size === 0) {
         this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
       }
-    }
-  }
-
-  /**
-   * Assert that a session is permitted to interact with a device.
-   *
-   * When autolock is enabled and a device is locked to a session, only that
-   * session UUID may drive it. A mismatched or absent session UUID is rejected.
-   * No-op when autolock is disabled or the device is not locked.
-   */
-  assertAutolockAccess(deviceId: string, sessionUuid: string | undefined): void {
-    if (!isDevicePoolAutolockEnabled()) {
-      return;
-    }
-
-    const device = this.devices.get(deviceId);
-    if (!device || !device.autolockSessionId) {
-      return;
-    }
-
-    if (device.autolockSessionId !== sessionUuid) {
-      throw new ActionableError(
-        `Device '${deviceId}' is locked to another session.\n` +
-          `Autolock is enabled, so tool calls must either come from the same MCP session ` +
-          `that called 'getAndroid' or 'getApple', or include the sessionUuid returned for this device.\n\n` +
-          `Options:\n` +
-          `  - Pass the sessionUuid from getAndroid or getApple that locked this device\n` +
-          `  - Use getAndroid or getApple to lock a different available device\n` +
-          `  - Wait for the idle timeout to release this device`,
-      );
     }
   }
 

@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { republishOwnedIdentity } from "../../src/daemon/identityRecovery";
+import { republishOwnedIdentity, type IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonManager } from "../../src/daemon/manager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -217,6 +217,18 @@ describe("provider-owned identity recovery", () => {
   test("recovery lock follower waits for the successor's generation instead of joining the doomed incumbent", async () => {
     const dir = mkdtempSync(join(tmpdir(), "identity-follower-"));
     const timer = new FakeTimer();
+    const stopStarted = Promise.withResolvers<void>();
+    const followerProbed = Promise.withResolvers<void>();
+    const followerWaiting = Promise.withResolvers<void>();
+    const launchStarted = Promise.withResolvers<void>();
+    const publishSuccessor = Promise.withResolvers<void>();
+    const sleep = timer.sleep.bind(timer);
+    spyOn(timer, "sleep").mockImplementation((ms) => {
+      if (ms === 100) {
+        followerWaiting.resolve();
+      }
+      return sleep(ms);
+    });
     const h = harness(
       { accepted: false, reason: "republish_unavailable" },
       join(dir, "lock"),
@@ -224,6 +236,7 @@ describe("provider-owned identity recovery", () => {
     );
     const successor = { ...complete, pid: 124, startedAt: 200, processGenerationToken: "next" };
     const stop = spyOn(h.manager as any, "stopRunningDaemon").mockImplementation(async () => {
+      stopStarted.resolve();
       await timer.sleep(300);
       h.setOwner({ running: false });
     });
@@ -231,13 +244,22 @@ describe("provider-owned identity recovery", () => {
       async () => {
         h.setOwner({ ...successor, running: true });
         // Listening is insufficient until the successor publishes its complete record.
-        await timer.sleep(300);
+        launchStarted.resolve();
+        await publishSuccessor.promise;
         h.setRecord(successor);
       },
     );
     const peer = harness({ accepted: false }, join(dir, "lock"), timer);
     // Separate manager state, sharing only the filesystem lock and fake daemon endpoint.
-    (peer.manager as any).identityRecoveryIO = (h.manager as any).identityRecoveryIO;
+    const recoveryIO = (h.manager as unknown as { identityRecoveryIO: IdentityRecoveryIO })
+      .identityRecoveryIO;
+    (peer.manager as unknown as { identityRecoveryIO: IdentityRecoveryIO }).identityRecoveryIO = {
+      ...recoveryIO,
+      probe: async () => {
+        followerProbed.resolve();
+        return recoveryIO.probe();
+      },
+    };
     spyOn(peer.manager as any, "isProcessRunning").mockImplementation((pid) =>
       (h.manager as any).isProcessRunning(pid),
     );
@@ -249,10 +271,15 @@ describe("provider-owned identity recovery", () => {
         joined = await h.manager.status(false);
         return result;
       });
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await Promise.all([stopStarted.promise, followerProbed.promise, followerWaiting.promise]);
       expect(stop).toHaveBeenCalledTimes(1);
       expect(joined).toBeUndefined();
       expect(h.record).toBeNull();
+      await timer.resolvePromise(launchStarted.promise);
+      expect(joined).toBeUndefined();
+      expect(h.record).toBeNull();
+      expect(reachable).not.toHaveBeenCalled();
+      publishSuccessor.resolve();
       expect(await timer.resolvePromise(Promise.all([first, follower]))).toEqual([
         "replaced",
         "joined",
@@ -267,6 +294,7 @@ describe("provider-owned identity recovery", () => {
       expect(launch).toHaveBeenCalledTimes(1);
       expect(h.client.callDaemonMethodCalls.filter((c) => c.method === ADMIT)).toHaveLength(1);
     } finally {
+      publishSuccessor.resolve();
       h.manager.releaseLock();
       rmSync(dir, { recursive: true, force: true });
     }

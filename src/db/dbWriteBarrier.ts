@@ -1,6 +1,9 @@
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
+
+const dbDrainTimeout = Symbol("database write drain timeout");
 
 /**
  * Tracks in-flight best-effort DB writes so graceful shutdown can quiesce them
@@ -194,18 +197,20 @@ export class InMemoryDbWriteBarrier implements DbWriteBarrier {
       return true;
     }
 
-    let handle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>((resolve) => {
-      handle = this.#timer.setTimeout(() => resolve(false), timeoutMs);
-    });
-
     const drained = this.#idle.then(() => true);
-    const result = await Promise.race([drained, timeout]);
-
-    if (handle !== undefined) {
-      this.#timer.clearTimeout(handle);
+    try {
+      return await raceWithDeadline(drained, {
+        timer: this.#timer,
+        timeoutMs,
+        label: "Database write drain",
+        timeoutError: () => dbDrainTimeout,
+      });
+    } catch (error) {
+      if (error === dbDrainTimeout) {
+        return false;
+      }
+      throw error;
     }
-    return result;
   }
 }
 

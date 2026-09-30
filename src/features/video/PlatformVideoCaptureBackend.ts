@@ -2,6 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, BootedDevice } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -33,6 +34,8 @@ interface AndroidBackendHandle {
   device: BootedDevice;
   deviceTempPath: string;
 }
+
+const gracefulExitTimeout = new Error("Video capture graceful exit deadline elapsed");
 
 type BackendHandle = AndroidBackendHandle;
 
@@ -124,26 +127,23 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     // Wait for the host adb process to exit now that remote screenrecord should have finalized
-    const gracefulExitTimeout = 10000;
-    let timeoutId: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<void>((resolve) => {
-      timeoutId = this.timer.setTimeout(() => {
-        if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
-          logger.info(`[VideoCapture] Sending SIGINT to host adb after pkill wait`);
-          backendHandle.process.kill("SIGINT");
-        }
-        resolve();
-      }, gracefulExitTimeout);
-    });
-
-    await Promise.race([backendHandle.exitPromise, timeoutPromise]);
-    if (timeoutId) {
-      // Disarm through the injected timer, not the global clearTimeout. Once
-      // the host adb has exited the 10 s SIGINT callback is stale; leaving it
-      // armed (as global clearTimeout would, since the handle came from
-      // this.timer.setTimeout) fires a SIGINT after the recording finished
-      // (issue #4170).
-      this.timer.clearTimeout(timeoutId);
+    try {
+      await raceWithDeadline(backendHandle.exitPromise, {
+        timer: this.timer,
+        timeoutMs: 10000,
+        label: "Video capture graceful exit",
+        timeoutError: () => gracefulExitTimeout,
+        onTimeout: () => {
+          if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+            logger.info(`[VideoCapture] Sending SIGINT to host adb after pkill wait`);
+            backendHandle.process.kill("SIGINT");
+          }
+        },
+      });
+    } catch (error) {
+      if (error !== gracefulExitTimeout) {
+        throw error;
+      }
     }
 
     if (backendHandle.process.exitCode === null) {

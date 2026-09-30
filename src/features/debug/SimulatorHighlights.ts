@@ -6,6 +6,8 @@ import {
   type HostProcessExecutor,
 } from "../../utils/HostCommandExecutor";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { logger } from "../../utils/logger";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import {
   readScreenCaptureHelperEnvOverride,
@@ -27,6 +29,8 @@ export interface SimulatorHighlightsDependencies {
   timer?: Timer;
   resolveHelper?: () => Promise<string | null>;
 }
+
+const highlightTimeout = new Error("Simulator highlight deadline elapsed");
 
 interface OverlayHost {
   child: ChildProcess;
@@ -76,22 +80,20 @@ export class SimulatorHighlights {
     timeoutMs = 5000,
   ): Promise<HighlightOperationResult> {
     const controller = new AbortController();
-    let deadline: NodeJS.Timeout | undefined;
-    const expired = new Promise<HighlightOperationResult>((resolve) => {
-      deadline = this.timer.setTimeout(() => {
-        controller.abort();
-        resolve({ success: false, error: "Simulator highlight timed out" });
-      }, timeoutMs);
-    });
     try {
-      return await Promise.race([
-        this.sendHighlight(id, shape, controller.signal, timeoutMs),
-        expired,
-      ]);
-    } finally {
-      if (deadline) {
-        this.timer.clearTimeout(deadline);
+      return await raceWithDeadline(this.sendHighlight(id, shape, controller.signal, timeoutMs), {
+        timer: this.timer,
+        timeoutMs,
+        label: "Simulator highlight",
+        timeoutError: () => highlightTimeout,
+        onTimeout: () => controller.abort(),
+      });
+    } catch (error) {
+      if (error === highlightTimeout) {
+        logger.warn(`[SimulatorHighlights] highlight request timed out after ${timeoutMs}ms`);
+        return { success: false, error: "Simulator highlight timed out" };
       }
+      throw error;
     }
   }
 

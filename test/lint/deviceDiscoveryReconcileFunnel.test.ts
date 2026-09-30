@@ -55,9 +55,14 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 4,
+      calls: 3,
       reason:
         "The pool routes discovery through the identity collaborator before reading pooled identity.",
+    },
+    "src/daemon/devicePoolRefresh.ts": {
+      calls: 1,
+      reason:
+        "Refresh discovery moved from devicePool; observations still fold through the pool identity port.",
     },
     "src/daemon/deviceRuntimeIdentity.ts": {
       calls: 1,

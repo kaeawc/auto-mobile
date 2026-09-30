@@ -25,6 +25,11 @@ import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { type RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import {
+  DevicePoolRefresh,
+  type DevicePoolRefreshPort,
+  type DevicePoolRefreshResult,
+} from "./devicePoolRefresh";
+import {
   getDeviceRecoveryPolicy,
   getDeviceRecoveryWindowMs,
   type DeviceRecoveryPolicy,
@@ -52,7 +57,6 @@ import {
   didSourceSucceedForDevice,
   discoverySourceFor,
   type DiscoveryCompleteness,
-  type DiscoverySource,
 } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import {
@@ -392,11 +396,6 @@ interface AssignableIdleDeviceSelection {
   livenessUnknown: boolean;
 }
 
-interface DevicePoolRefreshResult {
-  addedCount: number;
-  completeness?: DiscoveryCompleteness;
-}
-
 interface DeviceDisconnectSessionReleaser {
   (
     sessionId: string,
@@ -537,6 +536,7 @@ export interface DevicePoolDependencies {
     pool: AdbServerResetQuarantinePoolPort,
   ) => AdbServerResetQuarantine;
   missingDeviceLivenessFactory?: (pool: MissingDeviceLivenessPoolPort) => MissingDeviceLiveness;
+  devicePoolRefreshFactory?: (pool: DevicePoolRefreshPort) => DevicePoolRefresh;
   runtimeIdentityFactory?: (pool: DeviceRuntimeIdentityPoolPort) => DeviceRuntimeIdentity;
   deviceShutdownReservationsFactory?: (
     pool: DeviceShutdownReservationsPoolPort,
@@ -566,6 +566,13 @@ function createMissingDeviceLiveness(
   factory?: DevicePoolDependencies["missingDeviceLivenessFactory"],
 ): MissingDeviceLiveness {
   return factory ? factory(port) : new MissingDeviceLiveness(port);
+}
+
+function createDevicePoolRefresh(
+  port: DevicePoolRefreshPort,
+  factory?: DevicePoolDependencies["devicePoolRefreshFactory"],
+): DevicePoolRefresh {
+  return factory ? factory(port) : new DevicePoolRefresh(port);
 }
 
 function createDeviceRuntimeIdentity(
@@ -653,6 +660,7 @@ export class DevicePool {
   }
   private readonly emulatorProcessLifecycle: EmulatorProcessLifecycle;
   private readonly missingDeviceLiveness: MissingDeviceLiveness;
+  private readonly refreshCoordinator: DevicePoolRefresh;
   private readonly runtimeIdentity: DeviceRuntimeIdentity;
   private readonly shutdownReservationCoordinator: DeviceShutdownReservations;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
@@ -678,12 +686,6 @@ export class DevicePool {
   private get emulatorLossRecoveryResolvers(): Map<string, () => void> {
     return this.emulatorLossLedger.emulatorLossRecoveryResolvers;
   }
-  /** Latest refresh request; older discovery snapshots must not overwrite it. */
-  private refreshGeneration = 0;
-  /** A discovery snapshot predating a removal cannot recreate that serial. */
-  private deviceRemovalGeneration = 0;
-  private readonly deviceRemovalStamps = new Map<string, number>();
-  private readonly inFlightRefreshFloors = new Map<number, number>();
   /** A late kill settled; only a later fresh observation can lift its fence. */
   private readonly settledLateShutdowns = new Map<
     string,
@@ -751,6 +753,7 @@ export class DevicePool {
     adbServerResetQuarantineFactory,
     emulatorProcessLifecycleFactory,
     missingDeviceLivenessFactory,
+    devicePoolRefreshFactory,
     runtimeIdentityFactory,
     deviceShutdownReservationsFactory,
     deviceSessionContinuityEnabled,
@@ -791,7 +794,7 @@ export class DevicePool {
       getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
       getAssignmentMutex: () => this.assignmentMutex,
       getDeviceManager: () => this.deviceManager,
-      getRefreshGeneration: () => this.refreshGeneration,
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       shouldRebootDisconnectedAndroidDevice: (device) =>
         this.shouldRebootDisconnectedAndroidDevice(device),
       matchesRuntimeIdentity: (device, booted) =>
@@ -825,6 +828,38 @@ export class DevicePool {
       missingDevicePort,
       missingDeviceLivenessFactory,
     );
+    const refreshPort: DevicePoolRefreshPort = {
+      getTimer: () => this.timer,
+      getDeviceManager: () => this.deviceManager,
+      getDevices: () => this.devices,
+      getAssignmentMutex: () => this.assignmentMutex,
+      getCriteriaMatcher: () => this.criteriaMatcher,
+      identityEvidenceForBootedDevice: (device) =>
+        this.runtimeIdentity.identityEvidenceForBootedDevice(device),
+      identityEvidenceFields: (evidence) => identityEvidenceFields(evidence),
+      getDeviceSessionStarts: () => this.deviceSessionStarts,
+      getRefreshMissingDeviceMisses: () => this.refreshMissingDeviceMisses,
+      getSettledLateShutdowns: () => this.settledLateShutdowns,
+      getIntentionalShutdowns: () => this.intentionalShutdowns,
+      seedLastUsedAt: (now) => this.seedLastUsedAt(now),
+      nextDeviceIncarnation: () => this.nextDeviceIncarnation(),
+      setDeviceSessionTracking: (id, now) => this.setDeviceSessionTracking(id, now),
+      clearAutoStartSuppressionForBootedDevice: (device) =>
+        this.clearAutoStartSuppressionForBootedDevice(device),
+      foldObservationIntoPooledEntry: (pooled, device, source) =>
+        this.foldObservationIntoPooledEntry(pooled, device, source),
+      removeMissingDevicesForRefresh: (held, generation, ids, platforms, succeeded, sources) =>
+        this.missingDeviceLiveness.removeMissingDevicesForRefresh(
+          held,
+          generation,
+          ids,
+          platforms,
+          succeeded,
+          sources,
+        ),
+      notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+    };
+    this.refreshCoordinator = createDevicePoolRefresh(refreshPort, devicePoolRefreshFactory);
     const emulatorProcessPort: EmulatorProcessLifecyclePoolPort = {
       getTimer: () => this.timer,
       getStartedDeviceProcesses: () => this.startedDeviceProcesses,
@@ -912,7 +947,7 @@ export class DevicePool {
       getDeviceManager: () => this.deviceManager,
       getRetryExecutor: () => this.retryExecutor,
       getTimer: () => this.timer,
-      getRefreshGeneration: () => this.refreshGeneration,
+      getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       hasReusableSerial: (device) => this.hasReusableSerial(device),
       cancelDeviceSessionExecutions: (sessionId, reason, options) =>
         this.cancelDeviceSessionExecutions(sessionId, reason, options),
@@ -1270,204 +1305,17 @@ export class DevicePool {
    * booted. Assigned devices are kept so active sessions can be cancelled and
    * released by the disconnect monitor.
    */
-  async refreshDevices(): Promise<number> {
-    return (await this.refreshDevicesInternal(false)).addedCount;
+  refreshDevices(): Promise<number> {
+    return this.refreshCoordinator.refreshDevices();
   }
 
   /** @internal Test support for checking removal-stamp retention. */
   getDeviceRemovalStampCountForTest(): number {
-    return this.deviceRemovalStamps.size;
+    return this.refreshCoordinator.getDeviceRemovalStampCountForTest();
   }
 
-  private async refreshDevicesInternal(
-    assignmentLockHeld: boolean,
-  ): Promise<DevicePoolRefreshResult> {
-    const startTime = this.timer.now();
-    const perf = createGlobalPerformanceTracker();
-    const refreshGeneration = ++this.refreshGeneration;
-    const removalGenerationAtDiscoveryStart = this.deviceRemovalGeneration;
-    this.inFlightRefreshFloors.set(refreshGeneration, removalGenerationAtDiscoveryStart);
-    try {
-      logger.info("Refreshing device pool - discovering connected devices...");
-
-      // Log environment for debugging CI issues
-      const androidHome = process.env.ANDROID_HOME || "(not set)";
-      const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
-      logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
-
-      perf.startOperation("deviceDiscovery");
-      const discovery = await this.deviceManager.getBootedDevicesDetailed("either", {
-        bypassAndroidDeviceListCache: true,
-        bypassIosDeviceListCache: true,
-      });
-      perf.endOperation("deviceDiscovery");
-      const bootedDevices = discovery.devices;
-      const discoveryTime = this.timer.now() - startTime;
-      logger.info(
-        `Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`,
-      );
-
-      const now = this.seedLastUsedAt(this.timer.now());
-      let addedCount = 0;
-      let removedCount = 0;
-      const bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
-      const bootedPlatforms = new Set(bootedDevices.map((device) => device.platform));
-
-      perf.startOperation("poolUpdate");
-      const removed = await this.removeMissingDevicesForRefresh(
-        assignmentLockHeld,
-        refreshGeneration,
-        bootedDeviceIds,
-        bootedPlatforms,
-        discovery.succeededPlatforms,
-        discovery.succeededSources,
-      );
-      if (removed === undefined) {
-        logger.info("Discarding an out-of-date device discovery snapshot");
-        return { addedCount: 0 };
-      }
-      removedCount = removed;
-
-      for (const device of bootedDevices) {
-        const updatePooledDevice = async () => {
-          if (
-            this.shouldSkipRefreshedDevice(
-              device.deviceId,
-              refreshGeneration,
-              removalGenerationAtDiscoveryStart,
-            )
-          ) {
-            return undefined;
-          }
-          this.clearAutoStartSuppressionForBootedDevice(device);
-          const pooledDevice = this.devices.get(device.deviceId);
-          if (pooledDevice) {
-            const updated = await this.foldObservationIntoPooledEntry(
-              pooledDevice,
-              device,
-              "refresh",
-            );
-            this.liftSettledShutdownAfterFreshObservation(
-              device,
-              pooledDevice,
-              discovery,
-              refreshGeneration,
-            );
-            return updated;
-          }
-          this.devices.set(device.deviceId, {
-            id: device.deviceId,
-            name: device.name,
-            platform: device.platform,
-            sessionId: null,
-            status: "idle",
-            lastUsedAt: now,
-            assignmentCount: 0,
-            errorCount: 0,
-            iosVersion: device.iosVersion,
-            simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
-            ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
-            ...identityEvidenceFields(this.runtimeIdentity.identityEvidenceForBootedDevice(device)),
-            incarnation: this.nextDeviceIncarnation(),
-          });
-          this.deviceSessionStarts.set(device.deviceId, now);
-          this.refreshMissingDeviceMisses.delete(device.deviceId);
-          await this.setDeviceSessionTracking(device.deviceId, now);
-          logger.info(`Added device ${device.deviceId} to pool during refresh`);
-          return true;
-        };
-        const added = assignmentLockHeld
-          ? await updatePooledDevice()
-          : await this.assignmentMutex.runExclusive(updatePooledDevice);
-        if (added) {
-          addedCount++;
-        }
-        this.notifyRefreshedDeviceReady(device.deviceId, added);
-      }
-      perf.endOperation("poolUpdate");
-
-      if (addedCount > 0 || removedCount > 0) {
-        logger.info(
-          `Device pool refreshed: added ${addedCount}, removed ${removedCount} ` +
-            `(total: ${this.devices.size})`,
-        );
-      } else if (bootedDevices.length === 0) {
-        logger.warn("No devices found during pool refresh. Is an emulator running?");
-        logger.warn(
-          "Ensure 'adb devices' returns connected devices in the daemon process environment.",
-        );
-      } else {
-        logger.debug(`Device pool refresh: all ${bootedDevices.length} devices already in pool`);
-      }
-
-      return {
-        addedCount,
-        completeness: {
-          succeededPlatforms: discovery.succeededPlatforms,
-          succeededSources: discovery.succeededSources,
-        },
-      };
-    } catch (error) {
-      const elapsed = this.timer.now() - startTime;
-      logger.error(`Failed to refresh device pool after ${elapsed}ms: ${error}`);
-      if (error instanceof Error) {
-        logger.error(`Stack trace: ${error.stack}`);
-      }
-      return { addedCount: 0 };
-    } finally {
-      this.inFlightRefreshFloors.delete(refreshGeneration);
-      this.pruneDeviceRemovalStamps();
-    }
-  }
-
-  private pruneDeviceRemovalStamps(): void {
-    const floor =
-      this.inFlightRefreshFloors.size > 0
-        ? Math.min(...this.inFlightRefreshFloors.values())
-        : this.deviceRemovalGeneration;
-    for (const [deviceId, stamp] of this.deviceRemovalStamps) {
-      if (stamp <= floor) {
-        this.deviceRemovalStamps.delete(deviceId);
-      }
-    }
-  }
-
-  private shouldSkipRefreshedDevice(
-    deviceId: string,
-    refreshGeneration: number,
-    removalGenerationAtDiscoveryStart: number,
-  ): boolean {
-    return (
-      refreshGeneration !== this.refreshGeneration ||
-      (this.deviceRemovalStamps.get(deviceId) ?? 0) > removalGenerationAtDiscoveryStart
-    );
-  }
-
-  private notifyRefreshedDeviceReady(deviceId: string, added: boolean | undefined): void {
-    if (added !== undefined) {
-      this.notifyDeviceReady(deviceId);
-    }
-  }
-
-  private liftSettledShutdownAfterFreshObservation(
-    device: BootedDevice,
-    pooledDevice: PooledDevice,
-    discovery: BootedDeviceDiscovery,
-    refreshGeneration: number,
-  ): void {
-    const settled = this.settledLateShutdowns.get(device.deviceId);
-    if (
-      settled?.incarnation === pooledDevice.incarnation &&
-      refreshGeneration > settled.refreshGeneration &&
-      this.devices.get(device.deviceId) === pooledDevice &&
-      !pooledDevice.identityUnresolved &&
-      (discovery.freshDeviceIds
-        ? discovery.freshDeviceIds.has(device.deviceId)
-        : didSourceSucceedForDevice(discovery, device.platform, device.deviceId))
-    ) {
-      this.intentionalShutdowns.delete(device.deviceId);
-      this.settledLateShutdowns.delete(device.deviceId);
-    }
+  private refreshDevicesInternal(assignmentLockHeld: boolean): Promise<DevicePoolRefreshResult> {
+    return this.refreshCoordinator.refreshDevicesInternal(assignmentLockHeld);
   }
 
   /** Notify consumers that a device has reached a boot-ready connection boundary. */
@@ -1630,7 +1478,7 @@ export class DevicePool {
     this.devices.delete(deviceId);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
-    this.deviceRemovalStamps.set(deviceId, ++this.deviceRemovalGeneration);
+    this.refreshCoordinator.recordDeviceRemoval(deviceId);
     this.settledLateShutdowns.delete(deviceId);
     this.deferredDeviceReleases.delete(deviceId);
     this.notifyDeviceRemoved(deviceId, device.platform);
@@ -1800,7 +1648,7 @@ export class DevicePool {
     }
     this.settledLateShutdowns.set(expectedDevice.id, {
       incarnation: expectedDevice.incarnation,
-      refreshGeneration: this.refreshGeneration,
+      refreshGeneration: this.refreshCoordinator.getRefreshGeneration(),
     });
   }
 
@@ -2625,24 +2473,6 @@ export class DevicePool {
     return (
       (await this.recoverSessionBoundDeviceAfterLoss(device.id, incidentId, device)) !==
       "not-attempted"
-    );
-  }
-
-  private removeMissingDevicesForRefresh(
-    assignmentLockHeld: boolean,
-    refreshGeneration: number,
-    bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>,
-    succeededPlatforms: Set<Platform>,
-    succeededSources?: Set<DiscoverySource>,
-  ): Promise<number | undefined> {
-    return this.missingDeviceLiveness.removeMissingDevicesForRefresh(
-      assignmentLockHeld,
-      refreshGeneration,
-      bootedDeviceIds,
-      bootedPlatforms,
-      succeededPlatforms,
-      succeededSources,
     );
   }
 

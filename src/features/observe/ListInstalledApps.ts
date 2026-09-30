@@ -50,11 +50,13 @@ export type { IosInstalledAppRecord } from "../../utils/ios-cmdline-tools/iosIns
 export interface InstalledAppsDetailedResult {
   apps: InstalledAppsByProfile;
   successful: boolean;
+  error?: unknown;
 }
 
 export interface IosInstalledAppsDetailedResult {
   apps: IosInstalledAppRecord[];
   successful: boolean;
+  error?: unknown;
 }
 
 /**
@@ -326,7 +328,7 @@ export class ListInstalledApps {
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn("Failed to list installed apps with details:", error);
-      return { apps: { profiles: {}, system: [] }, successful: false };
+      return { apps: { profiles: {}, system: [] }, successful: false, error };
     }
   }
 
@@ -378,7 +380,7 @@ export class ListInstalledApps {
       return { apps: detailedApps, successful: true };
     } catch (error) {
       logger.warn("Failed to list installed iOS apps:", error);
-      return { apps: [], successful: false };
+      return { apps: [], successful: false, error };
     }
   }
 

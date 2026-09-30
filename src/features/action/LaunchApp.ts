@@ -1,4 +1,4 @@
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -40,6 +40,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { shellQuote } from "../../utils/shellQuote";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -53,7 +54,9 @@ export interface TargetUserDetector {
 }
 
 export interface InstalledAppsProvider {
-  listInstalledApps(signal?: AbortSignal): Promise<string[]>;
+  listInstalledApps(
+    signal?: AbortSignal,
+  ): Promise<{ apps: string[]; successful: boolean; error?: unknown }>;
 }
 
 export interface IosClearAppDataRunner {
@@ -539,11 +542,14 @@ export class LaunchApp extends BaseVisualChange {
               // simulators — simctl listapps is slow (~2s) and returns nothing for
               // a physical device, where devicectl's launch error is authoritative.
               if (!isSystemBundleId && simulator) {
-                const installedApps = await perf.track("checkInstalled", () =>
+                const installedAppsResult = await perf.track("checkInstalled", () =>
                   this.installedAppsProvider.listInstalledApps(signal),
                 );
                 this.assertLaunchNotAborted(signal);
-                if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
+                if (
+                  installedAppsResult.successful &&
+                  !installedAppsResult.apps.includes(bundleId)
+                ) {
                   logger.info("App is not installed");
                   perf.end();
                   return {
@@ -742,8 +748,31 @@ export class LaunchApp extends BaseVisualChange {
     return target.userId;
   }
 
-  private async listInstalledApps(signal?: AbortSignal): Promise<string[]> {
-    return new ListInstalledApps(this.device, this.adbFactory).execute(signal);
+  private async listInstalledApps(
+    signal?: AbortSignal,
+  ): Promise<{ apps: string[]; successful: boolean; error?: unknown }> {
+    const list = new ListInstalledApps(this.device, this.adbFactory);
+    if (this.device.platform === "ios") {
+      const result = await list.executeIosDetailedResult();
+      return {
+        apps: result.apps
+          .map((app) => getIosInstalledAppBundleId(app))
+          .filter((bundleId): bundleId is string => bundleId !== undefined),
+        successful: result.successful,
+        error: result.error,
+      };
+    }
+    const result = await list.executeDetailedResult(signal, { namesOnly: true });
+    const apps = new Set<string>();
+    for (const profileApps of Object.values(result.apps.profiles)) {
+      for (const app of profileApps) {
+        apps.add(app.packageName);
+      }
+    }
+    for (const app of result.apps.system) {
+      apps.add(app.packageName);
+    }
+    return { apps: Array.from(apps), successful: result.successful, error: result.error };
   }
 
   /**
@@ -794,7 +823,17 @@ export class LaunchApp extends BaseVisualChange {
       }
 
       const targetUserId = targetUserResult.value;
-      const installedApps = installedAppsResult.value;
+      const listing = installedAppsResult.value;
+      if (!listing.successful) {
+        throw toActionableError(
+          listing.error ??
+            new Error(
+              `installed-app listing did not complete successfully for ${this.device.deviceId}`,
+            ),
+          `Could not determine whether ${packageName} is installed`,
+        );
+      }
+      const installedApps = listing.apps;
       logger.info(`[LaunchApp] Found ${installedApps.length} installed app(s)`);
       logger.info(`[LaunchApp] Looking for package: ${packageName}`);
       logger.info(`[LaunchApp] Installed apps: ${installedApps.join(", ")}`);

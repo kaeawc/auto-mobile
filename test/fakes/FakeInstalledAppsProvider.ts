@@ -6,6 +6,7 @@ type FakeInstalledAppsProviderOptions = {
   installedApps?: string[];
   shouldThrow?: boolean;
   error?: Error;
+  successful?: boolean;
 };
 
 export class FakeInstalledAppsProvider implements InstalledAppsProvider {
@@ -14,6 +15,7 @@ export class FakeInstalledAppsProvider implements InstalledAppsProvider {
   private installedApps: string[];
   private shouldThrow: boolean;
   private error: Error;
+  private successful: boolean;
   private callCount = 0;
   private completedCount = 0;
 
@@ -23,16 +25,21 @@ export class FakeInstalledAppsProvider implements InstalledAppsProvider {
     this.installedApps = options.installedApps ?? [];
     this.shouldThrow = options.shouldThrow ?? false;
     this.error = options.error ?? new Error("Fake installed apps provider error");
+    this.successful = options.successful ?? true;
   }
 
-  async listInstalledApps(): Promise<string[]> {
+  async listInstalledApps(): Promise<{ apps: string[]; successful: boolean; error?: Error }> {
     this.callCount += 1;
     await this.timer.sleep(this.delayMs);
     this.completedCount += 1;
     if (this.shouldThrow) {
       throw this.error;
     }
-    return this.installedApps;
+    return {
+      apps: this.installedApps,
+      successful: this.successful,
+      error: this.successful ? undefined : this.error,
+    };
   }
 
   getCallCount(): number {

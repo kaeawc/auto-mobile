@@ -1311,6 +1311,24 @@ final class CommandHandler: CommandHandling {
                 error: "Rotation is not supported on this display (the screen size did not change)"
             )
         }
+        if !needsAxisSwap {
+            for _ in 0 ..< 3 where currentOrientation != iosOrientation {
+                try await Task.sleep(for: .milliseconds(100))
+                currentOrientation = await gesturePerformer.getOrientation()
+            }
+            if currentOrientation != iosOrientation {
+                return RotateResponse(
+                    requestId: request.requestId,
+                    success: false,
+                    totalTimeMs: totalTimeMs(from: startTime),
+                    previousOrientation: previousOrientation,
+                    currentOrientation: reportedOrientation(previous: previousOrientation, afterSize: afterSize),
+                    value: beforeSize.0 < beforeSize.1 ? 0 : 1,
+                    rotationPerformed: false,
+                    error: "Rotation to \(iosOrientation) is not supported on this display"
+                )
+            }
+        }
 
         return RotateResponse(
             requestId: request.requestId,

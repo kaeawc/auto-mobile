@@ -58,6 +58,10 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var onPressHome: (() -> Void)?
     var pressHomeError: CommandError?
     var rotationSupported = true
+    var sameAxisRotationSupported = true
+    var orientationUpdateDelayReads = 0
+    private var pendingOrientation: String?
+    private var remainingOrientationDelayReads = 0
     private var displayLandscape = false
 
     var keyVerified: Bool?
@@ -125,11 +129,32 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
 
     func setOrientation(_ orientation: String) throws {
         setOrientationCalls += 1
-        self.orientation = orientation
-        if rotationSupported { displayLandscape = orientation.hasPrefix("landscape") }
+        if !sameAxisRotationSupported &&
+            self.orientation.hasPrefix("landscape") == orientation.hasPrefix("landscape")
+        {
+            return
+        }
+        if orientationUpdateDelayReads > 0 {
+            pendingOrientation = orientation
+            remainingOrientationDelayReads = orientationUpdateDelayReads
+        } else {
+            self.orientation = orientation
+            if rotationSupported { displayLandscape = orientation.hasPrefix("landscape") }
+        }
     }
 
-    func getOrientation() -> String { orientation }
+    func getOrientation() -> String {
+        if let pendingOrientation {
+            if remainingOrientationDelayReads > 0 {
+                remainingOrientationDelayReads -= 1
+            } else {
+                orientation = pendingOrientation
+                self.pendingOrientation = nil
+                if rotationSupported { displayLandscape = orientation.hasPrefix("landscape") }
+            }
+        }
+        return orientation
+    }
     func pressHome() throws {
         if let pressHomeError { throw pressHomeError }
         onPressHome?()

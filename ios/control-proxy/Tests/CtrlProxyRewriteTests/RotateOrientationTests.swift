@@ -36,6 +36,55 @@ final class RotateOrientationTests: XCTestCase {
         try await assertRotation(from: "landscape_left", to: "landscape_right", performed: true, value: 1)
     }
 
+    func testSameAxisSupportedKeepsRequestedOrientation() async throws {
+        try await assertRotation(from: "portrait", to: "portrait_upside_down", performed: true, value: 0)
+    }
+
+    func testSameAxisRotationSucceedsWhenOrientationUpdatesOnSecondRead() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        try gestures.setOrientation("landscape_left")
+        gestures.orientationUpdateDelayReads = 1
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(),
+            gesturePerformer: gestures,
+            perf: PerfProvider()
+        )
+        let result = await handler.handle(.rotate(RequestRotate(
+            requestId: "rotate-test", orientation: "landscape_right"
+        )))
+        let response = try XCTUnwrap(result as? RotateResponse)
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.previousOrientation, "landscape_left")
+        XCTAssertEqual(response.currentOrientation, "landscape_right")
+        XCTAssertEqual(response.value, 1)
+        XCTAssertTrue(response.rotationPerformed)
+        XCTAssertEqual(gestures.getOrientation(), "landscape_right")
+        XCTAssertEqual(gestures.setOrientationCalls, 2)
+    }
+
+    func testSameAxisUnsupportedKeepsPreviousOrientation() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        try gestures.setOrientation("portrait")
+        gestures.sameAxisRotationSupported = false
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(),
+            gesturePerformer: gestures,
+            perf: PerfProvider()
+        )
+        let result = await handler.handle(.rotate(RequestRotate(
+            requestId: "rotate-test", orientation: "portrait_upside_down"
+        )))
+        let response = try XCTUnwrap(result as? RotateResponse)
+        XCTAssertFalse(response.success)
+        XCTAssertEqual(response.error, "Rotation to portrait_upside_down is not supported on this display")
+        XCTAssertEqual(response.previousOrientation, "portrait")
+        XCTAssertEqual(response.currentOrientation, "portrait")
+        XCTAssertEqual(response.value, 0)
+        XCTAssertFalse(response.rotationPerformed)
+        XCTAssertEqual(gestures.getOrientation(), "portrait")
+        XCTAssertEqual(gestures.setOrientationCalls, 2)
+    }
+
     func testLandscapeRightToLeft() async throws {
         try await assertRotation(from: "landscape_right", to: "landscape_left", performed: true, value: 1)
     }

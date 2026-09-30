@@ -854,15 +854,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     if (remaining <= 0) {
       return undefined;
     }
-    let timeoutId: ReturnType<Timer["setTimeout"]> | null = null;
-    const timeout = new Promise<undefined>((resolve) => {
-      timeoutId = this.timer.setTimeout(() => resolve(undefined), remaining);
-    });
-    const drained = await Promise.race([this.pollSdkEvents(), timeout]);
-    if (timeoutId) {
-      this.timer.clearTimeout(timeoutId);
+    const timedOut = new Error("SDK event poll timed out");
+    try {
+      return await raceWithDeadline(this.pollSdkEvents(), {
+        timer: this.timer,
+        timeoutMs: remaining,
+        label: "SDK event poll",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error === timedOut) {
+        return undefined;
+      }
+      throw error;
     }
-    return drained;
   }
 
   /**

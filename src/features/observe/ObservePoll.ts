@@ -1,7 +1,8 @@
 import type { ObserveResult } from "../../models";
 import type { ObserveScreen } from "./interfaces/ObserveScreen";
 import { Timer } from "../../utils/SystemTimer";
-import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { throwIfAborted } from "../../utils/toolUtils";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { logger } from "../../utils/logger";
 import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
 
@@ -138,15 +139,26 @@ async function awaitFinalizationWhilePollIsLive(
   remainingMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  const result = await Promise.race([
-    awaitWhileRequestIsLive(workPromise, signal).then(() => "settled" as const),
-    timer.sleep(Math.max(0, remainingMs)).then(() => "deadline" as const),
-  ]).catch((error: unknown) => {
+  const timedOut = new Error("Observe poll finalization deadline reached");
+  let result: "settled" | "deadline" | "aborted";
+  try {
+    await raceWithDeadline(workPromise, {
+      timer,
+      timeoutMs: Math.max(0, remainingMs),
+      signal,
+      label: "Observe poll finalization",
+      timeoutError: () => timedOut,
+    });
+    result = "settled";
+  } catch (error) {
     if (signal?.aborted) {
-      return "aborted" as const;
+      result = "aborted";
+    } else if (error === timedOut) {
+      result = "deadline";
+    } else {
+      throw error;
     }
-    throw error;
-  });
+  }
 
   if (result === "settled") {
     return;

@@ -3,6 +3,7 @@ import type { AvdManager } from "./android-cmdline-tools/interfaces/AvdManager";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
 import type { Timer } from "./SystemTimer";
+import { raceWithDeadline } from "./raceWithDeadline";
 
 export const CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS = 2_000;
 
@@ -71,16 +72,17 @@ export class AndroidAvdProvenanceCache {
     controller: AbortController,
     generation: number,
   ): Promise<ReadonlyMap<string, AvdInfo>> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeoutFailure = new Error(
+      `Android AVD provenance lookup timed out after ${timeoutMs}ms`,
+    );
     try {
-      const timeout = new Promise<never>((_resolve, reject) => {
-        timeoutHandle = timer.setTimeout(() => {
-          const error = new Error(`Android AVD provenance lookup timed out after ${timeoutMs}ms`);
-          controller.abort(error);
-          reject(error);
-        }, timeoutMs);
+      const avds = await raceWithDeadline(avdManager.listDeviceImages(controller.signal), {
+        timer,
+        timeoutMs,
+        label: "Android AVD provenance lookup",
+        timeoutError: () => timeoutFailure,
+        onTimeout: () => controller.abort(timeoutFailure),
       });
-      const avds = await Promise.race([avdManager.listDeviceImages(controller.signal), timeout]);
       const result = new Map(avds.map((avd) => [avd.name, avd]));
       if (this.generation === generation) {
         this.cached = result;
@@ -90,9 +92,6 @@ export class AndroidAvdProvenanceCache {
       logger.warn(`Android AVD provenance lookup failed: ${errorMessage(error)}`, error);
       return new Map();
     } finally {
-      if (timeoutHandle) {
-        timer.clearTimeout(timeoutHandle);
-      }
       if (this.generation === generation && this.inFlightController === controller) {
         this.inFlight = undefined;
         this.inFlightController = undefined;

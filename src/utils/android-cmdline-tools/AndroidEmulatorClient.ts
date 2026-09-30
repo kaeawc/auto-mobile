@@ -16,6 +16,7 @@ import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { raceWithDeadline } from "../raceWithDeadline";
 import { combineAbortSignals } from "../AbortContext";
 import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
@@ -1602,36 +1603,25 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const fullCommand = `${emulatorPath} ${args.join(" ")}`;
     logger.debug(`Executing emulator command: ${fullCommand}`);
 
-    // Use Promise.race to implement timeout if specified. On timeout we abort the
+    // On timeout we abort the
     // controller so the underlying child process is killed rather than left
     // running orphaned (issue #3938).
     if (timeoutMs) {
-      let timeoutId: NodeJS.Timeout;
       const controller = new AbortController();
-
-      const timeoutPromise = new Promise<ExecResult>((_, reject) => {
-        timeoutId = this.timer.setTimeout(() => {
-          controller.abort();
-          reject(new ActionableError(`Command timed out after ${timeoutMs}ms: ${fullCommand}`));
-        }, timeoutMs);
-      });
 
       const runPromise = this.execAsync(
         emulatorPath,
         args,
         combineAbortSignals(signal, controller.signal),
       );
-      // Once the timeout wins the race the aborted run promise rejects with an
-      // AbortError; keep it handled so it can't surface as an unhandledRejection.
-      runPromise.catch(() => {
-        /* settled after timeout; result consumed via race */
+      return raceWithDeadline(runPromise, {
+        timer: this.timer,
+        timeoutMs,
+        label: "Emulator command",
+        timeoutError: () =>
+          new ActionableError(`Command timed out after ${timeoutMs}ms: ${fullCommand}`),
+        onTimeout: () => controller.abort(),
       });
-
-      try {
-        return await Promise.race([runPromise, timeoutPromise]);
-      } finally {
-        this.timer.clearTimeout(timeoutId!);
-      }
     }
 
     return await this.execAsync(emulatorPath, args, signal);
@@ -3190,20 +3180,21 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     if (signal.aborted) {
       throw new ActionableError("Android emulator launch was cancelled while checking host ports");
     }
-    let rejectCancellation!: (error: ActionableError) => void;
-    const cancellation = new Promise<never>((_resolve, reject) => {
-      rejectCancellation = reject;
-    });
-    const onAbort = () => {
-      rejectCancellation(
-        new ActionableError("Android emulator launch was cancelled while checking host ports"),
-      );
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
     try {
-      return (await Promise.race([availability, cancellation])).every(Boolean);
-    } finally {
-      signal.removeEventListener("abort", onAbort);
+      return (
+        await raceWithDeadline(availability, {
+          timer: this.timer,
+          signal,
+          label: "Android emulator host port check",
+        })
+      ).every(Boolean);
+    } catch (error) {
+      if (signal.aborted) {
+        throw new ActionableError(
+          "Android emulator launch was cancelled while checking host ports",
+        );
+      }
+      throw error;
     }
   }
 

@@ -1,4 +1,9 @@
 import { toActionableError } from "../models/ActionableError";
+import {
+  clearToolTransportRecovery,
+  setToolTransportRecovery,
+  type ToolTransportRecovery,
+} from "./toolTransportRecovery";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
@@ -307,6 +312,8 @@ interface ToolRegistrationOptions {
   /** Built-in session default before startup or persisted exact-tool overrides. */
   defaultEnabled?: boolean;
   supportsProgress?: boolean;
+  /** Loopback closure recovery: connect only, or replay after ambiguous delivery. */
+  transportRecovery?: ToolTransportRecovery;
   debugOnly?: boolean;
   /**
    * Hidden from `tools/list` and discovery (`getAllTools` and
@@ -358,6 +365,7 @@ export interface RegisteredTool {
   defaultEnabled: boolean;
   defaultDeclared: boolean;
   supportsProgress?: boolean;
+  transportRecovery?: ToolTransportRecovery;
   requiresDevice?: boolean;
   deviceAwareHandler?: DeviceAwareToolHandler;
   debugOnly?: boolean;
@@ -1444,6 +1452,9 @@ export class ToolRegistryClass {
     options: ToolRegistrationOptions = {},
   ): void {
     this.invalidateToolDefinitionSchemaCache();
+    if (this === ToolRegistry) {
+      setToolTransportRecovery(name, options.transportRecovery);
+    }
     this.tools.set(name, {
       name,
       description,
@@ -1452,6 +1463,7 @@ export class ToolRegistryClass {
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
+      transportRecovery: options.transportRecovery,
       requiresDevice: false,
       debugOnly: options.debugOnly ?? false,
       hidden: options.hidden ?? false,
@@ -1465,6 +1477,9 @@ export class ToolRegistryClass {
   /** Remove one test-only or dynamically registered tool without disturbing the registry. */
   unregister(name: string): void {
     this.invalidateToolDefinitionSchemaCache();
+    if (this === ToolRegistry) {
+      setToolTransportRecovery(name, undefined);
+    }
     this.tools.delete(name);
   }
 
@@ -1477,6 +1492,12 @@ export class ToolRegistryClass {
     options: DeviceAwareToolOptions = {},
   ): void {
     this.invalidateToolDefinitionSchemaCache();
+    // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
+    // delivery requires an explicit per-tool opt-in.
+    const transportRecovery = options.transportRecovery ?? "connect";
+    if (this === ToolRegistry) {
+      setToolTransportRecovery(name, transportRecovery);
+    }
     // Create a wrapper that handles device ID injection
     const wrappedHandler: ToolHandler = async (
       args: any,
@@ -1604,6 +1625,7 @@ export class ToolRegistryClass {
       defaultEnabled: options.defaultEnabled ?? true,
       defaultDeclared: options.defaultEnabled !== undefined,
       supportsProgress: options.supportsProgress ?? false,
+      transportRecovery,
       requiresDevice: true,
       deviceAwareHandler: handler,
       debugOnly: options.debugOnly ?? false,
@@ -2127,6 +2149,13 @@ export class ToolRegistryClass {
   clearTools(): void {
     this.invalidateToolDefinitionSchemaCache();
     this.tools.clear();
+    if (this === ToolRegistry) {
+      clearToolTransportRecovery();
+    }
+  }
+
+  getToolTransportRecovery(name: string): ToolTransportRecovery | undefined {
+    return this.tools.get(name)?.transportRecovery;
   }
 }
 

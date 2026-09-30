@@ -1,6 +1,6 @@
 import type { DaemonRequest } from "./types";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
-import { errorMessage } from "../utils/describeUnknownError";
+import { getToolTransportRecovery } from "../server/toolTransportRecovery";
 
 export const DEVICE_CONTROL_TRANSPORT_FAILURE_CODE = "device_control_transport_failure";
 
@@ -31,6 +31,30 @@ export class DeviceControlTransportError extends Error {
   ) {
     super(message);
     this.name = "DeviceControlTransportError";
+  }
+}
+
+/** A rejected fetch on the daemon's loopback MCP transport. */
+export class LoopbackMcpConnectionError extends Error {
+  constructor(cause: unknown) {
+    super("Daemon loopback MCP connection closed", { cause });
+    this.name = "LoopbackMcpConnectionError";
+  }
+}
+
+/** Tag network failures where they occur, before the SDK can discard their cause. */
+export async function loopbackMcpFetch(
+  url: string | URL,
+  init?: RequestInit,
+  fetchImpl: (url: string | URL, init?: RequestInit) => Promise<Response> = fetch,
+): Promise<Response> {
+  try {
+    return await fetchImpl(url, init);
+  } catch (error) {
+    if (init?.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+      throw error;
+    }
+    throw new LoopbackMcpConnectionError(error);
   }
 }
 
@@ -135,11 +159,8 @@ export function sanitizeDeviceControlTransportFailure(
   };
 }
 
-export function isUnexpectedSocketClosure(error: unknown): boolean {
-  if (error instanceof McpError) {
-    return false;
-  }
-  return errorMessage(error).includes("The socket connection was closed unexpectedly");
+export function isLoopbackTransportFailure(error: unknown): boolean {
+  return !(error instanceof McpError) && error instanceof LoopbackMcpConnectionError;
 }
 
 export function isDeviceControlTransportRequest(request: DaemonRequest): boolean {
@@ -147,7 +168,7 @@ export function isDeviceControlTransportRequest(request: DaemonRequest): boolean
     return false;
   }
   const toolName = request.params?.name;
-  return toolName === "launchApp" || toolName === "observe";
+  return typeof toolName === "string" && getToolTransportRecovery(toolName) !== undefined;
 }
 
 /**
@@ -156,7 +177,7 @@ export function isDeviceControlTransportRequest(request: DaemonRequest): boolean
  * reconnect replay so both layers agree on what may run twice (issue #6382).
  */
 export function isReplaySafeToolName(toolName: unknown): boolean {
-  return toolName === "observe";
+  return typeof toolName === "string" && getToolTransportRecovery(toolName) === "replay";
 }
 
 export function isReplaySafeAfterResponseClosure(request: DaemonRequest): boolean {

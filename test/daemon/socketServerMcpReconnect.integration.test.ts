@@ -16,6 +16,8 @@ import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { DAEMON_BOUND_SESSION_PARAM } from "../../src/daemon/constants";
 import type { DaemonResponse } from "../../src/daemon/types";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { LoopbackMcpConnectionError } from "../../src/daemon/deviceControlTransportFailure";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 
 /**
  * Minimal fake MCP client interface for testing.
@@ -48,9 +50,7 @@ function expiredLoopbackSession(): StreamableHTTPError {
 }
 
 function socketClosedError(sensitiveDetail = ""): Error {
-  return new Error(
-    `The socket connection was closed unexpectedly. For more information, pass verbose: true.${sensitiveDetail}`,
-  );
+  return new LoopbackMcpConnectionError(new Error(`Unstable loopback transport${sensitiveDetail}`));
 }
 
 function createFakeDaemonState(
@@ -237,6 +237,19 @@ describe("UnixSocketServer MCP session reconnect", () => {
   let terminalReleaseSnapshot: SessionReleaseSnapshot | undefined;
 
   beforeEach(async () => {
+    const unusedHandler = async () => ({ content: [] });
+    ToolRegistry.register("launchApp", "test transport capability", {}, unusedHandler, {
+      transportRecovery: "connect",
+    });
+    ToolRegistry.register("observe", "test transport capability", {}, unusedHandler, {
+      transportRecovery: "replay",
+    });
+    ToolRegistry.register("safeProbe", "test transport capability", {}, unusedHandler, {
+      transportRecovery: "replay",
+    });
+    ToolRegistry.register("tapOn", "test transport capability", {}, unusedHandler, {
+      transportRecovery: "connect",
+    });
     socketPath = join(tmpdir(), `mcp-rc-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     sessionIsValid = true;
@@ -269,6 +282,9 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
   afterEach(async () => {
     await server.close();
+    for (const name of ["launchApp", "observe", "safeProbe", "tapOn"]) {
+      ToolRegistry.unregister(name);
+    }
     if (existsSync(socketPath)) {
       await unlink(socketPath);
     }
@@ -554,6 +570,32 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(callsDispatched).toBe(1);
   });
 
+  test("reconnects tapOn after a socket closure before request dispatch", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      if (clientsCreated === 1) {
+        throw socketClosedError();
+      }
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          return { content: [{ type: "text", text: "tapped" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "tapOn",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
+  });
+
   test("reconnects a sessionless call after a socket closure before request dispatch", async () => {
     let clientsCreated = 0;
     let callsDispatched = 0;
@@ -732,6 +774,61 @@ describe("UnixSocketServer MCP session reconnect", () => {
     expect(response.success).toBe(true);
     expect(clientsCreated).toBe(2);
     expect(callsDispatched).toBe(2);
+  });
+
+  test("replays a registered replay-safe tool after a typed closure", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    server.mcpClientFactory = async () => {
+      const clientIndex = ++clientsCreated;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          if (clientIndex === 1) {
+            throw new LoopbackMcpConnectionError(new Error("a differently worded failure"));
+          }
+          return { content: [{ type: "text", text: "recovered" }] };
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "safeProbe",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(true);
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(2);
+  });
+
+  test("reconnects a non-replay-safe tool without repeating an ambiguous call", async () => {
+    let clientsCreated = 0;
+    let callsDispatched = 0;
+    server.mcpClientFactory = async () => {
+      clientsCreated++;
+      return createFakeMcpClient({
+        callTool: async () => {
+          callsDispatched++;
+          throw socketClosedError();
+        },
+      });
+    };
+
+    const response = await sendRequest(socketPath, "tools/call", {
+      name: "tapOn",
+      arguments: { sessionUuid: "session-a" },
+    });
+
+    expect(response.success).toBe(false);
+    expect(response.transportFailure).toMatchObject({
+      phase: "response",
+      retryable: false,
+      reconnectAttempted: true,
+      replayAttempted: false,
+    });
+    expect(clientsCreated).toBe(2);
+    expect(callsDispatched).toBe(1);
   });
 
   test("refreshes first-use autolock identity before replaying observe", async () => {

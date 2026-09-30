@@ -1089,7 +1089,7 @@ export function registerAppTools() {
     "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     launchAppSchema,
     launchAppHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, transportRecovery: "connect" },
   );
 
   ToolRegistry.registerDeviceAware(

@@ -195,10 +195,83 @@ describe("SharedStorageReadService.list", () => {
     expect(listing.userSource).toBe("managedProfile");
     expect(listing.downloadsDirectory).toBe("/storage/emulated/10/Download/run-42");
     expect(captured[0]?.explicitUserId).toBe(10);
+    expect(captured[0]?.currentUser).toBe(true);
     expect(
       executor
         .getExecutedCommands()
         .some((c) => c.includes("/storage/emulated/10/Download/run-42")),
+    ).toBe(true);
+  });
+
+  test("uses current user for list and read when no explicit user is supplied", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("-exec stat", execResult(""));
+    executor.setCommandResponse("sha256sum", execResult(""));
+    executor.setCommandResponse("base64", execResult(Buffer.from("current").toString("base64")));
+    const captured: UserTargetRequest[] = [];
+    const service = createSharedStorageReadServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: resolverReturning({ userId: 12, source: "currentUser" }, captured),
+      deviceResolver: async () => androidDevice,
+    });
+
+    const listing = await service.list({ deviceId: "emulator-5554", namespace: "current" });
+    const result = await service.read({
+      deviceId: "emulator-5554",
+      namespace: "current",
+      path: "note.txt",
+    });
+
+    expect(captured).toHaveLength(2);
+    expect(captured.every((request) => request.currentUser === true)).toBe(true);
+    expect(listing.downloadsDirectory).toBe("/storage/emulated/12/Download/current");
+    expect(result.userId).toBe(12);
+    expect(
+      executor
+        .getExecutedCommands()
+        .some((command) => command.includes("/storage/emulated/12/Download/current/note.txt")),
+    ).toBe(true);
+  });
+
+  test("explicit user zero wins for both list and read", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("-exec stat", execResult(""));
+    executor.setCommandResponse("sha256sum", execResult(""));
+    executor.setCommandResponse("base64", execResult(Buffer.from("zero").toString("base64")));
+    const captured: UserTargetRequest[] = [];
+    const service = createSharedStorageReadServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async (request) => {
+          captured.push(request);
+          return request.explicitUserId !== undefined
+            ? { userId: request.explicitUserId, source: "explicit" }
+            : { userId: 12, source: "currentUser" };
+        },
+      }),
+      deviceResolver: async () => androidDevice,
+    });
+
+    const listing = await service.list({
+      deviceId: "emulator-5554",
+      namespace: "explicit-zero",
+      explicitUserId: 0,
+    });
+    const result = await service.read({
+      deviceId: "emulator-5554",
+      namespace: "explicit-zero",
+      path: "note.txt",
+      explicitUserId: 0,
+    });
+
+    expect(captured.map((request) => request.explicitUserId)).toEqual([0, 0]);
+    expect(captured.every((request) => request.currentUser === true)).toBe(true);
+    expect(listing.downloadsDirectory).toBe("/storage/emulated/0/Download/explicit-zero");
+    expect(result.userId).toBe(0);
+    expect(
+      executor
+        .getExecutedCommands()
+        .some((command) => command.includes("/storage/emulated/0/Download/explicit-zero/note.txt")),
     ).toBe(true);
   });
 

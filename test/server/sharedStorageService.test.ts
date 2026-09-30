@@ -7,6 +7,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { UserTargetRequest } from "../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const androidDevice: BootedDevice = {
@@ -137,10 +138,14 @@ describe("SharedStorageService", () => {
 
   test("uses the resolved active profile rather than assuming Android user zero", async () => {
     const executor = new FakeAdbExecutor();
+    const requests: UserTargetRequest[] = [];
     const service = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
-        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+        resolve: async (request) => {
+          requests.push(request ?? {});
+          return { userId: 12, source: "managedProfile" };
+        },
       }),
     });
 
@@ -156,6 +161,7 @@ describe("SharedStorageService", () => {
       userSource: "managedProfile",
       destinationDirectory: "/storage/emulated/12/Download/work-fixtures",
     });
+    expect(requests).toEqual([{ explicitUserId: undefined, currentUser: true, signal: undefined }]);
     expect(executor.getExecutedCommands()).toContain(
       "shell rm -rf '/storage/emulated/12/Download/work-fixtures'",
     );
@@ -166,17 +172,51 @@ describe("SharedStorageService", () => {
     ]);
   });
 
-  test("scopes MediaStore scanning and verification to the resolved profile", async () => {
+  test("honors explicit user zero while still preferring current-user resolution otherwise", async () => {
     const executor = new FakeAdbExecutor();
-    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    const requests: UserTargetRequest[] = [];
     const service = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
-        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+        resolve: async (request) => {
+          requests.push(request ?? {});
+          return request?.explicitUserId !== undefined
+            ? { userId: request.explicitUserId, source: "explicit" }
+            : { userId: 12, source: "currentUser" };
+        },
       }),
     });
 
-    await service.stage({
+    const result = await service.stage({
+      device: androidDevice,
+      namespace: "explicit-zero",
+      explicitUserId: 0,
+      files: [{ contentText: "zero", destinationPath: "fixture.txt" }],
+    });
+
+    expect(requests).toEqual([{ explicitUserId: 0, currentUser: true, signal: undefined }]);
+    expect(result).toMatchObject({
+      userId: 0,
+      userSource: "explicit",
+      destinationDirectory: "/storage/emulated/0/Download/explicit-zero",
+    });
+  });
+
+  test("scopes MediaStore scanning and storage paths to a non-zero current user", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    const requests: UserTargetRequest[] = [];
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async (request) => {
+          requests.push(request ?? {});
+          return { userId: 12, source: "currentUser" };
+        },
+      }),
+    });
+
+    const result = await service.stage({
       device: androidDevice,
       namespace: "work-media",
       files: [
@@ -184,6 +224,8 @@ describe("SharedStorageService", () => {
       ],
     });
 
+    expect(requests[0]?.currentUser).toBe(true);
+    expect(result.destinationDirectory).toBe("/storage/emulated/12/Download/work-media");
     expect(executor.getExecutedCommands()).toContain(
       "shell am broadcast --user 12 -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d 'file:///storage/emulated/12/Download/work-media/photo.png'",
     );

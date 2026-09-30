@@ -63,6 +63,7 @@ export interface SharedStorageUserResolver {
 
 export interface StageSharedStorageRequest extends Omit<StageSharedStorageArgs, "device"> {
   device: BootedDevice;
+  explicitUserId?: number;
   signal?: AbortSignal;
   /** Roll back files written by this call if any write or media index fails. */
   rollbackOnFailure?: boolean;
@@ -113,6 +114,7 @@ class DefaultSharedStorageService implements SharedStorageService {
       let user: ResolvedUserTarget;
       try {
         user = await this.createUserResolver(adb).resolve({
+          explicitUserId: request.explicitUserId,
           currentUser: true,
           signal: request.signal,
         });

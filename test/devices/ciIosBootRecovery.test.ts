@@ -6,7 +6,7 @@ import {
   NoopDeviceBootRecovery,
   normalizeCiIosBootRequest,
   shouldUseCiIosBootRecovery,
-} from "../../src/utils/deviceBootRecovery";
+} from "../../src/devices/deviceBootRecovery";
 import type { DeviceInfo } from "../../src/models";
 import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../src/utils/execResult";

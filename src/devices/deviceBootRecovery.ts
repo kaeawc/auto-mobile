@@ -1,18 +1,18 @@
 import { ActionableError, type DeviceInfo } from "../models";
-import type { DeviceBootRequest } from "../devices/deviceBootService";
+import type { DeviceBootRequest } from "./deviceBootService";
 import {
   DefaultDeviceProvisioner,
   createDefaultAndroidAvdCreator,
   resolveIosProvisioningSelection,
-} from "../devices/deviceProvisioning";
-import type { DeviceProvisioner } from "../devices/deviceProvisioning";
-import { MultiPlatformDeviceManager } from "./deviceUtils";
-import type { PlatformDeviceManager } from "./deviceUtils";
-import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
-import { iosVersionStringFromRuntimeId } from "./ios-cmdline-tools/iosVersion";
-import { logger } from "./logger";
-import { defaultTimer } from "./SystemTimer";
-import { raceWithDeadline } from "./raceWithDeadline";
+} from "./deviceProvisioning";
+import type { DeviceProvisioner } from "./deviceProvisioning";
+import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
+import type { PlatformDeviceManager } from "../utils/deviceUtils";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
+import { logger } from "../utils/logger";
+import { defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 const CI_SIMULATOR_NAME = "AutoMobile CI iPhone";
 

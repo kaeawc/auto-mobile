@@ -12,7 +12,7 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import type { AndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
+import type { AndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import type { DeviceRecoveryPolicy } from "../../src/daemon/poolConfig";
 import type { BootedDevice } from "../../src/models";
 import {

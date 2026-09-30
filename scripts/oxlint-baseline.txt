@@ -247,7 +247,7 @@
 1	src/utils/plan/PlanSerializer.ts	auto-mobile(catch-convention)
 1	src/utils/plan/PlanSerializer.ts	eslint(complexity)
 1	src/utils/plan/summarizeFailureObservation.ts	eslint(complexity)
-1	src/utils/requireBootedDevice.ts	auto-mobile(catch-convention)
+1	src/devices/requireBootedDevice.ts	auto-mobile(catch-convention)
 1	src/utils/retry/RetryExecutor.ts	eslint(complexity)
 1	src/utils/screenshot/ScreenshotComparator.ts	eslint(complexity)
 1	src/utils/truncateBodyText.ts	auto-mobile(catch-convention)

@@ -16,7 +16,7 @@ import { pickAndroidSystemImage } from "../../src/devices/deviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
-import type { DeviceBootRecovery } from "../../src/utils/deviceBootRecovery";
+import type { DeviceBootRecovery } from "../../src/devices/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";

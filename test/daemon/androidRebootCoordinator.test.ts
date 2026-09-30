@@ -9,7 +9,7 @@ import { AndroidRecoveryRecordLedger } from "../../src/daemon/androidRecoveryRec
 import type { IdentityEvidence } from "../../src/daemon/deviceIdentityEvidence";
 import type { DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
 import { DeviceCriteriaMatcher } from "../../src/daemon/DeviceCriteriaMatcher";
-import { BoundedAndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
+import { BoundedAndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import type { PlatformDeviceManager } from "../../src/utils/deviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 

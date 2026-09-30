@@ -18,7 +18,7 @@ import {
 } from "../utils/deviceUtils";
 import { matchesDeviceCriteria, type DeviceMatcher } from "../utils/deviceMatcher";
 import type { DeviceProvisioner, DeviceProvisioningIdentityHooks } from "./deviceProvisioning";
-import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "../utils/deviceBootRecovery";
+import { NoopDeviceBootRecovery, type DeviceBootRecovery } from "./deviceBootRecovery";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";

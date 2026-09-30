@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { CiIosBootRecovery } from "../../src/utils/deviceBootRecovery";
+import { CiIosBootRecovery } from "../../src/devices/deviceBootRecovery";
 import type { DeviceInfo } from "../../src/models";
 
 describe("CiIosBootRecovery", () => {

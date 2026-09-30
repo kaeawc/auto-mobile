@@ -92,7 +92,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       // Carry the runner's pinchPath so PinchOn can warn when the center-less
       // public fallback was used instead of the center-honoring synthesis (#2910).
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
         perfTiming: message.perfTiming,
@@ -114,7 +114,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
     case "launch_app_result":
     case "reset_permissions_result":
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
         perfTiming: message.perfTiming,
@@ -123,7 +123,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
     case "press_key_result":
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
         verified: message.verified,
@@ -133,7 +133,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
     case "keyboard_result":
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         open: message.open ?? false,
         method: message.method,
         totalTimeMs: message.totalTimeMs ?? 0,
@@ -144,7 +144,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
     case "rotate_result":
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
         perfTiming: message.perfTiming,
@@ -158,7 +158,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
     case "ime_action_result":
     case "action_result":
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         action: (message as { action?: string }).action,
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
@@ -199,7 +199,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
     case "multi_finger_swipe_result":
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
         perfTiming: message.perfTiming,
@@ -208,7 +208,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
     case "clipboard_result":
       result = {
-        success: message.success ?? true,
+        success: message.success ?? (message.error === undefined || message.error === null),
         action: (message as { action?: string }).action ?? "",
         text: (message as { text?: string }).text,
         totalTimeMs: message.totalTimeMs ?? 0,

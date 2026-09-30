@@ -37,16 +37,51 @@ function abortReason(signal: AbortSignal, label: string, relabelDefaultAbort: bo
     : reason;
 }
 
+function isPromiseArray<T>(
+  operation: Promise<T> | readonly Promise<T>[],
+): operation is readonly Promise<T>[] {
+  return Array.isArray(operation);
+}
+
+function asOperations<T>(operation: Promise<T> | readonly Promise<T>[]): readonly Promise<T>[] {
+  return isPromiseArray(operation) ? operation : [operation];
+}
+
+function startOperations<T>(
+  operation: Promise<T> | readonly Promise<T>[] | (() => Promise<T>),
+): readonly Promise<T>[] {
+  return typeof operation === "function" ? [operation()] : asOperations(operation);
+}
+
+function suppressLateRejections<T>(operations: readonly Promise<T>[]): void {
+  for (const operation of operations) {
+    void operation.then(undefined, () => {});
+  }
+}
+
 /**
- * Race an already-started promise against an optional deadline and abort signal.
+ * Race one or more promises against an optional deadline and abort signal. A thunk starts
+ * after the deadline is armed; already-started promises retain their timing.
  * Callers may share the operation, so losing the race never cancels it.
  * Raw abort reasons are preserved by default because callers such as
  * `src/server/deviceTools.ts` classify DOMException(AbortError) cancellations.
  * New callers may opt into #6573-style phase-labelled cancellation with relabelDefaultAbort
  * when downstream code does not require that raw shape.
  */
-export async function raceWithDeadline<T>(
+export function raceWithDeadline<T>(
   operation: Promise<T>,
+  options: RaceWithDeadlineOptions,
+): Promise<T>;
+export function raceWithDeadline<T>(
+  operation: () => Promise<T>,
+  options: RaceWithDeadlineOptions,
+): Promise<T>;
+export function raceWithDeadline<T>(
+  operation: readonly Promise<T>[],
+  options: RaceWithDeadlineOptions,
+): Promise<T>;
+export async function raceWithDeadline<T>(
+  operation: Promise<T> | readonly Promise<T>[] | (() => Promise<T>),
   {
     timer,
     timeoutMs,
@@ -58,8 +93,10 @@ export async function raceWithDeadline<T>(
     onTimeout,
   }: RaceWithDeadlineOptions,
 ): Promise<T> {
-  // A losing operation may still reject after the race has settled.
-  void operation.then(undefined, () => {});
+  // A losing already-started operation may reject before an aborted race starts.
+  if (typeof operation !== "function") {
+    suppressLateRejections(asOperations(operation));
+  }
   if (signal?.aborted) {
     throw abortReason(signal, label, relabelDefaultAbort);
   }
@@ -92,8 +129,11 @@ export async function raceWithDeadline<T>(
         });
 
   try {
+    const started = startOperations(operation);
+    // A losing operation may still reject after the race has settled.
+    suppressLateRejections(started);
     return await Promise.race([
-      operation,
+      ...started,
       ...(abortPromise ? [abortPromise] : []),
       ...(timeoutPromise ? [timeoutPromise] : []),
     ]);

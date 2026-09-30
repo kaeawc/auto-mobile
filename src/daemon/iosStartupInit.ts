@@ -1,6 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { CtrlProxyStaleRunnerCacheError } from "../ctrlProxy/IosCtrlProxyBuilder";
 
 /** Options the startup path passes to `DeviceSessionManager.verifyIosDevice`. */
@@ -37,13 +38,6 @@ export interface IosStartupInitResult {
   deferred: string[];
 }
 
-function unrefTimeout(handle: NodeJS.Timeout): void {
-  // Allow process to exit even if this timer is pending.
-  if (typeof (handle as { unref?: () => void }).unref === "function") {
-    (handle as { unref: () => void }).unref();
-  }
-}
-
 /**
  * Wait for `pending` up to `timeoutMs` on the injected timer. Resolves true
  * when it settled in time, false on budget expiry.
@@ -53,17 +47,21 @@ async function settledWithinBudget(
   timer: Timer,
   timeoutMs: number,
 ): Promise<boolean> {
-  let handle: NodeJS.Timeout | undefined;
-  const expired = new Promise<false>((resolve) => {
-    handle = timer.setTimeout(() => resolve(false), timeoutMs);
-    unrefTimeout(handle);
-  });
+  const timedOut = Symbol("iOS startup budget");
   try {
-    return await Promise.race([pending.then(() => true), expired]);
-  } finally {
-    if (handle !== undefined) {
-      timer.clearTimeout(handle);
+    await raceWithDeadline(pending, {
+      timer,
+      timeoutMs,
+      unref: true,
+      label: "iOS startup budget",
+      timeoutError: () => timedOut,
+    });
+    return true;
+  } catch (error) {
+    if (error !== timedOut) {
+      throw error;
     }
+    return false;
   }
 }
 

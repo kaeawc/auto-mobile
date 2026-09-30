@@ -1359,7 +1359,6 @@ export class RunnerReadinessService {
     const signal = context.signal
       ? AbortSignal.any([context.signal, controller.signal])
       : controller.signal;
-    let timeoutHandle: NodeJS.Timeout | undefined;
     // Record one `readiness:<phase>` span. The ambient tracker is already
     // established for the whole attempt in `ensureReadyUncoordinated`, so the
     // runner install/start/health commands (adb, simctl, xcodebuild) beneath
@@ -1370,15 +1369,16 @@ export class RunnerReadinessService {
     );
     void operationPromise.catch(() => {});
     try {
-      const result = await Promise.race([
-        operationPromise,
-        new Promise<never>((_resolve, reject) => {
-          timeoutHandle = this.dependencies.timer.setTimeout(() => {
-            controller.abort(new Error("readiness phase exceeded the remaining deadline"));
-            reject(new Error("readiness phase exceeded the remaining deadline"));
-          }, remainingMs);
-        }),
-      ]);
+      const result = await raceWithDeadline(operationPromise, {
+        timer: this.dependencies.timer,
+        timeoutMs: remainingMs,
+        label: `Runner readiness ${phase}`,
+        timeoutError: () => {
+          const error = new Error("readiness phase exceeded the remaining deadline");
+          controller.abort(error);
+          return error;
+        },
+      });
       recordElapsed();
       return result;
     } catch (error) {
@@ -1395,9 +1395,6 @@ export class RunnerReadinessService {
         deadlineExhausted: controller.signal.aborted,
       });
     } finally {
-      if (timeoutHandle) {
-        this.dependencies.timer.clearTimeout(timeoutHandle);
-      }
       recordElapsed();
     }
   }

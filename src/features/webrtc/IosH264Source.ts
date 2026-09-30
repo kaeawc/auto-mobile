@@ -848,15 +848,17 @@ export class IosH264Source implements H264CaptureSource {
     encoder.stdin.end();
     encoder.kill("SIGTERM");
 
-    let timeout: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<void>((resolve) => {
-      timeout = this.timer.setTimeout(resolve, IOS_ENCODER_RESTART_GRACE_MS);
-    });
+    const timedOut = Symbol("encoder reap timeout");
     try {
-      await Promise.race([exitPromise, timedOut]);
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
+      await raceWithDeadline(exitPromise, {
+        timer: this.timer,
+        timeoutMs: IOS_ENCODER_RESTART_GRACE_MS,
+        label: "Outgoing encoder reap",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
     }
 
@@ -2013,20 +2015,21 @@ export class IosH264Source implements H264CaptureSource {
         return true;
       },
     );
-    let timeout: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<false>((resolve) => {
-      timeout = this.timer.setTimeout(() => resolve(false), IOS_HELPER_STOP_TIMEOUT_MS);
-    });
+    const timedOut = Symbol("helper stop timeout");
     try {
-      if (!(await Promise.race([stopped, timedOut]))) {
-        logger.warn(
-          `[IosH264Source] helper stop exceeded ${IOS_HELPER_STOP_TIMEOUT_MS}ms; continuing teardown`,
-        );
+      await raceWithDeadline(stopped, {
+        timer: this.timer,
+        timeoutMs: IOS_HELPER_STOP_TIMEOUT_MS,
+        label: "iOS capture helper stop",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
-    } finally {
-      if (timeout) {
-        this.timer.clearTimeout(timeout);
-      }
+      logger.warn(
+        `[IosH264Source] helper stop exceeded ${IOS_HELPER_STOP_TIMEOUT_MS}ms; continuing teardown`,
+      );
     }
   }
 }

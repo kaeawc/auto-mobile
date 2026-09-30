@@ -380,9 +380,9 @@ describe("ChildProcessTracker", () => {
       });
 
       timer.advanceTime(100);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      for (let turn = 0; turn < 12 && process.signals.length < 2; turn++) {
+        await Promise.resolve();
+      }
       expect(process.signals).toEqual(["SIGINT", "SIGKILL"]);
       expect(timer.getPendingTimeouts()).toEqual([50]);
 

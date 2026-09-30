@@ -1,6 +1,8 @@
 import { logger } from "../utils/logger";
 import { ActionableError, type BootedDevice, type DeviceInfo, type Platform } from "../models";
 import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
 import type { PlatformDeviceManager } from "../utils/deviceUtils";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
@@ -293,13 +295,6 @@ export class DeviceAutolockManager {
         .getSessionManager()
         .releaseSessionIfOwned(session.sessionId, session, device.id, "session-creation-cancelled");
     };
-    let abort: (() => void) | undefined;
-    const cancelled = signal
-      ? new Promise<never>((_resolve, reject) => {
-          abort = () => reject(signal.reason);
-          signal.addEventListener("abort", abort, { once: true });
-        })
-      : undefined;
     try {
       signal?.throwIfAborted();
       const persistence = this.deviceSessionRepository.markAutolockSession(session.sessionId, {
@@ -308,7 +303,11 @@ export class DeviceAutolockManager {
         lastUsedAtMs: session.lastUsedAt,
         expiresAtMs: session.expiresAt,
       });
-      await Promise.race([persistence, ...(cancelled ? [cancelled] : [])]);
+      await raceWithDeadline(persistence, {
+        timer: defaultTimer,
+        signal,
+        label: "Autolock persistence",
+      });
       signal?.throwIfAborted();
     } catch (error) {
       // Session release fences automation admission synchronously, then may
@@ -323,10 +322,6 @@ export class DeviceAutolockManager {
       );
       this.restoreCancelledAutolockAssignment(device, session, snapshot);
       throw error;
-    } finally {
-      if (abort) {
-        signal?.removeEventListener("abort", abort);
-      }
     }
   }
 

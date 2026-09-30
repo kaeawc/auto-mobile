@@ -39,6 +39,12 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
+async function flushUntilExit(fakeProcess: FakeProcess): Promise<void> {
+  for (let turn = 0; turn < 20 && fakeProcess.exitCodes.length === 0; turn++) {
+    await Promise.resolve();
+  }
+}
+
 describe("process lifecycle handlers", () => {
   test("installs each process listener only once", () => {
     const fakeProcess = new FakeProcess();
@@ -189,7 +195,7 @@ describe("process lifecycle handlers", () => {
       expect(fakeProcess.exitCodes).toEqual([]);
 
       timer.advanceTime(50);
-      await flushMicrotasks();
+      await flushUntilExit(fakeProcess);
 
       expect(fakeProcess.exitCodes).toEqual([1]);
       expect(timeoutFinalizers).toEqual(["logger"]);
@@ -228,7 +234,7 @@ describe("process lifecycle handlers", () => {
       fakeStdin.emit("close");
       await flushMicrotasks();
       timer.advanceTime(50);
-      await flushMicrotasks();
+      await flushUntilExit(fakeProcess);
 
       expect(cleanupFailed).toBe(true);
       expect(fakeProcess.exitCodes).toEqual([1]);

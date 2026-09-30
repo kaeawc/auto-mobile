@@ -688,55 +688,67 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     instance: IOSCtrlProxyManager,
     timer: Timer,
   ): Promise<unknown | null> {
-    let timeout: NodeJS.Timeout | undefined;
     let forceStop: Promise<void> | undefined;
     const settled = instance.stop(instance.timer.now() + SHUTDOWN_STOP_TIMEOUT_MS).then(
       () => null,
       (error) => error,
     );
-    const timedOut = new Promise<Error>((resolve) => {
-      timeout = timer.setTimeout(() => {
-        // stop() may be blocked on a remote runner call. Reserve a bounded
-        // window to await direct termination before clearing the registry.
-        forceStop = IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
-        void forceStop.then(() =>
-          resolve(new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
-        );
-      }, SHUTDOWN_STOP_TIMEOUT_MS);
-    });
+    const timedOut = Symbol("CtrlProxy stop timeout");
+    let result: unknown | null;
     try {
-      const result = await Promise.race([settled, timedOut]);
-      if (forceStop) {
-        // The original stop can settle while force termination is in flight.
-        // Keep the registry until that bounded force stage has also settled.
-        await forceStop;
-      } else if (result !== null) {
-        await IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
+      result = await raceWithDeadline(settled, {
+        timer,
+        timeoutMs: SHUTDOWN_STOP_TIMEOUT_MS,
+        label: "CtrlProxy stop",
+        timeoutError: () => {
+          // Reserve a bounded direct termination window after the stop deadline.
+          forceStop = IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
+          return timedOut;
+        },
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
-      return result;
-    } finally {
-      if (timeout) {
-        timer.clearTimeout(timeout);
+      const pendingForceStop = forceStop;
+      if (!pendingForceStop) {
+        throw error;
       }
+      // After the deadline, the stop and direct termination are independent operations.
+      result = await Promise.race([
+        settled,
+        pendingForceStop.then(() => new Error(`timed out after ${SHUTDOWN_STOP_TIMEOUT_MS}ms`)),
+      ]);
     }
+    if (forceStop) {
+      // Keep the registry until direct termination has also settled.
+      await forceStop;
+    } else if (result !== null) {
+      await IOSCtrlProxyManager.forceStopWithinShutdownDeadline(instance, timer);
+    }
+    return result;
   }
 
   private static async forceStopWithinShutdownDeadline(
     instance: IOSCtrlProxyManager,
     timer: Timer,
   ): Promise<void> {
-    let timeout: NodeJS.Timeout | undefined;
-    const deadline = new Promise<void>((resolve) => {
-      timeout = timer.setTimeout(resolve, SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
-    });
+    const timedOut = Symbol("force stop timeout");
     try {
-      await Promise.race([
-        instance.forceStopForShutdown(instance.timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS),
-        deadline,
-      ]);
-    } finally {
-      if (timeout) {
-        timer.clearTimeout(timeout);
+      await raceWithDeadline(
+        Promise.resolve(
+          instance.forceStopForShutdown(instance.timer.now() + SHUTDOWN_FORCE_STOP_TIMEOUT_MS),
+        ),
+        {
+          timer,
+          timeoutMs: SHUTDOWN_FORCE_STOP_TIMEOUT_MS,
+          label: "CtrlProxy force stop",
+          timeoutError: () => timedOut,
+        },
+      );
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
     }
   }
@@ -767,18 +779,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
 
     const waitMs = Math.min(remainingMs, SHUTDOWN_FORCE_STOP_TIMEOUT_MS);
-    let timeout: NodeJS.Timeout | undefined;
-    const waitForDeadline = new Promise<void>((resolve) => {
-      timeout = timer.setTimeout(resolve, waitMs);
-    });
+    const timedOut = Symbol("eviction force stop timeout");
     try {
-      await Promise.race([
-        instance.forceStopForShutdown(Math.min(deadlineMs, now + SHUTDOWN_FORCE_STOP_TIMEOUT_MS)),
-        waitForDeadline,
-      ]);
-    } finally {
-      if (timeout) {
-        timer.clearTimeout(timeout);
+      await raceWithDeadline(
+        Promise.resolve(
+          instance.forceStopForShutdown(Math.min(deadlineMs, now + SHUTDOWN_FORCE_STOP_TIMEOUT_MS)),
+        ),
+        {
+          timer,
+          timeoutMs: waitMs,
+          label: "CtrlProxy eviction force stop",
+          timeoutError: () => timedOut,
+        },
+      );
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
     }
   }
@@ -3252,22 +3268,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     work: Promise<void>,
     timer: Timer,
   ): Promise<void> {
-    let timeout: NodeJS.Timeout | undefined;
+    const timedOut = Symbol("startup runner reap timeout");
     try {
-      await Promise.race([
-        work,
-        new Promise<void>((resolve) => {
-          timeout = timer.setTimeout(() => {
-            IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
-            resolve();
-          }, STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS);
-          (timeout as { unref?: () => void }).unref?.();
-        }),
-      ]);
-    } finally {
-      if (timeout) {
-        timer.clearTimeout(timeout);
+      await raceWithDeadline(work, {
+        timer,
+        timeoutMs: STARTUP_ORPHAN_RUNNER_REAP_DEADLINE_MS,
+        unref: true,
+        label: "Startup runner reap",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
+      IOSCtrlProxyManager.logStartupOrphanRunnerReapDeadline();
     }
   }
 

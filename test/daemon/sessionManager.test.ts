@@ -5122,9 +5122,9 @@ describe("SessionManager", () => {
     };
     try {
       const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 1_000 });
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      for (let turn = 0; turn < 12 && assignments === 0; turn++) {
+        await Promise.resolve();
+      }
       await fakeTimer.advanceTimeAsync(1_000);
       await expect(rehydration).resolves.toEqual({
         rehydrated: [],
@@ -5405,9 +5405,9 @@ describe("SessionManager", () => {
     };
     try {
       const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 10_000 });
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      for (let turn = 0; turn < 12 && assignments === 0; turn++) {
+        await Promise.resolve();
+      }
       const joined = restarted.admitIssuedSessionForAutomation(sessionUuid);
       resolveAssignment();
       const [summary, session] = await Promise.all([rehydration, joined]);
@@ -5529,9 +5529,9 @@ describe("SessionManager", () => {
     };
     try {
       const rehydration = restarted.rehydratePersistedSessions(devicePool, { deadlineMs: 1_000 });
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
+      for (let turn = 0; turn < 12 && assignments === 0; turn++) {
+        await Promise.resolve();
+      }
       await fakeTimer.advanceTimeAsync(1_000);
       await expect(rehydration).resolves.toEqual({
         rehydrated: [],

@@ -41,7 +41,10 @@ function service(
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
   lifecycleOptions?: Pick<
     DeviceBootServiceDependencies,
-    "allowExternalLeaseAdoptionRecheck" | "lifecycleLease" | "onAndroidColdBootTrackingChanged"
+    | "allowExternalLeaseAdoptionRecheck"
+    | "lifecycleLease"
+    | "onAndroidColdBootTrackingChanged"
+    | "onIdentityResolved"
   >,
 ): DeviceBootService {
   return new DeviceBootService({
@@ -1281,6 +1284,19 @@ describe("DeviceBootService", () => {
     expect(provisionSignal?.aborted).toBe(true);
     expect(provisionSettled).toBe(true);
     expect(created).toBe(false);
+  });
+
+  it("labels an already-aborted phase even when the signal has a custom reason", async () => {
+    const devices = new FakeDeviceUtils();
+    const controller = new AbortController();
+    controller.abort(new Error("custom cancellation"));
+
+    await expect(
+      service(devices, undefined, undefined, undefined, undefined, {
+        onIdentityResolved: async () => {},
+      }).boot({ platform: "android", signal: controller.signal }),
+    ).rejects.toThrow("startDevice cancelled while listing device images");
+    expect(devices.wasMethodCalled("getBootedDevicesDetailed")).toBe(false);
   });
 
   it("preempts a non-cooperative discovery phase after external cancellation", async () => {

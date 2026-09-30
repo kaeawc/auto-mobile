@@ -6,6 +6,7 @@ import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/rea
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -1406,26 +1407,33 @@ export class SendKeys {
     }
     let dispatched = false;
     let actionResult: SendKeysCommandResult | undefined;
-    let deadlineHandle: ReturnType<Timer["setTimeout"]> | undefined;
-    const deadline = new Promise<"deadline">((resolve) => {
-      deadlineHandle = this.timer.setTimeout(() => resolve("deadline"), 5000);
-    });
-    const interaction = this.executeUnbounded(
-      commands,
-      selector,
-      progress,
-      controller.signal,
-      () => {
-        dispatched = true;
-      },
-      (result) => {
-        actionResult = result;
-      },
-    );
+    const deadline = Symbol("IME action deadline");
+    let interaction!: Promise<SendKeysResult>;
+    const startInteraction = () =>
+      (interaction = this.executeUnbounded(
+        commands,
+        selector,
+        progress,
+        controller.signal,
+        () => {
+          dispatched = true;
+        },
+        (result) => {
+          actionResult = result;
+        },
+      ));
     try {
-      const outcome = await Promise.race([interaction, deadline]);
-      if (outcome !== "deadline") {
-        return outcome;
+      try {
+        return await raceWithDeadline(startInteraction, {
+          timer: this.timer,
+          timeoutMs: 5000,
+          label: "iOS IME interaction",
+          timeoutError: () => deadline,
+        });
+      } catch (error) {
+        if (error !== deadline) {
+          throw error;
+        }
       }
       controller.abort();
       void interaction.catch((error) => {
@@ -1460,9 +1468,6 @@ export class SendKeys {
         retryable: !dispatched,
       };
     } finally {
-      if (deadlineHandle !== undefined) {
-        this.timer.clearTimeout(deadlineHandle);
-      }
       signal?.removeEventListener("abort", abort);
     }
   }

@@ -9,6 +9,7 @@ import { ActionableError } from "../models/ActionableError";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
@@ -2828,25 +2829,20 @@ export class Daemon {
    * Waits for device discovery with configurable timeout
    */
   private async initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void> {
-    let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<void>((resolve) => {
-      timeoutHandle = this.timer.setTimeout(() => {
-        logger.warn(`Device pool initialization timed out after ${timeoutMs}ms`);
-        resolve();
-      }, timeoutMs);
-      if (typeof (timeoutHandle as { unref?: () => void }).unref === "function") {
-        (timeoutHandle as { unref: () => void }).unref();
-      }
-    });
-
-    const initPromise = this.initializeDevicePool();
-
+    const timedOut = Symbol("device pool initialization timeout");
     try {
-      await Promise.race([initPromise, timeoutPromise]);
-    } finally {
-      if (timeoutHandle !== undefined) {
-        this.timer.clearTimeout(timeoutHandle);
+      await raceWithDeadline(() => this.initializeDevicePool(), {
+        timer: this.timer,
+        timeoutMs,
+        unref: true,
+        label: "Device pool initialization",
+        timeoutError: () => timedOut,
+      });
+    } catch (error) {
+      if (error !== timedOut) {
+        throw error;
       }
+      logger.warn(`Device pool initialization timed out after ${timeoutMs}ms`);
     }
 
     // Log final device pool status
@@ -3073,26 +3069,25 @@ export class Daemon {
             if (!disconnectSettled) {
               logger.warn("Device disconnect monitor did not settle before daemon shutdown");
             }
-            let timeoutHandle: NodeJS.Timeout | undefined;
+            const timedOut = Symbol("recovery sweep drain timeout");
+            let sweepsSettled = true;
             try {
-              const sweepsSettled = await Promise.race([
-                Promise.allSettled(this.deferredSessionRecoverySweeps).then(() => true),
-                new Promise<boolean>((resolve) => {
-                  timeoutHandle = this.timer.setTimeout(
-                    () => resolve(false),
-                    DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
-                  );
-                }),
-              ]);
-              if (!sweepsSettled) {
-                logger.warn(
-                  `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
-                );
+              await raceWithDeadline(Promise.allSettled(this.deferredSessionRecoverySweeps), {
+                timer: this.timer,
+                timeoutMs: DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+                label: "Recovery sweep drain",
+                timeoutError: () => timedOut,
+              });
+            } catch (error) {
+              if (error !== timedOut) {
+                throw error;
               }
-            } finally {
-              if (timeoutHandle !== undefined) {
-                this.timer.clearTimeout(timeoutHandle);
-              }
+              sweepsSettled = false;
+            }
+            if (!sweepsSettled) {
+              logger.warn(
+                `Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining deferred session recovery sweeps; continuing daemon shutdown`,
+              );
             }
           },
         },

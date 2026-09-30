@@ -3244,54 +3244,59 @@
                 "additionalProperties": false
               },
               "displays": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "anyOf": [
-                        {
+                "type": "object",
+                "properties": {
+                  "panels": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "anyOf": [
-                        {
-                          "type": "string"
+                        "role": {
+                          "type": "string",
+                          "enum": ["inner", "cover", "rear", "external", "unknown"]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "width": {
-                      "type": "number"
-                    },
-                    "height": {
-                      "type": "number"
-                    },
-                    "density": {
-                      "anyOf": [
-                        {
+                        "sizePx": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "number"
+                            },
+                            "height": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "scale": {
                           "type": "number"
-                        },
-                        {
-                          "type": "null"
                         }
-                      ]
-                    },
-                    "units": {
-                      "type": "string",
-                      "const": "physical-pixels"
+                      },
+                      "required": ["key", "role", "sizePx"],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["id", "name", "width", "height", "density", "units"],
-                  "additionalProperties": false
-                }
+                  "postures": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "closed",
+                        "half_opened",
+                        "opened",
+                        "rear_display",
+                        "flipped",
+                        "tent",
+                        "unknown"
+                      ]
+                    }
+                  }
+                },
+                "required": ["panels", "postures"],
+                "additionalProperties": false
               },
               "capabilityInventory": {
                 "anyOf": [
@@ -3874,54 +3879,59 @@
                 "additionalProperties": false
               },
               "displays": {
-                "type": "array",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "anyOf": [
-                        {
+                "type": "object",
+                "properties": {
+                  "panels": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
                           "type": "string"
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "name": {
-                      "anyOf": [
-                        {
-                          "type": "string"
+                        "role": {
+                          "type": "string",
+                          "enum": ["inner", "cover", "rear", "external", "unknown"]
                         },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "width": {
-                      "type": "number"
-                    },
-                    "height": {
-                      "type": "number"
-                    },
-                    "density": {
-                      "anyOf": [
-                        {
+                        "sizePx": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "number"
+                            },
+                            "height": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "scale": {
                           "type": "number"
-                        },
-                        {
-                          "type": "null"
                         }
-                      ]
-                    },
-                    "units": {
-                      "type": "string",
-                      "const": "physical-pixels"
+                      },
+                      "required": ["key", "role", "sizePx"],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["id", "name", "width", "height", "density", "units"],
-                  "additionalProperties": false
-                }
+                  "postures": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "closed",
+                        "half_opened",
+                        "opened",
+                        "rear_display",
+                        "flipped",
+                        "tent",
+                        "unknown"
+                      ]
+                    }
+                  }
+                },
+                "required": ["panels", "postures"],
+                "additionalProperties": false
               },
               "capabilityInventory": {
                 "anyOf": [
@@ -9554,54 +9564,59 @@
               "additionalProperties": false
             },
             "displays": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "anyOf": [
-                      {
+              "type": "object",
+              "properties": {
+                "panels": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
                         "type": "string"
                       },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "name": {
-                    "anyOf": [
-                      {
-                        "type": "string"
+                      "role": {
+                        "type": "string",
+                        "enum": ["inner", "cover", "rear", "external", "unknown"]
                       },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "width": {
-                    "type": "number"
-                  },
-                  "height": {
-                    "type": "number"
-                  },
-                  "density": {
-                    "anyOf": [
-                      {
+                      "sizePx": {
+                        "type": "object",
+                        "properties": {
+                          "width": {
+                            "type": "number"
+                          },
+                          "height": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["width", "height"],
+                        "additionalProperties": false
+                      },
+                      "scale": {
                         "type": "number"
-                      },
-                      {
-                        "type": "null"
                       }
-                    ]
-                  },
-                  "units": {
-                    "type": "string",
-                    "const": "physical-pixels"
+                    },
+                    "required": ["key", "role", "sizePx"],
+                    "additionalProperties": false
                   }
                 },
-                "required": ["id", "name", "width", "height", "density", "units"],
-                "additionalProperties": false
-              }
+                "postures": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "closed",
+                      "half_opened",
+                      "opened",
+                      "rear_display",
+                      "flipped",
+                      "tent",
+                      "unknown"
+                    ]
+                  }
+                }
+              },
+              "required": ["panels", "postures"],
+              "additionalProperties": false
             },
             "capabilityInventory": {
               "anyOf": [

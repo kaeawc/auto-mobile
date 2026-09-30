@@ -9,6 +9,8 @@ import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
 import type { AdbExecuteOptions } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { DiscoveryObservationSequence } from "../../../src/utils/DiscoveryObservationSequence";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 function execResult(stdout: string) {
   return {
@@ -197,6 +199,33 @@ async function waitForPendingSleeps(timer: FakeTimer, count: number): Promise<vo
 }
 
 describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
+  test("publishes foldable panels through booted-device discovery", async () => {
+    const adb = new FakeAdbExecutor();
+    const fixture = (name: string) =>
+      readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
+    adb.setDevices([{ name: "ignored", platform: "android", deviceId: "emulator-5554" }]);
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger --display-id",
+      execResult(fixture("fold-surfaceflinger.txt")),
+    );
+    adb.setCommandResponse("cmd display get-displays", execResult(fixture("fold-displays.txt")));
+    adb.setCommandResponse("cmd device_state print-states", execResult(fixture("fold-states.txt")));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
+
+    const [device] = await client.getBootedDevicesChecked();
+    expect(device.displays).toEqual({
+      panels: [
+        { key: "4619827259835644672", role: "inner", sizePx: { width: 2076, height: 2152 } },
+        { key: "4619827259835644673", role: "cover", sizePx: { width: 1080, height: 2364 } },
+      ],
+      postures: ["closed", "half_opened", "opened", "rear_display"],
+    });
+  });
   test("enriches booted emulators concurrently within one probe delay", async () => {
     const timer = new FakeTimer();
     const devices = Array.from({ length: 4 }, (_, index) => ({
@@ -381,7 +410,12 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
     );
 
     expect((await client.getBootedDevicesChecked())[0]?.name).toBe("Pixel_9");
-    expect(adb.getExecutedCommands()).toEqual(["emu avd name"]);
+    expect(adb.getExecutedCommands()).toEqual([
+      "emu avd name",
+      "shell dumpsys SurfaceFlinger --display-id",
+      "shell cmd display get-displays",
+      "shell cmd device_state print-states",
+    ]);
   });
 
   test.each(["shell getprop ro.product.model", "shell getprop ro.product.cpu.abi"])(
@@ -586,6 +620,9 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       "shell getprop ro.boot.qemu.avd_name",
       "shell getprop ro.product.model",
       "shell getprop ro.product.cpu.abi",
+      "shell dumpsys SurfaceFlinger --display-id",
+      "shell cmd display get-displays",
+      "shell cmd device_state print-states",
     ]);
   });
 
@@ -680,7 +717,11 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       name: "Unknown (emulator-5554)",
       consoleBusyDuringProbe: true,
     });
-    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell dumpsys SurfaceFlinger --display-id",
+      "shell cmd display get-displays",
+      "shell cmd device_state print-states",
+    ]);
   });
 
   test("records console busy state when an empty AVD-name probe falls through to an empty property", async () => {

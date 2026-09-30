@@ -60,12 +60,17 @@ describe("SimCtlClient display dimension enrichment", () => {
       screenWidth: 2007,
       screenHeight: 2853,
       screenDensity: 460,
-      displays: [
-        { id: "1", name: "primary", width: 1398, height: 2034 },
-        { id: "3", name: "primary-1", width: 2007, height: 2853 },
-      ],
+      displays: {
+        panels: [
+          { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
+          { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
+        ],
+        postures: ["unknown"],
+      },
     });
     expect(commands).toContain(`simctl io ${UDID} enumerate`);
+    const [booted] = await simctl.getBootedSimulatorsChecked(100, undefined, { bypassCache: true });
+    expect(booted.displays).toEqual(device.displays);
   });
 
   const simulatorList = () =>

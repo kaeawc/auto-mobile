@@ -30,6 +30,7 @@ export * from "./ElementSelectionStrategy";
 export * from "./ElementSelectionResult";
 export * from "./ElementBounds";
 export * from "./DeviceInfo";
+export * from "./DisplayPanel";
 export * from "./DeviceMatchCriteria";
 export * from "./formFactor";
 export * from "./ExecResult";

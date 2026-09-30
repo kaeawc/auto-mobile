@@ -264,12 +264,20 @@ describe("device state tools", () => {
   test("reads networkCondition through the getDeviceState handler on iOS", async () => {
     const getTool = ToolRegistry.getTool("getDeviceState");
     const iosSim = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios", "iPhone 16");
+    iosSim.displays = {
+      panels: [
+        { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 } },
+        { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 } },
+      ],
+      postures: ["unknown"],
+    };
 
     const response = await getTool!.deviceAwareHandler!(iosSim, {
       include: ["networkCondition"],
     });
 
     const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.displays).toEqual(iosSim.displays);
     expect(payload.networkCondition).toMatchObject({
       supported: false,
       capability: "unsupported",

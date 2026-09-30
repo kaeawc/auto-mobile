@@ -39,7 +39,7 @@ import {
   deviceRestartReleaseReason,
   isDeviceRestartReleaseReason,
 } from "../db/deviceSessionRepository";
-import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../utils/androidDeviceReboot";
+import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../devices/androidDeviceReboot";
 import {
   DeviceCriteriaMatcher,
   DeviceAllocationCriteria,

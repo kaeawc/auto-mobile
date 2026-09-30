@@ -13,7 +13,7 @@ import * as fs from "fs/promises";
 import type { Dirent } from "fs";
 import * as path from "path";
 import { ActionableError, BootedDevice } from "../models";
-import { requireBootedDevice } from "../utils/requireBootedDevice";
+import { requireBootedDevice } from "../devices/requireBootedDevice";
 import {
   isExplicitPin,
   isPinnedVersionKnown,

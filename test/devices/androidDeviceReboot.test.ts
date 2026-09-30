@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { BoundedAndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
+import { BoundedAndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const target = {

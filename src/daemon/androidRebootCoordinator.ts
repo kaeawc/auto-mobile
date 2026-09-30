@@ -2,7 +2,7 @@ import { ActionableError, type BootedDevice, type DeviceInfo } from "../models";
 import type { ChildProcess, PlatformDeviceManager } from "../utils/deviceUtils";
 import { waitForDeviceReadyOrCancel } from "../utils/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
-import type { AndroidDeviceReboot } from "../utils/androidDeviceReboot";
+import type { AndroidDeviceReboot } from "../devices/androidDeviceReboot";
 import { logger } from "../utils/logger";
 import type { DeviceCriteriaMatcher } from "./DeviceCriteriaMatcher";
 import type { IdentityEvidence } from "./deviceIdentityEvidence";

@@ -330,7 +330,7 @@ jobs:
               - 'src/utils/CtrlProxyManager.ts'
               - 'src/utils/Device*'
               - 'src/utils/device*'
-              - 'src/utils/requireBootedDevice.ts'
+              - 'src/devices/requireBootedDevice.ts'
               - 'src/utils/plan/**'
               - 'src/utils/planUtils.ts'
               - 'src/models/**'

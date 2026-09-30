@@ -11,7 +11,7 @@ import {
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import type { AndroidDeviceReboot } from "../../src/utils/androidDeviceReboot";
+import type { AndroidDeviceReboot } from "../../src/devices/androidDeviceReboot";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";

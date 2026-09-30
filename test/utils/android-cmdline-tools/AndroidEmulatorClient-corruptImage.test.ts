@@ -9,6 +9,7 @@ import { ChildProcess } from "child_process";
 import { EventEmitter } from "events";
 import { Readable } from "stream";
 import { FakeAvdConfigReader } from "../../fakes/FakeAvdConfigReader";
+import type { SpawnFn } from "../../../src/utils/HostCommandExecutor";
 
 /**
  * REWRITE-5: await a promise that MUST reject, returning its Error. Replaces the
@@ -330,9 +331,9 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     expect(error.message).toContain("Suggestion");
   });
 
-  test("retains a late sandbox error for the readiness waiter", async () => {
+  test("does not classify sandbox output while the emulator is alive after startup validation", async () => {
     const fakeChild = createFakeChildProcess();
-    const spawnFn = ((_cmd: string, _args: string[]) => fakeChild) as any;
+    const spawnFn: SpawnFn = () => fakeChild;
     const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
       args.join(" ").includes("-list-avds")
         ? createExecResult("Pixel_9_Pro\n")
@@ -355,9 +356,41 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
     );
 
-    const error = await expectRejection(
+    expect(fakeChild.killed).toBe(false);
+    expect(fakeChild.stderr!.listenerCount("data")).toBe(1);
+  });
+
+  test("retains a late sandbox error for the readiness waiter after exit", async () => {
+    const fakeChild = createFakeChildProcess();
+    const spawnFn: SpawnFn = () => fakeChild;
+    const execAsync = async (_file: string, args: string[]): Promise<ExecResult> =>
+      args.join(" ").includes("-list-avds")
+        ? createExecResult("Pixel_9_Pro\n")
+        : createExecResult("");
+
+    fakeTimer.enableAutoAdvance();
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      spawnFn,
+      fakeTimer,
+      fakeFactory,
+      fakeAvdConfigReader,
+    );
+    skipEmulatorPathDetection(client);
+
+    const process = await client.startEmulator("Pixel_9_Pro");
+    expect(process).toBe(fakeChild);
+    const readiness = expectRejection(
       client.waitForEmulatorReady("Pixel_9_Pro", 60_000, fakeChild),
     );
+    fakeChild.emit("exit", 1, null);
+    fakeChild.stderr!.emit(
+      "data",
+      Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
+    );
+    fakeChild.emit("close", 1, null);
+
+    const error = await readiness;
     expect(error.message).toContain("hypervisor");
     expect(error.message).toContain("sandbox");
   });

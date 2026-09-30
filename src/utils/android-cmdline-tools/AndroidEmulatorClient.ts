@@ -2530,6 +2530,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         ) {
           return;
         }
+        duplicateAvdDetected ||= output.includes("Running multiple emulators with the same AVD");
         this.launchErrorFinalizations.set(
           child,
           new Promise<ActionableError | undefined>((resolveFinalization) => {
@@ -2573,7 +2574,13 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           !this.launchErrors.has(child) ||
           this.launchErrors.get(child) === provisionalPostValidationExitError
         ) {
-          provisionalPostValidationExitError = postValidationExitError(output);
+          recordEarlyExitCategory(output);
+          const sandboxError = this.sandboxFailure(output);
+          provisionalPostValidationExitError = sandboxError
+            ? new ActionableError(
+                `${postValidationExitError(output).message}\n\n${sandboxError.message}`,
+              )
+            : postValidationExitError(output);
           this.launchErrors.set(child, provisionalPostValidationExitError);
         }
         const finalError = this.launchErrors.get(child) ?? postValidationExitError(output);
@@ -2582,8 +2589,18 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         resolveFinalization(finalError);
       };
 
-      // Monitor emulator output for PANIC errors
-      const monitorOutput = (data: any, outputRedactor: AndroidCommandOutputStreamRedactor) => {
+      // Continue capturing redacted diagnostics after startup without classifying live output.
+      const captureOutput = (data: Buffer, outputRedactor: AndroidCommandOutputStreamRedactor) => {
+        const redactedOutput = outputRedactor.append(data.toString());
+        appendRedactedLaunchOutput(redactedOutput);
+        if (redactedOutput.length > 0) {
+          logger.debug(`Emulator output: ${redactedOutput}`);
+        }
+      };
+      const stdoutCaptureHandler = (data: Buffer) => captureOutput(data, stdoutRedactor);
+      const stderrCaptureHandler = (data: Buffer) => captureOutput(data, stderrRedactor);
+      // Monitor emulator output for PANIC errors during startup validation.
+      const monitorOutput = (data: Buffer, outputRedactor: AndroidCommandOutputStreamRedactor) => {
         const output = data.toString();
         const safeChunk = redactAndroidCommandOutput(output);
         const redactedOutput = outputRedactor.append(output);
@@ -2609,7 +2626,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
             child.kill();
           }
           if (!startupValidationComplete) {
-            startupValidationComplete = true;
+            completeStartupValidation();
             perf.endOperation("panicDetection");
             reject(sandboxError);
           }
@@ -2617,10 +2634,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         }
 
         // Check for PANIC in the output
-        const panicResult = this.detectArchitecturePanic(diagnosticOutput);
-        const directPanicResult = panicResult.isPanic
-          ? panicResult
-          : this.detectArchitecturePanic(safeChunk);
+        const directPanicResult = this.detectArchitecturePanic(safeChunk);
         if (directPanicResult.isPanic) {
           logger.error(`Emulator PANIC detected: ${directPanicResult.message}`);
 
@@ -2650,7 +2664,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
           // Reject the promise instead of just emitting error
           if (!startupValidationComplete) {
-            startupValidationComplete = true;
+            completeStartupValidation();
             perf.endOperation("panicDetection");
             reject(new ActionableError(errorMessage));
           }
@@ -2658,10 +2672,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         }
 
         // Check for corrupt disk image
-        const corruptResult = this.detectCorruptImage(diagnosticOutput);
-        const directCorruptResult = corruptResult.isCorrupt
-          ? corruptResult
-          : this.detectCorruptImage(safeChunk);
+        const directCorruptResult = this.detectCorruptImage(safeChunk);
         if (directCorruptResult.isCorrupt) {
           logger.error(`Emulator corrupt image detected: ${directCorruptResult.message}`);
 
@@ -2675,7 +2686,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           }
 
           if (!startupValidationComplete) {
-            startupValidationComplete = true;
+            completeStartupValidation();
             perf.endOperation("panicDetection");
             reject(new ActionableError(errorMessage));
           }
@@ -2700,7 +2711,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           }
 
           if (!startupValidationComplete) {
-            startupValidationComplete = true;
+            completeStartupValidation();
             perf.endOperation("panicDetection");
             reject(
               this.appendCategory(
@@ -2720,22 +2731,37 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         ) {
           // Emulator has started successfully, resolve with the child process
           if (!childTerminationObserved && !startupValidationComplete) {
-            startupValidationComplete = true;
+            completeStartupValidation();
             perf.endOperation("panicDetection");
             resolve(child);
           }
         }
       };
 
+      const monitorStdoutHandler = (data: Buffer) => monitorOutput(data, stdoutRedactor);
+      const monitorStderrHandler = (data: Buffer) => monitorOutput(data, stderrRedactor);
+
       // Set a timeout for startup validation (5 seconds should be enough to detect PANIC)
       const startupTimeout = this.timer.setTimeout(() => {
         if (!startupValidationComplete) {
-          startupValidationComplete = true;
+          completeStartupValidation();
           perf.endOperation("panicDetection");
           // If no PANIC detected and no clear success indicators, assume success
           resolve(child);
         }
       }, 5000);
+
+      const completeStartupValidation = () => {
+        if (startupValidationComplete) {
+          return;
+        }
+        startupValidationComplete = true;
+        this.timer.clearTimeout(startupTimeout);
+        child.stdout?.off("data", monitorStdoutHandler);
+        child.stderr?.off("data", monitorStderrHandler);
+        child.stdout?.on("data", stdoutCaptureHandler);
+        child.stderr?.on("data", stderrCaptureHandler);
+      };
 
       let exitDrainTimeout: NodeJS.Timeout | undefined;
       let earlyExitFinalization: Promise<void> | undefined;
@@ -2766,7 +2792,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
               `AVD '${avdName}' is already starting/running in another process - adopting it instead of the duplicate we launched`,
             );
             if (!startupValidationComplete) {
-              startupValidationComplete = true;
+              completeStartupValidation();
               perf.endOperation("panicDetection");
               resolve(null);
             }
@@ -2779,7 +2805,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
             logger.error(`Exit was due to emulator sandbox error: ${sandboxError.message}`);
             this.launchErrors.set(child, sandboxError);
             if (!startupValidationComplete) {
-              startupValidationComplete = true;
+              completeStartupValidation();
               perf.endOperation("panicDetection");
               reject(sandboxError);
             }
@@ -2791,7 +2817,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           if (panicResult.isPanic) {
             logger.error(`Exit was due to PANIC: ${panicResult.message}`);
             if (!startupValidationComplete) {
-              startupValidationComplete = true;
+              completeStartupValidation();
               perf.endOperation("panicDetection");
               reject(new ActionableError(`Emulator failed to start: ${panicResult.message}`));
             }
@@ -2803,7 +2829,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           if (corruptResult.isCorrupt) {
             logger.error(`Exit was due to corrupt image: ${corruptResult.message}`);
             if (!startupValidationComplete) {
-              startupValidationComplete = true;
+              completeStartupValidation();
               perf.endOperation("panicDetection");
               let errorMessage = `Emulator failed to start: ${corruptResult.message}`;
               if (corruptResult.suggestion) {
@@ -2820,7 +2846,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           if (displayResult.isDisplayError) {
             logger.error(`Exit was due to display error: ${displayResult.message}`);
             if (!startupValidationComplete) {
-              startupValidationComplete = true;
+              completeStartupValidation();
               perf.endOperation("panicDetection");
               let errorMessage = `Emulator failed to start: ${displayResult.message}`;
               if (displayResult.suggestion) {
@@ -2847,7 +2873,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
             category = category ?? this.accelerationCheckCategory(accelCheckOutput);
           }
           if (!startupValidationComplete) {
-            startupValidationComplete = true;
+            completeStartupValidation();
             perf.endOperation("panicDetection");
             reject(
               this.formatEarlyExitError(
@@ -2863,7 +2889,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         })().catch((error) => {
           logger.error(`Unable to finalize Android emulator early-exit diagnostics: ${error}`);
           if (!startupValidationComplete) {
-            startupValidationComplete = true;
+            completeStartupValidation();
             perf.endOperation("panicDetection");
             reject(
               this.formatEarlyExitError(
@@ -2880,13 +2906,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       };
 
       // Log emulator output through the same buffered redaction path as diagnostics.
-      child.stdout?.on("data", (data) => {
-        monitorOutput(data, stdoutRedactor);
-      });
-
-      child.stderr?.on("data", (data) => {
-        monitorOutput(data, stderrRedactor);
-      });
+      child.stdout?.on("data", monitorStdoutHandler);
+      child.stderr?.on("data", monitorStderrHandler);
 
       child.on("exit", (code, signal) => {
         this.timer.clearTimeout(startupTimeout);
@@ -2933,7 +2954,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           return;
         }
         clearExitDrainTimeout();
-        startupValidationComplete = true;
+        completeStartupValidation();
         perf.endOperation("panicDetection");
         reject(new ActionableError(`Emulator failed to start: ${error.message}`));
       });

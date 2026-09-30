@@ -258,7 +258,7 @@ run_unit_shards() {
   local shard_mode="$1"
   local changed_ref="${2:-}"
   local shard_root="$ROOT/scratch/test-ts-${shard_mode}-shards"
-  local file index shard worker_count rc pid shard_status timing_log report_name
+  local file index shard shard_number worker_count rc pid shard_status timing_log report_name
   local test_files=()
   local pids=()
 
@@ -302,24 +302,26 @@ run_unit_shards() {
 
   for ((shard = 0; shard < worker_count; shard += 1)); do
     local shard_files=()
+    shard_number="$shard"
     if [[ "$shard_mode" == "unit" ]]; then
       for ((index = shard; index < ${#test_files[@]}; index += worker_count)); do
         shard_files+=("${test_files[$index]}")
       done
       report_name="shard-${shard}.xml"
     else
+      shard_number=$((shard + 1))
       shard_files=(
         --path-ignore-patterns "**/*.integration.test.ts"
         --path-ignore-patterns "test/stress/**"
-        "--changed=${changed_ref}" "--shard=$((shard + 1))/${worker_count}"
+        "--changed=${changed_ref}" "--shard=${shard_number}/${worker_count}"
       )
-      report_name="changed-shard-$((shard + 1)).xml"
+      report_name="changed-shard-${shard_number}.xml"
     fi
 
     if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
       printf '%q ' bun test --isolate --timeout "$per_test_timeout_ms" --no-orphans \
         --preload "$ROOT/test/setup/fileTimingProbe.ts" \
-        "${shard_files[@]}"
+        ${shard_files[@]+"${shard_files[@]}"}
       printf '\n'
       continue
     fi
@@ -333,7 +335,7 @@ run_unit_shards() {
       export AUTOMOBILE_WATCHDOG_TIMING_LOG="$timing_log"
       export AUTOMOBILE_WATCHDOG_SNAPSHOT_FILE="$shard_root/watchdog-shard-${shard}.txt"
       # shellcheck disable=SC2030
-      export AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard}"
+      export AUTOMOBILE_WATCHDOG_LABEL="${shard_mode} shard ${shard_number}"
       export AUTOMOBILE_FORCE_PORTABLE_TIMEOUT=1
       shard_args=(bun test --isolate --timeout "$per_test_timeout_ms" --no-orphans \
         --preload "$ROOT/test/setup/fileTimingProbe.ts")
@@ -376,13 +378,17 @@ run_unit_shards() {
   rc=0
   for ((index = 0; index < ${#pids[@]}; index += 1)); do
     pid="${pids[$index]}"
+    shard_number="$index"
+    if [[ "$shard_mode" == "changed" ]]; then
+      shard_number=$((index + 1))
+    fi
     shard_status=0
     wait "$pid" || shard_status=$?
     if [[ "$shard_status" -eq 124 ]]; then
-      printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget\n' "$shard_mode" "$index" >&2
+      printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget\n' "$shard_mode" "$shard_number" >&2
       rc=124
     elif [[ "$shard_status" -ne 0 && "$rc" -ne 124 ]]; then
-      printf 'FAIL: %s shard %d exited with status %d\n' "$shard_mode" "$index" "$shard_status" >&2
+      printf 'FAIL: %s shard %d exited with status %d\n' "$shard_mode" "$shard_number" "$shard_status" >&2
       rc=1
     fi
   done

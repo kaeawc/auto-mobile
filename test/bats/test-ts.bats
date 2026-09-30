@@ -540,7 +540,7 @@ EOF
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_UNIT_TEST_WORKERS=2 \
     STUB_CHANGED_FAIL_SHARD=2/2 bash "$SCRIPT" changed
   [ "$status" -eq 1 ]
-  [[ "$output" == *"FAIL: changed shard 1 exited with status 7"* ]]
+  [[ "$output" == *"FAIL: changed shard 2 exited with status 7"* ]]
 }
 
 @test "changed lane accepts a shard with no selected files" {

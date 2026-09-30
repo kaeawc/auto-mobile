@@ -97,6 +97,7 @@ import Foundation
         private var handle: UnsafeMutableRawPointer?
         private var client: UnsafeMutableRawPointer?
         private var service: UnsafeMutableRawPointer?
+        private var removeServiceFunction: RemoveService?
         private var callbacks: UnsafeMutablePointer<HingeCallbacks>?
         private var queue: DispatchQueue?
         private var settled = false
@@ -123,7 +124,7 @@ import Foundation
             let activate = try symbol("IOHIDEventSystemClientActivate", as: Activate.self)
             let createService = try symbol("IOHIDVirtualServiceClientCreate", as: CreateService.self)
             _ = try symbol("IOHIDVirtualServiceClientDispatchEvent", as: DispatchEvent.self)
-            _ = try symbol("IOHIDVirtualServiceClientRemove", as: RemoveService.self)
+            removeServiceFunction = try symbol("IOHIDVirtualServiceClientRemove", as: RemoveService.self)
             _ = try symbol("IOHIDEventCreateVendorDefinedEvent", as: CreateVendorEvent.self)
             _ = try symbol("IOCFSerialize", as: Serialize.self)
 
@@ -158,13 +159,15 @@ import Foundation
                 ))
                 callbacks = pointer
             }
+            let propertiesPointer = Unmanaged.passUnretained(properties).toOpaque()
             service = createService(
                 createdClient,
-                Unmanaged.passUnretained(properties).toOpaque(),
+                propertiesPointer,
                 callbacks.map(UnsafeRawPointer.init),
                 nil,
                 nil
             )
+            withExtendedLifetime(properties) {}
             guard service != nil else {
                 Unmanaged<CFTypeRef>.fromOpaque(createdClient).release()
                 client = nil
@@ -186,7 +189,10 @@ import Foundation
                 "value": NSNumber(value: degrees),
             ])
             let serialize = try symbol("IOCFSerialize", as: Serialize.self)
-            guard let dataPointer = serialize(Unmanaged.passUnretained(payload).toOpaque(), 0) else {
+            let payloadPointer = Unmanaged.passUnretained(payload).toOpaque()
+            let dataPointer = serialize(payloadPointer, 0)
+            withExtendedLifetime(payload) {}
+            guard let dataPointer else {
                 throw HingeAngleError.dispatchFailed
             }
             let data = Unmanaged<CFData>.fromOpaque(dataPointer).takeRetainedValue()
@@ -194,15 +200,36 @@ import Foundation
             guard length <= 256 else { throw HingeAngleError.payloadTooLarge(length) }
 
             let createEvent = try symbol("IOHIDEventCreateVendorDefinedEvent", as: CreateVendorEvent.self)
-            guard let event = createEvent(
+            let dataBytes = CFDataGetBytePtr(data)
+            let event = createEvent(
                 nil, mach_absolute_time(), 0xFF61, 0x5B, 0,
-                CFDataGetBytePtr(data), length, 0
-            ) else {
+                dataBytes, length, 0
+            )
+            withExtendedLifetime(data) {}
+            guard let event else {
                 throw HingeAngleError.dispatchFailed
             }
             defer { Unmanaged<CFTypeRef>.fromOpaque(event).release() }
             let dispatch = try symbol("IOHIDVirtualServiceClientDispatchEvent", as: DispatchEvent.self)
-            guard dispatch(service, event) else { throw HingeAngleError.dispatchFailed }
+            guard dispatch(service, event) else {
+                tearDownAfterDispatchFailure()
+                throw HingeAngleError.dispatchFailed
+            }
+        }
+
+        private func tearDownAfterDispatchFailure() {
+            if let service {
+                if let removeServiceFunction {
+                    _ = removeServiceFunction(service)
+                }
+                Unmanaged<CFTypeRef>.fromOpaque(service).release()
+                self.service = nil
+            }
+            if let client {
+                Unmanaged<CFTypeRef>.fromOpaque(client).release()
+                self.client = nil
+            }
+            settled = false
         }
     }
 #endif

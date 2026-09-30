@@ -143,8 +143,8 @@ describe("SetPosture", () => {
     deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
     displays: {
       panels: [
-        { key: "panel-inner", role: "inner", sizePx: { width: 600, height: 900 }, scale: 3 },
-        { key: "panel-cover", role: "cover", sizePx: { width: 400, height: 800 }, scale: 2 },
+        { key: "panel-inner", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
+        { key: "panel-cover", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
       ],
       postures: ["closed", "half_opened", "opened"],
     },
@@ -213,6 +213,58 @@ describe("SetPosture", () => {
       locked: true,
     });
     expect(getObserveCount()).toBe(3);
+  });
+
+  test("polls when an unknown role still has the old panel size, then succeeds at the expected size", async () => {
+    const unknownRoleAtOldSize = {
+      ...observation,
+      display: { ...display, role: "unknown" },
+      screenSize: { width: 669, height: 951 },
+    } as ObserveResult;
+    const expectedPanelSize = {
+      ...unknownRoleAtOldSize,
+      screenSize: { width: 466, height: 678 },
+    };
+    const { feature, getObserveCount, timer } = makeIosFeature(duo, [
+      unknownRoleAtOldSize,
+      expectedPanelSize,
+    ]);
+    expect(await feature.execute("closed")).toMatchObject({
+      display: unknownRoleAtOldSize.display,
+    });
+    expect(getObserveCount()).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([250]);
+  });
+
+  test("throws when an unknown role keeps the old panel size until timeout", async () => {
+    const unknownRoleAtOldSize = {
+      ...observation,
+      display: { ...display, role: "unknown" },
+      screenSize: { width: 669, height: 951 },
+    } as ObserveResult;
+    const { feature, getObserveCount, timer } = makeIosFeature(duo, [unknownRoleAtOldSize]);
+    await expect(feature.execute("closed")).rejects.toThrow(
+      "hinge event was accepted, but the active display is still the inner panel after 3000 ms",
+    );
+    expect(getObserveCount()).toBe(13);
+    expect(timer.now()).toBe(3000);
+    expect(timer.getSleepHistory()).toEqual(Array(12).fill(250));
+  });
+
+  test("returns after one observe without panel inventory", async () => {
+    const unknownRoleObservation = {
+      ...observation,
+      display: { ...display, role: "unknown" },
+      screenSize: { width: 669, height: 951 },
+    } as ObserveResult;
+    const { feature, getObserveCount, timer } = makeIosFeature({ ...duo, displays: undefined }, [
+      unknownRoleObservation,
+    ]);
+    expect(await feature.execute("closed")).toMatchObject({
+      display: unknownRoleObservation.display,
+    });
+    expect(getObserveCount()).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test("notifies the transition exactly once before observing", async () => {

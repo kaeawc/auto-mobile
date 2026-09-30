@@ -251,6 +251,7 @@ export class DeviceTeardownService {
     leaseTransfer: TransferredLeaseOwnership,
   ): Promise<TResponse> {
     const controller = new AbortController();
+    const timeoutError = new ActionableError("Device teardown deadline exceeded");
     const cancelAcceptedOperation = () => {
       controller.abort(
         request.callerSignal?.reason ??
@@ -264,9 +265,20 @@ export class DeviceTeardownService {
         request.callerSignal?.addEventListener("abort", cancelAcceptedOperation, { once: true });
       }
     }
+    const remainingMs = request.deadlineMs - this.dependencies.timer.now();
+    const deadlineTimer =
+      remainingMs > 0
+        ? this.dependencies.timer.setTimeout(() => controller.abort(timeoutError), remainingMs)
+        : undefined;
+    if (remainingMs <= 0) {
+      controller.abort(timeoutError);
+    }
     try {
       return await this.execute(request, controller.signal, workflow, execution, leaseTransfer);
     } finally {
+      if (deadlineTimer !== undefined) {
+        this.dependencies.timer.clearTimeout(deadlineTimer);
+      }
       request.callerSignal?.removeEventListener("abort", cancelAcceptedOperation);
     }
   }
@@ -324,6 +336,12 @@ export class DeviceTeardownService {
     let target: TTarget | undefined;
     let lease = leaseTransfer.lease;
     let retainLease = false;
+    const awaitStep = async <T>(operation: Promise<T>): Promise<T> =>
+      await raceWithDeadline(operation, {
+        timer: this.dependencies.timer,
+        signal,
+        label: "Device teardown",
+      });
     try {
       if (lease) {
         // This is the only path that consumes a transferred lease; from here
@@ -341,7 +359,7 @@ export class DeviceTeardownService {
         );
       }
       signal.throwIfAborted();
-      const resolution = await workflow.resolve(signal, lease);
+      const resolution = await awaitStep(workflow.resolve(signal, lease));
       signal.throwIfAborted();
       if ("response" in resolution) {
         return resolution.response;
@@ -355,22 +373,24 @@ export class DeviceTeardownService {
         );
       };
       phase = "stop";
-      const stop = await workflow.stop(target, signal, retainLeaseUntil);
+      const stop = await awaitStep(workflow.stop(target, signal, retainLeaseUntil));
       signal.throwIfAborted();
       phase = "destroy";
-      await workflow.destroy(target, signal, retainLeaseUntil, () => {
-        execution.destructionStarted = true;
-      });
+      await awaitStep(
+        workflow.destroy(target, signal, retainLeaseUntil, () => {
+          execution.destructionStarted = true;
+        }),
+      );
       // A deadline-critical caller may have stopped waiting while platform I/O
       // ignored its abort signal. Never let that late settlement publish a
       // successful verification result for the cancelled accepted operation.
       signal.throwIfAborted();
       phase = "verification";
-      const response = await workflow.verify(target, stop, signal);
+      const response = await awaitStep(workflow.verify(target, stop, signal));
       signal.throwIfAborted();
       return response;
     } catch (error) {
-      return workflow.failure(phase, error, target);
+      return workflow.failure(phase, signal.aborted ? (signal.reason ?? error) : error, target);
     } finally {
       if (!retainLease) {
         lease?.release();

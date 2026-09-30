@@ -95,6 +95,7 @@ describe("runObservationRequestBatch", () => {
         deviceId: "stalled-sibling",
         observation: {
           observationId: "failed_observation_20000_batch-1",
+          display: { generation: 0, key: "0", posture: "unknown", role: "unknown" },
           updatedAt: DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS,
           screenSize: { width: 0, height: 0 },
           systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },

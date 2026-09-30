@@ -568,6 +568,7 @@ export function getRequiredIosRunnerFeatureFlags(
  * Extends DeviceServiceClient for shared connection lifecycle management.
  */
 export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlProxy {
+  private readonly streamedCaptureSequences = new WeakMap<XCTestHierarchy, number>();
   private static instances: Map<string, IOSCtrlProxyClient> = new Map();
   private closed = false;
 
@@ -2774,7 +2775,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult {
-    return this.hierarchy.convertToViewHierarchyResult(hierarchy);
+    const result = this.hierarchy.convertToViewHierarchyResult(hierarchy);
+    const captureSequence = this.streamedCaptureSequences.get(hierarchy);
+    if (captureSequence !== undefined) {
+      result.captureSequence = captureSequence;
+    }
+    return result;
   }
 
   hasCachedHierarchy(): boolean {
@@ -3425,6 +3431,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // bound to it. A null return (no subscribers), a throw, or a missing server all leave the
       // geometry untracked, and the daemon then omits the identity so a control client fails closed.
       if (captureSequence !== null) {
+        hierarchy.captureSequence = captureSequence;
+        if (source) {
+          source.captureSequence = captureSequence;
+          this.streamedCaptureSequences.set(source, captureSequence);
+        }
         this.screenGeometry.markForwarded(captureSequence);
       }
     } catch (error) {

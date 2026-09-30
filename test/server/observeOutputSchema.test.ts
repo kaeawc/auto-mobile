@@ -63,9 +63,10 @@ function collectBoundsUnions(schema: unknown): Array<Record<string, unknown>> {
 const OBSERVE_JOIN_KEYS = [
   "observationId",
   "deviceId",
+  "display",
   "observationScreenshotResourceUri",
 ] as const;
-const REQUIRED_OBSERVE_JOIN_KEYS = ["observationId", "deviceId"] as const;
+const REQUIRED_OBSERVE_JOIN_KEYS = ["observationId", "deviceId", "display"] as const;
 
 /**
  * Evaluate the effective JSON-Schema `required` set for one instance, honoring
@@ -146,6 +147,12 @@ describe("observe.outputSchema: requires usable screenshot-resource join keys on
     expect(
       (published.properties as Record<string, unknown>).observationScreenshotResourceUri,
     ).toBeDefined();
+    const display = (published.properties as Record<string, unknown>).display as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(display.required).toEqual(["key", "role", "posture", "generation"]);
+    expect(Object.keys(display.properties)).toEqual(["key", "role", "posture", "generation"]);
   });
 
   test("the join-key requirement does NOT depend on accessibilityAuditSkipped being present", () => {

@@ -34,6 +34,7 @@ export interface ObservationRequestBatchOptions<TDevice extends ObservationReque
 function failedObservation(timer: Timer, idGenerator: IdGenerator, error: string): ObserveResult {
   return {
     observationId: createTimestampedId("failed_observation", timer, idGenerator),
+    display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     updatedAt: timer.now(),
     screenSize: { width: 0, height: 0 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },

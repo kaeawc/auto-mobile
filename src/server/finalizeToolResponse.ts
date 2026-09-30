@@ -209,6 +209,7 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "screenSize",
   "observationId",
   "deviceId",
+  "display",
   "screenshotSettled",
   "screenshotSettledError",
   "screenshotOrientation",

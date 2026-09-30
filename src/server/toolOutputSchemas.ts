@@ -624,6 +624,24 @@ const observationDeviceIdSchema = z
     "Resolved device this observation ran against; join key (with observationId) for the observation-scoped screenshot resource.",
   );
 
+/** Parse old captures leniently while requiring the stamp on emitted observations. */
+const observationDisplaySchema = z
+  .object({
+    key: z.string(),
+    role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+    posture: z.enum([
+      "closed",
+      "half_opened",
+      "opened",
+      "rear_display",
+      "flipped",
+      "tent",
+      "unknown",
+    ]),
+    generation: z.number().int().nonnegative(),
+  })
+  .optional();
+
 /**
  * Fully-encoded observation-scoped screenshot resource URI (issue #7018), built
  * from `deviceId` + `observationId` so a client can read the paired screenshot
@@ -655,11 +673,12 @@ const observationScreenshotOutputFields = {
 const OBSERVATION_JOIN_KEY_PROPERTIES = [
   "observationId",
   "deviceId",
+  "display",
   "observationScreenshotResourceUri",
 ] as const;
 
 /** Identity keys every successful observation has on the advertised wire contract. */
-const OBSERVATION_WIRE_REQUIRED_KEYS = ["observationId", "deviceId"] as const;
+const OBSERVATION_WIRE_REQUIRED_KEYS = ["observationId", "deviceId", "display"] as const;
 
 /**
  * Advertise the observation join keys as required (in property order, so the
@@ -788,6 +807,7 @@ export const observationSummarySchema = z
     isDiff: z.literal(false).optional(),
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
+    display: observationDisplaySchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     ...observationScreenshotOutputFields,
     selectedElements: z.array(selectedElementSchema).optional(),
@@ -1011,6 +1031,7 @@ export const observeDiffSchema = z
     isDiff: z.literal(true),
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
+    display: observationDisplaySchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     ...observationScreenshotOutputFields,
     skeleton: z
@@ -1206,6 +1227,7 @@ export const observeResultSchema = z
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
+    display: observationDisplaySchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     ...observationScreenshotOutputFields,
     screenSize: screenSizeSchema.optional(),

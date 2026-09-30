@@ -19,6 +19,7 @@ import type { ObserveError } from "../features/observe/ObserveError";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
+import type { DisplayRef } from "./DisplayPanel";
 
 /** Output-only screen dimensions with an optional coordinate-unit marker. */
 export interface ScreenSizeWithUnits extends ScreenSize {
@@ -149,6 +150,8 @@ export interface ScreenIdentity {
  * Represents the result of observing the device state
  */
 export interface ObserveResult {
+  /** Physical panel represented by this capture; always present on emitted observations. */
+  display: DisplayRef;
   /**
    * Server-generated identity for this exact observe invocation. It remains
    * attached while deferred post-processing enriches the same result, allowing

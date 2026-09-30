@@ -189,13 +189,13 @@ describe("IosCtrlProxyHealthClient (local curl transport)", function () {
     expect(await badPort.client.readReportedPortFromHealth(8765)).toBeNull();
   });
 
-  test("probes localhost on the requested port via curl", async function () {
+  test("probes IPv4 loopback on the requested port via curl", async function () {
     const commands: string[] = [];
     const { client } = makeClient((command) => {
       commands.push(command);
       return execResult('{"status":"ok"}');
     });
     await client.checkHealthEndpointOnPort(9999);
-    expect(commands.some((c) => c.includes("http://localhost:9999/health"))).toBe(true);
+    expect(commands.some((c) => c.includes("http://127.0.0.1:9999/health"))).toBe(true);
   });
 });

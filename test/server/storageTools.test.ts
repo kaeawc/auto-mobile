@@ -223,6 +223,32 @@ describe("Storage Tools Registration", () => {
       expect(sdkCalls).toBe(1);
     });
 
+    test("explains how an iOS app can authorize key-value mutations", async () => {
+      registerStorageTools();
+      setStorageToolsDependenciesForTesting({
+        iosClientFactory: () => ({
+          setPreference: async () => {
+            throw new Error("mutation_not_authorized");
+          },
+          removePreference: async () => {},
+          clearPreferenceStore: async () => {},
+        }),
+      });
+      const tool = ToolRegistry.getTool("setKeyValue");
+      const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
+      await expect(
+        tool!.deviceAwareHandler!(device, {
+          appId: "com.example.app",
+          name: "duoStore",
+          key: "kvDuo",
+          value: "42",
+          type: "INT",
+        }),
+      ).rejects.toThrow(
+        "the app must opt in with StorageInspectionPolicy(allowMutations: true), in DEBUG builds only.",
+      );
+    });
+
     test("rejects missing required fields", () => {
       registerStorageTools();
       const tool = ToolRegistry.getTool("setKeyValue");

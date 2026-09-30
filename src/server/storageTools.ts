@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -73,6 +74,16 @@ function getStorageToolsDependencies(): StorageToolsDependencies {
     };
   }
   return storageToolsDependencies;
+}
+
+function actionableStorageWriteError(error: unknown, context: string): ActionableError {
+  if (errorMessage(error).includes("mutation_not_authorized")) {
+    return new ActionableError(
+      `${context}: the app must opt in with StorageInspectionPolicy(allowMutations: true), in DEBUG builds only.`,
+      { cause: error },
+    );
+  }
+  return toActionableError(error, context);
 }
 
 /** Test-only seam: inject fakes for the Android/iOS storage clients and adb factory. */
@@ -410,7 +421,7 @@ export function registerStorageTools(): void {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw toActionableError(error, `Failed to set key-value entry`);
+      throw actionableStorageWriteError(error, `Failed to set key-value entry`);
     }
   };
 
@@ -453,7 +464,7 @@ export function registerStorageTools(): void {
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw toActionableError(error, `Failed to remove key-value entry`);
+      throw actionableStorageWriteError(error, `Failed to remove key-value entry`);
     }
   };
 

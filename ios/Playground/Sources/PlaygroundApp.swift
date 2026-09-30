@@ -11,7 +11,10 @@ struct PlaygroundApp: App {
         #if DEBUG
             UserDefaultsInspector.shared.setEnabled(true)
             do {
-                try PlaygroundDatabaseFixture().install()
+                let allowStorageMutations = ProcessInfo.processInfo.arguments.contains(
+                    "--allow-storage-mutations"
+                )
+                try PlaygroundDatabaseFixture().install(allowMutations: allowStorageMutations)
             } catch {
                 AutoMobileLog.shared.e("PlaygroundApp", "database_fixture_failed error=\(error.localizedDescription)")
             }

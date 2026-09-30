@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import { ExecResult, BootedDevice } from "../../../src/models";
+import { ExecResult, BootedDevice, ActionableError } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -57,6 +57,7 @@ class DeviceScopedAdbExecutor extends FakeAdbExecutor {
       return createExecResult("");
     }
     if (command === "get-state") {
+      this.factory.markReady(this.device?.deviceId);
       return createExecResult("device\n");
     }
     if (command === "shell pm list packages") {
@@ -80,6 +81,7 @@ class DeviceScopedAdbClientFactory implements AdbClientFactory {
   constructor(
     devices: BootedDevice[] | Array<BootedDevice[] | Error>,
     private readonly avdNamesByDeviceId = new Map<string, string>(),
+    private readonly readyAvdNamesByDeviceId = new Map<string, string>(),
   ) {
     const firstScan = devices[0];
     this.deviceScans =
@@ -103,6 +105,16 @@ class DeviceScopedAdbClientFactory implements AdbClientFactory {
 
   getAvdName(deviceId: string | undefined): string {
     return deviceId ? (this.avdNamesByDeviceId.get(deviceId) ?? "") : "";
+  }
+
+  markReady(deviceId: string | undefined): void {
+    if (!deviceId) {
+      return;
+    }
+    const name = this.readyAvdNamesByDeviceId.get(deviceId);
+    if (name) {
+      this.avdNamesByDeviceId.set(deviceId, name);
+    }
   }
 }
 
@@ -576,6 +588,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
 
     await expect(client.waitForEmulatorReady("Pixel_9_Pro", 5_000, child)).resolves.toMatchObject({
       deviceId: "emulator-5556",
+      name: "Pixel_9_Pro",
     });
   });
 
@@ -853,6 +866,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     const result = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000, null, "emulator-5556");
 
     expect(result.deviceId).toBe("emulator-5556");
+    expect(result.name).toBe("Pixel_9_Pro");
     expect(
       scopedFactory.commandLog.some((command) => command.startsWith("emulator-5556:get-state")),
     ).toBe(true);
@@ -884,6 +898,110 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
     expect(
       scopedFactory.commandLog.some((command) => command.startsWith("emulator-5556:get-state")),
     ).toBe(false);
+  });
+
+  test("rejects a bound serial whose AVD name resolves to another image after readiness", async () => {
+    fakeTimer.enableAutoAdvance();
+    const candidate: BootedDevice = {
+      name: "Unknown (emulator-5556)",
+      platform: "android",
+      deviceId: "emulator-5556",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory(
+      [candidate],
+      new Map(),
+      new Map([["emulator-5556", "am-api35-ga-arm64"]]),
+    );
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const error = await expectRejection(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 5_000, null, "emulator-5556"),
+    );
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error.message).toContain("am-api33-ga-arm64");
+    expect(error.message).toContain("am-api35-ga-arm64");
+    expect(scopedFactory.commandLog).toContain("emulator-5556:emu avd name");
+  });
+
+  test("rejects a scan that resolves the bound serial to another AVD", async () => {
+    fakeTimer.enableAutoAdvance();
+    const candidate: BootedDevice = {
+      name: "Unknown (emulator-5556)",
+      platform: "android",
+      deviceId: "emulator-5556",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory(
+      [candidate],
+      new Map([["emulator-5556", "am-api35-ga-arm64"]]),
+    );
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const error = await expectRejection(
+      client.waitForEmulatorReady("am-api33-ga-arm64", 100, null, "emulator-5556"),
+    );
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error.message).toContain("am-api33-ga-arm64");
+    expect(error.message).toContain("am-api35-ga-arm64");
+    expect(scopedFactory.commandLog).not.toContain("emulator-5556:get-state");
+  });
+
+  test("uses the AVD name resolved by the scan for the returned device", async () => {
+    fakeTimer.enableAutoAdvance();
+    const candidate: BootedDevice = {
+      name: "Unknown (emulator-5556)",
+      platform: "android",
+      deviceId: "emulator-5556",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory(
+      [candidate],
+      new Map([["emulator-5556", "am-api33-ga-arm64"]]),
+    );
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady(
+      "am-api33-ga-arm64",
+      5_000,
+      null,
+      "emulator-5556",
+    );
+    expect(result).toMatchObject({ name: "am-api33-ga-arm64", deviceId: "emulator-5556" });
+    expect(
+      scopedFactory.commandLog.filter((command) => command === "emulator-5556:emu avd name"),
+    ).toHaveLength(1);
+  });
+
+  test("returns the resolved AVD name for a matching bound serial", async () => {
+    fakeTimer.enableAutoAdvance();
+    const candidate: BootedDevice = {
+      name: "Unknown (emulator-5556)",
+      platform: "android",
+      deviceId: "emulator-5556",
+      source: "local",
+    };
+    const scopedFactory = new DeviceScopedAdbClientFactory(
+      [candidate],
+      new Map(),
+      new Map([["emulator-5556", "am-api33-ga-arm64"]]),
+    );
+    const client = new AndroidEmulatorClient(mockExecAsync, null, fakeTimer, scopedFactory);
+    skipEmulatorPathDetection(client);
+
+    const result = await client.waitForEmulatorReady(
+      "am-api33-ga-arm64",
+      5_000,
+      null,
+      "emulator-5556",
+    );
+    expect(result).toMatchObject({ name: "am-api33-ga-arm64", deviceId: "emulator-5556" });
+    expect(
+      scopedFactory.commandLog.filter((command) => command === "emulator-5556:emu avd name"),
+    ).toHaveLength(2);
   });
 
   test("keeps explicit targetDeviceId authoritative when an unknown request name later resolves", async () => {

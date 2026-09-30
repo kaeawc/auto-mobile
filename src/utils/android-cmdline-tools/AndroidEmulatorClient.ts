@@ -2098,6 +2098,44 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     } as BootedDevice;
   }
 
+  private async resolvedReadyAvdName(
+    requestedName: string,
+    deviceId: string,
+    scannedName: string,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (!deviceId.startsWith("emulator-")) {
+      return scannedName;
+    }
+
+    // The scan may have seen Unknown while the emulator was booting. Confirm
+    // that placeholder once after readiness. A resolved scan already reports
+    // the runtime AVD name, so avoid another ADB probe in that case. Use the
+    // request only when both the scan and confirmation leave identity Unknown.
+    const confirmedName =
+      this.isUnknownEmulatorName(scannedName, deviceId) && timeoutMs > 0
+        ? (
+            await this.getRunningAVDName(
+              { name: scannedName, platform: "android", deviceId },
+              timeoutMs,
+              signal,
+            )
+          ).name
+        : "";
+    const resolvedName =
+      confirmedName ||
+      (this.isUnknownEmulatorName(scannedName, deviceId) ? requestedName : scannedName);
+    if (resolvedName !== requestedName && !this.isUnknownEmulatorName(requestedName, deviceId)) {
+      const message =
+        `Emulator identity mismatch: requested AVD '${requestedName}' but ` +
+        `${deviceId} reports '${resolvedName}'. Select the correct AVD or serial and retry.`;
+      logger.error(message);
+      throw new ActionableError(message);
+    }
+    return resolvedName;
+  }
+
   private async modelForBootedEmulator(
     device: BootedDevice,
     avdName: { name: string; consoleBusyDuringProbe?: boolean },
@@ -4048,6 +4086,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
     // Start background polling immediately with configurable intervals
     let foundDeviceId: string | null = null;
+    let foundEmulatorName = avdName;
     let foundDeviceModel: string | undefined;
     let resolvedTargetDeviceId: string | undefined;
     const probedNameSerials = new Set<string>();
@@ -4176,9 +4215,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
                 emulator &&
                 !this.matchesRequestedAvdOrUnknown(emulator, avdName, correlatedTargetDeviceId)
               ) {
-                logger.debug(
-                  `Exact deviceId match ${emulator.deviceId} resolved as '${emulator.name}', not requested AVD '${avdName}'`,
-                );
+                correlationFailure =
+                  `Emulator '${avdName}' failed to become ready within ${timeoutMs}ms: ` +
+                  `requested AVD '${avdName}' but ${emulator.deviceId} reports '${emulator.name}'. ` +
+                  "Select the correct AVD or serial and retry.";
+                logger.warn(correlationFailure);
                 emulator = undefined;
               }
             }
@@ -4290,6 +4331,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
                       `[PARALLEL] ✅ No package manager errors detected - marking emulator as ready`,
                     );
                     foundDeviceId = emulator.deviceId;
+                    foundEmulatorName = emulator.name;
                     foundDeviceModel = emulator.model;
                     return;
                   }
@@ -4373,18 +4415,28 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         polling.active = false;
         perf.endOperation("devicePolling");
         cleanupProcessListeners();
-        logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
-        const model = await this.resolveFoundDeviceModel(
-          foundDeviceModel,
-          foundDeviceId,
+        const resolvedName = await this.resolvedReadyAvdName(
           avdName,
+          foundDeviceId,
+          foundEmulatorName,
           Math.max(
             0,
             Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
           ),
           signal,
         );
-        const bootedDevice = this.foundBootedDevice(avdName, foundDeviceId, model);
+        logger.info(`Emulator '${resolvedName}' is ready! Device ID: ${foundDeviceId}`);
+        const model = await this.resolveFoundDeviceModel(
+          foundDeviceModel,
+          foundDeviceId,
+          resolvedName,
+          Math.max(
+            0,
+            Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
+          ),
+          signal,
+        );
+        const bootedDevice = this.foundBootedDevice(resolvedName, foundDeviceId, model);
         await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
         return bootedDevice;
       }
@@ -4402,18 +4454,28 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     this.throwPollingFailure(polling);
 
     if (foundDeviceId) {
-      logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
-      const model = await this.resolveFoundDeviceModel(
-        foundDeviceModel,
-        foundDeviceId,
+      const resolvedName = await this.resolvedReadyAvdName(
         avdName,
+        foundDeviceId,
+        foundEmulatorName,
         Math.max(
           0,
           Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
         ),
         signal,
       );
-      const bootedDevice = this.foundBootedDevice(avdName, foundDeviceId, model);
+      logger.info(`Emulator '${resolvedName}' is ready! Device ID: ${foundDeviceId}`);
+      const model = await this.resolveFoundDeviceModel(
+        foundDeviceModel,
+        foundDeviceId,
+        resolvedName,
+        Math.max(
+          0,
+          Math.min(READINESS_NAME_TIMEOUT_MS, timeoutMs - (this.timer.now() - startTime)),
+        ),
+        signal,
+      );
+      const bootedDevice = this.foundBootedDevice(resolvedName, foundDeviceId, model);
       await this.wakeAndUnlockAfterReadiness(bootedDevice, signal, options, perf);
       return bootedDevice;
     }

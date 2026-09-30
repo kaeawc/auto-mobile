@@ -1,4 +1,4 @@
-import { unsupportedPlatformError } from "../../models/ActionableError";
+import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import {
   BootedDevice,
@@ -210,6 +210,7 @@ export class TapAtCoordinate extends BaseVisualChange {
                 options,
                 resolved,
                 observeResult,
+                transitionRevision,
                 perf,
                 signal,
               );
@@ -267,6 +268,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     resolved: { x: number; y: number },
     observeResult: ObserveResult,
+    transitionRevision: number,
     perf: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<void> {
@@ -296,6 +298,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         signal,
         perf,
       });
+      this.assertDisplayRevisionCurrent(transitionRevision);
       const refreshed = this.resolveCoordinates(options, refreshedObservation);
       const refreshedFrameContext = refreshedObservation.viewHierarchy?.frameContext;
       if (
@@ -319,6 +322,14 @@ export class TapAtCoordinate extends BaseVisualChange {
         ANDROID_TAP_DURATION_MS,
         refreshedFrameContext,
         signal,
+      );
+    }
+  }
+
+  private assertDisplayRevisionCurrent(revision: number): void {
+    if (displayTransitions.revision(this.device.deviceId) !== revision) {
+      throw new ActionableError(
+        "Display changed since these coordinates were chosen. Re-observe the active panel and choose a new point before retrying.",
       );
     }
   }

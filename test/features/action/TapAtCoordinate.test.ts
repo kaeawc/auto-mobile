@@ -476,6 +476,44 @@ describe("TapAtCoordinate", () => {
     expect(adb.wasCommandExecuted("shell input touchscreen tap 20 30")).toBe(false);
   });
 
+  test("rejects a stale-frame retry when its observation detects a fold", async () => {
+    const dispatches: string[] = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push(frameContext ?? "missing");
+        return dispatches.length === 1
+          ? {
+              success: false,
+              error: "Stale frame context for input/tap; observe a fresh frame before retrying",
+            }
+          : { success: true };
+      },
+    };
+    const { tapAt, observeScreen } = createAndroidTapAtWithClient(
+      [observation(100, 200, "epoch:1")],
+      client,
+    );
+    observeScreen.setObserveResult((index) => {
+      if (index === 1) {
+        displayTransitions.notifyTransition(androidDevice.deviceId, "fold");
+      }
+      return observation(100, 200, index === 0 ? "epoch:1" : "epoch:2");
+    });
+
+    try {
+      const result = await tapAt.execute({ x: 20, y: 30 });
+
+      expect(result).toMatchObject({
+        success: false,
+        error: expect.stringContaining("Re-observe the active panel"),
+      });
+      expect(dispatches).toEqual(["epoch:1"]);
+      expect(observeScreen.getExecuteCallCount()).toBe(2);
+    } finally {
+      displayTransitions.reset(androidDevice.deviceId);
+    }
+  });
+
   test.each([
     { location: "top-level", capture: "initial" },
     { location: "nested view hierarchy", capture: "initial" },

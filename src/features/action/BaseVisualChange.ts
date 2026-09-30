@@ -165,12 +165,12 @@ export class BaseVisualChange {
     const timeoutMs = options.timeoutMs || 12000;
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
+    const displayRevision = displayTransitions.revision(this.device.deviceId);
 
     if (progress) {
       await progress(0, 100, "Preparing to execute action...");
     }
     throwIfAborted(options.signal);
-    const displayRevision = displayTransitions.revision(this.device.deviceId);
 
     // Fetch cached view hierarchy (skip if we just terminated/cleared the app)
     let previousObserveResult: ObserveResult | null = null;

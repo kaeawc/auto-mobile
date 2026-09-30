@@ -132,6 +132,31 @@ describe("BaseVisualChange post-action observation", () => {
     ).rejects.toThrow("Display changed");
   });
 
+  test("rejects coordinates when the display folds during the initial progress callback", async () => {
+    fakeObserveScreen.setObserveResult(makeObserve());
+    let dispatched = false;
+
+    await expect(
+      createVisualChange("ios").observedInteraction(
+        async () => {
+          dispatched = true;
+          return { success: true };
+        },
+        {
+          changeExpected: false,
+          progress: async (step) => {
+            if (step === 0) {
+              await Promise.resolve();
+              displayTransitions.notifyTransition("device-123", "fold");
+            }
+          },
+          predictionContext: { toolName: "tapOn", toolArgs: {} },
+        },
+      ),
+    ).rejects.toThrow("Re-observe the active panel");
+    expect(dispatched).toBe(false);
+  });
+
   test("never retries when the observation hierarchy carries an error", async () => {
     const instance = createVisualChange("ios");
     // Errored hierarchy AND otherwise-retry-worthy (stale) — the error guard must win.

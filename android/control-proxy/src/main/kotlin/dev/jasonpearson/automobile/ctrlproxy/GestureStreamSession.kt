@@ -48,7 +48,7 @@ internal interface StrokeDispatcher<S> {
  * marshalled, so the coordinator is never touched concurrently.
  *
  * [onFinished] fires exactly once, on the gesture thread, when the gesture lifts (success) or a
- * dispatch fails (failure). The owning registry uses it to drop the session.
+ * dispatch fails (failure). The owning router uses it to drop the session.
  */
 internal class GestureStreamSession<S>(
   private val coordinator: GestureStreamCoordinator,
@@ -121,31 +121,4 @@ internal class GestureStreamSession<S>(
     terminal = true
     onFinished(success, error)
   }
-}
-
-/**
- * Tracks the in-flight streamed gestures by their wire `gestureId`, so [CtrlProxy]'s
- * `request_gesture_start`/`_move`/`_end` — each a separate request — reach the one session that
- * owns that gesture.
- *
- * All mutation happens on the gesture thread (sessions marshal their own work there and the finish
- * callback runs there), so a plain map guarded by the same single-thread discipline is sufficient;
- * the registry does not add its own locking.
- */
-internal class GestureStreamRegistry {
-  private val sessions = mutableMapOf<String, GestureStreamSession<*>>()
-
-  /** True if a start for [gestureId] is already active — a duplicate start should be rejected. */
-  fun contains(gestureId: String): Boolean = sessions.containsKey(gestureId)
-
-  fun register(gestureId: String, session: GestureStreamSession<*>) {
-    sessions[gestureId] = session
-  }
-
-  fun get(gestureId: String): GestureStreamSession<*>? = sessions[gestureId]
-
-  fun remove(gestureId: String): GestureStreamSession<*>? = sessions.remove(gestureId)
-
-  /** Snapshot of active gesture ids, for tearing every stream down when the service stops. */
-  fun activeIds(): List<String> = sessions.keys.toList()
 }

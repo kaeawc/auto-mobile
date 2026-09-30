@@ -726,6 +726,9 @@ export class NavigationGraphManager implements NavigationGraphService {
    * This creates a "named node" in the navigation graph.
    */
   public async recordNavigationEvent(event: NavigationEvent): Promise<void> {
+    // Capture receipt before any async app switch or DB work. Tool calls use this
+    // same host clock; the SDK timestamp remains the graph's persisted event time.
+    const receivedAt = this.timer.now();
     // Auto-set current app from navigation event if provided
     if (event.applicationId && event.applicationId !== this.currentAppId) {
       await this.setCurrentApp(event.applicationId);
@@ -747,7 +750,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     const previousScreen = this.currentScreen;
 
     // Get modal stack from the most recent tool call (if any)
-    const recentToolCall = this.findCorrelatedToolCall(timestamp);
+    const recentToolCall = this.findCorrelatedToolCall(receivedAt);
     const currentModalStack = recentToolCall?.uiState?.modalStack;
 
     // Snapshot provenance ONCE for this transition so the node and edge observations
@@ -786,7 +789,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
         // Create edge from previous screen to current screen
         if (previousScreen && previousScreen !== screenName) {
-          const interaction = this.findCorrelatedToolCall(timestamp);
+          const interaction = recentToolCall;
 
           const toolName = interaction?.toolName || null;
           const toolArgs = interaction?.args || null;
@@ -1248,16 +1251,22 @@ export class NavigationGraphManager implements NavigationGraphService {
 
   /**
    * Find a tool call that likely caused a navigation event.
-   * Looks for tool calls within the correlation window BEFORE the navigation event.
+   * Uses host receipt time so device clock skew cannot move a tool call outside
+   * the correlation window. Arrival order breaks ties and also works when the
+   * SDK supplied no timestamp (so no device-to-host offset can be estimated).
    */
-  private findCorrelatedToolCall(navigationTimestamp: number): ToolCallInteraction | undefined {
-    // Look for tool calls within correlation window BEFORE navigation event
+  private findCorrelatedToolCall(receivedAt: number): ToolCallInteraction | undefined {
+    this.cleanupToolCallHistory();
     const candidates = this.toolCallHistory.filter((tc) => {
-      const timeDiff = navigationTimestamp - tc.timestamp;
+      const timeDiff = receivedAt - tc.timestamp;
       return timeDiff >= 0 && timeDiff <= this.TOOL_CALL_CORRELATION_WINDOW_MS;
     });
 
     if (candidates.length === 0) {
+      logger.debug(
+        `[NAVIGATION_GRAPH] No tool call correlated with navigation ` +
+          `(host receipt=${receivedAt}, window=${this.TOOL_CALL_CORRELATION_WINDOW_MS}ms, history=${this.toolCallHistory.length})`,
+      );
       return undefined;
     }
 
@@ -1265,7 +1274,7 @@ export class NavigationGraphManager implements NavigationGraphService {
     const mostRecent = candidates[candidates.length - 1];
     logger.debug(
       `[NAVIGATION_GRAPH] Correlated tool call: ${mostRecent.toolName} ` +
-        `(${navigationTimestamp - mostRecent.timestamp}ms before navigation)`,
+        `(${receivedAt - mostRecent.timestamp}ms before navigation)`,
     );
     return mostRecent;
   }

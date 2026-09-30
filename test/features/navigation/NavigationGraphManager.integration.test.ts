@@ -24,6 +24,8 @@ import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
 import { TelemetryRecorder } from "../../../src/features/telemetry/TelemetryRecorder";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 import type { Database, NavigationEdge as DBNavigationEdge } from "../../../src/db/types";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { useTempFileDatabase, type TempFileDatabaseHandle } from "../../helpers/tempFileDatabase";
@@ -278,6 +280,17 @@ describe("NavigationGraphManager", () => {
   });
 
   describe("recordToolCall", () => {
+    async function useFakeTimer(): Promise<FakeTimer> {
+      const timer = new FakeTimer();
+      manager = NavigationGraphManager.createForTesting(
+        new NavigationRepository(harness.db),
+        new TestCoverageRepository(undefined, harness.db),
+        timer,
+      );
+      await manager.setCurrentApp("com.test.app");
+      return timer;
+    }
+
     test("should record a tool call", async () => {
       manager.recordToolCall("tapOn", { text: "Button" });
 
@@ -304,19 +317,77 @@ describe("NavigationGraphManager", () => {
     });
 
     test("should not correlate tool call outside correlation window", async () => {
-      const now = Date.now();
+      const timer = await useFakeTimer();
 
       // Record tool call
       manager.recordToolCall("tapOn", { text: "Settings" });
+      await manager.recordNavigationEvent(createEvent("Screen1", 0));
 
-      // Navigation event occurs 3000ms after tool call (outside 2000ms window)
-      await manager.recordNavigationEvent(createEvent("Screen1", now));
-      await manager.recordNavigationEvent(createEvent("SettingsScreen", now + 3000));
+      // Host receipt occurs 3000ms after the tool call (outside the 2000ms window).
+      timer.advanceTime(3000);
+      await manager.recordNavigationEvent(createEvent("SettingsScreen", 3000));
 
       const edges = await manager.getEdgesFrom("Screen1");
       expect(edges).toHaveLength(1);
       expect(edges[0].edgeType).toBe("unknown");
       expect(edges[0].interaction).toBeUndefined();
+    });
+
+    test.each([8000, -8000])(
+      "correlates a navigation event with device clock skew of %dms",
+      async (skew) => {
+        const timer = await useFakeTimer();
+        await manager.recordNavigationEvent(createEvent("Screen1", 100_000 + skew));
+        manager.recordToolCall("tapOn", { text: "Target" });
+        timer.advanceTime(500);
+
+        await manager.recordNavigationEvent(createEvent("Screen2", 100_500 + skew));
+
+        const edges = await manager.getEdgesFrom("Screen1");
+        expect(edges).toHaveLength(1);
+        expect(edges[0].interaction?.toolName).toBe("tapOn");
+        expect(edges[0].interaction?.args).toEqual({ text: "Target" });
+      },
+    );
+
+    test("uses recent arrival order when the device timestamp is missing", async () => {
+      const timer = await useFakeTimer();
+      const firstEvent = createEvent("Screen1");
+      Reflect.deleteProperty(firstEvent, "timestamp");
+      await manager.recordNavigationEvent(firstEvent);
+      manager.recordToolCall("tapOn", { text: "First" });
+      manager.recordToolCall("tapOn", { text: "Second" });
+      const secondEvent = createEvent("Screen2");
+      Reflect.deleteProperty(secondEvent, "timestamp");
+
+      await manager.recordNavigationEvent(secondEvent);
+
+      const edges = await manager.getEdgesFrom("Screen1");
+      expect(edges).toHaveLength(1);
+      expect(edges[0].interaction?.args).toEqual({ text: "Second" });
+
+      timer.advanceTime(3000);
+      const lateEvent = createEvent("Screen3");
+      Reflect.deleteProperty(lateEvent, "timestamp");
+      await manager.recordNavigationEvent(lateEvent);
+      const lateEdges = await manager.getEdgesFrom("Screen2");
+      expect(lateEdges[0].interaction).toBeUndefined();
+    });
+
+    test("logs a diagnostic when no tool call is within the correlation window", async () => {
+      const timer = await useFakeTimer();
+      const debugSpy = spyOn(logger, "debug");
+      try {
+        manager.recordToolCall("tapOn", { text: "Old" });
+        timer.advanceTime(3000);
+        await manager.recordNavigationEvent(createEvent("Screen1", 3000));
+
+        expect(debugSpy).toHaveBeenCalledWith(
+          expect.stringContaining("No tool call correlated with navigation"),
+        );
+      } finally {
+        debugSpy.mockRestore();
+      }
     });
 
     test("should use most recent tool call within window", async () => {

@@ -20,7 +20,10 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import type { CtrlProxyKeyboardResult } from "../observe/ios/types";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -158,34 +161,76 @@ export class Keyboard {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestKeyboard(action);
     if (!result.success) {
-      const message = result.error ?? `Failed to ${action} iOS keyboard`;
-      return {
-        success: false,
-        open: result.open,
-        message,
-        error: message,
-      };
+      return this.iosFailure(action, result, client);
     }
 
     const success =
       action === "detect" ||
       (action === "open" && result.open) ||
       (action === "close" && !result.open);
-    const message = this.keyboardMessage(action, result.open);
+    const message = this.keyboardMessage(action, result.open, result.method);
     return {
       success,
       open: result.open,
       message,
+      ...(action === "close" && result.method ? { method: result.method } : {}),
       ...(success ? {} : { error: message }),
     };
   }
 
-  private keyboardMessage(action: KeyboardAction, open: boolean): string {
+  private async iosFailure(
+    action: KeyboardAction,
+    result: CtrlProxyKeyboardResult,
+    client: IOSCtrlProxyClient,
+  ): Promise<KeyboardResult> {
+    if (
+      action === "close" &&
+      /^Keyboard timed out after \d+ms$/.test(result.error ?? "") &&
+      (await this.confirmIOSCloseAfterTimeout(client))
+    ) {
+      return {
+        success: true,
+        open: false,
+        message:
+          "Keyboard closed after the close request timed out; dismissal method unknown (Return may have submitted the field)",
+      };
+    }
+    const message = result.error ?? `Failed to ${action} iOS keyboard`;
+    return {
+      success: false,
+      open: result.open,
+      message,
+      error: message,
+    };
+  }
+
+  private async confirmIOSCloseAfterTimeout(client: IOSCtrlProxyClient): Promise<boolean> {
+    try {
+      const detected = await raceWithDeadline(client.requestKeyboard("detect", 2000), {
+        timer: this.timer,
+        timeoutMs: 2000,
+        label: "Keyboard close follow-up detect",
+      });
+      return detected.success && !detected.open;
+    } catch (error) {
+      logger.warn(`Keyboard close timeout follow-up detect failed: ${String(error)}`, error);
+      return false;
+    }
+  }
+
+  private keyboardMessage(
+    action: KeyboardAction,
+    open: boolean,
+    method?: "escape" | "dismissKey" | "returnKey",
+  ): string {
     if (action === "detect") {
       return open ? "Keyboard is open" : "Keyboard is closed";
     }
     if (action === "open") {
       return open ? "Keyboard opened" : "Keyboard did not open";
+    }
+    if (!open && method === "returnKey") {
+      return "Keyboard closed with Return; the field may have submitted or committed autocorrect";
     }
     return open ? "Keyboard did not close" : "Keyboard closed";
   }

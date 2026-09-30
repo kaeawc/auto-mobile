@@ -102,13 +102,13 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     func clearText(resourceId _: String?) throws { clearTextCalls += 1 }
     func selectAll() throws { selectAllCalls += 1 }
     func performImeAction(_: String) throws { imeActionCalls += 1 }
-    func keyboard(action: String) throws -> Bool {
+    func keyboard(action: String) throws -> KeyboardActionResult {
         switch action {
         case "open": keyboardOpen = true
         case "close": keyboardOpen = false
         default: break
         }
-        return keyboardOpen
+        return KeyboardActionResult(open: keyboardOpen)
     }
 
     func clipboard(action _: String, text _: String?) throws -> String? { nil }

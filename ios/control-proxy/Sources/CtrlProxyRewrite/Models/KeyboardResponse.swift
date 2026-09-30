@@ -1,5 +1,17 @@
 import Foundation
 
+public struct KeyboardActionResult: Sendable {
+    public let open: Bool
+    public let method: String?
+    public let error: String?
+
+    public init(open: Bool, method: String? = nil, error: String? = nil) {
+        self.open = open
+        self.method = method
+        self.error = error
+    }
+}
+
 /// `keyboard_result` response envelope with the keyboard's visibility state after
 /// the command. Ported from the reference `Models.swift`; `Codable, Sendable`.
 public struct KeyboardResponse: Codable, Sendable {
@@ -10,13 +22,15 @@ public struct KeyboardResponse: Codable, Sendable {
     public let open: Bool
     public let totalTimeMs: Int64
     public let error: String?
+    public let method: String?
 
     public init(
         requestId: String?,
         success: Bool,
         open: Bool,
         totalTimeMs: Int64,
-        error: String? = nil
+        error: String? = nil,
+        method: String? = nil
     ) {
         type = ResponseType.keyboardResult.rawValue
         timestamp = Int64(Date().timeIntervalSince1970 * 1000)
@@ -25,5 +39,6 @@ public struct KeyboardResponse: Codable, Sendable {
         self.open = open
         self.totalTimeMs = totalTimeMs
         self.error = error
+        self.method = method
     }
 }

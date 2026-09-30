@@ -16,7 +16,7 @@ export class CtrlProxyKeyboard {
 
   async requestKeyboard(
     action: "open" | "close" | "detect",
-    timeoutMs: number = 5000,
+    timeoutMs: number = action === "close" ? 8000 : 5000,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyKeyboardResult> {
     return sendCommand<CtrlProxyKeyboardResult>(this.context, {

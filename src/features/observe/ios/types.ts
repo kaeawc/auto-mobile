@@ -143,6 +143,7 @@ export interface WebSocketMessage {
   verified?: boolean;
   ok?: boolean;
   open?: boolean;
+  method?: "escape" | "dismissKey" | "returnKey";
   totalTimeMs?: number;
   error?: string;
   /** Typed runner_busy metadata for a command rejected before entering the serial queue. */
@@ -198,6 +199,7 @@ export type CtrlProxySelectAllResult = BaseResult;
 /** Keyboard action result from CtrlProxy iOS */
 export interface CtrlProxyKeyboardResult extends BaseResult {
   open: boolean;
+  method?: "escape" | "dismissKey" | "returnKey";
 }
 
 /** Discrete keyboard key result from CtrlProxy iOS */

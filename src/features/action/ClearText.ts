@@ -2,7 +2,12 @@ import { toActionableError, unsupportedPlatformError } from "../../models/Action
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, ClearTextResult, ViewHierarchyResult } from "../../models";
+import {
+  BootedDevice,
+  ClearTextResult,
+  ViewHierarchyNode,
+  ViewHierarchyResult,
+} from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { ObserveResult } from "../../models";
@@ -15,53 +20,75 @@ import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
 
 export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 
+function extractSearchRootGroups(
+  viewHierarchy: ViewHierarchyResult,
+  parser: ElementParser,
+): ViewHierarchyNode[][] {
+  const windowGroups = parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+  const primaryRoots = parser.extractRootNodes(viewHierarchy);
+  const seenRoots = new Set<ViewHierarchyNode>();
+  const uniqueRoots = (roots: ViewHierarchyNode[]) =>
+    roots.filter((root) => {
+      if (seenRoots.has(root)) {
+        return false;
+      }
+      seenRoots.add(root);
+      return true;
+    });
+
+  return [...windowGroups, primaryRoots].map(uniqueRoots).filter((roots) => roots.length > 0);
+}
+
 export function getFocusedTextLength(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
 ): number | undefined {
-  let textLength: number | undefined;
-  const rootNodes = parser.extractRootNodes(viewHierarchy);
-
-  for (const rootNode of rootNodes) {
-    parser.traverseNode(rootNode, (node: any) => {
-      const nodeProperties = parser.extractNodeProperties(node);
-      const searchable = toSearchable(nodeProperties);
-      const displayText = searchable.textSources;
-      const text = displayText.value ?? displayText.text;
-      const length = typeof text === "string" ? text.length : searchable.capturedTextLength;
-      if (
-        (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-        length !== undefined
-      ) {
-        textLength = Math.max(textLength ?? 0, length);
-      }
-    });
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    let textLength: number | undefined;
+    for (const rootNode of rootGroup) {
+      parser.traverseNode(rootNode, (node: any) => {
+        const nodeProperties = parser.extractNodeProperties(node);
+        const searchable = toSearchable(nodeProperties);
+        const displayText = searchable.textSources;
+        const text = displayText.value ?? displayText.text;
+        const length = typeof text === "string" ? text.length : searchable.capturedTextLength;
+        if (
+          (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
+          length !== undefined
+        ) {
+          textLength = Math.max(textLength ?? 0, length);
+        }
+      });
+    }
+    if (textLength !== undefined) {
+      return textLength;
+    }
   }
 
-  return textLength;
+  return undefined;
 }
 
 export function hasFocusedTextInput(
   viewHierarchy: ViewHierarchyResult,
   parser: ElementParser = new DefaultElementParser(),
 ): boolean {
-  const rootNodes = parser.extractRootNodes(viewHierarchy);
+  for (const rootGroup of extractSearchRootGroups(viewHierarchy, parser)) {
+    for (const rootNode of rootGroup) {
+      let found = false;
+      parser.traverseNode(rootNode, (node: any) => {
+        if (found) {
+          return;
+        }
 
-  for (const rootNode of rootNodes) {
-    let found = false;
-    parser.traverseNode(rootNode, (node: any) => {
+        const nodeProperties = parser.extractNodeProperties(node);
+        if (isFocusedTextInputProperties(nodeProperties)) {
+          found = true;
+        }
+      });
+
       if (found) {
-        return;
+        return true;
       }
-
-      const nodeProperties = parser.extractNodeProperties(node);
-      if (isFocusedTextInputProperties(nodeProperties)) {
-        found = true;
-      }
-    });
-
-    if (found) {
-      return true;
     }
   }
 
@@ -285,23 +312,23 @@ export class ClearText extends BaseVisualChange {
     }
   }
 
-  private findAnyTextInputLength(viewHierarchy: any): number {
+  private findAnyTextInputLength(viewHierarchy: ViewHierarchyResult): number {
     let textLength = 0;
-    const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-
-    for (const rootNode of rootNodes) {
-      this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        const text = toSearchable(nodeProperties).textSources.text;
-        if (
-          nodeProperties.class &&
-          ANDROID_INPUT_CLASSES.some((cls) => nodeProperties.class.includes(cls)) &&
-          text &&
-          typeof text === "string"
-        ) {
-          textLength = Math.max(textLength, text.length);
-        }
-      });
+    for (const rootGroup of extractSearchRootGroups(viewHierarchy, this.parser)) {
+      for (const rootNode of rootGroup) {
+        this.parser.traverseNode(rootNode, (node: any) => {
+          const nodeProperties = this.parser.extractNodeProperties(node);
+          const text = toSearchable(nodeProperties).textSources.text;
+          if (
+            nodeProperties.class &&
+            ANDROID_INPUT_CLASSES.some((cls) => nodeProperties.class.includes(cls)) &&
+            text &&
+            typeof text === "string"
+          ) {
+            textLength = Math.max(textLength, text.length);
+          }
+        });
+      }
     }
 
     return textLength;

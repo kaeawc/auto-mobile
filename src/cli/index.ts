@@ -1,5 +1,6 @@
 import { toJSONSchema } from "zod/v4";
 import { errorMessage } from "../utils/describeUnknownError";
+import { formatDaemonToolError } from "./removedTools";
 import { ToolRegistry } from "../server/toolRegistry";
 import { coerceCliValue, getDeclaredParamTypes } from "./cliValueCoercion";
 import { initializeCliTools } from "./cliToolRegistration";
@@ -333,9 +334,7 @@ async function runToolViaDaemon(
       throw error;
     }
     const message = errorMessage(error);
-    throw new ActionableError(
-      `Error calling daemon: ${message}. ` + `Try: auto-mobile --daemon restart`,
-    );
+    throw new ActionableError(formatDaemonToolError(toolName, message));
   } finally {
     // Declare the session this one-shot process owns BEFORE closing (#6870).
     // Without it the connection's heartbeat keeper dies with the process and the

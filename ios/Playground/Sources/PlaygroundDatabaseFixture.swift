@@ -70,7 +70,7 @@ struct PlaygroundDatabaseFixture {
     }
 
     @discardableResult
-    func install() throws -> URL {
+    func install(allowMutations: Bool = false) throws -> URL {
         guard let databaseURL else {
             throw PlaygroundDatabaseFixtureError.applicationSupportDirectoryUnavailable
         }
@@ -90,7 +90,12 @@ struct PlaygroundDatabaseFixture {
         try execute("COMMIT", databaseURL: databaseURL)
         committed = true
 
-        inspector.configure(StorageInspectionConfiguration(allowedDatabasePaths: [databaseURL.path]))
+        inspector.configure(
+            StorageInspectionConfiguration(
+                allowedDatabasePaths: [databaseURL.path],
+                allowMutations: allowMutations
+            )
+        )
         inspector.setEnabled(true)
 
         return databaseURL

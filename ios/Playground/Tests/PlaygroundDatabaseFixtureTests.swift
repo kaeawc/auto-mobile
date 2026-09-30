@@ -22,6 +22,7 @@ final class PlaygroundDatabaseFixtureTests: XCTestCase {
             [databaseURL.path]
         )
         XCTAssertTrue(inspector.isEnabled)
+        XCTAssertFalse(inspector.configuration.allowMutations)
         XCTAssertEqual(fileSystem.createdDirectories.map(\.path), [databaseURL.deletingLastPathComponent().path])
         XCTAssertEqual(driver.executedQueries.count, 4)
         XCTAssertEqual(driver.executedQueries[0], "BEGIN IMMEDIATE TRANSACTION")
@@ -29,6 +30,19 @@ final class PlaygroundDatabaseFixtureTests: XCTestCase {
         XCTAssertTrue(driver.executedQueries[2].contains("ios-playground-seed-001"))
         XCTAssertTrue(driver.executedQueries[2].contains("WHERE NOT EXISTS"))
         XCTAssertEqual(driver.executedQueries[3], "COMMIT")
+    }
+
+    func testInstallCanEnableMutationsWhenExplicitlyRequested() throws {
+        let inspector = FakePlaygroundDatabaseInspector()
+        let fixture = PlaygroundDatabaseFixture(
+            fileSystem: FakePlaygroundFileSystem(),
+            inspector: inspector,
+            seedDriver: FakeDatabaseDriver()
+        )
+
+        _ = try fixture.install(allowMutations: true)
+
+        XCTAssertTrue(inspector.configuration.allowMutations)
     }
 
     func testInstallFailureRollsBackWithoutEnablingInspectionAndCanRetry() throws {

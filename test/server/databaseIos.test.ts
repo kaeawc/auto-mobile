@@ -104,6 +104,59 @@ describe("iOS database inspection server integration", function () {
     }
   });
 
+  test.each([
+    ["REPLACE INTO main.\"notes\" (title) VALUES ('new')", "mutation", true],
+    [
+      "WITH source AS (SELECT 'new' AS title) REPLACE INTO main.`notes` SELECT title FROM source",
+      "mutation",
+      true,
+    ],
+    ["PRAGMA user_version = 42", "mutation", true],
+    // The query text alone is not authoritative in either direction.
+    ["REPLACE INTO notes (title) VALUES ('new')", "query", false],
+    ["SELECT * FROM notes", "query", false],
+    ["SELECT * FROM notes", "mutation", true],
+  ] as const)(
+    "sqlQuery invalidation follows the returned %s result type",
+    async (query, type, shouldNotify) => {
+      const executeSQLForIos = mock(async () =>
+        type === "mutation"
+          ? ({ type, rowsAffected: 1 } as const)
+          : ({ type, columns: ["id"], rows: [["1"]] } as const),
+      );
+      IOSCtrlProxyClient.getInstance = mock(() => ({
+        executeSQLForIos,
+      })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+      const notifyResourceUpdated = mock(async (_uri: string) => {});
+      const originalNotify = ResourceRegistry.notifyResourceUpdated;
+      ResourceRegistry.notifyResourceUpdated = notifyResourceUpdated;
+
+      try {
+        registerDatabaseTools();
+        const tool = ToolRegistry.getTool("sqlQuery");
+        await tool!.deviceAwareHandler!(iosDevice, {
+          appId: "com.example.app",
+          databasePath: "/app/Documents/app.db",
+          query,
+        });
+
+        expect(notifyResourceUpdated.mock.calls.length > 0).toBe(shouldNotify);
+        if (shouldNotify) {
+          expect(notifyResourceUpdated).toHaveBeenCalledWith(
+            "automobile:devices/ios-1/databases?appId=com.example.app",
+          );
+        }
+        if (query.includes("REPLACE") && type === "mutation") {
+          expect(
+            notifyResourceUpdated.mock.calls.some(([uri]) => uri.includes("/tables/notes/data?")),
+          ).toBe(true);
+        }
+      } finally {
+        ResourceRegistry.notifyResourceUpdated = originalNotify;
+      }
+    },
+  );
+
   test("database resources resolve iOS devices through CtrlProxy", async function () {
     const listDatabases = mock(async () => [{ name: "app.db", path: "/app/Documents/app.db" }]);
     IOSCtrlProxyClient.getInstance = mock(() => ({

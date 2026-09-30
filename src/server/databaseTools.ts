@@ -33,30 +33,47 @@ interface SqlQueryArgs {
 /**
  * Extract table names from SQL query for notification purposes.
  *
- * Handles SQLite conflict clauses like INSERT OR REPLACE INTO and UPDATE OR IGNORE.
+ * Handles SQLite replacement statements, conflict clauses, and quoted or
+ * schema-qualified table identifiers. This is best-effort: callers must also
+ * invalidate database-level resources when no table can be extracted.
  */
 function extractAffectedTables(query: string): string[] {
   const tables: string[] = [];
 
   // SQLite conflict clause: OR (ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)
   const conflictClause = "(?:OR\\s+(?:ABORT|FAIL|IGNORE|REPLACE|ROLLBACK)\\s+)?";
+  // Capture the final component of an optionally schema-qualified SQLite
+  // identifier. SQLite allows double quotes, backticks, and square brackets.
+  const identifier = '(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\\[(?:\\]\\]|[^\\]])*\\]|[\\w$]+)';
+  const qualifiedTable = `(?:${identifier}\\s*\\.\\s*)?(${identifier})`;
 
-  // Match INSERT [OR conflict] INTO table, UPDATE [OR conflict] table, etc.
+  // Match INSERT/REPLACE [OR conflict] INTO table, UPDATE [OR conflict]
+  // table, and the other common table-changing statements.
   const patterns = [
-    new RegExp(`INSERT\\s+${conflictClause}INTO\\s+["']?(\\w+)["']?`, "gi"),
-    new RegExp(`UPDATE\\s+${conflictClause}["']?(\\w+)["']?`, "gi"),
-    /DELETE\s+FROM\s+["']?(\w+)["']?/gi,
-    /ALTER\s+TABLE\s+["']?(\w+)["']?/gi,
-    /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["']?(\w+)["']?/gi,
-    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?(\w+)["']?/gi,
-    /TRUNCATE\s+(?:TABLE\s+)?["']?(\w+)["']?/gi,
+    new RegExp(`(?:INSERT\\s+${conflictClause}|REPLACE\\s+)INTO\\s+${qualifiedTable}`, "gi"),
+    new RegExp(`UPDATE\\s+${conflictClause}${qualifiedTable}`, "gi"),
+    new RegExp(`DELETE\\s+FROM\\s+${qualifiedTable}`, "gi"),
+    new RegExp(`ALTER\\s+TABLE\\s+${qualifiedTable}`, "gi"),
+    new RegExp(`DROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?${qualifiedTable}`, "gi"),
+    new RegExp(`CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${qualifiedTable}`, "gi"),
+    new RegExp(`TRUNCATE\\s+(?:TABLE\\s+)?${qualifiedTable}`, "gi"),
   ];
 
   for (const pattern of patterns) {
     let match;
     while ((match = pattern.exec(query)) !== null) {
-      if (match[1] && !tables.includes(match[1])) {
-        tables.push(match[1]);
+      if (!match[1]) {
+        continue;
+      }
+      const table = match[1]
+        .replace(/^"|"$/g, "")
+        .replace(/""/g, '"')
+        .replace(/^`|`$/g, "")
+        .replace(/``/g, "`")
+        .replace(/^\[|\]$/g, "")
+        .replace(/\]\]/g, "]");
+      if (!tables.includes(table)) {
+        tables.push(table);
       }
     }
   }
@@ -93,37 +110,55 @@ export function stripLeadingSqlNoise(query: string): string {
 }
 
 /**
- * Determine if query is a mutation (modifies data)
+ * Approximate whether a query may mutate data before execution.
  *
- * Handles CTE queries (WITH ... SELECT/INSERT/UPDATE/DELETE) by looking past
- * the CTE prefix to find the actual statement type. Leading comments and
- * whitespace are stripped first so a commented-out preamble does not hide the
- * statement keyword.
+ * This is not authoritative: SQLite's statement-readonly result determines
+ * execution policy, and the SQLResult returned by the device determines cache
+ * invalidation. Treat statements that are not clearly read-only as mutations,
+ * consistent with the iOS SDK's sqlite3_stmt_readonly classification.
  */
 export function isMutationQuery(query: string): boolean {
   const upperQuery = stripLeadingSqlNoise(query).toUpperCase();
 
-  // Direct mutations
+  // Clearly read-only statements. PRAGMA can both read and write; assignment,
+  // call-style arguments, and unknown forms are conservatively mutations.
+  if (startsWithKeyword(upperQuery, "SELECT") || startsWithKeyword(upperQuery, "VALUES")) {
+    return false;
+  }
+  if (startsWithKeyword(upperQuery, "PRAGMA")) {
+    const pragmaBody = upperQuery.slice("PRAGMA".length).trim().replace(/;+$/, "").trim();
+    const readOnlyPragmas = new Set([
+      "APPLICATION_ID",
+      "COMPILE_OPTIONS",
+      "DATA_VERSION",
+      "DATABASE_LIST",
+      "ENCODING",
+      "FREELIST_COUNT",
+      "PAGE_COUNT",
+      "SCHEMA_VERSION",
+      "USER_VERSION",
+    ]);
+    const pragmaName = /^(?:\w+\s*\.\s*)?(\w+)$/.exec(pragmaBody)?.[1];
+    return pragmaName === undefined || !readOnlyPragmas.has(pragmaName);
+  }
+
+  // Direct mutations (including SQLite's REPLACE alias for INSERT OR REPLACE).
   if (
-    upperQuery.startsWith("INSERT") ||
-    upperQuery.startsWith("UPDATE") ||
-    upperQuery.startsWith("DELETE") ||
-    upperQuery.startsWith("ALTER") ||
-    upperQuery.startsWith("DROP") ||
-    upperQuery.startsWith("CREATE") ||
-    upperQuery.startsWith("TRUNCATE")
+    ["INSERT", "REPLACE", "UPDATE", "DELETE", "ALTER", "DROP", "CREATE", "TRUNCATE"].some(
+      (keyword) => startsWithKeyword(upperQuery, keyword),
+    )
   ) {
     return true;
   }
 
-  // CTE queries: WITH ... followed by SELECT/INSERT/UPDATE/DELETE
+  // CTE queries: recognize the terminal read; any other or unrecognized
+  // statement is conservatively treated as a possible mutation.
   if (upperQuery.startsWith("WITH")) {
     const statementType = findStatementAfterCTE(upperQuery);
-    // Only INSERT/UPDATE/DELETE are mutations; SELECT is not
-    return statementType === "INSERT" || statementType === "UPDATE" || statementType === "DELETE";
+    return statementType !== "SELECT" && statementType !== "VALUES";
   }
 
-  return false;
+  return true;
 }
 
 /**
@@ -191,10 +226,16 @@ export function registerDatabaseTools() {
     try {
       const result = await executeSqlForDevice(device, args);
 
-      // If this was a mutation, notify resource subscribers of the change
-      if (isMutationQuery(args.query)) {
+      // The executed result type is authoritative; SQL text classification is
+      // only an approximation for decisions that must happen before execution.
+      if (result.type === "mutation") {
         const affectedTables = extractAffectedTables(args.query);
-        await notifyDatabaseChanged(device.deviceId, args.appId, args.databasePath, affectedTables);
+        await notifyDatabaseChanged(
+          device.deviceId,
+          args.appId,
+          args.databasePath,
+          affectedTables.length > 0 ? affectedTables : undefined,
+        );
       }
 
       const message =

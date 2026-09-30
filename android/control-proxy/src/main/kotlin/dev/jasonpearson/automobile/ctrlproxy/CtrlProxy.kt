@@ -6688,24 +6688,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "swipe_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"swipe_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (gestureTimeMs != null) {
-            append(""","gestureTimeMs":$gestureTimeMs""")
-          }
-          if (error != null) {
-            append(""","error":"$error"""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        swipeResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
       }
       Log.d(TAG, "Broadcasted swipe result to ${webSocketServer.getConnectionCount()} clients")
     }
@@ -6726,24 +6709,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "drag_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"drag_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (gestureTimeMs != null) {
-            append(""","gestureTimeMs":$gestureTimeMs""")
-          }
-          if (error != null) {
-            append(""","error":"$error"""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        dragResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
       }
       Log.d(TAG, "Broadcasted drag result to ${webSocketServer.getConnectionCount()} clients")
     }
@@ -6763,21 +6729,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "tap_coordinates_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"tap_coordinates_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (error != null) {
-            append(""","error":"$error"""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        tapCoordinatesResultFrame(requestId, success, error, totalTimeMs, perfTiming)
       }
       Log.d(
         TAG,
@@ -6801,24 +6753,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     resultBroadcaster.guard(requestId, "pinch_result") {
       webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"pinch_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","success":$success""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (gestureTimeMs != null) {
-            append(""","gestureTimeMs":$gestureTimeMs""")
-          }
-          if (error != null) {
-            append(""","error":"$error"""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
+        pinchResultFrame(requestId, success, error, totalTimeMs, gestureTimeMs, perfTiming)
       }
       Log.d(TAG, "Broadcasted pinch result to ${webSocketServer.getConnectionCount()} clients")
     }
@@ -6861,14 +6796,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           // Surface a rate limit distinctly so the daemon classifies it as ctrlproxy_rate_limited
           // rather than a generic capture failure (issue #4927).
           val error = CtrlProxyScreenshotWire.errorMessageForCode(outcome.errorCode)
-          val errorMessage = buildString {
-            append("""{"type":"screenshot_error","timestamp":${System.currentTimeMillis()}""")
-            if (requestId != null) {
-              append(""","requestId":"$requestId"""")
-            }
-            append(""","error":"$error"}""")
-          }
-          webSocketServer.broadcast(errorMessage)
+          webSocketServer.broadcast(screenshotErrorFrame(requestId, error))
         }
       }
     }
@@ -7393,17 +7321,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     resultBroadcaster.guard(requestId, "current_focus_error") {
-      webSocketServer.broadcast(
-        buildString {
-          append("""{"type":"current_focus_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          append(""","error":"${error ?: "Unknown error"}"""")
-          append("}")
-        }
-      )
+      webSocketServer.broadcast(currentFocusErrorFrame(requestId, error, totalTimeMs))
       Log.d(
         TAG,
         "Broadcasted current focus error to ${webSocketServer.getConnectionCount()} clients",
@@ -7461,17 +7379,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     resultBroadcaster.guard(requestId, "traversal_order_error") {
-      webSocketServer.broadcast(
-        buildString {
-          append("""{"type":"traversal_order_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"$requestId"""")
-          }
-          append(""","totalTimeMs":$totalTimeMs""")
-          append(""","error":"${error ?: "Unknown error"}"""")
-          append("}")
-        }
-      )
+      webSocketServer.broadcast(traversalOrderErrorFrame(requestId, error, totalTimeMs))
       Log.d(
         TAG,
         "Broadcasted traversal order error to ${webSocketServer.getConnectionCount()} clients",

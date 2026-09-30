@@ -302,6 +302,41 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     expect(accelChecks()).toBe(0);
   });
 
+  test("detaches startup classification after the success marker but keeps output capture", async () => {
+    const child = createChild();
+    const { client } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+
+    const launchedChild = await client.startEmulator(avdName);
+    expect(launchedChild).toBe(child);
+    expect(child.stdout!.listenerCount("data")).toBe(1);
+    expect(child.stderr!.listenerCount("data")).toBe(1);
+
+    child.stderr!.emit("data", Buffer.from("PANIC: QEMU later runtime diagnostic\n"));
+    child.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; later runtime text\n"));
+
+    expect(child.killed).toBe(false);
+    expect(child.stdout!.listenerCount("data")).toBe(1);
+    expect(child.stderr!.listenerCount("data")).toBe(1);
+  });
+
+  test("detaches startup classification after the assume-success timeout", async () => {
+    const child = createChild();
+    const { client, timer } = createClient(child, () => {});
+    const launch = client.startEmulator(avdName);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    timer.advanceTime(5_000);
+    const launchedChild = await launch;
+
+    expect(launchedChild).toBe(child);
+    expect(child.stdout!.listenerCount("data")).toBe(1);
+    expect(child.stderr!.listenerCount("data")).toBe(1);
+    child.stderr!.emit("data", Buffer.from("PANIC: QEMU later runtime diagnostic\n"));
+    child.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; later runtime text\n"));
+    expect(child.killed).toBe(false);
+  });
+
   test("replays a post-validation exit to readiness with launch diagnostics", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
@@ -314,13 +349,20 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
 
     const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
 
-    child.stderr!.emit("data", Buffer.from("late handoff diagnostic\n"));
+    child.stderr!.emit(
+      "data",
+      Buffer.from(
+        "late handoff diagnostic\nqemu_mprotect__osdep: mprotect failed: Permission denied\n",
+      ),
+    );
     child.emit("close", 1, null);
     const error = await readiness;
 
-    expect(error.message).toContain("exited with code: 1");
+    expect(error.message).toContain("hypervisor");
+    expect(error.message).toContain("sandbox");
     expect(error.message).toContain("handoff diagnostic");
     expect(error.message).toContain("late handoff diagnostic");
+    expect(error.message).toContain("qemu_mprotect__osdep");
     expect(error.message).toContain("token=[REDACTED]");
     expect(error.message).not.toContain("handoff-secret");
     expect(timer.getSleepCallCount()).toBe(0);
@@ -344,6 +386,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const error = await readiness;
     expect(error.message).toContain("hypervisor");
     expect(error.message).toContain("sandbox");
+    expect(error.message).toContain("qemu_mprotect__osdep");
   });
 
   test("keeps a post-validation duplicate-AVD exit nonfatal", async () => {
@@ -466,6 +509,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const error = await readiness;
     expect(error.message).toContain("hypervisor");
     expect(error.message).toContain("sandbox");
+    expect(error.message).toContain("qemu_mprotect__osdep");
   });
 
   test("prefers finalized diagnostics for exits observed during readiness", async () => {
@@ -490,9 +534,10 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     const error = await readiness;
     expect(error.message).toContain("hypervisor");
     expect(error.message).toContain("sandbox");
+    expect(error.message).toContain("qemu_mprotect__osdep");
   });
 
-  test("keeps duplicate-AVD adoption nonfatal during active readiness", async () => {
+  test("does not classify post-validation duplicate-looking output as startup adoption", async () => {
     const child = createChild();
     const { client, timer } = createClient(child, () => {
       child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
@@ -527,7 +572,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       await timer.advanceTimeAsync(500);
       await new Promise<void>((resolve) => setImmediate(resolve));
 
-      expect(rejection).toBeUndefined();
+      expect(rejection?.message).toContain("exited with code: 1");
     } finally {
       controller.abort(new Error("test cleanup"));
       await readiness.catch(() => undefined);

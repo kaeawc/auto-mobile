@@ -71,8 +71,6 @@ import {
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { getAbortSignal, runWithAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
-import { AndroidCommandOutputStreamRedactor } from "../utils/android-cmdline-tools/redactAndroidCommandOutput";
-import { boundedEmulatorOutputTail } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   DeviceLostError,
   deviceLossCancellationReason,
@@ -93,6 +91,11 @@ import {
   AdbServerResetQuarantine,
   type AdbServerResetQuarantinePoolPort,
 } from "./adbServerResetQuarantine";
+import {
+  EmulatorProcessLifecycle,
+  type EmulatorProcessLifecyclePoolPort,
+  type EmulatorProcessOutputTail,
+} from "./emulatorProcessLifecycle";
 import {
   DeviceDisconnectHandler,
   INCARNATION_ANY,
@@ -523,71 +526,6 @@ export type IOSSimulatorRecoveryDevice = PooledDevice & {
 export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimulatorRecoveryDevice;
 
 /**
- * A process can emit output after readiness. Capture its redacted bounded tail
- * so a later unexpected exit has the same useful evidence as an early launch
- * failure without retaining unbounded process output.
- */
-class EmulatorProcessOutputTail {
-  private output = "";
-  private readonly stdoutRedactor = new AndroidCommandOutputStreamRedactor();
-  private readonly stderrRedactor = new AndroidCommandOutputStreamRedactor();
-  private readonly streamsClosed: Promise<void>;
-
-  constructor(
-    childProcess: ChildProcess,
-    private readonly timer: Timer,
-  ) {
-    const hasStreams =
-      (childProcess.stdout !== null && childProcess.stdout !== undefined) ||
-      (childProcess.stderr !== null && childProcess.stderr !== undefined);
-    this.streamsClosed = hasStreams
-      ? new Promise((resolve) => childProcess.once("close", resolve))
-      : Promise.resolve();
-    childProcess.stdout?.on("data", (value) => this.append(value, this.stdoutRedactor));
-    childProcess.stderr?.on("data", (value) => this.append(value, this.stderrRedactor));
-  }
-
-  snapshot(): string | undefined {
-    const output = boundedEmulatorOutputTail(
-      this.output + this.stdoutRedactor.snapshot() + this.stderrRedactor.snapshot(),
-    );
-    return output.length > 0 ? output : undefined;
-  }
-
-  async finalize(): Promise<string | undefined> {
-    await this.waitForStreamClose();
-    this.output = boundedEmulatorOutputTail(
-      this.output + this.stdoutRedactor.flush() + this.stderrRedactor.flush(),
-    );
-    return this.output.length > 0 ? this.output : undefined;
-  }
-
-  private append(value: unknown, redactor: AndroidCommandOutputStreamRedactor): void {
-    const text = typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString() : "";
-    if (!text) {
-      return;
-    }
-    this.output = boundedEmulatorOutputTail(this.output + redactor.append(text));
-  }
-
-  private async waitForStreamClose(): Promise<void> {
-    const timedOut = Symbol("stream-close-timeout");
-    try {
-      await raceWithDeadline(this.streamsClosed, {
-        timer: this.timer,
-        timeoutMs: 1_000,
-        label: "Emulator output streams",
-        timeoutError: () => timedOut,
-      });
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-    }
-  }
-}
-
-/**
  * Device Pool
  *
  * Manages a pool of Android devices for parallel test execution:
@@ -619,6 +557,9 @@ export interface DevicePoolDependencies {
   adbServerResetQuarantineFactory?: (
     pool: AdbServerResetQuarantinePoolPort,
   ) => AdbServerResetQuarantine;
+  emulatorProcessLifecycleFactory?: (
+    pool: EmulatorProcessLifecyclePoolPort,
+  ) => EmulatorProcessLifecycle;
   deviceSessionContinuityEnabled?: boolean;
 }
 
@@ -627,6 +568,13 @@ function createAdbServerResetQuarantine(
   factory?: DevicePoolDependencies["adbServerResetQuarantineFactory"],
 ): AdbServerResetQuarantine {
   return factory ? factory(port) : new AdbServerResetQuarantine(port);
+}
+
+function createEmulatorProcessLifecycle(
+  port: EmulatorProcessLifecyclePoolPort,
+  factory?: DevicePoolDependencies["emulatorProcessLifecycleFactory"],
+): EmulatorProcessLifecycle {
+  return factory ? factory(port) : new EmulatorProcessLifecycle(port);
 }
 
 export class DevicePool {
@@ -698,6 +646,7 @@ export class DevicePool {
   private get sessionPreservingRecoveries(): Map<string, SessionPreservingRecovery> {
     return this.recoveryCoordinator.sessionPreservingRecoveries;
   }
+  private readonly emulatorProcessLifecycle: EmulatorProcessLifecycle;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
@@ -821,6 +770,7 @@ export class DevicePool {
     lifecycleCoordinator,
     consoleBusyRegistry,
     adbServerResetQuarantineFactory,
+    emulatorProcessLifecycleFactory,
     deviceSessionContinuityEnabled,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
@@ -830,6 +780,27 @@ export class DevicePool {
     this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
+    const emulatorProcessPort: EmulatorProcessLifecyclePoolPort = {
+      getTimer: () => this.timer,
+      getStartedDeviceProcesses: () => this.startedDeviceProcesses,
+      getStartedDeviceProcessOutput: () => this.startedDeviceProcessOutput,
+      getDevices: () => this.devices,
+      getSessionManager: () => this.sessionManager,
+      isReservedForShutdown: (device) => this.isReservedForShutdown(device),
+      prepareSessionPreservingRecovery: (id, device) =>
+        this.prepareSessionPreservingRecovery(id, device),
+      finishSessionPreservingRecoveryPreparation: (preparation) =>
+        this.finishSessionPreservingRecoveryPreparation(preparation),
+      recordEmulatorLossIncident: (id, path, exit) =>
+        this.recordEmulatorLossIncident(id, path, exit),
+      finishEmulatorLossIncident: (id, outcome) => this.finishEmulatorLossIncident(id, outcome),
+      evictMissingPooledDevice: (device, reason, attempt, incidentId, captured, preparation) =>
+        this.evictMissingPooledDevice(device, reason, attempt, incidentId, captured, preparation),
+    };
+    this.emulatorProcessLifecycle = createEmulatorProcessLifecycle(
+      emulatorProcessPort,
+      emulatorProcessLifecycleFactory,
+    );
     this.idleDeviceReaper = new IdleDeviceReaper(
       {
         getDevice: (deviceId) => this.getDevice(deviceId),
@@ -3936,10 +3907,7 @@ export class DevicePool {
     deviceId: string,
     retainLeaseUntil?: (settlement: Promise<unknown>) => void,
   ): Promise<void> {
-    const childProcess = this.startedDeviceProcesses.get(deviceId);
-    await this.stopEmulatorProcess(childProcess, retainLeaseUntil);
-    this.startedDeviceProcesses.delete(deviceId);
-    this.startedDeviceProcessOutput.delete(deviceId);
+    return this.emulatorProcessLifecycle.stopTrackedEmulatorProcess(deviceId, retainLeaseUntil);
   }
 
   private async stopDiscoveredEmulatorByAvdName(
@@ -4069,149 +4037,27 @@ export class DevicePool {
     childProcess: ChildProcess | null | undefined,
     retainLeaseUntil?: (settlement: Promise<unknown>) => void,
   ): Promise<void> {
-    if (!childProcess || typeof childProcess.kill !== "function") {
-      return;
-    }
-
-    const exitCode = (childProcess as { exitCode?: number | null }).exitCode;
-    if (exitCode === undefined) {
-      childProcess.kill();
-      return;
-    }
-    const signalCode = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
-    if (exitCode !== null || (signalCode !== null && signalCode !== undefined)) {
-      return;
-    }
-
-    const exited = new Promise<void>((resolve) => {
-      childProcess.once("exit", () => resolve());
-    });
-    await this.terminateEmulatorProcess(childProcess, exited, retainLeaseUntil);
-  }
-
-  private async terminateEmulatorProcess(
-    childProcess: ChildProcess,
-    exited: Promise<void>,
-    retainLeaseUntil?: (settlement: Promise<unknown>) => void,
-  ): Promise<void> {
-    try {
-      childProcess.kill("SIGTERM");
-      if (await this.waitForTrackedProcessExit(exited, 1_000)) {
-        return;
-      }
-      childProcess.kill("SIGKILL");
-    } catch (error) {
-      retainLeaseUntil?.(exited);
-      throw error;
-    }
-    if (!(await this.waitForTrackedProcessExit(exited, 1_000))) {
-      retainLeaseUntil?.(exited);
-      throw new Error(
-        `emulator process ${childProcess.pid ?? "unknown"} did not exit after SIGKILL`,
-      );
-    }
-  }
-
-  private async waitForTrackedProcessExit(
-    exited: Promise<void>,
-    timeoutMs: number,
-  ): Promise<boolean> {
-    const timedOut = Symbol("process-exit-timeout");
-    try {
-      await raceWithDeadline(exited, {
-        timer: this.timer,
-        timeoutMs,
-        label: "Emulator process exit",
-        timeoutError: () => timedOut,
-      });
-      return true;
-    } catch (error) {
-      if (error !== timedOut) {
-        throw error;
-      }
-      return false;
-    }
+    return this.emulatorProcessLifecycle.stopEmulatorProcess(childProcess, retainLeaseUntil);
   }
 
   private async trackStartedDeviceProcess(
     device: BootedDevice,
     childProcess: ChildProcess | null | undefined,
   ): Promise<void> {
-    if (device.platform !== "android" || consolePortFromSerial(device.deviceId) === null) {
-      return;
-    }
-    if (!childProcess || typeof childProcess.once !== "function") {
-      return;
-    }
-
-    this.startedDeviceProcesses.set(device.deviceId, childProcess);
-    this.startedDeviceProcessOutput.set(
-      device.deviceId,
-      new EmulatorProcessOutputTail(childProcess, this.timer),
-    );
-    let exitHandled = false;
-    const handleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
-      if (exitHandled) {
-        return;
-      }
-      exitHandled = true;
-      if (this.startedDeviceProcesses.get(device.deviceId) !== childProcess) {
-        return;
-      }
-      void this.evictStartedDeviceAfterProcessExit(device.deviceId, code, signal).catch((error) => {
-        logger.warn(
-          `[DevicePool] Failed to evict ${device.deviceId} after emulator process exit: ${error}`,
-          error,
-        );
-      });
-    };
-    childProcess.once("exit", handleExit);
-    const completedExit = this.getCompletedProcessExit(childProcess);
-    if (completedExit) {
-      exitHandled = true;
-      const pooledDeviceAtExit = this.devices.get(device.deviceId);
-      if (
-        await this.handleCompletedProcessExit(device.deviceId, completedExit, pooledDeviceAtExit)
-      ) {
-        return;
-      }
-      throw new Error(
-        `Android emulator ${device.deviceId} exited before process tracking completed ` +
-          `(code=${completedExit.code ?? "null"}, signal=${completedExit.signal ?? "none"})`,
-      );
-    }
+    return this.emulatorProcessLifecycle.trackStartedDeviceProcess(device, childProcess);
   }
 
   hasStartedDeviceProcess(
     deviceId: string,
     childProcess: ChildProcess | null | undefined,
   ): boolean {
-    return (
-      childProcess !== null &&
-      childProcess !== undefined &&
-      this.startedDeviceProcesses.get(deviceId) === childProcess
-    );
+    return this.emulatorProcessLifecycle.hasStartedDeviceProcess(deviceId, childProcess);
   }
 
   private getCompletedProcessExit(
     childProcess: ChildProcess,
   ): { code: number | null; signal: NodeJS.Signals | null } | undefined {
-    const code = (childProcess as { exitCode?: number | null }).exitCode;
-    const signal = (childProcess as { signalCode?: NodeJS.Signals | null }).signalCode;
-    if (code === undefined || (code === null && (signal === null || signal === undefined))) {
-      return undefined;
-    }
-    return { code, signal: signal ?? null };
-  }
-
-  private async handleCompletedProcessExit(
-    deviceId: string,
-    exit: { code: number | null; signal: NodeJS.Signals | null },
-    pooledDeviceAtExit: PooledDevice | undefined,
-  ): Promise<boolean> {
-    await this.evictStartedDeviceAfterProcessExit(deviceId, exit.code, exit.signal);
-    const replacement = this.devices.get(deviceId);
-    return Boolean(replacement && replacement !== pooledDeviceAtExit);
+    return this.emulatorProcessLifecycle.getCompletedProcessExit(childProcess);
   }
 
   private async evictStartedDeviceAfterProcessExit(
@@ -4219,47 +4065,7 @@ export class DevicePool {
     code: number | null,
     signal: NodeJS.Signals | null,
   ): Promise<void> {
-    const device = this.devices.get(deviceId);
-    if (!device) {
-      return;
-    }
-    if (this.isReservedForShutdown(device)) {
-      // An explicit kill owns this incarnation until it confirms physical exit
-      // and retires ownership. Its tracked process exit is expected and must
-      // not cancel the initiating request or plan through normal loss cleanup.
-      return;
-    }
-
-    const assignmentCountAtExit = device.assignmentCount;
-    const sessionIdAtExit = device.sessionId;
-    const sessionAtExit = sessionIdAtExit ? this.sessionManager.getSession(sessionIdAtExit) : null;
-    const preparation = this.prepareSessionPreservingRecovery(deviceId, device);
-    try {
-      const incidentId = await this.recordEmulatorLossIncident(deviceId, "watched-process-exit", {
-        code,
-        signal,
-      });
-      if (
-        this.devices.get(deviceId) !== device ||
-        device.assignmentCount !== assignmentCountAtExit ||
-        device.sessionId !== sessionIdAtExit ||
-        (sessionAtExit !== null &&
-          this.sessionManager.getSession(sessionAtExit.sessionId) !== sessionAtExit)
-      ) {
-        await this.finishEmulatorLossIncident(incidentId, "not-attempted");
-        return;
-      }
-      await this.evictMissingPooledDevice(
-        device,
-        `emulator process exited after startup (code=${code ?? "null"}, signal=${signal ?? "null"})`,
-        true,
-        incidentId,
-        true,
-        preparation,
-      );
-    } finally {
-      this.finishSessionPreservingRecoveryPreparation(preparation);
-    }
+    return this.emulatorProcessLifecycle.evictStartedDeviceAfterProcessExit(deviceId, code, signal);
   }
 
   private suppressAutoStartForDevice(device: PooledDevice): void {

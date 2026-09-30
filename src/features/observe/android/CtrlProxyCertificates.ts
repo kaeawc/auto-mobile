@@ -41,10 +41,6 @@ export class CtrlProxyCertificates {
   private readonly context: CertificatesDelegateContext;
   private readonly fileSystem: CertificateFileSystem;
 
-  // Legacy pending request state for CA cert removal (still uses manual promise pattern)
-  private pendingCaCertRequestId: string | null = null;
-  private pendingCaCertResolve: ((result: A11yCaCertResult) => void) | null = null;
-
   constructor(
     context: CertificatesDelegateContext,
     fileSystem: CertificateFileSystem = nodeCertificateFileSystem,
@@ -263,6 +259,7 @@ export class CtrlProxyCertificates {
   ): Promise<A11yCaCertResult> {
     const startTime = this.context.timer.now();
     const trimmedAlias = alias.trim();
+    let requestId: string | null = null;
 
     if (!trimmedAlias) {
       return {
@@ -287,25 +284,25 @@ export class CtrlProxyCertificates {
         };
       }
 
-      const requestId = `ca_cert_remove_${this.context.timer.now()}_${generateSecureId()}`;
-      this.pendingCaCertRequestId = requestId;
-
-      const caCertPromise = new Promise<A11yCaCertResult>((resolve) => {
-        this.pendingCaCertResolve = resolve;
-
-        this.context.timer.setTimeout(() => {
-          if (this.pendingCaCertResolve === resolve) {
-            this.pendingCaCertResolve = null;
-            this.pendingCaCertRequestId = null;
-            resolve({
-              success: false,
-              action: "remove",
-              totalTimeMs: this.context.timer.now() - startTime,
-              error: `CA cert removal timeout after ${timeoutMs}ms`,
-            });
-          }
-        }, timeoutMs);
-      });
+      const caCertRequestId = this.context.requestManager.generateId("caCertRemove");
+      requestId = caCertRequestId;
+      const caCertPromise = this.context.requestManager.register<A11yCaCertResult>(
+        caCertRequestId,
+        "caCertRemove",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          action: "remove",
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `CA cert removal timeout after ${timeout}ms`,
+        }),
+        (error, totalTimeMs) => ({
+          success: false,
+          action: "remove",
+          totalTimeMs,
+          error,
+        }),
+      );
 
       await perf.track("sendRequest", async () => {
         const ws = this.context.getWebSocket();
@@ -313,11 +310,11 @@ export class CtrlProxyCertificates {
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.removeCaCert({ requestId, alias: trimmedAlias }),
+          ctrlProxyRequests.removeCaCert({ requestId: caCertRequestId, alias: trimmedAlias }),
         );
         ws.send(message);
         logger.debug(
-          `[CTRL_PROXY] Sent CA cert removal request (requestId: ${requestId}, alias: ${trimmedAlias})`,
+          `[CTRL_PROXY] Sent CA cert removal request (requestId: ${caCertRequestId}, alias: ${trimmedAlias})`,
         );
       });
 
@@ -338,6 +335,9 @@ export class CtrlProxyCertificates {
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] CA cert removal request failed after ${duration}ms: ${error}`);
+      if (requestId) {
+        this.context.requestManager.resolveError(requestId, errorMessage(error), duration);
+      }
       return {
         success: false,
         action: "remove",
@@ -543,14 +543,7 @@ export class CtrlProxyCertificates {
    * This is called by the main client when a ca_cert_result with remove action is received.
    */
   handleCaCertRemovalResult(requestId: string, result: A11yCaCertResult): boolean {
-    if (this.pendingCaCertRequestId === requestId && this.pendingCaCertResolve) {
-      const resolve = this.pendingCaCertResolve;
-      this.pendingCaCertResolve = null;
-      this.pendingCaCertRequestId = null;
-      resolve(result);
-      return true;
-    }
-    return false;
+    return this.context.requestManager.resolve<A11yCaCertResult>(requestId, result);
   }
 
   /**

@@ -496,6 +496,93 @@ describe("CtrlProxyCertificates (Android)", function () {
       }
     });
 
+    test("resolves overlapping removals by requestId and clears both pending entries", async function () {
+      const { client, socket } = await connectClient();
+      try {
+        const baseCount = socket.sentMessages.length;
+        const firstPromise = client.requestRemoveCaCertificate("first-alias");
+        const secondPromise = client.requestRemoveCaCertificate("second-alias");
+        await waitForSentMessages(socket, baseCount + 2);
+
+        const sent = socket.sentMessages
+          .map((raw) => JSON.parse(raw) as { type?: string; alias?: string; requestId?: string })
+          .filter((message) => message.type === "remove_ca_cert");
+        const first = sent.find((message) => message.alias === "first-alias");
+        const second = sent.find((message) => message.alias === "second-alias");
+        expect(first?.requestId).toBeDefined();
+        expect(second?.requestId).toBeDefined();
+        expect(first?.requestId).not.toBe(second?.requestId);
+        expect(client["requestManager"].getPendingCount()).toBe(2);
+
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: second?.requestId,
+            success: true,
+            action: "remove",
+            alias: "second-alias",
+            totalTimeMs: 2,
+          }),
+        );
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: first?.requestId,
+            success: true,
+            action: "remove",
+            alias: "first-alias",
+            totalTimeMs: 1,
+          }),
+        );
+
+        const [firstResult, secondResult] = await Promise.all([firstPromise, secondPromise]);
+        expect(firstResult.alias).toBe("first-alias");
+        expect(secondResult.alias).toBe("second-alias");
+        expect(client["requestManager"].getPendingCount()).toBe(0);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("timing out one overlapping removal leaves the other request live", async function () {
+      const { client, socket } = await connectClient();
+      try {
+        const baseCount = socket.sentMessages.length;
+        const timedOutPromise = client.requestRemoveCaCertificate("short-timeout", 100);
+        const livePromise = client.requestRemoveCaCertificate("long-timeout", 200);
+        await waitForSentMessages(socket, baseCount + 2);
+
+        const sent = socket.sentMessages
+          .map((raw) => JSON.parse(raw) as { type?: string; alias?: string; requestId?: string })
+          .filter((message) => message.type === "remove_ca_cert");
+        const live = sent.find((message) => message.alias === "long-timeout");
+        expect(client["requestManager"].getPendingCount()).toBe(2);
+
+        fakeTimer.advanceTime(100);
+        const timedOut = await timedOutPromise;
+        expect(timedOut.success).toBe(false);
+        expect(timedOut.error).toContain("timeout after 100ms");
+        expect(client["requestManager"].getPendingCount()).toBe(1);
+
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: live?.requestId,
+            success: true,
+            action: "remove",
+            alias: "long-timeout",
+            totalTimeMs: 3,
+          }),
+        );
+        const liveResult = await livePromise;
+        expect(liveResult.success).toBe(true);
+        expect(liveResult.alias).toBe("long-timeout");
+        expect(client["requestManager"].getPendingCount()).toBe(0);
+      } finally {
+        await client.close();
+      }
+    });
+
     test("rejects an empty alias without sending a request", async function () {
       const { client, socket } = await connectClient();
       try {

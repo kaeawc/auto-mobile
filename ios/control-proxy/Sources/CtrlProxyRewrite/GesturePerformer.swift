@@ -423,7 +423,7 @@ public final class GesturePerformer: GesturePerforming {
                    let snapshot = try? app.snapshot(),
                    let focusedType = GesturePerformer.focusedTextInputType(snapshot, forKeyPress: forKeyPress)
                 {
-                    let keyboardVisible = app.keyboards.firstMatch.exists
+                    let keyboardVisible = isKeyboardVisible(app: app)
                     let focusType: SnapshotFocusElementType
                     switch focusedType {
                     case .textField: focusType = .textField

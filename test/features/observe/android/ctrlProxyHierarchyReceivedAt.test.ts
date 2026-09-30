@@ -285,6 +285,52 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(result.hierarchy?.packageName).toBe("com.work.app");
   });
 
+  test("fresh is true only after a device hierarchy request", async () => {
+    h = createHarness();
+    const cachedTree: AccessibilityHierarchy = { updatedAt: 100, packageName: "" };
+    h.setCached({ hierarchy: cachedTree, receivedAt: 100, fresh: true });
+
+    let deviceRequests = 0;
+    const cacheHit = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    expect(cacheHit?.fresh).toBe(false);
+    expect(deviceRequests).toBe(0);
+
+    const timestampCacheHit = await h.hierarchy.getLatestHierarchy(
+      false,
+      1000,
+      undefined,
+      false,
+      50,
+    );
+    expect(timestampCacheHit.fresh).toBe(false);
+    expect(deviceRequests).toBe(0);
+
+    const freshTree: AccessibilityHierarchy = { updatedAt: 200, packageName: "" };
+    h.setCached(null);
+    Reflect.set(h.hierarchy, "requestHierarchySync", async () => {
+      deviceRequests += 1;
+      return { hierarchy: freshTree };
+    });
+    const syncSuccess = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+    expect(syncSuccess?.fresh).toBe(true);
+    expect(deviceRequests).toBeGreaterThan(0);
+
+    h.timer.advanceTime(2000);
+    h.setCached({ hierarchy: cachedTree, receivedAt: h.timer.now() - 1500, fresh: true });
+    Reflect.set(h.hierarchy, "requestHierarchySync", async () => {
+      deviceRequests += 1;
+      return null;
+    });
+    const cachedFallback = await h.hierarchy.getAccessibilityHierarchy(
+      undefined,
+      undefined,
+      true,
+      0,
+    );
+    expect(cachedFallback?.fresh).toBe(false);
+    expect(deviceRequests).toBe(2);
+  });
+
   test("preserves a replacement cache entry received during the liveness probe", async () => {
     h = createHarness();
     h.setCached({
@@ -309,7 +355,7 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     const result = await latestPromise;
 
     expect(result.hierarchy?.packageName).toBe("com.current.app");
-    expect(result.fresh).toBe(true);
+    expect(result.fresh).toBe(false);
   });
 
   test("uses the remaining request budget for the fresh hierarchy wait", async () => {

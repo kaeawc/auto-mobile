@@ -47,7 +47,7 @@ export interface DaemonRequest {
  */
 export interface DaemonResponse {
   /** Request ID this response corresponds to */
-  id: string;
+  id: string | null;
   /** Response type */
   type: "mcp_response";
   /** Whether the request was successful */
@@ -56,6 +56,8 @@ export interface DaemonResponse {
   result?: any;
   /** Error message if unsuccessful */
   error?: string;
+  /** JSON-RPC parse/invalid-request code when a request cannot be dispatched. */
+  code?: number;
   /** Rejected before any device operation was admitted. */
   handshakeFailure?: DaemonHandshakeFailure;
   /**

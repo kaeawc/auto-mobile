@@ -318,6 +318,9 @@ export class Daemon {
   private httpServer: HttpServer | null = null;
   private httpServerClosePromise: Promise<void> | null = null;
   private socketServer: UnixSocketServer | null = null;
+  private readonly startupCompletion: Promise<void>;
+  private resolveStartupCompletion!: () => void;
+  private rejectStartupCompletion!: (reason: unknown) => void;
   private transports: Map<string, StreamableHTTPServerTransport> = new Map();
   private readonly httpSessionIdleTimers = new Map<string, NodeJS.Timeout>();
   private readonly activeHttpRequests = new Map<string, number>();
@@ -411,6 +414,14 @@ export class Daemon {
     private readonly avdManagerFactory: () => Pick<AvdManager, "listDeviceImages"> = () =>
       new AvdManagerService(),
   ) {
+    this.startupCompletion = new Promise<void>((resolve, reject) => {
+      this.resolveStartupCompletion = resolve;
+      this.rejectStartupCompletion = reject;
+    });
+    // Startup can fail before the socket server exists or any request awaits it.
+    void this.startupCompletion.catch((error: unknown) => {
+      logger.debug(`Daemon startup completion rejected: ${errorMessage(error)}`);
+    });
     this.options = { ...options };
     this.port = options.port || DEFAULT_DAEMON_PORT;
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
@@ -640,6 +651,16 @@ export class Daemon {
    * Start the daemon
    */
   async start(): Promise<void> {
+    try {
+      await this.startUntilReady();
+      this.resolveStartupCompletion();
+    } catch (error) {
+      this.rejectStartupCompletion(error);
+      throw error;
+    }
+  }
+
+  private async startUntilReady(): Promise<void> {
     // Mirror structured daemon logs to stdout/stderr capture as well. The
     // primary stable log is `<configured log dir>/daemon.log` (defaulting to
     // `<auto-mobile data dir>/logs/daemon.log`); the daemon manager also
@@ -734,6 +755,7 @@ export class Daemon {
           processGenerationToken: this.processGenerationToken,
           startupOptions: this.options,
           onRepublishIdentity: () => this.republishIdentity(),
+          startupCompletion: this.startupCompletion,
           pidFilePath: PID_FILE_PATH,
           sockets: getDaemonSocketPathsByName(),
           dbPath: getDatabasePath(),
@@ -2846,6 +2868,7 @@ export class Daemon {
             processGenerationToken: this.processGenerationToken,
             startupOptions: this.options,
             onRepublishIdentity: () => this.republishIdentity(),
+            startupCompletion: this.startupCompletion,
             pidFilePath: PID_FILE_PATH,
             sockets: getDaemonSocketPathsByName(),
             dbPath: getDatabasePath(),

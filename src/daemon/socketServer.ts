@@ -184,6 +184,27 @@ export const MCP_FORWARD_START_HEADROOM_MS = 100;
  */
 export const MAX_MCP_FORWARD_REROUTES = 3;
 const MCP_OVERLOAD_RETRY_AFTER_MS = 250;
+const STARTUP_PROBE_METHODS = new Set(["ide/status", "ide/ping"]);
+
+function socketRequestId(parsed: unknown): string | null {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const id = (parsed as Record<string, unknown>).id;
+  return typeof id === "string" ? id : null;
+}
+
+function isDaemonSocketRequest(parsed: unknown): parsed is DaemonRequest {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return false;
+  }
+  const request = parsed as Record<string, unknown>;
+  return (
+    typeof request.id === "string" &&
+    typeof request.method === "string" &&
+    (request.type === "mcp_request" || request.type === "daemon_request")
+  );
+}
 
 function requestFailureCause(
   error: unknown,
@@ -723,6 +744,8 @@ export class UnixSocketServer {
   private readonly onRepublishIdentity?: () => Promise<boolean>;
   private readonly identityDbPath?: string;
   private readonly identityPidFilePath?: string;
+  private readonly startupCompletion?: Promise<void>;
+  private startupCompleted = false;
   private readonly identitySockets?: Record<string, string>;
   private readonly identityProcessStartedAt?: number;
   private identityRepublishInFlight?: Promise<{ accepted: boolean; reason?: string }>;
@@ -812,6 +835,7 @@ export class UnixSocketServer {
       onRepublishIdentity?: () => Promise<boolean>;
       dbPath?: string;
       pidFilePath?: string;
+      startupCompletion?: Promise<void>;
       sockets?: Record<string, string>;
       processStartedAt?: number;
       onRestartAccepted?: () => void;
@@ -859,6 +883,8 @@ export class UnixSocketServer {
     this.onRepublishIdentity = handshakeConfig.onRepublishIdentity;
     this.identityDbPath = handshakeConfig.dbPath;
     this.identityPidFilePath = handshakeConfig.pidFilePath;
+    this.startupCompletion = handshakeConfig.startupCompletion;
+    this.observeStartupCompletion();
     this.identitySockets = handshakeConfig.sockets;
     this.identityProcessStartedAt = handshakeConfig.processStartedAt;
     this.onRestartAccepted = handshakeConfig.onRestartAccepted;
@@ -868,6 +894,17 @@ export class UnixSocketServer {
     if (!mcpEndpoint) {
       logger.error("ERROR: mcpEndpoint is empty or undefined!");
     }
+  }
+
+  private observeStartupCompletion(): void {
+    void this.startupCompletion?.then(
+      () => {
+        this.startupCompleted = true;
+      },
+      (error: unknown) => {
+        logger.debug(`Daemon startup completion rejected: ${errorMessage(error)}`);
+      },
+    );
   }
 
   /**
@@ -1065,14 +1102,26 @@ export class UnixSocketServer {
     line: string,
     receivedAtMs: number,
   ): Promise<void> {
-    let requestId = "unknown";
+    let requestId: string | null = null;
     let deviceId: string | undefined;
     let pending: PendingSocketRequest | undefined;
+    let errorCode: number | undefined;
     try {
-      const request: DaemonRequest = JSON.parse(line);
-      requestId = request.id;
-      pending = {
-        id: requestId,
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch (error) {
+        errorCode = -32700;
+        throw toActionableError(error, "Parse error in daemon socket request");
+      }
+      requestId = socketRequestId(parsed);
+      if (!isDaemonSocketRequest(parsed)) {
+        errorCode = -32600;
+        throw new ActionableError("Invalid daemon socket request");
+      }
+      const request = parsed;
+      const tracked: PendingSocketRequest = {
+        id: request.id,
         sessionId,
         socket,
         admitted:
@@ -1081,16 +1130,16 @@ export class UnixSocketServer {
           request.method === DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
         terminal: false,
       };
-      this.pendingSocketRequests.add(pending);
-      const tracked = pending;
+      pending = tracked;
+      this.pendingSocketRequests.add(tracked);
       deviceId = this.onFrameTrace ? this.frameDeviceId(request) : undefined;
       if (this.onFrameTrace) {
-        this.traceFrame("frame_parsed", requestId, deviceId);
+        this.traceFrame("frame_parsed", request.id, deviceId);
       }
       const response = await this.handleRequest(sessionId, socket, request, receivedAtMs, () => {
         tracked.admitted = true;
       });
-      this.writeTerminalSocketResponse(pending, response, deviceId);
+      this.writeTerminalSocketResponse(tracked, response, deviceId);
     } catch (error) {
       logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
       const errorResponse: DaemonResponse = {
@@ -1098,6 +1147,7 @@ export class UnixSocketServer {
         type: "mcp_response",
         success: false,
         error: errorMessage(error),
+        ...(errorCode === undefined ? {} : { code: errorCode }),
       };
       if (pending) {
         this.writeTerminalSocketResponse(pending, errorResponse, deviceId);
@@ -1348,19 +1398,19 @@ export class UnixSocketServer {
     deviceId?: string,
   ): void {
     if (this.onFrameTrace && frame.type === "mcp_response") {
-      this.traceFrame("response_write_started", frame.id, deviceId);
+      this.traceFrame("response_write_started", frame.id ?? "null", deviceId);
       this.writeFrameData(
         socket,
         sessionId,
         frame,
         (error) => {
-          this.traceFrame("response_write_callback", frame.id, deviceId, error?.message, {
+          this.traceFrame("response_write_callback", frame.id ?? "null", deviceId, error?.message, {
             writableLengthInCallback: socket.writableLength,
           });
           onFlushed?.();
         },
         (writableLengthAfterWrite, byteLength) => {
-          this.traceFrame("response_write_returned", frame.id, deviceId, undefined, {
+          this.traceFrame("response_write_returned", frame.id ?? "null", deviceId, undefined, {
             byteLength,
             writableLengthAfterWrite,
           });
@@ -1485,6 +1535,12 @@ export class UnixSocketServer {
             type: "mcp_response",
             ...daemonResponse,
           };
+        }
+
+        // Status and ping are local probes used while the daemon is starting.
+        if (!STARTUP_PROBE_METHODS.has(request.method)) {
+          activeRequestSignal = cancellation.signal;
+          await this.waitForStartup(request, deadline, cancellation.signal);
         }
 
         const localResult = await this.handleLocalSocketRequest(request, sessionId);
@@ -1654,6 +1710,32 @@ export class UnixSocketServer {
         },
       )
       .finally(cancellation.dispose);
+  }
+
+  private async waitForStartup(
+    request: DaemonRequest,
+    deadline: ProgressExtendableDeadline,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (!this.startupCompletion || this.startupCompleted) {
+      return;
+    }
+    const remainingMs = deadline.value - this.timer.now();
+    const stillStarting = () =>
+      new ActionableError(`Daemon still starting; retry ${request.method} after startup completes`);
+    if (remainingMs <= 0) {
+      throw stillStarting();
+    }
+    const startup = this.startupCompletion.then(undefined, (error: unknown) => {
+      throw new ActionableError(`Daemon startup failed: ${errorMessage(error)}`, { cause: error });
+    });
+    await raceWithDeadline(startup, {
+      timer: this.timer,
+      timeoutMs: remainingMs,
+      signal,
+      label: "Daemon startup",
+      timeoutError: stillStarting,
+    });
   }
 
   /**

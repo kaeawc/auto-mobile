@@ -891,6 +891,26 @@ export class DaemonClient {
    * Handle a response from daemon
    */
   private handleResponse(response: DaemonResponse): void {
+    if (response.id === null) {
+      if (this.pendingRequests.size !== 1) {
+        logger.warn(
+          `Received uncorrelatable daemon response with ${this.pendingRequests.size} pending requests; dropping response`,
+        );
+        return;
+      }
+      const error = new ActionableError(
+        response.error ?? "Daemon could not parse a socket request",
+      );
+      const pending = this.pendingRequests.values().next().value;
+      if (!pending) {
+        return;
+      }
+      this.timer.clearTimeout(pending.timeout);
+      pending.removeAbortListener?.();
+      pending.reject(error);
+      this.pendingRequests.clear();
+      return;
+    }
     const pending = this.pendingRequests.get(response.id);
     if (!pending && this.cancelledRequestIds.delete(response.id)) {
       logger.debug(`Dropped daemon response for cancelled request ID: ${response.id}`);

@@ -198,6 +198,7 @@ export interface CachedHierarchy {
   hierarchy: AccessibilityHierarchy;
   receivedAt: number;
   fresh: boolean;
+  requestId?: string | null;
   perfTiming?: AndroidPerfTiming[];
   frameContext?: string;
 }

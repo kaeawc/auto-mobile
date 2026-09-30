@@ -17,16 +17,17 @@ import dev.jasonpearson.automobile.protocol.NodeSelector
  * consumes a JSON string.
  */
 interface CtrlProxyActions {
-  fun requestHierarchy(disableAllFiltering: Boolean)
+  fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?)
 
   fun requestHierarchy(
     disableAllFiltering: Boolean,
     maxDepth: Int?,
     maxNodes: Int?,
     displayId: Int? = null,
-  ) = requestHierarchy(disableAllFiltering)
+    requestId: String? = null,
+  ) = requestHierarchy(disableAllFiltering, requestId)
 
-  fun requestHierarchyIfStale(sinceTimestamp: Long)
+  fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?)
 
   fun setHierarchyInterval(intervalMs: Long?)
 

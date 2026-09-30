@@ -108,9 +108,14 @@ export class CtrlProxyHierarchy {
   // user-controlled requestId must never drive a dynamic method-name dispatch.
   private readonly pendingHierarchyRejectors = new Map<
     string,
-    { reject: (error: string) => void; disconnect: () => void }
+    {
+      reject: (error: string) => void;
+      disconnect: () => void;
+      resolve: (hierarchy: CachedHierarchy) => void;
+    }
   >();
   private readonly hierarchySyncFlights = new Set<HierarchySyncFlight>();
+  private correlatedFramesSeen = false;
 
   constructor(context: HierarchyDelegateContext) {
     this.context = context;
@@ -133,6 +138,51 @@ export class CtrlProxyHierarchy {
     return true;
   }
 
+  /** Deliver a correlated hierarchy before a later push overwrites the shared cache. */
+  resolvePendingHierarchy(requestId: string | null | undefined, hierarchy: CachedHierarchy): void {
+    if (requestId) {
+      this.correlatedFramesSeen = true;
+      this.pendingHierarchyRejectors.get(requestId)?.resolve(hierarchy);
+    }
+  }
+
+  private matchesHierarchyRequest(
+    hierarchy: CachedHierarchy,
+    requestId?: string,
+    staleRequestId?: string | null,
+    allowStaleResponse = true,
+  ): boolean {
+    return (
+      !requestId ||
+      (!hierarchy.requestId && !this.correlatedFramesSeen) ||
+      hierarchy.requestId === requestId ||
+      (allowStaleResponse && !!staleRequestId && hierarchy.requestId === staleRequestId)
+    );
+  }
+
+  private matchesFreshHierarchy(
+    hierarchy: CachedHierarchy,
+    minTimestamp: number,
+    useDeviceTimestamp: boolean,
+    requestId?: string,
+    staleRequestId?: string | null,
+    allowStaleResponse = true,
+  ): boolean {
+    return (
+      this.evaluateMinTimestamp(hierarchy, minTimestamp, useDeviceTimestamp).isFresh &&
+      this.matchesHierarchyRequest(hierarchy, requestId, staleRequestId, allowStaleResponse)
+    );
+  }
+
+  private isDispatchSocketValid(dispatchSocket?: WebSocket | null): boolean {
+    return (
+      dispatchSocket === undefined ||
+      (!!dispatchSocket &&
+        dispatchSocket.readyState === WebSocket.OPEN &&
+        this.context.getWebSocket() === dispatchSocket)
+    );
+  }
+
   /**
    * Clear connection-scoped device state on a WebSocket close (issue #7540).
    *
@@ -149,6 +199,7 @@ export class CtrlProxyHierarchy {
    */
   resetConnectionScopedState(): void {
     this.recompositionTrackingConfigured = false;
+    this.correlatedFramesSeen = false;
   }
 
   /** Reject every correlated hierarchy wait when its WebSocket connection closes. */
@@ -749,14 +800,10 @@ export class CtrlProxyHierarchy {
       // getAccessibilityHierarchy) — nothing is discarded here.
       const correlationRequestId = hierarchyRequestId ?? broadcastRequestId ?? undefined;
       const freshData = await perf.track("waitForPush", () =>
-        this.waitForFreshData(
-          effectiveTimeoutMs,
-          startTime,
-          false,
-          signal,
-          correlationRequestId,
+        this.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, correlationRequestId, {
           dispatchSocket,
-        ),
+          allowStaleResponse: !disableAllFiltering && displayId === undefined,
+        }),
       );
 
       if (freshData) {
@@ -1009,17 +1056,14 @@ export class CtrlProxyHierarchy {
     useDeviceTimestamp: boolean,
     signal?: AbortSignal,
     requestId?: string,
-    dispatchSocket?: WebSocket | null,
+    options: { dispatchSocket?: WebSocket | null; allowStaleResponse: boolean } = {
+      allowStaleResponse: true,
+    },
   ): Promise<CachedHierarchy | null> {
+    const { dispatchSocket, allowStaleResponse } = options;
     const combinedSignal = combineWithAmbientAbort(signal);
-    // Dispatch can await an ADB broadcast while close notification is delivered.
-    // Validate the original socket before registering, including close+replacement.
-    if (
-      dispatchSocket !== undefined &&
-      (!dispatchSocket ||
-        dispatchSocket.readyState !== WebSocket.OPEN ||
-        this.context.getWebSocket() !== dispatchSocket)
-    ) {
+    // Reject dispatch on a socket that closed or was replaced during ADB fallback.
+    if (!this.isDispatchSocketValid(dispatchSocket)) {
       return null;
     }
     const waitSocket = dispatchSocket === undefined ? this.context.getWebSocket() : dispatchSocket;
@@ -1030,23 +1074,30 @@ export class CtrlProxyHierarchy {
     let lastScreenCheck = startTime;
     let screenCheckInProgress = false;
     let staleCheckSent = false;
+    const isMatchingFresh = (hierarchy: CachedHierarchy, staleRequestId: string | null): boolean =>
+      this.matchesFreshHierarchy(
+        hierarchy,
+        minTimestamp,
+        useDeviceTimestamp,
+        requestId,
+        staleRequestId,
+        allowStaleResponse,
+      );
 
     return new Promise<CachedHierarchy | null>((resolve, reject) => {
       let settled = false;
       let intervalId: NodeJS.Timeout | null = null;
-      // The request_hierarchy_if_stale nudge (below) is minted mid-wait, so its id is not known
-      // until the interval fires. Track it here so cleanup can unregister it too (issue #3061).
+      // The nudge ID is minted mid-wait and must be unregistered on cleanup.
       let staleRequestId: string | null = null;
 
       const cleanup = (): void => {
         if (intervalId !== null) {
           this.context.timer.clearInterval(intervalId);
         }
-        if (requestId) {
-          this.pendingHierarchyRejectors.delete(requestId);
-        }
-        if (staleRequestId) {
-          this.pendingHierarchyRejectors.delete(staleRequestId);
+        for (const id of [requestId, staleRequestId]) {
+          if (id) {
+            this.pendingHierarchyRejectors.delete(id);
+          }
         }
       };
       const settleResolve = (value: CachedHierarchy | null): void => {
@@ -1066,26 +1117,27 @@ export class CtrlProxyHierarchy {
         reject(error);
       };
 
-      // Register a fast-fail rejector for a hierarchy requestId so a runner type:"error" frame
-      // (fanned in via AndroidCtrlProxyClient.rejectPendingHierarchy) rejects THIS wait instead of
-      // hanging to the timeout below. The hook is wrapped in a fixed `.reject` property so a
-      // runner-controlled id can never drive a dynamic method-name dispatch
-      // (CodeQL js/unvalidated-dynamic-method-call). Shared by the primary request_hierarchy path
-      // (issue #3032) and the request_hierarchy_if_stale nudge (issue #3061).
       const registerRejector = (id: string, label: string): void => {
         this.pendingHierarchyRejectors.set(id, {
           reject: (error: string) => {
             logger.warn(`[CTRL_PROXY] ${label} ${id} failed via runner error: ${error}`);
-            // Reject with a typed carrier so requestHierarchySync's catch can tell a runner-reported
-            // handler failure apart from other thrown causes and surface it via diagnostics (#3062).
+            // Preserve runner errors for requestHierarchySync diagnostics.
             settleReject(new HierarchyRunnerError(error));
           },
           disconnect: () => settleResolve(null),
+          resolve: resolveMatchingHierarchy,
         });
       };
 
-      // Route a runner type:"error" frame (delivered via AndroidCtrlProxyClient) for this hierarchy
-      // request into a fast rejection instead of hanging to the timeout below (issue #3032).
+      const resolveMatchingHierarchy = (hierarchy: CachedHierarchy): void => {
+        if (combinedSignal?.aborted || this.context.getWebSocket() !== waitSocket) {
+          return;
+        }
+        if (isMatchingFresh(hierarchy, staleRequestId)) {
+          settleResolve(hierarchy);
+        }
+      };
+
       if (requestId) {
         registerRejector(requestId, "Hierarchy request");
       }
@@ -1095,23 +1147,15 @@ export class CtrlProxyHierarchy {
           settleResolve(null);
           return;
         }
-        // Identity also catches close+reconnect: data from a new socket cannot satisfy this wait.
         if (this.context.getWebSocket() !== waitSocket) {
           settleResolve(null);
           return;
         }
         const elapsed = this.context.timer.now() - startTime;
 
-        // Check if we received fresh data
         const cachedHierarchy = this.context.getCachedHierarchy();
         if (cachedHierarchy) {
-          const freshness = this.evaluateMinTimestamp(
-            cachedHierarchy,
-            minTimestamp,
-            useDeviceTimestamp,
-          );
-
-          if (freshness.isFresh) {
+          if (isMatchingFresh(cachedHierarchy, staleRequestId)) {
             logger.debug(
               `[CTRL_PROXY] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, elapsed=${elapsed}ms`,
             );
@@ -1120,26 +1164,14 @@ export class CtrlProxyHierarchy {
           }
         }
 
-        // Send "nudge" after staleCheckDelay
         if (!staleCheckSent && elapsed >= staleCheckDelay) {
           staleCheckSent = true;
           logger.debug(
             `[CTRL_PROXY] No push received after ${staleCheckDelay}ms, sending stale check request (sinceTimestamp: ${minTimestamp})`,
           );
           const staleId = this.sendHierarchyIfStaleRequest(minTimestamp);
-          // Correlate a runner type:"error" frame for this stale nudge into THIS wait, mirroring the
-          // primary request_hierarchy path (issue #3032). A decode/handler failure on
-          // request_hierarchy_if_stale should fail the enclosing wait fast rather than hang to the
-          // timeout below (issue #3061).
-          //
-          // Gate on `requestId`: only correlate the stale nudge when the enclosing wait carries a
-          // correlation id at all. Two callers pass one and want a fast fail: the primary WebSocket
-          // request_hierarchy path (issue #3032) and, since issue #3089, the sync ADB-broadcast
-          // fallback (which now threads its `sync_` uuid). A fast fail there returns null, and
-          // requestHierarchySync's caller keeps its stale cache regardless, so nothing is discarded.
-          // getLatestHierarchy is the lone path that passes NO requestId — its timeout is meant to
-          // gracefully degrade to the stale cache, and a rejected stale nudge there WOULD discard it
-          // and return null, so it is deliberately left uncorrelated.
+          // Only correlated sync waits fail fast on nudge errors; getLatestHierarchy keeps its
+          // stale-cache fallback because it has no primary request ID.
           if (staleId && requestId) {
             staleRequestId = staleId;
             registerRejector(staleId, "Hierarchy stale nudge");

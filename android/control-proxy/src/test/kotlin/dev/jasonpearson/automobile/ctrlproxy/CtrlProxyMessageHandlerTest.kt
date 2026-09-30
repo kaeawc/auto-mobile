@@ -65,13 +65,13 @@ class CtrlProxyMessageHandlerTest {
   @Test
   fun `dispatches request_hierarchy`() = runTest {
     dispatch("""{"type":"request_hierarchy","requestId":"h1","disableAllFiltering":true}""")
-    assertEquals("requestHierarchy" to listOf<Any?>(true), lastCall)
+    assertEquals("requestHierarchy" to listOf<Any?>(true, "h1"), lastCall)
   }
 
   @Test
   fun `dispatches request_hierarchy_if_stale`() = runTest {
     dispatch("""{"type":"request_hierarchy_if_stale","requestId":"h2","sinceTimestamp":12345}""")
-    assertEquals("requestHierarchyIfStale" to listOf<Any?>(12345L), lastCall)
+    assertEquals("requestHierarchyIfStale" to listOf<Any?>(12345L, "h2"), lastCall)
   }
 
   @Test

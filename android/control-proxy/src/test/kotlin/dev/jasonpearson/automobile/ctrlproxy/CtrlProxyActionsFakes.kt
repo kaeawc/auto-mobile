@@ -7,9 +7,9 @@ import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
  * override just those. Keeps partial test doubles concise now that the interface is non-optional.
  */
 open class NoOpCtrlProxyActions : CtrlProxyActions {
-  override fun requestHierarchy(disableAllFiltering: Boolean) {}
+  override fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {}
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long) {}
+  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {}
 
   override fun setHierarchyInterval(intervalMs: Long?) {}
 
@@ -229,11 +229,11 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     calls.add(name to args.toList())
   }
 
-  override fun requestHierarchy(disableAllFiltering: Boolean) =
-    record("requestHierarchy", disableAllFiltering)
+  override fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
+    record("requestHierarchy", disableAllFiltering, requestId)
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long) =
-    record("requestHierarchyIfStale", sinceTimestamp)
+  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
+    record("requestHierarchyIfStale", sinceTimestamp, requestId)
 
   override fun setHierarchyInterval(intervalMs: Long?) = record("setHierarchyInterval", intervalMs)
 

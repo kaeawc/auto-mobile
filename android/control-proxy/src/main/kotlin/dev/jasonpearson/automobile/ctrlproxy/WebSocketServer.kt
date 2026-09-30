@@ -100,14 +100,14 @@ class WebSocketServer(
       return "Received from client #$connectionId: type=$type length=${raw.length}"
     }
 
-    /** Substring every correlated frame carries and no `hierarchy_update`/event frame does. */
+    /** Substring every correlated frame carries; passive event frames omit it. */
     private const val REQUEST_ID_TOKEN = "\"requestId\""
 
     /**
      * Cheap pre-check gating the full JSON parse in [extractRequestId]. The `hierarchy_update`
-     * frame is the highest-frequency, largest payload in the system and provably carries no
-     * `requestId` (see `recordsRequestOwner`), so gating on an `indexOf` lets those frames skip the
-     * O(payload) `parseToJsonElement` + throwaway element-tree allocation entirely. See #5462.
+     * passive frame is the highest-frequency, largest payload in the system and carries no
+     * `requestId`, so gating on an `indexOf` lets those frames skip the O(payload)
+     * `parseToJsonElement` + throwaway element-tree allocation entirely. See #5462.
      */
     internal fun mightCarryRequestId(raw: String): Boolean = raw.contains(REQUEST_ID_TOKEN)
 
@@ -166,9 +166,9 @@ class WebSocketServer(
         is InstalledPackagesResult -> response.requestId
         is PackageInfoResult -> response.requestId
         is LaunchIntentResult -> response.requestId
-        // Uncorrelated event/status frames never echo a requestId.
+        is HierarchyUpdateEvent -> response.requestId
+        // Other event/status frames never echo a requestId.
         is ConnectedResponse,
-        is HierarchyUpdateEvent,
         is InteractionEvent,
         is PackageEvent,
         is NavigationEventResponse,
@@ -557,10 +557,13 @@ class WebSocketServer(
    * @param messageBuilder Function that takes optional perfTiming JsonElement and returns the
    *   complete message
    */
-  suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
+  suspend fun broadcastWithPerf(
+    routeByRequestId: Boolean = true,
+    messageBuilder: (perfTiming: JsonElement?) -> String,
+  ) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    if (routeCorrelatedResponse(extractRequestId(message), message)) {
+    if (routeByRequestId && routeCorrelatedResponse(extractRequestId(message), message)) {
       return
     }
     broadcastToClients(message)
@@ -573,10 +576,13 @@ class WebSocketServer(
    * @param messageBuilder Function that takes optional perfTiming JsonElement and returns the
    *   complete message
    */
-  suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String) {
+  suspend fun broadcastWithPerfSync(
+    routeByRequestId: Boolean = true,
+    messageBuilder: (perfTiming: JsonElement?) -> String,
+  ) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    if (routeCorrelatedResponse(extractRequestId(message), message)) {
+    if (routeByRequestId && routeCorrelatedResponse(extractRequestId(message), message)) {
       return
     }
     broadcastToClients(message)

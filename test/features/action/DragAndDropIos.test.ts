@@ -9,6 +9,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { iosProjectionFixture } from "../../fixtures/iosProjectionFixture";
 
 // Simulator-shaped UDID so isIosSimulatorUdid would pass (not that dragAndDrop branches on it,
 // but keeps the device realistic).
@@ -124,6 +125,27 @@ describe("DragAndDrop - iOS", () => {
     });
     expect(result.success).toBe(false);
     expect(fakeIosClient.getDragHistory()).toHaveLength(0);
+  });
+
+  test("drag uses cleaned visible children and excludes filtered iOS nodes", async () => {
+    const freshHierarchy = iosProjectionFixture();
+    fakeIosClient.setHierarchyData(freshHierarchy);
+    fakeIosClient.setViewHierarchyResult(freshHierarchy);
+    fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
+
+    const visible = await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" },
+    });
+    expect(visible.success).toBe(true);
+    expect(fakeIosClient.getDragHistory()[0]).toMatchObject({ x1: 20, y1: 20, x2: 70, y2: 70 });
+
+    const hidden = await dragAndDrop.execute({
+      source: { elementId: "hidden-id" },
+      target: { elementId: "target-id" },
+    });
+    expect(hidden.success).toBe(false);
+    expect(fakeIosClient.getDragHistory()).toHaveLength(1);
   });
 
   test("routes drag through the iOS CtrlProxy client (not the Android a11y service)", async () => {

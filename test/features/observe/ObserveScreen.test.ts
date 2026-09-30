@@ -14,6 +14,11 @@ import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { sanitizeObserveResult } from "../../../src/features/observe/output/ObserveResultOutput";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
+import { iosProjectionFixture } from "../../fixtures/iosProjectionFixture";
+import { normalizeIosHierarchy } from "../../../src/features/observe/HierarchyNormalization";
+import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import { resolveViewHierarchyForSearch } from "../../../src/utils/viewHierarchySearch";
 
 describe("ObserveScreen", function () {
   describe("Unit Tests for Extracted Methods", function () {
@@ -556,6 +561,35 @@ describe("ObserveScreen", function () {
         expect(result.rotation).toBe(1);
         expect(result.insets?.displayCutoutInfo).toEqual({ classification: "unknown" });
       } finally {
+        resetObserveCacheStore();
+      }
+    });
+
+    test("iOS raw search keeps observe's cleaned visible candidates", async () => {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy(normalizeIosHierarchy(iosProjectionFixture()));
+      const screen = new RealObserveScreen(
+        { deviceId: "ios-projection", name: "iPhone", platform: "ios" },
+        new FakeAdbClientFactory(fakeAdb),
+        { viewHierarchy, cacheStore: new FakeObserveCacheStore(new FakeTimer()) },
+      );
+      const result = screen.createBaseResult();
+      serverConfig.setRawElementSearchEnabled(true);
+      try {
+        await screen.collectAllData(result);
+        expect(result.viewHierarchy).toBeDefined();
+        expect(resolveViewHierarchyForSearch(result.viewHierarchy)).toBe(result.viewHierarchy);
+        const nodes = new SearchableHierarchy().project(result.viewHierarchy!);
+        expect(nodes.some((node) => node.className === "WKWebView")).toBe(false);
+        const ids = nodes
+          .filter((node) => node.nativeId)
+          .map((node) => [node.nativeId, node.bounds]);
+        expect(ids).toEqual([
+          ["source-id", { left: 10, top: 10, right: 30, bottom: 30 }],
+          ["target-id", { left: 60, top: 60, right: 80, bottom: 80 }],
+        ]);
+      } finally {
+        serverConfig.setRawElementSearchEnabled(false);
         resetObserveCacheStore();
       }
     });

@@ -118,7 +118,7 @@ export class ResolverElementSelector implements ElementSelector {
     const result = this.resolver.resolve(
       {
         id: "container",
-        nodes: this.projection.project(resolveViewHierarchyForSearch(capture) ?? capture),
+        nodes: this.selectionNodes(capture, {}),
       },
       container,
       { action: "inspect" },
@@ -130,9 +130,10 @@ export class ResolverElementSelector implements ElementSelector {
   }
 
   private viewport(capture: ViewHierarchyResult) {
+    const snapshot = getHierarchySnapshot(capture);
     if (
-      getHierarchySnapshot(capture)?.searchRaw ||
-      resolveViewHierarchyForSearch(capture) !== capture
+      snapshot?.searchRaw ||
+      (snapshot?.platform !== "ios" && resolveViewHierarchyForSearch(capture) !== capture)
     ) {
       return undefined;
     }
@@ -198,8 +199,8 @@ export class ResolverElementSelector implements ElementSelector {
     capture: ViewHierarchyResult,
     options: SelectionOptions,
   ): readonly SearchableEntry[] {
-    const raw = resolveViewHierarchyForSearch(capture);
     const snapshot = getHierarchySnapshot(capture);
+    const raw = snapshot?.platform === "ios" ? capture : resolveViewHierarchyForSearch(capture);
     const nodes =
       raw && raw !== capture
         ? this.projection.project(raw)

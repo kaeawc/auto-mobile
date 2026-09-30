@@ -3,7 +3,59 @@ import { SearchableHierarchy } from "../../../src/features/utility/SearchableNod
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DebugSearch } from "../../../src/features/debug/DebugSearch";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
+import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
+import {
+  normalizeIosHierarchy,
+  projectActionableHierarchy,
+} from "../../../src/features/observe/HierarchyNormalization";
+import { identifyObservedHierarchy } from "../../../src/features/observe/HierarchyCapture";
+import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
+import { serverConfig } from "../../../src/utils/ServerConfig";
+import { iosProjectionFixture } from "../../fixtures/iosProjectionFixture";
 const bounds = { left: 0, top: 0, right: 20, bottom: 20 };
+
+test("iOS debug and action candidates use observe's cleaned visible bounds in raw mode", async () => {
+  const source = iosProjectionFixture();
+  const device: BootedDevice = { platform: "ios", deviceId: "fixture", name: "fixture" };
+  const timer = new FakeTimer();
+  const capture = createDeviceHierarchyCapture(device, {
+    timer,
+    syncClientFactory: () => ({
+      requestHierarchySync: async () => ({ hierarchy: source }),
+      convertToViewHierarchyResult: () => source,
+    }),
+  });
+  const observed = projectActionableHierarchy("ios", normalizeIosHierarchy(source));
+  const observedNodes = identifyObservedHierarchy("ios", observed, "fresh", timer).nodes;
+  const selector = new ResolverElementSelector();
+  serverConfig.setRawElementSearchEnabled(true);
+  try {
+    const snapshot = await capture.capture({ freshness: "fresh", searchRaw: true });
+    const candidates = (nodes: typeof observedNodes) =>
+      nodes.filter((node) => node.nativeId).map((node) => [node.nativeId, node.bounds]);
+    expect(candidates(snapshot.nodes)).toEqual(candidates(observedNodes));
+    expect(snapshot.nodes.some((node) => node.className === "WKWebView")).toBe(false);
+    expect(candidates(snapshot.nodes)).toEqual([
+      ["source-id", { left: 10, top: 10, right: 30, bottom: 30 }],
+      ["target-id", { left: 60, top: 60, right: 80, bottom: 80 }],
+    ]);
+    expect(selector.selectByResourceId(observed, "source-id").element?.bounds).toEqual(
+      selector.selectByResourceId(snapshot.hierarchy, "source-id").element?.bounds,
+    );
+    expect(selector.selectByResourceId(snapshot.hierarchy, "hidden-id").element).toBeNull();
+    const debug = new DebugSearch(device, undefined, timer, undefined, capture);
+    for (const elementId of ["source-id", "target-id"]) {
+      const result = await debug.execute({ resourceId: elementId });
+      expect(result.matches.map((match) => [match.resourceId, match.element.bounds])).toEqual(
+        candidates(observedNodes).filter(([id]) => id === elementId),
+      );
+    }
+    expect((await debug.execute({ resourceId: "hidden-id" })).matches).toEqual([]);
+    expect((await debug.execute({ text: "Source" })).matches).toHaveLength(1);
+  } finally {
+    serverConfig.setRawElementSearchEnabled(false);
+  }
+});
 const search = (capture: ViewHierarchyResult) =>
   new DebugSearch({ platform: "android" } as BootedDevice, undefined, new FakeTimer(), undefined, {
     capture: async (request) => ({

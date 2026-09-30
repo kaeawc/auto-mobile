@@ -6,7 +6,7 @@ import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 
 type PipeResponseToFile = {
-  pipeResponseToFile(response: Readable, destination: string, url: string): Promise<void>;
+  pipeResponseToFile(response: Readable, tempDestination: string): Promise<void>;
 };
 
 const asPipeResponseToFile = (downloader: DefaultFileDownloader): PipeResponseToFile =>
@@ -112,10 +112,10 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     const response = createFakeResponse();
     response.push(Buffer.from("partial body"));
 
-    const destination = path.join(tempDir, "mid-close.bin");
+    const tempDestination = path.join(tempDir, "mid-close.bin.download-test.tmp");
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
-    const result = downloader.pipeResponseToFile(response, destination, "https://example.com/file");
+    const result = downloader.pipeResponseToFile(response, tempDestination);
     // Wait for pipeline to request input before closing the source. This is
     // the exact synchronization point the former 100 ms test deadline was
     // trying to approximate, without making the assertion load-sensitive.
@@ -124,7 +124,8 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
 
     await expect(result).rejects.toThrow(/premature close/i);
 
-    expect(await fs.readdir(tempDir)).toEqual([]);
+    expect(await fs.stat(tempDestination)).toBeDefined();
+    await fs.rm(tempDestination, { force: true });
   });
 
   test("a failed attempt never removes a file another attempt already wrote to the same destination", async function () {
@@ -138,17 +139,21 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     response.push(Buffer.from("partial body"));
 
     const destination = path.join(tempDir, "preserved.bin");
+    const tempDestination = `${destination}.download-test.tmp`;
     const existingPayload = Buffer.from("already downloaded by another attempt");
     await fs.writeFile(destination, existingPayload);
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
-    const result = downloader.pipeResponseToFile(response, destination, "https://example.com/file");
+    const result = downloader.pipeResponseToFile(response, tempDestination);
     await response.waitForRead();
     response.destroy();
 
     await expect(result).rejects.toThrow(/premature close/i);
 
     expect(await fs.readFile(destination)).toEqual(existingPayload);
+    expect(await fs.stat(tempDestination)).toBeDefined();
+    await fs.rm(tempDestination, { force: true });
+    await fs.rm(destination, { force: true });
   });
 
   // This path writes and renames a real file; the integration lane supplies
@@ -160,12 +165,14 @@ describe("DefaultFileDownloader pipeResponseToFile", function () {
     response.push(null);
 
     const destination = path.join(tempDir, "complete.bin");
+    const tempDestination = `${destination}.download-test.tmp`;
     const downloader = asPipeResponseToFile(new DefaultFileDownloader());
 
-    await downloader.pipeResponseToFile(response, destination, "https://example.com/file");
+    await downloader.pipeResponseToFile(response, tempDestination);
 
-    expect(await fs.readFile(destination)).toEqual(payload);
-    expect((await fs.readdir(tempDir)).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
+    expect(await fs.readFile(tempDestination)).toEqual(payload);
+    expect(await fs.readdir(tempDir)).toEqual([path.basename(tempDestination)]);
+    await fs.rm(tempDestination, { force: true });
   });
 });
 

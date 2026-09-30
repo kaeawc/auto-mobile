@@ -14,6 +14,7 @@ import { toActionableError } from "../models/ActionableError";
 import { type IdGenerator, defaultIdGenerator } from "./IdGenerator";
 
 type DownloadExec = (file: string, args: string[], options: ExecSeamOptions) => Promise<void>;
+type DownloadFileSystem = Pick<typeof fs, "mkdir" | "rename" | "rm">;
 
 const defaultDownloadExec: DownloadExec = async (file, args, options) => {
   await runExecSeam(
@@ -34,6 +35,7 @@ export class DefaultFileDownloader implements FileDownloader {
   constructor(
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
     private readonly execute: DownloadExec = defaultDownloadExec,
+    private readonly fileSystem: DownloadFileSystem = fs,
   ) {}
 
   public async download(url: string, destination: string, signal?: AbortSignal): Promise<void> {
@@ -41,10 +43,28 @@ export class DefaultFileDownloader implements FileDownloader {
     if (signal?.aborted) {
       throw new Error(`Download aborted before starting: ${url}`);
     }
-    await fs.mkdir(path.dirname(destination), { recursive: true });
-
+    await this.fileSystem.mkdir(path.dirname(destination), { recursive: true });
+    const tempDestination = `${destination}.download-${this.idGenerator.next()}.tmp`;
     try {
-      await this.downloadWithCurl(url, destination, signal);
+      await this.downloadToTemp(url, tempDestination, signal);
+      await this.fileSystem.rename(tempDestination, destination);
+    } catch (error) {
+      await this.fileSystem.rm(tempDestination, { force: true }).catch((rmError: unknown) => {
+        logger.warn(
+          `[FileDownloader] failed to remove partial download at ${tempDestination}: ${errorMessage(rmError)}`,
+        );
+      });
+      throw toActionableError(error, `Download failed for ${url}`);
+    }
+  }
+
+  private async downloadToTemp(
+    url: string,
+    tempDestination: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.downloadWithCurl(url, tempDestination, signal);
       return;
     } catch (error) {
       if (!this.isCommandUnavailable(error, "curl")) {
@@ -56,7 +76,7 @@ export class DefaultFileDownloader implements FileDownloader {
     }
 
     try {
-      await this.downloadWithWget(url, destination, signal);
+      await this.downloadWithWget(url, tempDestination, signal);
       return;
     } catch (error) {
       if (!this.isCommandUnavailable(error, "wget")) {
@@ -67,7 +87,7 @@ export class DefaultFileDownloader implements FileDownloader {
       });
     }
 
-    await this.downloadWithNodeHttp(url, destination, 0, signal);
+    await this.downloadWithNodeHttp(url, tempDestination, 0, signal);
   }
 
   private async downloadWithCurl(
@@ -141,7 +161,7 @@ export class DefaultFileDownloader implements FileDownloader {
             return;
           }
 
-          void this.pipeResponseToFile(response, destination, url).then(resolve).catch(reject);
+          void this.pipeResponseToFile(response, destination).then(resolve).catch(reject);
         },
       );
 
@@ -158,11 +178,9 @@ export class DefaultFileDownloader implements FileDownloader {
   }
 
   /**
-   * Streams a response body to `destination`, writing to an attempt-unique
-   * temp path and renaming it onto `destination` only on success. Failure
-   * cleanup only ever removes that temp path, so a slow-to-settle failed
-   * attempt can never delete a concurrent or retried download's completed
-   * file at the same destination (issue #6131).
+   * Streams a response body to the caller-provided attempt-unique temp path.
+   * The public download method owns cleanup and publication for every
+   * transport, so failure can never remove another attempt's completed file.
    *
    * Uses `stream.pipeline` (not `response.pipe`) so a mid-body close — the
    * peer ending the connection before all bytes arrive — surfaces as a
@@ -170,27 +188,10 @@ export class DefaultFileDownloader implements FileDownloader {
    * `'end'`/`'error'`, neither of which fires when the source stream is
    * merely destroyed without ending.
    */
-  private async pipeResponseToFile(
-    response: Readable,
-    destination: string,
-    url: string,
-  ): Promise<void> {
-    const tempDestination = `${destination}.download-${this.idGenerator.next()}.tmp`;
+  private async pipeResponseToFile(response: Readable, tempDestination: string): Promise<void> {
     const fileStream = createWriteStream(tempDestination);
-    try {
-      response.once("readable", () => this.onFirstResponseByte?.());
-      await pipeline(response, fileStream);
-      await fs.rename(tempDestination, destination);
-    } catch (error) {
-      await fs.rm(tempDestination, { force: true }).catch((rmError: unknown) => {
-        // Best-effort cleanup of the partial file; failing to remove it
-        // must not mask the original download error.
-        logger.debug(
-          `[FileDownloader] failed to remove partial download at ${tempDestination}: ${errorMessage(rmError)}`,
-        );
-      });
-      throw toActionableError(error, `Download failed for ${url}`);
-    }
+    response.once("readable", () => this.onFirstResponseByte?.());
+    await pipeline(response, fileStream);
   }
 
   private isCommandUnavailable(error: unknown, command: string): boolean {

@@ -154,6 +154,8 @@ export interface ObserveResult {
   display: DisplayRef;
   /** Other known physical panels, only present when inventory has multiple panels. */
   otherDisplays?: Array<Pick<DisplayPanel, "key" | "role"> & { size: DisplayPanel["sizePx"] }>;
+  /** INTERNAL-ONLY: display transition revision when this capture completed. */
+  displayRevision?: number;
   /**
    * Server-generated identity for this exact observe invocation. It remains
    * attached while deferred post-processing enriches the same result, allowing

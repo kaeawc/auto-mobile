@@ -8,8 +8,9 @@
  * entirely from the observation already in hand, no device round-trip needed.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -33,7 +34,12 @@ const noOpWindow = (appId: string) => ({
 });
 
 describe("ObserveScreen missing-foreground-window freshness (issue #6220)", () => {
+  beforeEach(() => {
+    displayTransitions.reset(androidDevice.deviceId);
+  });
+
   afterEach(() => {
+    displayTransitions.reset(androidDevice.deviceId);
     resetObserveCacheStore();
   });
 

@@ -10,7 +10,8 @@
  * `isFresh: false`, with a warning naming both apps.
  */
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
@@ -25,6 +26,16 @@ const androidDevice: BootedDevice = {
   name: "Pixel 7",
   platform: "android",
 };
+
+beforeEach(() => {
+  displayTransitions.reset(androidDevice.deviceId);
+  displayTransitions.reset("SIM-1");
+});
+
+afterEach(() => {
+  displayTransitions.reset(androidDevice.deviceId);
+  displayTransitions.reset("SIM-1");
+});
 
 function makeScreen(
   viewHierarchy: FakeViewHierarchy,

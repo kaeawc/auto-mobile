@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DisplayTransitionTracker,
   displayTransitions,
@@ -36,8 +36,14 @@ const options = {
   skipAccessibilityAudit: true,
 };
 
+beforeEach(() => {
+  displayTransitions.reset(device.deviceId);
+  displayTransitions.reset("same-size-panels");
+});
+
 afterEach(() => {
   displayTransitions.reset(device.deviceId);
+  displayTransitions.reset("same-size-panels");
   resetObserveCacheStore();
 });
 
@@ -94,6 +100,109 @@ describe("display transitions", () => {
         screenSize: { width: 200, height: 100 },
       }),
     ).toBe(false);
+    expect(tracker.revision(device.deviceId)).toBe(0);
+    expect(invalidations).toEqual([]);
+  });
+
+  test("a pushed fold invalidates once and the matching observation reconciles it", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));
+    const inner = {
+      display: { key: "inner", role: "inner" as const, posture: "opened" as const, generation: 1 },
+      screenSize: { width: 200, height: 100 },
+    };
+    const cover = {
+      display: { key: "cover", role: "cover" as const, posture: "closed" as const, generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    };
+    tracker.record(device.deviceId, inner);
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:cover",
+      width: 100,
+      height: 100,
+    });
+    expect(tracker.revision(device.deviceId)).toBe(1);
+    expect(invalidations).toEqual(["CtrlProxy changed"]);
+    expect(tracker.checkIdentity(device.deviceId, cover.display)).toBe(false);
+    expect(tracker.record(device.deviceId, cover)).toBe(false);
+    expect(tracker.revision(device.deviceId)).toBe(1);
+    expect(tracker.record(device.deviceId, cover)).toBe(false);
+  });
+
+  test("an unchanged observation consumes a later device-state push", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));
+    const inner = {
+      display: { key: "inner", role: "inner" as const, posture: "opened" as const, generation: 1 },
+      screenSize: { width: 200, height: 100 },
+    };
+    const cover = {
+      display: { key: "cover", role: "cover" as const, posture: "closed" as const, generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    };
+    tracker.record(device.deviceId, cover);
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:inner",
+      width: 200,
+      height: 100,
+    });
+    expect(tracker.record(device.deviceId, inner)).toBe(false);
+    expect(tracker.revision(device.deviceId)).toBe(1);
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "device_state",
+      displayId: 0,
+      deviceState: 1,
+    });
+    expect(tracker.record(device.deviceId, inner)).toBe(false);
+    expect(tracker.record(device.deviceId, inner)).toBe(false);
+    expect(tracker.checkIdentity(device.deviceId, cover.display)).toBe(true);
+    expect(tracker.record(device.deviceId, cover)).toBe(false);
+    expect(tracker.revision(device.deviceId)).toBe(3);
+    expect(invalidations).toEqual([
+      "CtrlProxy changed",
+      "CtrlProxy device_state",
+      "display key, role, or posture changed",
+    ]);
+  });
+
+  test("an added push absent from the stamp cannot suppress a later fold", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));
+    const inner = {
+      display: { key: "inner", role: "inner" as const, posture: "opened" as const, generation: 1 },
+      screenSize: { width: 200, height: 100 },
+    };
+    const cover = {
+      display: { key: "cover", role: "cover" as const, posture: "closed" as const, generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    };
+    tracker.record(device.deviceId, inner);
+    tracker.notifyAndroidTransition(device.deviceId, { change: "added", displayId: 0 });
+    expect(tracker.record(device.deviceId, inner)).toBe(false);
+    expect(tracker.checkIdentity(device.deviceId, cover.display)).toBe(true);
+    expect(tracker.record(device.deviceId, cover)).toBe(false);
+    expect(tracker.revision(device.deviceId)).toBe(2);
+    expect(invalidations).toEqual(["CtrlProxy added", "display key, role, or posture changed"]);
+  });
+
+  test("a rotation-only push on the same panel is ignored", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));
+    tracker.record(device.deviceId, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 100, height: 200 },
+    });
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:inner",
+      width: 200,
+      height: 100,
+    });
     expect(tracker.revision(device.deviceId)).toBe(0);
     expect(invalidations).toEqual([]);
   });
@@ -214,6 +323,8 @@ describe("display transitions", () => {
     const folded = await screen.execute(options);
     expect(first.display.key).toBe("inner");
     expect(folded.display.key).toBe("cover");
+    expect(first.displayRevision).toBe(0);
+    expect(folded.displayRevision).toBe(1);
     expect(folded.deviceLock?.locked).toBe(true);
     expect(displayTransitions.revision(device.deviceId)).toBe(1);
     expect(

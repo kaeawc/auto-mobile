@@ -11,6 +11,7 @@ import type { SdkEvent } from "../../../../src/features/observe/interfaces/SdkEv
 import type { BootedDevice } from "../../../../src/models";
 import { logger } from "../../../../src/utils/logger";
 import { PortManager } from "../../../../src/utils/PortManager";
+import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
 import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
@@ -35,6 +36,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   let recorded: Array<{ event: SdkEvent<AndroidSdkEventPayload>; applicationId: string | null }>;
 
   beforeEach(() => {
+    displayTransitions.reset(device.deviceId);
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     timer = new FakeTimer();
     recorded = [];
@@ -59,6 +61,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
   });
 
   afterEach(() => {
+    displayTransitions.reset(device.deviceId);
     PortManager.reset();
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
@@ -79,14 +82,18 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     }
   });
 
-  test("parses a display transition without changing observation state", async () => {
+  test("parses a display transition and invalidates the owning device", async () => {
     const received: AndroidDisplayTransition[] = [];
     client.onDisplayTransition = (event) => received.push(event);
+    displayTransitions.record(device.deviceId, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 2076, height: 2152 },
+    });
     await client.handleWebSocketMessage(
       JSON.stringify({
         type: "display_transition",
         change: "changed",
-        displayId: 3,
+        displayId: 0,
         panelUniqueId: "local:cover",
         width: 1080,
         height: 2520,
@@ -98,7 +105,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     expect(received).toEqual([
       {
         change: "changed",
-        displayId: 3,
+        displayId: 0,
         panelUniqueId: "local:cover",
         width: 1080,
         height: 2520,
@@ -106,6 +113,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
         rotation: 1,
       },
     ]);
+    expect(displayTransitions.revision(device.deviceId)).toBe(1);
   });
 
   test("retains optional display identity on hierarchy and screenshot responses", async () => {

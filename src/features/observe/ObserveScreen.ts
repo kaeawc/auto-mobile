@@ -1151,6 +1151,7 @@ export class RealObserveScreen implements ObserveScreen {
       }
       const geometryTransition =
         !explicitlyRouted && displayTransitions.record(this.device.deviceId, result);
+      result.displayRevision = displayTransitions.revision(this.device.deviceId);
       if (geometryTransition) {
         cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
       }

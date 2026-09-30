@@ -456,6 +456,75 @@ describe("waitForObservation DSL branch", () => {
   });
 });
 
+describe("display stamp waitFor conditions", () => {
+  test("runtime schema accepts standalone posture and activeDisplay waits", () => {
+    expect(observeSchema.parse({ waitFor: { posture: "closed" } }).waitFor).toMatchObject({
+      posture: "closed",
+    });
+    expect(observeSchema.parse({ waitFor: { activeDisplay: "cover" } }).waitFor).toMatchObject({
+      activeDisplay: "cover",
+    });
+  });
+
+  const displayObservation = (
+    key: string,
+    role: "inner" | "cover",
+    posture: "opened" | "closed",
+    updatedAt = 10,
+  ) => ({
+    ...makeObservation([], updatedAt),
+    display: { key, role, posture, generation: 1 },
+  });
+
+  for (const [name, condition] of [
+    ["posture", { posture: "closed" }],
+    ["activeDisplay", { activeDisplay: "cover" }],
+  ] as const) {
+    test(`${name} matches the observation display and times out on a mismatch`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveSequence([
+        displayObservation("inner", "inner", "opened"),
+        displayObservation("cover", "cover", "closed", 20),
+      ]);
+      const matched = await waitForObservation(screen, condition, undefined, false, timer);
+      expect(matched.matched).toBe(true);
+      expect(matched.observation.display.key).toBe("cover");
+
+      const timeoutScreen = new FakeObserveScreen();
+      timeoutScreen.setObserveResult(displayObservation("inner", "inner", "opened"));
+      const timedOut = await waitForObservation(
+        timeoutScreen,
+        { ...condition, timeout: 300, pollMs: 100 },
+        undefined,
+        false,
+        timer,
+      );
+      expect(timedOut.timedOut).toBe(true);
+      expect(timedOut.matched).toBe(false);
+    });
+  }
+
+  test("activeDisplay also matches a panel role", async () => {
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(displayObservation("local:cover", "cover", "closed"));
+    const outcome = await waitForObservation(screen, { activeDisplay: "cover" });
+    expect(outcome.matched).toBe(true);
+  });
+
+  test("activeDisplay fails immediately when display inventory is unavailable", async () => {
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult({
+      ...makeObservation([]),
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    });
+    await expect(waitForObservation(screen, { activeDisplay: "unknown" })).rejects.toThrow(
+      "Cannot wait for activeDisplay: this device has no display inventory",
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Back-compat: the legacy element-appear waitFor form is untouched (AC4)
 // ---------------------------------------------------------------------------

@@ -669,6 +669,11 @@ export interface ObserveDiff {
   deviceId?: string;
   /** Physical panel represented by the post-action observation. */
   display?: ObserveResult["display"];
+  /** Physical panel or posture change since the diff baseline; generation alone is ignored. */
+  displayChanged?: {
+    from: Pick<ObserveResult["display"], "key" | "role" | "posture">;
+    to: Pick<ObserveResult["display"], "key" | "role" | "posture">;
+  };
   /**
    * Fully-encoded observation-scoped screenshot resource URI for the post-action
    * observation (issue #7018), built from `deviceId` + `observationId` via the
@@ -1755,6 +1760,22 @@ export function diffObserveResult(
       .filter((node): node is ObserveDiffNode => node !== undefined),
     changed,
   };
+  if (
+    baseline.display &&
+    next.display &&
+    !(baseline.display.key === "0" && baseline.display.role === "unknown") &&
+    !(next.display.key === "0" && next.display.role === "unknown") &&
+    (baseline.display.key !== next.display.key ||
+      baseline.display.role !== next.display.role ||
+      baseline.display.posture !== next.display.posture)
+  ) {
+    const { key: fromKey, role: fromRole, posture: fromPosture } = baseline.display;
+    const { key: toKey, role: toRole, posture: toPosture } = next.display;
+    diff.displayChanged = {
+      from: { key: fromKey, role: fromRole, posture: fromPosture },
+      to: { key: toKey, role: toRole, posture: toPosture },
+    };
+  }
 
   const scalarFields = cfg?.scalarFields ?? DIFF_SCALAR_FIELDS;
   const elementFields = cfg?.elementFields ?? DIFF_ELEMENT_FIELDS;

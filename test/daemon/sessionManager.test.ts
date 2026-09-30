@@ -3960,9 +3960,12 @@ describe("SessionManager", () => {
     test("EC3.1: returns the observation stored via setLastRenderedObservation", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android");
       const obs = makeObservation("root");
-      sessionManager.setLastRenderedObservation("s1", obs);
+      sessionManager.setLastRenderedObservation("s1", obs, 3);
 
       expect(sessionManager.getLastRenderedObservation("s1")).toEqual(obs);
+      expect(sessionManager.getLastRenderedDisplayRevision("s1")).toBe(3);
+      sessionManager.clearSessionCache("s1", "lastRenderedObservation");
+      expect(sessionManager.getLastRenderedDisplayRevision("s1")).toBe(3);
     });
 
     test("EC3.2: the read records NO session activity, unlike getSessionCache", async () => {

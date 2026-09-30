@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
@@ -65,6 +65,7 @@ function createTapAt(
   width = 10,
   height = 10,
   onIosDispatch?: (timer: FakeTimer) => void,
+  renderedDisplayRevision?: () => number | undefined,
 ) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation(width, height));
@@ -78,6 +79,7 @@ function createTapAt(
   };
   const tapAt = new TapAtCoordinate(device, new FakeAdbExecutor(), {
     timer,
+    renderedDisplayRevision,
     androidClient: unusedClient,
     iosClient: unusedClient,
     dispatchAndroidCoordinateTap: async (_client, _adb, x, y, _duration, frameContext) => {
@@ -103,6 +105,103 @@ function createTapAt(
 }
 
 describe("TapAtCoordinate", () => {
+  beforeEach(() => {
+    displayTransitions.reset(androidDevice.deviceId);
+    displayTransitions.reset(iosDevice.deviceId);
+  });
+
+  afterEach(() => {
+    displayTransitions.reset(androidDevice.deviceId);
+    displayTransitions.reset(iosDevice.deviceId);
+  });
+
+  test("rejects the caller's old coordinates when another path detected the fold first", async () => {
+    let callerRevision = 0;
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(
+      androidDevice,
+      200,
+      200,
+      undefined,
+      () => callerRevision,
+    );
+    const inner = {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    } as ObserveResult;
+    const cover = {
+      display: { key: "cover", role: "cover", posture: "closed", generation: 2 },
+      screenSize: { width: 100, height: 100 },
+    } as ObserveResult;
+    displayTransitions.record(androidDevice.deviceId, inner);
+    // setPosture's internal observe detects the fold but is not rendered to the caller.
+    displayTransitions.checkIdentity(androidDevice.deviceId, cover.display);
+    displayTransitions.record(androidDevice.deviceId, cover);
+    observeScreen.setObserveResult({ ...observation(100, 100, "cover"), display: cover.display });
+
+    const rejected = await tapAt.execute({ x: 50, y: 50 });
+    expect(rejected).toMatchObject({
+      success: false,
+      error: expect.stringContaining("Re-observe"),
+    });
+    expect(observeScreen.getExecuteCallCount()).toBe(0);
+    expect(androidDispatches).toEqual([]);
+
+    // An explicit caller-visible observe of the cover panel advances its revision.
+    callerRevision = displayTransitions.revision(androidDevice.deviceId);
+    const accepted = await tapAt.execute({ x: 50, y: 50 });
+    expect(accepted.success).toBe(true);
+    expect(androidDispatches).toHaveLength(1);
+  });
+
+  test("allows unchanged display coordinates from the caller's last observation", async () => {
+    const { tapAt, androidDispatches } = createTapAt(androidDevice, 100, 100, undefined, () => 0);
+    const result = await tapAt.execute({ x: 50, y: 50 });
+    expect(result.success).toBe(true);
+    expect(androidDispatches).toHaveLength(1);
+  });
+
+  test("keeps the existing path for a caller who has never observed", async () => {
+    const { tapAt, androidDispatches } = createTapAt(
+      androidDevice,
+      100,
+      100,
+      undefined,
+      () => undefined,
+    );
+    displayTransitions.notifyTransition(androidDevice.deviceId, "prior fold");
+    const result = await tapAt.execute({ x: 50, y: 50 });
+    expect(result.success).toBe(true);
+    expect(androidDispatches).toHaveLength(1);
+  });
+
+  test("rejects stale coordinates when CtrlProxy pushes a fold before dispatch", async () => {
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice, 200, 200);
+    displayTransitions.record(androidDevice.deviceId, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+      screenSize: { width: 200, height: 200 },
+    });
+    const execute = spyOn(observeScreen, "execute").mockImplementation(async () => {
+      displayTransitions.notifyAndroidTransition(androidDevice.deviceId, {
+        change: "changed",
+        displayId: 0,
+        panelUniqueId: "local:cover",
+        width: 100,
+        height: 100,
+      });
+      return observation(200, 200);
+    });
+    try {
+      const result = await tapAt.execute({ x: 50, y: 50 });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Re-observe");
+      expect(androidDispatches).toEqual([]);
+      expect(displayTransitions.revision(androidDevice.deviceId)).toBe(1);
+    } finally {
+      execute.mockRestore();
+      displayTransitions.reset(androidDevice.deviceId);
+    }
+  });
+
   test("rejects panel-A coordinates when the pre-dispatch observation detects a fold", async () => {
     const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice, 200, 200);
     const panelA = {

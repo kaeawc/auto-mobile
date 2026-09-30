@@ -1044,6 +1044,12 @@ export const observeDiffSchema = z
     deviceId: observationDeviceIdSchema,
     display: observationDisplaySchema,
     otherDisplays: otherDisplaysSchema,
+    displayChanged: z
+      .object({
+        from: observationDisplaySchema.unwrap().pick({ key: true, role: true, posture: true }),
+        to: observationDisplaySchema.unwrap().pick({ key: true, role: true, posture: true }),
+      })
+      .optional(),
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     ...observationScreenshotOutputFields,
     skeleton: z

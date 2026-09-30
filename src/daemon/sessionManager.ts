@@ -116,6 +116,7 @@ export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastObserveTime?: number; // Timestamp of last hierarchy observation
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
+  lastRenderedDisplayRevision?: number; // Caller-visible display revision; survives panel cache invalidation
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
   biometricEnrollment?: BiometricEnrollmentSessionState; // Original iOS Simulator biometric enrollment, restored on release
   networkCondition?: NetworkConditionSessionState; // Original device-wide network condition, restored on release (#6012)
@@ -3455,8 +3456,15 @@ export class SessionManager {
    * full untrimmed hierarchy for internal reuse; this holds the wire-shaped
    * observation so diffs compare like-for-like.
    */
-  setLastRenderedObservation(sessionId: string, observation: ObserveResult): void {
-    this.updateSessionCache(sessionId, { lastRenderedObservation: observation });
+  setLastRenderedObservation(
+    sessionId: string,
+    observation: ObserveResult,
+    displayRevision?: number,
+  ): void {
+    this.updateSessionCache(sessionId, {
+      lastRenderedObservation: observation,
+      ...(displayRevision === undefined ? {} : { lastRenderedDisplayRevision: displayRevision }),
+    });
   }
 
   /**
@@ -3473,6 +3481,15 @@ export class SessionManager {
    */
   getLastRenderedObservation(sessionId: string): ObserveResult | undefined {
     return this.getSession(sessionId)?.cacheData.lastRenderedObservation;
+  }
+
+  /** Keep the caller's revision even when a fold clears the hierarchy and diff baseline. */
+  setLastRenderedDisplayRevision(sessionId: string, revision: number): void {
+    this.updateSessionCache(sessionId, { lastRenderedDisplayRevision: revision });
+  }
+
+  getLastRenderedDisplayRevision(sessionId: string): number | undefined {
+    return this.getSession(sessionId)?.cacheData.lastRenderedDisplayRevision;
   }
 
   /**

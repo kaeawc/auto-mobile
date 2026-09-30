@@ -407,6 +407,17 @@ bar notification chrome. An artifact-spilled diff keeps its `skeleton`,
 `context`, and capture metadata inline while the bulky node and field deltas are
 available from its artifact pointer.
 
+`observe` can wait for a display stamp with `waitFor: { posture: "closed" }` or
+`waitFor: { activeDisplay: "cover" }`. `activeDisplay` accepts either a physical
+panel key or a role. These conditions compare the returned observation's
+`display` stamp. Posture waits accept only known postures; `unknown` remains a
+possible observation stamp but cannot be requested as a wait condition. Posture
+waits need a device that reports posture; Android observations currently report
+`unknown` posture.
+An action-observation diff includes `displayChanged: { from, to }` when the
+panel key, role, or posture changes. Capture generation alone does not create a
+display change entry.
+
 For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public
 tool selection, see [Dynamic Tools](using/dynamic-tools.md).

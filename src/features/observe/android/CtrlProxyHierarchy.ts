@@ -68,6 +68,7 @@ type HierarchySyncResult = {
 
 interface HierarchySyncFlight {
   disableAllFiltering: boolean;
+  displayId?: number;
   minReceivedAt: number;
   timeoutMs: number;
   controller: AbortController;
@@ -610,6 +611,7 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
     timeoutMs: number = 10000,
     diagnostics?: HierarchySyncDiagnostics,
+    displayId?: number,
   ): Promise<HierarchySyncResult> {
     const startTime = this.context.timer.now();
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
@@ -622,6 +624,7 @@ export class CtrlProxyHierarchy {
       let flight = [...this.hierarchySyncFlights].find(
         (candidate) =>
           candidate.disableAllFiltering === disableAllFiltering &&
+          candidate.displayId === displayId &&
           candidate.minReceivedAt >= startTime &&
           candidate.timeoutMs === effectiveTimeoutMs,
       );
@@ -630,6 +633,7 @@ export class CtrlProxyHierarchy {
         const sharedDiagnostics: HierarchySyncDiagnostics = {};
         flight = {
           disableAllFiltering,
+          displayId,
           minReceivedAt: startTime,
           timeoutMs: effectiveTimeoutMs,
           controller,
@@ -641,7 +645,7 @@ export class CtrlProxyHierarchy {
             controller.signal,
             effectiveTimeoutMs,
             sharedDiagnostics,
-            startTime,
+            { startTime, displayId },
           ),
         };
         const createdFlight = flight;
@@ -678,8 +682,9 @@ export class CtrlProxyHierarchy {
     signal: AbortSignal,
     effectiveTimeoutMs: number,
     diagnostics: HierarchySyncDiagnostics,
-    startTime: number,
+    request: { startTime: number; displayId?: number },
   ): Promise<HierarchySyncResult> {
+    const { startTime, displayId } = request;
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
@@ -698,7 +703,7 @@ export class CtrlProxyHierarchy {
       // runner type:"error" frame for this hierarchy request can reject the wait fast (issue #3032).
       const dispatchSocket = this.context.getWebSocket();
       const hierarchyRequestId = await perf.track("sendWsRequest", async () => {
-        return this.sendHierarchyRequest(disableAllFiltering);
+        return this.sendHierarchyRequest(disableAllFiltering, displayId);
       });
 
       // Fall back to ADB broadcast if WebSocket failed. The broadcast mints its own `sync_` uuid and
@@ -708,6 +713,11 @@ export class CtrlProxyHierarchy {
       // its own `req_` id).
       let broadcastRequestId: string | null = null;
       if (hierarchyRequestId === null) {
+        if (displayId !== undefined) {
+          throw new Error(
+            `Unable to request hierarchy for Android display ${displayId}: CtrlProxy WebSocket is unavailable`,
+          );
+        }
         logger.debug("[CTRL_PROXY] Falling back to ADB broadcast");
         const uuid = `sync_${this.context.timer.now()}_${generateSecureId()}`;
         broadcastRequestId = uuid;
@@ -1175,7 +1185,10 @@ export class CtrlProxyHierarchy {
    *   send fails. Callers use the returned id to correlate a runner type:"error" frame back to this
    *   request's wait (issue #3032).
    */
-  private sendHierarchyRequest(disableAllFiltering: boolean = false): string | null {
+  private sendHierarchyRequest(
+    disableAllFiltering: boolean = false,
+    displayId?: number,
+  ): string | null {
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       logger.warn("[CTRL_PROXY] Cannot send request - WebSocket not connected");
@@ -1185,7 +1198,7 @@ export class CtrlProxyHierarchy {
     try {
       const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
       const message = serializeCtrlProxyRequest(
-        ctrlProxyRequests.requestHierarchy({ requestId, disableAllFiltering }),
+        ctrlProxyRequests.requestHierarchy({ requestId, disableAllFiltering, displayId }),
       );
       ws.send(message);
       logger.debug(

@@ -2681,6 +2681,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     signal?: AbortSignal,
     timeoutMs?: number,
     diagnostics?: HierarchySyncDiagnostics,
+    displayId?: number,
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     return this.hierarchy.requestHierarchySync(
       perf,
@@ -2688,6 +2689,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       signal,
       timeoutMs,
       diagnostics,
+      displayId,
     );
   }
 

@@ -52,6 +52,35 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
     }
   });
 
+  test("captures requested PNG on the selected Android display through screencap", async () => {
+    const fakeAdb = new FakeAdbExecutor();
+    const screenshot = new TakeScreenshot(mockDevice, new FakeAdbClientFactory(fakeAdb));
+    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+    let ctrlProxyCalled = false;
+    AndroidCtrlProxyClient.getInstance = (() => ({
+      requestScreenshot: async () => {
+        ctrlProxyCalled = true;
+        return { success: false };
+      },
+    })) as typeof AndroidCtrlProxyClient.getInstance;
+    fakeAdb.setDefaultResponse({
+      stdout: readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+      stderr: "",
+    });
+    try {
+      const result = await screenshot.execute({ format: "png", displayId: 2 });
+      expect(result.success).toBe(true);
+      expect(result.screenshotFormat).toBe("png");
+      expect(result.path).toMatch(/\.png$/);
+      expect(ctrlProxyCalled).toBe(false);
+      expect(
+        fakeAdb.getExecutedCommands().find((command) => command.includes("screencap")),
+      ).toContain("screencap -d 2 -p");
+    } finally {
+      AndroidCtrlProxyClient.getInstance = originalGetInstance;
+    }
+  });
+
   test("keeps the ADB fallback as PNG", async () => {
     const fakeAdb = new FakeAdbExecutor();
     const screenshot = new TakeScreenshot(mockDevice, new FakeAdbClientFactory(fakeAdb));

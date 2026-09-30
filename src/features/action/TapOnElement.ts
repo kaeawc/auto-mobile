@@ -1920,18 +1920,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     ) {
       return;
     }
-    const resolved = await new ObservedAndroidDisplayCache(this.timer).resolve(
-      this.device,
-      this.adb,
-      signal,
-      true,
-    );
-    const identityChanged = displayTransitions.checkIdentity(
-      this.device.deviceId,
-      resolved.display,
-    );
+    const display = await this.refreshedDisplay(captured, signal);
+    const identityChanged = displayTransitions.checkIdentity(this.device.deviceId, display);
     const geometryTransition = displayTransitions.record(this.device.deviceId, {
-      display: resolved.display,
+      display,
       screenSize: freshSize,
     });
     if (identityChanged || geometryTransition) {
@@ -1939,6 +1931,31 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         "Display changed during tap preparation. Re-observe the active panel and choose the target again.",
       );
     }
+  }
+
+  private async refreshedDisplay(
+    captured: ViewHierarchyResult,
+    signal?: AbortSignal,
+  ): Promise<ObserveResult["display"]> {
+    const displayCache = new ObservedAndroidDisplayCache(this.timer);
+    const focusedPanel = await displayCache.panelForLogicalId(
+      this.device,
+      this.adb,
+      captured.displayId,
+      signal,
+      captured.panelUniqueId,
+      false,
+    );
+    const resolved = await displayCache.resolve(this.device, this.adb, signal);
+    const panel =
+      focusedPanel ??
+      this.device.displays?.panels.find((candidate) => candidate.key === resolved.display.key);
+    return {
+      ...resolved.display,
+      key: panel?.key ?? resolved.display.key,
+      role: panel?.role ?? resolved.display.role,
+      posture: await displayCache.posture(this.device, this.adb, signal),
+    };
   }
 
   private async readFreshHierarchy(

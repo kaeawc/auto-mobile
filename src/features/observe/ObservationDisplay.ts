@@ -1,16 +1,20 @@
 import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
+import type { Posture } from "../../models/DisplayPanel";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import {
   logicalDisplayIdForPanel,
   parseAndroidDisplayInfos,
 } from "../../utils/android-cmdline-tools/AndroidDisplayParsers";
 import { selectLiveSimulatorDisplay } from "../../utils/ios-cmdline-tools/SimulatorDisplays";
 import { logger } from "../../utils/logger";
+import { DisplaySelectionError } from "./DisplaySelection";
 import type { Timer } from "../../utils/SystemTimer";
 
 export interface ObservedAndroidDisplay {
   display: DisplayRef;
   logicalId: number;
+  panelKeysByLogicalId?: Readonly<Record<number, string>>;
 }
 
 function singlePanelKeyOrDefault(panels: readonly DisplayPanel[]): string {
@@ -49,6 +53,43 @@ interface CachedAndroidDisplay {
 
 const androidDisplayCache = new Map<string, CachedAndroidDisplay>();
 const lastKnownAndroidDisplay = new Map<string, ObservedAndroidDisplay>();
+const androidPostureCache = new Map<string, { inventory: string; at: number; posture: Posture }>();
+
+function physicalPanelKey(uniqueId: string): string {
+  return uniqueId.includes(":") ? uniqueId.split(":").slice(1).join(":") : uniqueId;
+}
+
+function postureForState(current: string, supported: string): Posture {
+  const stateId =
+    /(?:^|\b)(?:current\s+)?state\s*[:=]\s*(\d+)\b/i.exec(current)?.[1] ??
+    /^\s*(\d+)\s*$/m.exec(current)?.[1] ??
+    parseAndroidDeviceStates(current)[0]?.identifier;
+  return (
+    parseAndroidDeviceStates(supported).find((state) => state.identifier === Number(stateId))
+      ?.posture ?? "unknown"
+  );
+}
+
+async function readAndroidPosture(
+  adb: Pick<AdbExecutor, "executeCommand">,
+  signal?: AbortSignal,
+): Promise<Posture> {
+  try {
+    const [current, supported] = await Promise.all([
+      adb.executeCommand("shell cmd device_state state", 2000, undefined, true, signal),
+      adb.executeCommand("shell cmd device_state print-states", 2000, undefined, true, signal),
+    ]);
+    signal?.throwIfAborted();
+    return postureForState(current.stdout, supported.stdout);
+  } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
+      throw error;
+    }
+    // Device-state service is optional on Android devices without folding support.
+    logger.debug(`Unable to read Android device posture: ${error}`);
+    return "unknown";
+  }
+}
 
 /** Reuse the panel mapping across observe instances and settle polls. */
 export class ObservedAndroidDisplayCache {
@@ -56,14 +97,89 @@ export class ObservedAndroidDisplayCache {
 
   static clear(deviceId: string): void {
     androidDisplayCache.delete(deviceId);
+    androidPostureCache.delete(deviceId);
   }
 
   static release(deviceId: string): void {
     androidDisplayCache.delete(deviceId);
     lastKnownAndroidDisplay.delete(deviceId);
+    androidPostureCache.delete(deviceId);
   }
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
+
+  /** Resolve a physical panel to its current Android logical display id. */
+  async logicalIdForPanel(
+    device: BootedDevice,
+    adb: Pick<AdbExecutor, "executeCommand">,
+    key: string,
+    signal?: AbortSignal,
+  ): Promise<number> {
+    if (!device.displays?.panels.length && key === "0") {
+      return 0;
+    }
+    const infos = await readAndroidDisplayInfos(adb, signal);
+    const id = logicalDisplayIdForPanel(infos, key);
+    if (id === undefined) {
+      throw new DisplaySelectionError(
+        `Display panel "${key}" is not currently connected. Choose an active panel and retry.`,
+      );
+    }
+    return id;
+  }
+
+  /** The hierarchy reports the display of its focused window. */
+  async panelForLogicalId(
+    device: BootedDevice,
+    adb: Pick<AdbExecutor, "executeCommand">,
+    displayId: number | null | undefined,
+    signal?: AbortSignal,
+    panelUniqueId?: string | null,
+    allowProbe = true,
+  ): Promise<DisplayPanel | undefined> {
+    const direct = device.displays?.panels.find(
+      (panel) => panel.key === physicalPanelKey(panelUniqueId ?? ""),
+    );
+    if (direct) {
+      return direct;
+    }
+    if (typeof displayId !== "number") {
+      return undefined;
+    }
+    const cachedKey = androidDisplayCache.get(device.deviceId)?.value.panelKeysByLogicalId?.[
+      displayId
+    ];
+    if (cachedKey) {
+      return device.displays?.panels.find((panel) => panel.key === cachedKey);
+    }
+    if (!allowProbe) {
+      return undefined;
+    }
+    const infos = await readAndroidDisplayInfos(adb, signal);
+    const key = infos.find((info) => Number(info.logicalId) === displayId)?.uniqueId;
+    return device.displays?.panels.find((panel) => panel.key === physicalPanelKey(key ?? ""));
+  }
+
+  /** Device state is sampled once per inventory or every 2 seconds; the injected timer controls expiry. */
+  async posture(
+    device: BootedDevice,
+    adb: Pick<AdbExecutor, "executeCommand">,
+    signal?: AbortSignal,
+    force = false,
+  ): Promise<Posture> {
+    if ((device.displays?.panels.length ?? 0) < 2) {
+      return "unknown";
+    }
+    const inventory = JSON.stringify(device.displays);
+    const cached = androidPostureCache.get(device.deviceId);
+    const age = cached === undefined ? Infinity : this.timer.now() - cached.at;
+    if (!force && cached?.inventory === inventory && age >= 0 && age < 2_000) {
+      return cached.posture;
+    }
+    const posture = await readAndroidPosture(adb, signal);
+    androidPostureCache.set(device.deviceId, { inventory, at: this.timer.now(), posture });
+    return posture;
+  }
 
   async resolve(
     device: BootedDevice,
@@ -120,7 +236,14 @@ export async function observedAndroidDisplay(
   if (infos.length === 0 && previous) {
     return { ...previous, display: { ...previous.display } };
   }
-  return displayForAndroidInfos(panels, infos);
+  return {
+    ...displayForAndroidInfos(panels, infos),
+    panelKeysByLogicalId: Object.fromEntries(
+      infos
+        .filter((info) => info.uniqueId)
+        .map((info) => [Number(info.logicalId), physicalPanelKey(info.uniqueId!)]),
+    ),
+  };
 }
 
 function displayForAndroidInfos(

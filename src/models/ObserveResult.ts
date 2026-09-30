@@ -19,7 +19,7 @@ import type { ObserveError } from "../features/observe/ObserveError";
 import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
-import type { DisplayRef } from "./DisplayPanel";
+import type { DisplayPanel, DisplayRef } from "./DisplayPanel";
 
 /** Output-only screen dimensions with an optional coordinate-unit marker. */
 export interface ScreenSizeWithUnits extends ScreenSize {
@@ -152,6 +152,8 @@ export interface ScreenIdentity {
 export interface ObserveResult {
   /** Physical panel represented by this capture; always present on emitted observations. */
   display: DisplayRef;
+  /** Other known physical panels, only present when inventory has multiple panels. */
+  otherDisplays?: Array<Pick<DisplayPanel, "key" | "role"> & { size: DisplayPanel["sizePx"] }>;
   /**
    * Server-generated identity for this exact observe invocation. It remains
    * attached while deferred post-processing enriches the same result, allowing

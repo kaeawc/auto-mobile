@@ -58,6 +58,8 @@ export interface ScreenshotOptions {
   format?: "jpeg" | "png" | "webp";
   quality?: number;
   lossless?: boolean;
+  /** Android logical display selected by observe. */
+  displayId?: number;
 }
 
 export class TakeScreenshot implements ScreenshotService {
@@ -269,8 +271,11 @@ export class TakeScreenshot implements ScreenshotService {
 
     if (options.format === undefined || options.format === "jpeg") {
       try {
-        return await this.captureScreenshotViaCtrlProxy(finalPath, signal);
+        return await this.captureScreenshotViaCtrlProxy(finalPath, signal, options.displayId);
       } catch (error) {
+        if (options.displayId !== undefined) {
+          throw error;
+        }
         logger.info(`[SCREENSHOT] CtrlProxy capture failed, falling back to ADB: ${error}`);
         finalPath = replaceScreenshotExtension(finalPath, "png");
         options = { ...options, format: "png" };
@@ -298,6 +303,17 @@ export class TakeScreenshot implements ScreenshotService {
     }
   }
 
+  private async screencapDisplayArgument(options: ScreenshotOptions): Promise<string> {
+    if (options.displayId !== undefined) {
+      if (!Number.isSafeInteger(options.displayId) || options.displayId < 0) {
+        throw new Error(`Invalid Android display id: ${options.displayId}`);
+      }
+      return `-d ${options.displayId} `;
+    }
+    const displayId = await this.physicalDisplayIdResolver.resolve(this.adb, this.device.deviceId);
+    return displayId ? `-d ${displayId} ` : "";
+  }
+
   /**
    * Run the CtrlProxy screenshot request under the caller's cancellation.
    *
@@ -305,6 +321,7 @@ export class TakeScreenshot implements ScreenshotService {
    */
   private async requestCtrlProxyCapture(
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<CtrlProxyScreenshotResult | null> {
     const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     try {
@@ -316,7 +333,7 @@ export class TakeScreenshot implements ScreenshotService {
       // (re)connection completes, burning the shared screenshot rate limit and
       // pushing a late observation-stream frame (#6605).
       const result = await awaitWhileRequestIsLive(
-        client.requestScreenshot(10000, undefined, false, signal),
+        client.requestScreenshot(10000, undefined, false, signal, displayId),
         signal,
       );
       return signal?.aborted ? null : result;
@@ -334,8 +351,9 @@ export class TakeScreenshot implements ScreenshotService {
   private async captureScreenshotViaCtrlProxy(
     finalPath: string,
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<ScreenshotResult> {
-    const result = await this.requestCtrlProxyCapture(signal);
+    const result = await this.requestCtrlProxyCapture(signal, displayId);
     if (!result) {
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
@@ -499,8 +517,7 @@ export class TakeScreenshot implements ScreenshotService {
     const tempFile = `/data/local/tmp/am-shot-${screenshotTempIdToken(this.idGenerator.next())}.png`;
 
     // Single command: screencap -> base64 encode -> remove temp file
-    const displayId = await this.physicalDisplayIdResolver.resolve(this.adb, this.device.deviceId);
-    const displayArgument = displayId ? `-d ${displayId} ` : "";
+    const displayArgument = await this.screencapDisplayArgument(options);
     const command = `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
     // Use larger maxBuffer (50MB) to handle high-resolution screenshots
     const maxBuffer = 50 * 1024 * 1024; // 50MB
@@ -581,11 +598,7 @@ export class TakeScreenshot implements ScreenshotService {
       const cmdStartTime = this.timer.now();
 
       // Step 1: Take screenshot on device
-      const displayId = await this.physicalDisplayIdResolver.resolve(
-        this.adb,
-        this.device.deviceId,
-      );
-      const displayArgument = displayId ? `-d ${displayId} ` : "";
+      const displayArgument = await this.screencapDisplayArgument(options);
       const screencapResult = await this.adb.executeCommand(
         `shell "screencap ${displayArgument}-p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
         undefined,

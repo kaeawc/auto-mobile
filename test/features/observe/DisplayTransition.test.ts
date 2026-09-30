@@ -246,6 +246,70 @@ describe("display transitions", () => {
     expect(displayTransitions.revision(device.deviceId)).toBe(1);
   });
 
+  test("observe then tapOn accepts the same focused logical-2 panel and posture", async () => {
+    const focusedDevice: BootedDevice = {
+      ...device,
+      deviceId: "focused-logical-two-tap",
+      displays: {
+        panels: [
+          { key: "cover", role: "cover", sizePx: { width: 100, height: 100 } },
+          { key: "external", role: "external", sizePx: { width: 200, height: 200 } },
+        ],
+        postures: ["closed"],
+      },
+    };
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", {
+      stdout:
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+      stderr: "",
+    });
+    adb.setCommandResponse("shell cmd device_state state", { stdout: "State: 0", stderr: "" });
+    adb.setCommandResponse("shell cmd device_state print-states", {
+      stdout: "DeviceState{identifier=0, name='CLOSED'}",
+      stderr: "",
+    });
+    const hierarchy = new FakeViewHierarchy();
+    hierarchy.configureHierarchy({
+      hierarchy: { node: {} },
+      displayId: 2,
+      screenWidth: 200,
+      screenHeight: 200,
+    });
+    try {
+      const screen = new RealObserveScreen(
+        focusedDevice,
+        new FakeAdbClientFactory(adb),
+        {
+          viewHierarchy: hierarchy,
+          cacheStore: new FakeObserveCacheStore(timer),
+        },
+        timer,
+      );
+      const observed = await screen.execute(options);
+      expect(observed.display).toMatchObject({ key: "external", posture: "closed" });
+      const tap = new TapOnElement(focusedDevice, adb, {
+        timer,
+        hierarchyCapture: {
+          capture: async () => ({
+            hierarchy: {
+              hierarchy: { node: {} },
+              displayId: 2,
+              screenWidth: 200,
+              screenHeight: 200,
+            },
+          }),
+        } as HierarchyCapture,
+      });
+      await expect(tap.refreshViewHierarchy(10, observed.screenSize)).resolves.toBeDefined();
+      expect(displayTransitions.revision(focusedDevice.deviceId)).toBe(0);
+    } finally {
+      displayTransitions.reset(focusedDevice.deviceId);
+      resetObserveCacheStore();
+    }
+  });
+
   test("tapOn rejects a same-sized panel with a different physical key", async () => {
     const sameSized = {
       ...device,

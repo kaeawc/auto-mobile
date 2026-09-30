@@ -13,6 +13,8 @@ export interface HierarchyCaptureRequest {
   minTimestamp?: number;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Android logical display targeted by a per-call read. */
+  displayId?: number;
 }
 
 export interface HierarchySnapshot {

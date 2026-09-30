@@ -4501,6 +4501,10 @@
           "type": "string",
           "enum": ["settled", "async", "none"]
         },
+        "display": {
+          "description": "Panel key, role (inner, cover, rear, external), or active; all is not supported yet",
+          "type": "string"
+        },
         "project": {
           "description": "Output projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) in place of viewHierarchy/elements. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
@@ -4729,6 +4733,36 @@
           },
           "required": ["key", "role", "posture", "generation"],
           "additionalProperties": false
+        },
+        "otherDisplays": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string",
+                "enum": ["inner", "cover", "rear", "external", "unknown"]
+              },
+              "size": {
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "number"
+                  },
+                  "height": {
+                    "type": "number"
+                  }
+                },
+                "required": ["width", "height"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["key", "role", "size"],
+            "additionalProperties": false
+          }
         },
         "observationScreenshotResourceUri": {
           "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
@@ -13159,6 +13193,36 @@
                   "required": ["key", "role", "posture", "generation"],
                   "additionalProperties": false
                 },
+                "otherDisplays": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": ["inner", "cover", "rear", "external", "unknown"]
+                      },
+                      "size": {
+                        "type": "object",
+                        "properties": {
+                          "width": {
+                            "type": "number"
+                          },
+                          "height": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["width", "height"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["key", "role", "size"],
+                    "additionalProperties": false
+                  }
+                },
                 "observationScreenshotResourceUri": {
                   "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
                   "type": "string"
@@ -14040,6 +14104,36 @@
                   },
                   "required": ["key", "role", "posture", "generation"],
                   "additionalProperties": false
+                },
+                "otherDisplays": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "key": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": ["inner", "cover", "rear", "external", "unknown"]
+                      },
+                      "size": {
+                        "type": "object",
+                        "properties": {
+                          "width": {
+                            "type": "number"
+                          },
+                          "height": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["width", "height"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": ["key", "role", "size"],
+                    "additionalProperties": false
+                  }
                 },
                 "observationScreenshotResourceUri": {
                   "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",

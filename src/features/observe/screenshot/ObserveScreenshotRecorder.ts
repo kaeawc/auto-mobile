@@ -42,13 +42,23 @@ export interface ObserveScreenshotRecorder {
    * Fire-and-forget capture. Returns immediately while the capture continues
    * in the background. State is updated when the capture completes.
    */
-  start(observationId: string, perf?: PerformanceTracker, signal?: AbortSignal): void;
+  start(
+    observationId: string,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    displayId?: number,
+  ): void;
 
   /**
    * Awaitable capture. The promise resolves once the capture has completed
    * (successfully or not) and state has been updated.
    */
-  capture(observationId: string, perf?: PerformanceTracker, signal?: AbortSignal): Promise<void>;
+  capture(
+    observationId: string,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+    displayId?: number,
+  ): Promise<void>;
 
   /**
    * Await a fresh capture after any already-pending capture. Terminal evidence
@@ -59,6 +69,7 @@ export interface ObserveScreenshotRecorder {
     observationId: string,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<void>;
 
   /** Strict, queued PNG capture for settled observations. Optional for legacy fakes. */
@@ -66,6 +77,7 @@ export interface ObserveScreenshotRecorder {
     observationId: string,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<string>;
 }
 
@@ -95,11 +107,12 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     observationId: string,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    displayId?: number,
   ): void {
     this.store.beginObservation(this.device.deviceId, observationId);
     perf.startOperation("screenshot");
     const handle = this.screenshotUtil.startTrackedCapture(
-      {},
+      { displayId },
       {
         parentSignal: signal,
         // Fire-and-forget: coalesce work that has not started yet, but queue
@@ -150,33 +163,48 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     observationId: string,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
-    await this.captureWithOptions(observationId, perf, signal, {
-      coalesceWithPending: true,
-      queueAfterPendingIfRunning: true,
-    });
+    await this.captureWithOptions(
+      observationId,
+      perf,
+      signal,
+      {
+        coalesceWithPending: true,
+        queueAfterPendingIfRunning: true,
+      },
+      displayId,
+    );
   }
 
   async captureFresh(
     observationId: string,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<void> {
     this.store.beginObservation(this.device.deviceId, observationId);
-    await this.captureWithOptions(observationId, perf, signal, { queueAfterPending: true });
+    await this.captureWithOptions(
+      observationId,
+      perf,
+      signal,
+      { queueAfterPending: true },
+      displayId,
+    );
   }
 
   async captureSettled(
     observationId: string,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<string> {
     this.store.beginObservation(this.device.deviceId, observationId);
     try {
       return await perf.track("screenshot", async () => {
         for (let attempt = 0; attempt < 2; attempt++) {
-          const { result, cancelled } = await this.captureSettledAttempt(signal);
+          const { result, cancelled } = await this.captureSettledAttempt(signal, displayId);
           if (cancelled && attempt === 0 && !signal?.aborted) {
             logger.debug("[OBSERVE] Retrying screenshot cancelled by another capture");
             continue;
@@ -206,9 +234,10 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
 
   private async captureSettledAttempt(
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<{ result: ScreenshotResult; cancelled: boolean }> {
     const handle = this.screenshotUtil.startTrackedCapture(
-      { format: "png" },
+      { format: "png", displayId },
       { parentSignal: signal, queueAfterPending: true },
     );
     ScreenshotJobTracker.registerCompletionReader(handle.jobId);
@@ -236,11 +265,12 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       ScreenshotJobOptions,
       "coalesceWithPending" | "queueAfterPending" | "queueAfterPendingIfRunning"
     >,
+    displayId?: number,
   ): Promise<void> {
     try {
       await perf.track("screenshot", async () => {
         const handle = this.screenshotUtil.startTrackedCapture(
-          {},
+          { displayId },
           {
             parentSignal: signal,
             ...trackerOptions,

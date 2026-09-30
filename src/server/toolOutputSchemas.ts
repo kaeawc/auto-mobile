@@ -642,6 +642,16 @@ const observationDisplaySchema = z
   })
   .optional();
 
+const otherDisplaysSchema = z
+  .array(
+    z.object({
+      key: z.string(),
+      role: z.enum(["inner", "cover", "rear", "external", "unknown"]),
+      size: z.object({ width: z.number(), height: z.number() }),
+    }),
+  )
+  .optional();
+
 /**
  * Fully-encoded observation-scoped screenshot resource URI (issue #7018), built
  * from `deviceId` + `observationId` so a client can read the paired screenshot
@@ -808,6 +818,7 @@ export const observationSummarySchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     display: observationDisplaySchema,
+    otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     ...observationScreenshotOutputFields,
     selectedElements: z.array(selectedElementSchema).optional(),
@@ -1032,6 +1043,7 @@ export const observeDiffSchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     display: observationDisplaySchema,
+    otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     ...observationScreenshotOutputFields,
     skeleton: z
@@ -1228,6 +1240,7 @@ export const observeResultSchema = z
     observationId: observationIdSchema,
     deviceId: observationDeviceIdSchema,
     display: observationDisplaySchema,
+    otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     ...observationScreenshotOutputFields,
     screenSize: screenSizeSchema.optional(),

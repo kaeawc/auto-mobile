@@ -16,6 +16,7 @@ import {
   DefaultHierarchyCapture,
   recordAcquisitionTimestamp,
   type HierarchyCapture,
+  type HierarchyCaptureRequest,
 } from "./HierarchyCapture";
 import { ViewHierarchyCaptureReader } from "./ViewHierarchyCaptureReader";
 import {
@@ -32,6 +33,8 @@ export interface HierarchySyncClient {
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
     timeoutMs: number,
+    diagnostics?: unknown,
+    displayId?: number,
   ): Promise<{ hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] } | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
 }
@@ -56,6 +59,22 @@ function normalizeSyncedIosHierarchy(
     fresh: true,
     ...(synced.frameContext !== undefined ? { frameContext: synced.frameContext } : {}),
   };
+}
+
+function requestSyncHierarchy(
+  client: HierarchySyncClient,
+  request: HierarchyCaptureRequest,
+  timeoutMs: number,
+): ReturnType<HierarchySyncClient["requestHierarchySync"]> {
+  const args = [
+    new NoOpPerformanceTracker(),
+    request.searchRaw === true,
+    request.signal,
+    timeoutMs,
+  ] as const;
+  return request.displayId === undefined
+    ? client.requestHierarchySync(...args)
+    : client.requestHierarchySync(...args, undefined, request.displayId);
 }
 
 /** One capture policy for action tools; a fresh request always bypasses client TTL caches. */
@@ -85,12 +104,7 @@ export function createDeviceHierarchyCapture(
       const timeoutMs = request.timeoutMs ?? 15000;
       const deadline = timer.now() + timeoutMs;
       const syncClient = client();
-      const synced = await syncClient.requestHierarchySync(
-        new NoOpPerformanceTracker(),
-        request.searchRaw === true,
-        request.signal,
-        timeoutMs,
-      );
+      const synced = await requestSyncHierarchy(syncClient, request, timeoutMs);
       if (!synced) {
         throw new ActionableError("Unable to retrieve a fresh view hierarchy");
       }

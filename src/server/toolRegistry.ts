@@ -50,6 +50,7 @@ import {
   getStructuredPayload,
   StructuredToolResponse,
 } from "../utils/toolUtils";
+import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import {
   APP_ID_MAX_LENGTH,
   APP_ID_PATTERN,
@@ -543,8 +544,7 @@ function getObservedHierarchy(
   name: string,
   response: { structuredContent?: unknown; content?: unknown } | undefined,
 ): ViewHierarchyResult | undefined {
-  const structuredPayload = getStructuredPayload<Record<string, unknown>>(response);
-  const payload = structuredPayload ?? unwrapToolResponse(response);
+  const payload = readToolEnvelopePayload(response)?.payload;
   if (!isRecord(payload)) {
     return undefined;
   }
@@ -1081,25 +1081,9 @@ class DefaultNavigationToolCallRecorder implements NavigationToolCallRecorder {
   }
 }
 
-function responseText(response: { content?: unknown } | null | undefined): unknown {
-  const first = Array.isArray(response?.content) ? response.content[0] : undefined;
-  return first?.type === "text" ? first.text : undefined;
-}
-
 function unwrapToolResponse(response: any): any {
-  if (!response || typeof response !== "object" || "success" in response) {
-    return response;
-  }
-  const text = responseText(response);
-  if (typeof text !== "string") {
-    return response;
-  }
-  try {
-    const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" && "success" in parsed ? parsed : response;
-  } catch {
-    return response;
-  }
+  const payload = readToolEnvelopePayload(response)?.payload;
+  return payload && "success" in payload ? payload : response;
 }
 
 /**

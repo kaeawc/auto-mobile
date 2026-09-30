@@ -1,3 +1,4 @@
+import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
 
 /**
@@ -49,36 +50,16 @@ export function isDeviceSessionAcquisitionTool(name: string): boolean {
  * accepted. Returns undefined when the result is not a device-start envelope.
  */
 export function getDeviceSessionIdFromResult(result: unknown): string | undefined {
-  if (!result || typeof result !== "object" || !("content" in result)) {
-    return undefined;
-  }
-  const content = (result as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return undefined;
-  }
-  const text = content.find(
-    (item) =>
-      item &&
-      typeof item === "object" &&
-      "type" in item &&
-      (item as { type?: unknown }).type === "text" &&
-      "text" in item &&
-      typeof (item as { text?: unknown }).text === "string",
-  ) as { text: string } | undefined;
-  if (!text) {
-    return undefined;
-  }
-  try {
-    const payload = JSON.parse(text.text) as {
-      runtime?: { session?: { sessionUuid?: unknown } };
-      sessionId?: unknown;
-    };
-    const minted = payload.runtime?.session?.sessionUuid ?? payload.sessionId;
-    return typeof minted === "string" && minted.trim().length > 0 ? minted : undefined;
-  } catch (error) {
-    logger.debug("[MCP] Device-start response did not contain JSON", { error });
-    return undefined;
-  }
+  const payload = readToolEnvelopePayload(result)?.payload;
+  const runtime = payload?.runtime;
+  const session =
+    runtime && typeof runtime === "object" ? (runtime as { session?: unknown }).session : undefined;
+  const sessionUuid =
+    session && typeof session === "object"
+      ? (session as { sessionUuid?: unknown }).sessionUuid
+      : undefined;
+  const minted = sessionUuid ?? payload?.sessionId;
+  return typeof minted === "string" && minted.trim().length > 0 ? minted : undefined;
 }
 
 /**

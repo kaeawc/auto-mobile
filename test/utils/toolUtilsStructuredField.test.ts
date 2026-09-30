@@ -122,11 +122,9 @@ describe("getStructuredPayload", () => {
     expect(getStructuredPayload({ structuredContent: null })).toBeUndefined();
   });
 
-  test("does NOT fall back to parsing the serialized text part", () => {
-    // A text-only envelope carries the payload as JSON in content[0].text, not
-    // under structuredContent — getStructuredPayload deliberately ignores it.
+  test("falls back to parsing the serialized text part", () => {
     const textOnly = { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
-    expect(getStructuredPayload(textOnly)).toBeUndefined();
+    expect(getStructuredPayload(textOnly)).toEqual({ success: true });
   });
 });
 

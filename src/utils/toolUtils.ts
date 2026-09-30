@@ -3,6 +3,7 @@
  */
 import { OPERATION_CANCELLED_MESSAGE } from "./constants";
 import { deviceLostErrorFromAbortSignal } from "../server/deviceLossOutcome";
+import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 
 const stripAccessibilityExtras = (key: string, value: unknown): unknown => {
   if (key === "extras") {
@@ -154,21 +155,15 @@ export const createStructuredToolResponse = <T>(content: T): StructuredToolRespo
  * consumers that need the entire payload (e.g. to unwrap and inspect several
  * fields), the companion to {@link getStructuredField} for single-field reads.
  *
- * Returns `undefined` for null/undefined responses or a missing/non-object
- * `structuredContent`. Does NOT fall back to parsing the serialized text part —
- * callers that need that (older `content[0].text`-only results) must handle it
- * themselves.
+ * Prefers an object `structuredContent`, then the first JSON-object text part.
+ * Returns `undefined` when neither carries an object payload.
  *
  * @param response The tool-call envelope (or anything envelope-shaped).
  */
 export const getStructuredPayload = <T = Record<string, unknown>>(
-  response: { structuredContent?: unknown } | null | undefined,
+  response: { structuredContent?: unknown; content?: unknown } | null | undefined,
 ): T | undefined => {
-  const structuredContent = response?.structuredContent;
-  if (structuredContent && typeof structuredContent === "object") {
-    return structuredContent as T;
-  }
-  return undefined;
+  return readToolEnvelopePayload(response)?.payload as T | undefined;
 };
 
 /**

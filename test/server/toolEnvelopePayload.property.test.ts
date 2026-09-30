@@ -4,7 +4,9 @@ import {
   readToolEnvelopePayload,
   writeToolEnvelopePayload,
 } from "../../src/server/toolEnvelopePayload";
-import { stringifyToolResponse } from "../../src/utils/toolUtils";
+import { getStructuredPayload, stringifyToolResponse } from "../../src/utils/toolUtils";
+import { narrowInternalToolEnvelope } from "../../src/server/internalToolPayloads";
+import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
 
 // Property-based coverage for the tool-envelope payload seam. The module promises
 // that the two (really three) representations a tool envelope carries for the same
@@ -105,6 +107,40 @@ const serializedJsonCase = fc.oneof(
 function textEnvelope(payload: unknown): { content: Array<{ type: string; text: string }> } {
   return { content: [{ type: "text", text: stringifyToolResponse(payload) }] };
 }
+
+describe("canonical envelope reads across consumers", () => {
+  const structured = { success: true, sessionId: "structured-session" };
+  const text = { success: true, sessionId: "text-session" };
+  const fixtures = [
+    { name: "structured only", envelope: { structuredContent: structured }, expected: structured },
+    { name: "text only", envelope: textEnvelope(text), expected: text },
+    {
+      name: "disagreeing representations",
+      envelope: { structuredContent: structured, ...textEnvelope(text) },
+      expected: structured,
+    },
+    {
+      name: "image before text",
+      envelope: { content: [{ type: "image" }, ...textEnvelope(text).content] },
+      expected: text,
+    },
+    {
+      name: "error envelope",
+      envelope: { isError: true, ...textEnvelope({ success: false, error: "failed" }) },
+      expected: { success: false, error: "failed" },
+    },
+    { name: "empty envelope", envelope: { content: [] }, expected: undefined },
+  ];
+
+  for (const { name, envelope, expected } of fixtures) {
+    test(name, () => {
+      expect(readToolEnvelopePayload(envelope)?.payload).toEqual(expected);
+      expect(getStructuredPayload(envelope)).toEqual(expected);
+      expect(narrowInternalToolEnvelope("swipeOn", envelope)?.structuredContent).toEqual(expected);
+      expect(getDeviceSessionIdFromResult(envelope)).toBe(expected?.sessionId);
+    });
+  }
+});
 
 describe("toolEnvelopePayload (property-based)", () => {
   test("read prefers structuredContent over the text part, by identity", () => {
@@ -207,7 +243,7 @@ describe("toolEnvelopePayload (property-based)", () => {
     );
   });
 
-  test("read returns undefined when content[0] is not a text part and no structuredContent", () => {
+  test("read returns undefined when no content part contains text", () => {
     fc.assert(
       fc.property(fc.string(), fc.string(), (mimeType, data) => {
         const envelope = { content: [{ type: "image", data, mimeType }] };

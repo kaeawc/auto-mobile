@@ -1,5 +1,6 @@
 import { ObserveToolPayload, SwipeOnToolPayload } from "../models";
 import { StructuredToolResponse } from "../utils/toolUtils";
+import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 
 /**
  * Single source of truth mapping each internally-consumed tool name to its
@@ -35,11 +36,11 @@ export type InternalToolName = keyof InternalToolPayloads;
  * End-to-end typing without any runtime check would require the full generic
  * registry that is out of scope.
  *
- * Unlike the old identity cast, this validates the shape: a null/undefined,
- * non-object, or `structuredContent`-less value returns `undefined` rather than
- * a mistyped envelope. That preserves the read sites' existing behavior —
- * `getStructuredField` already yields `undefined` for those cases — while giving
- * the `any`→typed crossing a single checked home. The `name` argument selects
+ * Unlike the old identity cast, this validates the shape through the canonical
+ * payload reader. Text-only envelopes receive a typed structuredContent copy
+ * so `getStructuredField` can read the same payload after stripping. An empty
+ * or invalid envelope returns `undefined`. This gives the `any`→typed crossing
+ * a single checked home. The `name` argument selects
  * the payload type via {@link InternalToolPayloads}; it is intentionally unused
  * at runtime (the payloads share the envelope shape).
  */
@@ -47,12 +48,11 @@ export const narrowInternalToolEnvelope = <K extends InternalToolName>(
   _name: K,
   response: unknown,
 ): StructuredToolResponse<InternalToolPayloads[K]> | undefined => {
-  if (!response || typeof response !== "object") {
+  const view = readToolEnvelopePayload(response);
+  if (!view) {
     return undefined;
   }
-  const structuredContent = (response as { structuredContent?: unknown }).structuredContent;
-  if (!structuredContent || typeof structuredContent !== "object") {
-    return undefined;
-  }
-  return response as StructuredToolResponse<InternalToolPayloads[K]>;
+  return (
+    view.hasStructured ? response : { ...view.envelope, structuredContent: view.payload }
+  ) as StructuredToolResponse<InternalToolPayloads[K]>;
 };

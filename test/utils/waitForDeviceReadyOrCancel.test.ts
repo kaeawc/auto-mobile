@@ -5,7 +5,7 @@ import {
   waitForDeviceReadyOrCancel,
 } from "../../src/utils/deviceUtils";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import type { DeviceInfo } from "../../src/models";
+import { ActionableError, type DeviceInfo } from "../../src/models";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -109,6 +109,7 @@ describe("waitForDeviceReadyOrCancel", () => {
   it("kills an owned handle when external cancellation preempts non-cooperative readiness", async () => {
     const deviceManager = new FakeDeviceUtils();
     const controller = new AbortController();
+    const timer = new FakeTimer();
     const { handle, killed } = spyHandle();
     let resolveReadiness!: () => void;
     const pendingReadiness = new Promise<void>((resolve) => {
@@ -129,10 +130,12 @@ describe("waitForDeviceReadyOrCancel", () => {
       handle,
       30_000,
       controller.signal,
+      timer,
     );
+    void readiness.catch(() => {});
     controller.abort();
 
-    await expect(readiness).rejects.toThrow();
+    await expect(readiness).rejects.toBe(controller.signal.reason);
     expect(killed()).toBe(true);
     resolveReadiness();
   });
@@ -140,6 +143,7 @@ describe("waitForDeviceReadyOrCancel", () => {
   it("does not touch an adopted device when external cancellation preempts readiness", async () => {
     const deviceManager = new FakeDeviceUtils();
     const controller = new AbortController();
+    const timer = new FakeTimer();
     let resolveReadiness!: () => void;
     const pendingReadiness = new Promise<void>((resolve) => {
       resolveReadiness = resolve;
@@ -159,10 +163,35 @@ describe("waitForDeviceReadyOrCancel", () => {
       null,
       30_000,
       controller.signal,
+      timer,
     );
+    void readiness.catch(() => {});
     controller.abort();
 
-    await expect(readiness).rejects.toThrow();
+    await expect(readiness).rejects.toBe(controller.signal.reason);
     resolveReadiness();
+  });
+
+  it("uses the existing readiness timeout error for a non-Error abort reason", async () => {
+    const deviceManager = new FakeDeviceUtils();
+    const controller = new AbortController();
+    const timer = new FakeTimer();
+    deviceManager.waitForDeviceReady = async () => new Promise<never>(() => {});
+
+    const readiness = waitForDeviceReadyOrCancel(
+      deviceManager,
+      iosImage,
+      null,
+      30_000,
+      controller.signal,
+      timer,
+    );
+    controller.abort("caller cancelled");
+
+    await expect(readiness).rejects.toBeInstanceOf(ActionableError);
+    await expect(readiness).rejects.toThrow(
+      "Device readiness timed out after 30000ms for ABCD-1234",
+    );
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

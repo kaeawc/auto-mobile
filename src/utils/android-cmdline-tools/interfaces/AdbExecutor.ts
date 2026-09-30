@@ -154,7 +154,14 @@ export interface AdbExecutor {
   getForegroundApp(
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{ packageName: string; userId: number } | null>;
+  ): Promise<{
+    packageName: string;
+    userId: number;
+    /** Resumed activity on the observed display, when dumpsys names it. */
+    activityName?: string;
+    /** Number of display-scoped activity sections in the dumpsys capture. */
+    displayCount?: number;
+  } | null>;
 
   /** Get device time in milliseconds. */
   getDeviceTimestampMs(): Promise<number>;

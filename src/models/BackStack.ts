@@ -64,6 +64,8 @@ export interface BackStackInfo {
   tasks: TaskInfo[];
   /** The current foreground activity */
   currentActivity?: ActivityInfo;
+  /** Number of display-scoped activity sections in the dumpsys capture. */
+  displayCount?: number;
   /** The current task ID */
   currentTaskId?: number;
   /** Timestamp when this back stack info was captured (device time in milliseconds) */

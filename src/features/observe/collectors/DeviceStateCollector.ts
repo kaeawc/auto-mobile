@@ -83,15 +83,21 @@ export class DeviceStateCollector {
    * rather than a mismatch.
    */
   async collectForegroundIdentity(signal?: AbortSignal): Promise<string | undefined> {
+    const foreground = await this.collectForegroundSnapshot(signal);
+    return foreground?.packageName ?? undefined;
+  }
+
+  async collectForegroundSnapshot(
+    signal?: AbortSignal,
+  ): ReturnType<AdbExecutor["getForegroundApp"]> {
     const { adb } = this.opts;
     try {
-      const foreground = await adb.getForegroundApp(signal);
-      return foreground?.packageName ?? undefined;
+      return await adb.getForegroundApp(signal);
     } catch (error) {
       // Best-effort window-identity check: a failed foreground read must not fail
       // the observation, only skip the comparison.
       logger.debug("Failed to get ground-truth foreground app:", error);
-      return undefined;
+      return null;
     }
   }
 

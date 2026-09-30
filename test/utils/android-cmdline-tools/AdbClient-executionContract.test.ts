@@ -231,6 +231,12 @@ describe("AdbClient retry contract", () => {
       dispatches: 4,
     },
     {
+      name: "dumpsys activity activities filtered foreground",
+      command:
+        "shell dumpsys activity activities | grep -E '^[^[:space:]]|^[[:space:]]*(topResumedActivity|mResumedActivity|ResumedActivity|Resumed|mFocusedActivity)[[:space:]]*[:=]'",
+      dispatches: 4,
+    },
+    {
       name: "dumpsys activity processes bare",
       command: "shell dumpsys activity processes",
       dispatches: 4,
@@ -238,12 +244,6 @@ describe("AdbClient retry contract", () => {
     {
       name: "dumpsys activity processes package",
       command: "shell dumpsys activity processes com.example",
-      dispatches: 4,
-    },
-    {
-      name: "dumpsys activity activities grep and head",
-      command:
-        'shell dumpsys activity activities | grep -E "(mResumedActivity|mFocusedActivity|topResumedActivity)" | head -1',
       dispatches: 4,
     },
     { name: "dumpsys display", command: "shell dumpsys display", dispatches: 4 },

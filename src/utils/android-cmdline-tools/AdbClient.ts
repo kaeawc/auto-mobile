@@ -22,6 +22,7 @@ import {
   getBestAndroidToolsLocation,
 } from "./detection";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
+import { parseResumedActivityForDisplay } from "./parseResumedActivity";
 import {
   AdbExecutor,
   type AdbExecuteOptions,
@@ -1802,28 +1803,32 @@ export class AdbClient implements AdbExecutor {
   async getForegroundApp(
     signal?: AbortSignal,
     timeoutMs?: number,
-  ): Promise<{ packageName: string; userId: number } | null> {
+  ): Promise<{
+    packageName: string;
+    userId: number;
+    activityName?: string;
+    displayCount?: number;
+  } | null> {
     try {
       const result = await this.executeCommand(
-        'shell dumpsys activity activities | grep -E "(mResumedActivity|mFocusedActivity|topResumedActivity)" | head -1',
+        "shell dumpsys activity activities | grep -E '^[^[:space:]]|^[[:space:]]*(topResumedActivity|mResumedActivity|ResumedActivity|Resumed|mFocusedActivity)[[:space:]]*[:=]'",
         timeoutMs,
         undefined,
         true,
         signal,
       );
 
-      // Parse output to extract package name and user ID
-      // Example patterns:
-      //   mResumedActivity: ActivityRecord{abc1234 u0 com.example.app/.MainActivity t123}
-      //   mFocusedActivity: ActivityRecord{abc1234 u10 com.example.app/.MainActivity t123}
-      //   topResumedActivity=ActivityRecord{abc1234 u0 com.example.app/.MainActivity t123}
-
-      const match = result.stdout.match(/u(\d+)\s+([^\s/]+)\//);
-      if (match) {
-        const userId = parseInt(match[1], 10);
-        const packageName = match[2];
+      const parsed = parseResumedActivityForDisplay(result.stdout);
+      const foreground = parsed.activity;
+      if (foreground) {
+        const { userId, packageName } = foreground;
         logger.info(`[ADB] Foreground app: ${packageName} (user ${userId})`);
-        return { packageName, userId };
+        return {
+          packageName,
+          userId,
+          activityName: foreground.activityName,
+          displayCount: parsed.displayCount,
+        };
       }
 
       logger.debug("[ADB] No foreground app detected");

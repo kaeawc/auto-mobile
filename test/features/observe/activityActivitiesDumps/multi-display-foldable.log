@@ -1,0 +1,15 @@
+ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+Display #2 (activities from top to bottom):
+  * Task{e2 #22 type=standard I=com.android.settings/.Settings U=0 visible=true sz=1}
+    topResumedActivity=ActivityRecord{ext u0 com.android.settings/.Settings t22}
+    * Hist  #0: ActivityRecord{ext u0 com.android.settings/.Settings t22}
+  ResumedActivity: ActivityRecord{ext u0 com.android.settings/.Settings t22}
+
+Display #0 (activities from top to bottom):
+  * Task{d0 #10 type=standard I=com.google.android.gms/.auth.uiflows.minutemaid.MinuteMaidActivity U=0 visible=true sz=1}
+    topResumedActivity=ActivityRecord{main u0 com.google.android.gms/.auth.uiflows.minutemaid.MinuteMaidActivity t10}
+    * Hist  #0: ActivityRecord{main u0 com.google.android.gms/.auth.uiflows.minutemaid.MinuteMaidActivity t10}
+  ResumedActivity: ActivityRecord{main u0 com.google.android.gms/.auth.uiflows.minutemaid.MinuteMaidActivity t10}
+
+ActivityTaskSupervisor state:
+  topDisplayFocusedRootTask=Task{e2 #22 type=standard I=com.android.settings/.Settings}

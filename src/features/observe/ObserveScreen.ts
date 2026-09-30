@@ -790,10 +790,13 @@ export class RealObserveScreen implements ObserveScreen {
       // (issue #5867). Started here so it overlaps hierarchy collection and adds
       // no serial latency; Android only (dumpsys resumed/focused activity),
       // best-effort.
-      const foregroundIdentity: Promise<string | undefined> =
+      const foregroundSnapshot =
         this.device.platform === "android"
-          ? this.deviceStateCollector.collectForegroundIdentity(signal)
-          : Promise.resolve(undefined);
+          ? this.deviceStateCollector.collectForegroundSnapshot(signal)
+          : Promise.resolve(null);
+      const foregroundIdentity: Promise<string | undefined> = foregroundSnapshot.then(
+        (sample) => sample?.packageName,
+      );
 
       let capturedHierarchy: ViewHierarchyResult | undefined;
       if (options?.freshness) {
@@ -824,6 +827,25 @@ export class RealObserveScreen implements ObserveScreen {
         capturedHierarchy,
         options?.timeoutMs,
       );
+
+      // A caller may omit back-stack collection for an intermediate capture.
+      // Its already-started foreground sample still identifies display 0, so
+      // use that activity when CtrlProxy's window event came from display 2.
+      const sampledForeground = await foregroundSnapshot;
+      if (
+        (result.backStack?.displayCount ?? 0) < 2 &&
+        sampledForeground !== null &&
+        (sampledForeground.displayCount ?? 0) > 1 &&
+        sampledForeground.packageName === result.viewHierarchy?.packageName &&
+        sampledForeground.activityName &&
+        result.activeWindow
+      ) {
+        result.activeWindow = {
+          ...result.activeWindow,
+          appId: sampledForeground.packageName,
+          activityName: sampledForeground.activityName,
+        };
+      }
 
       // Reject a stale cross-platform hierarchy (e.g. an iOS hierarchy returned on
       // an Android device via a stale connection) at the source — before deriving
@@ -1406,6 +1428,22 @@ export class RealObserveScreen implements ObserveScreen {
                 activityName: "",
                 layoutSeqSum: 0,
               };
+        }
+
+        // CtrlProxy pairs the captured root package with the last window-state
+        // class it heard, which may belong to another display. The back-stack
+        // dump already sampled above scopes its resumed activity to display 0,
+        // the display used by this hierarchy and screenshot. Only use it when
+        // the activity belongs to the captured hierarchy's app.
+        if ((result.backStack?.displayCount ?? 0) > 1 && result.activeWindow) {
+          const scopedActivity = resolveBackStackActivityAttribution(result);
+          if (scopedActivity) {
+            result.activeWindow = {
+              ...result.activeWindow,
+              appId: scopedActivity.packageName,
+              activityName: scopedActivity.activityName,
+            };
+          }
         }
 
         if (result.notificationPermissionDetected && result.activeWindow) {

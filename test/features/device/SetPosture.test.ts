@@ -53,19 +53,18 @@ function makeFeature(device: BootedDevice, adb: FakeAdbExecutor) {
 describe("SetPosture", () => {
   test("maps each emulator posture to its console command and returns fresh display state", async () => {
     const mappings = [
-      ["closed", "emu fold"],
-      ["half_opened", "emu posture 2"],
-      ["opened", "emu unfold"],
-      ["rear_display", "emu posture 1"],
-      ["flipped", "emu posture 4"],
-      ["tent", "emu posture 5"],
+      ["closed", ["emu fold"]],
+      ["half_opened", ["emu posture 2"]],
+      ["opened", ["shell cmd device_state state reset", "emu unfold"]],
+      ["flipped", ["emu posture 4"]],
+      ["tent", ["emu posture 5"]],
     ] as const;
 
-    for (const [posture, command] of mappings) {
+    for (const [posture, commands] of mappings) {
       const adb = new FakeAdbExecutor();
       const { feature, getObserveCount } = makeFeature(makeDevice(), adb);
       const result = await feature.execute(posture);
-      expect(adb.getExecutedCommands()).toEqual([command]);
+      expect(adb.getExecutedCommands()).toEqual(commands);
       expect(getObserveCount()).toBe(1);
       expect(result).toEqual({ posture, display, locked: true });
     }
@@ -73,9 +72,56 @@ describe("SetPosture", () => {
 
   test("sets the Resizable emulator display preset", async () => {
     const adb = new FakeAdbExecutor();
-    const { feature } = makeFeature(makeDevice(), adb);
+    const { feature } = makeFeature(makeDevice("emulator-5554", ["closed", "opened"]), adb);
     await feature.execute("opened", "tablet");
     expect(adb.getExecutedCommands()).toEqual(["emu unfold", "emu resize-display 2"]);
+  });
+
+  test("uses the emulator rear display device state instead of closing its hinge", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(
+        "DeviceState{identifier=0, name='CLOSED'}\nDeviceState{identifier=7, name='REAR_DISPLAY_STATE'}",
+        "",
+      ),
+    );
+    const { feature } = makeFeature(makeDevice(), adb);
+    await feature.execute("rear_display");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd device_state print-states",
+      "shell cmd device_state state 7",
+    ]);
+  });
+
+  test("resets rear display state before unfolding the emulator", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult("DeviceState{identifier=7, name='REAR_DISPLAY_STATE'}", ""),
+    );
+    const { feature } = makeFeature(makeDevice(), adb);
+    await feature.execute("rear_display");
+    await feature.execute("opened");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd device_state print-states",
+      "shell cmd device_state state 7",
+      "shell cmd device_state state reset",
+      "emu unfold",
+    ]);
+  });
+
+  test("rejects rear display when it is absent from print-states", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult("DeviceState{identifier=0, name='CLOSED'}", ""),
+    );
+    const { feature } = makeFeature(makeDevice(), adb);
+    await expect(feature.execute("rear_display")).rejects.toThrow(
+      "Posture 'rear_display' is not supported by this device. Supported postures: closed.",
+    );
+    expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states"]);
   });
 
   test("parses physical print-states and sets the matching state identifier", async () => {

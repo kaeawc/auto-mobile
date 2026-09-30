@@ -11,6 +11,33 @@ wiring_requires_yq() {
   skip "yq not installed"
 }
 
+@test "default profile preserves the existing AVD cache keys" {
+  wiring_requires_yq
+  local profile_fragment key restore_keys
+  profile_fragment="\${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}"
+  [ "$(yq -r '.inputs.profile.default' "$ACTION")" = "" ]
+  [ "$(yq -r '.runs.steps[] | select(.name == "Create AVD and generate snapshot for caching") | .with.profile' "$ACTION")" = '${{ inputs.profile }}' ]
+  key="$(yq -r '.runs.steps[] | select(.id == "avd-cache") | .with.key' "$ACTION")"
+  restore_keys="$(yq -r '.runs.steps[] | select(.id == "avd-cache") | .with."restore-keys"' "$ACTION")"
+  [[ "$key" == *"$profile_fragment"* ]]
+  [[ "$restore_keys" == *"$profile_fragment"* ]]
+  [ "${key//$profile_fragment/}" = 'avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-${{ inputs.arch }}-${{ inputs.target }}' ]
+  [ "${restore_keys//$profile_fragment/}" = $'avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-${{ inputs.arch }}-\navd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.api_level }}-\navd-${{ runner.os }}-${{ inputs.avd-name }}-' ]
+}
+
+@test "windowed emulation is opt in for resize-display" {
+  wiring_requires_yq
+  local prep_options boot_options retry_options
+  [ "$(yq -r '.inputs.windowed.default' "$ACTION")" = "false" ]
+  prep_options="$(yq -r '.runs.steps[] | select(.name == "Create AVD and generate snapshot for caching") | .with."emulator-options"' "$ACTION")"
+  boot_options="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-1") | .run' "$ACTION")"
+  retry_options="$(yq -r '.runs.steps[] | select(.id == "emulator-attempt-2") | .run' "$ACTION")"
+  [[ "$prep_options" == *"inputs.windowed == 'true'"* ]]
+  [[ "$prep_options" == *"'-no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none'"* ]]
+  [[ "$boot_options" == *"inputs.windowed == 'true'"* ]]
+  [[ "$retry_options" == *"inputs.windowed == 'true'"* ]]
+}
+
 @test "emulator retry marker is wired only to the retry step" {
   wiring_requires_yq
   local retry_run attempt_run

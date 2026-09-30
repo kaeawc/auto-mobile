@@ -783,55 +783,30 @@ export class DevicePool {
   private readonly consoleBusyRegistry: EmulatorConsoleBusyRegistry;
 
   static create(deps: DevicePoolDependencies): DevicePool {
-    return new DevicePool(
-      deps.sessionManager,
-      deps.daemonSessionId,
-      deps.timer,
-      deps.installedAppsRepository,
-      deps.deviceManager,
-      deps.retryExecutor,
-      deps.deviceSessionRepository,
-      deps.criteriaMatcher,
-      deps.releaseSessionForDisconnectedDevice,
-      deps.onDeviceReady,
-      deps.androidDeviceReboot,
-      deps.recoveryPolicy,
-      deps.onDeviceRemoved,
-      deps.emulatorLossIncidentStore,
-      deps.cancelDeviceSessionExecutions,
-      deps.idGenerator,
-      deps.lifecycleCoordinator,
-      deps.consoleBusyRegistry,
-      deps.deviceSessionContinuityEnabled,
-    );
+    return new DevicePool(deps);
   }
 
-  constructor(
-    sessionManager: SessionManager,
-    daemonSessionId: string,
-    timer: Timer = defaultTimer,
-    installedAppsRepository?: InstalledAppsStore,
-    deviceManager: PlatformDeviceManager = new MultiPlatformDeviceManager(),
-    retryExecutor: RetryExecutor = defaultRetryExecutor,
-    deviceSessionRepository: Pick<
-      DeviceSessionRepository,
-      "markAutolockSession"
-    > = new DeviceSessionRepository(),
-    criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher(),
-    releaseSessionForDisconnectedDevice?: DeviceDisconnectSessionReleaser,
-    onDeviceReady?: DeviceReadyListener,
-    androidDeviceReboot?: AndroidDeviceReboot,
-    recoveryPolicy?: DeviceRecoveryPolicy,
-    onDeviceRemoved?: DeviceRemovedListener,
-    emulatorLossIncidentStore: EmulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(
-      timer,
-    ),
-    cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller,
-    idGenerator: IdGenerator = defaultIdGenerator,
-    lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator,
-    consoleBusyRegistry?: EmulatorConsoleBusyRegistry,
-    deviceSessionContinuityEnabled?: boolean,
-  ) {
+  constructor({
+    sessionManager,
+    daemonSessionId,
+    timer = defaultTimer,
+    installedAppsRepository,
+    deviceManager = new MultiPlatformDeviceManager(),
+    retryExecutor = defaultRetryExecutor,
+    deviceSessionRepository = new DeviceSessionRepository(),
+    criteriaMatcher = new DeviceCriteriaMatcher(),
+    releaseSessionForDisconnectedDevice,
+    onDeviceReady,
+    androidDeviceReboot,
+    recoveryPolicy,
+    onDeviceRemoved,
+    emulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
+    cancelDeviceSessionExecutions,
+    idGenerator = defaultIdGenerator,
+    lifecycleCoordinator,
+    consoleBusyRegistry,
+    deviceSessionContinuityEnabled,
+  }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;

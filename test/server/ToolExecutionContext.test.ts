@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -45,11 +46,11 @@ describe("ToolExecutionContext", () => {
     fakeAppsRepo = new FakeInstalledAppsRepository();
     fakeDeviceManager = new FakeDeviceManager();
     devicePool = new DevicePool(
-      sessionManager,
-      "test-daemon-session-id",
-      fakeTimer,
-      fakeAppsRepo,
-      fakeDeviceManager,
+      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+        timer: fakeTimer,
+        installedAppsRepository: fakeAppsRepo,
+        deviceManager: fakeDeviceManager,
+      }),
     );
     // Discovery has to list the pooled device: an idle Android entry is
     // re-proved present before it is assigned, handsets included.
@@ -457,11 +458,11 @@ describe("ToolExecutionContext", () => {
   test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
     const staleDeviceManager = new FakeDeviceManager();
     const stalePool = new DevicePool(
-      sessionManager,
-      "test-daemon-session-id",
-      fakeTimer,
-      fakeAppsRepo,
-      staleDeviceManager,
+      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+        timer: fakeTimer,
+        installedAppsRepository: fakeAppsRepo,
+        deviceManager: staleDeviceManager,
+      }),
     );
     await stalePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
     staleDeviceManager.bootedDevices = [];
@@ -2079,11 +2080,11 @@ describe("ToolExecutionContext", () => {
     };
     const manager = new SessionManager(fakeTimer, repository);
     const pool = new DevicePool(
-      manager,
-      "test-daemon-session-id",
-      fakeTimer,
-      fakeAppsRepo,
-      new FakeDeviceManager(),
+      createDevicePoolDependencies(manager, "test-daemon-session-id", {
+        timer: fakeTimer,
+        installedAppsRepository: fakeAppsRepo,
+        deviceManager: new FakeDeviceManager(),
+      }),
     );
     const applySpy = spyOn(KeepScreenAwakeManager.prototype, "apply").mockResolvedValue({
       applied: false,
@@ -2118,11 +2119,11 @@ describe("ToolExecutionContext", () => {
     const boundedDeviceManager = new FakeDeviceManager();
     boundedDeviceManager.bootedDevices = [createBootedDevice("device-1")];
     const boundedPool = new DevicePool(
-      boundedSessionManager,
-      "test-daemon-session-id",
-      boundedTimer,
-      fakeAppsRepo,
-      boundedDeviceManager,
+      createDevicePoolDependencies(boundedSessionManager, "test-daemon-session-id", {
+        timer: boundedTimer,
+        installedAppsRepository: fakeAppsRepo,
+        deviceManager: boundedDeviceManager,
+      }),
     );
     await boundedPool.initializeWithDevices([createBootedDevice("device-1")]);
     let finishSetup!: () => void;
@@ -2286,11 +2287,11 @@ describe("ToolExecutionContext", () => {
         async markReleased() {},
       });
       const recoveryPool = new DevicePool(
-        recoveryManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        fakeAppsRepo,
-        fakeDeviceManager,
+        createDevicePoolDependencies(recoveryManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: fakeAppsRepo,
+          deviceManager: fakeDeviceManager,
+        }),
       );
       await recoveryPool.initializeWithDevices([createBootedDevice("device-1")]);
 

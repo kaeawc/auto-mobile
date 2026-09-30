@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, spyOn, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely } from "kysely";
@@ -52,23 +53,16 @@ async function harness(deviceUtils?: FakeDeviceUtils) {
     [{ deviceId: "emulator-5554", name: "Agent A AVD", platform: "android" }],
   );
   const pool = new DevicePool(
-    manager,
-    "hunt-daemon",
-    timer,
-    new FakeInstalledAppsRepository(),
-    deviceUtils ?? devices,
-    new DefaultRetryExecutor(timer),
-    repository,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { onLoss: false, maxAttempts: 2 },
-    undefined,
-    undefined,
-    undefined,
-    new FakeIdGenerator(),
-    new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+    createDevicePoolDependencies(manager, "hunt-daemon", {
+      timer: timer,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+      deviceManager: deviceUtils ?? devices,
+      retryExecutor: new DefaultRetryExecutor(timer),
+      deviceSessionRepository: repository,
+      recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+      idGenerator: new FakeIdGenerator(),
+      lifecycleCoordinator: new InMemoryVirtualDeviceLifecycleCoordinator(timer),
+    }),
   );
   await pool.initializeWithDevices(devices.bootedDevices);
   return {

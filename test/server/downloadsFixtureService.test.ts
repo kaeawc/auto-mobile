@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, expect, test } from "bun:test";
 import {
   createDownloadsFixtureService,
@@ -234,7 +235,12 @@ describe("DownloadsFixtureService (#7007)", () => {
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const deviceUtils = new FakeDeviceUtils();
     deviceUtils.setBootedDevices("android", [androidDevice]);
-    const devicePool = new DevicePool(sessionManager, "daemon-test", timer, undefined, deviceUtils);
+    const devicePool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-test", {
+        timer: timer,
+        deviceManager: deviceUtils,
+      }),
+    );
     const staging = Promise.withResolvers<StageSharedStorageResult>();
     try {
       await devicePool.initializeWithDevices([androidDevice]);

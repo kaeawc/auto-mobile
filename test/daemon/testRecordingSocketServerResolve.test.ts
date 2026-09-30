@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -29,7 +30,9 @@ describe("resolveTestRecordingDevice folds its discovery into the pool (#6923)",
     const utils = new FakeDeviceUtils();
     const device: BootedDevice = { deviceId: SERIAL, name: "Pixel_8_API_35", platform: "android" };
     utils.setBootedDevices("android", [device]);
-    const pool = new DevicePool(manager, "daemon-test", timer, undefined, utils);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "daemon-test", { timer: timer, deviceManager: utils }),
+    );
     DaemonState.getInstance().initialize(manager, pool);
     await pool.initializeWithDevices([device]);
     return pool;

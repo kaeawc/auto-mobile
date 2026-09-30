@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DevicePool, type DevicePoolDependencies } from "../../src/daemon/devicePool";
 import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
@@ -36,26 +37,28 @@ describe("DevicePool.create", () => {
     deviceId: "emulator-5554",
   };
 
-  test("matches the positional constructor with only required dependencies", async () => {
+  test("matches the direct constructor with only required dependencies", async () => {
     const factoryTimer = new FakeTimer();
-    const positionalTimer = new FakeTimer();
+    const directTimer = new FakeTimer();
     const factoryPool = DevicePool.create({
       sessionManager: makeSessionManager(factoryTimer),
       daemonSessionId: "minimal-daemon",
     });
-    const positionalPool = new DevicePool(makeSessionManager(positionalTimer), "minimal-daemon");
+    const directPool = new DevicePool(
+      createDevicePoolDependencies(makeSessionManager(directTimer), "minimal-daemon"),
+    );
 
     await Promise.all([
       factoryPool.initializeWithDevices([]),
-      positionalPool.initializeWithDevices([]),
+      directPool.initializeWithDevices([]),
     ]);
 
-    expect(factoryPool.getTotalDeviceCount()).toBe(positionalPool.getTotalDeviceCount());
-    expect(factoryPool.getAvailableDeviceCount()).toBe(positionalPool.getAvailableDeviceCount());
+    expect(factoryPool.getTotalDeviceCount()).toBe(directPool.getTotalDeviceCount());
+    expect(factoryPool.getAvailableDeviceCount()).toBe(directPool.getAvailableDeviceCount());
     expect(factoryPool.getAvailableDeviceCount()).toBe(0);
   });
 
-  test("matches the positional constructor with all dependencies specified", async () => {
+  test("matches the direct constructor with all dependencies specified", async () => {
     const timer = new FakeTimer();
     const sessionManager = makeSessionManager(timer);
     const installedAppsRepository = new FakeInstalledAppsRepository();
@@ -106,27 +109,7 @@ describe("DevicePool.create", () => {
       deviceSessionContinuityEnabled: false,
     };
     const factoryPool = DevicePool.create(deps);
-    const positionalPool = new DevicePool(
-      deps.sessionManager,
-      deps.daemonSessionId,
-      deps.timer,
-      deps.installedAppsRepository,
-      deps.deviceManager,
-      deps.retryExecutor,
-      deps.deviceSessionRepository,
-      deps.criteriaMatcher,
-      deps.releaseSessionForDisconnectedDevice,
-      deps.onDeviceReady,
-      deps.androidDeviceReboot,
-      deps.recoveryPolicy,
-      deps.onDeviceRemoved,
-      deps.emulatorLossIncidentStore,
-      deps.cancelDeviceSessionExecutions,
-      deps.idGenerator,
-      deps.lifecycleCoordinator,
-      deps.consoleBusyRegistry,
-      deps.deviceSessionContinuityEnabled,
-    );
+    const directPool = new DevicePool(deps);
     const factoryInternals = factoryPool as unknown as {
       timer: FakeTimer;
       installedAppsRepository: FakeInstalledAppsRepository;
@@ -135,7 +118,7 @@ describe("DevicePool.create", () => {
       criteriaMatcher: DeviceCriteriaMatcher;
       onDeviceReady: typeof onDeviceReady;
     };
-    const positionalInternals = positionalPool as unknown as typeof factoryInternals;
+    const directInternals = directPool as unknown as typeof factoryInternals;
 
     expect(factoryInternals.timer).toBe(deps.timer);
     expect(factoryInternals.installedAppsRepository).toBe(deps.installedAppsRepository);
@@ -143,23 +126,21 @@ describe("DevicePool.create", () => {
     expect(factoryInternals.retryExecutor).toBe(deps.retryExecutor);
     expect(factoryInternals.criteriaMatcher).toBe(deps.criteriaMatcher);
     expect(factoryInternals.onDeviceReady).toBe(deps.onDeviceReady);
-    expect(positionalInternals.timer).toBe(factoryInternals.timer);
-    expect(positionalInternals.installedAppsRepository).toBe(
-      factoryInternals.installedAppsRepository,
-    );
-    expect(positionalInternals.deviceManager).toBe(factoryInternals.deviceManager);
-    expect(positionalInternals.retryExecutor).toBe(factoryInternals.retryExecutor);
-    expect(positionalInternals.criteriaMatcher).toBe(factoryInternals.criteriaMatcher);
-    expect(positionalInternals.onDeviceReady).toBe(factoryInternals.onDeviceReady);
+    expect(directInternals.timer).toBe(factoryInternals.timer);
+    expect(directInternals.installedAppsRepository).toBe(factoryInternals.installedAppsRepository);
+    expect(directInternals.deviceManager).toBe(factoryInternals.deviceManager);
+    expect(directInternals.retryExecutor).toBe(factoryInternals.retryExecutor);
+    expect(directInternals.criteriaMatcher).toBe(factoryInternals.criteriaMatcher);
+    expect(directInternals.onDeviceReady).toBe(factoryInternals.onDeviceReady);
 
     await Promise.all([
       factoryPool.initializeWithDevices([bootedDevice]),
-      positionalPool.initializeWithDevices([bootedDevice]),
+      directPool.initializeWithDevices([bootedDevice]),
     ]);
 
-    expect(factoryPool.getTotalDeviceCount()).toBe(positionalPool.getTotalDeviceCount());
-    expect(factoryPool.getAvailableDeviceCount()).toBe(positionalPool.getAvailableDeviceCount());
+    expect(factoryPool.getTotalDeviceCount()).toBe(directPool.getTotalDeviceCount());
+    expect(factoryPool.getAvailableDeviceCount()).toBe(directPool.getAvailableDeviceCount());
     expect(factoryPool.getAvailableDeviceCount()).toBe(1);
-    expect(factoryPool.getErrorDevices()).toEqual(positionalPool.getErrorDevices());
+    expect(factoryPool.getErrorDevices()).toEqual(directPool.getErrorDevices());
   });
 });

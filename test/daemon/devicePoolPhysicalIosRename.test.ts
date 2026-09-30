@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -71,12 +72,12 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeDeviceManager = new FakeDeviceManager();
     devicePool = new DevicePool(
-      sessionManager,
-      "test-daemon-session-id",
-      fakeTimer,
-      new FakeInstalledAppsRepository(),
-      fakeDeviceManager,
-      new DefaultRetryExecutor(fakeTimer),
+      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+        timer: fakeTimer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: fakeDeviceManager,
+        retryExecutor: new DefaultRetryExecutor(fakeTimer),
+      }),
     );
   });
 

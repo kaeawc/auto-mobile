@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -28,11 +29,10 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(sessionManager, pool);

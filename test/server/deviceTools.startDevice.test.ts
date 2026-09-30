@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
@@ -471,11 +472,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveringImage = {
       ...androidImage,
@@ -516,11 +516,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
@@ -550,11 +549,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -577,11 +575,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
@@ -623,11 +620,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
@@ -662,18 +658,11 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { onLoss: false, maxAttempts: 2 },
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+      }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
@@ -707,16 +696,11 @@ describe("startDevice handler", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const readyDeviceIds: string[] = [];
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      (deviceId) => readyDeviceIds.push(deviceId),
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        onDeviceReady: (deviceId) => readyDeviceIds.push(deviceId),
+      }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
@@ -770,12 +754,11 @@ describe("startDevice handler", () => {
     timer.enableAutoAdvance();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -818,11 +801,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -846,11 +828,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -913,11 +894,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const anrDevice: BootedDevice = {
       platform: "android",
@@ -996,11 +976,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1056,11 +1035,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1121,11 +1099,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1174,11 +1151,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1239,11 +1215,10 @@ describe("startDevice handler", () => {
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1313,11 +1288,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1387,17 +1361,14 @@ describe("startDevice handler", () => {
     timer.enableAutoAdvance();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
-      undefined,
-      undefined,
-      async () => {
-        throw new Error("cleanup persistence failed");
-      },
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+        releaseSessionForDisconnectedDevice: async () => {
+          throw new Error("cleanup persistence failed");
+        },
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1455,11 +1426,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const recoveryImage = {
       ...androidImage,
@@ -1529,11 +1499,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
@@ -1574,11 +1543,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
@@ -1619,17 +1587,14 @@ describe("startDevice handler", () => {
     timer.enableAutoAdvance();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      new DefaultRetryExecutor(timer),
-      undefined,
-      undefined,
-      async () => {
-        throw new Error("cleanup persistence failed");
-      },
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        retryExecutor: new DefaultRetryExecutor(timer),
+        releaseSessionForDisconnectedDevice: async () => {
+          throw new Error("cleanup persistence failed");
+        },
+      }),
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
@@ -1697,11 +1662,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -1997,11 +1961,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
@@ -2066,11 +2029,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
 
@@ -2573,11 +2535,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
@@ -2600,11 +2561,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([
       {
@@ -2629,11 +2589,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     fakeDeviceUtils.setBootedDevices("android", [
       {
@@ -2677,11 +2636,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const originalName = { ...physicalIphone, name: "Jason's iPhone" };
     fakeDeviceUtils.setBootedDevices("ios", [originalName]);
@@ -2708,11 +2666,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     const simulator: BootedDevice = {
       ...iosDevice,
@@ -2739,11 +2696,10 @@ describe("startDevice handler", () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([iosDevice]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);

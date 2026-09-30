@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -52,7 +53,12 @@ describe("setToolEnabled through the daemon-proxy loopback hop (#6148 round 4)",
     timer.enableAutoAdvance();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
-    pool = new DevicePool(sessionManager, "daemon-test", timer, undefined, fakeDeviceUtils);
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-test", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
     await pool.initializeWithDevices([]);
     DaemonState.getInstance().initialize(sessionManager, pool);
 

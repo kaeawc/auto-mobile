@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import {
   afterAll,
   afterEach,
@@ -906,11 +907,11 @@ describe("MCP Booted Device Resources", () => {
         await import("../../fakes/FakeInstalledAppsRepository");
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       const pool = new DevicePool(
-        sessions,
-        "test-daemon",
-        timer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessions, "test-daemon", {
+          timer: timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       await pool.initializeWithDevices([mockAndroidDevice1]);
       DaemonState.getInstance().initialize(sessions, pool);
@@ -1074,11 +1075,11 @@ describe("MCP Booted Device Resources", () => {
       const { FakeInstalledAppsRepository } =
         await import("../../fakes/FakeInstalledAppsRepository");
       const pool = new DevicePool(
-        sessions,
-        "test-daemon",
-        timer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessions, "test-daemon", {
+          timer: timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       await pool.initializeWithDevices([physicalDevice, mockIosDevice1]);
       await pool.assignDeviceToSession("physical-session", "ios");
@@ -1120,11 +1121,11 @@ describe("MCP Booted Device Resources", () => {
         await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        fakeAppsRepo,
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: fakeAppsRepo,
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       await devicePool.initializeWithDevices([mockAndroidDevice1, mockAndroidDevice2]);
 
@@ -1202,11 +1203,11 @@ describe("MCP Booted Device Resources", () => {
       const { FakeInstalledAppsRepository } =
         await import("../../fakes/FakeInstalledAppsRepository");
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       await devicePool.initializeWithDevices([mockAndroidDevice1, mockAndroidDevice2]);
       DaemonState.getInstance().initialize(sessionManager, devicePool);
@@ -1261,11 +1262,11 @@ describe("MCP Booted Device Resources", () => {
       const { FakeInstalledAppsRepository } =
         await import("../../fakes/FakeInstalledAppsRepository");
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       await devicePool.initializeWithDevices([mockAndroidDevice1]);
@@ -1316,11 +1317,11 @@ describe("MCP Booted Device Resources", () => {
       const { FakeInstalledAppsRepository } =
         await import("../../fakes/FakeInstalledAppsRepository");
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       // `addDevice` records the AVD this pool started, which is what would be
       // published as `stableId` for an emulator whose runtime name is unknown.
@@ -1363,11 +1364,11 @@ describe("MCP Booted Device Resources", () => {
       const { FakeInstalledAppsRepository } =
         await import("../../fakes/FakeInstalledAppsRepository");
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       await devicePool.initializeWithDevices([mockAndroidDevice1]);
@@ -1409,11 +1410,11 @@ describe("MCP Booted Device Resources", () => {
       const { FakeInstalledAppsRepository } =
         await import("../../fakes/FakeInstalledAppsRepository");
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
       await devicePool.initializeWithDevices([mockAndroidDevice1, mockAndroidDevice2]);
@@ -1463,11 +1464,11 @@ describe("MCP Booted Device Resources", () => {
       const { FakeInstalledAppsRepository } =
         await import("../../fakes/FakeInstalledAppsRepository");
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        new FakeInstalledAppsRepository(),
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       await devicePool.initializeWithDevices([mockAndroidDevice1]);
       const registry = new DeviceSessionRegistry(fakeTimer);
@@ -1511,10 +1512,10 @@ describe("MCP Booted Device Resources", () => {
         await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        fakeAppsRepo,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: fakeAppsRepo,
+        }),
       );
       await devicePool.initializeWithDevices([mockAndroidDevice1]);
       DaemonState.getInstance().initialize(sessionManager, devicePool);
@@ -1569,11 +1570,11 @@ describe("MCP Booted Device Resources", () => {
         await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
       const devicePool = new DevicePool(
-        sessionManager,
-        "test-daemon-session-id",
-        fakeTimer,
-        fakeAppsRepo,
-        fakeDeviceUtils,
+        createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+          timer: fakeTimer,
+          installedAppsRepository: fakeAppsRepo,
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       // An idle Android phantom (no longer booted) plus an assigned iOS device.
       await devicePool.initializeWithDevices([mockAndroidDevice1, mockIosDevice1]);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { EventEmitter } from "node:events";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -28,7 +29,12 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
-    pool = new DevicePool(sessionManager, "daemon-session-1", timer, undefined, fakeDeviceUtils);
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await pool.initializeWithDevices([androidDevice]);
   });
@@ -80,20 +86,12 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
       new CountingIdGenerator("test"),
     );
     const diagnosticPool = new DevicePool(
-      sessionManager,
-      "daemon-session-1",
-      timer,
-      undefined,
-      fakeDeviceUtils,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { onLoss: false, maxAttempts: 2 },
-      undefined,
-      incidentStore,
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+        emulatorLossIncidentStore: incidentStore,
+      }),
     );
     await diagnosticPool.initializeWithDevices([androidDevice]);
     const pooled = diagnosticPool.getDevice(androidDevice.deviceId)!;

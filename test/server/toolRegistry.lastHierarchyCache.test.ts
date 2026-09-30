@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { DefaultAfterToolCallHandler, ToolRegistry } from "../../src/server/toolRegistry";
@@ -65,11 +66,10 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
@@ -748,7 +749,12 @@ describe("provisionDevice handler", () => {
   test("quarantines a stale pooled identity before rejecting unresolved adoption", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     await pool.initializeWithDevices([
       {
         name: "phone-api-36-a",
@@ -2967,7 +2973,12 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     await pool.initializeWithDevices([]);
     DaemonState.getInstance().initialize(sessionManager, pool);
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
@@ -3207,11 +3218,10 @@ describe("provisionDevice handler", () => {
       const timer = new FakeTimer();
       const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       const pool = new DevicePool(
-        sessionManager,
-        "daemon-session",
-        timer,
-        undefined,
-        deviceManager,
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer: timer,
+          deviceManager: deviceManager,
+        }),
       );
       const bootedDevice = {
         name: "phone-api-36-a",
@@ -3308,7 +3318,12 @@ describe("provisionDevice handler", () => {
   test("records booted (not automationReady) when readiness: 'none' skips CtrlProxy setup (#6227 round 6)", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3366,7 +3381,12 @@ describe("provisionDevice handler", () => {
   test("a later automationReady tool runs setup for a session acquired via readiness: 'none' (#6227 round 6)", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3475,7 +3495,12 @@ describe("provisionDevice handler", () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3574,7 +3599,12 @@ describe("provisionDevice handler", () => {
   test("releases a live replay session when automation readiness fails", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3634,7 +3664,12 @@ describe("provisionDevice handler", () => {
   test("rebinds an errored persisted session instead of replaying its stale readiness", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3696,7 +3731,12 @@ describe("provisionDevice handler", () => {
   test("releases the bound session when completion persistence fails", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3781,7 +3821,12 @@ describe("provisionDevice handler", () => {
   test("waits for an in-flight TTL refresh before releasing a failed completion session", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3831,7 +3876,12 @@ describe("provisionDevice handler", () => {
   test("keeps a failed replay non-replayable until its bound session is released", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -3943,7 +3993,12 @@ describe("provisionDevice handler", () => {
   test("persists a completion failure after bound session release rejects", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -4608,11 +4663,10 @@ describe("provisionDevice handler", () => {
       const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
       sessionManager.stopCleanupTimer();
       const pool = new DevicePool(
-        sessionManager,
-        "daemon-session",
-        timer,
-        undefined,
-        deviceManager,
+        createDevicePoolDependencies(sessionManager, "daemon-session", {
+          timer: timer,
+          deviceManager: deviceManager,
+        }),
       );
       const booted = {
         name: "phone-api-36-a",
@@ -4669,7 +4723,12 @@ describe("provisionDevice handler", () => {
     timer.enableAutoAdvance();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const booted = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -4832,7 +4891,12 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const bootedDevice = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -5383,7 +5447,12 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     try {
       const booted = {
         name: "phone-api-36-a",
@@ -5452,18 +5521,16 @@ describe("provisionDevice handler", () => {
     const sessionManager = new SessionManager(timer, persistence);
     sessionManager.stopCleanupTimer();
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      deviceManager,
-      undefined,
-      {
-        markAutolockSession: async () => {
-          metadataStarted.resolve();
-          await metadataFinished.promise;
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+        deviceSessionRepository: {
+          markAutolockSession: async () => {
+            metadataStarted.resolve();
+            await metadataFinished.promise;
+          },
         },
-      },
+      }),
     );
     const booted = {
       name: "phone-api-36-a",
@@ -5560,7 +5627,12 @@ describe("provisionDevice handler", () => {
     };
     const sessionManager = new SessionManager(timer, persistence);
     sessionManager.stopCleanupTimer();
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const booted = {
       name: "phone-api-36-a",
       platform: "android" as const,
@@ -5652,7 +5724,12 @@ describe("provisionDevice handler", () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, deviceManager);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: deviceManager,
+      }),
+    );
     const booted = {
       name: "phone-api-36-a",
       platform: "android" as const,

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import {
@@ -28,7 +29,12 @@ describe("listDeviceImages", function () {
     const device = { name: "Pixel_8", platform: "android" as const, deviceId: "emulator-5554" };
     const deviceUtils = new FakeDeviceUtils();
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(manager, "daemon-images", timer, undefined, deviceUtils);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "daemon-images", {
+        timer: timer,
+        deviceManager: deviceUtils,
+      }),
+    );
     const fixture = new McpTestFixture({ daemonMode: true });
 
     beforeAll(async () => {

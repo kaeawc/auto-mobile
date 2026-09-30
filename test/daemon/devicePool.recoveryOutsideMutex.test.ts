@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -56,18 +57,13 @@ describe("DevicePool recovery reboot outside assignmentMutex", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new ParkingBootDeviceManager();
     pool = new DevicePool(
-      sessionManager,
-      "recovery-outside-mutex",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceManager,
-      new DefaultRetryExecutor(timer),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { onLoss: true, maxAttempts: 1 },
+      createDevicePoolDependencies(sessionManager, "recovery-outside-mutex", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceManager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+      }),
     );
     deviceManager.bootedDevices = [handset];
     await pool.initializeWithDevices([handset]);

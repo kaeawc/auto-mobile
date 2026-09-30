@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -47,11 +48,10 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);

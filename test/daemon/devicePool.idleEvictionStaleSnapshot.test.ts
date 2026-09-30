@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { DevicePool, type PooledDevice } from "../../src/daemon/devicePool";
@@ -63,12 +64,12 @@ describe("idle eviction with a stale discovery snapshot", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new ParkingFakeDeviceManager();
     pool = new DevicePool(
-      sessionManager,
-      "repro-6393-daemon",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceManager,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "repro-6393-daemon", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceManager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
   });
 
@@ -434,18 +435,13 @@ describe("idle eviction with a stale discovery snapshot", () => {
       deviceId: "R58M1234ABC",
     };
     pool = new DevicePool(
-      sessionManager,
-      "repro-6393-daemon",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceManager,
-      new DefaultRetryExecutor(timer),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { onLoss: true, maxAttempts: 1 },
+      createDevicePoolDependencies(sessionManager, "repro-6393-daemon", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceManager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+        recoveryPolicy: { onLoss: true, maxAttempts: 1 },
+      }),
     );
     deviceManager.bootedDevices = [handset];
     await pool.initializeWithDevices([handset]);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -209,12 +210,12 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     deviceManager = new FakeDeviceManager();
     devicePool = new DevicePool(
-      sessionManager,
-      "test-daemon-session-id",
-      timer,
-      new FakeInstalledAppsRepository(),
-      deviceManager,
-      new DefaultRetryExecutor(timer),
+      createDevicePoolDependencies(sessionManager, "test-daemon-session-id", {
+        timer: timer,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        deviceManager: deviceManager,
+        retryExecutor: new DefaultRetryExecutor(timer),
+      }),
     );
   });
 

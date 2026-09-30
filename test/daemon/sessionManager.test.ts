@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
@@ -2538,11 +2539,11 @@ describe("SessionManager", () => {
       // is handed out, handsets included, so discovery has to list it.
       deviceManager.bootedDevices = [device];
       const pool = new DevicePool(
-        manager,
-        "test-daemon",
-        fakeTimer,
-        new FakeInstalledAppsRepository(),
-        deviceManager,
+        createDevicePoolDependencies(manager, "test-daemon", {
+          timer: fakeTimer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: deviceManager,
+        }),
       );
       try {
         await pool.initializeWithDevices([device]);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -20,7 +21,12 @@ describe("DevicePool idle selection Android presence sweep", () => {
     timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
-    pool = new DevicePool(sessionManager, "daemon-session-1", timer, undefined, fakeDeviceUtils);
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
     fakeDeviceUtils.setBootedDevices("android", emulators);
     await pool.initializeWithDevices(emulators);
   });

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -45,7 +46,12 @@ describe("DevicePool autolock", () => {
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     fakeDeviceUtils = new FakeDeviceUtils();
 
-    pool = new DevicePool(sessionManager, "daemon-session-1", timer, undefined, fakeDeviceUtils);
+    pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
   });
 
   afterEach(() => {
@@ -78,11 +84,10 @@ describe("DevicePool autolock", () => {
     const persistence = new FakeDeviceSessionPersistence();
     const recoveringManager = new SessionManager(timer, persistence);
     const recoveringPool = new DevicePool(
-      recoveringManager,
-      "daemon-session-2",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(recoveringManager, "daemon-session-2", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await recoveringPool.initializeWithDevices([androidDevice]);
@@ -183,11 +188,10 @@ describe("DevicePool autolock", () => {
       () => restorer,
     );
     const restoringPool = new DevicePool(
-      restoringManager,
-      "daemon-session-1",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(restoringManager, "daemon-session-1", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     await restoringPool.initializeWithDevices([androidDevice]);
@@ -351,22 +355,11 @@ describe("DevicePool autolock", () => {
 
     it("mints the autolock session id from the injected IdGenerator", async () => {
       const deterministicPool = new DevicePool(
-        sessionManager,
-        "daemon-session-1",
-        timer,
-        undefined,
-        fakeDeviceUtils,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        new CountingIdGenerator("autolock"),
+        createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+          timer: timer,
+          deviceManager: fakeDeviceUtils,
+          idGenerator: new CountingIdGenerator("autolock"),
+        }),
       );
       fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
       await deterministicPool.initializeWithDevices([androidDevice]);
@@ -491,13 +484,11 @@ describe("DevicePool autolock", () => {
         },
       };
       const gatedPool = new DevicePool(
-        sessionManager,
-        "daemon-session-1",
-        timer,
-        undefined,
-        fakeDeviceUtils,
-        undefined,
-        repository,
+        createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+          timer: timer,
+          deviceManager: fakeDeviceUtils,
+          deviceSessionRepository: repository,
+        }),
       );
       fakeDeviceUtils.setBootedDevices("android", [first, second]);
       await gatedPool.initializeWithDevices([first, second]);
@@ -609,11 +600,10 @@ describe("DevicePool autolock", () => {
         }),
       );
       const restoringPool = new DevicePool(
-        restoringManager,
-        "daemon-session-1",
-        timer,
-        undefined,
-        fakeDeviceUtils,
+        createDevicePoolDependencies(restoringManager, "daemon-session-1", {
+          timer: timer,
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       try {
         fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
@@ -678,11 +668,10 @@ describe("DevicePool autolock", () => {
         }),
       );
       const restoringPool = new DevicePool(
-        restoringManager,
-        "daemon-session-1",
-        timer,
-        undefined,
-        fakeDeviceUtils,
+        createDevicePoolDependencies(restoringManager, "daemon-session-1", {
+          timer: timer,
+          deviceManager: fakeDeviceUtils,
+        }),
       );
       try {
         fakeDeviceUtils.setBootedDevices("android", [androidDevice]);

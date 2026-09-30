@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DefaultAuditRunner,
@@ -299,11 +300,10 @@ describe("DefaultPlanLifecycleManager server-side binding teardown (issue #4611 
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(sessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidDevice]);
     DaemonState.getInstance().initialize(sessionManager, pool);

@@ -1,3 +1,4 @@
+import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../../src/server/interactionTools";
@@ -72,11 +73,10 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
     const pool = new DevicePool(
-      daemonSessionManager,
-      "daemon-session",
-      timer,
-      undefined,
-      fakeDeviceUtils,
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        timer: timer,
+        deviceManager: fakeDeviceUtils,
+      }),
     );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);

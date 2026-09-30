@@ -24,12 +24,15 @@ import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../../src/utils/runnerReadi
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
-} from "../../src/utils/virtualDeviceLifecycleCoordinator";
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { getAbortSignal } from "../../src/utils/AbortContext";
-import { resetDeviceCreationGate, setDeviceCreationGate } from "../../src/utils/deviceCreationGate";
+import {
+  resetDeviceCreationGate,
+  setDeviceCreationGate,
+} from "../../src/devices/deviceCreationGate";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";

@@ -20,7 +20,7 @@ import { FakeDeviceManager } from "../../test/fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../../test/fakes/FakeInstalledAppsRepository";
 import { FakeDbWriteBarrier } from "../../test/fakes/FakeDbWriteBarrier";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
-import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/utils/virtualDeviceLifecycleCoordinator";
+import { InMemoryVirtualDeviceLifecycleCoordinator } from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { FakeDeviceMatcher } from "../../test/fakes/FakeDeviceMatcher";
 import { FakeDeviceUtils } from "../../test/fakes/FakeDeviceUtils";
 import { FakeChildProcess } from "../../test/fakes/FakeChildProcess";

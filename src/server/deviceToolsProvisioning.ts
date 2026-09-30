@@ -10,7 +10,7 @@ import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import { formatToolParamError } from "./toolParamError";
-import { type DeviceCreationGate } from "../utils/deviceCreationGate";
+import { type DeviceCreationGate } from "../devices/deviceCreationGate";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { isUnresolvedAndroidEmulatorName } from "../daemon/deviceIdentityEvidence";
@@ -25,7 +25,7 @@ import {
   DeviceBootService,
   DeviceBootTimeoutError,
   type DeviceBootResult,
-} from "../utils/deviceBootService";
+} from "../devices/deviceBootService";
 import { type Timer } from "../utils/SystemTimer";
 import { combineAbortSignals } from "../utils/AbortContext";
 import { RunnerReadinessError } from "../utils/RunnerReadinessService";
@@ -41,7 +41,7 @@ import {
 import {
   type ExactDeviceProvisioner,
   ProvisionDeviceError,
-} from "../utils/exactDeviceProvisioning";
+} from "../devices/exactDeviceProvisioning";
 import {
   ProvisionDeviceOperationConflictError,
   ProvisionDeviceOperationFailedError,
@@ -51,7 +51,7 @@ import {
   type ProvisionDeviceOperationBeginResult,
   type ProvisionDeviceOperationStore,
 } from "../db/provisionDeviceOperationRepository";
-import { type VirtualDeviceLifecycleLease } from "../utils/virtualDeviceLifecycleCoordinator";
+import { type VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService } from "../devices/deviceTeardownService";
 import { getProvisionedDeviceTransportFence } from "../utils/provisionedDeviceTransportFence";
 import { classifyDisplayCutout } from "../utils/displayCutout";

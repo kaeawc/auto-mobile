@@ -99,11 +99,11 @@ import {
   DEVICE_CREATE_ENV_VAR,
   getDeviceCreationGate,
   type DeviceCreationGate,
-} from "../utils/deviceCreationGate";
+} from "../devices/deviceCreationGate";
 import {
   createDefaultDeviceProvisioner,
   type DeviceProvisioner,
-} from "../utils/deviceProvisioning";
+} from "../devices/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
@@ -113,7 +113,7 @@ import {
   DeviceBootService,
   findUniqueBootedAndroidDeviceByName,
   type DeviceBootResult,
-} from "../utils/deviceBootService";
+} from "../devices/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -148,7 +148,7 @@ import {
   type ExactDeviceProvisioner,
   type ExactDeviceSpecification,
   ProvisionDeviceError,
-} from "../utils/exactDeviceProvisioning";
+} from "../devices/exactDeviceProvisioning";
 import { MIN_AVD_RAM_MB } from "../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import {
@@ -170,7 +170,7 @@ import {
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
   type VirtualDeviceLifecycleOperation,
-} from "../utils/virtualDeviceLifecycleCoordinator";
+} from "../devices/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService } from "../devices/deviceTeardownService";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";

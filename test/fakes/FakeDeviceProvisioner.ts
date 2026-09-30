@@ -4,7 +4,7 @@ import type {
   DeviceProvisioner,
   IosSimulatorCreator,
   ProvisionedDevice,
-} from "../../src/utils/deviceProvisioning";
+} from "../../src/devices/deviceProvisioning";
 import type { AppleDeviceType } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type {
   CreateAvdParams,

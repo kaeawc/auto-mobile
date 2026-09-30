@@ -6,7 +6,7 @@ import type {
   StableVirtualDeviceIdentity,
   VirtualDeviceLifecycleCoordinator,
   VirtualDeviceLifecycleLease,
-} from "../utils/virtualDeviceLifecycleCoordinator";
+} from "./virtualDeviceLifecycleCoordinator";
 
 export type DeviceTeardownPhase = "precondition" | "stop" | "destroy" | "verification";
 

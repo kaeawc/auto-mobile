@@ -9,10 +9,10 @@ import {
   getInFlightAndroidColdBootReader,
   type DeviceBootServiceDependencies,
   type DeviceBootProgress,
-} from "../../src/utils/deviceBootService";
+} from "../../src/devices/deviceBootService";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { DefaultDeviceMatcher } from "../../src/utils/deviceMatcher";
-import { pickAndroidSystemImage } from "../../src/utils/deviceProvisioning";
+import { pickAndroidSystemImage } from "../../src/devices/deviceProvisioning";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
 import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
@@ -24,7 +24,7 @@ import {
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
-} from "../../src/utils/virtualDeviceLifecycleCoordinator";
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 
 const image: DeviceInfo = {
   name: "Pixel_9_API_35",

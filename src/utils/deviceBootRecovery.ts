@@ -1,11 +1,11 @@
 import { ActionableError, type DeviceInfo } from "../models";
-import type { DeviceBootRequest } from "./deviceBootService";
+import type { DeviceBootRequest } from "../devices/deviceBootService";
 import {
   DefaultDeviceProvisioner,
   createDefaultAndroidAvdCreator,
   resolveIosProvisioningSelection,
-} from "./deviceProvisioning";
-import type { DeviceProvisioner } from "./deviceProvisioning";
+} from "../devices/deviceProvisioning";
+import type { DeviceProvisioner } from "../devices/deviceProvisioning";
 import { MultiPlatformDeviceManager } from "./deviceUtils";
 import type { PlatformDeviceManager } from "./deviceUtils";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";

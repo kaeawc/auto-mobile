@@ -5,7 +5,10 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceCreationGate } from "../fakes/FakeDeviceCreationGate";
-import { resetDeviceCreationGate, setDeviceCreationGate } from "../../src/utils/deviceCreationGate";
+import {
+  resetDeviceCreationGate,
+  setDeviceCreationGate,
+} from "../../src/devices/deviceCreationGate";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 

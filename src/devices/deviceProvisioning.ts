@@ -13,22 +13,22 @@
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import type { FormFactor } from "../models/DeviceMatchCriteria";
-import type { AppleDeviceType } from "./ios-cmdline-tools/SimCtlClient";
-import type { CreateAvdParams, SystemImage } from "./android-cmdline-tools/avdmanager";
-import { createAvd, listInstalledSystemImages } from "./android-cmdline-tools/avdmanager";
-import { versionToApiLevelRange } from "./android-cmdline-tools/AvdConfigReader";
-import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
-import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
+import type { AppleDeviceType } from "../utils/ios-cmdline-tools/SimCtlClient";
+import type { CreateAvdParams, SystemImage } from "../utils/android-cmdline-tools/avdmanager";
+import { createAvd, listInstalledSystemImages } from "../utils/android-cmdline-tools/avdmanager";
+import { versionToApiLevelRange } from "../utils/android-cmdline-tools/AvdConfigReader";
+import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "../utils/androidVersionBounds";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { CREATED_DEVICE_NAME_PREFIX } from "./deviceCreationGate";
-import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
-import { logger } from "./logger";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { logger } from "../utils/logger";
 import {
   compareSimctlVersions,
   decodeSimctlVersion,
   parseSimctlVersion,
-} from "./ios-cmdline-tools/simctlVersion";
-import { iosVersionStringFromRuntimeId } from "./ios-cmdline-tools/iosVersion";
-import { compareStrictNumericVersions } from "./deviceMatcher";
+} from "../utils/ios-cmdline-tools/simctlVersion";
+import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
+import { compareStrictNumericVersions } from "../utils/deviceMatcher";
 
 /** What was created, for logging and for handing straight to the boot path. */
 export interface ProvisionedDevice {

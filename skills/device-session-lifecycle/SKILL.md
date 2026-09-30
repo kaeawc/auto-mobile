@@ -544,7 +544,7 @@ State: `devicePool.ts`, `sessionManager.ts`, `deviceSessionRegistry.ts`,
 `deviceSessionResolver.ts`, `SessionHeartbeatMonitor.ts`,
 `SingleFlightInterval.ts`, `poolConfig.ts`,
 `src/db/deviceSessionRepository.ts`.
-Boot/readiness: `src/utils/deviceBootService.ts`, `deviceUtils.ts`,
+Boot/readiness: `src/devices/deviceBootService.ts`, `deviceUtils.ts`,
 `AndroidEmulatorClient.ts`, `SimCtlClient.ts`, `deviceTimeouts.ts`,
 `RunnerReadinessService.ts`, `deviceBootRecovery.ts`.
 Shutdown: `src/processLifecycle.ts`, `shutdownCleanup.ts`,

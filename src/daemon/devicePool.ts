@@ -106,7 +106,7 @@ import {
 import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
-} from "../utils/virtualDeviceLifecycleCoordinator";
+} from "../devices/virtualDeviceLifecycleCoordinator";
 
 export type { DeviceAllocationCriteria, DeviceAllocationRequest } from "./DeviceCriteriaMatcher";
 export type { DeviceRecoveryPolicy } from "./poolConfig";

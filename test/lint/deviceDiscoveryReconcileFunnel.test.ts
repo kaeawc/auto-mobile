@@ -165,7 +165,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
         "fourth call (resolveAndroidReadinessIdentity) re-reads the AVD-name-aware listing for one " +
         "serial so the provided/current readiness paths key the Window cache on the runtime (#7031).",
     },
-    "src/utils/deviceBootService.ts": {
+    "src/devices/deviceBootService.ts": {
       calls: 2,
       reason:
         "Boot-progress polling and fresh exact-name Android identity checks for a device being " +

@@ -30,7 +30,7 @@ import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleLease,
-} from "./virtualDeviceLifecycleCoordinator";
+} from "../devices/virtualDeviceLifecycleCoordinator";
 
 export { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "./deviceTimeouts";
 

@@ -13,7 +13,7 @@ import {
   type AndroidAvdConfigWriter,
   type ExactAndroidAvdClient,
   type ExactIosSimulatorClient,
-} from "../../src/utils/exactDeviceProvisioning";
+} from "../../src/devices/exactDeviceProvisioning";
 
 const ANDROID_SPEC = {
   runtime: "system-images;android-36;google_apis;x86_64",

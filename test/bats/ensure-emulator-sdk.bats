@@ -249,7 +249,7 @@ MOCK
   # each one into the part the probe chooses and the part the product spells out,
   # and pin both halves.
   script="$(pwd)/scripts/android/verify-emulator-sdk-resolution.sh"
-  product="$(pwd)/src/utils/deviceBootService.ts"
+  product="$(pwd)/src/devices/deviceBootService.ts"
 
   expected="$(grep -o 'expected_diagnostic="[^"]*"' "$script" \
     | head -n 1 | sed 's/^expected_diagnostic="//; s/"$//')"

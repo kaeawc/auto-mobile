@@ -6,7 +6,7 @@ import {
   isTruthyCreationEnvValue,
   resetDeviceCreationGate,
   setDeviceCreationGate,
-} from "../../src/utils/deviceCreationGate";
+} from "../../src/devices/deviceCreationGate";
 import { FakeDeviceCreationGate, FakeEnvironmentReader } from "../fakes/FakeDeviceCreationGate";
 
 function gateWithEnv(value: string | undefined): EnvDeviceCreationGate {

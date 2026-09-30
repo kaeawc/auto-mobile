@@ -14,12 +14,12 @@ import type {
   ExactDeviceProvisionRequest,
   ExactDeviceProvisioner,
   ExactProvisionedDevice,
-} from "../../src/utils/exactDeviceProvisioning";
+} from "../../src/devices/exactDeviceProvisioning";
 import {
   DefaultExactDeviceProvisioner,
   FileAndroidAvdConfigWriter,
   ProvisionDeviceError,
-} from "../../src/utils/exactDeviceProvisioning";
+} from "../../src/devices/exactDeviceProvisioning";
 import type {
   ProvisionDeviceLifecycleOutcome,
   ProvisionDeviceOperationStore,
@@ -37,7 +37,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
-} from "../../src/utils/virtualDeviceLifecycleCoordinator";
+} from "../../src/devices/virtualDeviceLifecycleCoordinator";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { RunnerReadinessError } from "../../src/utils/RunnerReadinessService";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";

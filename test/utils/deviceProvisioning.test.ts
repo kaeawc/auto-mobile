@@ -6,7 +6,7 @@ import {
   pickAndroidSystemImage,
   pickIosDeviceType,
   preferredAbis,
-} from "../../src/utils/deviceProvisioning";
+} from "../../src/devices/deviceProvisioning";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { AppleDeviceType } from "../../src/utils/ios-cmdline-tools/SimCtlClient";

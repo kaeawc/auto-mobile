@@ -50,7 +50,10 @@ import {
   writePidFileDataAtomic,
 } from "./daemonFiles";
 import { IncumbentOwnerGuard } from "./incumbentOwnerGuard";
-import { daemonLiveAcceptanceStartupSecret } from "./liveAcceptanceCapability";
+import {
+  DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV,
+  daemonLiveAcceptanceStartupSecret,
+} from "./liveAcceptanceCapability";
 import { currentDaemonProcessGenerationToken } from "./processGeneration";
 import { executionTracker } from "../server/executionTracker";
 import {
@@ -354,6 +357,8 @@ export class Daemon {
   private readonly processStartedAt: number;
   private readonly processGenerationToken: string | undefined;
   private readonly liveAcceptanceStartupSecret: string | undefined;
+  private readonly skipIosStartupWarmup: boolean;
+  private readonly iosWarmupDeviceIds: ReadonlySet<string> | null;
   private idGenerator: IdGenerator;
   private databaseInitializer: DatabaseInitializer;
   private toolSelectionProfileProvenanceLoader: ToolSelectionProfileProvenanceLoader;
@@ -418,6 +423,20 @@ export class Daemon {
     this.processGenerationToken = processGenerationToken();
     this.incumbentOwnerGuard = incumbentOwnerGuard;
     this.liveAcceptanceStartupSecret = daemonLiveAcceptanceStartupSecret();
+    // Even a malformed acceptance secret must not cause unsolicited simulator
+    // launches. Capability validation remains strict in liveAcceptanceCapability.
+    this.skipIosStartupWarmup =
+      process.env[DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV] !== undefined;
+    const iosWarmupDevices = process.env.AUTOMOBILE_IOS_WARMUP_DEVICES;
+    this.iosWarmupDeviceIds =
+      iosWarmupDevices === undefined
+        ? null
+        : new Set(
+            iosWarmupDevices
+              .split(",")
+              .map((deviceId) => deviceId.trim())
+              .filter(Boolean),
+          );
     this.databaseInitializer = databaseInitializer;
     this.toolSelectionProfileProvenanceLoader = toolSelectionProfileProvenanceLoader;
     this.databaseHealthProbe = databaseHealthProbe;
@@ -2889,12 +2908,16 @@ export class Daemon {
     // any device mutation. Warming every already-booted simulator here would
     // launch CtrlProxy on unrelated devices before that authenticated selection.
     // The later, explicit acquisition path still initializes its chosen target.
-    if (this.liveAcceptanceStartupSecret) {
+    if (this.skipIosStartupWarmup) {
       logger.info("[Daemon] Skipping pool-wide iOS CtrlProxy warm-up for live acceptance");
       return;
     }
     const allDevices = this.devicePool.getAllDevices();
-    const iosDevices = allDevices.filter((device) => device.platform === "ios");
+    const iosDevices = allDevices.filter(
+      (device) =>
+        device.platform === "ios" &&
+        (this.iosWarmupDeviceIds === null || this.iosWarmupDeviceIds.has(device.id)),
+    );
     if (iosDevices.length === 0) {
       logger.debug("[Daemon] No iOS devices to initialize CtrlProxy iOS for");
       return;

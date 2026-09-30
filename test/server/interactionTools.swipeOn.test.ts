@@ -3,11 +3,26 @@ import {
   formatSwipeOnMessage,
   resetSwipeOnFactory,
   setSwipeOnFactory,
+  swipeOnSchema,
   swipeOnHandler,
 } from "../../src/server/interactionTools";
 import type { SwipeOnArgs } from "../../src/server/interactionToolTypes";
 import type { BootedDevice, SwipeOnToolPayload } from "../../src/models";
+import { resolveSwipeDirection } from "../../src/utils/swipeOnUtils";
 import { getStructuredField } from "../../src/utils/toolUtils";
+
+test("swipeOn schema advertises the runtime default gesture type", () => {
+  const implicitDirection = resolveSwipeDirection({ direction: "down" }).direction;
+  const defaultGestureType = (
+    ["swipeFingerTowardsDirection", "scrollTowardsDirection"] as const
+  ).find(
+    (gestureType) =>
+      resolveSwipeDirection({ direction: "down", gestureType }).direction === implicitDirection,
+  );
+
+  expect(defaultGestureType).toBeDefined();
+  expect(swipeOnSchema.shape.gestureType.description).toContain(`default: ${defaultGestureType}`);
+});
 
 describe("formatSwipeOnMessage", () => {
   test("reports non-throwing swipe failures instead of a completed swipe", () => {

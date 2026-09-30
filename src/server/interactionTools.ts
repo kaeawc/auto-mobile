@@ -611,7 +611,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"])
           .optional()
           .describe(
-            "Finger direction or content scroll direction; default: scrollTowardsDirection",
+            "Finger direction or content scroll direction; default: swipeFingerTowardsDirection",
           ),
         lookFor: swipeOnLookForSchema.optional().describe("Element to look for during swipe"),
         boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),

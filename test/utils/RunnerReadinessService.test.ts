@@ -677,6 +677,39 @@ describe("RunnerReadinessService", () => {
     },
   );
 
+  test("caller cancellation during failed setup inspection cleanup takes precedence", async () => {
+    const controller = new AbortController();
+    const cancellation = new Error("cancelled during inspection cleanup");
+    const manager = new FakeAndroidManager();
+    manager.ensureCompatibleVersion = async () => {
+      throw new Error("required setup failed");
+    };
+    const { service } = createService({
+      androidManager: manager,
+      getAndroidFrameworkReadiness: async (_device, signal) =>
+        new Promise<AndroidFrameworkReadinessResult>((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              controller.abort(cancellation);
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        }),
+    });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(cancellation);
+  });
+
   test("cancels a transient retry delay without starting another setup", async () => {
     const timer = new FakeTimer();
     const controller = new AbortController();
@@ -699,6 +732,35 @@ describe("RunnerReadinessService", () => {
     await expect(ready).rejects.toThrow("caller cancelled");
     expect(attempts).toBe(1);
     expect(timer.now()).toBe(0);
+  });
+
+  test("preserves a default caller abort during runner setup", async () => {
+    const controller = new AbortController();
+    const manager = new FakeAndroidManager();
+    manager.installed = false;
+    manager.enabled = false;
+    manager.compatibilityResult = { status: "installed" };
+    let setupStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      setupStarted = resolve;
+    });
+    manager.setup = async (_force, _perf, signal) => {
+      setupStarted();
+      return new Promise<never>((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    };
+    const { service } = createService({ androidManager: manager });
+    const readiness = service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    await started;
+    controller.abort();
+    await expect(readiness).rejects.toBe(controller.signal.reason);
   });
 
   test("aborts the health loop promptly instead of running to the runner-health deadline", async () => {

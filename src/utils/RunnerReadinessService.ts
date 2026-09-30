@@ -13,6 +13,7 @@ import { compareIosVersions } from "./ios-cmdline-tools/iosVersion";
 import { DefaultRetryExecutor } from "./retry/RetryExecutor";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import { raceWithDeadline } from "./raceWithDeadline";
+import { runPhaseWithSettlement } from "./runPhaseWithSettlement";
 import {
   acquireDeviceReadinessLock,
   deviceReadinessLockKey,
@@ -1298,11 +1299,11 @@ export class RunnerReadinessService {
     getDiagnostic: (device: BootedDevice, signal: AbortSignal) => Promise<T>,
     phase: "runner-connect" | "runner-health",
   ): Promise<T | undefined> {
-    const controller = new AbortController();
-    const signal = context.signal
-      ? AbortSignal.any([context.signal, controller.signal])
-      : controller.signal;
     try {
+      const controller = new AbortController();
+      const signal = context.signal
+        ? AbortSignal.any([context.signal, controller.signal])
+        : controller.signal;
       const diagnosticPromise = getDiagnostic(context.device, signal);
       // The timeout returns first if an ADB diagnostic command hangs. Its
       // rejection after abort is intentionally observed below.
@@ -1345,6 +1346,7 @@ export class RunnerReadinessService {
       });
     }
     const remainingMs = this.remainingForPhase(context, phase);
+    let phaseTimedOut = false;
     const phaseStartedMs = this.dependencies.timer.now();
     let elapsedRecorded = false;
     const recordElapsed = (): void => {
@@ -1355,44 +1357,39 @@ export class RunnerReadinessService {
       const elapsedMs = Math.max(0, this.dependencies.timer.now() - phaseStartedMs);
       context.phaseElapsedMs[phase] = (context.phaseElapsedMs[phase] ?? 0) + elapsedMs;
     };
-    const controller = new AbortController();
-    const signal = context.signal
-      ? AbortSignal.any([context.signal, controller.signal])
-      : controller.signal;
     // Record one `readiness:<phase>` span. The ambient tracker is already
     // established for the whole attempt in `ensureReadyUncoordinated`, so the
     // runner install/start/health commands (adb, simctl, xcodebuild) beneath
     // this phase attribute their time here (see PerfContext); `trackAmbient` is
     // a no-op when no ambient tracker is in scope.
-    const operationPromise = trackAmbient(`readiness:${phase}`, () =>
-      runWithAbortSignal(signal, () => operation(signal)),
-    );
-    void operationPromise.catch(() => {});
     try {
-      const result = await raceWithDeadline(operationPromise, {
-        timer: this.dependencies.timer,
-        timeoutMs: remainingMs,
-        label: `Runner readiness ${phase}`,
-        timeoutError: () => {
-          const error = new Error("readiness phase exceeded the remaining deadline");
-          controller.abort(error);
-          return error;
+      return await runPhaseWithSettlement(
+        {
+          timer: this.dependencies.timer,
+          timeoutMs: remainingMs,
+          signal: context.signal,
+          graceMs: ABORT_SETTLEMENT_GRACE_MS,
+          label: `Runner readiness ${phase}`,
+          timeoutError: () => {
+            phaseTimedOut = true;
+            return new Error("readiness phase exceeded the remaining deadline");
+          },
+          onRaceSettled: recordElapsed,
         },
-      });
-      recordElapsed();
-      return result;
+        (signal) =>
+          trackAmbient(`readiness:${phase}`, () =>
+            runWithAbortSignal(signal, () => operation(signal)),
+          ),
+      );
     } catch (error) {
       // Capture the phase duration at the deadline, excluding any grace period
       // spent waiting for an aborted platform command to settle.
       recordElapsed();
-      if (controller.signal.aborted) {
-        await this.awaitAbortSettlement(operationPromise);
-      }
       this.throwIfCallerCancelled(context, error);
       // Only the phase-timeout path above is budget-driven; an error thrown by
       // the operation itself is a platform fault whatever the clock says.
       return this.fail(context, phase, attempts, normalizeDiagnostic(error), {
-        deadlineExhausted: controller.signal.aborted,
+        deadlineExhausted: phaseTimedOut,
       });
     } finally {
       recordElapsed();

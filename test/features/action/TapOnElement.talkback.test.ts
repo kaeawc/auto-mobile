@@ -7,6 +7,7 @@ import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigation
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
+import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
 
 describe("TapOnElement TalkBack mode detection", () => {
   let fakeAccessibilityDetector: FakeAccessibilityDetector;
@@ -664,7 +665,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
 
-    test("tap falls back to coordinate gesture when direct activation fails", async () => {
+    test("tap uses a precise focus and activation gesture when direct activation fails", async () => {
       fakeTalkBackStrategy.setDirectActivationResult({
         success: false,
         method: "accessibility-action",
@@ -684,8 +685,8 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
 
       expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(1);
       expect(fakeTalkBackStrategy.tapCalls).toHaveLength(0);
-      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
-      expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("tap");
+      expect(fakeTalkBackStrategy.preciseTapCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
     });
 
     test("tap falls back to ADB when direct activation and coordinate gesture both fail", async () => {
@@ -694,7 +695,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         method: "accessibility-action",
         error: "no node",
       });
-      fakeTalkBackStrategy.setFallbackResult({
+      fakeTalkBackStrategy.setPreciseTapResult({
         success: false,
         method: "coordinate-fallback",
         error: "fallback failed",
@@ -711,7 +712,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         undefined,
       );
 
-      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.preciseTapCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
         "tap",
         50,
@@ -794,7 +795,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.directActivationCalls).toHaveLength(0);
     });
 
-    test("falls back to coordinate gesture when cursor navigation fails", async () => {
+    test("uses precise tap fallback when cursor navigation fails", async () => {
       fakeTalkBackStrategy.setTapResult({
         success: false,
         method: "focus-navigation",
@@ -813,8 +814,8 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       );
 
       expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
-      expect(fakeTalkBackStrategy.fallbackCalls[0].action).toBe("tap");
+      expect(fakeTalkBackStrategy.preciseTapCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(0);
     });
 
     test("falls back to ADB when cursor navigation and coordinate gesture both fail", async () => {
@@ -823,7 +824,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         method: "focus-navigation",
         error: "Navigation failed",
       });
-      fakeTalkBackStrategy.setFallbackResult({
+      fakeTalkBackStrategy.setPreciseTapResult({
         success: false,
         method: "coordinate-fallback",
         error: "Fallback failed",
@@ -841,7 +842,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       );
 
       expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
-      expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
+      expect(fakeTalkBackStrategy.preciseTapCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
         "tap",
         50,
@@ -991,6 +992,46 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("TapOnElement precise TalkBack coordinate fallback", () => {
+  test("focuses the unidentifiable element before TalkBack activation taps", async () => {
+    const accessibilityDetector = new FakeAccessibilityDetector();
+    accessibilityDetector.setTalkBackEnabled(true);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const driver = new FakeTalkBackNavigationDriver();
+    const events: string[] = [];
+    const requestTapCoordinates = driver.requestTapCoordinates.bind(driver);
+    const sleep = timer.sleep.bind(timer);
+    spyOn(driver, "requestTapCoordinates").mockImplementation(async (x, y, durationMs) => {
+      events.push("tap");
+      return requestTapCoordinates(x, y, durationMs);
+    });
+    spyOn(timer, "sleep").mockImplementation(async (ms) => {
+      events.push(`sleep:${ms}`);
+      return sleep(ms);
+    });
+    const tapOnElement = new TapOnElement(
+      { name: "test-device", platform: "android", deviceId: "emulator-5554" },
+      null,
+      {
+        accessibilityDetector,
+        timer,
+        talkBackStrategy: new TalkBackTapStrategy({ timer }),
+        talkBackDriverFactory: { createDriver: () => driver },
+      },
+    );
+    const element = {
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+      text: "Unidentified action",
+    };
+
+    await tapOnElement.executeAndroidTap("tap", 50, 50, 500, element);
+
+    expect(driver.tapHistory).toHaveLength(3);
+    expect(events).toEqual(["tap", "sleep:500", "tap", "sleep:200", "tap"]);
   });
 });
 

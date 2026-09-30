@@ -480,11 +480,12 @@ describe("TalkBackTapStrategy", () => {
   });
 
   describe("executeCoordinateFallback", () => {
-    test("performs single tap for tap action", async () => {
+    test("does not report activation from a single touch for tap action", async () => {
       const result = await strategy.executeCoordinateFallback(50, 50, "tap", 500, driver);
 
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
       expect(result.method).toBe("coordinate-fallback");
+      expect(result.error).toContain("only moves TalkBack focus");
       expect(driver.getTapCount()).toBe(1);
       expect(driver.tapHistory[0]).toEqual({ x: 50, y: 50, durationMs: 50 }); // Short duration for tap
     });

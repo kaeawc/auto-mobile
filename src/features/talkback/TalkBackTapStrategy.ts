@@ -406,13 +406,23 @@ export class TalkBackTapStrategy {
       return { success: true, method: "coordinate-fallback", completedTaps: 2 };
     }
 
-    // Single tap or long press
+    // A single touch only moves TalkBack's accessibility focus; it does not
+    // activate the focused element. Let callers continue to their last resort.
     const result = await driver.requestTapCoordinates(x, y, tapDuration);
     if (!result.success) {
       return {
         success: false,
         method: "coordinate-fallback",
         error: result.error,
+      };
+    }
+
+    if (action === "tap") {
+      return {
+        success: false,
+        method: "coordinate-fallback",
+        error:
+          "A single coordinate touch only moves TalkBack focus and does not activate the element",
       };
     }
 

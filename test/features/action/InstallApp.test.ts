@@ -17,11 +17,16 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import path from "path";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { logger } from "../../../src/utils/logger";
+
+const playgroundBadgingOutput = readFileSync(
+  path.join(import.meta.dir, "../../fixtures/android-playground-debug-badging.txt"),
+  "utf8",
+);
 
 // Keep action tests isolated from the production SQLite repository even when a
 // scenario does not need to inspect stale-marker rows explicitly.
@@ -59,6 +64,39 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   trim: () => stdout.trim(),
   includes: (searchString: string) => stdout.includes(searchString),
 });
+
+class InstallAppFakeAdbExecutor extends FakeAdbExecutor {
+  private installSucceeded = false;
+
+  override async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal,
+    waitForProcessSettlementAfterAbort?: boolean,
+  ): Promise<ExecResult> {
+    const result = await super.executeCommand(
+      command,
+      timeoutMs,
+      maxBuffer,
+      noRetry,
+      signal,
+      waitForProcessSettlementAfterAbort,
+    );
+    if (command.startsWith("install ") && result.stdout.trim() === "Success") {
+      this.installSucceeded = true;
+    }
+    if (
+      this.installSucceeded &&
+      command.includes("shell pm list packages --user ") &&
+      !result.stdout.trim()
+    ) {
+      return createExecResult("package: com.example.app");
+    }
+    return result;
+  }
+}
 
 class SequencedFakeSimctl extends FakeSimctl {
   private listResponses: any[][] = [];
@@ -157,7 +195,7 @@ describe("InstallApp", () => {
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   beforeEach(() => {
-    fakeAdb = new FakeAdbExecutor();
+    fakeAdb = new InstallAppFakeAdbExecutor();
     fakeAdbFactory = { create: () => fakeAdb };
     fakeHost = new FakeHostCommandExecutor();
     fakeLocator = new FakeAndroidBuildToolsLocator();
@@ -220,6 +258,29 @@ describe("InstallApp", () => {
     const installEntry = timings[0];
     expect(installEntry.name).toBe("installApp");
     expect((installEntry.children as TimingEntry[]).length).toBeGreaterThan(0);
+  });
+
+  test("reports when aapt's package ID differs from the package installed on device", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const parsedPackageName = "dev.jasonpearson.automobile.playground";
+    const installedPackageName = "dev.jasonpearson.automobile.playground.runtime";
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/36.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult(playgroundBadgingOutput));
+    fakeAdb.setCommandResponseSequence("shell pm list packages --user 0", [
+      createExecResult(""),
+      createExecResult(""),
+      createExecResult(`package: ${installedPackageName}`),
+    ]);
+    fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
+      createPerformanceTracker(false, fakeTimer),
+    );
+
+    await expect(installApp.execute(apkPath)).rejects.toThrow(
+      `aapt reported "${parsedPackageName}", but the device reported "${installedPackageName}"`,
+    );
   });
 
   test("returns the install timing tree when --debug-perf is enabled", async () => {
@@ -846,10 +907,11 @@ describe("InstallApp", () => {
     );
 
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
-    fakeAdb.setCommandResponse(
-      "shell pm list packages --user 0",
+    fakeAdb.setCommandResponseSequence("shell pm list packages --user 0", [
       createExecResult("package:com.example.app2"),
-    );
+      createExecResult("package:com.example.app2"),
+      createExecResult("package:com.example.app2\npackage:com.example.app"),
+    ]);
 
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 

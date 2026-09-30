@@ -122,6 +122,65 @@ final class HierarchyIntegrationTests: XCTestCase {
         XCTAssertEqual(secureNode?.password, "true")
     }
 
+    func testTypeUnicodeCorpusIntoTextFieldAndTextView() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"
+        app.launch()
+
+        let textView = app.descendants(matching: .textView)
+            .matching(NSPredicate(format: "label == %@", "Message #sample"))
+            .firstMatch
+        let textField = app.textFields["standard-field"]
+        guard textView.waitForExistence(timeout: 10), textField.waitForExistence(timeout: 10) else {
+            XCTFail("Host app did not present the snapshot-gap text inputs")
+            return
+        }
+
+        let locator = ElementLocator(application: app, perf: PerfProvider())
+        let gestures = GesturePerformer(application: app, elementLocator: locator)
+        let corpus = [
+            "a😀b👍🏽c👨‍👩‍👧d🇯🇵e❤️fé日本",
+            "1️⃣",
+            "e\u{0301}",
+            "🏳️‍🌈",
+            "👩🏽‍💻",
+            "ไทย",
+            "हिन्दी",
+            "مرحبا",
+            "한국어",
+        ]
+
+        try assertUnicodeCorpus(corpus, typesInto: textField, gestures: gestures)
+        try assertUnicodeCorpus(corpus, typesInto: textView, gestures: gestures)
+    }
+
+    private func assertUnicodeCorpus(
+        _ corpus: [String],
+        typesInto element: XCUIElement,
+        gestures: GesturePerformer
+    )
+        throws
+    {
+        element.tap()
+        guard waitForKeyboardFocusOrFail(element) else {
+            return
+        }
+
+        for (index, text) in corpus.enumerated() {
+            if index > 0 {
+                try gestures.clearText()
+            }
+
+            try gestures.typeText(text: text)
+            let typed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", text),
+                object: element
+            )
+            XCTAssertEqual(XCTWaiter().wait(for: [typed], timeout: 5), .completed)
+            XCTAssertEqual(element.value as? String, text, "Unicode input did not round-trip exactly")
+        }
+    }
+
     func testPressKeyBackspaceDeletesFocusedText() throws {
         let app = XCUIApplication()
         app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"

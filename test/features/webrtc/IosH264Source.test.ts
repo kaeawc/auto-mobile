@@ -2094,7 +2094,7 @@ describe("IosH264Source", () => {
     }
   });
 
-  test("exhausts bounded reconnects after a pooled helper stop stalls the shared queue", async () => {
+  test("exhausts bounded reconnects while another simulator's pooled stop stalls", async () => {
     const timer = new FakeTimer();
     const helpers: FakeFrameCaptureHelper[] = [];
     const pool = new IosSimulatorCaptureHelperPool({
@@ -2135,7 +2135,7 @@ describe("IosH264Source", () => {
       await flush();
       timer.advanceTime(500);
       await flush();
-      expect(helpers).toHaveLength(2);
+      expect(helpers).toHaveLength(3);
 
       timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS - 500);
       await flush();

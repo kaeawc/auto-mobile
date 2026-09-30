@@ -79,6 +79,89 @@ async function flushMicrotasks(count = 10): Promise<void> {
 }
 
 describe("IosSimulatorCaptureHelperPool", () => {
+  test("a stalled stop does not block another window, but orders the same window", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IosSimulatorCaptureHelperPool({
+      timer,
+      createHelper: () => {
+        const helper =
+          helpers.length === 0 ? new NeverStoppingSimulatorHelper() : new FakeSimulatorHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const first = pool.acquire(simulatorOptions(42));
+      await first.start();
+      const stopping = first.invalidate();
+      await flushMicrotasks();
+
+      const sameWindow = pool.acquire(simulatorOptions(42));
+      const sameStarting = sameWindow.start();
+      const otherWindow = pool.acquire(simulatorOptions(99));
+      await otherWindow.start();
+      expect(helpers).toHaveLength(2);
+      expect(helpers[1].starts).toBe(1);
+
+      timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
+      await Promise.all([stopping, sameStarting]);
+      expect(helpers).toHaveLength(3);
+      expect(helpers[2].starts).toBe(1);
+      await pool.shutdown();
+      await flushMicrotasks();
+      expect(Reflect.get(pool, "transitions")).toEqual(new Map());
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("shutdown waits for every target's queued transition", async () => {
+    const timer = new FakeTimer();
+    const helpers: FakeSimulatorHelper[] = [];
+    const helpersByWindow = new Map<number, FakeSimulatorHelper>();
+    const pool = new IosSimulatorCaptureHelperPool({
+      timer,
+      createHelper: (options) => {
+        const helper =
+          helpers.length < 2 ? new NeverStoppingSimulatorHelper() : new FakeSimulatorHelper();
+        helpers.push(helper);
+        if (options.target.kind === "simulator") {
+          helpersByWindow.set(options.target.windowID, helper);
+        }
+        return helper;
+      },
+    });
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const first = pool.acquire(simulatorOptions(42));
+      const second = pool.acquire(simulatorOptions(43));
+      const remaining = pool.acquire(simulatorOptions(44));
+      await Promise.all([first.start(), second.start(), remaining.start()]);
+      const stopping = [first.invalidate(), second.invalidate()];
+      await flushMicrotasks(30);
+      const shutdown = pool.shutdown();
+      let completed = false;
+      void shutdown.then(() => {
+        completed = true;
+      });
+      await flushMicrotasks(30);
+      expect(helpersByWindow.get(42)?.stops).toBe(1);
+      expect(helpersByWindow.get(43)?.stops).toBe(1);
+      expect(helpersByWindow.get(44)?.stops).toBe(0);
+      expect(completed).toBe(false);
+
+      timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
+      await Promise.all([...stopping, shutdown]);
+      expect(helpersByWindow.get(44)?.stops).toBe(1);
+      expect(completed).toBe(true);
+      expect(Reflect.get(pool, "transitions")).toEqual(new Map());
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   test("evicts an idle stalled window without failing a different window attach", async () => {
     const timer = new FakeTimer();
     const helpers: FakeSimulatorHelper[] = [];
@@ -99,11 +182,14 @@ describe("IosSimulatorCaptureHelperPool", () => {
 
       const newWindow = pool.acquire(simulatorOptions(43));
       const attaching = newWindow.start();
-      await flushMicrotasks();
-      expect(helpers).toHaveLength(1);
+      await attaching;
+      expect(helpers[1].starts).toBe(1);
+      await flushMicrotasks(30);
+      expect(helpers).toHaveLength(2);
+      expect(helpers[0].stops).toBe(1);
 
       timer.advanceTime(IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS);
-      await attaching;
+      await flushMicrotasks();
       expect(helpers).toHaveLength(2);
       expect(helpers[1].starts).toBe(1);
       expect(warning).toHaveBeenCalledWith(
@@ -114,6 +200,58 @@ describe("IosSimulatorCaptureHelperPool", () => {
     } finally {
       warning.mockRestore();
     }
+  });
+
+  test("stops an idle helper before starting a different capture on the same window", async () => {
+    const timer = new FakeTimer();
+    const events: string[] = [];
+    let finishStop: (() => void) | undefined;
+    class PausedStoppingHelper extends FakeSimulatorHelper {
+      override async stop(): Promise<null> {
+        this.stops++;
+        await new Promise<void>((resolve) => {
+          finishStop = resolve;
+        });
+        this.isRunning = false;
+        events.push("old stopped");
+        return null;
+      }
+    }
+    class ReplacementHelper extends FakeSimulatorHelper {
+      override start(): void {
+        events.push("new started");
+        super.start();
+      }
+    }
+    const helpers: FakeSimulatorHelper[] = [];
+    const pool = new IosSimulatorCaptureHelperPool({
+      timer,
+      createHelper: () => {
+        const helper = helpers.length === 0 ? new PausedStoppingHelper() : new ReplacementHelper();
+        helpers.push(helper);
+        return helper;
+      },
+    });
+    const oldLease = pool.acquire(simulatorOptions());
+    await oldLease.start();
+    await oldLease.stop();
+
+    const newLease = pool.acquire(encodedOptions());
+    const attaching = newLease.start();
+    await flushMicrotasks();
+    expect(helpers).toHaveLength(1);
+    expect(helpers[0].stops).toBe(1);
+    expect(events).toEqual([]);
+
+    if (!finishStop) {
+      throw new Error("Idle helper stop was not started");
+    }
+    finishStop();
+    await attaching;
+    expect(events).toEqual(["old stopped", "new started"]);
+    expect(helpers[1].starts).toBe(1);
+    await newLease.stop();
+    await pool.shutdown();
   });
 
   test("times out a failed helper stop and releases the serialized attach queue", async () => {
@@ -363,7 +501,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
     await lease.stop();
     await starting;
     timer.advanceTime(1);
-    await Promise.resolve();
+    await flushMicrotasks();
 
     expect(helpers).toEqual([]);
   });
@@ -445,7 +583,7 @@ describe("IosSimulatorCaptureHelperPool", () => {
     timer.advanceTime(IOS_SIMULATOR_HELPER_IDLE_TTL_MS - 1);
     expect(helpers[0].stops).toBe(0);
     timer.advanceTime(1);
-    await Promise.resolve();
+    await flushMicrotasks();
     expect(helpers[0].stops).toBe(1);
 
     const second = pool.acquire(simulatorOptions());

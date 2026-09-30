@@ -3095,8 +3095,11 @@ describe("killDevice handler", () => {
       });
 
       expect(String(await screenshotResult)).toContain("WebSocket connection closed");
-      expect(IOSCtrlProxyClient.getInstance(device)).toBe(client);
-      expect(await IOSCtrlProxyClient.getInstance(device).ensureConnected()).toBe(false);
+      const postKillClient = IOSCtrlProxyClient.getInstance(device);
+      expect(postKillClient).not.toBe(client);
+      expect(await client.ensureConnected()).toBe(false);
+      expect(await postKillClient.ensureConnected()).toBe(false);
+      expect(await postKillClient.connectWithoutSetup()).toBe(false);
       expect(socketCreations).toBe(1);
       expect(restarts).toBe(0);
     } finally {

@@ -390,8 +390,11 @@ describe("RestoreSnapshot", () => {
         useVmSnapshot: false,
       });
 
-      // Should use ADB restore even for VM snapshot when flag is false
-      expect(result.snapshotType).toBe("vm");
+      // The VM payload was not restored; only Android settings replay ran.
+      expect(result.snapshotType).toBe("adb");
+      expect(result.restoreMode).toBe("settings_only");
+      expect(result.restoreNote).toContain("VM state was not restored");
+      expect(result.restoreNote).toContain("useVmSnapshot is disabled");
       expect(fakeAdb.wasCommandExecuted("emu avd snapshot load")).toBe(false);
     });
 
@@ -432,8 +435,11 @@ describe("RestoreSnapshot", () => {
         useVmSnapshot: true,
       });
 
-      // Should use ADB restore for physical device
-      expect(result.snapshotType).toBe("vm");
+      // The VM payload was not restored; only Android settings replay ran.
+      expect(result.snapshotType).toBe("adb");
+      expect(result.restoreMode).toBe("settings_only");
+      expect(result.restoreNote).toContain("VM state was not restored");
+      expect(result.restoreNote).toContain("is not an emulator");
       expect(fakeAdb.wasCommandExecuted("emu avd snapshot load")).toBe(false);
     });
   });
@@ -737,6 +743,7 @@ describe("RestoreSnapshot", () => {
       });
 
       expect(result.snapshotType).toBe("adb");
+      expect(result.restoreMode).toBe("settings_only");
       expect(fakeAdb.wasCommandExecuted("shell settings put global 'airplane_mode_on' '1'")).toBe(
         true,
       );

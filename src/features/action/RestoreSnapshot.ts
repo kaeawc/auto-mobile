@@ -53,6 +53,10 @@ export interface RestoreSnapshotArgs {
 export interface RestoreSnapshotResult {
   snapshotType: DeviceSnapshotType;
   restoredAt: string;
+  /** Android restore operation that actually ran. */
+  restoreMode?: "vm" | "settings_only";
+  /** Present when a VM snapshot record was restored without its VM state. */
+  restoreNote?: string;
   /** Optional for existing restore-provider fakes; concrete restores always set both fields. */
   success?: boolean;
   failures?: RestoreSnapshotFailure[];
@@ -74,6 +78,25 @@ const RESTORABLE_SETTINGS_NAMESPACES = new Set<string>(["global", "secure", "sys
 
 function isSettingsNamespace(value: string): value is SettingsNamespace {
   return RESTORABLE_SETTINGS_NAMESPACES.has(value);
+}
+
+function getAndroidRestoreDetails(
+  snapshotType: DeviceSnapshotType,
+  usedVmSnapshot: boolean,
+  isEmulator: boolean,
+  deviceId: string,
+): Pick<RestoreSnapshotResult, "snapshotType" | "restoreMode" | "restoreNote"> {
+  const degradedVmRestore = snapshotType === "vm" && !usedVmSnapshot;
+  const reason = isEmulator ? "useVmSnapshot is disabled" : `device ${deviceId} is not an emulator`;
+  return {
+    snapshotType: usedVmSnapshot ? "vm" : "adb",
+    restoreMode: usedVmSnapshot ? "vm" : "settings_only",
+    ...(degradedVmRestore
+      ? {
+          restoreNote: `VM state was not restored; only captured Android settings were applied because ${reason}.`,
+        }
+      : {}),
+  };
 }
 
 /**
@@ -204,8 +227,15 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       );
     }
 
+    const restoreDetails = getAndroidRestoreDetails(
+      manifest.snapshotType,
+      shouldUseVmSnapshot,
+      isEmulator,
+      this.device.deviceId,
+    );
+
     return {
-      snapshotType: manifest.snapshotType,
+      ...restoreDetails,
       restoredAt: new Date().toISOString(),
       success: failures.length === 0,
       failures,

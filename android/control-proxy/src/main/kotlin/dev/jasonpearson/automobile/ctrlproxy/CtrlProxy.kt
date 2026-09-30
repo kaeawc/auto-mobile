@@ -3755,7 +3755,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               lifecycle.cancelled(onResult)
             }
           },
-          null,
+          gestureHandler,
         )
       } catch (e: Exception) {
         Log.e(TAG, "Error dispatching $perfLabel gesture (requestId=$requestId)", e)
@@ -4074,6 +4074,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val gestureBuiltTime = System.currentTimeMillis()
       Log.d(TAG, "Tap gesture built in ${gestureBuiltTime - startTime}ms")
 
+      var freshHierarchy: ViewHierarchy? = null
       dispatchGestureWithResult(
         "performTapCoordinates",
         gesture,
@@ -4083,15 +4084,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         frameContext,
         beforeCompletedResult = {
           // Wait for UI to settle after tap, then extract fresh hierarchy.
-          val freshHierarchy =
+          freshHierarchy =
             hierarchyDebouncer.extractAfterQuiescence(
               quiescenceMs = HierarchyQuiescence.POLL_MS,
               maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
               pollIntervalMs = 10L,
             )
-          if (freshHierarchy != null) {
-            kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
-          }
         },
       ) { outcome ->
         if (outcome.completed) {
@@ -4100,6 +4098,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             "Tap completed: gesture=${outcome.gestureTimeMs}ms, total=${outcome.totalTimeMs}ms",
           )
           launchRequestScope(requestId) {
+            freshHierarchy?.let { broadcastHierarchyUpdate(it, sync = true) }
             broadcastTapCoordinatesResult(requestId, true, null, outcome.totalTimeMs)
           }
         } else {

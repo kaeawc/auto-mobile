@@ -444,7 +444,9 @@ export class ElementResolver {
           ? target.affordances.includes("tap") || target.affordances.includes("toggle")
           : target.affordances.length > 0,
         input: target.affordances.includes("input"),
-        raw: rawTextMatch.has(candidate),
+        // A labelled checkable row may enclose a smaller toggle control;
+        // compare their actionable bounds before preferring the row's raw text.
+        raw: rawTextMatch.has(candidate) && !target.affordances.includes("toggle"),
       };
     };
     result.candidates.sort((a, b) => compareSelectionRank(rank(a), rank(b), intent.preferTap));

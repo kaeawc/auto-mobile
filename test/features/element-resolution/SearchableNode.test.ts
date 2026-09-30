@@ -73,6 +73,18 @@ describe("searchable node derivation", () => {
     expect(node.textSources).toEqual({});
   });
 
+  test("exposes an iOS text field placeholder as a searchable label", () => {
+    const node = toSearchable({
+      bounds,
+      class: "UITextField",
+      "hint-text": "Name",
+      actions: ["set_text"],
+    });
+    expect(node.label).toBe("Name");
+    expect(node.textFields).toContain("Name");
+    expect(node.textSources["hint-text"]).toBe("Name");
+  });
+
   test("keeps category text separate from editable display value", () => {
     const node = toSearchable({
       bounds,

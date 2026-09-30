@@ -871,10 +871,16 @@ export class LaunchApp extends BaseVisualChange {
 
       if (isRunning) {
         if (clearAppData) {
-          await perf.track("clearAppData", async () => {
+          const clearResult = await perf.track("clearAppData", async () => {
             return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
           });
           this.assertLaunchNotAborted(signal);
+          if (!clearResult.success) {
+            const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
+            logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
+            perf.end();
+            return { success: false, packageName, userId: targetUserId, error };
+          }
           didTerminateOrClear = true;
         } else if (coldBoot) {
           const coldBootResult = await perf.track("terminateApp", async () => {
@@ -914,10 +920,16 @@ export class LaunchApp extends BaseVisualChange {
         }
       } else {
         if (clearAppData) {
-          await perf.track("clearAppData", async () => {
+          const clearResult = await perf.track("clearAppData", async () => {
             return this.createAndroidClearAppData(this.device).execute(packageName, targetUserId);
           });
           this.assertLaunchNotAborted(signal);
+          if (!clearResult.success) {
+            const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
+            logger.warn(`[LaunchApp] Android clearAppData failed for ${packageName}: ${error}`);
+            perf.end();
+            return { success: false, packageName, userId: targetUserId, error };
+          }
         }
       }
 

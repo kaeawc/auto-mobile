@@ -7,6 +7,13 @@ import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 import type { DelegateContext, CtrlProxyKeyboardResult, CtrlProxyPressKeyResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
+export function pressKeyTimeoutMs(key: InputKeyName, timeoutMs?: number): number {
+  if (timeoutMs !== undefined) {
+    return timeoutMs;
+  }
+  return key === "arrow_left" || key === "arrow_right" ? 7000 : 5000;
+}
+
 export class CtrlProxyKeyboard {
   private readonly context: DelegateContext;
 
@@ -51,7 +58,7 @@ export class CtrlProxyKeyboard {
   async requestPressKey(
     key: InputKeyName,
     modifiers: InputKeyModifier[],
-    timeoutMs: number = 5000,
+    timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<CtrlProxyPressKeyResult> {
     return sendCommand<CtrlProxyPressKeyResult>(this.context, {
@@ -59,7 +66,7 @@ export class CtrlProxyKeyboard {
       responseType: "press_key",
       messageType: "request_press_key",
       params: { key, modifiers },
-      timeoutMs,
+      timeoutMs: pressKeyTimeoutMs(key, timeoutMs),
       perf,
       errorLabel: "Press key",
     });

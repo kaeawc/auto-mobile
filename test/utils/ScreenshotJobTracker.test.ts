@@ -3,6 +3,18 @@ import { ScreenshotJobTracker } from "../../src/utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import type { ScreenshotResult } from "../../src/models/ScreenshotResult";
+
+function deferredResult(): {
+  promise: Promise<ScreenshotResult>;
+  resolve: (result: ScreenshotResult) => void;
+} {
+  let resolve: (result: ScreenshotResult) => void = () => {};
+  const promise = new Promise<ScreenshotResult>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 describe("ScreenshotJobTracker", () => {
   let fakeTimer: FakeTimer;
@@ -317,6 +329,156 @@ describe("ScreenshotJobTracker", () => {
     expect(firstResult.path).toBe("first");
     expect(secondRunnerCalls).toBe(1);
     expect(secondResult.path).toBe("second");
+  });
+
+  test("twenty rapid fresh requests execute only the active and newest captures", async () => {
+    const activeResult = deferredResult();
+    const calls: number[] = [];
+    const active = ScreenshotJobTracker.startJob("device-burst", () => {
+      calls.push(0);
+      return activeResult.promise;
+    });
+    await Promise.resolve();
+
+    const queued = Array.from({ length: 19 }, (_, index) =>
+      ScreenshotJobTracker.startJob(
+        "device-burst",
+        async () => {
+          calls.push(index + 1);
+          return { success: true, path: `capture-${index + 1}` };
+        },
+        { queueAfterPending: true },
+      ),
+    );
+    expect(calls).toEqual([0]);
+
+    activeResult.resolve({ success: true, path: "active" });
+    const results = await Promise.all([active.promise, ...queued.map((job) => job.promise)]);
+    expect(calls).toEqual([0, 19]);
+    expect(results[0]?.path).toBe("active");
+    expect(results.slice(1).every((result) => result.path === "capture-19")).toBe(true);
+  });
+
+  test("superseded waiters receive the newest result and retain their own completion IDs", async () => {
+    const activeResult = deferredResult();
+    const completed: Array<{ jobId: string; path?: string; isLatest: boolean }> = [];
+    const active = ScreenshotJobTracker.startJob("device-waiters", () => activeResult.promise);
+    await Promise.resolve();
+    const onComplete = (completion: {
+      jobId: string;
+      result: ScreenshotResult;
+      isLatest: boolean;
+    }) => {
+      completed.push({
+        jobId: completion.jobId,
+        path: completion.result.path,
+        isLatest: completion.isLatest,
+      });
+    };
+    const old = ScreenshotJobTracker.startJob(
+      "device-waiters",
+      async () => ({ success: true, path: "stale" }),
+      { queueAfterPending: true, onComplete },
+    );
+    const newest = ScreenshotJobTracker.startJob(
+      "device-waiters",
+      async () => ({ success: true, path: "newest" }),
+      { queueAfterPending: true, onComplete },
+    );
+
+    activeResult.resolve({ success: true, path: "active" });
+    const [oldResult, newestResult] = await Promise.all([old.promise, newest.promise]);
+    await active.promise;
+    expect(oldResult).toEqual(newestResult);
+    expect(completed).toContainEqual({ jobId: old.jobId, path: "newest", isLatest: false });
+    expect(completed).toContainEqual({ jobId: newest.jobId, path: "newest", isLatest: true });
+  });
+
+  test("cancelJob removes a pending entry synchronously while its predecessor is unsettled", async () => {
+    const activeResult = deferredResult();
+    const active = ScreenshotJobTracker.startJob("device-cancel-now", () => activeResult.promise);
+    await Promise.resolve();
+    let queuedCalls = 0;
+    const queued = ScreenshotJobTracker.startJob(
+      "device-cancel-now",
+      async () => {
+        queuedCalls++;
+        return { success: true };
+      },
+      { queueAfterPending: true },
+    );
+
+    ScreenshotJobTracker.cancelJob("device-cancel-now");
+    expect(ScreenshotJobTracker.isPending("device-cancel-now")).toBe(false);
+    expect(queued.signal.aborted).toBe(true);
+    activeResult.resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+    expect((await queued.promise).error).toBe(OPERATION_CANCELLED_MESSAGE);
+    await active.promise;
+    expect(queuedCalls).toBe(0);
+  });
+
+  test("started queued jobs retain execution order when another request arrives", async () => {
+    const firstResult = deferredResult();
+    const secondResult = deferredResult();
+    const calls: string[] = [];
+    const first = ScreenshotJobTracker.startJob("device-order", () => {
+      calls.push("first");
+      return firstResult.promise;
+    });
+    await Promise.resolve();
+    const second = ScreenshotJobTracker.startJob(
+      "device-order",
+      () => {
+        calls.push("second");
+        return secondResult.promise;
+      },
+      { queueAfterPending: true },
+    );
+    firstResult.resolve({ success: true, path: "first" });
+    await first.promise;
+    await Promise.resolve();
+    expect(calls).toEqual(["first", "second"]);
+
+    const third = ScreenshotJobTracker.startJob(
+      "device-order",
+      async () => {
+        calls.push("third");
+        return { success: true, path: "third" };
+      },
+      { queueAfterPending: true },
+    );
+    expect(calls).toEqual(["first", "second"]);
+    secondResult.resolve({ success: true, path: "second" });
+    const [secondValue, thirdValue] = await Promise.all([second.promise, third.promise]);
+    expect(secondValue.path).toBe("second");
+    expect(thirdValue.path).toBe("third");
+    expect(calls).toEqual(["first", "second", "third"]);
+  });
+
+  test("bounds alternating queue kinds with an actionable error", async () => {
+    const activeResult = deferredResult();
+    const active = ScreenshotJobTracker.startJob("device-depth", () => activeResult.promise);
+    await Promise.resolve();
+    const queued = [
+      ScreenshotJobTracker.startJob("device-depth", async () => ({ success: true }), {
+        queueAfterPending: true,
+      }),
+      ScreenshotJobTracker.startJob("device-depth", async () => ({ success: true }), {
+        queueAfterPendingIfRunning: true,
+      }),
+      ScreenshotJobTracker.startJob("device-depth", async () => ({ success: true }), {
+        queueAfterPending: true,
+      }),
+    ];
+
+    expect(() =>
+      ScreenshotJobTracker.startJob("device-depth", async () => ({ success: true }), {
+        queueAfterPendingIfRunning: true,
+      }),
+    ).toThrow("Wait for a capture to finish or cancel pending captures and retry");
+
+    activeResult.resolve({ success: true });
+    await Promise.all([active.promise, ...queued.map((job) => job.promise)]);
   });
 
   test("keeps the active capture latest until its queued successor starts", async () => {

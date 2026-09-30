@@ -118,6 +118,7 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
     try {
       target = await this.createUserResolver(adb).resolve({
         explicitUserId: request.explicitUserId,
+        currentUser: true,
         signal: request.signal,
       });
     } catch (error) {
@@ -186,6 +187,7 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
     try {
       target = await this.createUserResolver(adb).resolve({
         explicitUserId: request.explicitUserId,
+        currentUser: true,
         signal: request.signal,
       });
     } catch (error) {

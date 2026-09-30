@@ -1637,12 +1637,18 @@ export class ToolRegistryClass {
         );
         return response;
       } finally {
-        await this.toolCallRepository.recordToolCall({
-          toolName: name,
-          timestamp: toolCallTimestamp,
-          sessionUuid,
-          durationMs: toolDurationMs ?? this.timer.now() - toolStartMs,
-        });
+        void Promise.resolve()
+          .then(() =>
+            this.toolCallRepository.recordToolCall({
+              toolName: name,
+              timestamp: toolCallTimestamp,
+              sessionUuid,
+              durationMs: toolDurationMs ?? this.timer.now() - toolStartMs,
+            }),
+          )
+          .catch((error: unknown) => {
+            logger.warn(`[ToolRegistry] Failed to record tool call for ${name}: ${error}`);
+          });
       }
     };
 

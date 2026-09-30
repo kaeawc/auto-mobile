@@ -45,6 +45,7 @@ import {
   type AndroidPrerequisiteDetector,
   DefaultAndroidPrerequisiteDetector,
 } from "../utils/android-cmdline-tools/AndroidPrerequisiteDetector";
+import { CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT, CTRL_PROXY_PACKAGE } from "./constants";
 
 export const MAX_STALE_PREFETCH_DIRS_PER_STARTUP = 20;
 export const STALE_PREFETCH_SWEEP_DEADLINE_MS = 5_000;
@@ -144,12 +145,13 @@ type InstalledApkSha256Result = {
 export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private readonly device: BootedDevice;
   private adb: AdbExecutor;
-  public static readonly PACKAGE = "dev.jasonpearson.automobile.ctrlproxy";
+  public static readonly PACKAGE = CTRL_PROXY_PACKAGE;
   public static readonly ACTIVITY = "dev.jasonpearson.automobile.ctrlproxy.MainActivity";
   /** Package name used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
   private static readonly LEGACY_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice";
 
-  private static readonly ACCESSIBILITY_SERVICE_COMPONENT = `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`;
+  private static readonly ACCESSIBILITY_SERVICE_COMPONENT =
+    CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT;
   // android:label references accessibility_service_name in control-proxy/strings.xml.
   private static readonly ACCESSIBILITY_SERVICE_LABEL = "AutoMobile CtrlProxy";
 

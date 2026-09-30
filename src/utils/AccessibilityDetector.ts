@@ -7,6 +7,42 @@ import type {
 import { SystemTimer, type Timer } from "./SystemTimer";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { TTLCache } from "./cache/Cache";
+import {
+  CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT,
+  CTRL_PROXY_PACKAGE,
+} from "../ctrlProxy/constants";
+import { errorMessage } from "./describeUnknownError";
+
+const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
+const TALKBACK_SERVICE = "TalkBackService";
+
+function normalizeServiceComponent(component: string): string {
+  const [packageName, className] = component.split("/", 2);
+  if (!packageName || !className) {
+    return component;
+  }
+  if (className.startsWith(".")) {
+    return `${packageName}/${packageName}${className}`;
+  }
+  if (!className.includes(".")) {
+    return `${packageName}/${packageName}.${className}`;
+  }
+  return component;
+}
+
+function isCtrlProxyService(component: string): boolean {
+  return (
+    component === CTRL_PROXY_ACCESSIBILITY_SERVICE_COMPONENT ||
+    component === `${CTRL_PROXY_PACKAGE}/.CtrlProxy`
+  );
+}
+
+function isTalkBackService(component: string): boolean {
+  return (
+    normalizeServiceComponent(component) ===
+    `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.${TALKBACK_SERVICE}`
+  );
+}
 
 /**
  * Cached accessibility state value
@@ -175,11 +211,16 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
 
       const output = result.stdout.trim();
 
-      // Check if TalkBack is in the enabled services
-      const isTalkBackEnabled =
-        output.includes("com.google.android.marvin.talkback") || output.includes("TalkBackService");
+      const services =
+        output === "" || output === "null"
+          ? []
+          : output
+              .split(":")
+              .map((service) => service.trim())
+              .filter(Boolean);
+      const nonCtrlProxyServices = services.filter((service) => !isCtrlProxyService(service));
 
-      if (isTalkBackEnabled) {
+      if (nonCtrlProxyServices.some(isTalkBackService)) {
         logger.debug(`[AccessibilityDetector] TalkBack detected as enabled on device ${deviceId}`);
         return { enabled: true, service: "talkback" };
       }
@@ -190,11 +231,11 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
       // sentinel — a substring scan (`!output.includes("null")`) misclassified any
       // legitimately-enabled service whose component string merely contains "null"
       // as disabled (#3922).
-      const isAnyServiceEnabled = output.length > 0 && output !== "null";
+      const isAnyServiceEnabled = nonCtrlProxyServices.length > 0;
 
       if (isAnyServiceEnabled) {
         logger.debug(
-          `[AccessibilityDetector] Unknown accessibility service detected on device ${deviceId}: ${output}`,
+          `[AccessibilityDetector] Unknown accessibility service detected on device ${deviceId}: ${nonCtrlProxyServices.join(":")}`,
         );
         return { enabled: true, service: "unknown" };
       }
@@ -204,8 +245,8 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
       );
       return { enabled: false, service: "unknown" };
     } catch (error) {
-      logger.error(
-        `[AccessibilityDetector] Failed to detect accessibility state for device ${deviceId}:`,
+      logger.warn(
+        `[AccessibilityDetector] Failed to detect accessibility state for device ${deviceId}: ${errorMessage(error)}`,
         error,
       );
       // Graceful fallback: assume disabled on error

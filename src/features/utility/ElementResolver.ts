@@ -379,7 +379,12 @@ export class ElementResolver {
       return this.resolveReference(result, snapshot, intent);
     }
     const actionTarget = (node: SearchableEntry | undefined) =>
-      this.actionTarget(node, snapshot, intent, scope);
+      intent.action === "highlight" &&
+      selector.elementId !== undefined &&
+      node &&
+      eligible(node, intent)
+        ? node
+        : this.actionTarget(node, snapshot, intent, scope);
     // Positional selection counts displayed actionable rows; diagnostic
     // matches retain inert labels so debug can still explain why they cannot act.
     const actionableCandidate = (candidate: SearchableEntry) =>

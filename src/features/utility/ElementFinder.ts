@@ -1518,7 +1518,7 @@ export class DefaultElementFinder implements ElementFinder {
     if (containerNode && !scope) {
       return [];
     }
-    const matches = new Set<(typeof nodes)[number]>();
+    const matches = new Map<(typeof nodes)[number]["source"], (typeof nodes)[number]>();
     for (const node of [...nodes].sort(
       (a, b) => a.windowRank - b.windowRank || a.index - b.index,
     )) {
@@ -1528,11 +1528,11 @@ export class DefaultElementFinder implements ElementFinder {
       ) {
         const target = promoteClickableAncestor(node, nodes, { action: "tap" });
         if (target?.element && (!scope || target === scope || isWithin(target, scope, nodes))) {
-          matches.add(target);
+          matches.set(target.source, matches.get(target.source) ?? target);
         }
       }
     }
-    return [...matches].flatMap((node) => (node.element ? [node.element] : []));
+    return [...matches.values()].flatMap((node) => (node.element ? [node.element] : []));
   }
 
   /**

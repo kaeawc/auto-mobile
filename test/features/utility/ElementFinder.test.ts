@@ -33,6 +33,20 @@ describe("DefaultElementFinder", () => {
     expect(matches.map((match) => match.bounds)).toEqual([innerBounds]);
   });
 
+  test("returns one clickable target when a window root aliases the main hierarchy", () => {
+    const row = {
+      clickable: true,
+      bounds: bounds(0, 0, 200, 80),
+      node: [{ text: "Wi-Fi", bounds: bounds(20, 20, 100, 50) }],
+    };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: { node: { bounds: bounds(0, 0, 200, 200), node: [row] } },
+      windows: [{ windowLayer: 10, hierarchy: { node: [row] } }],
+    };
+
+    expect(finder.findClickableParentsContainingText(hierarchy, "Wi-Fi")).toHaveLength(1);
+  });
+
   describe("findElementsByText", () => {
     test("returns empty for null hierarchy", () => {
       expect(finder.findElementsByText(null as any, "Login")).toEqual([]);

@@ -102,6 +102,51 @@ describe("Highlight Tools Registration", () => {
     });
   });
 
+  test("Android element ID highlight keeps the bounded label inside a clickable row", async () => {
+    const labelBounds = { left: 20, top: 30, right: 120, bottom: 60 };
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          "resource-id": "app:id/row",
+          clickable: true,
+          bounds: { left: 0, top: 0, right: 200, bottom: 100 },
+          node: [{ "resource-id": "app:id/label", bounds: labelBounds, text: "Wi-Fi" }],
+        },
+      },
+    };
+    let shape: HighlightShape | undefined;
+    registerHighlightTools({
+      hierarchyCaptureFactory: () => ({
+        capture: async (request) => ({
+          captureId: "id-highlight",
+          platform: "android",
+          requestedFreshness: request.freshness,
+          receivedAt: 0,
+          hierarchy,
+          nodes: new SearchableHierarchy().project(hierarchy),
+        }),
+      }),
+      highlightClientFactory: () =>
+        Object.assign(new VisualHighlightClient(), {
+          addHighlight: async (_id: string, value: HighlightShape) => {
+            shape = value;
+            return { success: true };
+          },
+        }),
+    });
+
+    const tool = ToolRegistry.getTool("highlight")!;
+    const response = await tool.deviceAwareHandler!(
+      { deviceId: "android-test", platform: "android", name: "test" },
+      tool.schema.parse({ elementId: "app:id/label" }),
+    );
+    expect(JSON.parse(response.content[0].text).success).toBe(true);
+    expect(shape).toEqual({
+      type: "circle",
+      bounds: { x: 20, y: 30, width: 100, height: 30 },
+    });
+  });
+
   test("validates highlight schema for add action", () => {
     registerHighlightTools();
 

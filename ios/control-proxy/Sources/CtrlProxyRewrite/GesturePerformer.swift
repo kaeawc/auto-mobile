@@ -231,11 +231,13 @@ public final class GesturePerformer: GesturePerforming {
         return nil
     }
 
-    private nonisolated static let closeButtonNames = [
-        "dismiss keyboard", "hide keyboard", "dismisskeyboard", "hidekeyboard",
+    private nonisolated static let submitButtonNames = [
         "return", "return_arrow", "returnarrow", "go", "search", "done", "next",
         "send", "join", "route", "↵", "⏎", "↩",
     ]
+    private nonisolated static let closeButtonNames = [
+        "dismiss keyboard", "hide keyboard", "dismisskeyboard", "hidekeyboard",
+    ] + submitButtonNames
     private nonisolated static let multilineCloseError =
         "Keyboard did not close: the focused field is multiline and has no dismiss key; tap outside the field or use a different action"
 
@@ -245,8 +247,14 @@ public final class GesturePerformer: GesturePerforming {
         case escape
     }
 
-    nonisolated static func closeAttemptOrder(hasEnabledMatch: Bool, isMultiline: Bool) -> [CloseAttempt] {
-        (hasEnabledMatch ? [.matchedButton] : []) + (isMultiline ? [] : [.newline]) + [.escape]
+    nonisolated static func closeAttemptOrder(
+        hasEnabledMatch: Bool,
+        hasSubmitKey: Bool,
+        isMultiline: Bool
+    )
+        -> [CloseAttempt]
+    {
+        (hasEnabledMatch ? [.matchedButton] : []) + (!isMultiline && hasSubmitKey ? [.newline] : []) + [.escape]
     }
 
     nonisolated static func closeKeyCandidates(
@@ -1037,6 +1045,20 @@ public final class GesturePerformer: GesturePerforming {
                 }
 
                 var enabledKey: (element: XCUIElement, method: String)?
+                var hasSubmitKey = false
+                if !isMultiline {
+                    do {
+                        hasSubmitKey = try catchingObjCException {
+                            app.keyboards.buttons.matching(NSPredicate(
+                                format: "identifier IN[c] %@ OR label IN[c] %@",
+                                Self.submitButtonNames,
+                                Self.submitButtonNames
+                            )).firstMatch.exists
+                        }
+                    } catch {
+                        print("[GesturePerformer] keyboard close submit key lookup failed: \(error)")
+                    }
+                }
                 do {
                     let keys = try catchingObjCException {
                         app.keyboards.buttons.matching(NSPredicate(
@@ -1062,7 +1084,11 @@ public final class GesturePerformer: GesturePerforming {
                     print("[GesturePerformer] keyboard close key lookup failed: \(error)")
                 }
 
-                for attempt in Self.closeAttemptOrder(hasEnabledMatch: enabledKey != nil, isMultiline: isMultiline) {
+                for attempt in Self.closeAttemptOrder(
+                    hasEnabledMatch: enabledKey != nil,
+                    hasSubmitKey: hasSubmitKey,
+                    isMultiline: isMultiline
+                ) {
                     if !isKeyboardVisible(app: app) {
                         return KeyboardActionResult(open: false)
                     }

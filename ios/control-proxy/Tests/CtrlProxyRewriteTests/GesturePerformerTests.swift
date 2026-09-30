@@ -26,21 +26,35 @@ final class KeyboardCloseKeySelectionTests: XCTestCase {
 
     func testSingleLineCloseAttemptsTryEnabledButtonThenNewlineThenEscape() {
         XCTAssertEqual(
-            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true, isMultiline: false),
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true, hasSubmitKey: true, isMultiline: false),
             [.matchedButton, .newline, .escape]
         )
     }
 
-    func testSingleLineCloseAttemptsSkipDisabledButtonBeforeNewlineAndEscape() {
+    func testSingleLineDisabledGoKeyAllowsNewlineFallback() {
+        let candidates = GesturePerformer.closeKeyCandidates([(label: "Go", identifier: "")])
+        XCTAssertEqual(candidates.map(\.method), ["returnKey"])
         XCTAssertEqual(
-            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false, isMultiline: false),
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false, hasSubmitKey: true, isMultiline: false),
             [.newline, .escape]
+        )
+    }
+
+    func testSingleLineWithoutSubmitKeyOnlyTriesEscape() {
+        XCTAssertTrue(GesturePerformer.closeKeyCandidates([(label: "Space", identifier: "")]).isEmpty)
+        XCTAssertEqual(
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false, hasSubmitKey: false, isMultiline: false),
+            [.escape]
+        )
+        XCTAssertEqual(
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true, hasSubmitKey: false, isMultiline: false),
+            [.matchedButton, .escape]
         )
     }
 
     func testMultilineCloseAttemptsOnlyUseDismissButtonThenEscape() {
         XCTAssertEqual(
-            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true, isMultiline: true),
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: true, hasSubmitKey: true, isMultiline: true),
             [.matchedButton, .escape]
         )
         let candidates = GesturePerformer.closeKeyCandidates([
@@ -78,7 +92,7 @@ final class KeyboardCloseKeySelectionTests: XCTestCase {
             (label: "Delete", identifier: ""),
         ]).isEmpty)
         XCTAssertEqual(
-            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false, isMultiline: true),
+            GesturePerformer.closeAttemptOrder(hasEnabledMatch: false, hasSubmitKey: false, isMultiline: true),
             [.escape]
         )
     }

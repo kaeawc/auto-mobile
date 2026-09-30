@@ -3,15 +3,10 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 
 type NodeHttpDownloader = {
   onFirstResponseByte?: () => void;
-  downloadWithNodeHttp(
-    url: string,
-    destination: string,
-    redirectCount: number,
-    signal?: AbortSignal,
-  ): Promise<void>;
 };
 
 const asNodeHttpDownloader = (downloader: DefaultFileDownloader): NodeHttpDownloader =>
@@ -49,18 +44,23 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
     await fs.mkdir(scratchDir, { recursive: true });
     tempDir = await fs.mkdtemp(path.join(scratchDir, "node-http-complete-"));
     const destination = path.join(tempDir, "file.bin");
-    // Calls the private downloadWithNodeHttp directly so the test exercises
-    // the Node HTTP fallback path itself, bypassing the curl/wget tiers
-    // that download() would otherwise prefer on a host that has them.
-    const downloader = asNodeHttpDownloader(new DefaultFileDownloader());
+    // Force the command transports to report unavailable so this exercises
+    // the Node fallback through the same atomic contract as curl and wget.
+    const unavailable = async (command: string): Promise<void> => {
+      throw Object.assign(new Error(`${command} not found`), { code: "ENOENT" });
+    };
+    const downloader = new DefaultFileDownloader(new CountingIdGenerator("node"), unavailable);
 
     try {
-      await downloader.downloadWithNodeHttp(url, destination, 0);
+      await downloader.download(url, destination);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
 
     expect(await fs.readFile(destination)).toEqual(payload);
+    expect((await fs.readdir(tempDir)).filter((entry) => entry.includes(".download-")).length).toBe(
+      0,
+    );
   });
 
   test("rejects promptly and removes the partial file when a real socket closes mid-body", async function () {
@@ -98,8 +98,14 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
     await fs.mkdir(scratchDir, { recursive: true });
     tempDir = await fs.mkdtemp(path.join(scratchDir, "node-http-mid-close-"));
     const destination = path.join(tempDir, "file.bin");
-    const downloader = asNodeHttpDownloader(new DefaultFileDownloader());
-    downloader.onFirstResponseByte = markFirstByteReceived;
+    const existingPayload = Buffer.from("previous complete download");
+    await fs.writeFile(destination, existingPayload);
+    const unavailable = async (command: string): Promise<void> => {
+      throw Object.assign(new Error(`${command} not found`), { code: "ENOENT" });
+    };
+    const downloader = new DefaultFileDownloader(new CountingIdGenerator("node"), unavailable);
+    const responseObserver = asNodeHttpDownloader(downloader);
+    responseObserver.onFirstResponseByte = markFirstByteReceived;
 
     try {
       // Bun's `node:http` client surfaces a real mid-body socket close as
@@ -107,10 +113,13 @@ describe("DefaultFileDownloader downloadWithNodeHttp (end to end, real socket)",
       // `ERR_STREAM_PREMATURE_CLOSE` "Premature close" text; match both so
       // this test asserts the underlying condition (an unterminated
       // response body) rather than one runtime's exact wording.
-      await expect(downloader.downloadWithNodeHttp(url, destination, 0)).rejects.toThrow(
+      await expect(downloader.download(url, destination)).rejects.toThrow(
         /premature close|closed unexpectedly/i,
       );
-      expect(await fs.stat(destination).catch(() => undefined)).toBeUndefined();
+      expect(await fs.readFile(destination)).toEqual(existingPayload);
+      expect(
+        (await fs.readdir(tempDir)).filter((entry) => entry.includes(".download-")).length,
+      ).toBe(0);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

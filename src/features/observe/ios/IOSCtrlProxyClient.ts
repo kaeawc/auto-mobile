@@ -655,6 +655,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private restartReplacementSocket: WebSocket | null = null;
   private restartSocketBeforeTeardown: WebSocket | null = null;
   private connectedSocketPort: number | null = null;
+  /** Port acquired by this registered client, if it still uses that allocation. */
+  private allocatedPort: number | null = null;
 
   // Auto-setup on connection failure
   private readonly serviceManagerFactory: ServiceManagerFactory;
@@ -741,22 +743,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const key = device.deviceId;
     const retired = IOSCtrlProxyManager.isDeviceRetired(key);
     const existing = IOSCtrlProxyClient.instances.get(key);
-    if (retired && existing) {
-      return existing;
-    }
-    const resolvedPort =
-      (retired ? IOSCtrlProxyClient.DEFAULT_PORT : port) ??
-      (device.platform === "ios"
-        ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
-        : IOSCtrlProxyClient.DEFAULT_PORT);
     if (existing) {
-      if (!existing.closed) {
-        existing.updatePort(resolvedPort);
+      if (port !== undefined && !existing.closed && !retired) {
+        existing.updatePort(port);
       }
       return existing;
     }
-
+    const allocatePort = !retired && port === undefined && device.platform === "ios";
+    const resolvedPort = allocatePort
+      ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
+      : ((retired ? IOSCtrlProxyClient.DEFAULT_PORT : port) ?? IOSCtrlProxyClient.DEFAULT_PORT);
     const client = new IOSCtrlProxyClient(device, resolvedPort);
+    if (allocatePort) {
+      client.allocatedPort = resolvedPort;
+    }
     if (retired) {
       client.closed = true;
       client.autoReconnectEnabled = false;
@@ -778,11 +778,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
   }
 
-  /**
-   * Permanently retire the registered client for one device incarnation.
-   * Keep the closed instance in the map so concurrent lookups cannot create a
-   * reconnecting replacement while the simulator is being killed.
-   */
+  /** Permanently retire the registered client for one device incarnation. */
   public static async retireInstance(deviceId: string): Promise<void> {
     IOSCtrlProxyManager.retireDevice(deviceId);
     const instance = IOSCtrlProxyClient.instances.get(deviceId);
@@ -880,8 +876,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * without leaving anything behind: because it is never cached, a later
    * `getExistingInstance` can't rediscover a closed probe and mistake it for a
    * live session (which would reconnect and leak the socket/SDK polling timer).
-   * Identical to `getInstance` otherwise — same port allocation and production
-   * defaults — just unregistered.
+   * Uses the shared port allocation and production defaults, but does not own
+   * that allocation because the registered manager or client may also use it.
    */
   public static createDetached(device: BootedDevice): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.createDetached");
@@ -1173,7 +1169,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.restartRearmTimeout = null;
     }
     this.failPendingRestart("Client closed before stable reconnect");
-    await super.close();
+    try {
+      await super.close();
+    } finally {
+      const registered = IOSCtrlProxyClient.instances.get(this.device.deviceId);
+      if (registered === this) {
+        IOSCtrlProxyClient.instances.delete(this.device.deviceId);
+      }
+      if (this.allocatedPort !== null && (!registered || registered === this)) {
+        PortManager.releaseIfAllocated(this.device.deviceId, this.allocatedPort);
+      }
+      this.allocatedPort = null;
+    }
   }
 
   private syncPortFromManager(manager: CtrlProxyIosManager): void {
@@ -1186,6 +1193,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         `[IOSCtrlProxyClient] CtrlProxy service port changed from ${this.port} to ${port}`,
       );
       this.port = port;
+      this.allocatedPort = null;
       // Invalidate any in-flight connect the same way close() does: a connect
       // that is mid-handshake snapshotted the old generation and is dialing the
       // now-stale old port (this.ws is still null, isConnecting is true), so its

@@ -60,6 +60,11 @@ class HierarchyRunnerError extends Error {
   }
 }
 
+type HierarchyLookupResult = AccessibilityHierarchyResponse & {
+  /** Internal cache-serving policy; never exposed as verification freshness. */
+  withinCacheServeWindow?: boolean;
+};
+
 type HierarchySyncResult = {
   hierarchy: AccessibilityHierarchy;
   perfTiming?: AndroidPerfTiming[];
@@ -197,7 +202,7 @@ export class CtrlProxyHierarchy {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal,
-  ): Promise<AccessibilityHierarchyResponse> {
+  ): Promise<HierarchyLookupResult> {
     const startTime = this.context.timer.now();
     let cachedHierarchy = this.context.getCachedHierarchy();
 
@@ -259,17 +264,18 @@ export class CtrlProxyHierarchy {
             );
             // Fall through to wait for fresh data or sync
           } else {
-            const isFresh = cacheAge < Math.min(1000, maxObservationAgeMs());
+            const withinCacheServeWindow = cacheAge < Math.min(1000, maxObservationAgeMs());
             const duration = this.context.timer.now() - startTime;
             logger.debug(
               `[CTRL_PROXY] Cache accepted in ${duration}ms: ` +
                 `receivedAt=${cachedHierarchy.receivedAt}, ` +
-                `updatedAt=${updatedAt}, age=${cacheAge}ms, fresh=${isFresh}`,
+                `updatedAt=${updatedAt}, age=${cacheAge}ms, withinServeWindow=${withinCacheServeWindow}`,
             );
 
             return {
               hierarchy: cachedHierarchy.hierarchy,
-              fresh: isFresh,
+              fresh: false,
+              withinCacheServeWindow,
               updatedAt: updatedAt,
               receivedAt: cachedHierarchy.receivedAt,
               perfTiming: cachedHierarchy.perfTiming,
@@ -278,15 +284,16 @@ export class CtrlProxyHierarchy {
           }
         } else {
           // No minTimestamp check, return cache
-          const isFresh = cacheAge < Math.min(1000, maxObservationAgeMs());
+          const withinCacheServeWindow = cacheAge < Math.min(1000, maxObservationAgeMs());
           const duration = this.context.timer.now() - startTime;
           logger.debug(
-            `[CTRL_PROXY] Cache hit: ${duration}ms (age: ${cacheAge}ms, fresh: ${isFresh}, updatedAt: ${updatedAt})`,
+            `[CTRL_PROXY] Cache hit: ${duration}ms (age: ${cacheAge}ms, withinServeWindow: ${withinCacheServeWindow}, updatedAt: ${updatedAt})`,
           );
 
           return {
             hierarchy: cachedHierarchy.hierarchy,
-            fresh: isFresh,
+            fresh: false,
+            withinCacheServeWindow,
             updatedAt: updatedAt,
             receivedAt: cachedHierarchy.receivedAt,
             perfTiming: cachedHierarchy.perfTiming,
@@ -504,7 +511,7 @@ export class CtrlProxyHierarchy {
       let receivedAt = response.receivedAt;
 
       // If no hierarchy from WebSocket or data is stale, sync to get fresh data
-      const needsSync = !hierarchyData || !isFresh;
+      const needsSync = !hierarchyData || (!isFresh && !response.withinCacheServeWindow);
       if (needsSync) {
         logger.debug(
           `[CTRL_PROXY] WebSocket returned ${hierarchyData ? "stale" : "no"} data (fresh=${isFresh}), syncing for fresh data`,

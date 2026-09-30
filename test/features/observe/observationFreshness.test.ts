@@ -45,6 +45,18 @@ describe("computeFreshness", () => {
       expect(v.warning).toContain("without being re-verified");
     });
 
+    test("an over-budget unverified cached tree reports the cache_age category", () => {
+      const ageMs = DEFAULT_MAX_OBSERVATION_AGE_MS + 1;
+      const v = computeFreshness({
+        actualTimestamp: NOW - ageMs,
+        now: NOW,
+        verified: false,
+      });
+      expect(v.isFresh).toBe(false);
+      expect(v.category).toBe("cache_age");
+      expect(v.ageMs).toBe(ageMs);
+    });
+
     test("an unknowable freshness reads false, not true", () => {
       const v = computeFreshness({ actualTimestamp: undefined, now: NOW });
       expect(v.isFresh).toBe(false);

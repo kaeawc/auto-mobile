@@ -2,7 +2,11 @@ import { DaemonState } from "../daemon/daemonState";
 import { AndroidCtrlProxyManager } from "../ctrlProxy/CtrlProxyManager";
 import { getAbortSignal } from "../utils/AbortContext";
 import { DEFAULT_DEVICE_TEARDOWN_TIMEOUT_MS } from "../utils/deviceTimeouts";
-import type { DeviceTeardownPhase, DeviceTeardownService } from "../devices/deviceTeardownService";
+import {
+  DeviceTeardownDeadlineError,
+  type DeviceTeardownPhase,
+  type DeviceTeardownService,
+} from "../devices/deviceTeardownService";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { logger } from "../utils/logger";
 import type { ProgressCallback } from "./toolRegistry";
@@ -12,6 +16,7 @@ import {
   capturePooledAvdIdentity,
   checkForRestartedTeardownTarget,
   createTeardownFailureResponse,
+  createTeardownVerificationDeadlineFailure,
   destroyTeardownTarget,
   finalizeTeardownEviction,
   getDeviceTeardownService,
@@ -41,6 +46,34 @@ import type {
   TeardownResolvedTarget,
   TeardownToolResponse,
 } from "./deviceTools";
+
+function teardownDeadlineFailure(
+  phase: DeviceTeardownPhase,
+  state:
+    | {
+        context: TeardownContext;
+        target: TeardownResolvedTarget;
+        lastVerificationFailure?: TeardownToolResponse;
+      }
+    | undefined,
+  args: TeardownDeviceArgs,
+  timeoutMs: number,
+): TeardownToolResponse | Error {
+  if (phase === "verification" && state) {
+    return createTeardownVerificationDeadlineFailure(
+      state.context,
+      state.target,
+      state.lastVerificationFailure,
+    );
+  }
+  return shutdownTimeoutError(
+    state?.context.deadlineDevice ?? teardownDeadlineDevice(args),
+    phase === "precondition"
+      ? "waiting for teardown target discovery or stable device lifecycle reservation"
+      : `teardown ${phase} did not complete`,
+    timeoutMs,
+  );
+}
 
 export function createLifecycleHandlers() {
   const killDeviceHandler = async (
@@ -129,6 +162,7 @@ export function createLifecycleHandlers() {
       target: TeardownResolvedTarget;
       androidManager?: AndroidCtrlProxyManager;
       earlyResponse?: TeardownToolResponse;
+      lastVerificationFailure?: TeardownToolResponse;
     };
     try {
       return await teardownService.teardown<
@@ -229,7 +263,9 @@ export function createLifecycleHandlers() {
             if (state.earlyResponse) {
               return state.earlyResponse;
             }
-            return await verifyTeardownAbsence(state.context, state.target, stop);
+            return await verifyTeardownAbsence(state.context, state.target, stop, (failure) => {
+              state.lastVerificationFailure = failure;
+            });
           },
           conflict: () =>
             createTeardownFailureResponse(
@@ -239,6 +275,13 @@ export function createLifecycleHandlers() {
               "The operation ID has already been used with different teardown arguments.",
             ),
           failure: (phase: DeviceTeardownPhase, error, state) => {
+            if (error instanceof DeviceTeardownDeadlineError) {
+              const mapped = teardownDeadlineFailure(phase, state, args, timeoutMs);
+              if (!(mapped instanceof Error)) {
+                return mapped;
+              }
+              error = mapped;
+            }
             const effectiveError =
               phase === "precondition" &&
               error instanceof Error &&

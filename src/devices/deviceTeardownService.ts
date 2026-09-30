@@ -11,6 +11,12 @@ import type {
 
 export type DeviceTeardownPhase = "precondition" | "stop" | "destroy" | "verification";
 
+export class DeviceTeardownDeadlineError extends ActionableError {
+  constructor() {
+    super("Device teardown deadline exceeded");
+  }
+}
+
 export type DeviceTeardownResolution<TTarget, TResponse> =
   | { target: TTarget }
   | { response: TResponse };
@@ -251,7 +257,7 @@ export class DeviceTeardownService {
     leaseTransfer: TransferredLeaseOwnership,
   ): Promise<TResponse> {
     const controller = new AbortController();
-    const timeoutError = new ActionableError("Device teardown deadline exceeded");
+    const timeoutError = new DeviceTeardownDeadlineError();
     const cancelAcceptedOperation = () => {
       controller.abort(
         request.callerSignal?.reason ??
@@ -335,13 +341,41 @@ export class DeviceTeardownService {
     let phase: DeviceTeardownPhase = "precondition";
     let target: TTarget | undefined;
     let lease = leaseTransfer.lease;
-    let retainLease = false;
-    const awaitStep = async <T>(operation: Promise<T>): Promise<T> =>
-      await raceWithDeadline(operation, {
-        timer: this.dependencies.timer,
-        signal,
-        label: "Device teardown",
-      });
+    let pendingSettlements = 0;
+    let workflowSettled = false;
+    const retainLeaseUntil = (settlement: Promise<unknown>): void => {
+      pendingSettlements++;
+      void settlement.then(
+        () => {
+          pendingSettlements--;
+          if (workflowSettled && pendingSettlements === 0) {
+            lease?.release();
+          }
+        },
+        () => {
+          pendingSettlements--;
+          if (workflowSettled && pendingSettlements === 0) {
+            lease?.release();
+          }
+        },
+      );
+    };
+    const awaitStep = async <T>(operation: Promise<T>): Promise<T> => {
+      try {
+        return await raceWithDeadline(operation, {
+          timer: this.dependencies.timer,
+          signal,
+          label: "Device teardown",
+        });
+      } catch (error) {
+        // A nested platform command may register its own settlement only after
+        // this race ends. Hold the lease through that registration and command.
+        if (signal.aborted) {
+          retainLeaseUntil(operation);
+        }
+        throw error;
+      }
+    };
     try {
       if (lease) {
         // This is the only path that consumes a transferred lease; from here
@@ -365,13 +399,6 @@ export class DeviceTeardownService {
         return resolution.response;
       }
       target = resolution.target;
-      const retainLeaseUntil = (settlement: Promise<unknown>): void => {
-        retainLease = true;
-        void settlement.then(
-          () => lease?.release(),
-          () => lease?.release(),
-        );
-      };
       phase = "stop";
       const stop = await awaitStep(workflow.stop(target, signal, retainLeaseUntil));
       signal.throwIfAborted();
@@ -392,7 +419,8 @@ export class DeviceTeardownService {
     } catch (error) {
       return workflow.failure(phase, signal.aborted ? (signal.reason ?? error) : error, target);
     } finally {
-      if (!retainLease) {
+      workflowSettled = true;
+      if (pendingSettlements === 0) {
         lease?.release();
       }
     }

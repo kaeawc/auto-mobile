@@ -1452,10 +1452,30 @@ internal constructor(
   )
 
   private data class OcclusionWindowIndex(
-    val all: List<IndexedValue<OcclusionNode>>,
-    val buckets: Map<Int, List<IndexedValue<OcclusionNode>>>,
-    val wide: List<IndexedValue<OcclusionNode>>,
+    val lastIndex: Int,
+    val all: List<OcclusionBoundsGroup>,
+    val buckets: Map<Int, List<OcclusionBoundsGroup>>,
+    val wide: List<OcclusionBoundsGroup>,
   )
+
+  /**
+   * Identical rectangles have the same intersection and union contribution. Keep their sorted
+   * entries so a query can retain the first eligible label when equal-layer windows interleave.
+   */
+  private data class OcclusionBoundsGroup(
+    val bounds: ElementBounds,
+    val entries: List<IndexedValue<OcclusionNode>>,
+  ) {
+    fun firstAfter(index: Int): IndexedValue<OcclusionNode>? {
+      var low = 0
+      var high = entries.size
+      while (low < high) {
+        val middle = (low + high) ushr 1
+        if (entries[middle].index <= index) low = middle + 1 else high = middle
+      }
+      return entries.getOrNull(low)
+    }
+  }
 
   private fun occlusionBuckets(bounds: ElementBounds): IntRange? {
     val first = bounds.left / OCCLUSION_BUCKET_WIDTH
@@ -1591,21 +1611,28 @@ internal constructor(
 
     val sortedNodes =
       nodes.sortedWith(compareBy<OcclusionNode> { it.windowLayer }.thenBy { it.order })
-    // Index cross-window candidates spatially. Wide roots are stored once and considered for
-    // every query; narrow nodes are visited only in the queried horizontal buckets.
+    // Index cross-window candidates spatially and collapse identical rectangles within each
+    // window. A dense accessibility tree can repeat a full-screen bound hundreds of times; only
+    // the first eligible rectangle affects coverage or the tie-broken occluder label.
     val nodesByWindow =
       sortedNodes
         .withIndex()
         .groupBy { it.value.windowKey }
         .mapValues { (_, entries) ->
-          val buckets = mutableMapOf<Int, MutableList<IndexedValue<OcclusionNode>>>()
-          val wide = mutableListOf<IndexedValue<OcclusionNode>>()
-          for (entry in entries) {
-            val span = occlusionBuckets(entry.value.bounds)
-            if (span == null) wide.add(entry)
-            else for (bucket in span) buckets.getOrPut(bucket) { mutableListOf() }.add(entry)
+          val groups =
+            entries
+              .groupBy { it.value.bounds }
+              .map { (bounds, matches) ->
+                OcclusionBoundsGroup(bounds, matches)
+              }
+          val buckets = mutableMapOf<Int, MutableList<OcclusionBoundsGroup>>()
+          val wide = mutableListOf<OcclusionBoundsGroup>()
+          for (group in groups) {
+            val span = occlusionBuckets(group.bounds)
+            if (span == null) wide.add(group)
+            else for (bucket in span) buckets.getOrPut(bucket) { mutableListOf() }.add(group)
           }
-          OcclusionWindowIndex(entries, buckets, wide)
+          OcclusionWindowIndex(entries.last().index, groups, buckets, wide)
         }
     val occlusionInfo = mutableMapOf<NodeKey, OcclusionInfo>()
     var indexEntriesVisited = 0L
@@ -1632,7 +1659,7 @@ internal constructor(
       val candidates = mutableListOf<IndexedValue<OcclusionNode>>()
       val nodeBuckets = occlusionBuckets(node.bounds)
       for ((windowKey, windowIndex) in nodesByWindow) {
-        if (windowKey == node.windowKey) continue
+        if (windowKey == node.windowKey || windowIndex.lastIndex <= i) continue
         // A query spanning several buckets is cheaper to scan once against the window index.
         // For narrow queries, stream bucket entries so duplicates never form a flattened list.
         val possible =
@@ -1644,11 +1671,12 @@ internal constructor(
               for (bucket in nodeBuckets) yieldAll(windowIndex.buckets[bucket].orEmpty())
             }
           }
-        val seen = mutableSetOf<Int>()
-        for (entry in possible) {
+        val seen = mutableSetOf<ElementBounds>()
+        for (group in possible) {
           indexEntriesVisited++
-          if (!seen.add(entry.index)) continue
-          val bounds = entry.value.bounds
+          if (!seen.add(group.bounds)) continue
+          val entry = group.firstAfter(i) ?: continue
+          val bounds = group.bounds
           if (
             entry.index > i &&
               bounds.left < node.bounds.right &&

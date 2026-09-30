@@ -94,6 +94,9 @@ describe("BaseVisualChange post-action observation", () => {
 
     // 1 initial final-observe + 4 capped retries.
     expect(fakeObserveScreen.getExecuteCallCount()).toBe(5);
+    expect(fakeObserveScreen.getExecuteOptions().map((options) => options.freshness)).toEqual(
+      Array(5).fill("fresh"),
+    );
     expect(fakeTimer.getSleepHistory()).toEqual([50, 100, 200, 400]);
     // The returned observation is the LAST attempt's (index 4), not an earlier one.
     expect((result.observation as { updatedAt: number }).updatedAt).toBe(4);
@@ -134,6 +137,7 @@ describe("BaseVisualChange post-action observation", () => {
     const options = fakeObserveScreen.getExecuteOptions();
     expect(options).toHaveLength(1);
     expect(options[0].skipScreenshot).toBe(true);
+    expect(options[0].freshness).toBe("fresh");
     expect(fakeObserveScreen.getCaptureScreenshotCallCount()).toBe(0);
     expect(fakeObserveScreen.getAccessibilityAuditCallCount()).toBe(1);
     expect(shouldSkipActionObservationScreenshot()).toBe(true);
@@ -193,6 +197,22 @@ describe("BaseVisualChange post-action observation", () => {
     // Cache read once; the only execute() is the post-action final observe.
     expect(fakeObserveScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(1);
     expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("requests cached-ok explicitly when the previous hierarchy needs a fallback", async () => {
+    const instance = createVisualChange("ios");
+    fakeObserveScreen.setObserveResult(
+      makeObserve({ viewHierarchy: { hierarchy: { error: "no cached hierarchy" } } }),
+    );
+
+    await instance.observedInteraction(async () => ({ success: false }), {
+      changeExpected: false,
+    });
+
+    expect(fakeObserveScreen.getExecuteOptions().map((options) => options.freshness)).toEqual([
+      "cached-ok",
+      "fresh",
+    ]);
   });
 
   test("records a deferred prediction outcome against the final observation once", async () => {

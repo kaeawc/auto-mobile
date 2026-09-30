@@ -46,6 +46,7 @@ function createObserveScreen(
   foregroundActivity: string | null = "com.example/.MainActivity",
   hierarchyCapture?: HierarchyCapture,
   hierarchyFailure?: ActionableError,
+  hierarchyCollector?: HierarchyCollector,
 ) {
   const fakeTimer = new FakeTimer();
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
@@ -59,10 +60,12 @@ function createObserveScreen(
       cacheStore: new FakeObserveCacheStore(fakeTimer),
       screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: fakeScreenshotRecorder,
-      hierarchyCollector: new FakeHierarchyCollector(
-        foregroundActivity,
-        hierarchyFailure,
-      ) as unknown as HierarchyCollector,
+      hierarchyCollector:
+        hierarchyCollector ??
+        (new FakeHierarchyCollector(
+          foregroundActivity,
+          hierarchyFailure,
+        ) as unknown as HierarchyCollector),
       deviceStateCollector: fakeDeviceStateCollector as unknown as DeviceStateCollector,
       performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
       accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
@@ -383,4 +386,47 @@ test("legacy observe publishes internal provenance without altering observation 
   expect(snapshot?.captureId).toBe(observation.observationId);
   expect(snapshot?.requestedFreshness).toBe("cached-ok");
   expect(JSON.stringify(observation)).not.toContain("captureId");
+});
+
+test("explicit capture freshness also controls the hierarchy collector fallback wait", async () => {
+  const waits: boolean[] = [];
+  const collector = new FakeHierarchyCollector();
+  const originalCollect = collector.collect.bind(collector);
+  collector.collect = async (
+    result,
+    queryOptions,
+    perf,
+    skipWaitForFresh,
+    minTimestamp,
+    signal,
+    readOnly,
+    capturedHierarchy,
+  ) => {
+    waits.push(skipWaitForFresh);
+    return originalCollect(
+      result,
+      queryOptions,
+      perf,
+      skipWaitForFresh,
+      minTimestamp,
+      signal,
+      readOnly,
+      capturedHierarchy,
+    );
+  };
+  const { observeScreen } = createObserveScreen(
+    undefined,
+    {
+      capture: async () => {
+        throw new ActionableError("capture unavailable");
+      },
+    },
+    undefined,
+    collector as unknown as HierarchyCollector,
+  );
+
+  await observeScreen.execute({ freshness: "fresh", skipScreenshot: true });
+  await observeScreen.execute({ freshness: "cached-ok", skipScreenshot: true });
+
+  expect(waits).toEqual([false, true]);
 });

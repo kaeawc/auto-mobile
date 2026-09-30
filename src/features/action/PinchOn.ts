@@ -286,7 +286,7 @@ export class PinchOn extends BaseVisualChange {
   private async resolveTarget(options: PinchOnOptions): Promise<PinchTarget> {
     let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
     if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
-      observeResult = await this.observeScreen.execute();
+      observeResult = await this.observeScreen.execute({ freshness: "cached-ok" });
     }
 
     const snapshot = await this.capture.capture({

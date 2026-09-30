@@ -760,7 +760,9 @@ export class RealObserveScreen implements ObserveScreen {
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     const queryOptions = options?.queryOptions;
     const perf = options?.perf ?? new NoOpPerformanceTracker();
-    const skipWaitForFresh = options?.skipWaitForFresh ?? true;
+    const skipWaitForFresh = options?.freshness
+      ? options.freshness === "cached-ok"
+      : (options?.skipWaitForFresh ?? true);
     const minTimestamp = options?.minTimestamp ?? 0;
     const signal = options?.signal;
     const skipBackStack = options?.skipBackStack ?? false;

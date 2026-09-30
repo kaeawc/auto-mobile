@@ -181,7 +181,11 @@ export class TapAtCoordinate extends BaseVisualChange {
         async () => {
           // Validate against the latest available frame immediately before dispatch.
           // Observe defaults to skipWaitForFresh=true, so cache validity matters here.
-          const observeResult = await this.observeScreen.execute({ signal, perf });
+          const observeResult = await this.observeScreen.execute({
+            freshness: "cached-ok",
+            signal,
+            perf,
+          });
           const resolved = this.resolveCoordinates(options, observeResult);
           if ("error" in resolved) {
             return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
@@ -273,10 +277,14 @@ export class TapAtCoordinate extends BaseVisualChange {
         throw actionable;
       }
 
-      // One fresh capture distinguishes Android's benign generation churn from a layout-invalidating
+      // One re-observation distinguishes Android's benign generation churn from a layout-invalidating
       // advance. Any unprovable or changed targeting state preserves the original fail-closed error.
       throwIfAborted(signal);
-      const refreshedObservation = await this.observeScreen.execute({ signal, perf });
+      const refreshedObservation = await this.observeScreen.execute({
+        freshness: "cached-ok",
+        signal,
+        perf,
+      });
       const refreshed = this.resolveCoordinates(options, refreshedObservation);
       const refreshedFrameContext = refreshedObservation.viewHierarchy?.frameContext;
       if (

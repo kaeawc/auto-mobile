@@ -7,6 +7,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
@@ -177,7 +178,7 @@ export interface SendKeysTargetFocuser {
 export interface SendKeysObserver {
   execute(options?: {
     signal?: AbortSignal;
-    skipWaitForFresh?: boolean;
+    freshness?: HierarchyCaptureRequest["freshness"];
     minTimestamp?: number;
   }): Promise<ObserveResult>;
 }
@@ -461,7 +462,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   }
 
   private async isFocusedAndroidPasswordField(signal?: AbortSignal): Promise<boolean> {
-    const observation = await this.observer.execute({ signal, skipWaitForFresh: false });
+    const observation = await this.observer.execute({ signal, freshness: "fresh" });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return false;
@@ -1246,7 +1247,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
     | { success: false; error: string }
   > {
-    const observation = await this.observer.execute({ signal, skipWaitForFresh: false });
+    const observation = await this.observer.execute({ signal, freshness: "fresh" });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return {
@@ -1490,7 +1491,7 @@ export class SendKeys {
     await progress?.(commands.length, commands.length, "Observing final keyboard input state");
     const observation = await this.observer.execute({
       signal,
-      skipWaitForFresh: false,
+      freshness: "fresh",
       minTimestamp,
     });
     return this.buildResult(execution.results, execution.failure, observation);

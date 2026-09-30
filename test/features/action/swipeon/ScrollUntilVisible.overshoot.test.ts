@@ -398,6 +398,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     expect(result.success).toBe(true);
     expect(talkBackExecutor.getDirections()).toEqual(["up", "up"]);
     expect(observeOptions).toHaveLength(4); // initial, idle, corroboration, next idle
+    expect(observeOptions.map((options) => options?.freshness)).toEqual(Array(4).fill("cached-ok"));
     expect(repeatedObservationReads).toBeGreaterThanOrEqual(3);
   });
 

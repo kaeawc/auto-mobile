@@ -170,7 +170,7 @@ export class SwipeOn extends BaseVisualChange {
   }> {
     let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
     if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
-      observeResult = await this.observeScreen.execute();
+      observeResult = await this.observeScreen.execute({ freshness: "cached-ok" });
     }
 
     if (!observeResult.viewHierarchy) {

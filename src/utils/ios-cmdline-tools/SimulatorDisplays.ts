@@ -125,7 +125,9 @@ export function simulatorDeviceDisplays(
       },
     ];
   });
-  return panels.length > 1 ? { panels, postures: ["unknown"] } : undefined;
+  return panels.length > 1
+    ? { panels, postures: isDuo ? ["closed", "half_opened", "opened"] : ["unknown"] }
+    : undefined;
 }
 
 /** Select only when the live runner size identifies one screen unambiguously. */

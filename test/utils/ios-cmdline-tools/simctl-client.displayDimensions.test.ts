@@ -65,7 +65,7 @@ describe("SimCtlClient display dimension enrichment", () => {
           { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
           { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
         ],
-        postures: ["unknown"],
+        postures: ["closed", "half_opened", "opened"],
       },
     });
     expect(commands).toContain(`simctl io ${UDID} enumerate`);

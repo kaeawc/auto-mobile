@@ -11413,7 +11413,7 @@
   },
   {
     "name": "setPosture",
-    "description": "Set the device posture, and optionally the Resizable emulator display preset",
+    "description": "Set Android device posture or iPhone Duo simulator hinge posture, and optionally the Resizable Android emulator display preset",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

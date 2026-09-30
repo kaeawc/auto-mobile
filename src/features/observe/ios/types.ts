@@ -155,6 +155,7 @@ export interface WebSocketMessage {
   previousOrientation?: string;
   currentOrientation?: string;
   value?: number;
+  angle?: number;
   rotationPerformed?: boolean;
   // Pinch-only: which mechanism performed the gesture — "event-path" (private
   // synthesis, honors center) or "element-anchored" (public fallback, center-less).
@@ -227,6 +228,14 @@ export interface CtrlProxyRotateResult extends BaseResult {
   currentOrientation: string;
   value: number;
   rotationPerformed: boolean;
+}
+
+/** Hinge angle result from CtrlProxy iOS */
+export interface CtrlProxyHingeAngleResult {
+  success: boolean;
+  angle?: number;
+  error?: string;
+  totalTimeMs: number;
 }
 
 /** Launch app result from CtrlProxy iOS */

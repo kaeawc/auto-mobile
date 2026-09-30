@@ -2077,6 +2077,44 @@ describe("IOSCtrlProxyClient", function () {
     });
   });
 
+  describe("requestSetHingeAngle", function () {
+    test("sends the angle and resolves a typed runner result", async function () {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      try {
+        const promise = testClient.requestSetHingeAngle(180);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket!, 1);
+        const request = commandPayloads(socket!)[0];
+        expect(request).toMatchObject({ type: "set_hinge_angle", angle: 180 });
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hinge_angle_result",
+            requestId: request.requestId,
+            success: true,
+            angle: 180,
+            totalTimeMs: 2,
+          }),
+        );
+        expect(await promise).toEqual({
+          success: true,
+          angle: 180,
+          error: undefined,
+          totalTimeMs: 2,
+        });
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("requestPressKey", function () {
     test("should send a discrete key chord and resolve the result", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
@@ -2157,6 +2195,10 @@ describe("IOSCtrlProxyClient", function () {
         expect(rotate.rotationPerformed).toBe(false);
         expect(rotate.error).toContain("does not support request_rotate");
 
+        const hinge = await testClient.requestSetHingeAngle(130, 5000);
+        expect(hinge).toMatchObject({ success: false, totalTimeMs: 0 });
+        expect(hinge.error).toContain("does not support set_hinge_angle");
+
         const clipboard = await testClient.requestClipboard("get", undefined, 5000);
         expect(clipboard.success).toBe(false);
         expect(clipboard.action).toBe("get");
@@ -2213,8 +2255,17 @@ describe("IOSCtrlProxyClient", function () {
         expect(rotate.totalTimeMs).toBe(100);
         expect(rotate.error).toBe("Rotate timed out after 100ms");
 
-        const clipboardPromise = testClient.requestClipboard("get", undefined, 100);
+        const hingePromise = testClient.requestSetHingeAngle(130, 100);
         await waitForSentMessages(socket as CapturingWebSocket, 3);
+        testTimer.advanceTime(100);
+        expect(await hingePromise).toEqual({
+          success: false,
+          totalTimeMs: 100,
+          error: "Set hinge angle timed out after 100ms",
+        });
+
+        const clipboardPromise = testClient.requestClipboard("get", undefined, 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 4);
         testTimer.advanceTime(100);
         const clipboard = await clipboardPromise;
         expect(clipboard.success).toBe(false);

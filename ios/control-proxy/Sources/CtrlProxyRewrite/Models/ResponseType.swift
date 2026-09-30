@@ -28,6 +28,7 @@ public enum ResponseType: String, Sendable {
     case launchAppResult = "launch_app_result"
     case resetPermissionsResult = "reset_permissions_result"
     case rotateResult = "rotate_result"
+    case hingeAngleResult = "hinge_angle_result"
     case clipboardResult = "clipboard_result"
     case currentFocusResult = "current_focus_result"
     case traversalOrderResult = "traversal_order_result"

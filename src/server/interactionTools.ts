@@ -2964,7 +2964,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "setPosture",
-    "Set the device posture, and optionally the Resizable emulator display preset",
+    "Set Android device posture or iPhone Duo simulator hinge posture, and optionally the Resizable Android emulator display preset",
     setPostureSchema,
     setPostureHandler,
     { defaultEnabled: false },

@@ -23,6 +23,7 @@ import {
 } from "../../src/features/observe/ios";
 import type {
   CtrlProxyVoiceOverResult,
+  CtrlProxyHingeAngleResult,
   CtrlProxyActionResult,
   CtrlProxyHierarchy,
 } from "../../src/features/observe/ios/types";
@@ -119,6 +120,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private shakeTimeoutHistory: number[] = [];
   private recentAppsRequestCount: number = 0;
   private rotateHistory: Array<{ orientation: string }> = [];
+  private hingeAngleHistory: number[] = [];
+  private hingeAngleResult: CtrlProxyHingeAngleResult | null = null;
   private currentOrientation: string = "portrait";
   private launchAppHistory: string[] = [];
   private dragResult: CtrlProxyDragResult | null = null;
@@ -374,6 +377,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return [...this.rotateHistory];
   }
 
+  getHingeAngleHistory(): number[] {
+    return [...this.hingeAngleHistory];
+  }
+
+  setHingeAngleResult(result: CtrlProxyHingeAngleResult | null): void {
+    this.hingeAngleResult = result;
+  }
+
   /**
    * Get the history of launch app requests
    */
@@ -508,6 +519,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.recentAppsRequestCount = 0;
     this.launchAppHistory = [];
     this.rotateHistory = [];
+    this.hingeAngleHistory = [];
     this.currentOrientation = "portrait";
     this.voiceOverActivateHistory = [];
     this.setVoiceOverEnabledHistory = [];
@@ -1030,6 +1042,16 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
       rotationPerformed,
       perfTiming: this.performanceTiming || undefined,
     };
+  }
+
+  async requestSetHingeAngle(
+    angle: number,
+    timeoutMs: number = 5000,
+  ): Promise<CtrlProxyHingeAngleResult> {
+    this.hingeAngleHistory.push(angle);
+    await this.applyDelay("setHingeAngle");
+    this.checkFailure("setHingeAngle");
+    return this.hingeAngleResult ?? { success: true, angle, totalTimeMs: 0 };
   }
 
   async requestLaunchApp(

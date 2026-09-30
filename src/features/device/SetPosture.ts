@@ -7,6 +7,11 @@ import {
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { DisplayPanel } from "../../models/DisplayPanel";
+import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
 
 export type RequestedPosture = Exclude<Posture, "unknown">;
 export type DisplayPreset = "phone" | "unfolded" | "tablet";
@@ -27,6 +32,77 @@ export type SetPostureOutput = SetPostureResult | SetPostureUnsupportedResult;
 export interface SetPostureDependencies {
   adbFactory?: AdbClientFactory;
   observeFactory?: (device: BootedDevice) => ObserveScreen;
+  iosClientProvider?: (device: BootedDevice) => IOSCtrlProxy;
+  timer?: Timer;
+  transitionSink?: DisplayTransitionSink;
+}
+
+const IOS_POSTURE_POLL_INTERVAL_MS = 250;
+const IOS_POSTURE_TIMEOUT_MS = 3000;
+
+type IosPanelMatch = "expected" | "old" | "indeterminate";
+
+function sizeMatchesPanel(size: { width: number; height: number }, panel: DisplayPanel): boolean {
+  const matchesSize = (width: number, height: number): boolean =>
+    (size.width === width && size.height === height) ||
+    (size.width === height && size.height === width);
+  if (matchesSize(panel.sizePx.width, panel.sizePx.height)) {
+    return true;
+  }
+  return (
+    panel.scale !== undefined &&
+    matchesSize(
+      Math.round(panel.sizePx.width / panel.scale),
+      Math.round(panel.sizePx.height / panel.scale),
+    )
+  );
+}
+
+export function classifyIosPostureObservation(
+  observation: Awaited<ReturnType<ObserveScreen["execute"]>>,
+  panels: DisplayPanel[] | undefined,
+  expectedRole: "cover" | "inner",
+): IosPanelMatch {
+  const expected = panels?.find((panel) => panel.role === expectedRole);
+  const old = panels?.find(
+    (panel) => panel.role === (expectedRole === "cover" ? "inner" : "cover"),
+  );
+  if (!expected || !old) {
+    return "indeterminate";
+  }
+  const matchesPanel = (panel: DisplayPanel): boolean =>
+    observation.display.role === panel.role || sizeMatchesPanel(observation.screenSize, panel);
+  if (matchesPanel(expected)) {
+    return "expected";
+  }
+  return matchesPanel(old) ? "old" : "indeterminate";
+}
+
+async function observeIosPosture(
+  observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
+  panels: DisplayPanel[] | undefined,
+  expectedRole: "cover" | "inner",
+  timer: Timer,
+): Promise<Awaited<ReturnType<ObserveScreen["execute"]>>> {
+  const startedAt = timer.now();
+  let observation = await observe();
+  let match = classifyIosPostureObservation(observation, panels, expectedRole);
+  while (match === "old") {
+    const elapsed = timer.now() - startedAt;
+    if (elapsed >= IOS_POSTURE_TIMEOUT_MS) {
+      break;
+    }
+    await timer.sleep(Math.min(IOS_POSTURE_POLL_INTERVAL_MS, IOS_POSTURE_TIMEOUT_MS - elapsed));
+    observation = await observe();
+    match = classifyIosPostureObservation(observation, panels, expectedRole);
+  }
+  if (match === "old") {
+    const oldRole = expectedRole === "cover" ? "inner" : "cover";
+    throw new ActionableError(
+      `The iPhone Duo hinge event was accepted, but the active display is still the ${oldRole} panel after ${IOS_POSTURE_TIMEOUT_MS} ms. The simulator did not apply the posture.`,
+    );
+  }
+  return observation;
 }
 
 const EMULATOR_POSTURE_IDS: Record<RequestedPosture, number> = {
@@ -99,6 +175,9 @@ async function setPhysicalPosture(
 export class SetPosture {
   private readonly adbFactory: AdbClientFactory;
   private readonly observeFactory: (device: BootedDevice) => ObserveScreen;
+  private readonly iosClientProvider: (device: BootedDevice) => IOSCtrlProxy;
+  private readonly timer: Timer;
+  private readonly transitionSink: DisplayTransitionSink;
 
   constructor(
     private readonly device: BootedDevice,
@@ -107,6 +186,10 @@ export class SetPosture {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.observeFactory =
       dependencies.observeFactory ?? ((target) => new RealObserveScreen(target));
+    this.iosClientProvider =
+      dependencies.iosClientProvider ?? ((target) => IOSCtrlProxyClient.getInstance(target));
+    this.timer = dependencies.timer ?? defaultTimer;
+    this.transitionSink = dependencies.transitionSink ?? displayTransitions;
   }
 
   async execute(
@@ -114,11 +197,7 @@ export class SetPosture {
     displayPreset?: DisplayPreset,
   ): Promise<SetPostureOutput> {
     if (this.device.platform === "ios") {
-      return {
-        status: "unsupported",
-        message:
-          "setPosture is not supported on iOS yet; the iPhone Duo posture is only available through Device Hub (#8254).",
-      };
+      return this.executeIos(requested, displayPreset);
     }
 
     validateInventoryPosture(this.device, requested);
@@ -138,6 +217,57 @@ export class SetPosture {
     }
 
     const observation = await this.observeFactory(this.device).execute({});
+    return {
+      posture: requested,
+      display: observation.display,
+      ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
+    };
+  }
+
+  private async executeIos(
+    requested: RequestedPosture,
+    displayPreset?: DisplayPreset,
+  ): Promise<SetPostureOutput> {
+    if (!isIosSimulatorUdid(this.device.deviceId)) {
+      return {
+        status: "unsupported",
+        message: "Physical iOS hinge posture can only be read, not set.",
+      };
+    }
+    if (this.device.deviceType && !this.device.deviceType.endsWith(".iPhone-Duo")) {
+      return { status: "unsupported", message: "This iOS simulator is not a foldable device." };
+    }
+    if (displayPreset) {
+      throw new ActionableError("displayPreset is not supported on iOS simulators.");
+    }
+    const angles: Partial<Record<RequestedPosture, number>> = {
+      closed: 0,
+      half_opened: 130,
+      opened: 180,
+    };
+    const angle = angles[requested];
+    if (angle === undefined) {
+      throw new ActionableError(
+        `Posture '${requested}' is not supported by the iPhone Duo. Supported postures: closed, half_opened, opened.`,
+      );
+    }
+    const result = await this.iosClientProvider(this.device).requestSetHingeAngle(angle);
+    if (!result.success) {
+      throw new ActionableError(
+        `Could not set iPhone Duo posture: ${result.error ?? "unknown runner error"}`,
+      );
+    }
+    this.transitionSink.notifyTransition(
+      this.device.deviceId,
+      "setPosture changed the iPhone Duo hinge angle",
+    );
+    const expectedRole = requested === "closed" ? "cover" : "inner";
+    const observation = await observeIosPosture(
+      () => this.observeFactory(this.device).execute({}),
+      this.device.displays?.panels,
+      expectedRole,
+      this.timer,
+    );
     return {
       posture: requested,
       display: observation.display,

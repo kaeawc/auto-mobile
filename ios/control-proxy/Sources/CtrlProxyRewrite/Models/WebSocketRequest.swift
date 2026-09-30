@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - Typed request envelope
+
 //
 // Ported from the reference `CtrlProxy` target's `Models.swift`. The WIRE FORMAT
 // IS FROZEN: the same `type` discriminator strings (see `RequestType`) and the
@@ -49,6 +50,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case launchApp(RequestLaunchApp)
     case resetPermissions(RequestResetPermissions)
     case rotate(RequestRotate)
+    case setHingeAngle(RequestSetHingeAngle)
     case clipboard(RequestClipboard)
 
     case getCurrentFocus(RequestEnvelope)
@@ -145,6 +147,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             self = try .resetPermissions(RequestResetPermissions(from: decoder))
         case .requestRotate:
             self = try .rotate(RequestRotate(from: decoder))
+        case .setHingeAngle:
+            self = try .setHingeAngle(RequestSetHingeAngle(from: decoder))
         case .requestClipboard:
             self = try .clipboard(RequestClipboard(from: decoder))
         case .getCurrentFocus:
@@ -222,6 +226,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .launchApp: return .requestLaunchApp
         case .resetPermissions: return .requestResetPermissions
         case .rotate: return .requestRotate
+        case .setHingeAngle: return .setHingeAngle
         case .clipboard: return .requestClipboard
         case .getCurrentFocus: return .getCurrentFocus
         case .getTraversalOrder: return .getTraversalOrder
@@ -271,6 +276,7 @@ public enum WebSocketRequest: Decodable, Sendable {
              let .getSdkCapabilities(payload):
             return payload
         case let .setVoiceOverState(payload): return payload
+        case let .setHingeAngle(payload): return payload
         case let .tapCoordinates(payload): return payload
         case let .swipe(payload): return payload
         case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):

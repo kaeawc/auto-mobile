@@ -286,7 +286,7 @@ describe("observation display stamp", () => {
           { key: "inner", role: "inner", sizePx: { width: 2064, height: 2208 } },
           { key: "primary", role: "cover", sizePx: { width: 1170, height: 2532 } },
         ],
-        postures: ["unknown"],
+        postures: ["closed", "half_opened", "opened"],
       },
     };
     expect(

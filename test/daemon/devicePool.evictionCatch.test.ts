@@ -65,16 +65,18 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     // Fire the process-exit event; the rejection must be caught, not unhandled.
     child.emit("exit", 1, null);
 
+    const hasLoggedEviction = (): boolean =>
+      warnSpy.mock.calls.some(
+        (call) => typeof call[0] === "string" && call[0].includes("Failed to evict emulator-5554"),
+      );
+
     // Let the rejected eviction promise settle through the .catch (microtasks only).
-    for (let i = 0; i < 10; i++) {
+    for (let turn = 0; turn < 50 && !hasLoggedEviction(); turn++) {
       await Promise.resolve();
     }
 
     expect(evictSpy).toHaveBeenCalledTimes(1);
-    const loggedEviction = warnSpy.mock.calls.some(
-      (call) => typeof call[0] === "string" && call[0].includes("Failed to evict emulator-5554"),
-    );
-    expect(loggedEviction).toBe(true);
+    expect(hasLoggedEviction()).toBe(true);
 
     warnSpy.mockRestore();
     evictSpy.mockRestore();

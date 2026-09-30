@@ -82,6 +82,7 @@ import {
 } from "./emulatorLossIncident";
 import { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
 import { IdleDeviceReaper } from "./idleDeviceReaper";
+import { DeviceRecoveryCoordinator } from "./deviceRecoveryCoordinator";
 import { DeviceAutolockManager, type AutolockClient } from "./deviceAutolockManager";
 import {
   DeviceDisconnectHandler,
@@ -144,7 +145,6 @@ export class DevicePoolError extends Error {
  */
 export type DeviceStatus = "idle" | "busy" | "error";
 const UNCONFIRMED_RECOVERY_SHUTDOWN_COOLDOWN_MS = 30_000;
-const RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS = 250;
 const MAX_DEFERRED_RECOVERY_SHUTDOWNS = 1;
 /** Initial unreadable observation plus two cache-bypassing rediscovery attempts. */
 const POOLED_IDENTITY_RECONCILE_MAX_ATTEMPTS = DEFAULT_RETRY_OPTIONS.maxAttempts;
@@ -481,11 +481,6 @@ interface AdbServerResetRecoveryReservation {
   recoveryGeneration?: number;
 }
 
-interface RecoveringAndroidImageSettlement {
-  settled: Promise<void>;
-  resolve(): void;
-}
-
 export interface AdbServerResetCohortDetachment {
   devices: readonly PooledDevice[];
   deferred: boolean;
@@ -655,11 +650,16 @@ export class DevicePool {
   private readonly androidDeviceReboot: AndroidDeviceReboot;
   private readonly recoveryPolicy: DeviceRecoveryPolicy;
   private readonly deviceSessionContinuityEnabled: boolean;
-  private readonly recoveringAndroidImages: Map<string, DeviceInfo> = new Map();
-  private readonly recoveringAndroidImageSettlements: Map<
-    string,
-    RecoveringAndroidImageSettlement
-  > = new Map();
+  private readonly recoveryCoordinator: DeviceRecoveryCoordinator;
+  private get recoveringAndroidImages(): Map<string, DeviceInfo> {
+    return this.recoveryCoordinator.recoveringAndroidImages;
+  }
+  private get recoveringAndroidDeviceIds(): Set<string> {
+    return this.recoveryCoordinator.recoveringAndroidDeviceIds;
+  }
+  private get androidRecoveryHandoffOwners(): Map<string, symbol> {
+    return this.recoveryCoordinator.androidRecoveryHandoffOwners;
+  }
   private afterAndroidStartupRecoverySnapshot?: () => void;
   /**
    * A reset cohort is reserved before its first member is restarted. This keeps
@@ -681,8 +681,6 @@ export class DevicePool {
   /** Sessions whose old serial may be reused before their reset cohort settles. */
   private readonly adbServerResetQuarantinedSessions: Set<string> = new Set();
   private readonly sessionPreservingRecoveries = new Map<string, SessionPreservingRecovery>();
-  private readonly recoveringAndroidDeviceIds: Set<string> = new Set();
-  private readonly androidRecoveryHandoffOwners = new Map<string, symbol>();
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
   private readonly startedDeviceProcessOutput: Map<string, EmulatorProcessOutputTail> = new Map();
   private readonly emulatorLossLedger: EmulatorLossIncidentLedger;
@@ -876,6 +874,10 @@ export class DevicePool {
       },
       this.timer,
     );
+    this.recoveryCoordinator = new DeviceRecoveryCoordinator({
+      getRecoveringSessionLosses: () => this.recoveringSessionLosses,
+      getTimer: () => this.timer,
+    });
     this.emulatorLossLedger = new EmulatorLossIncidentLedger(
       {
         getDevice: (deviceId) => this.getDevice(deviceId),
@@ -912,14 +914,20 @@ export class DevicePool {
         recordEmulatorLossRecoveryAttempt: (incidentId, attempt) =>
           this.recordEmulatorLossRecoveryAttempt(incidentId, attempt),
         setRecoveringAndroidImage: (avdName, image) =>
-          this.setRecoveringAndroidImage(avdName, image),
-        addRecoveringAndroidDeviceId: (deviceId) => this.addRecoveringAndroidDeviceId(deviceId),
+          this.recoveryCoordinator.setRecoveringAndroidImage(avdName, image),
+        addRecoveringAndroidDeviceId: (deviceId) =>
+          this.recoveryCoordinator.addRecoveringAndroidDeviceId(deviceId),
         setAndroidRecoveryHandoffOwner: (deviceId, owner) =>
-          this.setAndroidRecoveryHandoffOwner(deviceId, owner),
+          this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(deviceId, owner),
         clearAndroidRecoveryHandoffOwnerIfCurrent: (deviceId, owner) =>
-          this.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
+          this.recoveryCoordinator.clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId, owner),
         finishAndroidRecoveryAttempt: (avdName, deviceIds, retainImage, owner) =>
-          this.finishAndroidRecoveryAttempt(avdName, deviceIds, retainImage, owner),
+          this.recoveryCoordinator.finishAndroidRecoveryAttempt(
+            avdName,
+            deviceIds,
+            retainImage,
+            owner,
+          ),
         stopAndroidEmulatorForRecovery: (
           device,
           avdName,
@@ -1127,7 +1135,7 @@ export class DevicePool {
     }
     const { record } = finalization;
     if (record.reservations.has("image") && record.avdName) {
-      this.clearRecoveringAndroidImage(record.avdName);
+      this.recoveryCoordinator.clearRecoveringAndroidImage(record.avdName);
     }
     finalization.clearAdbResetReservation();
     if (record.reservations.has("quarantine")) {
@@ -4172,7 +4180,10 @@ export class DevicePool {
       if (matchingReservations.length > 0) {
         await this.waitForAdbServerResetReservations(matchingReservations, signal);
       } else {
-        await this.waitForRecoveringAndroidImages(matchingRecoveryAvdNames, signal);
+        await this.recoveryCoordinator.waitForRecoveringAndroidImages(
+          matchingRecoveryAvdNames,
+          signal,
+        );
       }
     }
 
@@ -4353,82 +4364,10 @@ export class DevicePool {
     reservations: readonly AdbServerResetRecoveryReservation[],
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.waitForRecoverySettlements(
+    await this.recoveryCoordinator.waitForRecoverySettlements(
       reservations.map((reservation) => reservation.settled),
       signal,
     );
-  }
-
-  private async waitForRecoveringAndroidImages(
-    avdNames: readonly string[],
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const settlements = avdNames.flatMap((avdName) => {
-      const settlement = this.recoveringAndroidImageSettlements.get(avdName);
-      return settlement ? [settlement.settled] : [];
-    });
-    if (settlements.length === 0) {
-      if (!avdNames.some((avdName) => this.recoveringAndroidImages.has(avdName))) {
-        return;
-      }
-      // The maps should be updated together; a short retry safely handles any transient inconsistency.
-      logger.debug(
-        `[DevicePool] Recovering Android AVD image was observed without a tracked settlement; retrying`,
-      );
-      await this.waitForAndroidRecoveryDelay(RECOVERING_IMAGE_SETTLEMENT_MISSING_RETRY_MS, signal);
-      return;
-    }
-    await this.waitForRecoverySettlements(settlements, signal);
-  }
-
-  private async waitForRecoverySettlements(
-    settlements: readonly Promise<void>[],
-    signal?: AbortSignal,
-  ): Promise<void> {
-    if (settlements.length === 0) {
-      return;
-    }
-    let abortListener: (() => void) | undefined;
-    const cancellation = signal
-      ? new Promise<never>((_resolve, reject) => {
-          abortListener = () => reject(signal.reason ?? new Error("Device preparation cancelled"));
-          if (signal.aborted) {
-            abortListener();
-            return;
-          }
-          signal.addEventListener("abort", abortListener, { once: true });
-        })
-      : undefined;
-    try {
-      await Promise.race([Promise.all(settlements), ...(cancellation ? [cancellation] : [])]);
-    } finally {
-      if (abortListener) {
-        signal?.removeEventListener("abort", abortListener);
-      }
-    }
-  }
-
-  private async waitForAndroidRecoveryDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
-    if (!signal) {
-      await this.timer.sleep(delayMs);
-      return;
-    }
-    let abortListener: (() => void) | undefined;
-    const cancellation = new Promise<never>((_resolve, reject) => {
-      abortListener = () => reject(signal.reason ?? new Error("Device preparation cancelled"));
-      if (signal.aborted) {
-        abortListener();
-        return;
-      }
-      signal.addEventListener("abort", abortListener, { once: true });
-    });
-    try {
-      await Promise.race([this.timer.sleep(delayMs), cancellation]);
-    } finally {
-      if (abortListener) {
-        signal.removeEventListener("abort", abortListener);
-      }
-    }
   }
 
   private async releasePreservedAdbResetSessionIfDetached(
@@ -4534,64 +4473,6 @@ export class DevicePool {
       signal,
       retainLeaseUntil,
     );
-  }
-
-  private addRecoveringAndroidDeviceId(deviceId: string): void {
-    this.recoveringAndroidDeviceIds.add(deviceId);
-  }
-
-  private setAndroidRecoveryHandoffOwner(deviceId: string, handoffOwner: symbol): void {
-    this.androidRecoveryHandoffOwners.set(deviceId, handoffOwner);
-  }
-
-  private clearAndroidRecoveryHandoffOwnerIfCurrent(deviceId: string, owner: symbol): void {
-    if (this.androidRecoveryHandoffOwners.get(deviceId) === owner) {
-      this.androidRecoveryHandoffOwners.delete(deviceId);
-    }
-  }
-
-  private finishAndroidRecoveryAttempt(
-    avdName: string,
-    recoveryDeviceIds: ReadonlySet<string>,
-    retainRecoveryImage: boolean,
-    replacementHandoffOwner: symbol,
-  ): void {
-    for (const [deviceId, owner] of this.androidRecoveryHandoffOwners) {
-      if (owner === replacementHandoffOwner) {
-        this.androidRecoveryHandoffOwners.delete(deviceId);
-      }
-    }
-    const recordOwnsImage = Array.from(this.recoveringSessionLosses.values()).some(
-      (record) => record.avdName === avdName && record.reservations.has("image"),
-    );
-    if (!retainRecoveryImage && !recordOwnsImage) {
-      this.clearRecoveringAndroidImage(avdName);
-    }
-    for (const deviceId of recoveryDeviceIds) {
-      this.recoveringAndroidDeviceIds.delete(deviceId);
-    }
-  }
-
-  private setRecoveringAndroidImage(avdName: string, image: DeviceInfo): void {
-    this.recoveringAndroidImages.set(avdName, image);
-    if (this.recoveringAndroidImageSettlements.has(avdName)) {
-      return;
-    }
-    let resolve!: () => void;
-    const settled = new Promise<void>((resolvePromise) => {
-      resolve = resolvePromise;
-    });
-    this.recoveringAndroidImageSettlements.set(avdName, { settled, resolve });
-  }
-
-  private clearRecoveringAndroidImage(avdName: string): void {
-    this.recoveringAndroidImages.delete(avdName);
-    const settlement = this.recoveringAndroidImageSettlements.get(avdName);
-    if (!settlement) {
-      return;
-    }
-    this.recoveringAndroidImageSettlements.delete(avdName);
-    settlement.resolve();
   }
 
   private async stopAndroidEmulatorForRecovery(
@@ -4898,10 +4779,16 @@ export class DevicePool {
               `Android emulator '${avdName}' changed ownership during recovery; recovery will not relaunch it`,
             );
           }
-          this.androidRecoveryHandoffOwners.set(matchingAvd.deviceId, handoffOwner);
+          this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(
+            matchingAvd.deviceId,
+            handoffOwner,
+          );
           await this.removeDevice(disconnectedDevice.id, true, disconnectedDevice);
         } else {
-          this.androidRecoveryHandoffOwners.set(matchingAvd.deviceId, handoffOwner);
+          this.recoveryCoordinator.setAndroidRecoveryHandoffOwner(
+            matchingAvd.deviceId,
+            handoffOwner,
+          );
         }
         await this.addDevice(matchingAvd, disconnectedDevice.androidImage);
         signal.throwIfAborted();
@@ -5609,7 +5496,12 @@ export class DevicePool {
     if (this.hasReadinessNameReservation(device, readinessReservationOwners)) {
       throw new ActionableError(unavailableMessage);
     }
-    if (this.isAndroidRecoveryHandoffReserved(device.id, readinessReservationOwners)) {
+    if (
+      this.recoveryCoordinator.isAndroidRecoveryHandoffReserved(
+        device.id,
+        readinessReservationOwners,
+      )
+    ) {
       throw new ActionableError(unavailableMessage);
     }
 
@@ -6707,18 +6599,10 @@ export class DevicePool {
     return (
       this.isReservedForReadiness(device.id) ||
       this.hasReadinessNameReservation(device) ||
-      this.isAndroidRecoveryHandoffReserved(device.id) ||
+      this.recoveryCoordinator.isAndroidRecoveryHandoffReserved(device.id) ||
       this.isReservedForShutdown(device) ||
       this.isDeviceUnderShutdown(device.id)
     );
-  }
-
-  private isAndroidRecoveryHandoffReserved(
-    deviceId: string,
-    allowedOwners?: ReadonlySet<symbol>,
-  ): boolean {
-    const owner = this.androidRecoveryHandoffOwners.get(deviceId);
-    return owner !== undefined && !allowedOwners?.has(owner);
   }
 
   private assertNotReservedForShutdown(device: PooledDevice, unavailableMessage: string): void {

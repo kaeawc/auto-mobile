@@ -22,6 +22,7 @@ import {
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger, type Logger } from "../../../utils/logger";
+import { displayTransitions } from "../DisplayTransition";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import { CtrlProxyForwardingLeaseConflictError } from "../shared/CtrlProxyForwardingLeaseConflictError";
 import {
@@ -4527,6 +4528,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     display_transition: (message) => {
       const event = displayTransitionFromWire(message);
       if (event) {
+        displayTransitions.notifyAndroidTransition(this.device.deviceId, event);
         this.onDisplayTransition?.(event);
       }
     },

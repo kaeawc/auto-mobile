@@ -127,6 +127,11 @@ const absentPredicatePresenceSchema = z.union([
 const absentPredicateSchema = absentPredicateBaseSchema.and(absentPredicatePresenceSchema);
 
 const waitForCommonShape = {
+  posture: z
+    .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent"])
+    .optional()
+    .describe("Wait for the observed device posture"),
+  activeDisplay: z.string().min(1).optional().describe("Wait for a panel key or role"),
   activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
   absent: absentPredicateSchema
     .optional()
@@ -216,6 +221,8 @@ const waitForElementBaseSchema = z
   });
 
 const waitForPredicatePresenceSchema = z.union([
+  z.object({ posture: waitForCommonShape.posture.unwrap() }).passthrough(),
+  z.object({ activeDisplay: z.string().min(1) }).passthrough(),
   z.object({ elementId: z.string() }).passthrough(),
   z.object({ text: z.string() }).passthrough(),
   z.object({ className: z.string() }).passthrough(),
@@ -266,6 +273,8 @@ const waitForConditionDslSchema = z
     textMatch: z.never().optional(),
     activeWindow: z.never().optional(),
     absent: z.never().optional(),
+    posture: z.never().optional(),
+    activeDisplay: z.never().optional(),
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -372,6 +381,11 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
         { required: ["activityName"] },
       ],
     },
+    posture: {
+      type: "string",
+      enum: ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"],
+    },
+    activeDisplay: { type: "string", description: "Physical panel key or role" },
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
     container: {
       type: "object",
@@ -404,6 +418,8 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
         ...ELEMENT_PREDICATE_REQUIRED,
         { required: ["activeWindow"] },
         { required: ["absent"] },
+        { required: ["posture"] },
+        { required: ["activeDisplay"] },
       ],
     },
   ],
@@ -1102,6 +1118,12 @@ const matchesAbsent = (
   );
 };
 
+const matchesDisplayStamp = (observation: ObserveResult, waitFor: ObserveWaitForOptions): boolean =>
+  (waitFor.posture === undefined || observation.display?.posture === waitFor.posture) &&
+  (waitFor.activeDisplay === undefined ||
+    observation.display?.key === waitFor.activeDisplay ||
+    observation.display?.role === waitFor.activeDisplay);
+
 const evaluateWaitForObservation = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
@@ -1110,6 +1132,7 @@ const evaluateWaitForObservation = (
   modes: Map<string, MatchMode>,
 ): { matched: boolean; awaitedElement?: Element } => {
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
+  const displayMatched = matchesDisplayStamp(observation, waitFor);
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement =
     needsElementMatch && observation.viewHierarchy
@@ -1126,7 +1149,10 @@ const evaluateWaitForObservation = (
 
   return {
     matched:
-      activeWindowMatched && absentSatisfied && (!needsElementMatch || awaitedElement !== null),
+      activeWindowMatched &&
+      displayMatched &&
+      absentSatisfied &&
+      (!needsElementMatch || awaitedElement !== null),
     awaitedElement: awaitedElement ?? undefined,
   };
 };
@@ -1203,8 +1229,8 @@ export const waitForObservation = async (
   // in, `complete` captures exactly one screenshot from the terminal state.
   const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
 
-  const observeOnce = (minTimestamp: number) =>
-    observeScreen.execute({
+  const observeOnce = async (minTimestamp: number) => {
+    const observation = await observeScreen.execute({
       queryOptions,
       timeoutMs: Math.max(0, timeoutMs - (timer.now() - startTime)),
       perf: createGlobalPerformanceTracker(),
@@ -1215,6 +1241,17 @@ export const waitForObservation = async (
       skipScreenshot: true,
       skipAccessibilityAudit: true,
     });
+    if (
+      waitFor.activeDisplay !== undefined &&
+      observation.display?.key === "0" &&
+      observation.display.role === "unknown"
+    ) {
+      throw new ActionableError(
+        "Cannot wait for activeDisplay: this device has no display inventory. Select a device that reports display panels and retry.",
+      );
+    }
+    return observation;
+  };
 
   // Settle gate (issue #3490 §3): once the predicate matches, hold until the
   // hierarchy hash is unchanged for settled.quietPeriodMs. `matchedHash === null`

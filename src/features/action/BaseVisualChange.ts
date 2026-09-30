@@ -32,6 +32,7 @@ import { PredictionAnalyzer, PredictionActionContext } from "../observe/Predicti
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { DaemonState } from "../../daemon/daemonState";
 import {
   resolveScreenshotMode,
   shouldSkipActionObservationScreenshot,
@@ -60,6 +61,21 @@ const COORDINATE_ACTIONS = new Set([
   "dragAndDrop",
   "pinchOn",
 ]);
+
+export const STALE_DISPLAY_COORDINATES_ERROR =
+  "Display changed since these coordinates were chosen. Re-observe the active panel and choose a new point before retrying.";
+
+export type RenderedDisplayRevisionReader = (deviceId: string) => number | undefined;
+
+function sessionRenderedDisplayRevision(deviceId: string): number | undefined {
+  const daemon = DaemonState.getInstance();
+  if (!daemon.isInitialized()) {
+    return undefined;
+  }
+  const sessions = daemon.getSessionManager();
+  const sessionId = sessions.getSessionForDevice(deviceId);
+  return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : undefined;
+}
 
 /**
  * Max retry attempts `takeObservation` performs after its initial observation
@@ -102,6 +118,7 @@ export class BaseVisualChange {
     (observation: ObserveResult) => Promise<void>
   >();
   protected timer: Timer;
+  protected readonly renderedDisplayRevision: RenderedDisplayRevisionReader;
 
   protected shouldCapturePostActionScreenshot(): boolean {
     // Preserve the pre-existing live-view behavior, while allowing other
@@ -123,6 +140,7 @@ export class BaseVisualChange {
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
+    renderedDisplayRevision: RenderedDisplayRevisionReader = sessionRenderedDisplayRevision,
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
@@ -151,6 +169,7 @@ export class BaseVisualChange {
     this.window = new Window(device, this.adbFactory, timer);
     this.predictionAnalyzer = new PredictionAnalyzer();
     this.timer = timer;
+    this.renderedDisplayRevision = renderedDisplayRevision;
   }
 
   /**
@@ -166,6 +185,14 @@ export class BaseVisualChange {
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
     const displayRevision = displayTransitions.revision(this.device.deviceId);
+    const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
+    if (
+      COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
+      callerDisplayRevision !== undefined &&
+      callerDisplayRevision !== displayRevision
+    ) {
+      throw new ActionableError(STALE_DISPLAY_COORDINATES_ERROR);
+    }
 
     if (progress) {
       await progress(0, 100, "Preparing to execute action...");

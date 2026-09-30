@@ -203,6 +203,58 @@ describe("finalizeToolResponse", () => {
     serverConfig.setObserveResultIncludeElementsEnabled(originalIncludeElements);
   });
 
+  test("records only caller-visible observation revisions and strips the internal stamp", () => {
+    const originalDiff = serverConfig.isActionsDiffObserveEnabled();
+    const originalNoObserve = serverConfig.isActionsNoObserveEnabled();
+    let renderedRevision: number | undefined;
+    const store = {
+      get: () => undefined,
+      set: (_sessionUuid: string, _observation: ObserveResult, revision?: number) => {
+        renderedRevision = revision;
+      },
+      setDisplayRevision: (_sessionUuid: string, revision: number) => {
+        renderedRevision = revision;
+      },
+    };
+    const stamped = (revision: number) => ({
+      ...makeObserveResult(),
+      displayRevision: revision,
+    });
+    try {
+      serverConfig.setActionsDiffObserveEnabled(false);
+      serverConfig.setActionsNoObserveEnabled(false);
+      const initial = finalizeToolResponse(createStructuredToolResponse(stamped(0)), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+        args: { project: "full" },
+      });
+      expect(renderedRevision).toBe(0);
+      expect(structuredPayload(initial).displayRevision).toBeUndefined();
+
+      // An internal setPosture-style observation does not move what the caller saw.
+      finalizeToolResponse(createStructuredToolResponse(stamped(1)), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+        internal: true,
+      });
+      expect(renderedRevision).toBe(0);
+
+      const refreshed = finalizeToolResponse(createStructuredToolResponse(stamped(1)), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+        args: { project: "full" },
+      });
+      expect(renderedRevision).toBe(1);
+      expect(structuredPayload(refreshed).displayRevision).toBeUndefined();
+    } finally {
+      serverConfig.setActionsDiffObserveEnabled(originalDiff);
+      serverConfig.setActionsNoObserveEnabled(originalNoObserve);
+    }
+  });
+
   test("EC1: observe response is sanitized in both structuredContent and text", () => {
     const obs = makeObserveResult();
     const response = createStructuredToolResponse(obs);

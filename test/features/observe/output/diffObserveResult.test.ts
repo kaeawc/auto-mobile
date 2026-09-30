@@ -62,6 +62,36 @@ function iosObs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): 
 }
 
 describe("diffObserveResult", () => {
+  test("reports a changed panel or posture, but ignores generation-only changes", () => {
+    const node = { "resource-id": "root", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const inner = obs(node, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+    });
+    const nextGeneration = obs(node, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 2 },
+    });
+    const cover = obs(node, {
+      display: { key: "cover", role: "cover", posture: "closed", generation: 3 },
+    });
+    expect(diffObserveResult(inner, nextGeneration).displayChanged).toBeUndefined();
+    expect(diffObserveResult(inner, cover).displayChanged).toEqual({
+      from: { key: "inner", role: "inner", posture: "opened" },
+      to: { key: "cover", role: "cover", posture: "closed" },
+    });
+  });
+
+  test("does not report a display change to or from the no-inventory fallback", () => {
+    const node = { "resource-id": "root", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const fallback = obs(node, {
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    });
+    const cover = obs(node, {
+      display: { key: "cover", role: "cover", posture: "unknown", generation: 1 },
+    });
+    expect(diffObserveResult(fallback, cover).displayChanged).toBeUndefined();
+    expect(diffObserveResult(cover, fallback).displayChanged).toBeUndefined();
+  });
+
   test("identical observations produce an empty diff", () => {
     const node = {
       "resource-id": "a",

@@ -4370,6 +4370,14 @@
                 }
               ]
             },
+            "posture": {
+              "type": "string",
+              "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+            },
+            "activeDisplay": {
+              "type": "string",
+              "description": "Physical panel key or role"
+            },
             "absent": {
               "type": "object",
               "additionalProperties": false,
@@ -4473,6 +4481,12 @@
                 },
                 {
                   "required": ["absent"]
+                },
+                {
+                  "required": ["posture"]
+                },
+                {
+                  "required": ["activeDisplay"]
                 }
               ]
             }
@@ -8241,6 +8255,14 @@
                 }
               ]
             },
+            "posture": {
+              "type": "string",
+              "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+            },
+            "activeDisplay": {
+              "type": "string",
+              "description": "Physical panel key or role"
+            },
             "absent": {
               "type": "object",
               "additionalProperties": false,
@@ -8344,6 +8366,12 @@
                 },
                 {
                   "required": ["absent"]
+                },
+                {
+                  "required": ["posture"]
+                },
+                {
+                  "required": ["activeDisplay"]
                 }
               ]
             }
@@ -13222,6 +13250,65 @@
                     "required": ["key", "role", "size"],
                     "additionalProperties": false
                   }
+                },
+                "displayChanged": {
+                  "type": "object",
+                  "properties": {
+                    "from": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": ["inner", "cover", "rear", "external", "unknown"]
+                        },
+                        "posture": {
+                          "type": "string",
+                          "enum": [
+                            "closed",
+                            "half_opened",
+                            "opened",
+                            "rear_display",
+                            "flipped",
+                            "tent",
+                            "unknown"
+                          ]
+                        }
+                      },
+                      "required": ["key", "role", "posture"],
+                      "additionalProperties": false
+                    },
+                    "to": {
+                      "type": "object",
+                      "properties": {
+                        "key": {
+                          "type": "string"
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": ["inner", "cover", "rear", "external", "unknown"]
+                        },
+                        "posture": {
+                          "type": "string",
+                          "enum": [
+                            "closed",
+                            "half_opened",
+                            "opened",
+                            "rear_display",
+                            "flipped",
+                            "tent",
+                            "unknown"
+                          ]
+                        }
+                      },
+                      "required": ["key", "role", "posture"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["from", "to"],
+                  "additionalProperties": false
                 },
                 "observationScreenshotResourceUri": {
                   "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",

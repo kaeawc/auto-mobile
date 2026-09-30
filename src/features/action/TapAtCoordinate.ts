@@ -19,7 +19,12 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { displayTransitions } from "../observe/DisplayTransition";
-import { BaseVisualChange, type ProgressCallback } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  STALE_DISPLAY_COORDINATES_ERROR,
+  type ProgressCallback,
+  type RenderedDisplayRevisionReader,
+} from "./BaseVisualChange";
 import {
   type CoordinateTapClient,
   dispatchAndroidCoordinateTap,
@@ -134,6 +139,7 @@ function hasSameTapTargetingLayout(previous: ObserveResult, refreshed: ObserveRe
 
 export interface TapAtCoordinateDependencies {
   timer?: Timer;
+  renderedDisplayRevision?: RenderedDisplayRevisionReader;
   androidClient?: CoordinateTapClient;
   iosClient?: CoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
@@ -154,7 +160,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: TapAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer);
+    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision);
     this.androidClient =
       dependencies.androidClient ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
@@ -179,6 +185,15 @@ export class TapAtCoordinate extends BaseVisualChange {
 
     try {
       throwIfAborted(signal);
+      const callerRevision = this.renderedDisplayRevision(this.device.deviceId);
+      if (callerRevision !== undefined && callerRevision !== transitionRevision) {
+        return {
+          success: false,
+          x: options.x,
+          y: options.y,
+          error: STALE_DISPLAY_COORDINATES_ERROR,
+        };
+      }
       return await this.observedInteraction(
         async () => {
           // Validate against the latest available frame immediately before dispatch.
@@ -193,8 +208,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               success: false,
               x: options.x,
               y: options.y,
-              error:
-                "Display changed since these coordinates were chosen. Re-observe the active panel and choose a new point before retrying.",
+              error: STALE_DISPLAY_COORDINATES_ERROR,
             };
           }
           const resolved = this.resolveCoordinates(options, observeResult);
@@ -328,9 +342,7 @@ export class TapAtCoordinate extends BaseVisualChange {
 
   private assertDisplayRevisionCurrent(revision: number): void {
     if (displayTransitions.revision(this.device.deviceId) !== revision) {
-      throw new ActionableError(
-        "Display changed since these coordinates were chosen. Re-observe the active panel and choose a new point before retrying.",
-      );
+      throw new ActionableError(STALE_DISPLAY_COORDINATES_ERROR);
     }
   }
 

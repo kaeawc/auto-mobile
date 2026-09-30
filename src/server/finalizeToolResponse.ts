@@ -28,15 +28,16 @@ import { buildObservationScreenshotUri } from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 
 /**
- * Read/write access to the per-session diff baseline — the "last observation
- * output to the agent" (#2761). Injected (interface + fake) so `finalizeToolResponse`
+ * Read/write access to the per-session diff baseline and the display revision
+ * of the last observation output to the agent. Injected (interface + fake) so `finalizeToolResponse`
  * stays free of a direct `sessionManager`/`DaemonState` dependency; the call site
  * backs it with `SessionManager.setLastRenderedObservation` /
  * `getSessionCache(...).lastRenderedObservation`.
  */
 export interface ObservationBaselineStore {
   get(sessionUuid: string): ObserveResult | undefined;
-  set(sessionUuid: string, observation: ObserveResult): void;
+  set(sessionUuid: string, observation: ObserveResult, displayRevision?: number): void;
+  setDisplayRevision?(sessionUuid: string, revision: number): void;
 }
 
 export type ObservationArtifactPayload = string;
@@ -453,6 +454,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   let sanitizedPayload: Record<string, unknown> | undefined;
   let hasArtifactableObservation = false;
   let pendingBaselineUpdate: { sessionUuid: string; observation: ObserveResult } | undefined;
+  const renderedObservation = isObserveTool ? payload : payload.observation;
+  const renderedDisplayRevision =
+    !ctx.internal &&
+    (isObserveTool || !noObserveEnabled) &&
+    isObserveResult(renderedObservation) &&
+    typeof renderedObservation.displayRevision === "number"
+      ? renderedObservation.displayRevision
+      : undefined;
   if (isObserveTool && isObserveResult(payload)) {
     // `observe` always emits the full sanitized observation (no-observe never
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
@@ -727,8 +736,15 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
 
   // Rewrite both representations from the same object so they cannot diverge.
   writeToolEnvelopePayload(envelopeView, sanitizedPayload);
-  pendingBaselineUpdate &&
-    ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
+  if (pendingBaselineUpdate) {
+    ctx.baselineStore!.set(
+      pendingBaselineUpdate.sessionUuid,
+      pendingBaselineUpdate.observation,
+      renderedDisplayRevision,
+    );
+  } else if (ctx.sessionUuid && renderedDisplayRevision !== undefined) {
+    ctx.baselineStore?.setDisplayRevision?.(ctx.sessionUuid, renderedDisplayRevision);
+  }
 
   return response;
 }
@@ -1216,6 +1232,7 @@ function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean
     diff.added.length === 0 &&
     diff.removed.length === 0 &&
     diff.changed.length === 0 &&
+    diff.displayChanged === undefined &&
     diff.fields === undefined
   );
 }

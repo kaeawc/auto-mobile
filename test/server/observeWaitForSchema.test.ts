@@ -319,6 +319,15 @@ describe("published observe waitFor input schema", () => {
     ).toBe(true);
   });
 
+  test("allows known posture waits but rejects unknown in runtime and published inputs", () => {
+    for (const posture of ["closed", "unknown"]) {
+      const input = { platform: "android", waitFor: { posture } };
+      const expected = posture === "closed";
+      expect(observeSchema.safeParse(input).success).toBe(expected);
+      expect(validatePublishedObserveInput(input).valid).toBe(expected);
+    }
+  });
+
   test("leaves textEquals conditional validation to runtime", () => {
     expect(
       validatePublishedObserveInput({
@@ -1109,6 +1118,29 @@ describe("waitForObservation activeWindow", () => {
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     activeWindow: { appId, activityName, layoutSeqSum: 0 },
     viewHierarchy: makeHierarchy(nodes),
+  });
+
+  test("known posture wait ignores an unknown stamp until posture is reported", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observeScreen = new FakeObserveScreen();
+    const observation = makeObservation("com.example.app", "");
+    observeScreen.setObserveSequence([
+      { ...observation, display: { key: "0", role: "unknown", posture: "unknown", generation: 0 } },
+      { ...observation, display: { key: "0", role: "inner", posture: "closed", generation: 1 } },
+    ]);
+
+    const outcome = await waitForObservation(
+      observeScreen,
+      { posture: "closed", timeout: 500 },
+      undefined,
+      false,
+      timer,
+    );
+
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(outcome.observation.display?.posture).toBe("closed");
+    expect(observeScreen.getExecuteCallCount()).toBe(2);
   });
 
   test("keeps polling until activeWindow and element predicates are both true", async () => {

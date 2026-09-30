@@ -76,7 +76,7 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 | ⌨️ <code>sendKeys</code>      | Runs ordered text, clear, raw-key, and semantic-key commands.                                                                  |
 | 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                                                                                  |
 | ✨ <code>selectAllText</code> | Selects all text in the focused input.                                                                                         |
-| 🔘 <code>pressButton</code>   | Presses a device or navigation button.                                                                                         |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button. iOS simulators support volume and power; iOS does not support menu.                     |
 | ⌨️ <code>keyboard</code>      | Opens, closes, or detects the keyboard; selects AutoMobile profiles or installed Android IMEs.                                 |
 | 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                                                                                |
 

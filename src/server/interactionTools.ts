@@ -2838,7 +2838,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "pressButton",
-    "Press device or navigation button",
+    "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
     pressButtonSchema,
     pressButtonHandler,
     { defaultEnabled: true, supportsProgress: true },

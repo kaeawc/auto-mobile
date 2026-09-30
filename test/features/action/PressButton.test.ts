@@ -365,10 +365,12 @@ describe("PressButton", () => {
     }
   });
 
-  test("ios simulator rejects hardware buttons without contacting CtrlProxy", async () => {
+  test("ios simulator forwards hardware buttons to CtrlProxy", async () => {
+    const pressButtonCalls: string[] = [];
     const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
-      requestPressButton: async () => {
-        throw new Error("should not be called");
+      requestPressButton: async (button: string) => {
+        pressButtonCalls.push(button);
+        return { success: true, totalTimeMs: 5 };
       },
     } as any);
 
@@ -377,13 +379,11 @@ describe("PressButton", () => {
 
       for (const button of ["volume_up", "volume_down", "power"]) {
         const result = await (pressButton as any).executeiOSButtonPress(button);
-        expect(result.success).toBe(false);
-        expect(result.button).toBe(button);
-        expect(result.keyCode).toBe(-1);
-        expect(result.error).toContain("unavailable on the iOS simulator");
+        expect(result).toEqual({ success: true, button, keyCode: -1 });
       }
 
-      expect(getInstanceSpy).not.toHaveBeenCalled();
+      expect(pressButtonCalls).toEqual(["volume_up", "volume_down", "power"]);
+      expect(getInstanceSpy).toHaveBeenCalledTimes(3);
     } finally {
       getInstanceSpy.mockRestore();
     }

@@ -287,6 +287,38 @@ describe("emulator readiness ADB work budget", () => {
     expect(clients.get("emulator-5572")?.wasCommandExecuted("emu avd name")).toBe(true);
   });
 
+  test("unresolved names cannot starve an unprobed target later in the snapshot", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const states = Array.from({ length: 10 }, (_, index) => ({
+      deviceId: `emulator-${5554 + index * 2}`,
+      state: "device",
+    }));
+    const discovery = new SnapshotAdb(timer, states);
+    const clients = new Map<string, FakeAdbExecutor>();
+    for (const [index, state] of states.entries()) {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "emu avd name",
+        result(index < 4 ? "" : index === 8 ? "Pixel_9_Pro\n" : "Other_AVD\n"),
+      );
+      clients.set(state.deviceId, adb);
+    }
+    const target = clients.get(states[8]!.deviceId)!;
+    target.setCommandResponse("get-state", result("device\n"));
+    target.setCommandResponse("shell pm list packages", result("package:android\n"));
+    target.setCommandResponse("shell getprop sys.boot_completed", result("1\n"));
+    target.setCommandResponse("shell getprop init.svc.bootanim", result("stopped\n"));
+    const client = new AndroidEmulatorClient(async () => result(), null, timer, {
+      create: (device) => (device ? clients.get(device.deviceId)! : discovery),
+    });
+
+    const device = await client.waitForEmulatorReady("Pixel_9_Pro", 5_000);
+
+    expect(device.deviceId).toBe(states[8]!.deviceId);
+    expect(discovery.snapshotCalls.length).toBeLessThanOrEqual(Math.ceil(states.length / 4) + 1);
+  });
+
   test("retries an empty AVD name on the next iteration", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

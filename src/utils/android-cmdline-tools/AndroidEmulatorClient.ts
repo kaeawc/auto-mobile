@@ -3738,24 +3738,36 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private nextReadinessNameCandidates(
     devices: BootedDevice[],
     probedSerials: Set<string>,
+    unresolvedSerials: Set<string>,
   ): BootedDevice[] {
     const emulatorCandidates = devices.filter((device) => device.deviceId.startsWith("emulator-"));
     let unprobed = emulatorCandidates.filter((device) => !probedSerials.has(device.deviceId));
     if (unprobed.length === 0) {
       probedSerials.clear();
+      unresolvedSerials.clear();
       unprobed = emulatorCandidates;
     }
-    const selected = unprobed.slice(0, READINESS_NAME_CANDIDATES_PER_ITERATION);
+    // A failed name can be retried while discovery advances, but it may occupy
+    // only one slot so new serials cannot be starved by unresolved names.
+    const retry = emulatorCandidates.find((device) => unresolvedSerials.has(device.deviceId));
+    const selected = unprobed.slice(0, READINESS_NAME_CANDIDATES_PER_ITERATION - (retry ? 1 : 0));
+    if (retry) {
+      selected.push(retry);
+      unresolvedSerials.delete(retry.deviceId);
+    }
     for (const device of selected) {
       probedSerials.add(device.deviceId);
     }
     return selected;
   }
 
-  private retryUnresolvedReadinessNames(devices: BootedDevice[], probedSerials: Set<string>): void {
+  private retryUnresolvedReadinessNames(
+    devices: BootedDevice[],
+    unresolvedSerials: Set<string>,
+  ): void {
     for (const device of devices) {
       if (device.name === this.unknownEmulatorName(device.deviceId)) {
-        probedSerials.delete(device.deviceId);
+        unresolvedSerials.add(device.deviceId);
       }
     }
   }
@@ -4038,6 +4050,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     let foundDeviceModel: string | undefined;
     let resolvedTargetDeviceId: string | undefined;
     const probedNameSerials = new Set<string>();
+    const unresolvedNameSerials = new Set<string>();
     let correlationFailure: string | undefined;
     let lastDiagnostic: ReadinessDiagnostic | undefined;
     const offlineTracker: OfflineTracker = { deviceId: null, since: null };
@@ -4106,7 +4119,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           logger.debug(`Checking for running local emulators...`);
           const candidateDevices =
             snapshot?.devices && !correlatedTargetDeviceId
-              ? this.nextReadinessNameCandidates(snapshot.devices, probedNameSerials)
+              ? this.nextReadinessNameCandidates(
+                  snapshot.devices,
+                  probedNameSerials,
+                  unresolvedNameSerials,
+                )
               : snapshot?.devices;
           const scan = await this.getBootedDevicesWithDiagnostics(
             false,
@@ -4128,7 +4145,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
             signal,
           );
           const scanDiagnostic = this.relevantScanDiagnostic(scan, correlatedTargetDeviceId);
-          this.retryUnresolvedReadinessNames(scan.devices, probedNameSerials);
+          this.retryUnresolvedReadinessNames(scan.devices, unresolvedNameSerials);
           lastDiagnostic = scanDiagnostic;
           const runningEmulators = scan.devices;
           logger.debug(`Device scan complete - found ${runningEmulators.length} running emulators`);

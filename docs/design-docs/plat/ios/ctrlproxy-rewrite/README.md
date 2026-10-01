@@ -41,6 +41,7 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    Apple Settings translations are not bundled in this repo, so there is no
    verified localized label table; a reordered first cell or a changed sub-page
    structure still needs physical-device validation.
+
 5. PerfProvider (TaskLocal call-tree + confined pool) ✅
 6. CommandHandler (Sendable POD router, async) + async serial dispatch + CtrlProxy coordinator ✅
 7. Cutover — ✅ **complete** (`CtrlProxyRewrite` is the sole implementation):

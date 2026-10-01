@@ -31,8 +31,19 @@ export const captureDeviceScreenshotSchema = z.strictObject({
 export type CaptureDeviceScreenshotArgs = z.infer<typeof captureDeviceScreenshotSchema>;
 
 interface ScreenshotFileReader {
-  stat(path: string): Promise<{ isFile(): boolean; size: number; mtimeMs: number }>;
-  readFile(path: string): Promise<Buffer>;
+  open(
+    path: string,
+    flags: "r",
+  ): Promise<{
+    stat(): Promise<{ isFile(): boolean; size: number; mtimeMs: number }>;
+    read(
+      buffer: Buffer,
+      offset: number,
+      length: number,
+      position: number,
+    ): Promise<{ bytesRead: number }>;
+    close(): Promise<void>;
+  }>;
 }
 
 export interface DeviceScreenshotDependencies {
@@ -122,13 +133,31 @@ async function readScreenshot(
   deps: DeviceScreenshotDependencies,
   freshFailure?: ScreenshotFailure,
 ) {
-  const stat = await deps.files.stat(path);
-  if (!stat.isFile() || stat.size > MAX_SCREENSHOT_BYTES) {
-    throw new ActionableError("Screenshot file is missing or exceeds the 16 MiB response limit.");
-  }
-  const bytes = await deps.files.readFile(path);
-  if (bytes.length > MAX_SCREENSHOT_BYTES) {
-    throw new ActionableError("Screenshot exceeds the 16 MiB response limit.");
+  const handle = await deps.files.open(path, "r");
+  let stat: Awaited<ReturnType<typeof handle.stat>>;
+  let bytes: Buffer;
+  try {
+    stat = await handle.stat();
+    if (!stat.isFile() || stat.size > MAX_SCREENSHOT_BYTES) {
+      throw new ActionableError("Screenshot file is missing or exceeds the 16 MiB response limit.");
+    }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total <= MAX_SCREENSHOT_BYTES) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MAX_SCREENSHOT_BYTES + 1 - total));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+      if (bytesRead === 0) {
+        break;
+      }
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    if (total > MAX_SCREENSHOT_BYTES) {
+      throw new ActionableError("Screenshot exceeds the 16 MiB response limit.");
+    }
+    bytes = Buffer.concat(chunks, total);
+  } finally {
+    await handle.close();
   }
   const mimeType = detectImageMimeType(bytes);
   if (!mimeType) {

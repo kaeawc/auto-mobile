@@ -22,6 +22,7 @@ const device: BootedDevice = {
 };
 
 const png = Buffer.from("89504e470d0a1a0a0000000d4948445200000002000000030806000000", "hex");
+const maxScreenshotBytes = 16 * 1024 * 1024;
 const args = captureDeviceScreenshotSchema.parse({ deviceId: device.deviceId });
 const dirs: string[] = [];
 
@@ -67,6 +68,43 @@ function dependencies(
     cachedScreenshotPath: () => options.cachedPath,
     files: fs,
     timer,
+  };
+}
+
+function fakeFiles(options: { isFile?: boolean; size: number; bytes?: Buffer; growing?: boolean }) {
+  let reads = 0;
+  let closes = 0;
+  const files: DeviceScreenshotDependencies["files"] = {
+    open: async () => ({
+      stat: async () => ({
+        isFile: () => options.isFile ?? true,
+        size: options.size,
+        mtimeMs: 8_000,
+      }),
+      read: async (buffer, offset, length, position) => {
+        reads++;
+        const available = options.growing
+          ? maxScreenshotBytes + 1 - position
+          : (options.bytes?.length ?? 0) - position;
+        const bytesRead = Math.min(length, Math.max(0, available));
+        if (options.bytes) {
+          options.bytes.copy(buffer, offset, position, position + bytesRead);
+        }
+        return { bytesRead };
+      },
+      close: async () => {
+        closes++;
+      },
+    }),
+  };
+  return {
+    files,
+    get reads() {
+      return reads;
+    },
+    get closes() {
+      return closes;
+    },
   };
 }
 
@@ -229,6 +267,57 @@ describe("captureDeviceScreenshot", () => {
     expect(result.structuredContent).toEqual({
       error: { code: "SCREENSHOT_CAPTURE_FAILED", message: "camera unavailable", retryable: true },
     });
+  });
+
+  test("rejects a non-file handle without reading and closes it", async () => {
+    const fake = fakeFiles({ isFile: false, size: png.length, bytes: png });
+    const deps = dependencies(new FakeTimer(), { success: true, path: "directory" });
+    deps.files = fake.files;
+
+    const result = await captureDeviceScreenshot(args, undefined, undefined, deps);
+
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: "SCREENSHOT_READ_FAILED",
+        message: "Screenshot file is missing or exceeds the 16 MiB response limit.",
+      },
+    });
+    expect(fake.reads).toBe(0);
+    expect(fake.closes).toBe(1);
+  });
+
+  test("rejects an oversized handle before reading and closes it", async () => {
+    const fake = fakeFiles({ size: maxScreenshotBytes + 1 });
+    const deps = dependencies(new FakeTimer(), { success: true, path: "oversized" });
+    deps.files = fake.files;
+
+    const result = await captureDeviceScreenshot(args, undefined, undefined, deps);
+
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: "SCREENSHOT_READ_FAILED",
+        message: "Screenshot file is missing or exceeds the 16 MiB response limit.",
+      },
+    });
+    expect(fake.reads).toBe(0);
+    expect(fake.closes).toBe(1);
+  });
+
+  test("bounds reads when a file grows after handle stat", async () => {
+    const fake = fakeFiles({ size: png.length, growing: true });
+    const deps = dependencies(new FakeTimer(), { success: true, path: "growing" });
+    deps.files = fake.files;
+
+    const result = await captureDeviceScreenshot(args, undefined, undefined, deps);
+
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        code: "SCREENSHOT_READ_FAILED",
+        message: "Screenshot exceeds the 16 MiB response limit.",
+      },
+    });
+    expect(fake.reads).toBeGreaterThan(0);
+    expect(fake.closes).toBe(1);
   });
 
   test("rechecks authorization after a capture and withholds its image if ownership changes", async () => {

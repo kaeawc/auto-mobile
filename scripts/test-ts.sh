@@ -402,9 +402,8 @@ run_unit_shards() {
 
 parallel_workers="$unit_workers"
 if [[ "$mode" == "coverage" ]]; then
-  # Bun's coverage reporter and Linux epoll-backed streams are not reliable
-  # when the full unit suite is executed in parallel. Keep coverage deterministic
-  # while the normal unit lane retains its parallel speed.
+  # Keep Bun's in-process parallelism off for the coverage reporter and Linux
+  # epoll-backed streams. Coverage shards use separate processes and log files.
   parallel_workers=1
 fi
 
@@ -736,13 +735,84 @@ case "$mode" in
       echo "No unit test paths were selected." >&2
       exit 2
     fi
-    run_test_command \
-      "${unit_args[@]}" \
-      --coverage \
-      --coverage-reporter=lcov \
-      --coverage-dir=coverage \
-      "${unit_test_paths[@]+"${unit_test_paths[@]}"}" \
-      "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    coverage_shards="${AUTOMOBILE_COVERAGE_SHARDS:-2}"
+    validate_positive_integer "AUTOMOBILE_COVERAGE_SHARDS" "$coverage_shards"
+    if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
+      validate_positive_integer "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" \
+        "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+    fi
+    if [[ "${TEST_TS_PRINT_CMD:-}" != "1" ]]; then
+      rm -rf coverage
+      mkdir -p coverage/shards
+      for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
+        bun scripts/lib/write-coverage-bunfig.ts \
+          "coverage/shards/shard-${coverage_shard}.toml" \
+          "coverage/shards/shard-${coverage_shard}"
+      done
+    fi
+    coverage_pids=()
+    coverage_lcov_files=()
+    coverage_junit_files=()
+    for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
+      coverage_dir="coverage/shards/shard-${coverage_shard}"
+      coverage_junit="coverage/shards/shard-${coverage_shard}.xml"
+      coverage_config="coverage/shards/shard-${coverage_shard}.toml"
+      coverage_args=(
+        bun "--config=${coverage_config}" "${unit_args[@]:1}"
+        --coverage --coverage-reporter=lcov
+        --reporter junit --reporter-outfile "$coverage_junit"
+        "--shard=${coverage_shard}/${coverage_shards}"
+        "${unit_test_paths[@]+"${unit_test_paths[@]}"}"
+        "${passthrough_args[@]+"${passthrough_args[@]}"}"
+      )
+      coverage_lcov_files+=("${coverage_dir}/lcov.info")
+      coverage_junit_files+=("$coverage_junit")
+      if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
+        printf '%q ' "${coverage_args[@]}"
+        printf '\n'
+        continue
+      fi
+      (
+        if [[ -n "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
+          # shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+          source "$ROOT/scripts/ios/run_with_timeout.sh"
+          run_with_timeout "$AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS" "${coverage_args[@]}"
+        else
+          "${coverage_args[@]}"
+        fi
+      ) > "coverage/shards/shard-${coverage_shard}.log" 2>&1 3>&- &
+      coverage_pids+=("$!")
+    done
+    if [[ "${TEST_TS_PRINT_CMD:-}" == "1" ]]; then
+      exit 0
+    fi
+    coverage_status=0
+    for ((coverage_index = 0; coverage_index < ${#coverage_pids[@]}; coverage_index += 1)); do
+      shard_status=0
+      wait "${coverage_pids[$coverage_index]}" || shard_status=$?
+      if [[ "$shard_status" -eq 124 ]]; then
+        echo "Coverage test run exceeded its ${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS}s wall-clock budget (shard $((coverage_index + 1))/${coverage_shards})." >&2
+        coverage_status=124
+      elif [[ "$shard_status" -ne 0 ]]; then
+        echo "FAIL: coverage shard $((coverage_index + 1))/${coverage_shards} exited with status ${shard_status}" >&2
+        if [[ "$coverage_status" -ne 124 ]]; then coverage_status=1; fi
+      fi
+    done
+    for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
+      printf '\n==> TypeScript coverage shard %d/%d\n' "$coverage_shard" "$coverage_shards"
+      command cat "coverage/shards/shard-${coverage_shard}.log"
+    done
+    if [[ "$coverage_status" -ne 0 ]]; then exit "$coverage_status"; fi
+    for ((coverage_shard = 1; coverage_shard <= coverage_shards; coverage_shard += 1)); do
+      bash scripts/ci/verify-ts-coverage-output.sh "coverage/shards/shard-${coverage_shard}"
+    done
+    if [[ "$coverage_shards" -eq 1 ]]; then
+      cp "${coverage_lcov_files[0]}" coverage/lcov.info
+      cp "${coverage_junit_files[0]}" coverage/junit.xml
+    else
+      bun scripts/lib/merge-lcov.ts coverage/lcov.info "${coverage_lcov_files[@]+"${coverage_lcov_files[@]}"}"
+      bun scripts/lib/merge-junit-reports.ts coverage/junit.xml "${coverage_junit_files[@]+"${coverage_junit_files[@]}"}"
+    fi
     ;;
   all)
     if [[ "$has_test_targets" -eq 0 || "${#unit_test_paths[@]}" -gt 0 ]]; then

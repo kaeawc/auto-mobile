@@ -36,7 +36,10 @@ import {
 } from "../../../src/features/screen-stream/IosSimulatorCaptureHelperPool";
 import { logger } from "../../../src/utils/logger";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../../src/features/webrtc/webrtcStreamingConfig";
-import { ENCODED_VIDEO_CAPABILITY } from "../../../src/features/screen-stream";
+import {
+  ENCODED_VIDEO_CAPABILITY,
+  NATIVE_FRAME_METRICS_PREFIX,
+} from "../../../src/features/screen-stream";
 import type {
   CaptureTarget,
   DecodedEncodedVideo,
@@ -1571,6 +1574,56 @@ describe("IosH264Source", () => {
     await expect(started).rejects.toThrow(
       /screen-capture-helper exited \(code=null, signal=SIGABRT\); last stderr: ScreenCaptureKit failed to start capture/,
     );
+  });
+
+  test("logs healthy helper frame metrics at debug and preserves stderr warnings", async () => {
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const { source, helper } = createHarness(IOS_DEVICE);
+      await startWithFrame(source, helper, frame(2, 2, 0x11));
+      warning.mockClear();
+      debug.mockClear();
+
+      const healthyLine =
+        'automobile-frame-metrics:{"droppedFrames":0,"highWaterMarkBytes":0,"frameQueueDepth":0,"bytesQueued":0}';
+      helper.emitStderr(healthyLine);
+      expect(debug).toHaveBeenCalledTimes(1);
+      expect(debug).toHaveBeenCalledWith(expect.stringContaining(healthyLine));
+      expect(warning).not.toHaveBeenCalled();
+
+      warning.mockClear();
+      helper.emitStderr(
+        'automobile-frame-metrics:{"droppedFrames":3,"highWaterMarkBytes":0,"frameQueueDepth":0,"bytesQueued":0}',
+      ); // Real-shape line with only droppedFrames changed.
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('"droppedFrames":3'));
+
+      warning.mockClear();
+      helper.emitStderr(
+        'automobile-frame-metrics:{"droppedFrames":0,"highWaterMarkBytes":0,"frameQueueDepth":1,"bytesQueued":0}',
+      ); // Real-shape line with only frameQueueDepth changed.
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('"frameQueueDepth":1'));
+
+      warning.mockClear();
+      helper.emitStderr(`${NATIVE_FRAME_METRICS_PREFIX}{"droppedFrames":`);
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning.mock.calls[0]?.[0]).toContain("unrecognised frame-metrics line");
+      expect(warning.mock.calls[0]?.[0]).toContain(
+        `${NATIVE_FRAME_METRICS_PREFIX}{"droppedFrames":`,
+      );
+      expect(warning.mock.calls[0]?.[0]).toContain("; ");
+
+      warning.mockClear();
+      helper.emitStderr("ordinary helper diagnostic");
+      expect(warning).toHaveBeenCalledTimes(1);
+      expect(warning).toHaveBeenCalledWith(
+        "[IosH264Source] screen-capture-helper stderr: ordinary helper diagnostic",
+      );
+      await source.stop();
+    } finally {
+      debug.mockRestore();
+      warning.mockRestore();
+    }
   });
 
   test("resolves startup quietly when stopped before the first frame", async () => {

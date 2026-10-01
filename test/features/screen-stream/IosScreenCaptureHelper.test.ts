@@ -354,6 +354,94 @@ describe("IosScreenCaptureHelper", () => {
     expect(stderr).toEqual([]);
   });
 
+  test("accepts the real nil-optionals native frame metrics line", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const metrics = [];
+    const stderr: string[] = [];
+    helper.on("captureMetrics", (value) => metrics.push(value));
+    helper.on("stderr", (line) => stderr.push(line));
+    helper.start();
+
+    fake.stderr.push(
+      Buffer.from(
+        'automobile-frame-metrics:{"droppedFrames":0,"highWaterMarkBytes":0,"frameQueueDepth":0,"bytesQueued":0}\n',
+      ),
+    );
+    await flush();
+
+    expect(metrics).toEqual([
+      {
+        captureTimestampMs: null,
+        frameQueueAgeMs: null,
+        frameQueueDepth: 0,
+        droppedFrames: 0,
+        bytesQueued: 0,
+        highWaterMarkBytes: 0,
+        lastOutputWriteDurationMs: null,
+      },
+    ]);
+    expect(stderr).toEqual([]);
+  });
+
+  test("accepts the real all-fields native frame metrics line", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const metrics = [];
+    const stderr: string[] = [];
+    helper.on("captureMetrics", (value) => metrics.push(value));
+    helper.on("stderr", (line) => stderr.push(line));
+    helper.start();
+
+    fake.stderr.push(
+      Buffer.from(
+        'automobile-frame-metrics:{"highWaterMarkBytes":8294400,"droppedFrames":0,"frameQueueAgeMs":0.5,"lastOutputWriteDurationMs":1.2,"frameQueueDepth":0,"bytesQueued":0,"captureTimestampMs":1234}\n',
+      ),
+    );
+    await flush();
+
+    expect(metrics).toEqual([
+      {
+        highWaterMarkBytes: 8294400,
+        droppedFrames: 0,
+        frameQueueAgeMs: 0.5,
+        lastOutputWriteDurationMs: 1.2,
+        frameQueueDepth: 0,
+        bytesQueued: 0,
+        captureTimestampMs: 1234,
+      },
+    ]);
+    expect(stderr).toEqual([]);
+  });
+
+  test("reassembles a real nil-optionals metrics line split across stderr chunks", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const metrics = [];
+    const stderr: string[] = [];
+    helper.on("captureMetrics", (value) => metrics.push(value));
+    helper.on("stderr", (line) => stderr.push(line));
+    helper.start();
+
+    fake.stderr.push(
+      Buffer.from(
+        'automobile-frame-metrics:{"droppedFrames":0,"highWaterMarkBytes":0,"frameQueueDepth":0,',
+      ),
+    );
+    fake.stderr.push(Buffer.from('"bytesQueued":0}\n'));
+    await flush();
+
+    expect(metrics).toEqual([
+      {
+        captureTimestampMs: null,
+        frameQueueAgeMs: null,
+        frameQueueDepth: 0,
+        droppedFrames: 0,
+        bytesQueued: 0,
+        highWaterMarkBytes: 0,
+        lastOutputWriteDurationMs: null,
+      },
+    ]);
+    expect(stderr).toEqual([]);
+  });
+
   test("emits malformed events for invalid headers", async () => {
     const { fake, helper } = withFakeSpawner();
     const malformed: MalformedFrameError[] = [];

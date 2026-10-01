@@ -16,6 +16,8 @@ interface ActiveExecution {
   transportSessionId?: string;
   sessionUuid?: string;
   resolvedAutolockSessionUuid?: string;
+  /** Captured when an untargeted device call starts, until routing finishes. */
+  provisionalAutolockSessionUuid?: string;
   startTime: number;
   abortController: AbortController;
   /**
@@ -54,6 +56,9 @@ export type DaemonRestartAdmission = "accepted" | "active_operations" | "restart
 export interface ActiveProvisionDeviceQuery {
   hasActiveProvisionDeviceOperation(): boolean;
 }
+export interface AutolockSessionResolver {
+  autolockSessionForMcpSession(mcpSessionId: string): string | undefined;
+}
 export type DaemonMaintenanceAdmission =
   | "accepted"
   | "active_operations"
@@ -71,6 +76,7 @@ export class ExecutionTracker {
   private daemonRestartPrepared = false;
   private daemonMaintenancePrepared = false;
   private activeProvisionDeviceQuery?: ActiveProvisionDeviceQuery;
+  private autolockSessionResolver?: AutolockSessionResolver;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
@@ -81,11 +87,16 @@ export class ExecutionTracker {
     this.activeProvisionDeviceQuery = query;
   }
 
+  setAutolockSessionResolver(resolver: AutolockSessionResolver): void {
+    this.autolockSessionResolver = resolver;
+  }
+
   startExecution(
     toolName: string,
     sessionId?: string,
     sessionUuid?: string,
     transportSessionId?: string,
+    unresolvedAutolockMcpSessionId?: string,
   ): ActiveExecution {
     if (this.isDaemonRestartPrepared() || this.isDaemonMaintenancePrepared()) {
       throw new DaemonRestartPendingError();
@@ -97,6 +108,9 @@ export class ExecutionTracker {
       sessionId,
       transportSessionId,
       sessionUuid,
+      provisionalAutolockSessionUuid: unresolvedAutolockMcpSessionId
+        ? this.autolockSessionResolver?.autolockSessionForMcpSession(unresolvedAutolockMcpSessionId)
+        : undefined,
       startTime: this.timer.now(),
       abortController: new AbortController(),
     };
@@ -295,7 +309,8 @@ export class ExecutionTracker {
 
   /**
    * Cancels both explicit and implicit work bound to a concrete device session.
-   * Implicit autolock calls are added to a separate index after routing resolves.
+   * Unresolved implicit calls retain their start-time autolock mapping until
+   * routing binds them to the selected session.
    */
   async cancelDeviceSessionExecutions(
     sessionUuid: string,
@@ -305,6 +320,7 @@ export class ExecutionTracker {
     const executionIds = new Set<string>([
       ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
       ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
+      ...this.unresolvedAutolockExecutionIds(sessionUuid),
     ]);
     return this.cancelExecutionIds(executionIds, "deviceSessionUuid", sessionUuid, reason, options);
   }
@@ -370,22 +386,57 @@ export class ExecutionTracker {
    * Records the concrete autolock UUID selected after an implicit MCP call begins.
    * This association must not follow later changes to the MCP-session routing map.
    */
-  setResolvedAutolockSessionUuid(executionId: string, sessionUuid: string): void {
+  setResolvedAutolockSessionUuid(executionId: string, sessionUuid?: string): void {
     const execution = this.executions.get(executionId);
-    if (!execution || execution.resolvedAutolockSessionUuid === sessionUuid) {
+    if (!execution) {
+      return;
+    }
+    const provisionalSessionUuid = execution.provisionalAutolockSessionUuid;
+    execution.provisionalAutolockSessionUuid = undefined;
+    if (execution.resolvedAutolockSessionUuid === sessionUuid) {
+      if (provisionalSessionUuid && provisionalSessionUuid !== sessionUuid) {
+        for (const listener of this.executionEndListeners) {
+          listener();
+        }
+      }
       return;
     }
     if (execution.resolvedAutolockSessionUuid) {
       this.unregisterAutolockSessionExecution(execution.resolvedAutolockSessionUuid, executionId);
     }
     execution.resolvedAutolockSessionUuid = sessionUuid;
-    const executions = this.autolockSessionExecutions.get(sessionUuid) ?? new Set<string>();
-    executions.add(executionId);
-    this.autolockSessionExecutions.set(sessionUuid, executions);
+    if (sessionUuid) {
+      const executions = this.autolockSessionExecutions.get(sessionUuid) ?? new Set<string>();
+      executions.add(executionId);
+      this.autolockSessionExecutions.set(sessionUuid, executions);
+    }
+    for (const listener of this.executionEndListeners) {
+      listener();
+    }
   }
 
   hasActiveAutolockSessionExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {
-    return this.hasActiveExecutionsForKey(this.autolockSessionExecutions, sessionUuid, query);
+    return (
+      this.hasActiveExecutionsForKey(this.autolockSessionExecutions, sessionUuid, query) ||
+      this.unresolvedAutolockExecutionIds(sessionUuid).some((executionId) => {
+        const execution = this.executions.get(executionId);
+        return (
+          executionId !== query?.excludeExecutionId &&
+          (query?.startedAtOrBefore === undefined ||
+            (execution !== undefined && execution.startTime <= query.startedAtOrBefore))
+        );
+      })
+    );
+  }
+
+  private unresolvedAutolockExecutionIds(sessionUuid: string): string[] {
+    const executionIds: string[] = [];
+    for (const execution of this.executions.values()) {
+      if (execution.provisionalAutolockSessionUuid === sessionUuid) {
+        executionIds.push(execution.id);
+      }
+    }
+    return executionIds;
   }
 
   hasActiveToolExecution(toolName: string, options: ExecutionScopeOptions): boolean {

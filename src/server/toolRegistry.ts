@@ -1595,6 +1595,12 @@ export class ToolRegistryClass {
         });
         signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
+        if (selectionContext?.execution && !sessionUuid) {
+          executionTracker.setResolvedAutolockSessionUuid(
+            selectionContext.execution.executionId,
+            undefined,
+          );
+        }
         const response = await runWithToolSelectionContext(
           // Bind the ROUTING session, not the selection profile, so
           // nested calls re-inject the correct derived routing UUID.

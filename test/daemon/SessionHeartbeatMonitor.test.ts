@@ -5,6 +5,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
@@ -568,6 +569,41 @@ describe("SessionHeartbeatMonitor", () => {
 
       expect(pool.getDevice("emulator-5554")!.status).toBe("idle");
       expect(pool.getDevice("emulator-5554")!.autolockSessionId).toBeUndefined();
+    });
+
+    it("does not reap an autolock while an implicit call is still resolving", async () => {
+      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["implicit"]));
+      tracker.setAutolockSessionResolver({
+        autolockSessionForMcpSession: (mcpSessionId) =>
+          pool.captureAutolockSessionForMcpSession(mcpSessionId),
+      });
+      const hasActiveExecutions = (sessionUuid: string): boolean =>
+        tracker.hasActiveSessionUuidExecutions(sessionUuid) ||
+        tracker.hasActiveAutolockSessionExecutions(sessionUuid);
+      sessionManager.setActiveSessionExecutionChecker(hasActiveExecutions);
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        hasActiveExecutions,
+        reapVia(sessionManager, pool),
+        timer,
+      );
+      const execution = tracker.startExecution(
+        "tapOn",
+        "mcp-session-1",
+        undefined,
+        undefined,
+        "mcp-session-1",
+      );
+
+      timer.advanceTime(60_001);
+      await monitor.tick();
+      expect(sessionManager.getSession(sessionId!)).not.toBeNull();
+      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
+
+      tracker.endExecution(execution.id);
+      await monitor.tick();
+      expect(sessionManager.getSession(sessionId!)).toBeNull();
     });
 
     it("does not pin the mapped autolock for an explicit call to another session", async () => {

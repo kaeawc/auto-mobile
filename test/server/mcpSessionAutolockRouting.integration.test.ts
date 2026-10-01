@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -92,6 +92,154 @@ describe("MCP session autolock routing", () => {
       expect(executionTracker.hasActiveSessionExecutions("shared-loopback-session")).toBe(true);
     });
   });
+
+  test("ends a failed MCP execution exactly once", async () => {
+    fixture = new McpTestFixture({ sessionContext: { sessionId: "mcp-session" } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register("failCall", "failCall", captureSchema, async () => {
+      throw new Error("handler failed");
+    });
+    const endExecution = spyOn(executionTracker, "endExecution");
+    try {
+      const { client } = fixture.getContext();
+      const response = await client.request(
+        { method: "tools/call", params: { name: "failCall", arguments: {} } },
+        z.any(),
+      );
+      expect(response.isError).toBe(true);
+      expect(endExecution).toHaveBeenCalledTimes(1);
+      expect(executionTracker.hasActiveSessionExecutions("mcp-session")).toBe(false);
+    } finally {
+      endExecution.mockRestore();
+    }
+  });
+
+  test("ends an execution even when acquisition cleanup throws", async () => {
+    fixture = new McpTestFixture({ sessionContext: { sessionId: "mcp-session" } });
+    await fixture.setup();
+    ToolRegistry.clearTools();
+    ToolRegistry.register("getAndroid", "getAndroid", captureSchema, async () => ({
+      content: [{ type: "text", text: "ok" }],
+    }));
+    const registerRelease = spyOn(ToolRegistry, "registerSessionBindingReleaseHandler");
+    registerRelease.mockImplementation(() => () => {
+      throw new Error("cleanup failed");
+    });
+    const endExecution = spyOn(executionTracker, "endExecution");
+    try {
+      const { client } = fixture.getContext();
+      await expect(
+        client.request(
+          { method: "tools/call", params: { name: "getAndroid", arguments: {} } },
+          z.any(),
+        ),
+      ).rejects.toThrow();
+      expect(endExecution).toHaveBeenCalledTimes(1);
+      expect(executionTracker.hasActiveSessionExecutions("mcp-session")).toBe(false);
+    } finally {
+      endExecution.mockRestore();
+      registerRelease.mockRestore();
+    }
+  });
+
+  test.each([{ deviceId: "emulator-5556" }, { platform: "ios" }])(
+    "does not pin another target to the mapped session with %j",
+    async (selectors) => {
+      let sessionManager: SessionManager | undefined;
+      let startExecution: ReturnType<typeof spyOn> | undefined;
+      try {
+        process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+        const timer = new FakeTimer();
+        sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+        const fakeDeviceUtils = new FakeDeviceUtils();
+        const devices = [
+          { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" },
+          { name: "iPhone", platform: "ios" as const, deviceId: "emulator-5556" },
+        ];
+        fakeDeviceUtils.setBootedDevices(
+          "android",
+          devices.filter((device) => device.platform === "android"),
+        );
+        fakeDeviceUtils.setBootedDevices(
+          "ios",
+          devices.filter((device) => device.platform === "ios"),
+        );
+        const pool = new DevicePool(
+          createDevicePoolDependencies(sessionManager, "daemon-test", {
+            timer,
+            deviceManager: fakeDeviceUtils,
+          }),
+        );
+        await pool.initializeWithDevices(devices);
+        DaemonState.getInstance().initialize(sessionManager, pool);
+        const sessionA = await pool.autolockDevice("emulator-5554", "android", "mcp-session");
+        executionTracker.setAutolockSessionResolver({
+          autolockSessionForMcpSession: (mcpSessionId) =>
+            pool.captureAutolockSessionForMcpSession(mcpSessionId),
+        });
+        ToolRegistry.clearTools();
+        ToolRegistry.registerDeviceAware(
+          "captureAutolockOwnership",
+          "captureAutolockOwnership",
+          captureSchema.extend({
+            platform: z.string().optional(),
+            deviceId: z.string().optional(),
+          }),
+          async () => ({ content: [{ type: "text", text: "ok" }] }),
+        );
+        fixture = new McpTestFixture({ sessionContext: { sessionId: "mcp-session" } });
+        await fixture.setup();
+
+        const originalStart = executionTracker.startExecution.bind(executionTracker);
+        let activeForA: boolean | undefined;
+        let cancelledForA: Promise<number> | undefined;
+        let drainedA: Promise<boolean> | undefined;
+        let targetAborted: boolean | undefined;
+        let provisionalKey: string | undefined;
+        startExecution = spyOn(executionTracker, "startExecution").mockImplementation((...args) => {
+          const execution = originalStart(...args);
+          provisionalKey = args[4];
+          activeForA = executionTracker.hasActiveAutolockSessionExecutions(sessionA!);
+          cancelledForA = executionTracker.cancelDeviceSessionExecutions(sessionA!);
+          drainedA = executionTracker.waitForDeviceSessionExecutionsToEnd(sessionA!, 1_000);
+          targetAborted = execution.abortController.signal.aborted;
+          executionTracker.endExecution(execution.id);
+          throw new Error("admission captured");
+        });
+        const { client } = fixture.getContext();
+        const request = client
+          .request(
+            {
+              method: "tools/call",
+              params: { name: "captureAutolockOwnership", arguments: selectors },
+            },
+            z.any(),
+          )
+          .then(
+            () => undefined,
+            (error: unknown) => error,
+          );
+        expect(await request).toBeInstanceOf(Error);
+        expect(activeForA ?? executionTracker.hasActiveAutolockSessionExecutions(sessionA!)).toBe(
+          false,
+        );
+        await expect(
+          cancelledForA ?? executionTracker.cancelDeviceSessionExecutions(sessionA!),
+        ).resolves.toBe(0);
+        await expect(
+          drainedA ?? executionTracker.waitForDeviceSessionExecutionsToEnd(sessionA!, 1_000),
+        ).resolves.toBe(true);
+        expect(targetAborted).not.toBe(true);
+        expect(provisionalKey).toBeUndefined();
+      } finally {
+        startExecution?.mockRestore();
+        sessionManager?.stopCleanupTimer();
+        DaemonState.getInstance().reset();
+        delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
+      }
+    },
+  );
 
   test.each([{}, { platform: "android" }, { deviceId: "emulator-5554" }])(
     "binds an implicit execution with %j to its resolved autolock before an MCP remap",

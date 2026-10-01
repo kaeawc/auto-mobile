@@ -28,6 +28,9 @@ import type { PerformanceAuditor } from "../../../src/features/observe/audits/Pe
 import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 class NoOpAuditor implements Pick<
   PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
@@ -47,11 +50,13 @@ function createObserveScreen(
   hierarchyCapture?: HierarchyCapture,
   hierarchyFailure?: ActionableError,
   hierarchyCollector?: HierarchyCollector,
+  realEvidence = false,
 ) {
   const fakeTimer = new FakeTimer();
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
   const fakeDeviceStateCollector = new FakeDeviceStateCollector();
   const cacheStore = new FakeObserveCacheStore(fakeTimer);
+  const screenshotStateStore = new FakeScreenshotStateStore(fakeTimer);
 
   const observeScreen = new RealObserveScreen(
     device,
@@ -59,7 +64,10 @@ function createObserveScreen(
     {
       hierarchyCapture,
       cacheStore,
-      screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
+      screenshotStateStore,
+      screenshotEvidenceFiles: realEvidence
+        ? fs
+        : { stat: async () => ({ isFile: () => true, size: 1, mtimeMs: fakeTimer.now() }) },
       screenshotRecorder: fakeScreenshotRecorder,
       hierarchyCollector:
         hierarchyCollector ??
@@ -75,7 +83,14 @@ function createObserveScreen(
     fakeTimer,
   );
 
-  return { observeScreen, fakeScreenshotRecorder, fakeDeviceStateCollector, cacheStore };
+  return {
+    observeScreen,
+    fakeScreenshotRecorder,
+    fakeDeviceStateCollector,
+    cacheStore,
+    screenshotStateStore,
+    fakeTimer,
+  };
 }
 
 describe("ObserveScreen skip options", () => {
@@ -181,11 +196,68 @@ describe("ObserveScreen skip options", () => {
     expect(emitted.screenshotMimeType).toBe("image/png");
   });
 
+  test.each([
+    ["jpg", "jpeg", "image/jpeg"],
+    ["webp", "webp", "image/webp"],
+  ] as const)(
+    "settled %s capture retains format and provenance",
+    async (extension, format, mime) => {
+      fakeScreenshotRecorder.captureSettled = async () => `/fake/settled.${extension}`;
+      const result = await observeScreen.execute({ screenshot: "settled" });
+      expect(result).toMatchObject({
+        screenshotPath: `/fake/settled.${extension}`,
+        screenshotFormat: format,
+        screenshotMimeType: mime,
+        screenshotSource: "fresh",
+        screenshotCaptureSource: "device",
+      });
+    },
+  );
+
   test("explicit settled failure throws the capture error", async () => {
     fakeScreenshotRecorder.settledError = new ActionableError("capture failed");
     await expect(observeScreen.execute({ screenshot: "settled" })).rejects.toThrow(
       "capture failed",
     );
+  });
+
+  test("failed strict settled capture does not return an existing cached screenshot", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "observe-cached-"));
+    try {
+      const cachedPath = path.join(dir, "cached.png");
+      await fs.writeFile(cachedPath, Buffer.from("89504e470d0a1a0a", "hex"));
+      await fs.utimes(cachedPath, 8, 8);
+      const created = createObserveScreen(undefined, undefined, undefined, undefined, true);
+      created.fakeTimer.advanceTime(10_000);
+      created.screenshotStateStore.update(device.deviceId, cachedPath);
+      created.fakeScreenshotRecorder.settledError = new ActionableError("capture failed");
+
+      await expect(created.observeScreen.execute({ screenshot: "settled" })).rejects.toThrow(
+        "capture failed",
+      );
+      expect(created.screenshotStateStore.getPath(device.deviceId)).toBe(cachedPath);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("fresh settled capture returns an existing screenshot path and fresh label", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "observe-fresh-"));
+    try {
+      const screenshotPath = path.join(dir, "fresh.png");
+      await fs.writeFile(screenshotPath, Buffer.from("89504e470d0a1a0a", "hex"));
+      const created = createObserveScreen(undefined, undefined, undefined, undefined, true);
+      created.fakeScreenshotRecorder.captureSettled = async () => screenshotPath;
+      const result = await created.observeScreen.execute({ screenshot: "settled" });
+      expect(result).toMatchObject({
+        screenshotPath,
+        screenshotSource: "fresh",
+        screenshotCaptureSource: "device",
+      });
+      expect((await fs.stat(result.screenshotPath!)).isFile()).toBe(true);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("explicit settled mode preserves the fallback for an unrelated hierarchy error", async () => {
@@ -211,6 +283,27 @@ describe("ObserveScreen skip options", () => {
       expect(result.screenshotSettled).toBe(false);
       expect(result.screenshotSettledError).toBe("capture failed");
       expect(result.screenshotOrientation).toBe("display");
+    } finally {
+      if (original === undefined) {
+        delete process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT;
+      } else {
+        process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT = original;
+      }
+    }
+  });
+
+  test("non-strict settled evidence failure does not advertise the missing screenshot", async () => {
+    const original = process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT;
+    process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT = "true";
+    try {
+      const created = createObserveScreen(undefined, undefined, undefined, undefined, true);
+      created.fakeScreenshotRecorder.captureSettled = async () => "/missing/settled.png";
+      const result = await created.observeScreen.execute();
+      expect(result.screenshotSettled).toBe(false);
+      expect(result.screenshotSettledError).toBeDefined();
+      expect(result.screenshotPath).toBeUndefined();
+      expect(result.screenshotFormat).toBeUndefined();
+      expect(result.screenshotMimeType).toBeUndefined();
     } finally {
       if (original === undefined) {
         delete process.env.AUTOMOBILE_OBSERVE_SETTLED_SCREENSHOT;

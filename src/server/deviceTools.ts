@@ -25,7 +25,6 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { enableToolsSchemaField } from "./toolSelectionTools";
 import { deviceResourceConfigurationSchema } from "./deviceResourceSchemas";
 import { registerDeviceResourceTools } from "./deviceResourceTools";
-import { registerDeviceScreenshotTool } from "./deviceScreenshotTools";
 import { createProvisionDeviceHandler } from "./deviceToolsProvisioning";
 import { createAcquisitionHandlers } from "./deviceToolsAcquisition";
 import { createStartDeviceHandlers } from "./deviceToolsStartDevice";
@@ -4633,7 +4632,6 @@ export function registerDeviceTools() {
 
   // Register with the tool registry
   registerDeviceResourceTools(getDeviceToolsDependencies);
-  registerDeviceScreenshotTool();
   ToolRegistry.register(
     "listDeviceImages",
     "List device images",

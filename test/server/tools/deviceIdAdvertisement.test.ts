@@ -25,12 +25,13 @@ describe("advertised deviceId schema", () => {
     ToolRegistry.clearTools();
   });
 
-  test("hides executor-injected deviceId while keeping agent-facing deviceId", () => {
+  test("exposes observe deviceId and hides it on other executor-routed tools", () => {
     registerMcpTools(false);
 
     const definitions = ToolRegistry.getToolDefinitions();
 
-    for (const toolName of ["observe", "tapOn", "swipeOn", "changeLocalization"]) {
+    expect(propertiesFor(getTool(definitions, "observe")).deviceId).toBeDefined();
+    for (const toolName of ["tapOn", "swipeOn", "changeLocalization"]) {
       expect(
         propertiesFor(getTool(definitions, toolName)).deviceId,
         `${toolName} should hide injected deviceId`,

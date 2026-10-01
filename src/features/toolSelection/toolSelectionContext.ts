@@ -3,6 +3,8 @@ import type { SessionToolSelectionService } from "./SessionToolSelectionService"
 import type { ProgressCallback } from "../../server/toolRegistry";
 
 export type ToolSelectionContext = {
+  /** Set only at MCP ingress when observe's raw arguments explicitly name a device. */
+  explicitObserveDeviceRead?: boolean;
   /** Trusted enclosing plan metadata, reattached after each step's schema parse. */
   planRequest?: {
     deadlineMs?: unknown;

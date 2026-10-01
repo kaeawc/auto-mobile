@@ -707,8 +707,13 @@ export interface ObserveDiff {
   screenshotSettledError?: string;
   screenshotOrientation?: "native" | "display";
   screenshotPath?: string;
-  screenshotFormat?: "png";
-  screenshotMimeType?: "image/png";
+  screenshotSource?: "fresh" | "cached";
+  screenshotCaptureSource?: "device" | "observation-cache";
+  screenshotCapturedAt?: string;
+  screenshotAgeMs?: number;
+  screenshotFreshFailure?: { code: string; message: string; retryable: boolean };
+  screenshotFormat?: "png" | "jpeg" | "webp";
+  screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";
   /**
    * Actionable-only selector surface (issue #6221 items 1 and 4.1), ALWAYS
    * present alongside the diff — the same array a full observation's

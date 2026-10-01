@@ -204,6 +204,12 @@ export interface ObserveResult {
   screenshotOrientation?: "native" | "display";
   /** Local path to this observation's validated settled screenshot. */
   screenshotPath?: string;
+  /** Provenance of the screenshot returned with this observation. */
+  screenshotSource?: "fresh" | "cached";
+  screenshotCaptureSource?: "device" | "observation-cache";
+  screenshotCapturedAt?: string;
+  screenshotAgeMs?: number;
+  screenshotFreshFailure?: { code: string; message: string; retryable: boolean };
   screenshotFormat?: "png" | "jpeg" | "webp";
   screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";
   /** Status of opt-in inline screenshot delivery; absent for ordinary observations. */

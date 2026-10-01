@@ -3,6 +3,12 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
+import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import {
+  assertObservationReadAccess,
+  resolveDeviceForObservationRead,
+  type DeviceObservationAccess,
+} from "./deviceObservationAccess";
 import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
 import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
@@ -1521,6 +1527,42 @@ export function invalidateReadinessForDisabledAccessibility(
   }
 }
 
+interface ObserveToolDependencies {
+  createScreen?: (
+    device: BootedDevice,
+    display?: string,
+  ) => Pick<
+    RealObserveScreen,
+    "execute" | "executeDeviceRead" | "appendRawViewHierarchy" | "getMostRecentCachedObserveResult"
+  >;
+  deviceReadAccess?: DeviceObservationAccess;
+}
+
+function screenForObserve(
+  device: BootedDevice,
+  args: ObserveArgs,
+  dependencies: ObserveToolDependencies,
+): ObserveScreen & Pick<RealObserveScreen, "appendRawViewHierarchy" | "executeDeviceRead"> {
+  if (dependencies.createScreen) {
+    return dependencies.createScreen(device, args.display);
+  }
+  return new RealObserveScreen(device, undefined, {
+    display: args.display,
+    deviceReadOnly: getToolSelectionContext()?.explicitObserveDeviceRead === true,
+    onAvailabilityLost:
+      device.platform === "android"
+        ? (reason) => {
+            const daemonState = DaemonState.getInstance();
+            if (args.sessionUuid && daemonState.isInitialized()) {
+              daemonState
+                .getSessionManager()
+                .invalidateAutomationReadiness(args.sessionUuid, reason);
+            }
+          }
+        : undefined,
+  });
+}
+
 // Register tools (this will be called when this file is imported)
 async function withCapturedScreenshotImage(
   result: ObserveToolPayload,
@@ -1563,7 +1605,7 @@ function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined 
   return args.includeScreenshotImage ? "settled" : args.screenshot;
 }
 
-export function registerObserveTools() {
+export function registerObserveTools(dependencies: ObserveToolDependencies = {}) {
   // Observe handler
   const observeHandler = async (
     device: BootedDevice,
@@ -1572,67 +1614,64 @@ export function registerObserveTools() {
     signal?: AbortSignal,
   ): Promise<ObserveResponse> => {
     const waitFor = args.waitFor;
+    const deviceRead = getToolSelectionContext()?.explicitObserveDeviceRead === true;
     // #6154 follow-up: `platform` is optional on the wire, so the schema's
     // iOS-rejects-activityName check (which runs against the raw request
     // platform) can be skipped entirely when the caller omitted it. Re-validate
     // against the resolved `device.platform`, before the try/catch below so the
     // actionable message isn't re-wrapped as a generic execution failure.
     assertActiveWindowWaitForSupportedOnPlatform(device.platform, waitFor);
-    const screenshotMode = requestedScreenshotMode(args);
+    const screenshotMode = deviceRead
+      ? (requestedScreenshotMode(args) ?? "settled")
+      : requestedScreenshotMode(args);
     try {
-      const observeScreen = new RealObserveScreen(device, undefined, {
-        display: args.display,
-        onAvailabilityLost:
-          device.platform === "android"
-            ? (reason) => {
-                const daemonState = DaemonState.getInstance();
-                if (args.sessionUuid && daemonState.isInitialized()) {
-                  daemonState
-                    .getSessionManager()
-                    .invalidateAutomationReadiness(args.sessionUuid, reason);
-                }
-              }
-            : undefined,
-      });
+      const observeScreen = screenForObserve(device, args, dependencies);
       // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
-      const waitOutcome = waitFor
-        ? await waitForObservation(
-            observeScreen,
-            { ...waitFor, settled: args.settled },
-            signal,
-            args.skipBackStack ?? false,
-            defaultTimer,
-            device.platform,
-            screenshotMode,
-            args.screenshotOptions,
-          )
-        : null;
-      const result = waitOutcome
-        ? waitOutcome.observation
-        : await observeScreen.execute({
-            perf: createGlobalPerformanceTracker(),
-            skipWaitForFresh: true,
-            signal,
-            screenshot: screenshotMode,
-            screenshotOptions: args.screenshotOptions,
-          });
+      const waitOutcome =
+        !deviceRead && waitFor
+          ? await waitForObservation(
+              observeScreen,
+              { ...waitFor, settled: args.settled },
+              signal,
+              args.skipBackStack ?? false,
+              defaultTimer,
+              device.platform,
+              screenshotMode,
+              args.screenshotOptions,
+            )
+          : null;
+      const result = deviceRead
+        ? await observeScreen.executeDeviceRead(signal, screenshotMode, args.screenshotOptions)
+        : waitOutcome
+          ? waitOutcome.observation
+          : await observeScreen.execute({
+              perf: createGlobalPerformanceTracker(),
+              skipWaitForFresh: true,
+              signal,
+              screenshot: screenshotMode,
+              screenshotOptions: args.screenshotOptions,
+            });
 
-      result.snapshotReference = snapshotReferences.capture(device.deviceId, result);
+      if (!deviceRead) {
+        result.snapshotReference = snapshotReferences.capture(device.deviceId, result);
+      }
 
-      if (args.raw) {
+      if (args.raw && !deviceRead) {
         await observeScreen.appendRawViewHierarchy(result, signal);
       }
 
       // The settled capture has resolved before either resource is announced.
-      await ResourceRegistry.notifyResourcesUpdated([
-        RESOURCE_URIS.LATEST_OBSERVATION,
-        RESOURCE_URIS.LATEST_SCREENSHOT,
-      ]);
+      if (!deviceRead) {
+        await ResourceRegistry.notifyResourcesUpdated([
+          RESOURCE_URIS.LATEST_OBSERVATION,
+          RESOURCE_URIS.LATEST_SCREENSHOT,
+        ]);
+      }
 
       // Include setup timing if this is the first observe after accessibility service setup
-      const setupTiming = consumeSetupTiming(device.deviceId);
+      const setupTiming = deviceRead ? undefined : consumeSetupTiming(device.deviceId);
       if (setupTiming && result.perfTiming) {
         // Prepend setup timing to the observe timing
         result.perfTiming = [setupTiming, ...result.perfTiming];
@@ -1641,7 +1680,7 @@ export function registerObserveTools() {
       }
 
       // Record back stack information in navigation graph if available
-      if (result.backStack && result.activeWindow?.appId) {
+      if (!deviceRead && result.backStack && result.activeWindow?.appId) {
         const navGraph = args.sessionUuid
           ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
           : NavigationGraphManager.getInstance();
@@ -1656,14 +1695,16 @@ export function registerObserveTools() {
 
       // A disabled accessibility service invalidates both the manager setup latch
       // and the session readiness recorded before the service was lost.
-      invalidateReadinessForDisabledAccessibility(device, result, args.sessionUuid, {
-        resetSetupState: () => AndroidCtrlProxyManager.getInstance(device).resetSetupState(),
-        isDaemonInitialized: () => DaemonState.getInstance().isInitialized(),
-        invalidateAutomationReadiness: (sessionUuid, reason) =>
-          DaemonState.getInstance()
-            .getSessionManager()
-            .invalidateAutomationReadiness(sessionUuid, reason),
-      });
+      if (!deviceRead) {
+        invalidateReadinessForDisabledAccessibility(device, result, args.sessionUuid, {
+          resetSetupState: () => AndroidCtrlProxyManager.getInstance(device).resetSetupState(),
+          isDaemonInitialized: () => DaemonState.getInstance().isInitialized(),
+          invalidateAutomationReadiness: (sessionUuid, reason) =>
+            DaemonState.getInstance()
+              .getSessionManager()
+              .invalidateAutomationReadiness(sessionUuid, reason),
+        });
+      }
 
       if (waitOutcome) {
         const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
@@ -1725,7 +1766,7 @@ export function registerObserveTools() {
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    "Get screen view hierarchy",
+    "Get screen view hierarchy and screenshot. An explicit deviceId reads without acquiring a session or changing ownership; deviceId and sessionUuid are mutually exclusive.",
     observeSchema,
     observeHandler,
     {
@@ -1733,6 +1774,12 @@ export function registerObserveTools() {
       transportRecovery: "replay",
       outputSchema: observeToolResultSchema,
       appUiResourceUri: OBSERVE_APP_RESOURCE_URI,
+      sessionlessDeviceRead: {
+        resolve: (deviceId, signal) =>
+          resolveDeviceForObservationRead(deviceId, signal, dependencies.deviceReadAccess),
+        assertAuthorized: (device) =>
+          assertObservationReadAccess(device, dependencies.deviceReadAccess),
+      },
     },
   );
 

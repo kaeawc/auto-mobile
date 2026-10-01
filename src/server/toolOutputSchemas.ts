@@ -683,6 +683,13 @@ const observationScreenshotOutputFields = {
   screenshotSettledError: z.string().optional(),
   screenshotOrientation: z.enum(["native", "display"]).optional(),
   screenshotPath: z.string().optional(),
+  screenshotSource: z.enum(["fresh", "cached"]).optional(),
+  screenshotCaptureSource: z.enum(["device", "observation-cache"]).optional(),
+  screenshotCapturedAt: z.string().optional(),
+  screenshotAgeMs: z.number().optional(),
+  screenshotFreshFailure: z
+    .object({ code: z.string(), message: z.string(), retryable: z.boolean() })
+    .optional(),
   screenshotFormat: z.enum(["png", "jpeg", "webp"]).optional(),
   screenshotMimeType: z.enum(["image/png", "image/jpeg", "image/webp"]).optional(),
   screenshotImage: z

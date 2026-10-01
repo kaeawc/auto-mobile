@@ -42,6 +42,43 @@ describe("display read routing", () => {
     skipAccessibilityAudit: true,
   };
 
+  test.each([
+    ["absent", undefined],
+    ["empty", { panels: [], postures: [] }],
+  ])("device read rejects an unavailable panel when inventory is %s", async (_name, displays) => {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    let screenshotCalls = 0;
+    const screen = new RealObserveScreen(
+      { ...device, displays },
+      new FakeAdbClientFactory(adb),
+      {
+        display: "cover",
+        deviceReadOnly: true,
+        cacheStore: new FakeObserveCacheStore(timer),
+        screenshot: {
+          execute: async () => {
+            screenshotCalls++;
+            return { success: true, path: "/fake/default.png" };
+          },
+          generateScreenshotPath: () => "/fake/default.png",
+          getActivityHash: async () => "",
+        },
+      },
+      timer,
+    );
+
+    try {
+      await expect(screen.executeDeviceRead()).rejects.toThrow(
+        'Unknown or unavailable display "cover". Available panels: 0 (unknown)',
+      );
+      expect(screenshotCalls).toBe(0);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    } finally {
+      resetObserveCacheStore();
+    }
+  });
+
   test("fresh Android hierarchy passes selected displayId to the sync client", async () => {
     let requestedDisplayId: number | undefined;
     const hierarchy: ViewHierarchyResult = {
@@ -217,6 +254,9 @@ describe("display read routing", () => {
         {
           hierarchyCapture: capture,
           screenshotRecorder: recorder,
+          screenshotEvidenceFiles: {
+            stat: async () => ({ isFile: () => true, size: 1, mtimeMs: timer.now() }),
+          },
           cacheStore: new FakeObserveCacheStore(timer),
         },
         timer,
@@ -272,6 +312,9 @@ describe("display read routing", () => {
         {
           viewHierarchy: hierarchy,
           screenshotRecorder: recorder,
+          screenshotEvidenceFiles: {
+            stat: async () => ({ isFile: () => true, size: 1, mtimeMs: timer.now() }),
+          },
           cacheStore: new FakeObserveCacheStore(timer),
         },
         timer,

@@ -27,7 +27,7 @@ describe("TakeScreenshot Android cancellation", function () {
         androidDevice("android-cancel-device"),
         new FakeAdbClientFactory(new FakeAdbExecutor()),
       );
-      const resultPromise = screenshot.execute({}, controller.signal);
+      const resultPromise = screenshot.execute({ format: "jpeg" }, controller.signal);
       await Promise.resolve();
       controller.abort();
       const stillPending = (async () => {
@@ -65,7 +65,7 @@ describe("TakeScreenshot Android cancellation", function () {
         new CountingIdGenerator("capture"),
         writer,
       );
-      const result = await screenshot.execute({}, controller.signal);
+      const result = await screenshot.execute({ format: "jpeg" }, controller.signal);
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });
       expect(writer.written).toHaveLength(1);
       expect(writer.removed).toEqual(writer.written);

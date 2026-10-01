@@ -68,7 +68,14 @@ native absolute-input coordinates.
 `observe`, `observe.screenSize`, and `tapAt` use the device's current-orientation
 native coordinate space described above. For a fresh screenshot matching an
 observation, call `observe({ screenshot: "settled" })` and read its
-`screenshotPath`. The screenshot's orientation follows the device framebuffer:
+`screenshotPath`.
+For encoded captures, pass `screenshotOptions` with `screenshot: "settled"`,
+for example `observe({ screenshot: "settled", screenshotOptions: { format: "webp", quality: 80 } })`.
+Omitting options requests PNG. JPEG and WebP accept integer `quality` from 1 to 100. WebP also accepts `lossless: true`, which cannot be combined with
+`quality`; PNG accepts neither. The returned `screenshotFormat`,
+`screenshotMimeType`, and `screenshotPath` extension describe the saved bytes
+after a platform capture fallback. The path does not depend on reading an
+in-protocol screenshot resource. The screenshot's orientation follows the device framebuffer:
 on the iOS Simulator, the framebuffer can remain portrait after `rotate`, even
 while the device orientation is landscape (this is simulator framebuffer
 behavior, not an AutoMobile bug); on Android, the raster rotates with the

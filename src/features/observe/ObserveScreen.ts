@@ -20,6 +20,7 @@ import {
 import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
+import type { ScreenshotEncodingOptions } from "./screenshot/screenshotOptions";
 import { GetBackStack } from "./GetBackStack";
 import {
   AdbClientFactory,
@@ -1057,6 +1058,7 @@ export class RealObserveScreen implements ObserveScreen {
             signal,
             options?.screenshot === "settled",
             screenshotDisplayId,
+            options?.screenshotOptions,
           );
         } else if (serverConfig.getAccessibilityAuditConfig()) {
           await this.screenshotRecorder.capture(
@@ -1310,6 +1312,7 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
     observation?: ObserveResult,
     screenshot?: ScreenshotMode,
+    screenshotOptions?: ScreenshotEncodingOptions,
   ): Promise<void> {
     const screenshotObservation = observation ?? this.createBaseResult();
     const displayId = await this.screenshotDisplayId(signal);
@@ -1327,6 +1330,7 @@ export class RealObserveScreen implements ObserveScreen {
         signal,
         screenshot === "settled",
         displayId,
+        screenshotOptions,
       );
     } else {
       await this.screenshotRecorder.captureFresh(
@@ -1347,6 +1351,7 @@ export class RealObserveScreen implements ObserveScreen {
     signal: AbortSignal | undefined,
     strict: boolean,
     displayId?: number,
+    screenshotOptions?: ScreenshotEncodingOptions,
   ): Promise<void> {
     try {
       if (!this.screenshotRecorder.captureSettled) {
@@ -1357,11 +1362,14 @@ export class RealObserveScreen implements ObserveScreen {
         perf,
         signal,
         displayId,
+        screenshotOptions,
       );
       observation.screenshotSettled = true;
       observation.screenshotPath = path;
-      observation.screenshotFormat = "png";
-      observation.screenshotMimeType = "image/png";
+      const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
+      observation.screenshotFormat =
+        extension === ".jpg" ? "jpeg" : extension === ".webp" ? "webp" : "png";
+      observation.screenshotMimeType = `image/${observation.screenshotFormat}`;
     } catch (error) {
       if (strict) {
         throw new StrictSettledScreenshotCaptureError(error, this.device.deviceId);

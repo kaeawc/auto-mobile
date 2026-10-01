@@ -74,6 +74,8 @@ export class SharpBackend implements ImageBackend {
     switch (pipeline.encoding?.mime) {
       case "image/png":
         return image.png();
+      case "image/jpeg":
+        return image.jpeg({ quality: pipeline.encoding.options?.quality as number | undefined });
       case "image/webp": {
         const options = pipeline.encoding.options;
         return image.webp({

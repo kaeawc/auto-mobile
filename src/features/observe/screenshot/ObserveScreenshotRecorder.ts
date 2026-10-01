@@ -12,6 +12,7 @@ import type {
 import { ScreenshotJobTracker } from "../../../utils/ScreenshotJobTracker";
 import type { ScreenshotService } from "../interfaces/ScreenshotService";
 import type { ScreenshotOptions } from "../TakeScreenshot";
+import type { ScreenshotEncodingOptions } from "./screenshotOptions";
 import { getScreenshotStateStore, ScreenshotStateStore } from "./ScreenshotStateRegistry";
 import { validateCapturedScreenshot } from "./validateCapturedScreenshot";
 import { ActionableError, toActionableError } from "../../../models/ActionableError";
@@ -78,6 +79,7 @@ export interface ObserveScreenshotRecorder {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    options?: ScreenshotEncodingOptions,
   ): Promise<string>;
 }
 
@@ -199,12 +201,17 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     displayId?: number,
+    options?: ScreenshotEncodingOptions,
   ): Promise<string> {
     this.store.beginObservation(this.device.deviceId, observationId);
     try {
       return await perf.track("screenshot", async () => {
         for (let attempt = 0; attempt < 2; attempt++) {
-          const { result, cancelled } = await this.captureSettledAttempt(signal, displayId);
+          const { result, cancelled } = await this.captureSettledAttempt(
+            signal,
+            displayId,
+            options,
+          );
           if (cancelled && attempt === 0 && !signal?.aborted) {
             logger.debug("[OBSERVE] Retrying screenshot cancelled by another capture");
             continue;
@@ -235,9 +242,10 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   private async captureSettledAttempt(
     signal?: AbortSignal,
     displayId?: number,
+    options?: ScreenshotEncodingOptions,
   ): Promise<{ result: ScreenshotResult; cancelled: boolean }> {
     const handle = this.screenshotUtil.startTrackedCapture(
-      { format: "png", displayId },
+      { ...options, format: options?.format ?? "png", displayId },
       { parentSignal: signal, queueAfterPending: true },
     );
     ScreenshotJobTracker.registerCompletionReader(handle.jobId);

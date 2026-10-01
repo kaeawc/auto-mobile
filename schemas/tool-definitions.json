@@ -4600,6 +4600,72 @@
           "type": "string",
           "enum": ["settled", "async", "none"]
         },
+        "screenshotOptions": {
+          "description": "Encoding for a settled screenshot; omitted uses PNG",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "const": "png"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "const": "jpeg"
+                },
+                "quality": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                }
+              },
+              "required": ["format"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "const": "webp"
+                },
+                "quality": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 100
+                },
+                "lossless": {
+                  "type": "boolean",
+                  "const": false
+                }
+              },
+              "required": ["format"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "format": {
+                  "type": "string",
+                  "const": "webp"
+                },
+                "lossless": {
+                  "type": "boolean",
+                  "const": true
+                }
+              },
+              "required": ["format", "lossless"],
+              "additionalProperties": false
+            }
+          ]
+        },
         "display": {
           "description": "Panel key, role (inner, cover, rear, external), or active; all is not supported yet",
           "type": "string"
@@ -4896,11 +4962,11 @@
         },
         "screenshotFormat": {
           "type": "string",
-          "const": "png"
+          "enum": ["png", "jpeg", "webp"]
         },
         "screenshotMimeType": {
           "type": "string",
-          "const": "image/png"
+          "enum": ["image/png", "image/jpeg", "image/webp"]
         },
         "screenSize": {
           "description": "Current-orientation native screen size for observe bounds and absolute tapAt input: Android physical pixels or iOS XCTest logical points. Valid points satisfy 0 <= x < width and 0 <= y < height. No density, inset, Retina, canonical-pixel, or rotation transform applies to an already-native point.",
@@ -13588,11 +13654,11 @@
                 },
                 "screenshotFormat": {
                   "type": "string",
-                  "const": "png"
+                  "enum": ["png", "jpeg", "webp"]
                 },
                 "screenshotMimeType": {
                   "type": "string",
-                  "const": "image/png"
+                  "enum": ["image/png", "image/jpeg", "image/webp"]
                 },
                 "skeleton": {
                   "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
@@ -14514,11 +14580,11 @@
                 },
                 "screenshotFormat": {
                   "type": "string",
-                  "const": "png"
+                  "enum": ["png", "jpeg", "webp"]
                 },
                 "screenshotMimeType": {
                   "type": "string",
-                  "const": "image/png"
+                  "enum": ["image/png", "image/jpeg", "image/webp"]
                 },
                 "selectedElements": {
                   "type": "array",

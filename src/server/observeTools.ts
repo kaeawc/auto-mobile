@@ -1,6 +1,7 @@
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
+import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
 import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
@@ -558,6 +559,9 @@ const observeBaseSchema = withJsonSchemaOverride(
           .describe(
             "Screenshot mode: await a fresh validated capture, use background capture, or skip",
           ),
+        screenshotOptions: screenshotOptionsSchema
+          .optional()
+          .describe("Encoding for a settled screenshot; omitted uses PNG"),
         display: z
           .string()
           .optional()
@@ -578,7 +582,17 @@ const observeBaseSchema = withJsonSchemaOverride(
         scope: observeScopeSchema.optional(),
       })
       .strict(),
-  ).superRefine(refineWaitForArgs),
+  )
+    .superRefine(refineWaitForArgs)
+    .superRefine((args, ctx) => {
+      if (args.screenshotOptions !== undefined && args.screenshot !== "settled") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["screenshotOptions"],
+          message: "screenshotOptions requires screenshot: settled",
+        });
+      }
+    }),
   overrideWaitForJsonSchema,
 );
 
@@ -1264,6 +1278,7 @@ export const waitForObservation = async (
   timer: Timer = defaultTimer,
   platform?: BootedDevice["platform"],
   screenshot?: ScreenshotMode,
+  screenshotOptions?: z.infer<typeof screenshotOptionsSchema>,
 ): Promise<WaitForObservationOutcome> => {
   const complete = async (
     outcome: WaitForObservationOutcome,
@@ -1279,6 +1294,7 @@ export const waitForObservation = async (
         signal,
         outcome.observation,
         screenshot,
+        screenshotOptions,
       );
     } else {
       await observeScreen.runAccessibilityAudit?.(
@@ -1531,6 +1547,7 @@ export function registerObserveTools() {
             defaultTimer,
             device.platform,
             args.screenshot,
+            args.screenshotOptions,
           )
         : null;
       const result = waitOutcome
@@ -1540,6 +1557,7 @@ export function registerObserveTools() {
             skipWaitForFresh: true,
             signal,
             screenshot: args.screenshot,
+            screenshotOptions: args.screenshotOptions,
           });
 
       result.snapshotReference = snapshotReferences.capture(device.deviceId, result);

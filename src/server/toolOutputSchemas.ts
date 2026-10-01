@@ -683,8 +683,8 @@ const observationScreenshotOutputFields = {
   screenshotSettledError: z.string().optional(),
   screenshotOrientation: z.enum(["native", "display"]).optional(),
   screenshotPath: z.string().optional(),
-  screenshotFormat: z.literal("png").optional(),
-  screenshotMimeType: z.literal("image/png").optional(),
+  screenshotFormat: z.enum(["png", "jpeg", "webp"]).optional(),
+  screenshotMimeType: z.enum(["image/png", "image/jpeg", "image/webp"]).optional(),
 };
 
 /**

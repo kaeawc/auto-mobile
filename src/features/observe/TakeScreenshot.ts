@@ -10,6 +10,11 @@ import { Window } from "./Window";
 import { logger } from "../../utils/logger";
 import { ScreenshotResult } from "../../models/ScreenshotResult";
 import { Image } from "../../utils/image-utils";
+import { detectImageMimeType } from "../../utils/screenshot/imageHeaderDimensions";
+import {
+  validateScreenshotOptions,
+  type ScreenshotEncodingOptions,
+} from "./screenshot/screenshotOptions";
 import { BootedDevice } from "../../models";
 import {
   ScreenshotJobHandle,
@@ -52,8 +57,9 @@ import {
   withAndroidScreenshotCaptureLock,
 } from "./android/AndroidPhysicalDisplayId";
 
-function replaceScreenshotExtension(filePath: string, extension: string): string {
-  return filePath.replace(/\.[^.]+$/, `.${extension}`);
+export function replaceScreenshotExtension(filePath: string, extension: string): string {
+  const oldExtension = path.extname(filePath);
+  return `${filePath.slice(0, filePath.length - oldExtension.length)}.${extension}`;
 }
 
 export interface ScreenshotOptions {
@@ -62,6 +68,65 @@ export interface ScreenshotOptions {
   lossless?: boolean;
   /** Android logical display selected by observe. */
   displayId?: number;
+}
+
+async function encodeScreenshot(
+  source: Buffer,
+  options: ScreenshotEncodingOptions,
+): Promise<Buffer> {
+  const format = options.format ?? "png";
+  if (
+    detectImageMimeType(source) === `image/${format}` &&
+    options.quality === undefined &&
+    options.lossless !== true
+  ) {
+    return source;
+  }
+  if (!detectImageMimeType(source)) {
+    throw new Error("Screenshot has an unsupported image format");
+  }
+  const image = Image.fromBuffer(source);
+  let encoded: Buffer;
+  switch (format) {
+    case "png":
+      encoded = await image.png().toBuffer();
+      break;
+    case "jpeg":
+      encoded = await image.jpeg({ quality: options.quality }).toBuffer();
+      break;
+    case "webp":
+      encoded = await image
+        .webp(options.lossless ? { lossless: true } : { quality: options.quality ?? 75 })
+        .toBuffer();
+      break;
+  }
+  if (detectImageMimeType(encoded) !== `image/${format}`) {
+    throw new Error(`Screenshot encoder did not produce ${format} bytes`);
+  }
+  return encoded;
+}
+
+function encodingOptions(options: ScreenshotOptions): ScreenshotEncodingOptions {
+  return validateScreenshotOptions({
+    ...(options.format === undefined ? {} : { format: options.format }),
+    ...(options.quality === undefined ? {} : { quality: options.quality }),
+    ...(options.lossless === undefined ? {} : { lossless: options.lossless }),
+  });
+}
+
+function ctrlProxyScreenshotFormat(
+  result: CtrlProxyScreenshotResult,
+  imageBuffer: Buffer,
+  useLegacyFormat: boolean,
+): "png" | "jpeg" | "webp" {
+  if (useLegacyFormat) {
+    return result.format?.toLowerCase() === "png" ? "png" : "jpeg";
+  }
+  const mime = detectImageMimeType(imageBuffer);
+  if (!mime) {
+    throw new Error("Android CtrlProxy returned an unsupported screenshot format");
+  }
+  return mime.slice(6) as "png" | "jpeg" | "webp";
 }
 
 export class TakeScreenshot implements ScreenshotService {
@@ -210,6 +275,8 @@ export class TakeScreenshot implements ScreenshotService {
     );
 
     try {
+      const encoding = encodingOptions(options);
+      options = { ...options, ...encoding };
       if (signal?.aborted) {
         return { success: false, error: OPERATION_CANCELLED_MESSAGE };
       }
@@ -266,7 +333,7 @@ export class TakeScreenshot implements ScreenshotService {
       case "android":
         return await this.captureAndroidScreenshot(finalPath, options, signal);
       case "ios":
-        return await this.captureiOSScreenshot(finalPath, signal);
+        return await this.captureiOSScreenshot(finalPath, options, signal);
       default:
         throw new Error(`Unsupported platform: ${this.device.platform}`);
     }
@@ -285,16 +352,26 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     logger.info(`[SCREENSHOT] Starting screenshot capture with format: ${options.format}`);
 
-    if (options.format === undefined || options.format === "jpeg") {
+    if (
+      options.format === undefined ||
+      (options.format === "jpeg" && options.quality === undefined)
+    ) {
       try {
-        return await this.captureScreenshotViaCtrlProxy(finalPath, signal, options.displayId);
+        return await this.captureScreenshotViaCtrlProxy(
+          finalPath,
+          signal,
+          options.displayId,
+          options.format === undefined,
+        );
       } catch (error) {
         if (options.displayId !== undefined) {
           throw error;
         }
         logger.info(`[SCREENSHOT] CtrlProxy capture failed, falling back to ADB: ${error}`);
-        finalPath = replaceScreenshotExtension(finalPath, "png");
-        options = { ...options, format: "png" };
+        if (options.format === undefined) {
+          finalPath = replaceScreenshotExtension(finalPath, "png");
+          options = { ...options, format: "png" };
+        }
       }
     }
 
@@ -368,6 +445,7 @@ export class TakeScreenshot implements ScreenshotService {
     finalPath: string,
     signal?: AbortSignal,
     displayId?: number,
+    useLegacyFormat: boolean = false,
   ): Promise<ScreenshotResult> {
     const result = await this.requestCtrlProxyCapture(signal, displayId);
     if (!result) {
@@ -377,8 +455,8 @@ export class TakeScreenshot implements ScreenshotService {
       throw new Error(result.error || "No screenshot data returned from Android CtrlProxy");
     }
 
-    const format = result.format?.toLowerCase() === "png" ? "png" : "jpeg";
     const imageBuffer = Buffer.from(result.data, "base64");
+    const format = ctrlProxyScreenshotFormat(result, imageBuffer, useLegacyFormat);
     const screenshotPath = replaceScreenshotExtension(
       finalPath,
       screenshotExtensionForFormat(format),
@@ -405,6 +483,7 @@ export class TakeScreenshot implements ScreenshotService {
    */
   private async captureiOSScreenshot(
     finalPath: string,
+    options: ScreenshotOptions,
     signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
@@ -426,7 +505,7 @@ export class TakeScreenshot implements ScreenshotService {
         client.requestScreenshot(10000, undefined, signal),
         signal,
       );
-      return await this.writeiOSScreenshot(finalPath, result, startTime, signal);
+      return await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
     } catch (error) {
       const errorMsg = errorMessage(error);
       logger.error(`[SCREENSHOT] iOS screenshot capture failed: ${errorMsg}`);
@@ -441,6 +520,7 @@ export class TakeScreenshot implements ScreenshotService {
     finalPath: string,
     result: CtrlProxyScreenshotResult,
     startTime: number,
+    options: ScreenshotOptions,
     signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     if (signal?.aborted) {
@@ -456,7 +536,11 @@ export class TakeScreenshot implements ScreenshotService {
 
     // Decode base64 and save to file securely
     const imageBuffer = Buffer.from(result.data, "base64");
-    await this.fileWriter.write(finalPath, imageBuffer);
+    const encoding = encodingOptions(options);
+    const format = encoding.format ?? "png";
+    // The historical iOS PNG path persisted CtrlProxy's bytes without encoding.
+    const encoded = format === "png" ? imageBuffer : await encodeScreenshot(imageBuffer, encoding);
+    await this.fileWriter.write(finalPath, encoded);
     if (signal?.aborted) {
       // A cancellation can land while the write is in flight. Remove the frame
       // so findLatestScreenshotPath(deviceId) cannot surface it as current (#6605).
@@ -468,19 +552,27 @@ export class TakeScreenshot implements ScreenshotService {
     logger.info(`[SCREENSHOT] iOS screenshot captured in ${durationMs}ms, saved to ${finalPath}`);
 
     // Push to observation stream for IDE plugins
-    this.pushScreenshotToStream(result.data, imageBuffer);
+    this.pushScreenshotToStream(
+      encoded === imageBuffer ? result.data : encoded.toString("base64"),
+      encoded,
+      format,
+    );
 
     return {
       success: true,
       path: finalPath,
-      ...IOS_CTRLPROXY_SCREENSHOT_METADATA,
+      ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, format),
     };
   }
 
   /**
    * Push screenshot to the device data stream for IDE plugins.
    */
-  private pushScreenshotToStream(base64Data: string, imageBuffer: Buffer): void {
+  private pushScreenshotToStream(
+    base64Data: string,
+    imageBuffer: Buffer,
+    format: "png" | "jpeg" | "webp",
+  ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
@@ -506,9 +598,12 @@ export class TakeScreenshot implements ScreenshotService {
         base64Data,
         width,
         height,
-        this.device.platform === "ios"
-          ? IOS_CTRLPROXY_SCREENSHOT_METADATA
-          : ANDROID_ADB_SCREENSHOT_METADATA,
+        metadataForScreenshotFormat(
+          this.device.platform === "ios"
+            ? IOS_CTRLPROXY_SCREENSHOT_METADATA
+            : ANDROID_ADB_SCREENSHOT_METADATA,
+          format,
+        ),
         { decodedImage: imageBuffer },
       );
     } catch (error) {
@@ -557,30 +652,11 @@ export class TakeScreenshot implements ScreenshotService {
       `[SCREENSHOT] Base64 decode took ${decodeDuration}ms, buffer size: ${imageBuffer.length} bytes`,
     );
 
-    // Handle format conversion and save securely
-    if (options.format !== "webp") {
-      // For PNG, save directly
-      const saveStartTime = this.timer.now();
-      await this.fileWriter.write(finalPath, imageBuffer);
-      const saveDuration = this.timer.now() - saveStartTime;
-      logger.info(`[SCREENSHOT] PNG file save took ${saveDuration}ms`);
-    } else {
-      // Convert to WebP
-      const convertStartTime = this.timer.now();
-      const image = Image.fromBuffer(imageBuffer);
-      const transformer = image.webp({
-        quality: options.quality || 75,
-        lossless: options.lossless,
-      });
-      const convertedImage = await transformer.toBuffer();
-      const convertDuration = this.timer.now() - convertStartTime;
-      logger.info(`[SCREENSHOT] WebP conversion took ${convertDuration}ms`);
-
-      // Save the webp file securely
-      const saveStartTime = this.timer.now();
-      await this.fileWriter.write(finalPath, convertedImage);
-      const saveDuration = this.timer.now() - saveStartTime;
-      logger.info(`[SCREENSHOT] WebP file save took ${saveDuration}ms`);
+    const encoded = await encodeScreenshot(imageBuffer, encodingOptions(options));
+    await this.fileWriter.write(finalPath, encoded);
+    if (signal?.aborted) {
+      await this.fileWriter.remove(finalPath);
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
 
     const totalDuration = this.timer.now() - startTime;
@@ -650,31 +726,13 @@ export class TakeScreenshot implements ScreenshotService {
         `[SCREENSHOT] File read took ${readDuration}ms, buffer size: ${imageBuffer.length} bytes`,
       );
 
-      // Step 5: Handle format conversion and save to final path
-      if (options.format !== "webp") {
-        // For PNG, move the temp file to final path
-        const saveStartTime = this.timer.now();
+      if (options.format === undefined || options.format === "png") {
+        // ADB screencap is already PNG. Preserve the original file-pull move.
         await this.fileSystem.rename(tempLocalFile, finalPath);
-        const saveDuration = this.timer.now() - saveStartTime;
-        logger.info(`[SCREENSHOT] PNG file move took ${saveDuration}ms`);
       } else {
-        // Convert to WebP
-        const convertStartTime = this.timer.now();
-        const image = Image.fromBuffer(imageBuffer);
-        const transformer = image.webp({
-          quality: options.quality || 75,
-          lossless: options.lossless,
-        });
-        const convertedImage = await transformer.toBuffer();
-        const convertDuration = this.timer.now() - convertStartTime;
-        logger.info(`[SCREENSHOT] WebP conversion took ${convertDuration}ms`);
-
-        // Save the webp file securely and remove temp file
-        const saveStartTime = this.timer.now();
-        await this.fileWriter.write(finalPath, convertedImage);
+        const encoded = await encodeScreenshot(imageBuffer, encodingOptions(options));
+        await this.fileWriter.write(finalPath, encoded);
         await this.fileSystem.remove(tempLocalFile);
-        const saveDuration = this.timer.now() - saveStartTime;
-        logger.info(`[SCREENSHOT] WebP file save took ${saveDuration}ms`);
       }
 
       const totalDuration = this.timer.now() - startTime;

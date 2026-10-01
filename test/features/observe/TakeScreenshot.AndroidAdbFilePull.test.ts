@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
+import type { ScreenshotFileWriter } from "../../../src/features/observe/screenshot/ScreenshotFileWriter";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { shellQuote } from "../../../src/utils/shellQuote";
 import { screenshotTempIdToken } from "../../../src/utils/screenshot/screenshotFormats";
@@ -13,6 +14,17 @@ import { androidFilePullDevice } from "./takeScreenshotTestHelpers";
 
 const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+function writerFor(fileSystem: FakeFileSystem): ScreenshotFileWriter {
+  return {
+    async write(filePath, data) {
+      fileSystem.setBinaryFile(filePath, data);
+    },
+    async remove(filePath) {
+      await fileSystem.remove(filePath);
+    },
+  };
+}
+
 describe("Android file-pull screenshots", function () {
   test("rejects a quiet screencap failure before pulling a stale frame and cleans up", async function () {
     const fakeAdb = new FakeAdbExecutor();
@@ -23,7 +35,7 @@ describe("Android file-pull screenshots", function () {
       new FakeAdbClientFactory(fakeAdb),
       new FakeTimer(),
       new FakeIdGenerator(["quiet-failure"]),
-      undefined,
+      writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
     );
@@ -48,7 +60,7 @@ describe("Android file-pull screenshots", function () {
       new FakeAdbClientFactory(fakeAdb),
       new FakeTimer(),
       new FakeIdGenerator(["first", "second"]),
-      undefined,
+      writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
     );
@@ -94,7 +106,7 @@ describe("Android file-pull screenshots", function () {
       new FakeAdbClientFactory(fakeAdb),
       new FakeTimer(),
       new FakeIdGenerator(["cancelled"]),
-      undefined,
+      writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
     );
@@ -123,7 +135,7 @@ describe("Android file-pull screenshots", function () {
       new FakeAdbClientFactory(fakeAdb),
       new FakeTimer(),
       new FakeIdGenerator(["../evil id; rm -rf /"]),
-      undefined,
+      writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
     );

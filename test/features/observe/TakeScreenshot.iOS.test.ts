@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
@@ -126,7 +127,9 @@ describe("TakeScreenshot iOS cancellation", function () {
   test("removes an iOS frame written as the caller cancels", async function () {
     const controller = new AbortController();
     const fakeCtrlProxy = new FakeIOSCtrlProxy();
-    fakeCtrlProxy.setScreenshotData(Buffer.from("image").toString("base64"));
+    fakeCtrlProxy.setScreenshotData(
+      readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+    );
     const originalGetInstance = IOSCtrlProxyClient.getInstance;
     IOSCtrlProxyClient.getInstance = (() => ({
       ensureConnected: async () => true,
@@ -153,7 +156,9 @@ describe("TakeScreenshot iOS cancellation", function () {
   test("passes a cancellation signal to iOS CtrlProxy before screenshot dispatch", async function () {
     const controller = new AbortController();
     const fakeCtrlProxy = new FakeIOSCtrlProxy();
-    fakeCtrlProxy.setScreenshotData(Buffer.from("image").toString("base64"));
+    fakeCtrlProxy.setScreenshotData(
+      readFileSync("test/fixtures/screenshots/black-on-white.png").toString("base64"),
+    );
     fakeCtrlProxy.abortScreenshotOnRequest(controller);
     const originalGetInstance = IOSCtrlProxyClient.getInstance;
     IOSCtrlProxyClient.getInstance = (() => ({
@@ -175,6 +180,7 @@ describe("TakeScreenshot iOS cancellation", function () {
       };
       const result = await (screenshot as any).captureiOSScreenshot(
         path.join(os.tmpdir(), "ios-pre-cancel.png"),
+        { format: "png" },
         controller.signal,
       );
       expect(result).toEqual({ success: false, error: OPERATION_CANCELLED_MESSAGE });

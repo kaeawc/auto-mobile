@@ -228,10 +228,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 diagnostic: StorageDiagnostic(code: "multiple_statements_not_supported", message: message)
             )
         }
-        guard let db = openDatabase(path: databasePath, readOnly: classification.readOnly) else {
+        // Transaction control has no result columns and sqlite3_stmt_readonly reports it as
+        // read-only. Keep it on the same connection as the writes it brackets.
+        guard let db = openDatabase(path: databasePath, readOnly: !classification.requiresWriteConnection) else {
             let diagnostic = StorageDiagnostic(
                 code: "store_unavailable",
-                message: "Failed to open database in \(classification.readOnly ? "read-only" : "read-write") mode"
+                message: "Failed to open database in \(classification.requiresWriteConnection ? "read-write" : "read-only") mode"
             )
             return SQLExecutionResult(
                 columns: nil,
@@ -694,6 +696,8 @@ struct SQLClassification {
     let returnsRows: Bool
     let readOnly: Bool
     var hasMultipleStatements = false
+
+    var requiresWriteConnection: Bool { !(readOnly && returnsRows) }
 }
 
 private struct SQLKeyword {

@@ -2,7 +2,6 @@ import { z } from "zod/v4";
 import * as fs from "node:fs/promises";
 import { ActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
-import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
 import type { TrackedScreenshotService } from "../features/observe/screenshot/ObserveScreenshotRecorder";
 import { getScreenshotStateStore } from "../features/observe/screenshot/ScreenshotStateRegistry";
@@ -18,6 +17,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
 import { DaemonState } from "../daemon/daemonState";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
+import { listBootedDevicesForResource } from "./resourceDeviceResolver";
 import { ToolRegistry } from "./toolRegistry";
 
 const MAX_SCREENSHOT_BYTES = 16 * 1024 * 1024;
@@ -48,16 +48,10 @@ export interface DeviceScreenshotDependencies {
 function defaultScreenshotDependencies(): DeviceScreenshotDependencies {
   return {
     listBooted: async (signal) => {
-      const discovery = await new MultiPlatformDeviceManager().getBootedDevicesDetailed("either", {
+      return listBootedDevicesForResource("either", "captureDeviceScreenshot", {
         signal,
-        bypassAndroidDeviceListCache: true,
-        bypassIosDeviceListCache: true,
+        requireFresh: true,
       });
-      return discovery.devices.filter(
-        (device) =>
-          discovery.succeededPlatforms.has(device.platform) &&
-          (!discovery.freshDeviceIds || discovery.freshDeviceIds.has(device.deviceId)),
-      );
     },
     isAuthorized: (device, callerSessionUuid) => {
       const daemon = DaemonState.getInstance();

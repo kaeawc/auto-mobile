@@ -26,6 +26,7 @@ import {
   type IosPhysicalPrivacyClient,
 } from "./IosPhysicalPermissions";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 
 /**
  * Map requested permission names onto the runner-reported grant map.
@@ -485,7 +486,7 @@ export class AppPermissions {
         true,
       );
       const stdout = result.stdout;
-      if (/Unable to find package/i.test(stdout)) {
+      if (outputReportsMissingPackage(stdout)) {
         return this.androidQueryFailure(
           normalizedAppId,
           `Package not installed: ${normalizedAppId}`,

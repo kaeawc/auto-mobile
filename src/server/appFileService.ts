@@ -793,6 +793,7 @@ class AndroidUserFilesProvider implements AppFileWriteProvider {
       device: request.device,
       namespace: request.target.namespace,
       reset: request.target.reset,
+      indexMedia: request.target.indexMedia ?? false,
       files: requests.map((file) => ({
         sourcePath: file.sourcePath,
         destinationPath: file.destinationPath,

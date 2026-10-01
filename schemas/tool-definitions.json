@@ -9984,6 +9984,11 @@
                 "reset": {
                   "description": "Remove only this fixture namespace before writing",
                   "type": "boolean"
+                },
+                "indexMedia": {
+                  "description": "Request Android media indexing for media files",
+                  "default": false,
+                  "type": "boolean"
                 }
               },
               "required": ["domain", "namespace"],

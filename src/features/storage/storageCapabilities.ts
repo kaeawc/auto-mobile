@@ -277,7 +277,7 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
     domain: "user_files",
     portable: false,
     platformScope: "android",
-    note: 'Android user-visible shared storage. putAppFile/stageSharedStorage write bounded Downloads namespaces; the "Downloads Namespace Files" and "Downloads Namespace File" MCP resources expose listing and reading at automobile:devices/{deviceId}/downloads/{namespace}[/{path}].',
+    note: 'Android user-visible shared storage. putAppFile user_files and stageSharedStorage write bounded Downloads namespaces; the "Downloads Namespace Files" and "Downloads Namespace File" MCP resources expose listing and reading at automobile:devices/{deviceId}/downloads/{namespace}[/{path}].',
     operations: [
       deriveOperation(
         "list",

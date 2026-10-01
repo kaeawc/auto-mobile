@@ -1,15 +1,26 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { registerAppFileTools } from "../../src/server/appFileTools";
+import {
+  createAppFileServiceForTesting,
+  nodeAppFileFileSystem,
+  type AppFileService,
+} from "../../src/server/appFileService";
+import { registerSharedStorageTools } from "../../src/server/sharedStorageTools";
+import type {
+  StageSharedStorageRequest,
+  SharedStorageService,
+} from "../../src/server/sharedStorageService";
+import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("App file tools", () => {
   beforeEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
   });
 
   afterEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
   });
 
   test("registers putAppFile with discoverable schema fields", () => {
@@ -132,5 +143,95 @@ describe("App file tools", () => {
       expect(result.success).toBe(false);
       expect(result.error!.issues[0].message).toContain("relative path");
     }
+  });
+
+  test("registers a pending user_files write before it settles", async () => {
+    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+    const pending = Promise.withResolvers<Awaited<ReturnType<AppFileService["putFile"]>>>();
+    const registrations: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+    registerAppFileTools({
+      appFileService: () => ({
+        putFile: (() => pending.promise) as AppFileService["putFile"],
+        listFiles: async () => {
+          throw new Error("unused");
+        },
+        readFile: async () => {
+          throw new Error("unused");
+        },
+      }),
+      registerPendingDeviceCleanup: (deviceId, cleanup) => {
+        registrations.push({ deviceId, cleanup });
+      },
+    });
+
+    const resultPromise = ToolRegistry.getTool("putAppFile")!.deviceAwareHandler!(device, {
+      target: { domain: "user_files", namespace: "run-42" },
+      files: [{ contentText: "fixture", destinationPath: "photo.png" }],
+    });
+    expect(registrations).toEqual([{ deviceId: device.deviceId, cleanup: pending.promise }]);
+    pending.resolve({
+      success: true,
+      deviceId: device.deviceId,
+      platform: "android",
+      target: { domain: "user_files", namespace: "run-42" },
+      files: [],
+    });
+    await resultPromise;
+  });
+
+  test("putAppFile user_files and stageSharedStorage send the same fixture to staging", async () => {
+    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+    const calls: StageSharedStorageRequest[] = [];
+    const sharedStorage: SharedStorageService = {
+      stage: async (request) => {
+        calls.push(request);
+        return {
+          success: true,
+          deviceId: device.deviceId,
+          platform: "android",
+          namespace: request.namespace,
+          userId: 0,
+          userSource: "primary",
+          destinationDirectory: `/storage/emulated/0/Download/${request.namespace}`,
+          reset: request.reset ?? false,
+          files: request.files.map((file) => ({
+            destinationPath: file.destinationPath,
+            byteCount: 3,
+            mediaIndexing: { status: "completed" },
+          })),
+        };
+      },
+    };
+    const fileSystem = {
+      ...nodeAppFileFileSystem,
+      stat: async () => ({
+        size: 3,
+        mtime: new Date(0),
+        isFile: () => true,
+        isDirectory: () => false,
+      }),
+    };
+    registerAppFileTools({
+      appFileService: () =>
+        createAppFileServiceForTesting({ sharedStorageService: sharedStorage, fileSystem }),
+      registerPendingDeviceCleanup: () => {},
+    });
+    registerSharedStorageTools({
+      sharedStorage: () => sharedStorage,
+      registerPendingDeviceCleanup: () => {},
+    });
+    const file = { sourcePath: "/fixtures/photo.png", destinationPath: "photo.png" };
+    await ToolRegistry.getTool("putAppFile")!.deviceAwareHandler!(device, {
+      target: { domain: "user_files", namespace: "run-42", reset: true, indexMedia: true },
+      files: [file],
+    });
+    await ToolRegistry.getTool("stageSharedStorage")!.deviceAwareHandler!(device, {
+      namespace: "run-42",
+      reset: true,
+      indexMedia: true,
+      files: [file],
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(calls[1]);
   });
 });

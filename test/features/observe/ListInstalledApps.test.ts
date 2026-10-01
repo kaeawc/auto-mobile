@@ -24,9 +24,12 @@ import { logger } from "../../../src/utils/logger";
  * `installed_packages` answer, tagged with the user it describes.
  */
 class FakeInstalledPackageSource implements AndroidInstalledPackageSource {
+  requestCount = 0;
+
   constructor(private readonly result: AndroidInstalledPackagesRequest) {}
 
   async requestInstalledPackages(): Promise<AndroidInstalledPackagesRequest> {
+    this.requestCount += 1;
     return this.result;
   }
 }
@@ -534,6 +537,101 @@ describe("ListInstalledApps", function () {
       } finally {
         warnSpy.mockRestore();
       }
+    });
+
+    test("requests CtrlProxy once and uses adb only for users outside its catalog", async function () {
+      fakeAdb.setUsers([
+        { userId: 0, name: "Owner", flags: 13, running: true },
+        { userId: 10, name: "Work", flags: 0, running: true },
+      ]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 10", {
+        stdout: "package:com.android.settings\npackage:com.work.app\n",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
+        stdout: "package:com.android.settings\n",
+        stderr: "",
+      });
+      const source = new FakeInstalledPackageSource({
+        available: true,
+        result: {
+          userId: 0,
+          packages: [
+            {
+              packageName: "com.android.settings",
+              isSystem: true,
+              label: "Settings",
+              launchable: true,
+            },
+            {
+              packageName: "com.owner.app",
+              isSystem: false,
+              label: "Owner App",
+              launchable: true,
+            },
+          ],
+        },
+      });
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: source,
+      });
+
+      const result = await list.executeDetailed();
+
+      expect(source.requestCount).toBe(1);
+      expect(result.profiles[0]).toMatchObject([
+        { packageName: "com.owner.app", label: "Owner App", launchable: true },
+      ]);
+      expect(result.profiles[10]).toMatchObject([{ packageName: "com.work.app" }]);
+      expect(result.system).toMatchObject([
+        {
+          packageName: "com.android.settings",
+          userIds: [0, 10],
+          label: "Settings",
+          launchableByUserId: { 0: true },
+        },
+      ]);
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 10")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(false);
+    });
+
+    test("requests an unavailable CtrlProxy source once and lists every user through adb", async function () {
+      fakeAdb.setUsers([
+        { userId: 0, name: "Owner", flags: 13, running: true },
+        { userId: 10, name: "Work", flags: 0, running: true },
+      ]);
+      fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+        stdout: "package:com.owner.app\n",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
+        stdout: "",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages --user 10", {
+        stdout: "package:com.work.app\n",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
+        stdout: "",
+        stderr: "",
+      });
+      const source = new FakeInstalledPackageSource({
+        available: false,
+        reason: "WebSocket not connected",
+      });
+      const list = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb), null, {
+        installedPackageSource: source,
+      });
+
+      const result = await list.executeDetailed();
+
+      expect(source.requestCount).toBe(1);
+      expect(result.profiles[0]).toMatchObject([{ packageName: "com.owner.app" }]);
+      expect(result.profiles[10]).toMatchObject([{ packageName: "com.work.app" }]);
+      expect(result.system).toEqual([]);
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 10")).toBe(true);
     });
 
     test("warns once for a CtrlProxy catalog with no labels, but not for names-only", async function () {

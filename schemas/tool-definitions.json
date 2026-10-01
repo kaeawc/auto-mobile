@@ -2461,6 +2461,11 @@
           "description": "Target panel key, role, or active",
           "type": "string"
         },
+        "snapshotId": {
+          "description": "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          "type": "string",
+          "minLength": 1
+        },
         "x": {
           "description": "Absolute screen x coordinate in the native observe coordinate space",
           "type": "number"

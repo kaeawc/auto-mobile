@@ -207,13 +207,13 @@ describe("NavigationGraphManager provenance write path", () => {
   });
 
   test("fingerprint path: an app switch during the lookup does not cross-link A's node to B's build key", async () => {
-    // Repo whose getNodeByFingerprint switches the current app mid-await, simulating
-    // an app switch landing during the awaited fingerprint lookup.
+    // Repo whose getNodeByFingerprint requests an app switch during the lookup.
+    // The switch queues behind the hierarchy write, preserving A's provenance.
     class SwitchingRepo extends NavigationRepository {
-      public onLookup: (() => Promise<void>) | undefined;
+      public onLookup: (() => void) | undefined;
       async getNodeByFingerprint(appId: string, hash: string) {
         if (this.onLookup) {
-          await this.onLookup();
+          this.onLookup();
         }
         return super.getNodeByFingerprint(appId, hash);
       }
@@ -240,8 +240,9 @@ describe("NavigationGraphManager provenance write path", () => {
     const node = await switchingRepo.getOrCreateNode(APP, "Home", 100);
     await switchingRepo.getOrCreateFingerprint(APP, node.id, "fp-1", "{}", 100);
 
-    switchingRepo.onLookup = async () => {
-      await m.setCurrentApp("com.other.app");
+    let appSwitch: Promise<void> | undefined;
+    switchingRepo.onLookup = () => {
+      appSwitch = m.setCurrentApp("com.other.app");
     };
 
     await m.recordHierarchyNavigation({
@@ -250,6 +251,7 @@ describe("NavigationGraphManager provenance write path", () => {
       packageName: APP,
       timestamp: 200,
     } as never);
+    await appSwitch;
 
     const obs = await db
       .selectFrom("navigation_node_observations")

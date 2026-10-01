@@ -302,6 +302,7 @@ export class NavigationGraphManager implements NavigationGraphService {
   private timer: Timer;
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
+  private navigationWriteTail: Promise<void> = Promise.resolve();
   private graphUpdateListeners: Array<() => void | Promise<void>> = [];
 
   // Session + build/device provenance (#4984). sessionUuid identifies the owning
@@ -585,6 +586,20 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Creates the app record in the database if it doesn't exist.
    */
   public async setCurrentApp(appId: string): Promise<void> {
+    return this.enqueueNavigationWrite(() => this.setCurrentAppUnlocked(appId));
+  }
+
+  private enqueueNavigationWrite<T>(write: () => Promise<T>): Promise<T> {
+    const result = this.navigationWriteTail.then(write);
+    // Keep the tail usable after failure; return result so this caller still sees its rejection.
+    this.navigationWriteTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private async setCurrentAppUnlocked(appId: string): Promise<void> {
     if (this.currentAppId === appId) {
       return;
     }
@@ -729,9 +744,16 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Capture receipt before any async app switch or DB work. Tool calls use this
     // same host clock; the SDK timestamp remains the graph's persisted event time.
     const receivedAt = this.timer.now();
+    return this.enqueueNavigationWrite(() => this.recordNavigationEventUnlocked(event, receivedAt));
+  }
+
+  private async recordNavigationEventUnlocked(
+    event: NavigationEvent,
+    receivedAt: number,
+  ): Promise<void> {
     // Auto-set current app from navigation event if provided
     if (event.applicationId && event.applicationId !== this.currentAppId) {
-      await this.setCurrentApp(event.applicationId);
+      await this.setCurrentAppUnlocked(event.applicationId);
     }
 
     if (!this.currentAppId) {
@@ -957,9 +979,13 @@ export class NavigationGraphManager implements NavigationGraphService {
    * 4. Does nothing if app has no named nodes (SDK not integrated)
    */
   public async recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void> {
+    return this.enqueueNavigationWrite(() => this.recordHierarchyNavigationUnlocked(event));
+  }
+
+  private async recordHierarchyNavigationUnlocked(event: HierarchyNavigationEvent): Promise<void> {
     // Auto-set current app from package name if provided
     if (event.packageName && event.packageName !== this.currentAppId) {
-      await this.setCurrentApp(event.packageName);
+      await this.setCurrentAppUnlocked(event.packageName);
     }
 
     if (!this.currentAppId) {
@@ -1666,6 +1692,10 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Clear the graph for the current app.
    */
   public async clearCurrentGraph(): Promise<void> {
+    return this.enqueueNavigationWrite(() => this.clearCurrentGraphUnlocked());
+  }
+
+  private async clearCurrentGraphUnlocked(): Promise<void> {
     if (this.currentAppId) {
       await this.repository.clearAppGraph(this.currentAppId);
       this.currentScreen = null;
@@ -1679,12 +1709,14 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Note: This only clears the current app's data since we use app-specific storage.
    */
   public async clearAllGraphs(): Promise<void> {
-    await this.clearCurrentGraph();
-    this.currentAppId = null;
-    this.currentScreen = null;
-    this.toolCallHistory = [];
-    logger.info(`[NAVIGATION_GRAPH] Cleared all navigation graphs`);
-    this.notifyGraphUpdated();
+    return this.enqueueNavigationWrite(async () => {
+      await this.clearCurrentGraphUnlocked();
+      this.currentAppId = null;
+      this.currentScreen = null;
+      this.toolCallHistory = [];
+      logger.info(`[NAVIGATION_GRAPH] Cleared all navigation graphs`);
+      this.notifyGraphUpdated();
+    });
   }
 
   /**

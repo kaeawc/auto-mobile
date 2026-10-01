@@ -1,5 +1,10 @@
 import Foundation
 
+struct PreferenceMutationResult: Sendable {
+    var resolvedStore: String?
+    var effectiveValueDiffers: Bool?
+}
+
 /// The runner's only route for target-app UserDefaults. Implementations must never use
 /// UserDefaults in the runner process.
 protocol SdkPreferenceFetching: Sendable {
@@ -14,9 +19,11 @@ protocol SdkPreferenceFetching: Sendable {
         type: String,
         sessionId: String?,
         mutationToken: String?
-    ) async throws
+    ) async throws -> PreferenceMutationResult
     func remove(appId: String, suiteName: String, key: String, sessionId: String?, mutationToken: String?) async throws
+        -> PreferenceMutationResult
     func clear(appId: String, suiteName: String, sessionId: String?, mutationToken: String?) async throws
+        -> PreferenceMutationResult
 }
 
 final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
@@ -61,9 +68,9 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
         sessionId: String?,
         mutationToken: String?
     )
-        async throws
+        async throws -> PreferenceMutationResult
     {
-        _ = try await post(.init(
+        let response = try await post(.init(
             operation: "set",
             appId: appId,
             suiteName: suiteName,
@@ -73,6 +80,9 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
             sessionId: sessionId,
             mutationToken: mutationToken
         ))
+        return PreferenceMutationResult(
+            resolvedStore: response.resolvedStore, effectiveValueDiffers: response.effectiveValueDiffers
+        )
     }
 
     func remove(
@@ -82,9 +92,9 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
         sessionId: String?,
         mutationToken: String?
     )
-        async throws
+        async throws -> PreferenceMutationResult
     {
-        _ = try await post(.init(
+        let response = try await post(.init(
             operation: "remove",
             appId: appId,
             suiteName: suiteName,
@@ -92,16 +102,29 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
             sessionId: sessionId,
             mutationToken: mutationToken
         ))
+        return PreferenceMutationResult(
+            resolvedStore: response.resolvedStore, effectiveValueDiffers: response.effectiveValueDiffers
+        )
     }
 
-    func clear(appId: String, suiteName: String, sessionId: String?, mutationToken: String?) async throws {
-        _ = try await post(.init(
+    func clear(
+        appId: String,
+        suiteName: String,
+        sessionId: String?,
+        mutationToken: String?
+    )
+        async throws -> PreferenceMutationResult
+    {
+        let response = try await post(.init(
             operation: "clear",
             appId: appId,
             suiteName: suiteName,
             sessionId: sessionId,
             mutationToken: mutationToken
         ))
+        return PreferenceMutationResult(
+            resolvedStore: response.resolvedStore, effectiveValueDiffers: response.effectiveValueDiffers
+        )
     }
 
     private func post(_ payload: PreferenceRequest) async throws -> PreferenceResponse {
@@ -158,6 +181,8 @@ private struct PreferenceResponse: Decodable {
     let files: [PreferenceFile]?
     let entries: [StorageEntry]?
     let entry: StorageEntry?
+    let resolvedStore: String?
+    let effectiveValueDiffers: Bool?
 }
 
 private struct PreferenceFile: Decodable {

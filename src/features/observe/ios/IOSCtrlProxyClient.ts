@@ -3416,7 +3416,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     value: string | null,
     type: import("../../storage/storageTypes").KeyValueType,
     timeoutMs?: number,
-  ): Promise<void> {
+  ): Promise<import("../../storage/storageTypes").PreferenceStoreResolution | undefined> {
     return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMs);
   }
 
@@ -3425,7 +3425,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     fileName: string,
     key: string,
     timeoutMs?: number,
-  ): Promise<void> {
+  ): Promise<import("../../storage/storageTypes").PreferenceStoreResolution | undefined> {
     return this.storage.removePreference(packageName, fileName, key, timeoutMs);
   }
 
@@ -3433,7 +3433,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     packageName: string,
     fileName: string,
     timeoutMs?: number,
-  ): Promise<void> {
+  ): Promise<import("../../storage/storageTypes").PreferenceStoreResolution | undefined> {
     return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
   }
 

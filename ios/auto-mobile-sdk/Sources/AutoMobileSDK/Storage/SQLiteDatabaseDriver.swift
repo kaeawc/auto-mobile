@@ -506,6 +506,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         var rows: [[String?]] = []
         var bytesRead = 0
         var truncated = false
+        let totalBefore = sqlite3_total_changes(db)
         var stepResult = sqlite3_step(stmt)
         while stepResult == SQLITE_ROW {
             var row: [String?] = []
@@ -534,7 +535,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             )
         }
 
-        let rowsAffected = includeRowsAffected ? Int(sqlite3_changes(db)) : 0
+        if truncated && includeRowsAffected { sqlite3_reset(stmt) }
+        let rowsAffected = includeRowsAffected ? self.rowsAffected(db: db, totalBefore: totalBefore) : 0
         return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: rowsAffected, truncated: truncated)
     }
 
@@ -552,9 +554,10 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
         defer { sqlite3_finalize(stmt) }
 
+        let totalBefore = sqlite3_total_changes(db)
         let result = sqlite3_step(stmt)
         if result == SQLITE_DONE {
-            let changes = Int(sqlite3_changes(db))
+            let changes = rowsAffected(db: db, totalBefore: totalBefore)
             return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: changes)
         } else if result == SQLITE_ROW {
             // RETURNING clause produces rows — collect them like a query
@@ -594,7 +597,8 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                     diagnostic: Self.diagnostic(for: error)
                 )
             }
-            let changes = Int(sqlite3_changes(db))
+            if truncated { sqlite3_reset(stmt) }
+            let changes = rowsAffected(db: db, totalBefore: totalBefore)
             return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: changes, truncated: truncated)
         } else {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
@@ -607,6 +611,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
                 diagnostic: diagnostic
             )
         }
+    }
+
+    /// Non-DML statements leave sqlite3_changes stale; total changes detects that
+    /// while sqlite3_changes excludes trigger and foreign-key side effects.
+    private func rowsAffected(db: OpaquePointer, totalBefore: Int32) -> Int {
+        sqlite3_total_changes(db) == totalBefore ? 0 : Int(sqlite3_changes(db))
     }
 
     private static func diagnostic(for message: String) -> StorageDiagnostic {

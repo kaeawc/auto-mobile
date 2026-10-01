@@ -16,7 +16,7 @@ import {
   type AdbClientFactory,
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { ResourceRegistry } from "./resourceRegistry";
-import type { KeyValueType } from "../features/storage/storageTypes";
+import type { KeyValueType, PreferenceStoreResolution } from "../features/storage/storageTypes";
 import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "./storageSdkErrors";
 import {
   clearAndroidKeyValueFileDirect,
@@ -52,9 +52,13 @@ export interface IosKeyValueClient {
     key: string,
     value: string,
     type: KeyValueType,
-  ): Promise<void>;
-  removePreference(appId: string, fileName: string, key: string): Promise<void>;
-  clearPreferenceStore(appId: string, fileName: string): Promise<void>;
+  ): Promise<PreferenceStoreResolution | void>;
+  removePreference(
+    appId: string,
+    fileName: string,
+    key: string,
+  ): Promise<PreferenceStoreResolution | void>;
+  clearPreferenceStore(appId: string, fileName: string): Promise<PreferenceStoreResolution | void>;
 }
 
 export interface StorageToolsDependencies {
@@ -135,7 +139,8 @@ const TYPE_GUIDANCE: Record<string, string> = {
   "android:DICTIONARY": "DICTIONARY is iOS-only. On Android, store JSON objects as STRING.",
 };
 
-const STORAGE_NAME_DESCRIPTION = "Storage name";
+const STORAGE_NAME_DESCRIPTION =
+  'Storage name. iOS: empty string, "standard" (any case) or the app bundle id select the app\'s standard UserDefaults; any other value is a UserDefaults suite name (e.g. an app group) and must be a valid suite with no leading or trailing whitespace. Android: SharedPreferences file name without the .xml extension (letters, digits, underscore, dash, dot).';
 
 const ADAPTER_NAME_DESCRIPTION =
   "Name the host app registered its DataStore adapter under (AutoMobile SDK)";
@@ -351,6 +356,23 @@ export function validateTypeForPlatform(platform: string, type: KeyValueType): v
   }
 }
 
+/** @internal Preserve any existing warning before adding the set-only override guidance. */
+export function preferenceSetWarning(
+  existingWarning: string | undefined,
+  effectiveValueDiffers?: boolean,
+): string | undefined {
+  return (
+    [
+      existingWarning,
+      effectiveValueDiffers === true
+        ? "The value was written to the app's persistent store but the effective value read by the app differs (for example a launch argument, managed configuration or other override). The write persisted."
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined
+  );
+}
+
 /**
  * Register storage write tools.
  *
@@ -368,6 +390,8 @@ export function registerStorageTools(): void {
       }
 
       let usedDirectFileFallback = false;
+      let resolvedStore: string | undefined;
+      let effectiveValueDiffers: boolean | undefined;
       if (device.platform === "android") {
         const client = getStorageToolsDependencies().androidClientFactory(device);
         ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
@@ -394,9 +418,18 @@ export function registerStorageTools(): void {
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
         if (value === null) {
-          await client.removePreference(args.appId, storageName, args.key);
+          resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
+            ?.resolvedStore;
         } else {
-          await client.setPreference(args.appId, storageName, args.key, value, args.type);
+          const result = await client.setPreference(
+            args.appId,
+            storageName,
+            args.key,
+            value,
+            args.type,
+          );
+          resolvedStore = result?.resolvedStore;
+          effectiveValueDiffers = result?.effectiveValueDiffers;
         }
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
@@ -407,15 +440,21 @@ export function registerStorageTools(): void {
         buildEntriesUri(device.deviceId, args.appId, storageName),
       );
 
+      const warning = preferenceSetWarning(
+        usedDirectFileFallback
+          ? directFileFallbackRelaunchWarning(args.appId, storageName)
+          : undefined,
+        effectiveValueDiffers,
+      );
       return createJSONToolResponse({
         success: true,
         appId: args.appId,
         name: storageName,
+        resolvedStore,
         key: args.key,
         type: args.type,
-        ...(usedDirectFileFallback
-          ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
-          : {}),
+        effectiveValueDiffers,
+        warning,
       });
     } catch (error) {
       if (error instanceof ActionableError) {
@@ -430,6 +469,7 @@ export function registerStorageTools(): void {
     try {
       const storageName = resolveStorageName(args);
       let usedDirectFileFallback = false;
+      let resolvedStore: string | undefined;
       if (device.platform === "android") {
         const client = getStorageToolsDependencies().androidClientFactory(device);
         ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
@@ -442,7 +482,8 @@ export function registerStorageTools(): void {
         ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
-        await client.removePreference(args.appId, storageName, args.key);
+        resolvedStore = (await client.removePreference(args.appId, storageName, args.key))
+          ?.resolvedStore;
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
       }
@@ -455,6 +496,7 @@ export function registerStorageTools(): void {
         success: true,
         appId: args.appId,
         name: storageName,
+        ...(resolvedStore ? { resolvedStore } : {}),
         key: args.key,
         ...(usedDirectFileFallback
           ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
@@ -473,6 +515,7 @@ export function registerStorageTools(): void {
     try {
       const storageName = resolveStorageName(args);
       let usedDirectFileFallback = false;
+      let resolvedStore: string | undefined;
       if (device.platform === "android") {
         const client = getStorageToolsDependencies().androidClientFactory(device);
         ({ usedDirectFileFallback } = await withSharedPreferencesInspectionFallback(
@@ -484,7 +527,7 @@ export function registerStorageTools(): void {
         ));
       } else if (device.platform === "ios") {
         const client = getStorageToolsDependencies().iosClientFactory(device);
-        await client.clearPreferenceStore(args.appId, storageName);
+        resolvedStore = (await client.clearPreferenceStore(args.appId, storageName))?.resolvedStore;
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
       }
@@ -497,6 +540,7 @@ export function registerStorageTools(): void {
         success: true,
         appId: args.appId,
         name: storageName,
+        ...(resolvedStore ? { resolvedStore } : {}),
         ...(usedDirectFileFallback
           ? { warning: directFileFallbackRelaunchWarning(args.appId, storageName) }
           : {}),

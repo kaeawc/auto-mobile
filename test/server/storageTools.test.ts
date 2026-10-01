@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerStorageTools,
+  preferenceSetWarning,
   resetStorageToolsDependencies,
   setStorageToolsDependenciesForTesting,
   validateTypeForPlatform,
@@ -498,6 +499,119 @@ describe("Storage Tools Registration", () => {
 
       const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name);
       expect(definition?.inputSchema.description).toBe(expectedMessage);
+    }
+  });
+
+  test("iOS write tools include resolution only when the client provides it", async () => {
+    registerStorageTools();
+    const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
+    for (const resolvedStore of ["standard", undefined]) {
+      const result = resolvedStore ? { resolvedStore } : undefined;
+      setStorageToolsDependenciesForTesting({
+        iosClientFactory: () => ({
+          setPreference: async () => result,
+          removePreference: async () => result,
+          clearPreferenceStore: async () => result,
+        }),
+      });
+      for (const [name, fields] of [
+        ["setKeyValue", { key: "key", value: "42", type: "INT" }],
+        ["setKeyValue", { key: "key", value: null, type: "STRING" }],
+        ["removeKeyValue", { key: "key" }],
+        ["clearKeyValueFile", {}],
+      ] as const) {
+        const tool = ToolRegistry.getAllTools({ includeUnavailable: true }).find(
+          (candidate) => candidate.name === name,
+        )!;
+        const args = tool.schema.parse({ appId: "com.example.app", name: "", ...fields });
+        const response = await tool.deviceAwareHandler!(device, args);
+        const content = response.content[0];
+        if (content.type !== "text") {
+          throw new Error("Expected JSON response");
+        }
+        const payload = JSON.parse(content.text);
+        expect(payload.name).toBe("");
+        expect(payload.success).toBe(true);
+        if (resolvedStore) {
+          expect(payload.resolvedStore).toBe(resolvedStore);
+        } else {
+          expect(payload).not.toHaveProperty("resolvedStore");
+        }
+      }
+    }
+  });
+
+  test("effective override guidance appends to an existing warning", () => {
+    const existing = "Existing warning.";
+    const warning = preferenceSetWarning(existing, true);
+    expect(warning).toStartWith(existing + " ");
+    expect(warning).toContain("effective value read by the app differs");
+    expect(warning).toEndWith("The write persisted.");
+    expect(preferenceSetWarning(existing, false)).toBe(existing);
+    expect(preferenceSetWarning(existing)).toBe(existing);
+    expect(preferenceSetWarning(undefined, false)).toBeUndefined();
+  });
+
+  test.each([true, false, undefined])(
+    "only non-null iOS set warns for an effective override: %s",
+    async (effectiveValueDiffers) => {
+      registerStorageTools();
+      const device: BootedDevice = { deviceId: "ios-test", name: "iPhone", platform: "ios" };
+      setStorageToolsDependenciesForTesting({
+        iosClientFactory: () => ({
+          setPreference: async () => ({ resolvedStore: "standard", effectiveValueDiffers }),
+          removePreference: async () => ({
+            resolvedStore: "standard",
+            effectiveValueDiffers: true,
+          }),
+          clearPreferenceStore: async () => ({
+            resolvedStore: "standard",
+            effectiveValueDiffers: true,
+          }),
+        }),
+      });
+      for (const [name, fields, isSet] of [
+        ["setKeyValue", { key: "key", value: "written", type: "STRING" }, true],
+        ["setKeyValue", { key: "key", value: null, type: "STRING" }, false],
+        ["removeKeyValue", { key: "key" }, false],
+        ["clearKeyValueFile", {}, false],
+      ] as const) {
+        const tool = ToolRegistry.getAllTools({ includeUnavailable: true }).find(
+          (candidate) => candidate.name === name,
+        )!;
+        const response = await tool.deviceAwareHandler!(
+          device,
+          tool.schema.parse({ appId: "com.example.app", name: "", ...fields }),
+        );
+        const content = response.content[0];
+        if (content.type !== "text") {
+          throw new Error("Expected JSON response");
+        }
+        const payload = JSON.parse(content.text);
+        expect(payload.success).toBe(true);
+        if (isSet && effectiveValueDiffers === true) {
+          expect(payload.effectiveValueDiffers).toBe(true);
+          expect(payload.warning).toContain("effective value read by the app differs");
+          expect(payload.warning).toContain("The write persisted.");
+        } else {
+          expect(payload).not.toHaveProperty("warning");
+        }
+        if (!isSet) {
+          expect(payload).not.toHaveProperty("effectiveValueDiffers");
+        }
+      }
+    },
+  );
+
+  test("name descriptions document accepted iOS and Android names", () => {
+    registerStorageTools();
+    for (const name of ["setKeyValue", "removeKeyValue", "clearKeyValueFile"]) {
+      const definition = ToolRegistry.getToolDefinitions().find((item) => item.name === name)!;
+      const description = definition.inputSchema.properties?.name?.description;
+      expect(description).toContain('"standard"');
+      expect(description).toContain("bundle id");
+      expect(description).toContain("no leading or trailing whitespace");
+      expect(description).toContain("SharedPreferences");
     }
   });
 

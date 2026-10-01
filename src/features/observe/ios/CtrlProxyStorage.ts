@@ -7,9 +7,11 @@
  */
 
 import { logger } from "../../../utils/logger";
+import { mapStorageSdkError } from "../../../server/storageSdkErrors";
 import { ActionableError } from "../../../models/ActionableError";
 import type { DelegateContext } from "./types";
 import type {
+  PreferenceStoreResolution,
   PreferenceFile,
   KeyValueEntry,
   KeyValueType,
@@ -35,13 +37,24 @@ export class CtrlProxyStorage {
     this.context = context;
   }
 
-  private mutationError(error: string | undefined, fallback: string): ActionableError {
-    if (error?.includes("mutation_not_authorized")) {
-      return new ActionableError(
-        "iOS key-value storage mutation is not authorized: in a DEBUG build, configure StorageInspectionConfiguration(allowMutations: true), call DatabaseInspector.shared.authorizeHostMutations(true), and require a launch-scoped mutation token or authorize the current SDK session with DatabaseInspector.shared.authorizeSessionMutations(sessionId:).",
-      );
-    }
-    return new ActionableError(error || fallback);
+  private sdkError(
+    error: string | undefined,
+    fallback: string,
+    action?: "set" | "remove" | "clear",
+  ): ActionableError {
+    const mapped = error ? mapStorageSdkError(error, { operation: "storage", action }) : null;
+    return new ActionableError(mapped ?? (error || fallback));
+  }
+
+  private mutationResult(result: PreferenceStoreResolution): PreferenceStoreResolution | undefined {
+    return result.resolvedStore !== undefined || result.effectiveValueDiffers !== undefined
+      ? {
+          ...(result.resolvedStore !== undefined ? { resolvedStore: result.resolvedStore } : {}),
+          ...(result.effectiveValueDiffers !== undefined
+            ? { effectiveValueDiffers: result.effectiveValueDiffers }
+            : {}),
+        }
+      : undefined;
   }
 
   /**
@@ -85,7 +98,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new ActionableError(result.error || "Failed to list preference files");
+      throw this.sdkError(result.error, "Failed to list preference files");
     }
 
     return result.files || [];
@@ -137,7 +150,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new ActionableError(result.error || "Failed to get preference entries");
+      throw this.sdkError(result.error, "Failed to get preference entries");
     }
 
     return result.entries || [];
@@ -193,7 +206,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new ActionableError(result.error || "Failed to get preference");
+      throw this.sdkError(result.error, "Failed to get preference");
     }
 
     return result.found && result.entry ? result.entry : null;
@@ -216,7 +229,7 @@ export class CtrlProxyStorage {
     value: string | null,
     type: KeyValueType,
     timeoutMs: number = 5000,
-  ): Promise<void> {
+  ): Promise<PreferenceStoreResolution | undefined> {
     const startTime = this.context.timer.now();
 
     if (!(await this.context.ensureConnected())) {
@@ -257,8 +270,13 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw this.mutationError(result.error, "Failed to set preference");
+      throw this.sdkError(
+        result.error,
+        "Failed to set preference",
+        value === null ? "remove" : "set",
+      );
     }
+    return this.mutationResult(result);
   }
 
   /**
@@ -274,7 +292,7 @@ export class CtrlProxyStorage {
     fileName: string,
     key: string,
     timeoutMs: number = 5000,
-  ): Promise<void> {
+  ): Promise<PreferenceStoreResolution | undefined> {
     const startTime = this.context.timer.now();
 
     if (!(await this.context.ensureConnected())) {
@@ -313,8 +331,9 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw this.mutationError(result.error, "Failed to remove preference");
+      throw this.sdkError(result.error, "Failed to remove preference", "remove");
     }
+    return this.mutationResult(result);
   }
 
   /**
@@ -328,7 +347,7 @@ export class CtrlProxyStorage {
     packageName: string,
     fileName: string,
     timeoutMs: number = 5000,
-  ): Promise<void> {
+  ): Promise<PreferenceStoreResolution | undefined> {
     const startTime = this.context.timer.now();
 
     if (!(await this.context.ensureConnected())) {
@@ -366,7 +385,8 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw this.mutationError(result.error, "Failed to clear preferences");
+      throw this.sdkError(result.error, "Failed to clear preferences", "clear");
     }
+    return this.mutationResult(result);
   }
 }

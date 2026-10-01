@@ -890,3 +890,47 @@ describe("rewriteUnknownCommandError", () => {
     expect(rewriteUnknownCommandError("timeout")).toBe("timeout");
   });
 });
+
+describe("preference store resolution decoding", () => {
+  for (const type of [
+    "set_preference_result",
+    "remove_preference_result",
+    "clear_preferences_result",
+  ]) {
+    test.each([true, false])(
+      `${type} preserves boolean effectiveValueDiffers: %s`,
+      (effectiveValueDiffers) => {
+        expect(
+          decodeCtrlProxyMessage({
+            ...msg({ type, success: true }),
+            resolvedStore: "standard",
+            effectiveValueDiffers,
+          })?.result,
+        ).toMatchObject({ resolvedStore: "standard", effectiveValueDiffers });
+      },
+    );
+    test.each([undefined, null, "true", 1])(
+      `${type} ignores non-boolean effectiveValueDiffers: %s`,
+      (effectiveValueDiffers) => {
+        expect(
+          decodeCtrlProxyMessage({
+            ...msg({ type, success: true }),
+            effectiveValueDiffers,
+          })?.result,
+        ).not.toHaveProperty("effectiveValueDiffers");
+      },
+    );
+    test(`${type} forwards only string resolvedStore values`, () => {
+      expect(
+        decodeCtrlProxyMessage({ ...msg({ type, success: true }), resolvedStore: "standard" })
+          ?.result,
+      ).toMatchObject({ resolvedStore: "standard" });
+      for (const payload of [
+        msg({ type, success: true }),
+        { ...msg({ type, success: true }), resolvedStore: 42 },
+      ]) {
+        expect(decodeCtrlProxyMessage(payload)?.result).not.toHaveProperty("resolvedStore");
+      }
+    });
+  }
+});

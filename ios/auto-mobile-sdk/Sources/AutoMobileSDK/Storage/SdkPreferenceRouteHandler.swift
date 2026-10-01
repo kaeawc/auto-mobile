@@ -6,15 +6,18 @@
         private let driver: () -> (any UserDefaultsDriver)?
         private let bundleId: () -> String?
         private let currentSessionId: () -> String?
+        private let suiteIsValid: (String) -> Bool
 
         init(
             driver: @escaping () -> (any UserDefaultsDriver)? = { UserDefaultsInspector.shared.getDriver() },
             bundleId: @escaping () -> String? = { Bundle.main.bundleIdentifier },
-            currentSessionId: @escaping () -> String? = { AutoMobileSDK.shared.currentSessionId() }
+            currentSessionId: @escaping () -> String? = { AutoMobileSDK.shared.currentSessionId() },
+            suiteIsValid: @escaping (String) -> Bool = UserDefaultsStoreResolver.defaultSuiteIsValid
         ) {
             self.driver = driver
             self.bundleId = bundleId
             self.currentSessionId = currentSessionId
+            self.suiteIsValid = suiteIsValid
         }
 
         func handle(body: Data) -> SdkRouteResponse {
@@ -27,7 +30,8 @@
             guard let driver = driver() else {
                 return error(503, "user_defaults_inspection_disabled")
             }
-            let suite = request.suiteName == "Standard" || request.suiteName.isEmpty ? nil : request.suiteName
+            let persistentReader = driver as? any PersistentDomainReading
+            let resolver = UserDefaultsStoreResolver(bundleIdentifier: appId, suiteIsValid: suiteIsValid)
 
             switch request.operation {
             case "list":
@@ -40,32 +44,74 @@
                 }
                 return encode(SdkPreferencePayload(files: files))
             case "entries":
-                let entries = driver.getValues(suiteName: suite).map(redact)
-                return encode(SdkPreferencePayload(entries: entries))
+                guard let store = resolver.resolve(request.suiteName) else { return error(400, "invalid_store_name") }
+                let entries = driver.getValues(suiteName: store.suiteName).map(redact)
+                return encode(SdkPreferencePayload(entries: entries, resolvedStore: store.label))
             case "get":
                 guard let key = request.key else { return error(400, "missing_key") }
+                guard let store = resolver.resolve(request.suiteName) else { return error(400, "invalid_store_name") }
                 return encode(SdkPreferencePayload(
-                    entry: driver.getValue(suiteName: suite, key: key)
-                        .map(redact)
+                    entry: driver.getValue(suiteName: store.suiteName, key: key)
+                        .map(redact),
+                    resolvedStore: store.label
                 ))
             case "set":
                 guard canMutate(request) else { return error(403, "mutation_not_authorized") }
                 guard let key = request.key, let value = request.value, let type = request.valueType,
                       let parsed = Self.parse(value, type: type) else { return error(400, "invalid_preference_value") }
-                driver.setValue(suiteName: suite, key: key, value: parsed.value, type: parsed.type)
-                return encode(SdkPreferencePayload())
+                guard let store = resolver.resolve(request.suiteName) else { return error(400, "invalid_store_name") }
+                driver.setValue(suiteName: store.suiteName, key: key, value: parsed.value, type: parsed.type)
+                guard let stored = verificationValue(driver, persistentReader, store: store, appId: appId, key: key),
+                      stored.type == parsed.type, Self.valuesMatch(stored, parsed)
+                else {
+                    return error(500, "write_verification_failed")
+                }
+                let effective = driver.getValue(suiteName: store.suiteName, key: key)
+                let differs = effective.map { $0.type != parsed.type || !Self.valuesMatch($0, parsed) } ?? true
+                return encode(SdkPreferencePayload(
+                    resolvedStore: store.label, effectiveValueDiffers: differs ? true : nil
+                ))
             case "remove":
                 guard canMutate(request) else { return error(403, "mutation_not_authorized") }
                 guard let key = request.key else { return error(400, "missing_key") }
-                driver.removeValue(suiteName: suite, key: key)
-                return encode(SdkPreferencePayload())
+                guard let store = resolver.resolve(request.suiteName) else { return error(400, "invalid_store_name") }
+                driver.removeValue(suiteName: store.suiteName, key: key)
+                if verificationValue(driver, persistentReader, store: store, appId: appId, key: key) != nil {
+                    return error(500, "write_verification_failed")
+                }
+                return encode(SdkPreferencePayload(resolvedStore: store.label))
             case "clear":
                 guard canMutate(request) else { return error(403, "mutation_not_authorized") }
-                driver.clear(suiteName: suite)
-                return encode(SdkPreferencePayload())
+                guard let store = resolver.resolve(request.suiteName) else { return error(400, "invalid_store_name") }
+                let keys: Set<String>
+                if let persistentReader {
+                    keys = persistentReader.persistentKeys(domain: store.suiteName ?? appId, suiteName: store.suiteName)
+                } else {
+                    keys = Set(driver.getValues(suiteName: store.suiteName).map(\.key))
+                }
+                driver.clear(suiteName: store.suiteName)
+                guard keys.allSatisfy({
+                    verificationValue(driver, persistentReader, store: store, appId: appId, key: $0) == nil
+                }) else { return error(500, "write_verification_failed") }
+                return encode(SdkPreferencePayload(resolvedStore: store.label))
             default:
                 return error(400, "unknown_operation")
             }
+        }
+
+        private func verificationValue(
+            _ driver: any UserDefaultsDriver,
+            _ reader: (any PersistentDomainReading)?,
+            store: ResolvedStore,
+            appId: String,
+            key: String
+        )
+            -> KeyValuePair?
+        {
+            if let reader {
+                return reader.persistentValue(domain: store.suiteName ?? appId, suiteName: store.suiteName, key: key)
+            }
+            return driver.getValue(suiteName: store.suiteName, key: key)
         }
 
         private func canMutate(_ request: SdkPreferenceRequest) -> Bool {
@@ -117,6 +163,25 @@
             }
         }
 
+        private static func valuesMatch(_ stored: KeyValuePair, _ written: (value: Any, type: KeyValueType)) -> Bool {
+            let wireType = written.type == .bool ? "BOOLEAN" : written.type.rawValue.uppercased()
+            guard let value = stored.value, let readBack = parse(value, type: wireType) else { return false }
+            switch written.type {
+            case .string: return (readBack.value as? String) == (written.value as? String)
+            case .int: return (readBack.value as? Int) == (written.value as? Int)
+            case .double: return (readBack.value as? Double) == (written.value as? Double)
+            case .bool: return (readBack.value as? Bool) == (written.value as? Bool)
+            case .data: return (readBack.value as? Data) == (written.value as? Data)
+            case .date:
+                guard let actual = readBack.value as? Date, let expected = written.value as? Date else { return false }
+                return abs(actual.timeIntervalSince(expected)) <= 0.001
+            case .array, .dictionary:
+                guard let actual = readBack.value as? NSObject else { return false }
+                return actual.isEqual(written.value)
+            case .unknown: return false
+            }
+        }
+
         private func encode(_ payload: SdkPreferencePayload) -> SdkRouteResponse {
             guard let data = try? JSONEncoder().encode(payload) else { return error(500, "encode_failed") }
             return SdkRouteResponse(statusCode: 200, body: data)
@@ -165,5 +230,7 @@
         var files: [SdkPreferenceFile]?
         var entries: [SdkPreferenceEntry]?
         var entry: SdkPreferenceEntry?
+        var resolvedStore: String?
+        var effectiveValueDiffers: Bool?
     }
 #endif

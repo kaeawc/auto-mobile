@@ -1722,8 +1722,9 @@ final class CommandHandler: CommandHandling {
         async throws -> WebSocketResponse
     {
         let (appId, client) = try await preferenceClient(request.appId)
+        let result: PreferenceMutationResult
         if let value = request.value {
-            try await client.set(
+            result = try await client.set(
                 appId: appId,
                 suiteName: request.fileName ?? "Standard",
                 key: request.key,
@@ -1733,7 +1734,7 @@ final class CommandHandler: CommandHandling {
                 mutationToken: request.mutationToken
             )
         } else {
-            try await client.remove(
+            result = try await client.remove(
                 appId: appId,
                 suiteName: request.fileName ?? "Standard",
                 key: request.key,
@@ -1741,11 +1742,14 @@ final class CommandHandler: CommandHandling {
                 mutationToken: request.mutationToken
             )
         }
-        return WebSocketResponse.success(
+        var response = WebSocketResponse.success(
             type: ResponseType.setPreferenceResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            resolvedStore: result.resolvedStore
         )
+        if request.value != nil { response.effectiveValueDiffers = result.effectiveValueDiffers }
+        return response
     }
 
     private func handleRemovePreference(
@@ -1755,7 +1759,7 @@ final class CommandHandler: CommandHandling {
         async throws -> WebSocketResponse
     {
         let (appId, client) = try await preferenceClient(request.appId)
-        try await client.remove(
+        let result = try await client.remove(
             appId: appId,
             suiteName: request.fileName ?? "Standard",
             key: request.key,
@@ -1765,7 +1769,8 @@ final class CommandHandler: CommandHandling {
         return WebSocketResponse.success(
             type: ResponseType.removePreferenceResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            resolvedStore: result.resolvedStore
         )
     }
 
@@ -1776,7 +1781,7 @@ final class CommandHandler: CommandHandling {
         async throws -> WebSocketResponse
     {
         let (appId, client) = try await preferenceClient(request.appId)
-        try await client.clear(
+        let result = try await client.clear(
             appId: appId,
             suiteName: request.fileName ?? "Standard",
             sessionId: request.sessionId,
@@ -1785,7 +1790,8 @@ final class CommandHandler: CommandHandling {
         return WebSocketResponse.success(
             type: ResponseType.clearPreferencesResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            resolvedStore: result.resolvedStore
         )
     }
 

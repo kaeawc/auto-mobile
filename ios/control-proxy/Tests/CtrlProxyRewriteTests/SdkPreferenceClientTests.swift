@@ -22,7 +22,7 @@ final class SdkPreferenceClientTests: XCTestCase {
             baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
             transport: transport
         )
-        try await client.set(
+        _ = try await client.set(
             appId: "com.example.app",
             suiteName: "duoStore",
             key: "kvDuo",
@@ -51,7 +51,12 @@ final class SdkPreferenceClientTests: XCTestCase {
             transport: transport
         )
         do {
-            try await client.clear(appId: "com.example.app", suiteName: "duoStore", sessionId: nil, mutationToken: nil)
+            _ = try await client.clear(
+                appId: "com.example.app",
+                suiteName: "duoStore",
+                sessionId: nil,
+                mutationToken: nil
+            )
             XCTFail("Expected missing SDK to fail")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("embed the AutoMobile SDK"))
@@ -70,7 +75,7 @@ final class SdkPreferenceClientTests: XCTestCase {
                 transport: StubHTTPTransport(status: 409, body: body)
             )
             do {
-                try await client.clear(
+                _ = try await client.clear(
                     appId: "com.example.app",
                     suiteName: "Standard",
                     sessionId: "session-1",
@@ -90,7 +95,12 @@ final class SdkPreferenceClientTests: XCTestCase {
             transport: StubHTTPTransport(status: 404, body: Data("{}".utf8))
         )
         do {
-            try await client.clear(appId: "com.example.app", suiteName: "Standard", sessionId: nil, mutationToken: nil)
+            _ = try await client.clear(
+                appId: "com.example.app",
+                suiteName: "Standard",
+                sessionId: nil,
+                mutationToken: nil
+            )
             XCTFail("Expected missing route")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("embed or upgrade the AutoMobile SDK"))
@@ -112,5 +122,52 @@ final class SdkPreferenceClientTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("UserDefaultsInspector.shared.setEnabled(true)"))
             XCTAssertFalse(error.localizedDescription.contains("embed the AutoMobile SDK"))
         }
+    }
+
+    func testMutationsDecodeResolvedStoreAndSupportOlderSdkResponses() async throws {
+        for expected in ["standard", nil] as [String?] {
+            let fields = expected.map { ["resolvedStore": $0] } ?? [:]
+            let body = try JSONEncoder().encode(fields)
+            let transport = StubHTTPTransport([
+                .respond(status: 200, body: body),
+                .respond(status: 200, body: body),
+                .respond(status: 200, body: body),
+            ])
+            let client = try SdkPreferenceClient(
+                baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+                transport: transport
+            )
+            let set = try await client.set(
+                appId: "com.example.app", suiteName: "standard", key: "key", value: "42", type: "INT",
+                sessionId: nil, mutationToken: nil
+            )
+            let remove = try await client.remove(
+                appId: "com.example.app", suiteName: "standard", key: "key", sessionId: nil, mutationToken: nil
+            )
+            let clear = try await client.clear(
+                appId: "com.example.app", suiteName: "standard", sessionId: nil, mutationToken: nil
+            )
+            XCTAssertEqual(set.resolvedStore, expected)
+            XCTAssertNil(set.effectiveValueDiffers)
+            XCTAssertEqual(remove.resolvedStore, expected)
+            XCTAssertNil(remove.effectiveValueDiffers)
+            XCTAssertEqual(clear.resolvedStore, expected)
+            XCTAssertNil(clear.effectiveValueDiffers)
+        }
+    }
+
+    func testSetDecodesEffectiveValueDiffers() async throws {
+        let transport = StubHTTPTransport([
+            .respond(status: 200, body: Data("{\"resolvedStore\":\"standard\",\"effectiveValueDiffers\":true}".utf8)),
+        ])
+        let client = try SdkPreferenceClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:8766")), transport: transport
+        )
+        let result = try await client.set(
+            appId: "com.example.app", suiteName: "standard", key: "key", value: "written", type: "STRING",
+            sessionId: nil, mutationToken: nil
+        )
+        XCTAssertEqual(result.resolvedStore, "standard")
+        XCTAssertEqual(result.effectiveValueDiffers, true)
     }
 }

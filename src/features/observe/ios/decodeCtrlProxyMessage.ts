@@ -276,7 +276,20 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
     case "set_preference_result":
     case "remove_preference_result":
-    case "clear_preferences_result":
+    case "clear_preferences_result": {
+      const msg = message as { resolvedStore?: unknown; effectiveValueDiffers?: unknown };
+      result = {
+        success: message.success ?? message.ok ?? false,
+        totalTimeMs: message.totalTimeMs ?? 0,
+        error: message.error,
+        ...(typeof msg.resolvedStore === "string" ? { resolvedStore: msg.resolvedStore } : {}),
+        ...(typeof msg.effectiveValueDiffers === "boolean"
+          ? { effectiveValueDiffers: msg.effectiveValueDiffers }
+          : {}),
+      };
+      break;
+    }
+
     case "set_network_fault_rules_result":
     case "set_network_error_simulation_result":
       result = {

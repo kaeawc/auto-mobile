@@ -132,6 +132,8 @@ export interface GetPreferenceResult {
  * Result of a set_preference request.
  */
 export interface SetPreferenceResult {
+  effectiveValueDiffers?: boolean;
+  resolvedStore?: string;
   success: boolean;
   totalTimeMs: number;
   error?: string;
@@ -141,6 +143,8 @@ export interface SetPreferenceResult {
  * Result of a remove_preference request.
  */
 export interface RemovePreferenceResult {
+  effectiveValueDiffers?: boolean;
+  resolvedStore?: string;
   success: boolean;
   totalTimeMs: number;
   error?: string;
@@ -150,7 +154,14 @@ export interface RemovePreferenceResult {
  * Result of a clear_preferences request.
  */
 export interface ClearPreferencesResult {
+  effectiveValueDiffers?: boolean;
+  resolvedStore?: string;
   success: boolean;
   totalTimeMs: number;
   error?: string;
+}
+
+export interface PreferenceStoreResolution {
+  resolvedStore?: string;
+  effectiveValueDiffers?: boolean;
 }

@@ -2052,12 +2052,12 @@
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, and networkCondition. Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
+          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, and networkCondition, and location (read-back currently unavailable). Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
           "minItems": 1,
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb", "connectivity", "biometrics", "networkCondition"]
+            "enum": ["doNotDisturb", "connectivity", "biometrics", "networkCondition", "location"]
           }
         },
         "platform": {
@@ -11242,7 +11242,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
+    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -11390,6 +11390,29 @@
               }
             }
           ]
+        },
+        "location": {
+          "description": "Set one static location on an Android emulator or iOS Simulator.",
+          "type": "object",
+          "properties": {
+            "mode": {
+              "description": "Apply one static coordinate.",
+              "type": "string",
+              "const": "static"
+            },
+            "latitude": {
+              "type": "number",
+              "minimum": -90,
+              "maximum": 90
+            },
+            "longitude": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            }
+          },
+          "required": ["mode", "latitude", "longitude"],
+          "additionalProperties": false
         },
         "platform": {
           "type": "string",

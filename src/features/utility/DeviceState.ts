@@ -20,6 +20,14 @@ import {
 } from "../../utils/ios-cmdline-tools/notifyutil";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { shellQuote } from "../../utils/shellQuote";
+import {
+  consolePortFromSerial,
+  type EmulatorConsoleClient,
+} from "../../utils/android-cmdline-tools/EmulatorConsoleClient";
+import {
+  defaultEmulatorConsoleClientFactory,
+  type EmulatorConsoleClientFactory,
+} from "../action/Telephony";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -297,6 +305,7 @@ export interface DeviceStateResult {
   connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
+  location?: DeviceLocationState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -317,6 +326,24 @@ export interface SetDeviceStateInput {
     locationEnabled?: boolean;
   };
   networkCondition?: SetNetworkConditionInput;
+  location?: SetDeviceLocationInput;
+}
+
+export interface SetDeviceLocationInput {
+  mode: "static";
+  latitude: number;
+  longitude: number;
+}
+
+export interface DeviceLocationState {
+  supported: boolean;
+  mode?: "static";
+  latitude?: number;
+  longitude?: number;
+  method?: "android_emulator_console" | "ios_simctl";
+  /** A successful command is an applied fix, not a device location read-back. */
+  verified?: boolean;
+  error?: string;
 }
 
 /**
@@ -331,6 +358,7 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "connectivity",
   "biometrics",
   "networkCondition",
+  "location",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -347,6 +375,7 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   biometrics: true,
   connectivity: true,
   networkCondition: true,
+  location: true,
 };
 
 /**
@@ -374,6 +403,7 @@ interface SelectedDeviceStates {
   connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
+  location?: DeviceLocationState;
 }
 
 /**
@@ -384,12 +414,14 @@ type SelectedDeviceState = NonNullable<SelectedDeviceStates[keyof SelectedDevice
 
 interface IosSimulatorClient {
   executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
+  executeCommandArgs?(args: string[], timeoutMs?: number): Promise<ExecResult>;
 }
 
 export interface DeviceStateDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorClient | null;
   timer?: Timer;
+  consoleFactory?: EmulatorConsoleClientFactory;
 }
 
 const IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION = "com.apple.BiometricKit.enrollmentChanged";
@@ -1033,7 +1065,26 @@ export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must
 
 /** True when a `setState` call carries no device-state field to apply. */
 function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean {
-  return !input.doNotDisturb && !input.biometrics && !input.connectivity && !input.networkCondition;
+  return (
+    !input.doNotDisturb &&
+    !input.biometrics &&
+    !input.connectivity &&
+    !input.networkCondition &&
+    !input.location
+  );
+}
+
+function locationInputError(input: SetDeviceLocationInput | undefined): string | undefined {
+  if (!input) {
+    return undefined;
+  }
+  if (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90) {
+    return "location.latitude must be a finite number in [-90, 90]";
+  }
+  if (!Number.isFinite(input.longitude) || input.longitude < -180 || input.longitude > 180) {
+    return "location.longitude must be a finite number in [-180, 180]";
+  }
+  return undefined;
 }
 
 function doNotDisturbInputError(input: SetDeviceStateInput["doNotDisturb"]): string | undefined {
@@ -1060,7 +1111,11 @@ function connectivityInputError(input: SetDeviceStateInput["connectivity"]): str
 }
 
 function setDeviceStateInputError(input: SetDeviceStateInput): string | undefined {
-  return doNotDisturbInputError(input.doNotDisturb) ?? connectivityInputError(input.connectivity);
+  return (
+    doNotDisturbInputError(input.doNotDisturb) ??
+    connectivityInputError(input.connectivity) ??
+    locationInputError(input.location)
+  );
 }
 
 export class DeviceState {
@@ -1071,12 +1126,14 @@ export class DeviceState {
   private simctl: IosSimulatorClient | null;
 
   private timer: Timer;
+  private consoleFactory: EmulatorConsoleClientFactory;
 
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl ?? null;
     this.timer = dependencies.timer ?? defaultTimer;
+    this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
   }
 
   async getState(
@@ -1130,6 +1187,15 @@ export class DeviceState {
       ...(include.includes("networkCondition")
         ? { networkCondition: await this.readNetworkCondition() }
         : {}),
+      ...(include.includes("location")
+        ? {
+            location: {
+              supported: false,
+              error:
+                "Location read-back is unavailable; use an app location probe to verify the applied fix.",
+            },
+          }
+        : {}),
     };
   }
 
@@ -1161,7 +1227,8 @@ export class DeviceState {
         | DoNotDisturbState
         | BiometricEnrollmentState
         | DeviceConnectivityState
-        | NetworkConditionState => state !== undefined,
+        | NetworkConditionState
+        | DeviceLocationState => state !== undefined,
     );
     const error = requestedStates.find((state) => state.error)?.error;
 
@@ -1180,7 +1247,10 @@ export class DeviceState {
   private async writeRequestedStates(
     input: SetDeviceStateInput,
   ): Promise<
-    Pick<DeviceStateResult, "doNotDisturb" | "biometrics" | "connectivity" | "networkCondition">
+    Pick<
+      DeviceStateResult,
+      "doNotDisturb" | "biometrics" | "connectivity" | "networkCondition" | "location"
+    >
   > {
     return {
       ...(input.doNotDisturb
@@ -1195,7 +1265,90 @@ export class DeviceState {
       ...(input.networkCondition
         ? { networkCondition: await this.writeNetworkCondition(input.networkCondition) }
         : {}),
+      ...(input.location ? { location: await this.writeLocation(input.location) } : {}),
     };
+  }
+
+  private async writeLocation(input: SetDeviceLocationInput): Promise<DeviceLocationState> {
+    const invalid = locationInputError(input);
+    if (invalid) {
+      return { supported: true, error: invalid };
+    }
+    if (this.device.platform === "ios") {
+      if (!isIosSimulatorDevice(this.device)) {
+        return {
+          supported: false,
+          error:
+            "Location simulation is unsupported on physical iOS devices. Use an iOS Simulator.",
+        };
+      }
+      const simctl = this.simctl ?? new SimCtlClient(this.device);
+      try {
+        if (!simctl.executeCommandArgs) {
+          throw new Error("Injected simctl client does not support argv commands");
+        }
+        await simctl.executeCommandArgs([
+          "location",
+          this.device.deviceId,
+          "set",
+          `${input.latitude},${input.longitude}`,
+        ]);
+        return {
+          supported: true,
+          mode: "static",
+          latitude: input.latitude,
+          longitude: input.longitude,
+          method: "ios_simctl",
+        };
+      } catch (error) {
+        logger.warn(
+          `Failed to set iOS Simulator location for ${this.device.deviceId}: ${errorMessage(error)}`,
+          error,
+        );
+        return {
+          supported: true,
+          method: "ios_simctl",
+          error: `Failed to set iOS Simulator location: ${errorMessage(error)}`,
+        };
+      }
+    }
+    const port = consolePortFromSerial(this.device.deviceId);
+    if (port === null) {
+      return {
+        supported: false,
+        error:
+          "Location simulation is unsupported on physical Android devices. Use an Android emulator.",
+      };
+    }
+    try {
+      const adb = this.adbFactory.create(this.device);
+      const probe = await adb.executeCommand("shell getprop ro.kernel.qemu");
+      if (probe.stdout.trim() !== "1") {
+        return {
+          supported: false,
+          error: "Location simulation requires an Android emulator (ro.kernel.qemu=1).",
+        };
+      }
+      const consoleClient: EmulatorConsoleClient = this.consoleFactory(port);
+      await consoleClient.geoFix(input.longitude, input.latitude);
+      return {
+        supported: true,
+        mode: "static",
+        latitude: input.latitude,
+        longitude: input.longitude,
+        method: "android_emulator_console",
+      };
+    } catch (error) {
+      logger.warn(
+        `Failed to set Android emulator location for ${this.device.deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+      return {
+        supported: true,
+        method: "android_emulator_console",
+        error: `Failed to set Android emulator location: ${errorMessage(error)}`,
+      };
+    }
   }
 
   async getBiometricEnrollmentState(): Promise<BiometricEnrollmentState> {

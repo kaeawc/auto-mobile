@@ -19,6 +19,7 @@ export interface EmulatorConsoleClient {
   gsmBusy(phoneNumber: string): Promise<void>;
   gsmHold(): Promise<void>;
   smsSend(phoneNumber: string, message: string): Promise<void>;
+  geoFix(lon: number, lat: number): Promise<void>;
 }
 
 /**
@@ -273,5 +274,21 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     const number = validatePhoneNumber(phoneNumber);
     const safeMessage = validateSmsMessage(message);
     await this.runCommands([`sms send ${number} ${safeMessage}`]);
+  }
+
+  async geoFix(lon: number, lat: number): Promise<void> {
+    if (
+      !Number.isFinite(lon) ||
+      lon < -180 ||
+      lon > 180 ||
+      !Number.isFinite(lat) ||
+      lat < -90 ||
+      lat > 90
+    ) {
+      throw new ActionableError(
+        "geo fix requires longitude in [-180, 180] and latitude in [-90, 90]",
+      );
+    }
+    await this.runCommands([`geo fix ${lon} ${lat}`]);
   }
 }

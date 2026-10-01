@@ -77,6 +77,17 @@ describe("RealEmulatorConsoleClient", () => {
     expect(transport.calls[0].commands).toEqual(["gsm call +15551234567"]);
   });
 
+  test("geoFix sends longitude before latitude and accepts empty payload after OK", async () => {
+    await client.geoFix(-122.4194, 37.7749);
+    expect(transport.calls[0].commands).toEqual(["geo fix -122.4194 37.7749"]);
+  });
+
+  test("geoFix rejects non-finite or out-of-range points before opening the console", async () => {
+    await expect(client.geoFix(Infinity, 0)).rejects.toThrow("longitude");
+    await expect(client.geoFix(0, -91)).rejects.toThrow("latitude");
+    expect(transport.calls).toEqual([]);
+  });
+
   test("accepts an explicit OK terminal line", async () => {
     transport.nextOutput = "Android Console\nOK\nOK\nOK\n";
     await expect(client.gsmCall("5551234567")).resolves.toBeUndefined();

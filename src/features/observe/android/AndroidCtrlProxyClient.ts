@@ -1233,6 +1233,7 @@ const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 interface CtrlProxyForwardLease {
   tryAcquire(): boolean;
   release(): void;
+  fork?(): CtrlProxyForwardLease;
   /**
    * PID of the process currently holding the lease, when a preceding
    * {@link tryAcquire} call returned `false` (issue #6260). Lets the caller
@@ -1245,6 +1246,7 @@ interface CtrlProxyForwardLease {
 class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   private lockPath: string | null = null;
   private readonly ownerToken = defaultIdGenerator.next();
+  private holders = 0;
   private acquired = false;
   private lastOwnerPid: number | undefined;
 
@@ -1267,26 +1269,72 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     if (this.acquired) {
       return true;
     }
+    this.acquired = this.acquireHolder();
+    return this.acquired;
+  }
+
+  private acquireHolder(): boolean {
+    if (this.holders > 0) {
+      this.holders++;
+      return true;
+    }
     // Shutdown recovery can evict a singleton while its setup remains in flight.
     // Another client in this process must wait for that live lease, not reclaim it.
-    this.acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
+    const acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
       ownerToken: this.ownerToken,
     });
-    this.lastOwnerPid = this.acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
-    return this.acquired;
+    this.holders = acquired ? 1 : 0;
+    this.lastOwnerPid = acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
+    return acquired;
   }
 
   public release(): void {
     if (!this.acquired) {
       return;
     }
-    releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
     this.acquired = false;
+    this.releaseHolder();
+  }
+
+  private releaseHolder(): void {
+    this.holders--;
+    if (this.holders > 0) {
+      return;
+    }
+    releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
   }
 
   public getLastOwnerPid(): number | undefined {
     return this.lastOwnerPid;
   }
+
+  /** A separate holder on the same process lease for one detached observer. */
+  public fork(): CtrlProxyForwardLease {
+    let acquired = false;
+    return {
+      tryAcquire: () => {
+        if (!acquired) {
+          acquired = this.acquireHolder();
+        }
+        return acquired;
+      },
+      release: () => {
+        if (acquired) {
+          acquired = false;
+          this.releaseHolder();
+        }
+      },
+      getLastOwnerPid: () => this.lastOwnerPid,
+    };
+  }
+}
+
+function portAllocationIdForClient(
+  deviceId: string,
+  transientObserver: boolean,
+  ids: IdGenerator,
+): string {
+  return transientObserver ? `${deviceId}:observer:${ids.next()}` : deviceId;
 }
 
 /**
@@ -1397,9 +1445,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Per-instance port allocation for multi-device support
   private localPort: number;
   private readonly ownsPortAllocation: boolean;
+  private readonly portAllocationId: string;
 
   // Singleton instances per device
   private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
+  private static readonly activeObservers = new Set<AndroidCtrlProxyClient>();
   private static readonly retiredDeviceIds = new Set<string>();
 
   // Build/device provenance (#4984): lazily-built content-hash provider (cached by
@@ -1609,11 +1659,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.certificateFileSystem = certificateFileSystem;
     this.ctrlProxyForwardLease =
       ctrlProxyForwardLease ?? new FileCtrlProxyForwardLease(device.deviceId);
-    this.ownsPortAllocation = PortManager.getPort(device.deviceId) === undefined;
-    this.localPort = PortManager.allocate(device.deviceId, {
+    // A detached observer needs its own forward while a disconnected singleton
+    // retains the device allocation for a later reconnect.
+    this.portAllocationId = portAllocationIdForClient(
+      device.deviceId,
+      this.transientObserver,
+      idGenerator,
+    );
+    this.ownsPortAllocation = PortManager.getPort(this.portAllocationId) === undefined;
+    this.localPort = PortManager.allocate(this.portAllocationId, {
       reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
     });
     AndroidCtrlProxyManager.getInstance(device);
+    AndroidCtrlProxyClient.trackObserver(this);
+  }
+
+  private static trackObserver(client: AndroidCtrlProxyClient): void {
+    if (client.transientObserver) {
+      AndroidCtrlProxyClient.activeObservers.add(client);
+    }
   }
 
   /**
@@ -1662,6 +1726,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   public static createForObservationRead(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    existing?: AndroidCtrlProxyClient,
   ): AndroidCtrlProxyClient {
     return new AndroidCtrlProxyClient(
       device,
@@ -1675,7 +1740,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       undefined,
       logger,
       undefined,
-      undefined,
+      existing?.ctrlProxyForwardLease.fork?.() ?? existing?.ctrlProxyForwardLease,
       defaultAndroidServiceManagerFactory,
       defaultIdGenerator,
       true,
@@ -1744,7 +1809,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId) === this) {
       AndroidCtrlProxyClient.removeInstance(this.device.deviceId);
     }
-    PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+    PortManager.releaseIfAllocated(this.portAllocationId, this.localPort);
     PortManager.holdForCleanup(this.localPort);
     this.cleanupHeldPort = this.localPort;
     // A replacement must recover even if this invalidated client's asynchronous
@@ -1941,6 +2006,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       instance.close().catch(() => {});
     }
     AndroidCtrlProxyClient.instances.clear();
+    AndroidCtrlProxyClient.activeObservers.clear();
     AndroidCtrlProxyClient.retiredDeviceIds.clear();
     PortManager.reset();
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
@@ -4299,7 +4365,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       if (this.ownsPortAllocation) {
-        PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+        PortManager.releaseIfAllocated(this.portAllocationId, this.localPort);
       }
       await this.finishInvalidatedConnectionCleanup();
     } catch (error) {
@@ -4307,6 +4373,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } finally {
       this.lateCancelledScreenshotRequestIds.clear();
       this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
+      AndroidCtrlProxyClient.activeObservers.delete(this);
     }
   }
 
@@ -4315,15 +4382,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   private ensureLocalPortAvailableForForwarding(): void {
-    const currentAllocation = PortManager.getPort(this.device.deviceId);
+    const currentAllocation = PortManager.getPort(this.portAllocationId);
     const currentPortIsAvailable = PortManager.isPortAvailable(this.localPort);
     if (currentAllocation === this.localPort && currentPortIsAvailable) {
       return;
     }
 
     const additionalReservedPorts = currentPortIsAvailable ? [] : [this.localPort];
-    PortManager.release(this.device.deviceId);
-    const nextPort = PortManager.allocate(this.device.deviceId, {
+    PortManager.release(this.portAllocationId);
+    const nextPort = PortManager.allocate(this.portAllocationId, {
       reservedPorts: [...IOS_CTRL_PROXY_RESERVED_PORTS, ...additionalReservedPorts],
     });
     if (nextPort !== this.localPort) {
@@ -4432,7 +4499,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     const livePorts = new Set(
-      Array.from(AndroidCtrlProxyClient.instances.values())
+      [...AndroidCtrlProxyClient.instances.values(), ...AndroidCtrlProxyClient.activeObservers]
         .filter((client) => client.device.deviceId === this.device.deviceId && !client.closed)
         .map((client) => client.localPort),
     );
@@ -4538,7 +4605,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
     const heldPort = this.cleanupHeldPort;
     this.cleanupHeldPort = null;
-    PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+    PortManager.releaseIfAllocated(this.portAllocationId, this.localPort);
     PortManager.releaseCleanupHold(heldPort);
   }
 

@@ -60,6 +60,7 @@ import {
   withAndroidScreenshotCaptureLock,
 } from "./android/AndroidPhysicalDisplayId";
 import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
+import { displayTransitions } from "./DisplayTransition";
 
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
   const oldExtension = path.extname(filePath);
@@ -183,12 +184,7 @@ export class TakeScreenshot implements ScreenshotService {
       return client.requestScreenshotForObserver(10000, signal);
     }
     if (isIosSimulatorUdid(this.device.deviceId)) {
-      const png = await new SimCtlClient(this.device).screenshot(
-        this.device.deviceId,
-        this.device.displays?.panels[0]?.key ?? "main",
-        signal,
-      );
-      return { success: true, data: png.toString("base64"), format: "png" };
+      return this.captureSimulatorObserverScreenshot(signal);
     }
     const daemon = DaemonState.getInstance();
     if (
@@ -206,6 +202,18 @@ export class TakeScreenshot implements ScreenshotService {
     } finally {
       await transient.close();
     }
+  }
+
+  private async captureSimulatorObserverScreenshot(
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyScreenshotResult> {
+    const observedPanel = displayTransitions.currentObservedPanel(this.device.deviceId)?.key;
+    const png = await new SimCtlClient(this.device).screenshot(
+      this.device.deviceId,
+      observedPanel ?? this.device.displays?.panels[0]?.key ?? "main",
+      signal,
+    );
+    return { success: true, data: png.toString("base64"), format: "png" };
   }
   private readonly device: BootedDevice;
   private adb: AdbExecutor;

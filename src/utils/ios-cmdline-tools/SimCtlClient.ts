@@ -2729,7 +2729,9 @@ export class SimCtlClient implements SimCtl {
       });
       child.once("close", (code) => {
         this.timer.clearTimeout(handle);
-        if (code === 0) {
+        if (captureSignal.aborted) {
+          reject(captureSignal.reason ?? new Error("simctl screenshot aborted"));
+        } else if (code === 0) {
           resolve(Buffer.concat(chunks));
         } else {
           reject(new Error(`simctl screenshot failed: ${Buffer.concat(errors).toString()}`));

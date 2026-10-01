@@ -18,6 +18,10 @@ import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { readFileSync } from "node:fs";
+import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
+import type { ObserveResult } from "../../../src/models/ObserveResult";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 
 class CapturingSocket extends FakeWebSocket {
   readonly sent: string[] = [];
@@ -177,10 +181,22 @@ test.each(["android", "ios"] as const)(
     Reflect.set(daemon, "deviceSessionRegistry", {});
     const clientClass = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
     const previousExisting = Reflect.get(clientClass, "getExistingInstance");
-    const previousGet = Reflect.get(clientClass, "getInstance");
+    const previousGet = Reflect.get(clientClass, "createForObservationRead");
     let starts = 0;
-    Reflect.set(clientClass, "getExistingInstance", () => null);
-    Reflect.set(clientClass, "getInstance", () => {
+    let connects = 0;
+    let closes = 0;
+    const existing = {
+      isConnected: () => false,
+      connectForObservationRead: () => {
+        connects++;
+        return Promise.resolve(true);
+      },
+      close: async () => {
+        closes++;
+      },
+    };
+    Reflect.set(clientClass, "getExistingInstance", () => existing);
+    Reflect.set(clientClass, "createForObservationRead", () => {
       starts++;
       throw new Error("replacement");
     });
@@ -192,12 +208,161 @@ test.each(["android", "ios"] as const)(
         "session-owned and has no connected hierarchy service",
       );
       expect(starts).toBe(0);
+      expect(connects).toBe(0);
+      expect(closes).toBe(0);
     } finally {
       Reflect.set(clientClass, "getExistingInstance", previousExisting);
-      Reflect.set(clientClass, "getInstance", previousGet);
+      Reflect.set(clientClass, "createForObservationRead", previousGet);
     }
   },
 );
+
+test.each(["android", "ios"] as const)(
+  "unowned %s observer reads through a transient when the singleton is disconnected",
+  async (platform) => {
+    const device = { deviceId: `${platform}-idle-disconnected`, name: platform, platform };
+    const daemon = DaemonState.getInstance();
+    Reflect.set(daemon, "sessionManager", {});
+    Reflect.set(daemon, "devicePool", { getDevice: () => ({ sessionId: undefined }) });
+    Reflect.set(daemon, "deviceSessionRegistry", {});
+    const hierarchy = {
+      hierarchy: {
+        node: { text: "Available", bounds: { left: 0, top: 0, right: 30, bottom: 30 } },
+      },
+      screenWidth: 30,
+      screenHeight: 30,
+    };
+    let singletonConnects = 0;
+    let singletonCloses = 0;
+    let transientConnects = 0;
+    let transientCloses = 0;
+    const existing = {
+      isConnected: () => false,
+      connectForObservationRead: async () => {
+        singletonConnects++;
+        return true;
+      },
+      close: async () => {
+        singletonCloses++;
+      },
+    };
+    const transient = {
+      connectForObservationRead: async () => {
+        transientConnects++;
+        return true;
+      },
+      close: async () => {
+        transientCloses++;
+      },
+      requestHierarchySyncForObserver: async () => ({ hierarchy }),
+      convertToViewHierarchyResult: () => hierarchy,
+    };
+    const clientClass = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
+    const previousExisting = Reflect.get(clientClass, "getExistingInstance");
+    const previousFactory = Reflect.get(clientClass, "createForObservationRead");
+    Reflect.set(clientClass, "getExistingInstance", () => existing);
+    Reflect.set(clientClass, "createForObservationRead", () => transient);
+    try {
+      const capture = createDeviceHierarchyCapture(device, { timer: new FakeTimer() });
+      const result = await capture.capture({ freshness: "fresh", observerMode: true });
+      expect(result.hierarchy.hierarchy.node).toBeDefined();
+      expect(transientConnects).toBe(1);
+      expect(transientCloses).toBe(1);
+      expect(singletonConnects).toBe(0);
+      expect(singletonCloses).toBe(0);
+      expect(clientClass.getExistingInstance(device.deviceId)).toBe(existing);
+    } finally {
+      Reflect.set(clientClass, "getExistingInstance", previousExisting);
+      Reflect.set(clientClass, "createForObservationRead", previousFactory);
+    }
+  },
+);
+
+test("Android transient uses its own forward and leaves the disconnected singleton's port and lease", async () => {
+  PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+  const device = {
+    deviceId: "android-idle-forward",
+    name: "Android",
+    platform: "android" as const,
+  };
+  const adb = new FakeAdbExecutor();
+  const existing = AndroidCtrlProxyClient.createForTesting(
+    device,
+    adb,
+    createInstantFailureWebSocketFactory(new FakeTimer()),
+    new FakeTimer(),
+  );
+  AndroidCtrlProxyClient.registerForTesting(existing, device.deviceId);
+  const ownerPort = PortManager.getPort(device.deviceId)!;
+  let holders = 0;
+  let forks = 0;
+  const lease = {
+    tryAcquire: () => {
+      holders++;
+      return true;
+    },
+    release: () => {
+      holders--;
+    },
+    getLastOwnerPid: () => undefined,
+    fork: () => {
+      forks++;
+      return {
+        tryAcquire: () => {
+          holders++;
+          return true;
+        },
+        release: () => {
+          holders--;
+        },
+        getLastOwnerPid: () => undefined,
+      };
+    },
+  };
+  Reflect.set(existing, "ctrlProxyForwardLease", lease);
+  lease.tryAcquire();
+  const transient = AndroidCtrlProxyClient.createForObservationRead(
+    device,
+    new FakeAdbClientFactory(adb),
+    existing,
+  );
+  const transientPort = Reflect.get(transient, "localPort") as number;
+  const ownerForward = `${device.deviceId} tcp:${ownerPort} tcp:${PortManager.DEVICE_PORT}`;
+  const transientForward = `${device.deviceId} tcp:${transientPort} tcp:${PortManager.DEVICE_PORT}`;
+  const response = (stdout: string) => ({
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (part: string) => stdout.includes(part),
+  });
+  adb.setCommandResponseSequence("forward --list", [
+    response(ownerForward),
+    response(ownerForward),
+    response(`${ownerForward}\n${transientForward}`),
+    response(`${ownerForward}\n${transientForward}`),
+    response(ownerForward),
+  ]);
+  try {
+    expect(transientPort).not.toBe(ownerPort);
+    await transient.setupPortForwarding();
+    await existing.sweepOrphanedCtrlProxyPortForwards();
+    await transient.close();
+    expect(forks).toBe(1);
+    expect(holders).toBe(1);
+    expect(PortManager.getPort(device.deviceId)).toBe(ownerPort);
+    expect(adb.getExecutedCommands()).toContain(
+      `forward tcp:${transientPort} tcp:${PortManager.DEVICE_PORT}`,
+    );
+    expect(adb.getExecutedCommands()).toContain(`forward --remove tcp:${transientPort}`);
+    expect(adb.getExecutedCommands()).not.toContain(`forward --remove tcp:${ownerPort}`);
+    expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBe(existing);
+  } finally {
+    await transient.close();
+    lease.release();
+    await existing.close();
+  }
+});
 
 test.each(["android", "ios"] as const)(
   "%s observer queues behind a pending owner request without cancelling it",
@@ -778,6 +943,96 @@ test("Android observer JPEG screenshot uses ADB while the real owner client stay
   } finally {
     screenshotRequest.mockRestore();
     await client.close();
+  }
+});
+
+test.each([true, false])(
+  "iOS simulator observer captures %s panel without advancing transitions",
+  async (hasObservedPanel) => {
+    const device = {
+      deviceId: `A1B2C3D4-E5F6-7890-ABCD-EF12345678${hasObservedPanel ? "90" : "91"}`,
+      name: "Duo",
+      platform: "ios" as const,
+      displays: {
+        panels: [
+          { key: "cover-1", role: "cover" as const, sizePx: { width: 100, height: 100 } },
+          { key: "primary-1", role: "inner" as const, sizePx: { width: 200, height: 200 } },
+        ],
+        postures: [],
+      },
+    };
+    if (hasObservedPanel) {
+      displayTransitions.record(device.deviceId, {
+        display: { key: "primary-1", role: "inner", generation: 1 },
+        screenSize: { width: 200, height: 200 },
+      } as ObserveResult);
+    }
+    const revision = displayTransitions.revision(device.deviceId);
+    const captures: string[] = [];
+    const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockImplementation(
+      async (_deviceId, display) => {
+        captures.push(display);
+        return readFileSync("test/fixtures/screenshots/black-on-white.png");
+      },
+    );
+    const writer = new FakeScreenshotFileWriter();
+    try {
+      const screenshot = new TakeScreenshot(
+        device,
+        new FakeAdbClientFactory(new FakeAdbExecutor()),
+        new FakeTimer(),
+        new CountingIdGenerator("observer"),
+        writer,
+        undefined,
+        undefined,
+        undefined,
+        false,
+      );
+      expect((await screenshot.executeObservationRead({ format: "png" })).success).toBe(true);
+      expect(captures).toEqual([hasObservedPanel ? "primary-1" : "cover-1"]);
+      expect(displayTransitions.revision(device.deviceId)).toBe(revision);
+    } finally {
+      simctl.mockRestore();
+      displayTransitions.reset(device.deviceId);
+    }
+  },
+);
+
+test("aborted iOS simulator observer removes its frame and never pushes to the stream", async () => {
+  const device = {
+    deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567892",
+    name: "Simulator",
+    platform: "ios" as const,
+  };
+  const controller = new AbortController();
+  const writer = new FakeScreenshotFileWriter(() => controller.abort());
+  const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockResolvedValue(
+    readFileSync("test/fixtures/screenshots/black-on-white.png"),
+  );
+  try {
+    const screenshot = new TakeScreenshot(
+      device,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      new FakeTimer(),
+      new CountingIdGenerator("observer"),
+      writer,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+    let pushes = 0;
+    Reflect.set(screenshot, "pushScreenshotToStream", () => {
+      pushes++;
+    });
+    expect(await screenshot.executeObservationRead({ format: "png" }, controller.signal)).toEqual({
+      success: false,
+      error: OPERATION_CANCELLED_MESSAGE,
+    });
+    expect(writer.removed).toEqual(writer.written);
+    expect(pushes).toBe(0);
+  } finally {
+    simctl.mockRestore();
   }
 });
 

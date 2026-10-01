@@ -54,6 +54,21 @@ test("simctl screenshot passes the selected display as one argv token and preser
   expect(calls).toEqual([["simctl", "io", udid, "screenshot", "--display=primary-1", "-"]]);
 });
 
+test("simctl screenshot rejects a late successful close after caller abort", async () => {
+  const controller = new AbortController();
+  let child: ChildProcess | undefined;
+  const spawn = (): ChildProcess => {
+    child = new EventEmitter() as ChildProcess;
+    Object.assign(child, { stdout: new PassThrough(), stderr: new PassThrough() });
+    return child;
+  };
+  const simctl = new SimCtlClient(device, null, new FakeTimer(), "darwin", spawn);
+  const pending = simctl.screenshot(udid, "primary-1", controller.signal);
+  controller.abort(new Error("capture cancelled"));
+  child?.emit("close", 0);
+  await expect(pending).rejects.toThrow("capture cancelled");
+});
+
 test("multi-panel screenshot falls back with a warning when simctl returns cover dimensions", async () => {
   let fallback = 0;
   const result = await captureIosPanelScreenshot(

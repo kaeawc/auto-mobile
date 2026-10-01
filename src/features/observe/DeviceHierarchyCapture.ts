@@ -106,6 +106,7 @@ function newHierarchyClient(
   device: BootedDevice,
   adbFactory?: AdbClientFactory,
   transient = false,
+  existing?: AndroidCtrlProxyClient | IOSCtrlProxyClient | null,
 ): HierarchySyncClient {
   if (device.platform === "ios") {
     return transient
@@ -113,7 +114,11 @@ function newHierarchyClient(
       : IOSCtrlProxyClient.getInstance(device);
   }
   return transient
-    ? AndroidCtrlProxyClient.createForObservationRead(device, adbFactory)
+    ? AndroidCtrlProxyClient.createForObservationRead(
+        device,
+        adbFactory,
+        existing instanceof AndroidCtrlProxyClient ? existing : undefined,
+      )
     : AndroidCtrlProxyClient.getInstance(device, adbFactory);
 }
 
@@ -126,21 +131,29 @@ function resolveHierarchyClient(
     return { syncClient: dependencies.syncClientFactory(device), transient: false, owned: false };
   }
   const existing = existingHierarchyClient(device);
+  if (!observerMode) {
+    return {
+      syncClient: existing ?? newHierarchyClient(device, dependencies.adbFactory),
+      transient: false,
+      owned: false,
+    };
+  }
   const daemon = DaemonState.getInstance();
-  const owned =
-    observerMode && daemon.isInitialized()
-      ? !!daemon.getDevicePool().getDevice(device.deviceId)?.sessionId
-      : false;
-  if (observerMode && owned && !existing?.isConnected()) {
+  const owned = daemon.isInitialized()
+    ? !!daemon.getDevicePool().getDevice(device.deviceId)?.sessionId
+    : false;
+  if (owned && !existing?.isConnected()) {
     throw new ActionableError(
       `Device ${device.deviceId} is session-owned and has no connected hierarchy service`,
     );
   }
-  const transient = observerMode && !existing;
+  if (existing?.isConnected()) {
+    return { syncClient: existing, transient: false, owned };
+  }
   return {
-    syncClient: existing ?? newHierarchyClient(device, dependencies.adbFactory, transient),
-    transient,
-    owned,
+    syncClient: newHierarchyClient(device, dependencies.adbFactory, true, existing),
+    transient: true,
+    owned: false,
   };
 }
 

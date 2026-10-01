@@ -12,6 +12,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import type { ScrollPosition } from "../../src/utils/interfaces/NavigationGraph";
 
 /**
@@ -33,6 +34,7 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
+  let restorePipelineOverrides: (() => void) | undefined;
   let spiedSessionIds: string[];
 
   /**
@@ -83,6 +85,9 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     spiedSessionIds = [];
     // #6227: `setupAutolockedSession` creates its session directly via
@@ -94,6 +99,8 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();

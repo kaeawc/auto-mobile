@@ -10,6 +10,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -45,6 +46,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   const schema = z.object({
     platform: z.enum(["ios", "android"]).optional(),
@@ -64,9 +66,14 @@ describe("ToolRegistry autolock session enforcement", () => {
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
     Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();

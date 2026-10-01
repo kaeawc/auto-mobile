@@ -3,6 +3,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { BootedDevice } from "../../src/models";
 import { z } from "zod/v4";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 describe("ToolRegistry iOS session context", () => {
   const iosDeviceA: BootedDevice = {
@@ -18,15 +19,21 @@ describe("ToolRegistry iOS session context", () => {
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
     Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     ToolRegistry.clearTools();
   });

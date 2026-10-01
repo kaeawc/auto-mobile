@@ -8,6 +8,7 @@ import {
 } from "../../src/server/directSessionDeviceRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { z } from "zod/v4";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 // #5893 item 3: in direct mode (--no-proxy, DaemonState not initialized), a tool
 // call that carries only a sessionUuid must recover its device+platform from the
@@ -28,6 +29,7 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   beforeEach(() => {
     // Direct mode: daemon must not be initialized.
@@ -37,9 +39,14 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     ToolRegistry.clearTools();
     clearDirectSessionDevices();

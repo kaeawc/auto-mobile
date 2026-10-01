@@ -30,6 +30,9 @@ SCRIPT
   cat > "${MOCK_BIN}/bun" <<'SCRIPT'
 #!/bin/bash
 printf 'bun %s\n' "$*" >> "$COMMAND_LOG"
+if [[ "$*" == "scripts/generate-tool-definitions.ts --check" ]]; then
+  exit "${MOCK_TOOL_DEFINITIONS_STATUS:-0}"
+fi
 SCRIPT
   chmod +x "${MOCK_BIN}/bun"
 
@@ -63,12 +66,36 @@ teardown() {
   run env -u RUNNER_OS MOCK_UNAME=Linux PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  expected_log=$'git fetch --quiet origin main\ngit merge-base --is-ancestor origin/main HEAD\nbun run format:check\nbun run typecheck\nbun run lint\nbun test test/lint/\nbun run test:image:bun\nenv AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports bash scripts/test-ts.sh unit\nbash scripts/test-ts.sh unit\ngit diff --no-renames --name-only origin/main...HEAD --\ngit diff --no-renames --cached --name-only --diff-filter=ACMRD\ngit diff --no-renames --name-only --diff-filter=ACMRD\nenv BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR=scratch/timing-unit-reports bash scripts/validate-bun-test-timings.sh\nbash scripts/validate-bun-test-timings.sh'
+  expected_log=$'git fetch --quiet origin main\ngit merge-base --is-ancestor origin/main HEAD\nbun run format:check\nbun run typecheck\nbun run lint\nbun scripts/generate-tool-definitions.ts --check\nbun test test/lint/\nbun run test:image:bun\nenv AUTOMOBILE_TEST_MODE=true AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720 AUTOMOBILE_UNIT_JUNIT_DIR=scratch/timing-unit-reports bash scripts/test-ts.sh unit\nbash scripts/test-ts.sh unit\ngit diff --no-renames --name-only origin/main...HEAD --\ngit diff --no-renames --cached --name-only --diff-filter=ACMRD\ngit diff --no-renames --name-only --diff-filter=ACMRD\nenv BUN_TEST_TIMING_BASE_REF=origin/main BUN_TEST_TIMING_REPORT_DIR=scratch/timing-unit-reports bash scripts/validate-bun-test-timings.sh\nbash scripts/validate-bun-test-timings.sh'
   [ "$(cat "$COMMAND_LOG")" = "$expected_log" ] || {
     printf 'Expected:\n%s\nActual:\n%s\n' "$expected_log" "$(cat "$COMMAND_LOG")"
     return 1
   }
   [[ "$output" == *"Node pre-push validation passed"* ]]
+}
+
+@test "tool definitions drift passes in default and changed modes" {
+  for mode in default changed; do
+    : > "$COMMAND_LOG"
+    if [[ "$mode" == "changed" ]]; then
+      run env -u RUNNER_OS MOCK_UNAME=Linux PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+    else
+      run env -u RUNNER_OS MOCK_UNAME=Linux PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT"
+    fi
+
+    [ "$status" -eq 0 ]
+    [ "$(grep -c '^bun scripts/generate-tool-definitions.ts --check$' "$COMMAND_LOG")" -eq 1 ]
+    [[ "$output" == *"PASS"*"tool definitions drift"* ]]
+  done
+}
+
+@test "tool definitions drift failure stops later gates and gives regenerate command" {
+  run env -u RUNNER_OS MOCK_UNAME=Linux MOCK_TOOL_DEFINITIONS_STATUS=1 PATH="${MOCK_BIN}:${PATH}" /bin/bash "$SCRIPT" --changed
+
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FAIL"*"tool definitions drift"* ]]
+  [[ "$output" == *"bun scripts/generate-tool-definitions.ts && bunx oxfmt schemas/tool-definitions.json"* ]]
+  ! grep -F 'bun test test/lint/' "$COMMAND_LOG"
 }
 
 @test "DB integration fast path runs for each selected directory" {

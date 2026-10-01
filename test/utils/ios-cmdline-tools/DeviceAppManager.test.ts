@@ -641,7 +641,66 @@ describe("DeviceAppManager", () => {
     ).toBe(false);
   });
 
-  test("clearAppDataViaReinstall surfaces the install error (not 'could not resolve') when reinstall fails after uninstall", async () => {
+  for (const failure of ["missing", "not a directory", "unreadable"] as const) {
+    test(`clearAppDataViaReinstall does not uninstall when copied bundle is ${failure}`, async () => {
+      const copyDir = "/tmp/automobile-device-app-copy";
+      const bundlePath = join(copyDir, "AutoMobileTest.app");
+      const commands: string[] = [];
+      let bundleStatCalls = 0;
+      const inspector = new DeviceAppManager({
+        platform: () => "darwin",
+        execute: async (file, args) => {
+          commands.push([file, ...args].join(" "));
+          return {
+            stdout: "",
+            stderr: "",
+            toString: () => "",
+            trim: () => "",
+            includes: () => false,
+          };
+        },
+        readFile: async () =>
+          JSON.stringify({ apps: [{ bundleIdentifier: bundleId, bundlePath: "/device/App.app" }] }),
+        mkdtemp: async (prefix) =>
+          prefix.includes("automobile-device-app-") ? copyDir : "/tmp/automobile-info",
+        rm: async () => undefined,
+        readdir: async (path) => {
+          if (path === bundlePath) {
+            if (failure === "unreadable") {
+              throw new Error("permission denied");
+            }
+            return [];
+          }
+          return ["AutoMobileTest.app"];
+        },
+        stat: async (path) => {
+          if (path === bundlePath) {
+            bundleStatCalls++;
+            if (bundleStatCalls === 2 && failure === "missing") {
+              throw new Error("ENOENT");
+            }
+            return { isDirectory: () => bundleStatCalls === 1 || failure !== "not a directory" };
+          }
+          return { isDirectory: () => true };
+        },
+        tmpdir: () => "/tmp",
+        logger: createFakeLogger(),
+      });
+
+      const error = await inspector.clearAppDataViaReinstall("device-udid", bundleId).then(
+        () => new Error("Expected copied bundle validation failure"),
+        (error: unknown) => error,
+      );
+
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toContain(bundleId);
+      expect((error as Error).message).toContain(bundlePath);
+      expect((error as Error).message).toContain("has not been uninstalled");
+      expect(commands.some((command) => command.includes("device uninstall app"))).toBe(false);
+    });
+  }
+
+  test("clearAppDataViaReinstall reports an uninstalled app when reinstall fails", async () => {
     const workDir = await createTempDir();
     const fixtureApp = await createFixtureApp(workDir);
     const commands: string[] = [];
@@ -702,11 +761,20 @@ describe("DeviceAppManager", () => {
       logger: createFakeLogger(),
     });
 
-    // The real install error must propagate — not be masked as "could not resolve".
-    await expect(inspector.clearAppDataViaReinstall("device-udid", bundleId)).rejects.toThrow(
-      /install failed: device locked/,
+    const error = await inspector.clearAppDataViaReinstall("device-udid", bundleId).then(
+      () => new Error("Expected reinstall failure"),
+      (error: unknown) => error,
     );
-    // The uninstall did run (app was removed), so the failure is actionable.
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain("UNINSTALLED");
+    expect((error as Error).message).toContain(bundleId);
+    const installCommand = commands.find((command) => command.includes("device install app"));
+    const attemptedPath = installCommand && parseArgValue(installCommand, "--device device-udid");
+    expect(attemptedPath).toContain("AutoMobileTest.app");
+    expect((error as Error).message).toContain(attemptedPath as string);
+    expect((error as Error).message).toContain("install failed: device locked");
+    expect((error as Error).message).toContain("installApp tool");
+    expect((error as Error).message).toContain("temporary copy is removed");
     expect(commands.some((c) => c.includes("device uninstall app"))).toBe(true);
   });
 });

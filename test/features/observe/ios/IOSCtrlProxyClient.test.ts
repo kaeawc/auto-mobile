@@ -3765,6 +3765,58 @@ describe("IOSCtrlProxyClient", function () {
       await fresh.close();
     });
 
+    test("connection failure threshold restarts only the triggering booted simulator", async function () {
+      const otherDevice: BootedDevice = {
+        deviceId: "22222222-2222-2222-2222-222222222222",
+        platform: "ios",
+        name: "Other booted iPhone",
+      };
+      const managerCalls: Array<{ deviceId: string; action: string }> = [];
+      const managerFor = (device: BootedDevice): CtrlProxyIosManager => {
+        const budget = new ForcedRestartBudget(fakeTimer);
+        return {
+          getForcedRestartBudget: () => budget,
+          forceRestart: async () => {
+            managerCalls.push({ deviceId: device.deviceId, action: "forceRestart" });
+          },
+          setup: async () => {
+            managerCalls.push({ deviceId: device.deviceId, action: "setup" });
+            return { success: false, message: "fake runner unavailable" };
+          },
+        } as CtrlProxyIosManager;
+      };
+      const managers = new Map([
+        [testDevice.deviceId, managerFor(testDevice)],
+        [otherDevice.deviceId, managerFor(otherDevice)],
+      ]);
+      const factoryCalls: string[] = [];
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer,
+        (device) => {
+          factoryCalls.push(device.deviceId);
+          return managers.get(device.deviceId)!;
+        },
+        async () => [testDevice, otherDevice],
+      );
+      factoryCalls.length = 0;
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          (client as unknown as { onConnectAttemptFailed(): void }).onConnectAttemptFailed();
+        }
+        await flushMicrotasks();
+        expect(managerCalls.filter((call) => call.action === "forceRestart")).toEqual([
+          { deviceId: testDevice.deviceId, action: "forceRestart" },
+        ]);
+        expect([...new Set(factoryCalls)]).toEqual([testDevice.deviceId]);
+        expect(managerCalls.some((call) => call.deviceId === otherDevice.deviceId)).toBe(false);
+      } finally {
+        await client.close();
+      }
+    });
+
     test("manager startup and forced restart refuse a retired device", async function () {
       const manager = IOSCtrlProxyManager.createForTesting(testDevice, fakeTimer);
       IOSCtrlProxyManager.retireDevice(testDevice.deviceId);

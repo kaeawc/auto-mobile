@@ -1,9 +1,13 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { initializeIosCtrlProxyAtStartup } from "../../src/daemon/iosStartupInit";
+import {
+  initializeIosCtrlProxyAtStartup,
+  selectIosStartupWarmupDevices,
+} from "../../src/daemon/iosStartupInit";
 import { CtrlProxyStaleRunnerCacheError } from "../../src/ctrlProxy/IosCtrlProxyBuilder";
 import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { PassiveWorkPolicy, parsePassiveWorkSettings } from "../../src/daemon/PassiveWorkPolicy";
 
 /**
  * Startup CtrlProxy iOS init must not race the background runner-bundle
@@ -13,6 +17,34 @@ import { FakeTimer } from "../fakes/FakeTimer";
  */
 describe("initializeIosCtrlProxyAtStartup (#7032)", () => {
   const BUDGET_MS = 5_000;
+
+  test("startup warm-up selects only enabled owned or allowlisted iOS simulators", () => {
+    const booted = [
+      { id: "sim-owned", platform: "ios" },
+      { id: "sim-allowlisted", platform: "ios" },
+      { id: "sim-unowned", platform: "ios" },
+      { id: "android-owned", platform: "android" },
+    ];
+    const secretEnv = "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET";
+    const select = (env: NodeJS.ProcessEnv) =>
+      selectIosStartupWarmupDevices(
+        booted,
+        new PassiveWorkPolicy(parsePassiveWorkSettings(env, secretEnv), (id) => id === "sim-owned"),
+      ).map((device) => device.id);
+
+    expect(select({})).toEqual(["sim-owned"]);
+    expect(select({ AUTOMOBILE_IOS_WARMUP_DEVICES: "sim-allowlisted,sim-unowned" })).toEqual([
+      "sim-owned",
+      "sim-allowlisted",
+      "sim-unowned",
+    ]);
+    expect(
+      select({
+        AUTOMOBILE_IOS_WARMUP_DEVICES: "sim-allowlisted",
+        [secretEnv]: "acceptance-secret",
+      }),
+    ).toEqual([]);
+  });
 
   test("skips a device when shutdown begins before its verification starts", async () => {
     const timer = new FakeTimer();

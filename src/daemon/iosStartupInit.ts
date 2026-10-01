@@ -3,6 +3,28 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { CtrlProxyStaleRunnerCacheError } from "../ctrlProxy/IosCtrlProxyBuilder";
+import type { Platform } from "../models";
+import type { PassiveWorkPolicy } from "./PassiveWorkPolicy";
+
+export type IosStartupWarmupPolicy = Pick<PassiveWorkPolicy, "allows" | "isIosPassiveWorkEnabled">;
+
+export interface IosStartupWarmupDevice {
+  id: string;
+  platform: Platform;
+}
+
+/** Select the startup-booted iOS devices eligible for passive CtrlProxy warm-up. */
+export function selectIosStartupWarmupDevices(
+  devices: readonly IosStartupWarmupDevice[],
+  policy: IosStartupWarmupPolicy,
+): IosStartupWarmupDevice[] {
+  if (!policy.isIosPassiveWorkEnabled()) {
+    return [];
+  }
+  return devices.filter(
+    (device) => device.platform === "ios" && policy.allows("ios", "startup-warmup", device.id),
+  );
+}
 
 /** Options the startup path passes to `DeviceSessionManager.verifyIosDevice`. */
 export interface IosStartupVerifyOptions {

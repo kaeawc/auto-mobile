@@ -162,7 +162,8 @@ import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { EmulatorLossIncidentRepository } from "../db/emulatorLossIncidentRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
-import { initializeIosCtrlProxyAtStartup } from "./iosStartupInit";
+import { initializeIosCtrlProxyAtStartup, selectIosStartupWarmupDevices } from "./iosStartupInit";
+import { selectObservationStreamDevices } from "./observationInitialFrame";
 import {
   startAppearanceSyncScheduler,
   syncAppearanceForDevice,
@@ -1668,13 +1669,11 @@ export class Daemon {
       // A stream subscription does not acquire devices. Initial frames can
       // connect a CtrlProxy client, so both platforms need passive-work scope.
       const pooledDevices = this.devicePool.getAllDevices();
-      const allDevices = pooledDevices.filter((device) => {
-        if (this.passiveWorkPolicy.allows(device.platform, "observation-stream", device.id)) {
-          return true;
-        }
-        this.logSkippedObservationStreamDevice(device.platform, device.id, "connect");
-        return false;
-      });
+      const allDevices = selectObservationStreamDevices(
+        pooledDevices,
+        this.passiveWorkPolicy,
+        (device) => this.logSkippedObservationStreamDevice(device.platform, device.id, "connect"),
+      );
 
       pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
         streamServer: server,
@@ -3011,11 +3010,9 @@ export class Daemon {
       logger.info("[Daemon] Skipping iOS CtrlProxy warm-up for live acceptance");
       return;
     }
-    const allDevices = this.devicePool.getAllDevices();
-    const iosDevices = allDevices.filter(
-      (device) =>
-        device.platform === "ios" &&
-        this.passiveWorkPolicy.allows("ios", "startup-warmup", device.id),
+    const iosDevices = selectIosStartupWarmupDevices(
+      this.devicePool.getAllDevices(),
+      this.passiveWorkPolicy,
     );
     if (iosDevices.length === 0) {
       logger.debug("[Daemon] No iOS devices to initialize CtrlProxy iOS for");

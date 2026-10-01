@@ -170,6 +170,15 @@ function installListeningProcessFakes(
   });
 }
 
+async function flushUntil(condition: () => boolean, description: string): Promise<void> {
+  for (let turn = 0; turn < 100 && !condition(); turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  if (!condition()) {
+    throw new Error(`Timed out waiting for ${description}`);
+  }
+}
+
 function createFakeBuilder(xctestrunPath = "/tmp/CtrlProxy.xctestrun") {
   return {
     getXctestrunPath: async () => xctestrunPath,
@@ -4443,6 +4452,50 @@ describe("IOSCtrlProxyManager", function () {
 
       expect(manager.getServicePort()).toBe(8765);
       expect(fakeExecutor.getSpawnedProcesses()).toHaveLength(1);
+    });
+
+    test("supervisor health restart spawns for its simulator without adopting or killing a sibling runner", async function () {
+      const otherRunner: FakeListeningProcess = {
+        pid: 2469,
+        port: 8790,
+        command:
+          "xcodebuild test CtrlProxyUITests -destination id=OTHER-SIMULATOR CTRL_PROXY_IOS_PORT=8790",
+        alive: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [otherRunner]);
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2469\n", ""));
+      fakeExecutor.setCommandHandler("curl -s", () =>
+        createExecResult(
+          fakeExecutor.getSpawnedProcesses().length > 0
+            ? JSON.stringify({ status: "ok", deviceId: testDevice.deviceId })
+            : "",
+          "",
+        ),
+      );
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+      );
+      const supervisor = (manager as unknown as { processSupervisor: { start(): Promise<void> } })
+        .processSupervisor;
+
+      await supervisor.start();
+      fakeTimer.advanceTime(30_000);
+      await flushUntil(() => supervisor.isRestartPending(), "the health-check restart schedule");
+      fakeTimer.advanceTime(2_000);
+      await flushUntil(() => fakeExecutor.getSpawnedProcesses().length > 0, "the runner restart");
+
+      const launches = fakeExecutor.getSpawnedProcesses();
+      expect(launches).toHaveLength(1);
+      expect(launches[0].command).toBe("xcodebuild");
+      expect(launches[0].args).toContain(`platform=iOS Simulator,id=${testDevice.deviceId}`);
+      expect(launches[0].args.join(" ")).not.toContain("OTHER-SIMULATOR");
+      expect(otherRunner.alive).toBe(true);
+      expect(fakeExecutor.wasCommandExecuted("kill -TERM 2469")).toBe(false);
+      expect(fakeExecutor.wasCommandExecuted("kill -KILL 2469")).toBe(false);
+      expect(manager.getServicePort()).toBe(8765);
     });
 
     test("startOnSimulator() delivers the reallocated port to the runner via the xctestrun (EC5)", async function () {

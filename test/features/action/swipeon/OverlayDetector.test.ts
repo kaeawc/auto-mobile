@@ -9,6 +9,7 @@ import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { Element, ElementBounds } from "../../../../src/models";
+import type { ViewHierarchyResult } from "../../../../src/models";
 import { OverlayDetector } from "../../../../src/features/action/swipeon/OverlayDetector";
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
@@ -74,14 +75,14 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
       ]),
       node(b(0, 1900, 1000, 2000), { "resource-id": "row", clickable: "true" }),
     ]);
-    const hierarchy = {
+    const hierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: [listNode],
+        node: listNode,
       },
     };
 
     const overlays = detector().collectOverlayCandidates(
-      hierarchy as any,
+      hierarchy,
       { elementId: "list" },
       listElement,
     );

@@ -809,7 +809,7 @@ EOF
   run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
   [[ "$output" == *"Coverage test run exceeded its 480s wall-clock budget"* ]]
-  [[ "$output" == *"#6969"* ]]
+  [[ "$output" == *"shard 1/2"* ]]
 }
 
 @test "unit shards force the portable watchdog, capture a snapshot, and preserve exit 124" {

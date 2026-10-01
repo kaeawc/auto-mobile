@@ -1,3 +1,4 @@
+import { ActionableError } from "../../src/models/ActionableError";
 import Ajv2020 from "ajv/dist/2020";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
@@ -317,6 +318,11 @@ describe("published observe waitFor input schema", () => {
         waitFor: { for: "stable", container: { elementId: "scope" } },
       }).valid,
     ).toBe(true);
+  });
+
+  test("publishes the additive posture timeout diagnostic in the output schema", () => {
+    const observeTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
+    expect(observeTool?.outputSchema).toHaveProperty("properties.timeoutReason.type", "string");
   });
 
   test("allows known posture waits but rejects unknown in runtime and published inputs", () => {
@@ -1126,8 +1132,22 @@ describe("waitForObservation activeWindow", () => {
     const observeScreen = new FakeObserveScreen();
     const observation = makeObservation("com.example.app", "");
     observeScreen.setObserveSequence([
-      { ...observation, display: { key: "0", role: "unknown", posture: "unknown", generation: 0 } },
-      { ...observation, display: { key: "0", role: "inner", posture: "closed", generation: 1 } },
+      {
+        ...observation,
+        display: { key: "inner", role: "inner", posture: "unknown", generation: 0 },
+      },
+      {
+        ...observation,
+        display: { key: "inner", role: "inner", posture: "opened", generation: 0 },
+      },
+      {
+        ...observation,
+        display: { key: "inner", role: "inner", posture: "unknown", generation: 0 },
+      },
+      {
+        ...observation,
+        display: { key: "cover", role: "cover", posture: "closed", generation: 0 },
+      },
     ]);
 
     const outcome = await waitForObservation(
@@ -1140,7 +1160,223 @@ describe("waitForObservation activeWindow", () => {
 
     expect(outcome.awaitTimeout).toBe(false);
     expect(outcome.observation.display?.posture).toBe("closed");
-    expect(observeScreen.getExecuteCallCount()).toBe(2);
+    expect(observeScreen.getExecuteCallCount()).toBe(4);
+  });
+
+  const postureObservation = (
+    posture: "opened" | "closed" | "unknown",
+    nodes: unknown[] = [],
+  ): ObserveResult => ({
+    ...makeObservation("com.example.app", "", nodes),
+    display: { key: "inner", role: "inner", posture, generation: 0 },
+  });
+
+  test("posture waits reject the no-inventory stub after exactly one observation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult({
+      ...postureObservation("unknown"),
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    });
+    await expect(
+      waitForObservation(screen, { posture: "closed", timeout: 500 }, undefined, false, timer),
+    ).rejects.toBeInstanceOf(ActionableError);
+    expect(screen.getExecuteCallCount()).toBe(1);
+    expect(timer.now()).toBe(0);
+  });
+
+  test("posture waits tolerate missing hierarchy and transient execute failure after support", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult((index) => {
+      if (index === 2) {
+        throw new Error("fold temporarily interrupted observation");
+      }
+      const observation = postureObservation(index === 3 ? "closed" : "unknown");
+      return index === 0
+        ? { ...observation, viewHierarchy: { ...observation.viewHierarchy!, updatedAt: 1000 } }
+        : { ...observation, viewHierarchy: undefined };
+    });
+    const outcome = await waitForObservation(
+      screen,
+      { posture: "closed", timeout: 500 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(outcome.observation.display?.posture).toBe("closed");
+    expect(screen.getExecuteCallCount()).toBe(4);
+    expect(screen.getExecuteOptions().every((options) => options.minTimestamp === 0)).toBe(true);
+  });
+
+  test("a fresh posture stamp can resolve without a hierarchy during a fold", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveSequence([
+      {
+        ...postureObservation("opened"),
+        viewHierarchy: { ...makeHierarchy([]), updatedAt: 1000 },
+      },
+      {
+        ...postureObservation("unknown"),
+        viewHierarchy: { hierarchy: { error: "temporarily unavailable", transportFailure: true } },
+      },
+      { ...postureObservation("closed"), viewHierarchy: undefined },
+    ]);
+    const outcome = await waitForObservation(
+      screen,
+      { posture: "closed", timeout: 500 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.observation.viewHierarchy).toBeUndefined();
+    expect(screen.getExecuteCallCount()).toBe(3);
+  });
+
+  test("repeated posture poll failures reach the deadline with the last successful observation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    const lastObservation = postureObservation("opened");
+    screen.setObserveResult((index) => {
+      if (index > 0) {
+        throw new Error("fold capture unavailable");
+      }
+      return lastObservation;
+    });
+    const outcome = await waitForObservation(
+      screen,
+      { posture: "closed", timeout: 200 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.observation).toBe(lastObservation);
+    expect(outcome).toMatchObject({
+      awaitTimeout: true,
+      timedOut: true,
+      matched: false,
+      polls: 3,
+      timeoutReason:
+        'Timed out after 200 ms waiting for posture "closed"; last observed posture "opened"',
+    });
+    expect(timer.now()).toBe(200);
+  });
+
+  test("posture timeout names the last observed posture and preserves timeout flags", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveSequence([postureObservation("unknown"), postureObservation("opened")]);
+    const outcome = await waitForObservation(
+      screen,
+      { posture: "closed", timeout: 200 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome).toMatchObject({
+      timedOut: true,
+      awaitTimeout: true,
+      matched: false,
+      timeoutReason:
+        'Timed out after 200 ms waiting for posture "closed"; last observed posture "opened"',
+    });
+    expect(outcome.observation.display?.posture).toBe("opened");
+  });
+
+  test("posture and text both have to match on the same observation", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    const text = [{ $: { text: "Ready", bounds: bounds(10, 10, 100, 60) } }];
+    screen.setObserveSequence([
+      postureObservation("closed"),
+      postureObservation("opened", text),
+      postureObservation("closed", text),
+    ]);
+    const outcome = await waitForObservation(
+      screen,
+      { posture: "closed", text: "Ready", timeout: 500 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(outcome.awaitedElement?.text).toBe("Ready");
+    expect(screen.getExecuteCallCount()).toBe(3);
+  });
+
+  test("posture with text still requires fresh hierarchy evidence", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    const observation = postureObservation("closed", [
+      { $: { text: "Ready", bounds: bounds(10, 10, 100, 60) } },
+    ]);
+    screen.setObserveSequence([
+      {
+        ...postureObservation("opened"),
+        viewHierarchy: { ...observation.viewHierarchy!, updatedAt: 1000 },
+      },
+      { ...observation, viewHierarchy: { ...observation.viewHierarchy!, updatedAt: 1000 } },
+    ]);
+    const outcome = await waitForObservation(
+      screen,
+      { posture: "closed", text: "Ready", timeout: 200 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.awaitTimeout).toBe(true);
+    expect(outcome.matched).toBe(false);
+  });
+
+  test("first observation failures and non-posture poll failures still propagate", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    const failure = new Error("observation failed");
+    screen.setObserveResult(() => {
+      throw failure;
+    });
+    await expect(
+      waitForObservation(screen, { posture: "closed" }, undefined, false, timer),
+    ).rejects.toBe(failure);
+    screen.setObserveResult((index) => {
+      if (index > 1) {
+        throw failure;
+      }
+      return postureObservation("opened");
+    });
+    await expect(
+      waitForObservation(screen, { text: "missing" }, undefined, false, timer),
+    ).rejects.toBe(failure);
+  });
+
+  test("posture poll aborts propagate even during a transient failure", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    const controller = new AbortController();
+    const abort = new DOMException("cancelled", "AbortError");
+    screen.setObserveResult((index) => {
+      if (index > 0) {
+        controller.abort(abort);
+        throw abort;
+      }
+      return postureObservation("opened");
+    });
+    await expect(
+      waitForObservation(screen, { posture: "closed" }, controller.signal, false, timer),
+    ).rejects.toThrow();
+    expect(screen.getExecuteCallCount()).toBe(2);
   });
 
   test("keeps polling until activeWindow and element predicates are both true", async () => {

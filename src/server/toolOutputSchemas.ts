@@ -1345,6 +1345,10 @@ export const observeResultSchema = z
         "Why a requested accessibility audit was omitted from this observation (issue #6926): `settled_capture_adopted` means a settled capture replaced the action's original capture, so its audit was deliberately dropped rather than mismatched onto the returned hierarchy.",
       ),
     timedOut: z.boolean().optional(),
+    timeoutReason: z
+      .string()
+      .optional()
+      .describe("Posture wait timeout with the last observed posture"),
     polls: z.number().int().nonnegative().optional(),
     waitMs: z.number().nonnegative().optional(),
     matchedElement: elementSchema.optional(),

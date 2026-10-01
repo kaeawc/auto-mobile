@@ -590,8 +590,20 @@ available from its artifact pointer.
 panel key or a role. These conditions compare the returned observation's
 `display` stamp. Posture waits accept only known postures; `unknown` remains a
 possible observation stamp but cannot be requested as a wait condition. Posture
-waits need a device that reports posture; Android observations currently report
-`unknown` posture.
+waits need a device that reports posture: supported Android foldables and iPhone
+Duo report it in the display stamp. A no-inventory stamp (key `"0"`, role
+`"unknown"`, posture `"unknown"`) fails immediately on the first observation
+with an actionable error. A known panel with temporarily `unknown` posture
+keeps polling. After the first observation establishes support, posture waits
+also tolerate missing/unavailable hierarchy and transient observation failures
+during a fold; cancellation still propagates.
+
+Posture-only waits use the independently read display stamp without requiring a
+new hierarchy timestamp. Combined text/element predicates and settling retain
+the hierarchy freshness requirement, and all specified predicates must match.
+On timeout, the last observation is returned with `timedOut: true` and
+`awaitTimeout: true`, plus `timeoutReason`, for example:
+`Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"`.
 An action-observation diff includes `displayChanged: { from, to }` when the
 panel key, role, or posture changes. Capture generation alone does not create a
 display change entry.

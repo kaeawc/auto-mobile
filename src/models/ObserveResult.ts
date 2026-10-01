@@ -402,6 +402,9 @@ export interface ObserveResult {
   /** True if a declarative waitFor condition or stability wait timed out. */
   timedOut?: boolean;
 
+  /** Diagnostic for a posture wait that exhausted its deadline. */
+  timeoutReason?: string;
+
   /** Number of observations made by the waitFor poll. */
   polls?: number;
 

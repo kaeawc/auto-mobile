@@ -647,6 +647,8 @@ export class ListInstalledApps {
     accumulator.foregroundApp = await this.adb.getForegroundApp(signal);
     signal?.throwIfAborted();
 
+    const proxyRequest = await this.fetchCtrlProxyPackages(signal);
+
     // List packages for each user
     for (const user of users) {
       try {
@@ -655,6 +657,7 @@ export class ListInstalledApps {
 
         const { userPackages, systemPackages, catalog } = await this.partitionPackagesForUser(
           user.userId,
+          proxyRequest,
           signal,
           options,
         );
@@ -806,12 +809,13 @@ export class ListInstalledApps {
   // (`--user N` for non-current user) fall back to ADB.
   private async partitionPackagesForUser(
     userId: number,
+    proxyRequest: AndroidInstalledPackagesRequest,
     signal?: AbortSignal,
     options: DetailedListingOptions = {},
   ): Promise<PartitionedPackages> {
     const proxy =
       this.device.platform === "android"
-        ? await this.fetchCtrlProxyPackages(signal)
+        ? proxyRequest
         : {
             available: false as const,
             reason: "CtrlProxy catalog is unavailable on this platform",

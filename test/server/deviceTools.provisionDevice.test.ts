@@ -48,6 +48,7 @@ import type {
 } from "../../src/devices/deviceUtils";
 import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
 
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
@@ -5244,6 +5245,56 @@ describe("provisionDevice handler", () => {
       error: { code: "timeout", retryable: true },
     });
     expect(operationStore.failCodes).toEqual(["timeout"]);
+  });
+
+  test("preserves missing-device diagnostics and reuses the failed operation identity", async () => {
+    deviceManager.setBootedDevices("android", [
+      { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
+    ]);
+    exactProvisioner.provision = async () => provisionedTestDevice("android", false);
+    let readinessCalls = 0;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        readinessCalls++;
+        throw new RunnerReadinessError(
+          "provisionDevice automation runner readiness failed: phase=runner-setup attempts=1: " +
+            "error: device 'emulator-5554' not found",
+          false,
+          false,
+          "runner-setup",
+          1,
+          new DeviceLostError(
+            "emulator-5554",
+            "error: device 'emulator-5554' not found",
+            "incident-6d",
+          ),
+        );
+      },
+    });
+    const args = provisionTestArgs("android", "missing-device-operation-reuse");
+
+    const first = JSON.parse(
+      ((await ToolRegistry.getTool("provisionDevice")!.handler(args)) as any).content[0].text,
+    );
+    const replay = JSON.parse(
+      ((await ToolRegistry.getTool("provisionDevice")!.handler(args)) as any).content[0].text,
+    );
+
+    expect(first).toMatchObject({
+      operationId: "missing-device-operation-reuse",
+      error: {
+        code: "device_lost",
+        providerCode: "device_lost",
+        retryable: true,
+        readinessPhase: "runner-setup",
+        attempt: 1,
+        incidentId: "incident-6d",
+        deviceId: "emulator-5554",
+        daemonBuild: expect.any(String),
+      },
+    });
+    expect(replay).toMatchObject(first);
+    expect(readinessCalls).toBe(1);
   });
 
   test("reports a non-retryable identity conflict from the provisioning path", async () => {

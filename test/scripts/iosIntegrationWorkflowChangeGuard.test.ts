@@ -28,7 +28,9 @@ describe("Fast Validation independence from XCTestRunner", () => {
   test("keeps the disabled XCTestRunner job out of every job's needs", () => {
     const jobs = loadWorkflow(WORKFLOW).jobs ?? {};
     for (const [jobId, job] of Object.entries(jobs)) {
-      if (jobId === "ios-xctest-runner-simulator-tests") continue;
+      if (jobId === "ios-xctest-runner-simulator-tests") {
+        continue;
+      }
       const needs = Array.isArray(job?.needs) ? job.needs : [job?.needs];
       expect(needs).not.toContain("ios-xctest-runner-simulator-tests");
     }

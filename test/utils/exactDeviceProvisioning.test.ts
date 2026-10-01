@@ -34,6 +34,8 @@ describe("ProvisionDeviceError retryability", () => {
     expect(DEFAULT_PROVISION_DEVICE_RETRYABILITY).toEqual({
       cleanup_failed: false,
       creation_not_allowed: false,
+      device_lost: true,
+      device_offline: true,
       discovery_incomplete: true,
       identity_conflict: false,
       timeout: true,

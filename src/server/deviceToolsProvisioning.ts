@@ -4,6 +4,7 @@ import { ProgressCallback } from "./toolRegistry";
 import type { DeviceResourceConfigurationResult } from "../models/DeviceResourceConfiguration";
 import { PlatformDeviceManager } from "../devices/deviceUtils";
 import { BootedDevice, DeviceInfo } from "../models";
+import { DeviceLostError } from "../models/DeviceLostError";
 import { describeDevice, projectProvisionedDevice } from "./deviceDescription";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
@@ -17,6 +18,8 @@ import { isUnresolvedAndroidEmulatorName } from "../devices/deviceIdentityEviden
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { McpSessionRecoveryInProgressError } from "../daemon/devicePool";
+import { getCurrentBuildIdentity } from "../daemon/buildIdentity";
+import { DAEMON_VERSION } from "../daemon/constants";
 import {
   DAEMON_HANDOFF_INTERRUPTED_ERROR_CODE,
   DaemonHandoffInterruptionError,
@@ -28,6 +31,7 @@ import {
 } from "../devices/deviceBootService";
 import { type Timer } from "../utils/SystemTimer";
 import { combineAbortSignals } from "../utils/AbortContext";
+import { AdbDeviceOfflineError } from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import { RunnerReadinessError } from "../utils/RunnerReadinessService";
 import {
   deviceReadinessLockKey,
@@ -1113,6 +1117,36 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     if (knownError) {
       return knownError;
     }
+    if (error instanceof RunnerReadinessError) {
+      const cause = error.diagnosticCause;
+      if (cause instanceof DeviceLostError) {
+        return new ProvisionDeviceError(
+          "device_lost",
+          `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+          true,
+          {
+            providerCode: cause.code,
+            readinessPhase: error.phase,
+            attempt: error.attempts,
+            incidentId: cause.incidentId,
+            deviceId: cause.deviceId,
+          },
+        );
+      }
+      if (cause instanceof AdbDeviceOfflineError) {
+        return new ProvisionDeviceError(
+          "device_offline",
+          `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
+          true,
+          {
+            providerCode: cause.code,
+            readinessPhase: error.phase,
+            attempt: error.attempts,
+            deviceId: cause.deviceId,
+          },
+        );
+      }
+    }
     // A readiness phase that ran out of budget is a purely time-based failure:
     // report it as `timeout` so a controller that retries timeouts but treats
     // `platform_command_failed` as terminal does not give up on it.
@@ -1123,6 +1157,15 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       isDeadlineFailure ? "timeout" : "platform_command_failed",
       `Failed to provision ${args.device.platform} device '${args.device.name}': ${errorMessage(error)}`,
     );
+  }
+
+  function provisionDeviceLifecycleReason(error: ProvisionDeviceError) {
+    return {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      ...provisionDeviceDiagnosticFields(error),
+    };
   }
 
   function teardownResponsePayload(
@@ -1365,11 +1408,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         state: lifecycleStateForCleanup(rollbackError.cleanup),
         phase: "cleanup",
         device: lifecycleDevice,
-        reason: {
-          code: provisionFailure.code,
-          message: provisionFailure.message,
-          retryable: provisionFailure.retryable,
-        },
+        reason: provisionDeviceLifecycleReason(provisionFailure),
         cleanup: {
           status: lifecycleCleanupStatus(rollbackError.cleanup),
           reason:
@@ -1595,11 +1634,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     const lifecycle: ProvisionDeviceLifecycleOutcome = {
       state: "no_device_created",
       phase: "provisioning",
-      reason: {
-        code: provisionFailure.code,
-        message: provisionFailure.message,
-        retryable: provisionFailure.retryable,
-      },
+      reason: provisionDeviceLifecycleReason(provisionFailure),
     };
     await recordLifecycle(lifecycle);
     throw attachProvisionDeviceLifecycle(provisionFailure, lifecycle);
@@ -1675,11 +1710,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
         state: "cleanup_in_progress",
         phase: "cleanup",
         device: lifecycleDevice,
-        reason: {
-          code: provisionFailure.code,
-          message: provisionFailure.message,
-          retryable: provisionFailure.retryable,
-        },
+        reason: provisionDeviceLifecycleReason(provisionFailure),
         cleanup: { status: "in_progress", reason: "readiness_timeout" },
       });
     }
@@ -2489,6 +2520,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           code: error.code,
           message: error.message,
           retryable: error.retryable,
+          ...provisionDeviceDiagnosticFields(error.provisionFailure),
         },
         provisionFailure: {
           code: error.provisionFailure.code,
@@ -2504,6 +2536,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           code: error.code,
           message: error.message,
           retryable: error.retryable,
+          ...provisionDeviceDiagnosticFields(error),
         },
       });
     }
@@ -2517,6 +2550,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
           code: error.errorCode,
           message: error.message,
           retryable: error.lifecycle.reason?.retryable ?? false,
+          ...provisionDeviceLifecycleDiagnosticFields(error.lifecycle.reason),
         },
       });
     }
@@ -2531,6 +2565,34 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
       errorMessage(error),
       operationOutcome,
     );
+  }
+
+  function provisionDeviceDiagnosticFields(error: ProvisionDeviceError) {
+    const diagnostics = error.diagnostics;
+    return {
+      ...(diagnostics.providerCode ? { providerCode: diagnostics.providerCode } : {}),
+      ...(diagnostics.readinessPhase ? { readinessPhase: diagnostics.readinessPhase } : {}),
+      ...(diagnostics.attempt !== undefined ? { attempt: diagnostics.attempt } : {}),
+      ...(diagnostics.incidentId ? { incidentId: diagnostics.incidentId } : {}),
+      ...(diagnostics.deviceId ? { deviceId: diagnostics.deviceId } : {}),
+      daemonBuild: `${DAEMON_VERSION}+${getCurrentBuildIdentity().buildId}`,
+    };
+  }
+
+  function provisionDeviceLifecycleDiagnosticFields(
+    reason: ProvisionDeviceLifecycleOutcome["reason"],
+  ) {
+    if (!reason) {
+      return {};
+    }
+    return {
+      ...(reason.providerCode ? { providerCode: reason.providerCode } : {}),
+      ...(reason.readinessPhase ? { readinessPhase: reason.readinessPhase } : {}),
+      ...(reason.attempt !== undefined ? { attempt: reason.attempt } : {}),
+      ...(reason.incidentId ? { incidentId: reason.incidentId } : {}),
+      ...(reason.deviceId ? { deviceId: reason.deviceId } : {}),
+      ...(reason.daemonBuild ? { daemonBuild: reason.daemonBuild } : {}),
+    };
   }
 
   return provisionDeviceHandler;

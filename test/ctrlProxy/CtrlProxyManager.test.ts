@@ -23,6 +23,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { logger } from "../../src/utils/logger";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 
 // Captured on a bound API 36 / Android 16 google_apis arm64 emulator. No older
 // API-level dumpsys captures exist in this repository; variants below are
@@ -251,6 +253,14 @@ describe("CtrlProxyManager", function () {
     ).toBe(120_000);
   });
 
+  test("preserves device loss reported while installing CtrlProxy", async () => {
+    fakeAdb.setCommandError("install ", new Error("error: device 'test-device' not found"));
+
+    await expect(accessibilityServiceClient.install("/tmp/ctrlproxy.apk")).rejects.toBeInstanceOf(
+      DeviceLostError,
+    );
+  });
+
   test("categorizes a compatibility-stage timeout for bounded setup retry", async () => {
     const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
       testDevice,
@@ -397,6 +407,18 @@ describe("CtrlProxyManager", function () {
       expect(result).toBe(true);
     });
 
+    test("accepts installed output alongside a benign ADB startup notice", async function () {
+      fakeAdb.setCommandResponse(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
+        },
+      );
+
+      expect(await accessibilityServiceClient.isInstalled()).toBe(true);
+    });
+
     test("should return false when accessibility service package is not installed", async function () {
       fakeAdb.setCommandResponse(
         `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
@@ -410,18 +432,19 @@ describe("CtrlProxyManager", function () {
       expect(result).toBe(false);
     });
 
-    test("returns false when the ADB command throws", async function () {
-      // ADD-10: exercise the catch path for real. Setting stderr on a resolved
-      // response never entered the catch (isInstalled reads stdout only), so it
-      // could not distinguish "return false" from any other catch behavior.
-      fakeAdb.setCommandError(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        new Error("adb: device offline"),
-      );
+    test.each(["adb: device offline", "error: device is offline"])(
+      "preserves an offline-device failure instead of reporting not installed: %s",
+      async (message) => {
+        fakeAdb.setCommandError(
+          `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+          new Error(message),
+        );
 
-      const result = await accessibilityServiceClient.isInstalled();
-      expect(result).toBe(false);
-    });
+        await expect(accessibilityServiceClient.isInstalled()).rejects.toBeInstanceOf(
+          AdbDeviceOfflineError,
+        );
+      },
+    );
   });
 
   describe("isEnabled", function () {
@@ -435,6 +458,15 @@ describe("CtrlProxyManager", function () {
       expect(result).toBe(true);
     });
 
+    test("accepts enabled output alongside a benign ADB startup notice", async function () {
+      fakeAdb.setCommandResponse("settings get secure", {
+        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
+        stderr: "* daemon not running; starting now at tcp:5037\n* daemon started successfully",
+      });
+
+      expect(await accessibilityServiceClient.isEnabled()).toBe(true);
+    });
+
     test("should return false when accessibility service is not enabled", async function () {
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: "other.service/SomeService",
@@ -445,14 +477,31 @@ describe("CtrlProxyManager", function () {
       expect(result).toBe(false);
     });
 
-    test("returns false when the ADB command fails", async function () {
+    test("returns false when an unclassified enabled-state probe fails", async function () {
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: "",
         stderr: "Error",
       });
 
-      const result = await accessibilityServiceClient.isEnabled();
-      expect(result).toBe(false);
+      expect(await accessibilityServiceClient.isEnabled()).toBe(false);
+    });
+
+    test("preserves missing-device failure when installation is positively cached", async function () {
+      fakeAdb.setCommandResponse(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "",
+        },
+      );
+      expect(await accessibilityServiceClient.isInstalled()).toBe(true);
+      fakeAdb.setCommandError(
+        "settings get secure",
+        new Error("error: device 'test-device' not found"),
+      );
+
+      expect(await accessibilityServiceClient.isInstalled()).toBe(true);
+      await expect(accessibilityServiceClient.isEnabled()).rejects.toBeInstanceOf(DeviceLostError);
     });
   });
 
@@ -1345,6 +1394,27 @@ describe("CtrlProxyManager", function () {
       const result = await manager.ensureCompatibleVersion();
       expect(result.status).toBe("compatible");
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(false);
+    });
+
+    test("preserves device loss while inspecting an installed APK checksum", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      fakeAdb.setCommandResponse(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "",
+        },
+      );
+      fakeAdb.setCommandError(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        new Error("error: device 'test-device' not found"),
+      );
+
+      await expect(
+        accessibilityServiceClient.ensureCompatibleVersion({
+          allowDownloadWhenInstalled: true,
+        }),
+      ).rejects.toBeInstanceOf(DeviceLostError);
     });
 
     test("should accept preinstalled APK when installed SHA mismatches expected by default", async function () {
@@ -3904,7 +3974,11 @@ describe("CtrlProxyManager", function () {
           stubSettingsToggleSupported();
           fakeAdb.setCommandError(method.readCommand, new Error(diagnosis.trigger));
 
-          await expect(method.run()).rejects.toThrow(diagnosis.expected);
+          if (diagnosis.trigger === "device is offline") {
+            await expect(method.run()).rejects.toBeInstanceOf(AdbDeviceOfflineError);
+          } else {
+            await expect(method.run()).rejects.toThrow(diagnosis.expected);
+          }
         });
       }
     }

@@ -6,6 +6,22 @@ export interface AdbMissingDeviceEvent {
   message: string;
 }
 
+const ADB_DEVICE_OFFLINE_OUTCOME_CODE = "adb_device_offline";
+
+/** ADB still knows the serial, but cannot currently execute commands on it. */
+export class AdbDeviceOfflineError extends Error {
+  readonly code = ADB_DEVICE_OFFLINE_OUTCOME_CODE;
+  readonly retryable = true;
+
+  constructor(
+    readonly deviceId: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AdbDeviceOfflineError";
+  }
+}
+
 type AdbMissingDeviceListener = (event: AdbMissingDeviceEvent) => void;
 
 const missingDeviceListeners = new Set<AdbMissingDeviceListener>();
@@ -28,6 +44,10 @@ export function isAdbMissingDeviceError(error: unknown, expectedDeviceId?: strin
 
   const message = errorMessage(error).toLowerCase();
   return message.includes("device not found") || message.includes("no devices");
+}
+
+export function isAdbDeviceOfflineError(error: unknown): boolean {
+  return /\bdevice(?:\s+is)?\s+offline\b/i.test(errorMessage(error));
 }
 
 export function notifyAdbMissingDevice(deviceId: string, error: unknown): void {

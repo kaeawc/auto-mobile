@@ -1,6 +1,12 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
+import { DeviceLostError } from "../models/DeviceLostError";
 import { isAndroidFrameworkUnavailable } from "../utils/android-cmdline-tools/isAndroidFrameworkUnavailable";
+import {
+  AdbDeviceOfflineError,
+  isAdbDeviceOfflineError,
+  isAdbMissingDeviceError,
+} from "../utils/android-cmdline-tools/AdbDeviceHealth";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -121,6 +127,7 @@ interface AccessibilityVersionCheckResult {
   error?: string;
   upgradeError?: string;
   reinstallError?: string;
+  cause?: unknown;
 }
 
 interface AccessibilityVersionCheckOptions {
@@ -839,6 +846,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       if (isAndroidFrameworkUnavailable(diagnostic)) {
         throw new ActionableError(diagnostic);
       }
+      const deviceError = this.statusInspectionDeviceError(diagnostic);
+      if (deviceError) {
+        throw deviceError;
+      }
       const isInstalled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
@@ -852,22 +863,19 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return isInstalled;
     } catch (error) {
-      // Preserve boot failures for the readiness retry loop; false means that
-      // inspection completed without finding the installed runner.
-      if (isAndroidFrameworkUnavailable(error)) {
-        throw toActionableError(error, "Android framework unavailable");
-      }
-      logger.warn(`[CTRL_PROXY] Error checking installation status: ${error}`);
-      return false;
+      return this.handleStatusInspectionFailure(error, "installation");
     }
   }
 
   /**
    * Check if Accessibility Service is enabled as an input method
    */
-  async isEnabled(): Promise<boolean> {
+  async isEnabled(
+    _signal?: AbortSignal,
+    options: { bypassCache?: boolean } = {},
+  ): Promise<boolean> {
     // Check cache first
-    if (this.cachedEnabled) {
+    if (!options.bypassCache && this.cachedEnabled) {
       const cacheAge = this.timer.now() - this.cachedEnabled.timestamp;
       const ttl = this.cachedEnabled.isEnabled
         ? AndroidCtrlProxyManager.STATUS_CACHE_TTL
@@ -891,6 +899,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       if (isAndroidFrameworkUnavailable(diagnostic)) {
         throw new ActionableError(diagnostic);
       }
+      const deviceError = this.statusInspectionDeviceError(diagnostic);
+      if (deviceError) {
+        throw deviceError;
+      }
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
       // Cache the result
@@ -904,13 +916,33 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       return isEnabled;
     } catch (error) {
-      // A missing settings service during boot is not a disabled runner.
-      if (isAndroidFrameworkUnavailable(error)) {
-        throw toActionableError(error, "Android framework unavailable");
-      }
-      logger.warn(`[CTRL_PROXY] Error checking enabled status: ${error}`);
-      return false;
+      return this.handleStatusInspectionFailure(error, "enabled");
     }
+  }
+
+  private handleStatusInspectionFailure(error: unknown, status: "installation" | "enabled"): false {
+    // Missing framework services can be transient during boot, while ADB
+    // transport failures must retain their typed device identity.
+    if (isAndroidFrameworkUnavailable(error)) {
+      throw toActionableError(error, "Android framework unavailable");
+    }
+    const deviceError = this.statusInspectionDeviceError(error);
+    if (deviceError) {
+      throw deviceError;
+    }
+    logger.warn(`[CTRL_PROXY] Error checking ${status} status: ${error}`);
+    return false;
+  }
+
+  private statusInspectionDeviceError(error: unknown): Error | undefined {
+    const message = errorMessage(error);
+    if (isAdbMissingDeviceError(error, this.device.deviceId)) {
+      return new DeviceLostError(this.device.deviceId, message);
+    }
+    if (isAdbDeviceOfflineError(error)) {
+      return new AdbDeviceOfflineError(this.device.deviceId, message);
+    }
+    return undefined;
   }
 
   /**
@@ -1311,6 +1343,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Clear cache on error
       this.cachedAvailability = null;
 
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       return false;
     }
   }
@@ -1485,6 +1521,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perf,
       );
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       const message = errorMessage(error);
       const downloadUnavailable = this.isNetworkError(message);
       const failedResult: AccessibilityVersionCheckResult = {
@@ -1494,6 +1534,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         error: downloadUnavailable
           ? "Unable to download the latest accessibility service APK while offline. Connect to the internet and retry."
           : message,
+        cause: error,
       };
       return options.allowDownloadWhenInstalled
         ? failedResult
@@ -1593,6 +1634,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         };
       } catch (upgradeError) {
         perf.endOperation("installApk");
+        const deviceError = this.statusInspectionDeviceError(upgradeError);
+        if (deviceError) {
+          throw deviceError;
+        }
         const upgradeMessage = errorMessage(upgradeError);
         logger.warn("[CTRL_PROXY] Upgrade failed, attempting reinstall", { error: upgradeMessage });
         result.upgradeError = upgradeMessage;
@@ -1627,6 +1672,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         ...result,
         status: "failed",
         reinstallError: reinstallMessage,
+        cause: reinstallError,
       };
     }
   }
@@ -1792,6 +1838,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // A failed adb install can still have changed package state before the
       // command reported an error.
       this.clearAvailabilityCache();
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       throw new Error(`Failed to install APK: ${errorMessage(error)}`);
     }
   }
@@ -1850,6 +1900,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       perf.endOperation("writeServiceEnabled");
       logger.info("Accessibility Service enabled successfully via settings");
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
@@ -1944,6 +1998,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       logger.info("Accessibility Service disabled successfully via settings");
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
@@ -2043,6 +2101,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         `[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`,
       );
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       const errorMsg = errorMessage(error);
       const errorLower = errorMsg.toLowerCase();
 
@@ -2130,6 +2192,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         }
       } catch (error) {
         logger.warn(`[CTRL_PROXY] Failed to re-check service status: ${error}`);
+        const errorMsg = errorMessage(error);
+        const { message, category } = AndroidCtrlProxyManager.classifySetupError(errorMsg);
+        perf.end();
+        return {
+          success: false,
+          message,
+          error: errorMsg,
+          cause: error,
+          category,
+          perfTiming: perf.getTimings(),
+        };
       }
       perf.end();
       return {
@@ -2153,6 +2226,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           success: false,
           message: "Failed to ensure compatible Accessibility Service version",
           error,
+          cause: compatibilityResult.cause,
           category: AndroidCtrlProxyManager.classifySetupError(error ?? "").category,
           perfTiming: perf.getTimings(),
         };
@@ -2209,6 +2283,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         success: false,
         message,
         error: errorMsg,
+        cause: error,
         category,
         perfTiming: perf.getTimings(),
       };
@@ -2288,6 +2363,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const model = modelResult.stdout.trim().toLowerCase();
       return [model.includes("emulator") || model.includes("sdk"), false];
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       logger.warn("[CTRL_PROXY] Error detecting device type", { error });
       // Default to physical device on error (more conservative), but mark as errored
       return [false, true];
@@ -2309,6 +2388,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const apiLevel = parseInt(result.stdout.trim(), 10);
       return [isNaN(apiLevel) ? null : apiLevel, false];
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       logger.warn("[CTRL_PROXY] Error getting API level", { error });
       return [null, true];
     }
@@ -2417,6 +2500,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         };
       }
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       logger.warn("[CTRL_PROXY] sha256sum unavailable or failed, falling back to host hash", {
         error: errorMessage(error),
       });
@@ -2439,6 +2526,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         apkPath,
       };
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       logger.warn("[CTRL_PROXY] Failed to compute installed APK hash via host fallback", {
         error: errorMessage(error),
       });
@@ -2480,6 +2571,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       return line.replace("package:", "").trim() || null;
     } catch (error) {
+      const deviceError = this.statusInspectionDeviceError(error);
+      if (deviceError) {
+        throw deviceError;
+      }
       logger.warn("[CTRL_PROXY] Failed to resolve installed APK path", {
         error: errorMessage(error),
       });

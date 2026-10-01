@@ -2,6 +2,15 @@ import XCTest
 @testable import ScreenCaptureCore
 
 final class CommandLineOptionsTests: XCTestCase {
+    func testHelpTextDescribesFrameHeader() {
+        let helpText = CommandLineOptions.helpText
+
+        XCTAssertTrue(helpText.contains("\(FrameProtocol.headerSize)-byte"))
+        XCTAssertFalse(helpText.contains("16-byte"))
+        XCTAssertTrue(helpText.contains("magic"))
+        XCTAssertTrue(helpText.contains("CRC-32"))
+    }
+
     func testParsesAudioForSimulatorCapture() throws {
         let options = try CommandLineOptions.parse([
             "screen-capture-helper", "--simulator-window", "42", "--audio"

@@ -271,8 +271,8 @@ public struct CommandLineOptions: Equatable {
 
         -h, --help              Show this help.
 
-    Frames are written to stdout: 16-byte little-endian header
-    (width, height, bytesPerRow, timestampMs) followed by
+    Frames are written to stdout: \(FrameProtocol.headerSize)-byte little-endian header
+    (magic, CRC-32 checksum, width, height, bytesPerRow, timestampMs) followed by
     height * bytesPerRow bytes of BGRA pixel data.
     """
 }

@@ -1959,7 +1959,7 @@ internal constructor(
     return ElementBounds(left, top, right, bottom)
   }
 
-  private fun calculateUnionArea(rectangles: List<ElementBounds>, maxArea: Int? = null): Int {
+  internal fun calculateUnionArea(rectangles: List<ElementBounds>, maxArea: Int? = null): Int {
     data class Event(val x: Int, val y1: Int, val y2: Int, val delta: Int)
 
     val events =
@@ -1980,13 +1980,12 @@ internal constructor(
 
     fun activeUnionLength(): Int {
       if (activeIntervals.isEmpty()) return 0
-      val sorted = activeIntervals.sortedBy { it.first }
       var total = 0
-      var currentStart = sorted[0].first
-      var currentEnd = sorted[0].second
+      var currentStart = activeIntervals[0].first
+      var currentEnd = activeIntervals[0].second
 
-      for (i in 1 until sorted.size) {
-        val (start, end) = sorted[i]
+      for (i in 1 until activeIntervals.size) {
+        val (start, end) = activeIntervals[i]
         if (start > currentEnd) {
           total += currentEnd - currentStart
           currentStart = start
@@ -2010,11 +2009,27 @@ internal constructor(
       }
 
       if (event.delta > 0) {
-        activeIntervals.add(event.y1 to event.y2)
+        // Insert after equal starts to preserve sortedBy's stable tie order.
+        var low = 0
+        var high = activeIntervals.size
+        while (low < high) {
+          val middle = (low + high) ushr 1
+          if (activeIntervals[middle].first <= event.y1) low = middle + 1 else high = middle
+        }
+        activeIntervals.add(low, event.y1 to event.y2)
       } else {
-        val index = activeIntervals.indexOfFirst { it.first == event.y1 && it.second == event.y2 }
-        if (index >= 0) {
-          activeIntervals.removeAt(index)
+        var low = 0
+        var high = activeIntervals.size
+        while (low < high) {
+          val middle = (low + high) ushr 1
+          if (activeIntervals[middle].first < event.y1) low = middle + 1 else high = middle
+        }
+        while (low < activeIntervals.size && activeIntervals[low].first == event.y1) {
+          if (activeIntervals[low].second == event.y2) {
+            activeIntervals.removeAt(low)
+            break
+          }
+          low++
         }
       }
 

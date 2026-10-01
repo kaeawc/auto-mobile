@@ -42,6 +42,8 @@ import { blankComments } from "./blankComments";
 describe("device-addressed admission gate (issue #6863)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
   const GATE = "assertDeviceActionable";
+  // The source-tree inventory can exceed Bun's default hook limit on loaded CI runners.
+  const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 
   function walkSrc(dir: string = join(ROOT, "src"), files: string[] = []): string[] {
     // withFileTypes, not a statSync per entry: one syscall for the whole
@@ -228,7 +230,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
       .filter((file) => readFileSync(file).includes("unadmittedAdbClientFactory"))
       .map((file) => relative(ROOT, file).split(sep).join("/"))
       .sort();
-  });
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   test("the gate exists on the pool under its single name", () => {
     expect(poolSource).toMatch(

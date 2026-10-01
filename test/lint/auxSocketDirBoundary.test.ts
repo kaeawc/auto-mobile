@@ -4,6 +4,8 @@ import { parseSync, Visitor, type Expression, type MemberExpression } from "oxc-
 import path from "node:path";
 
 const TEST_DIR = path.join(import.meta.dir, "..");
+// Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
+const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 const SERVER_CLASSES = [
   "Appearance",
   "DeviceSnapshot",
@@ -182,7 +184,7 @@ describe("auxiliary socket test boundary (issue #7616)", () => {
         })
         .map((violation) => `${relative}:${violation}`);
     });
-  });
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   test("unit tests do not target production auxiliary socket paths", () => {
     expect(offenders).toEqual([]);

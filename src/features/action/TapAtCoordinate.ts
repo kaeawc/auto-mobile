@@ -63,6 +63,38 @@ function hasPositiveScreenSize(screenSize: ObserveResult["screenSize"] | undefin
   );
 }
 
+/** Shared native point resolution for coordinate dispatch and hierarchy preview. */
+export function resolveTapAtCoordinates(
+  options: TapAtOptions,
+  observeResult: ObserveResult,
+  platform: BootedDevice["platform"],
+): { x: number; y: number } | { x: number; y: number; error: string } {
+  const rawX = options.x;
+  const rawY = options.y;
+  if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
+    return { x: rawX, y: rawY, error: "tapAt requires finite x and y coordinates" };
+  }
+
+  const screenSize = observeResult.screenSize;
+  if (!hasPositiveScreenSize(screenSize)) {
+    return {
+      x: rawX,
+      y: rawY,
+      error: "tapAt requires a positive screenSize from a fresh observation",
+    };
+  }
+  if (rawX < 0 || rawX >= screenSize.width || rawY < 0 || rawY >= screenSize.height) {
+    return {
+      x: rawX,
+      y: rawY,
+      error: `tapAt coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
+    };
+  }
+  const x = platform === "android" ? Math.min(Math.round(rawX), screenSize.width - 1) : rawX;
+  const y = platform === "android" ? Math.min(Math.round(rawY), screenSize.height - 1) : rawY;
+  return { x, y };
+}
+
 function withoutVolatileTapLayoutFields(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map(withoutVolatileTapLayoutFields);
@@ -429,31 +461,6 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     observeResult: ObserveResult,
   ): { x: number; y: number } | { x: number; y: number; error: string } {
-    const rawX = options.x;
-    const rawY = options.y;
-    if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
-      return { x: rawX, y: rawY, error: "tapAt requires finite x and y coordinates" };
-    }
-
-    const screenSize = observeResult.screenSize;
-    if (!hasPositiveScreenSize(screenSize)) {
-      return {
-        x: rawX,
-        y: rawY,
-        error: "tapAt requires a positive screenSize from a fresh observation",
-      };
-    }
-    if (rawX < 0 || rawX >= screenSize.width || rawY < 0 || rawY >= screenSize.height) {
-      return {
-        x: rawX,
-        y: rawY,
-        error: `tapAt coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
-      };
-    }
-    const x =
-      this.device.platform === "android" ? Math.min(Math.round(rawX), screenSize.width - 1) : rawX;
-    const y =
-      this.device.platform === "android" ? Math.min(Math.round(rawY), screenSize.height - 1) : rawY;
-    return { x, y };
+    return resolveTapAtCoordinates(options, observeResult, this.device.platform);
   }
 }

@@ -4,6 +4,8 @@ import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
+import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
+import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import { TapAnyElement } from "../features/action/TapAnyElement";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../features/action/DeviceLockStore";
@@ -490,7 +492,7 @@ export const tapOnSchema = withJsonSchemaOverride(
   },
 );
 
-export const tapAtSchema = withJsonSchemaOverride(
+const coordinatePointInputSchema = () =>
   addDeviceTargetingToSchema(
     z
       .object({
@@ -511,12 +513,18 @@ export const tapAtSchema = withJsonSchemaOverride(
         ...responseShapeControlFields,
       })
       .strict(),
-  ),
-  (js) => {
-    js.description =
-      "Tap one absolute point in the platform-native coordinate space returned by observe.";
-  },
-);
+  );
+
+export const tapAtSchema = withJsonSchemaOverride(coordinatePointInputSchema(), (js) => {
+  js.description =
+    "Tap one absolute point in the platform-native coordinate space returned by observe.";
+});
+
+/** The preview takes the same coordinate target as tapAt without dispatching input. */
+export const hitTestSchema = withJsonSchemaOverride(coordinatePointInputSchema(), (js) => {
+  js.description =
+    "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.";
+});
 
 export const tapAnySchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
@@ -1485,6 +1493,20 @@ export function resetTapAtElementFactory(): void {
   tapAtElementFactory = (device) => new TapAtCoordinate(device);
 }
 
+type HitTestObservationReader = Pick<RealObserveScreen, "execute">;
+let hitTestObservationFactory: (device: BootedDevice) => HitTestObservationReader = (device) =>
+  new RealObserveScreen(device);
+
+export function setHitTestObservationFactory(
+  factory: (device: BootedDevice) => HitTestObservationReader,
+): void {
+  hitTestObservationFactory = factory;
+}
+
+export function resetHitTestObservationFactory(): void {
+  hitTestObservationFactory = (device) => new RealObserveScreen(device);
+}
+
 const VISIBLE_HIERARCHY_TEXT_KEYS = new Set([
   "text",
   "label",
@@ -1846,6 +1868,29 @@ export async function tapAtHandler(
   const response: StructuredToolResponse<typeof payload> & { isError?: true } =
     createStructuredToolResponse(payload);
   return result.success ? response : { ...response, isError: true as const };
+}
+
+export async function hitTestHandler(device: BootedDevice, args: TapAtArgs) {
+  const observation = await hitTestObservationFactory(device).execute({
+    display: args.display,
+    freshness: "cached-ok",
+    skipScreenshot: true,
+    skipAccessibilityAudit: true,
+    skipPerformanceAudit: true,
+    skipRecompositionTracking: true,
+  });
+  if (args.snapshotId) {
+    const staleReason = snapshotReferences.staleReason(
+      args.snapshotId,
+      device.deviceId,
+      observation,
+    );
+    if (staleReason) {
+      throw new ActionableError(staleReason);
+    }
+  }
+  const preview = previewHierarchyHitTest(args, observation, device.platform);
+  return createStructuredToolResponse({ ...preview, deviceId: device.deviceId });
 }
 
 // Injection seam for the tapAny handler (mirrors the tapOn factory seam above).
@@ -2935,6 +2980,14 @@ export function registerInteractionTools() {
     tapAtSchema,
     tapAtHandler,
     { defaultEnabled: true, supportsProgress: true },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "hitTest",
+    "Preview hierarchy-bounds candidates at a platform-native screen point; no input is dispatched and the actual event recipient is unknown.",
+    hitTestSchema,
+    hitTestHandler,
+    { defaultEnabled: false },
   );
 
   ToolRegistry.registerDeviceAware(

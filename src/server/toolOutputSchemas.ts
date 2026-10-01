@@ -678,6 +678,13 @@ const snapshotReferenceSchema = z
   .optional()
   .describe("Process-local full-screen coordinate reference; expires after at most five minutes.");
 
+const snapshotReferenceUnavailableSchema = z
+  .array(z.string())
+  .optional()
+  .describe(
+    "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+  );
+
 const observationScreenshotOutputFields = {
   screenshotSettled: z.boolean().optional(),
   screenshotSettledError: z.string().optional(),
@@ -852,6 +859,7 @@ export const observationSummarySchema = z
     otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     snapshotReference: snapshotReferenceSchema,
+    snapshotReferenceUnavailable: snapshotReferenceUnavailableSchema,
     ...observationScreenshotOutputFields,
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
@@ -1084,6 +1092,7 @@ export const observeDiffSchema = z
       .optional(),
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     snapshotReference: snapshotReferenceSchema,
+    snapshotReferenceUnavailable: snapshotReferenceUnavailableSchema,
     ...observationScreenshotOutputFields,
     skeleton: z
       .array(skeletonElementSchema)
@@ -1282,6 +1291,7 @@ export const observeResultSchema = z
     otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     snapshotReference: snapshotReferenceSchema,
+    snapshotReferenceUnavailable: snapshotReferenceUnavailableSchema,
     ...observationScreenshotOutputFields,
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),

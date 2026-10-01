@@ -4906,6 +4906,13 @@
           "required": ["snapshotId", "expiresAt"],
           "additionalProperties": false
         },
+        "snapshotReferenceUnavailable": {
+          "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "screenshotSettled": {
           "type": "boolean"
         },
@@ -13797,6 +13804,13 @@
                   "required": ["snapshotId", "expiresAt"],
                   "additionalProperties": false
                 },
+                "snapshotReferenceUnavailable": {
+                  "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -14793,6 +14807,13 @@
                   },
                   "required": ["snapshotId", "expiresAt"],
                   "additionalProperties": false
+                },
+                "snapshotReferenceUnavailable": {
+                  "description": "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 "screenshotSettled": {
                   "type": "boolean"

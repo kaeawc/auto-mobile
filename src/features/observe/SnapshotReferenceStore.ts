@@ -11,6 +11,10 @@ export interface SnapshotReference {
   expiresAt: number;
 }
 
+export type SnapshotReferenceCaptureResult =
+  | { status: "captured"; reference: SnapshotReference }
+  | { status: "unavailable"; missing: string[] };
+
 interface SnapshotGeometry {
   deviceId: string;
   incarnation: string | undefined;
@@ -49,24 +53,26 @@ function frameContextEpoch(token: string): string | undefined {
   return match?.[1]?.toLowerCase();
 }
 
-function captureFrame(
-  observation: ObserveResult,
-): Pick<SnapshotGeometry, "rotation" | "nativeScale" | "runnerEpoch"> | undefined {
-  const rotation = observation.rotation ?? observation.viewHierarchy?.rotation;
-  // The runner token proves this capture has frame provenance. Its generation may advance on
-  // accessibility events without changing the target window or geometry, so it is not an identity
-  // field of the reusable reference. The current token is still sent with each dispatch.
-  const frameContext = observation.viewHierarchy?.frameContext;
-  const nativeScale = observation.viewHierarchy?.nativeScale;
-  if (
-    typeof rotation !== "number" ||
-    !Number.isInteger(rotation) ||
-    !hasPositiveScale(nativeScale) ||
-    !frameContext
-  ) {
-    return undefined;
+/** Missing capture preconditions, in stable diagnostic order; empty means mintable. */
+export function snapshotReferenceUnavailable(observation: ObserveResult): string[] {
+  const missing: string[] = [];
+  if (!observation.display?.key) {
+    missing.push("display");
   }
-  return { rotation, nativeScale, runnerEpoch: frameContextEpoch(frameContext) };
+  if (!hasPositiveSize(observation.screenSize)) {
+    missing.push("screenSize");
+  }
+  const rotation = observation.rotation ?? observation.viewHierarchy?.rotation;
+  if (typeof rotation !== "number" || !Number.isInteger(rotation)) {
+    missing.push("rotation");
+  }
+  if (!hasPositiveScale(observation.viewHierarchy?.nativeScale)) {
+    missing.push("nativeScale");
+  }
+  if (!observation.viewHierarchy?.frameContext) {
+    missing.push("frameContext");
+  }
+  return missing;
 }
 
 function focusedWindowContext(
@@ -93,8 +99,7 @@ function focusedWindowContext(
 }
 
 function geometry(deviceId: string, observation: ObserveResult): SnapshotGeometry | undefined {
-  const frame = captureFrame(observation);
-  if (!observation.display?.key || !hasPositiveSize(observation.screenSize) || !frame) {
+  if (snapshotReferenceUnavailable(observation).length > 0) {
     return undefined;
   }
   const { width, height } = observation.screenSize;
@@ -106,7 +111,11 @@ function geometry(deviceId: string, observation: ObserveResult): SnapshotGeometr
     displayPosture: observation.display.posture,
     width,
     height,
-    ...frame,
+    // The shared precondition check above guarantees these frame fields are present.
+    rotation: (observation.rotation ?? observation.viewHierarchy?.rotation)!,
+    nativeScale: observation.viewHierarchy!.nativeScale!,
+    // Frame-event generation may advance without changing geometry; bind only the runner epoch.
+    runnerEpoch: frameContextEpoch(observation.viewHierarchy!.frameContext!),
     appId: observation.activeWindow?.appId || observation.viewHierarchy?.packageName,
     hierarchyPackage: observation.viewHierarchy?.packageName,
     activityName: observation.activeWindow?.activityName ?? "",
@@ -144,10 +153,10 @@ export class SnapshotReferenceStore {
     private readonly ids: IdGenerator = defaultIdGenerator,
   ) {}
 
-  capture(deviceId: string, observation: ObserveResult): SnapshotReference | undefined {
+  capture(deviceId: string, observation: ObserveResult): SnapshotReferenceCaptureResult {
     const captured = geometry(deviceId, observation);
     if (!captured) {
-      return undefined;
+      return { status: "unavailable", missing: snapshotReferenceUnavailable(observation) };
     }
     this.cleanup();
     while (this.entries.size >= MAX_REFERENCES) {
@@ -155,7 +164,7 @@ export class SnapshotReferenceStore {
     }
     const reference = { snapshotId: this.ids.next(), expiresAt: this.timer.now() + LIFETIME_MS };
     this.entries.set(reference.snapshotId, { ...captured, ...reference });
-    return reference;
+    return { status: "captured", reference };
   }
 
   staleReason(

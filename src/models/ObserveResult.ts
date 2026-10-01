@@ -159,6 +159,8 @@ export interface ObserveResult {
   displayRevision?: number;
   /** Short-lived full-screen coordinate reference for a later tapAt call. */
   snapshotReference?: SnapshotReference;
+  /** Missing capture precondition names; only present when a session observe could not produce a reference. */
+  snapshotReferenceUnavailable?: string[];
   /**
    * Server-generated identity for this exact observe invocation. It remains
    * attached while deferred post-processing enriches the same result, allowing

@@ -358,7 +358,6 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "connectivity",
   "biometrics",
   "networkCondition",
-  "location",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -379,15 +378,11 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
 };
 
 /**
- * Every field `setState` can write. The invariant of issue #6872 — anything
- * `setDeviceState` can write, `getDeviceState` should read back — is that this
- * list is a SUBSET of {@link DEVICE_STATE_READABLE_FIELDS}. Both halves are
- * enforced by the compiler rather than by a hand-maintained list: the keys come
- * from {@link SetDeviceStateInput}, and declaring them as `DeviceStateField`
- * fails the build if one of them has no readable counterpart. A unit test pins
- * the third side of the triangle — the advertised `setDeviceState` schema.
+ * Every field `setState` can write. The keys come from {@link SetDeviceStateInput},
+ * and a unit test compares them with the advertised `setDeviceState` schema.
+ * Location is write-only because the applied coordinate cannot be read back.
  */
-export const DEVICE_STATE_WRITABLE_FIELDS: readonly DeviceStateField[] = Object.freeze(
+export const DEVICE_STATE_WRITABLE_FIELDS: readonly (keyof SetDeviceStateInput)[] = Object.freeze(
   Object.keys(DEVICE_STATE_WRITABLE_FIELD_PRESENCE) as (keyof SetDeviceStateInput)[],
 );
 
@@ -403,7 +398,6 @@ interface SelectedDeviceStates {
   connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
-  location?: DeviceLocationState;
 }
 
 /**
@@ -1186,15 +1180,6 @@ export class DeviceState {
         : {}),
       ...(include.includes("networkCondition")
         ? { networkCondition: await this.readNetworkCondition() }
-        : {}),
-      ...(include.includes("location")
-        ? {
-            location: {
-              supported: false,
-              error:
-                "Location read-back is unavailable; use an app location probe to verify the applied fix.",
-            },
-          }
         : {}),
     };
   }

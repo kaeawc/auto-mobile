@@ -52,6 +52,7 @@ describe("device state tools", () => {
     expect(getTool?.requiresDevice).toBe(true);
     expect(() => getTool!.schema.parse({ include: ["doNotDisturb"] })).not.toThrow();
     expect(() => getTool!.schema.parse({ include: ["biometrics"] })).not.toThrow();
+    expect(() => getTool!.schema.parse({ include: ["location"] })).toThrow();
 
     expect(setTool).toBeDefined();
     expect(setTool?.requiresDevice).toBe(true);

@@ -346,6 +346,8 @@ describe("tapAtHandler (registered handler wiring)", () => {
     ).toBe(true);
     expect(tapAtSchema.safeParse({ x: 12, y: 34, selector: { text: "Nope" } }).success).toBe(false);
     expect(tapAtSchema.safeParse({ x: 12, y: 34, duration: 10 }).success).toBe(false);
+    expect(tapAtSchema.safeParse({ x: 12, y: 34, snapshotId: "ref-1" }).success).toBe(true);
+    expect(tapAtSchema.safeParse({ x: 12, y: 34, snapshotId: "" }).success).toBe(false);
   });
 
   test("serializes a successful native-coordinate tap", async () => {

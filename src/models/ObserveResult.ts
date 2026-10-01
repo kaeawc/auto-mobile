@@ -20,6 +20,7 @@ import type { LayoutWarnings, ObservationInsets } from "./ObservationInsets";
 import type { ObserveScopeMetadata } from "./ObserveScope";
 import type { SemanticLink } from "./SemanticLink";
 import type { DisplayPanel, DisplayRef } from "./DisplayPanel";
+import type { SnapshotReference } from "../features/observe/SnapshotReferenceStore";
 
 /** Output-only screen dimensions with an optional coordinate-unit marker. */
 export interface ScreenSizeWithUnits extends ScreenSize {
@@ -156,6 +157,8 @@ export interface ObserveResult {
   otherDisplays?: Array<Pick<DisplayPanel, "key" | "role"> & { size: DisplayPanel["sizePx"] }>;
   /** INTERNAL-ONLY: display transition revision when this capture completed. */
   displayRevision?: number;
+  /** Short-lived full-screen coordinate reference for a later tapAt call. */
+  snapshotReference?: SnapshotReference;
   /**
    * Server-generated identity for this exact observe invocation. It remains
    * attached while deferred post-processing enriches the same result, allowing

@@ -19,6 +19,7 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { displayTransitions } from "../observe/DisplayTransition";
+import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   BaseVisualChange,
@@ -147,6 +148,7 @@ export interface TapAtCoordinateDependencies {
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
   invalidateIosCache?: () => void;
   lastRenderedObservation?: RenderedObservationReader;
+  snapshotReferences?: SnapshotReferenceStore;
 }
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
@@ -157,6 +159,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
   private readonly lastRenderedObservation?: RenderedObservationReader;
+  private readonly snapshotReferences: SnapshotReferenceStore;
 
   constructor(
     device: BootedDevice,
@@ -174,6 +177,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       dependencies.invalidateIosCache ??
       (() => IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache());
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
+    this.snapshotReferences = dependencies.snapshotReferences ?? snapshotReferences;
   }
 
   private async executeOnDisplay(
@@ -189,6 +193,10 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.lastRenderedObservation,
       signal,
     );
+    const stale = this.staleSnapshotReason(options, observation);
+    if (stale) {
+      return { success: false, x: options.x, y: options.y, error: stale };
+    }
     const resolved = this.resolveCoordinates(options, observation);
     if ("error" in resolved) {
       return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
@@ -261,6 +269,10 @@ export class TapAtCoordinate extends BaseVisualChange {
               error: STALE_DISPLAY_COORDINATES_ERROR,
             };
           }
+          const stale = this.staleSnapshotReason(options, observeResult);
+          if (stale) {
+            return { success: false, x: options.x, y: options.y, error: stale };
+          }
           const resolved = this.resolveCoordinates(options, observeResult);
           if ("error" in resolved) {
             return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
@@ -268,16 +280,29 @@ export class TapAtCoordinate extends BaseVisualChange {
           dispatchedCoordinates = resolved;
 
           const frameContext = observeResult.viewHierarchy?.frameContext;
+          this.assertDisplayRevisionCurrent(transitionRevision);
           switch (this.device.platform) {
             case "android":
-              await this.dispatchAndroidTapWithOneFreshRetry(
-                options,
-                resolved,
-                observeResult,
-                transitionRevision,
-                perf,
-                signal,
-              );
+              if (options.snapshotId) {
+                await this.androidCoordinateTap(
+                  this.androidClient,
+                  this.adb,
+                  resolved.x,
+                  resolved.y,
+                  ANDROID_TAP_DURATION_MS,
+                  frameContext,
+                  signal,
+                );
+              } else {
+                await this.dispatchAndroidTapWithOneFreshRetry(
+                  options,
+                  resolved,
+                  observeResult,
+                  transitionRevision,
+                  perf,
+                  signal,
+                );
+              }
               break;
             case "ios":
               await this.iosCoordinateTap(
@@ -394,6 +419,15 @@ export class TapAtCoordinate extends BaseVisualChange {
     if (displayTransitions.revision(this.device.deviceId) !== revision) {
       throw new ActionableError(STALE_DISPLAY_COORDINATES_ERROR);
     }
+  }
+
+  private staleSnapshotReason(
+    options: TapAtOptions,
+    observation: ObserveResult,
+  ): string | undefined {
+    return options.snapshotId
+      ? this.snapshotReferences.staleReason(options.snapshotId, this.device.deviceId, observation)
+      : undefined;
   }
 
   private resolveCoordinates(

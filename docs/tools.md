@@ -77,6 +77,17 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 `observe` screenshot pixels. No such transform is needed on Android. The
 `screenshotOrientation` field identifies the returned raster orientation.
 
+When `observe` has verifiable geometry and a frame context, it returns
+`snapshotReference: { snapshotId, expiresAt }`. Pass `snapshotId` with native
+screen coordinates to `tapAt` to bind the tap to that observation. References
+are process-local, expire within five minutes, and are rejected after a device
+restart or reassignment, display transition, rotation, resize, scale change, or
+frame-context change. A rejected tap does not silently recapture or retarget.
+This reference covers the full screen; it does not convert screenshot pixels
+into native coordinates or account for a crop. Unchanged geometry and frame
+context do not prove unchanged visual content. Recapture after navigation,
+scrolling, animation, or any other UI change.
+
 | Tool                                 | What it does                                               |
 | ------------------------------------ | ---------------------------------------------------------- |
 | 👀 <code>observe</code>              | Gets the current screen view hierarchy.                    |

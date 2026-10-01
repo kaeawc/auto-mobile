@@ -28,13 +28,14 @@ _mock_nproc() {
   [[ "$output" == *"--shards=14"* ]]
 }
 
-@test "clamps to at least 1 worker on a 2-core machine" {
+@test "uses the 2-worker minimum on a 2-core Linux machine" {
   local dir
   dir="$(_mock_nproc 2)"
   run env PATH="$dir:$PATH" RUNNER_OS=Linux TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
   rm -rf "$dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--shards=1"* ]]
+  [[ "$output" == *"--shards=2"* ]]
+  [[ "$output" == *"test-ts: unit lane cores=2 workers=2"* ]]
 }
 
 @test "reserves at least 2 workers on a 2-core macOS runner" {
@@ -46,13 +47,14 @@ _mock_nproc() {
   [[ "$output" == *"--shards=2"* ]]
 }
 
-@test "clamps to at least 1 worker on a single-core machine" {
+@test "uses the 2-worker minimum on a single-core machine" {
   local dir
   dir="$(_mock_nproc 1)"
   run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
   rm -rf "$dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--shards=1"* ]]
+  [[ "$output" == *"--shards=2"* ]]
+  [[ "$output" == *"test-ts: unit lane cores=1 workers=2"* ]]
 }
 
 @test "passes through extra arguments to bun test" {

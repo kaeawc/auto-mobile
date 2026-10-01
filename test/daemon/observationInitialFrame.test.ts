@@ -169,6 +169,33 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
   }
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+class DeferredConnectionAndroidClient extends FakeAndroidInitialFrameClient {
+  constructor(private readonly connect: () => Promise<boolean>) {
+    super(true, {
+      updatedAt: 1,
+      packageName: "com.example",
+      screenWidth: 100,
+      screenHeight: 200,
+      hierarchy: { text: "Android" },
+    });
+  }
+
+  override ensureConnected(): Promise<boolean> {
+    return this.connect();
+  }
+}
+
 class FakeIosInitialFrameClient implements ObservationStreamIosClient {
   readonly syncHierarchyCalls: Array<{ timeoutMs?: number }> = [];
   readonly suppressedSyncHierarchyCalls: Array<{ timeoutMs?: number }> = [];
@@ -900,6 +927,100 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     ]);
     expect(streamServer.screenshotUpdates.map((update) => update.deviceId)).toEqual([
       androidDevice.id,
+    ]);
+  });
+
+  it("bounds simultaneous captures and eventually delivers frames for every device", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const devices = Array.from({ length: 5 }, (_, index): ObservationStreamDevice => ({
+      id: `android-${index}`,
+      name: `Pixel ${index}`,
+      platform: "android",
+    }));
+    const gates = devices.map(() => deferred<boolean>());
+    const starts = devices.map(() => deferred<void>());
+    let active = 0;
+    let peak = 0;
+    let started = 0;
+
+    const capture = pushInitialObservationFramesForSubscriber(null, devices, {
+      streamServer,
+      androidClientFactory: () => {
+        const index = started++;
+        return new DeferredConnectionAndroidClient(async () => {
+          active++;
+          peak = Math.max(peak, active);
+          starts[index].resolve();
+          const connected = await gates[index].promise;
+          active--;
+          return connected;
+        });
+      },
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS client");
+      },
+    });
+
+    await starts[1].promise;
+    expect(started).toBe(2);
+    expect(peak).toBe(2);
+    expect(streamServer.hierarchyUpdates).toHaveLength(0);
+
+    gates[0].resolve(true);
+    await starts[2].promise;
+    expect(peak).toBe(2);
+    gates[1].resolve(true);
+    await starts[3].promise;
+    gates[2].resolve(true);
+    await starts[4].promise;
+    gates[3].resolve(true);
+    gates[4].resolve(true);
+    await capture;
+
+    expect(peak).toBe(2);
+    expect(active).toBe(0);
+    expect(streamServer.hierarchyUpdates.map((update) => update.deviceId).sort()).toEqual(
+      devices.map((device) => device.id),
+    );
+    expect(streamServer.screenshotUpdates.map((update) => update.deviceId).sort()).toEqual(
+      devices.map((device) => device.id),
+    );
+  });
+
+  it("continues with remaining devices when one capture fails", async () => {
+    const streamServer = new FakeObservationStreamServer();
+    const devices = Array.from({ length: 3 }, (_, index): ObservationStreamDevice => ({
+      id: `android-${index}`,
+      name: `Pixel ${index}`,
+      platform: "android",
+    }));
+    const clients = devices.map(
+      (_, index) =>
+        new DeferredConnectionAndroidClient(async () => {
+          if (index === 0) {
+            throw new Error("connection failed");
+          }
+          return true;
+        }),
+    );
+
+    await pushInitialObservationFramesForSubscriber(null, devices, {
+      streamServer,
+      maxConcurrency: 1,
+      androidClientFactory: (device) =>
+        clients[devices.findIndex((item) => item.id === device.deviceId)],
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS client");
+      },
+    });
+
+    expect(streamServer.hierarchyUpdates.map((update) => update.deviceId)).toEqual([
+      "android-1",
+      "android-2",
+    ]);
+    expect(streamServer.screenshotUpdates.map((update) => update.deviceId)).toEqual([
+      "android-1",
+      "android-2",
     ]);
   });
 

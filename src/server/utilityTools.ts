@@ -171,6 +171,14 @@ const connectivityStateInputSchema = z
     { message: "Provide at least one connectivity field to set" },
   );
 
+const locationInputSchema = z
+  .object({
+    mode: z.literal("static").describe("Apply one static coordinate."),
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+  })
+  .strict();
+
 // In direct/sessionless mode there is no session lifecycle owner to enforce a
 // networkCondition TTL, so accepting `expiresInSeconds` there would echo a TTL we
 // will never honor and leave the emulator shaped indefinitely (issue #6085 review
@@ -371,6 +379,9 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
         networkCondition: networkConditionInputSchema
           .optional()
           .describe("Device-wide network condition to apply (Android emulator only)."),
+        location: locationInputSchema
+          .optional()
+          .describe("Set one static location on an Android emulator or iOS Simulator."),
       })
       .strict(),
   ).refine(
@@ -378,7 +389,8 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
       values.doNotDisturb !== undefined ||
       values.biometrics !== undefined ||
       values.connectivity !== undefined ||
-      values.networkCondition !== undefined,
+      values.networkCondition !== undefined ||
+      values.location !== undefined,
     {
       message: "At least one device state field must be provided",
     },
@@ -849,6 +861,7 @@ export function registerUtilityTools() {
           biometrics: args.biometrics,
           connectivity: args.connectivity,
           networkCondition: args.networkCondition,
+          location: args.location,
         },
         capture.failure,
       );
@@ -864,6 +877,7 @@ export function registerUtilityTools() {
         biometrics: args.biometrics,
         connectivity: args.connectivity,
         networkCondition: args.networkCondition,
+        location: args.location,
       });
 
     // Route network-bearing requests through runSessionNetworkMutation (slot
@@ -933,7 +947,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
+    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

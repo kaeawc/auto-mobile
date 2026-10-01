@@ -52,6 +52,7 @@ describe("device state tools", () => {
     expect(getTool?.requiresDevice).toBe(true);
     expect(() => getTool!.schema.parse({ include: ["doNotDisturb"] })).not.toThrow();
     expect(() => getTool!.schema.parse({ include: ["biometrics"] })).not.toThrow();
+    expect(() => getTool!.schema.parse({ include: ["location"] })).toThrow();
 
     expect(setTool).toBeDefined();
     expect(setTool?.requiresDevice).toBe(true);
@@ -194,6 +195,36 @@ describe("device state tools", () => {
       capability: "unsupported",
       requestedProfile: "3g",
     });
+  });
+
+  test("threads location through the setDeviceState handler", async () => {
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    const physicalAndroid = createBootedDevice("38290DLJG000XY", "android", "Pixel 8");
+    const response = await setTool!.deviceAwareHandler!(physicalAndroid, {
+      location: { mode: "static", latitude: 37.7749, longitude: -122.4194 },
+    });
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.success).toBe(false);
+    expect(payload.location.supported).toBe(false);
+    expect(payload.location.error).toContain("Use an Android emulator");
+  });
+
+  test("advertises a strict static location schema in generated tool definitions", () => {
+    const definitions = JSON.parse(
+      fs.readFileSync("schemas/tool-definitions.json", "utf8"),
+    ) as Array<{
+      name: string;
+      inputSchema: { properties: Record<string, unknown> };
+    }>;
+    const schema = definitions.find((definition) => definition.name === "setDeviceState")
+      ?.inputSchema.properties.location;
+    expect(schema).toBeDefined();
+    const validate = new Ajv({ strict: false }).compile(schema as object);
+    expect(validate({ mode: "static", latitude: 90, longitude: -180 })).toBe(true);
+    expect(validate({ mode: "static", latitude: 91, longitude: 0 })).toBe(false);
+    expect(validate({ mode: "static", latitude: 0, longitude: 181 })).toBe(false);
+    expect(validate({ mode: "static", latitude: 0, longitude: 0, extra: true })).toBe(false);
+    expect(validate({ mode: "route", latitude: 0, longitude: 0 })).toBe(false);
   });
 
   test("threads connectivity through the setDeviceState handler", async () => {

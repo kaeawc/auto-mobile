@@ -1,7 +1,7 @@
 import { EmulatorConsoleClient } from "../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 
 export interface RecordedConsoleCall {
-  method: "gsmCall" | "gsmAccept" | "gsmCancel" | "gsmBusy" | "gsmHold" | "smsSend";
+  method: "gsmCall" | "gsmAccept" | "gsmCancel" | "gsmBusy" | "gsmHold" | "smsSend" | "geoFix";
   args: string[];
 }
 
@@ -40,5 +40,8 @@ export class FakeEmulatorConsoleClient implements EmulatorConsoleClient {
   }
   smsSend(phoneNumber: string, message: string): Promise<void> {
     return this.record("smsSend", [phoneNumber, message]);
+  }
+  geoFix(lon: number, lat: number): Promise<void> {
+    return this.record("geoFix", [String(lon), String(lat)]);
   }
 }

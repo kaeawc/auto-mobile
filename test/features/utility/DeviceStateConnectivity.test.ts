@@ -551,10 +551,13 @@ describe("DeviceState connectivity toggles (issue #6872)", () => {
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 
-  test("every setDeviceState-writable field has a getDeviceState-readable counterpart", () => {
+  test("all writable fields except location can be read back", () => {
     for (const field of DEVICE_STATE_WRITABLE_FIELDS) {
-      expect(DEVICE_STATE_READABLE_FIELDS).toContain(field);
+      if (field !== "location") {
+        expect(DEVICE_STATE_READABLE_FIELDS).toContain(field);
+      }
     }
+    expect(DEVICE_STATE_READABLE_FIELDS).not.toContain("location");
   });
 
   test("the writable-field list is exactly what the setDeviceState schema advertises", () => {

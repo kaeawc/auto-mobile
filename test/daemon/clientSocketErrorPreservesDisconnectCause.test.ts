@@ -1,7 +1,8 @@
 import { FakeSocket } from "../fakes/FakeNetServer";
 import * as net from "node:net";
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
 
 let createdSocket: FakeSocket | undefined;
 mock.module("node:net", () => ({
@@ -67,6 +68,87 @@ describe("DaemonClient socket error disconnect cause", () => {
     createdSocket!.emit("data", frame.subarray(split));
     expect(await response).toBe("日");
     await client.close();
+  });
+
+  test("rejects the sole pending request promptly on a null-id parse error", async () => {
+    const client = new DaemonClient(
+      "/fake/socket",
+      1_000,
+      new FakeTimer(),
+      {},
+      null,
+      undefined,
+      "win32",
+    );
+    await client.connect();
+    const response = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
+    await Promise.resolve();
+    createdSocket!.emit(
+      "data",
+      Buffer.from(
+        JSON.stringify({
+          id: null,
+          type: "mcp_response",
+          success: false,
+          error: "Parse error in daemon socket request",
+          code: -32700,
+        }) + "\n",
+      ),
+    );
+    await expect(response).rejects.toThrow("Parse error in daemon socket request");
+    await client.close();
+  });
+
+  test("drops a null-id response when two requests are pending and warns", async () => {
+    const client = new DaemonClient(
+      "/fake/socket",
+      1_000,
+      new FakeTimer(),
+      {},
+      null,
+      undefined,
+      "win32",
+    );
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await client.connect();
+      const first = client.callDaemonMethod("tools/list", {}, { timeoutMs: 250 });
+      const second = client.callDaemonMethod("resources/list", {}, { timeoutMs: 250 });
+      await Promise.resolve();
+      const [firstRequest, secondRequest] = createdSocket!.writes.map((write) => JSON.parse(write));
+      createdSocket!.emit(
+        "data",
+        Buffer.from(
+          JSON.stringify({
+            id: null,
+            type: "mcp_response",
+            success: false,
+            error: "Parse error in daemon socket request",
+            code: -32700,
+          }) + "\n",
+        ),
+      );
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("2 pending requests"));
+      createdSocket!.emit(
+        "data",
+        Buffer.from(
+          JSON.stringify({ id: firstRequest.id, type: "mcp_response", success: true, result: 1 }) +
+            "\n" +
+            JSON.stringify({
+              id: secondRequest.id,
+              type: "mcp_response",
+              success: true,
+              result: 2,
+            }) +
+            "\n",
+        ),
+      );
+      expect(await first).toBe(1);
+      expect(await second).toBe(2);
+    } finally {
+      warning.mockRestore();
+      await client.close();
+    }
   });
 
   test("drops an incomplete frame when a new socket connects", async () => {

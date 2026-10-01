@@ -1332,7 +1332,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const runToolHandler = () =>
         runWithToolSelectionContext(
           {
-            explicitObserveDeviceRead: name === "observe" && Object.hasOwn(toolParams, "deviceId"),
+            explicitObserveDeviceRead:
+              name === "observe" &&
+              Object.hasOwn(toolParams, "deviceId") &&
+              !providedSessionUuid &&
+              !handlerRoutingSessionUuid,
             // A bound derived session may still target a sibling label. Resolve
             // that label from the base map; unlabeled calls retain the derived
             // ambient session.

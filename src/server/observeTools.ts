@@ -1766,7 +1766,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    "Get screen view hierarchy and screenshot. An explicit deviceId reads without acquiring a session or changing ownership; deviceId and sessionUuid are mutually exclusive.",
+    "Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device.",
     observeSchema,
     observeHandler,
     {

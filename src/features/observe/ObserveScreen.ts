@@ -21,6 +21,7 @@ import { ViewHierarchy } from "./ViewHierarchy";
 import { Window } from "./Window";
 import { TakeScreenshot } from "./TakeScreenshot";
 import type { ScreenshotEncodingOptions } from "./screenshot/screenshotOptions";
+import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import { GetBackStack } from "./GetBackStack";
 import {
   AdbClientFactory,
@@ -92,6 +93,11 @@ import { displayTransitions } from "./DisplayTransition";
 import { readFile } from "node:fs/promises";
 import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 import { DisplaySelectionError, resolveTargetDisplay } from "./DisplaySelection";
+import {
+  observationScreenshotEvidence,
+  screenshotFormatForPath,
+  type ScreenshotEvidenceFiles,
+} from "./screenshot/observationScreenshotEvidence";
 
 function reconcileIosDisplayTransition(
   deviceId: string,
@@ -181,6 +187,16 @@ class StrictSettledScreenshotCaptureError extends ActionableError {
     });
   }
 }
+
+const unavailableReadOnlyHierarchy: ViewHierarchyInterface = {
+  getViewHierarchy: async () => ({
+    hierarchy: { error: "Hierarchy connection unavailable", unavailableReason: "connection_lost" },
+  }),
+  configureRecompositionTracking: async () => {},
+  findFocusedElement: () => null,
+  findAccessibilityFocusedElement: () => null,
+  filterOffscreenNodes: (hierarchy) => hierarchy,
+};
 
 type FocusedSystemUiSignal = "focused" | "topmost-suspect" | "none";
 
@@ -554,6 +570,8 @@ export class RealObserveScreen implements ObserveScreen {
   private predictiveUIState: PredictiveUIStateInterface;
 
   private screenshotRecorder: ObserveScreenshotRecorder;
+  private readonly screenshotService: ScreenshotService;
+  private screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
   private hierarchyCollector: HierarchyCollector;
   private deviceStateCollector: DeviceStateCollector;
   private readonly iosLockStateProbe: IosLockStateProbe;
@@ -659,7 +677,11 @@ export class RealObserveScreen implements ObserveScreen {
     this.idGenerator = idGenerator;
 
     // Data sources (either injected or default)
-    this.viewHierarchy = dependencies?.viewHierarchy ?? new ViewHierarchy(device, this.adbFactory);
+    this.viewHierarchy =
+      dependencies?.viewHierarchy ??
+      (dependencies?.deviceReadOnly
+        ? unavailableReadOnlyHierarchy
+        : new ViewHierarchy(device, this.adbFactory));
     this.hierarchyCapture =
       dependencies?.hierarchyCapture ??
       createDeviceHierarchyCapture(device, {
@@ -669,7 +691,12 @@ export class RealObserveScreen implements ObserveScreen {
         ids: idGenerator,
       });
     const window = dependencies?.window ?? new Window(device, this.adbFactory);
-    const screenshotUtil = dependencies?.screenshot ?? new TakeScreenshot(device, this.adbFactory);
+    const screenshotUtil =
+      dependencies?.screenshot ??
+      (dependencies?.deviceReadOnly
+        ? TakeScreenshot.forObservationRead(device)
+        : new TakeScreenshot(device, this.adbFactory));
+    this.screenshotService = screenshotUtil;
     const backStack = dependencies?.backStack ?? new GetBackStack(device, this.adbFactory);
     this.predictiveUIState = dependencies?.predictiveUIState ?? new PredictiveUIState();
 
@@ -693,6 +720,7 @@ export class RealObserveScreen implements ObserveScreen {
         screenshotUtil as TrackedScreenshotService,
         getScreenshotStateStore(),
       );
+    this.screenshotEvidenceFiles = dependencies?.screenshotEvidenceFiles;
     this.hierarchyCollector =
       dependencies?.hierarchyCollector ??
       new HierarchyCollector({
@@ -759,6 +787,127 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   // ---------- Public API ----------
+
+  /** A device-id read never enters the hierarchy setup, recovery, or observe-cache pipeline. */
+  async executeDeviceRead(
+    signal?: AbortSignal,
+    screenshot: ScreenshotMode = "settled",
+    screenshotOptions?: ScreenshotEncodingOptions,
+  ): Promise<ObserveResult> {
+    const result = this.createBaseResult();
+    this.stampScreenSizeUnits(result);
+    result.viewHierarchy = {
+      hierarchy: {
+        error: "Hierarchy requires an already available observation connection.",
+        unavailableReason: "connection_lost",
+      },
+    };
+    result.freshness = {
+      isFresh: false,
+      category: "unavailable",
+      unavailableReason: "connection_lost",
+      unavailableDetail: "Read-only device access does not start or recover a hierarchy service.",
+    };
+    if (screenshot === "none") {
+      result.screenshotCaptureAttempted = false;
+      return result;
+    }
+    await this.captureDeviceReadScreenshot(result, signal, screenshotOptions);
+    return result;
+  }
+
+  private async captureDeviceReadScreenshot(
+    result: ObserveResult,
+    signal?: AbortSignal,
+    screenshotOptions?: ScreenshotEncodingOptions,
+  ): Promise<void> {
+    result.screenshotCaptureAttempted = true;
+    result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
+    const displayId = await this.resolveReadDisplayId(result, signal);
+    const options = { format: screenshotOptions?.format ?? "png", ...screenshotOptions, displayId };
+    const capture =
+      this.screenshotService instanceof TakeScreenshot
+        ? await this.screenshotService.executeObservationRead(options, signal)
+        : await this.screenshotService.execute(options, signal);
+    signal?.throwIfAborted();
+    if (capture.success && capture.path) {
+      Object.assign(
+        result,
+        await observationScreenshotEvidence(
+          capture.path,
+          "fresh",
+          undefined,
+          this.screenshotEvidenceFiles,
+          this.timer,
+        ),
+      );
+      result.screenshotSettled = true;
+      return;
+    }
+    const failure = capture.error ?? "Screenshot capture failed";
+    const cachedPath = this.eligibleCachedScreenshotPath(displayId);
+    if (cachedPath) {
+      try {
+        Object.assign(
+          result,
+          await observationScreenshotEvidence(
+            cachedPath,
+            "cached",
+            failure,
+            this.screenshotEvidenceFiles,
+            this.timer,
+          ),
+        );
+      } catch (error) {
+        logger.warn(`[OBSERVE] Cached screenshot unavailable: ${describeError(error)}`, error);
+      }
+    }
+    result.screenshotSettled = false;
+    result.screenshotSettledError = failure;
+  }
+
+  private async resolveReadDisplayId(
+    result: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<number | undefined> {
+    if (
+      this.device.platform !== "android" ||
+      !this.requestedDisplay ||
+      this.requestedDisplay === "active"
+    ) {
+      return undefined;
+    }
+    const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {});
+    const displayId = await this.observedAndroidDisplayCache.logicalIdForPanel(
+      this.device,
+      this.adb,
+      panel.key,
+      signal,
+    );
+    result.display = { ...result.display, key: panel.key, role: panel.role };
+    return displayId;
+  }
+
+  private eligibleCachedScreenshotPath(displayId?: number): string | undefined {
+    const cached = getObserveCacheStore().getRecentInMemoryForDevice(this.device.deviceId);
+    const explicitDisplay = Boolean(this.requestedDisplay && this.requestedDisplay !== "active");
+    const displayMatches = [
+      undefined,
+      "active",
+      cached?.display.key,
+      cached?.display.role,
+    ].includes(this.requestedDisplay);
+    const displayIdMatches = [undefined, cached?.viewHierarchy?.displayId].includes(displayId);
+    if (!displayMatches || !displayIdMatches) {
+      return undefined;
+    }
+    if (cached?.screenshotPath) {
+      return cached.screenshotPath;
+    }
+    return !explicitDisplay && displayId === undefined
+      ? getScreenshotStateStore().getPath(this.device.deviceId)
+      : undefined;
+  }
 
   /**
    * Fetch raw view hierarchy and attach it to an existing observe result.
@@ -1411,19 +1560,27 @@ export class RealObserveScreen implements ObserveScreen {
         displayId,
         screenshotOptions,
       );
-      observation.screenshotSettled = true;
-      observation.screenshotPath = path;
-      const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
-      observation.screenshotFormat =
-        extension === ".jpg" ? "jpeg" : extension === ".webp" ? "webp" : "png";
-      observation.screenshotMimeType = `image/${observation.screenshotFormat}`;
-      if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
-        observation.screenshotOrientation = await iosScreenshotOrientation(
-          path,
-          observation.screenSize,
-        );
+      const screenshotFormat = screenshotFormatForPath(path);
+      const screenshotEvidence = await observationScreenshotEvidence(
+        path,
+        "fresh",
+        undefined,
+        this.screenshotEvidenceFiles,
+        this.timer,
+      );
+      const screenshotOrientation =
+        this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
+          ? await iosScreenshotOrientation(path, observation.screenSize)
+          : undefined;
+      Object.assign(observation, screenshotEvidence);
+      observation.screenshotFormat = screenshotFormat;
+      observation.screenshotMimeType = `image/${screenshotFormat}`;
+      if (screenshotOrientation) {
+        observation.screenshotOrientation = screenshotOrientation;
       }
+      observation.screenshotSettled = true;
     } catch (error) {
+      signal?.throwIfAborted();
       if (strict) {
         throw new StrictSettledScreenshotCaptureError(error, this.device.deviceId);
       }

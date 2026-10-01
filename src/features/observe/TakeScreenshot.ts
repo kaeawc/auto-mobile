@@ -131,6 +131,46 @@ function ctrlProxyScreenshotFormat(
 }
 
 export class TakeScreenshot implements ScreenshotService {
+  /** Device reads may write one capture but must not evict another session's cache. */
+  static forObservationRead(device: BootedDevice): TakeScreenshot {
+    return new TakeScreenshot(
+      device,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+  }
+
+  /** Capture on an existing iOS socket only; never connect or recover a runner. */
+  async executeObservationRead(
+    options: ScreenshotOptions,
+    signal?: AbortSignal,
+  ): Promise<ScreenshotResult> {
+    if (this.device.platform !== "ios") {
+      return this.execute(options, signal);
+    }
+    const client = IOSCtrlProxyClient.getExistingInstance(this.device.deviceId);
+    if (!client?.isConnected()) {
+      return { success: false, error: "iOS runner is not connected" };
+    }
+    const startedAt = this.timer.now();
+    const finalPath = this.generateScreenshotPath(startedAt, options);
+    try {
+      const capture = await client.requestScreenshot(10000, undefined, signal);
+      return await this.writeiOSScreenshot(finalPath, capture, startedAt, options, signal);
+    } catch (error) {
+      logger.warn(
+        `[SCREENSHOT] Existing iOS connection capture failed: ${errorMessage(error)}`,
+        error,
+      );
+      return { success: false, error: errorMessage(error) };
+    }
+  }
   private readonly device: BootedDevice;
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
@@ -171,6 +211,7 @@ export class TakeScreenshot implements ScreenshotService {
     physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(
       timer,
     ),
+    cleanupOnCreate = true,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -184,7 +225,9 @@ export class TakeScreenshot implements ScreenshotService {
     this.physicalDisplayIdResolver = physicalDisplayIdResolver;
 
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
-    this.cleanupCache();
+    if (cleanupOnCreate) {
+      void this.cleanupCache();
+    }
   }
 
   /**

@@ -196,13 +196,13 @@ function constrainAdvertisedAppIdProperties(value: unknown): void {
 
 function toAdvertisedJsonSchema(
   schema: any,
-  options: { constrainAppIds: boolean; anthropicSubset?: boolean },
+  options: { constrainAppIds: boolean; anthropicSubset?: boolean; exposeDeviceId?: boolean },
 ): Record<string, unknown> {
   const jsonSchema = toJSONSchema(schema, {
     override: ({ zodSchema, jsonSchema }) => {
       applyJsonSchemaOverride(zodSchema, jsonSchema);
       dropDefaultedKeysFromRequired(jsonSchema);
-      if (isInjectedDeviceIdSchema(zodSchema)) {
+      if (isInjectedDeviceIdSchema(zodSchema) && !options.exposeDeviceId) {
         const properties = jsonSchema.properties as Record<string, unknown> | undefined;
         if (properties) {
           delete properties.deviceId;
@@ -337,6 +337,11 @@ interface ToolRegistrationOptions {
 
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
   shouldEnsureDevice?: (args: T) => boolean;
+  /** Read an explicit device id without acquiring or changing a device session. */
+  sessionlessDeviceRead?: {
+    resolve(deviceId: string, signal?: AbortSignal): Promise<BootedDevice>;
+    assertAuthorized(device: BootedDevice): void;
+  };
   deviceReadiness?: DeviceReadinessLevel | ((args: T) => DeviceReadinessLevel);
   nonDeviceHandler?: ToolHandler<T>;
   embeddedSdkOnly?: boolean;
@@ -620,12 +625,53 @@ interface ToolRegistryPipelineOverrides {
   planLifecycleManager?: PlanLifecycleManager;
 }
 
+async function resolveSessionlessDeviceRead(
+  input: ExecutionTargetInput,
+  read: NonNullable<DeviceAwareToolOptions["sessionlessDeviceRead"]>,
+  deviceId: string,
+): Promise<ExecutionTargetContext> {
+  const { args, signal } = input;
+  signal?.throwIfAborted();
+  const device = await read.resolve(deviceId, signal);
+  if (args.platform && args.platform !== device.platform) {
+    throw new ActionableError(
+      `Device ${deviceId} is ${device.platform}, not requested platform ${args.platform}.`,
+    );
+  }
+  return {
+    args,
+    baseSessionUuid: undefined,
+    device,
+    internalCall: args[INTERNAL_NO_DIFF_PARAM] === true,
+    sessionUuid: undefined,
+    shouldResolveDevice: true,
+  };
+}
+
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   constructor(
     private readonly logger: Logger = logger,
     private readonly displayInventory: DisplayInventoryProvider = defaultDisplayInventoryProvider,
   ) {}
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
+    if (
+      input.options.sessionlessDeviceRead &&
+      getToolSelectionContext()?.explicitObserveDeviceRead &&
+      input.args.deviceId &&
+      !input.args.sessionUuid
+    ) {
+      return resolveSessionlessDeviceRead(
+        input,
+        input.options.sessionlessDeviceRead,
+        input.args.deviceId,
+      );
+    }
+    return this.resolveNormalExecutionTarget(input);
+  }
+
+  private async resolveNormalExecutionTarget(
+    input: ExecutionTargetInput,
+  ): Promise<ExecutionTargetContext> {
     const { name, args, options, deviceSessionManager, signal } = input;
     signal?.throwIfAborted();
     let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
@@ -1426,6 +1472,73 @@ function withItemsEnum(
   };
 }
 
+function deviceAwareHandlerArgs(
+  args: Record<string, unknown>,
+  options: DeviceAwareToolOptions,
+  context: ReturnType<typeof getToolSelectionContext>,
+): Record<string, unknown> {
+  const routingSession =
+    options.sessionlessDeviceRead &&
+    context?.explicitObserveDeviceRead &&
+    args.deviceId &&
+    !args.sessionUuid
+      ? undefined
+      : context?.routingSessionUuid;
+  return withAmbientDeviceContext(args, routingSession, context?.execution);
+}
+
+function assertDeviceReadRouting(
+  args: Record<string, unknown>,
+  options: DeviceAwareToolOptions,
+): void {
+  if (
+    options.sessionlessDeviceRead &&
+    getToolSelectionContext()?.explicitObserveDeviceRead &&
+    args.deviceId &&
+    args.sessionUuid
+  ) {
+    throw new ActionableError("observe deviceId and sessionUuid are mutually exclusive.");
+  }
+}
+
+function assertSessionlessReadAuthorization(
+  options: DeviceAwareToolOptions,
+  args: Record<string, unknown>,
+  device: BootedDevice | undefined,
+  signal?: AbortSignal,
+): void {
+  if (
+    options.sessionlessDeviceRead &&
+    getToolSelectionContext()?.explicitObserveDeviceRead &&
+    args.deviceId &&
+    !args.sessionUuid &&
+    device
+  ) {
+    signal?.throwIfAborted();
+    options.sessionlessDeviceRead.assertAuthorized(device);
+  }
+}
+
+async function invokeResolvedDeviceHandler(input: {
+  options: DeviceAwareToolOptions;
+  selectionContext: ReturnType<typeof getToolSelectionContext>;
+  target: ExecutionTargetContext & { device: BootedDevice };
+  name: string;
+  args: Record<string, unknown>;
+  handler: DeviceAwareToolHandler;
+  progress?: ProgressCallback;
+  signal?: AbortSignal;
+  auditRunner: AuditRunner;
+  navigationRecorder: NavigationToolCallRecorder;
+}): Promise<any> {
+  const { options, selectionContext, target, name, args, handler, progress, signal } = input;
+  if (options.sessionlessDeviceRead && selectionContext?.explicitObserveDeviceRead) {
+    return handler(target.device, args, progress, signal);
+  }
+  input.navigationRecorder.record(name, args, target.device, target.sessionUuid);
+  return input.auditRunner.run({ name, args, device: target.device, handler, progress, signal });
+}
+
 // The registry that holds all tools
 export class ToolRegistryClass {
   private tools: Map<string, RegisteredTool> = new Map();
@@ -1550,6 +1663,18 @@ export class ToolRegistryClass {
     this.tools.delete(name);
   }
 
+  private prepareDeviceAwareRegistration(
+    name: string,
+    options: DeviceAwareToolOptions,
+  ): ToolTransportRecovery {
+    this.invalidateToolDefinitionSchemaCache();
+    const recovery = options.transportRecovery ?? "connect";
+    if (this === ToolRegistry) {
+      setToolTransportRecovery(name, recovery);
+    }
+    return recovery;
+  }
+
   // Register a device-aware tool
   registerDeviceAware(
     name: string,
@@ -1558,13 +1683,9 @@ export class ToolRegistryClass {
     handler: DeviceAwareToolHandler,
     options: DeviceAwareToolOptions = {},
   ): void {
-    this.invalidateToolDefinitionSchemaCache();
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
     // delivery requires an explicit per-tool opt-in.
-    const transportRecovery = options.transportRecovery ?? "connect";
-    if (this === ToolRegistry) {
-      setToolTransportRecovery(name, transportRecovery);
-    }
+    const transportRecovery = this.prepareDeviceAwareRegistration(name, options);
     // Create a wrapper that handles device ID injection
     const wrappedHandler: ToolHandler = async (
       args: any,
@@ -1572,18 +1693,16 @@ export class ToolRegistryClass {
       signal?: AbortSignal,
     ) => {
       const selectionContext = getToolSelectionContext();
+      assertDeviceReadRouting(args, options);
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
-      const handlerArgs: any = withAmbientDeviceContext(
-        args,
-        selectionContext?.routingSessionUuid,
-        selectionContext?.execution,
-      );
+      const handlerArgs = deviceAwareHandlerArgs(args, options, selectionContext);
       const toolStartMs = this.timer.now();
       const toolCallTimestamp = new Date().toISOString();
       let toolDurationMs: number | undefined;
-      let sessionUuid = handlerArgs.sessionUuid;
+      let sessionUuid =
+        typeof handlerArgs.sessionUuid === "string" ? handlerArgs.sessionUuid : undefined;
 
       try {
         const resolvedTarget = await this.executionTargetResolver.resolveExecutionTarget({
@@ -1617,20 +1736,24 @@ export class ToolRegistryClass {
                 }
                 response = await options.nonDeviceHandler(handlerArgs, progress, signal);
               } else if (resolvedTarget.device !== undefined) {
-                this.navigationToolCallRecorder.record(
-                  name,
-                  handlerArgs,
-                  resolvedTarget.device,
-                  resolvedTarget.sessionUuid,
-                );
-                response = await this.auditRunner.run({
+                response = await invokeResolvedDeviceHandler({
+                  options,
+                  selectionContext,
+                  target: { ...resolvedTarget, device: resolvedTarget.device },
                   name,
                   args: handlerArgs,
-                  device: resolvedTarget.device,
                   handler,
                   progress,
                   signal,
+                  auditRunner: this.auditRunner,
+                  navigationRecorder: this.navigationToolCallRecorder,
                 });
+                assertSessionlessReadAuthorization(
+                  options,
+                  handlerArgs,
+                  resolvedTarget.device,
+                  signal,
+                );
               }
 
               // A late device-loss abort cannot replace a completed success.
@@ -2144,6 +2267,7 @@ export class ToolRegistryClass {
         inputSchema: toAdvertisedJsonSchema(tool.schema, {
           constrainAppIds: true,
           anthropicSubset: true,
+          exposeDeviceId: tool.name === "observe",
         }),
         outputSchemasByRuntimeFlags: new Map(),
       };

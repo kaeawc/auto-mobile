@@ -810,8 +810,8 @@ case "$mode" in
       cp "${coverage_lcov_files[0]}" coverage/lcov.info
       cp "${coverage_junit_files[0]}" coverage/junit.xml
     else
-      bun scripts/lib/merge-lcov.ts coverage/lcov.info "${coverage_lcov_files[@]}"
-      bun scripts/lib/merge-junit-reports.ts coverage/junit.xml "${coverage_junit_files[@]}"
+      bun scripts/lib/merge-lcov.ts coverage/lcov.info "${coverage_lcov_files[@]+"${coverage_lcov_files[@]}"}"
+      bun scripts/lib/merge-junit-reports.ts coverage/junit.xml "${coverage_junit_files[@]+"${coverage_junit_files[@]}"}"
     fi
     ;;
   all)

@@ -28,7 +28,14 @@ coverage_dir="coverage/shards/shard-${number}"
 grep -q "coverageDir = \"${coverage_dir}\"" "$coverage_config" || exit 71
 printf '%s\n' "$shard" > "${coverage_dir%/*}/invoked-${number}"
 echo "log from shard $number"
-if [[ "$number" == "${STUB_FAIL_SHARD:-}" ]]; then exit 7; fi
+if [[ "$number" == "${STUB_WRITE_FAILED_SHARD:-}" ]]; then
+  echo 'error: An internal error occurred (WriteFailed)'
+  echo '0 fail'
+elif [[ "$number" == "${STUB_REAL_FAIL_SHARD:-}" ]]; then
+  echo '1 fail'
+else
+  echo '0 fail'
+fi
 mkdir -p "$coverage_dir"
 cat > "$coverage_dir/lcov.info" <<LCOV
 TN:
@@ -55,6 +62,7 @@ cat > "$report" <<JUNIT
 <?xml version="1.0" encoding="UTF-8"?>
 <testsuites tests="1" failures="0" time="0.001"><testsuite name="shard-${number}" tests="1" failures="0" time="0.001"><testcase name="case" classname="shard-${number}" file="test/shard-${number}.test.ts" time="0.001" /></testsuite></testsuites>
 JUNIT
+if [[ "$number" == "${STUB_FAIL_SHARD:-}" || "$number" == "${STUB_WRITE_FAILED_SHARD:-}" || "$number" == "${STUB_REAL_FAIL_SHARD:-}" ]]; then exit 7; fi
 EOF
   chmod +x "$STUB_BIN/bun"
 }
@@ -119,5 +127,22 @@ EOF
   run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" coverage
   [ "$status" -eq 124 ]
   [[ "$output" == *"Coverage test run exceeded its 480s wall-clock budget (shard 1/2)"* ]]
+  [ ! -f coverage/lcov.info ]
+}
+
+@test "WriteFailed after zero failures recovers and merges shard coverage" {
+  run env PATH="$STUB_BIN:$PATH" STUB_WRITE_FAILED_SHARD=2 \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 bash scripts/ci/run-ts-coverage.sh
+  [ "$status" -eq 0 ]
+  [ -f coverage/lcov.info ]
+  [ -f coverage/junit.xml ]
+  [ "$(rg -c '^SF:src/shared.ts$' coverage/lcov.info)" -eq 1 ]
+  grep -q '^FNDA:3,shared$' coverage/lcov.info
+}
+
+@test "WriteFailed on one shard does not tolerate another shard real failures" {
+  run env PATH="$STUB_BIN:$PATH" STUB_WRITE_FAILED_SHARD=2 STUB_REAL_FAIL_SHARD=1 \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 bash scripts/ci/run-ts-coverage.sh
+  [ "$status" -ne 0 ]
   [ ! -f coverage/lcov.info ]
 }

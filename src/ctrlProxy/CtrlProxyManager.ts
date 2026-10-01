@@ -1,3 +1,4 @@
+import { combineWithAmbientAbort, runWithAbortSignal } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { DeviceLostError } from "../models/DeviceLostError";
@@ -149,6 +150,14 @@ type InstalledApkSha256Result = {
   error?: string;
 };
 
+export interface CtrlProxyCompatibilityInspection {
+  status: "not_installed" | "compatible" | "mismatch" | "unverifiable" | "skipped";
+  expectedSha256: string;
+  installedSha256: string | null;
+  installedShaSource: "device" | "host" | "none";
+  knownPinMismatch: boolean;
+}
+
 export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private readonly device: BootedDevice;
   private adb: AdbExecutor;
@@ -274,6 +283,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
     }
     return AndroidCtrlProxyManager.instances.get(device.deviceId)!;
+  }
+
+  /** Fresh diagnostic reads without registering or replacing live session dependencies. */
+  public static createDetached(
+    device: BootedDevice,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor = defaultAdbClientFactory,
+  ): AndroidCtrlProxyManager {
+    requireBootedDevice(device, "AndroidCtrlProxyManager.createDetached");
+    const adb =
+      "create" in adbFactoryOrExecutor ? adbFactoryOrExecutor.create(device) : adbFactoryOrExecutor;
+    return new AndroidCtrlProxyManager(device, adb);
   }
 
   public static createForTestingWithDeps(
@@ -1375,6 +1395,51 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
 
     return installedSha.toLowerCase() === expectedSha.toLowerCase();
+  }
+
+  /** Inspect integrity without provisioning, invalidating caches, or consuming prefetches. */
+  async inspectCompatibility(signal?: AbortSignal): Promise<CtrlProxyCompatibilityInspection> {
+    const readSignal = combineWithAmbientAbort(signal);
+    return runWithAbortSignal(readSignal, async () => {
+      readSignal?.throwIfAborted();
+      this.assertPinnedVersionVerifiable();
+      const expectedSha256 = await this.getExpectedChecksum(false);
+      readSignal?.throwIfAborted();
+      const installed = await this.isInstalled();
+      readSignal?.throwIfAborted();
+      const reading: CtrlProxyCompatibilityInspection = {
+        status: "not_installed",
+        expectedSha256,
+        installedSha256: null,
+        installedShaSource: "none",
+        knownPinMismatch: false,
+      };
+      if (!installed) {
+        return reading;
+      }
+      if (
+        !expectedSha256 ||
+        (this.shouldSkipDownloadIfInstalled() &&
+          !AndroidCtrlProxyManager.isKnownExplicitPinConfigured())
+      ) {
+        return { ...reading, status: "skipped" };
+      }
+      const sha = await this.getInstalledApkSha256WithDetails(readSignal);
+      readSignal?.throwIfAborted();
+      const status = !sha.sha256
+        ? "unverifiable"
+        : sha.sha256.toLowerCase() === expectedSha256.toLowerCase()
+          ? "compatible"
+          : "mismatch";
+      return {
+        ...reading,
+        status,
+        installedSha256: sha.sha256,
+        installedShaSource: sha.source,
+        knownPinMismatch:
+          status === "mismatch" && AndroidCtrlProxyManager.isKnownExplicitPinConfigured(),
+      };
+    });
   }
 
   /**
@@ -2479,8 +2544,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     return capabilities;
   }
 
-  private async getInstalledApkSha256WithDetails(): Promise<InstalledApkSha256Result> {
+  private async getInstalledApkSha256WithDetails(
+    signal?: AbortSignal,
+  ): Promise<InstalledApkSha256Result> {
+    const throwIfAborted = () => signal?.throwIfAborted();
+    throwIfAborted();
     const apkPath = await this.getInstalledApkPath();
+    throwIfAborted();
     if (!apkPath) {
       return {
         sha256: null,
@@ -2491,6 +2561,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     try {
       const shaResult = await this.adb.executeCommand(`shell sha256sum ${shellQuote(apkPath)}`);
+      throwIfAborted();
       const sha256 = shaResult.stdout.trim().split(/\s+/)[0];
       if (sha256) {
         return {
@@ -2500,6 +2571,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         };
       }
     } catch (error) {
+      throwIfAborted();
       const deviceError = this.statusInspectionDeviceError(error);
       if (deviceError) {
         throw deviceError;
@@ -2509,11 +2581,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       });
     }
 
+    throwIfAborted();
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-apk-"));
     const safeDeviceId = (this.device.deviceId || "device").replace(/[^a-zA-Z0-9_.-]/g, "_");
     const localApkPath = path.join(tempDir, `control-proxy-installed-${safeDeviceId}.apk`);
 
     try {
+      throwIfAborted();
       await this.adb.executeCommand(
         `pull "${apkPath}" "${localApkPath}"`,
         CTRL_PROXY_PULL_TIMEOUT_MS,
@@ -2526,6 +2600,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         apkPath,
       };
     } catch (error) {
+      throwIfAborted();
       const deviceError = this.statusInspectionDeviceError(error);
       if (deviceError) {
         throw deviceError;
@@ -2582,7 +2657,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
   }
 
-  private async getExpectedChecksum(): Promise<string> {
+  private async getExpectedChecksum(useSharedCache = true): Promise<string> {
     if (this.shouldSkipChecksum()) {
       return "";
     }
@@ -2597,6 +2672,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     let entry: ApkOverrideChecksumEntry | undefined;
     try {
+      if (!useSharedCache) {
+        return (
+          await this.checksumCalculator.computeFileSha256(overridePath)
+        ).checksum.toLowerCase();
+      }
       const { mtimeMs, size } = await fs.stat(overridePath);
       entry = AndroidCtrlProxyManager.apkOverrideChecksums.get(overridePath);
       if (!entry || entry.mtimeMs !== mtimeMs || entry.size !== size) {
@@ -2608,7 +2688,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
       return await entry.checksumPromise;
     } catch (error) {
-      if (entry === AndroidCtrlProxyManager.apkOverrideChecksums.get(overridePath)) {
+      if (
+        useSharedCache &&
+        entry === AndroidCtrlProxyManager.apkOverrideChecksums.get(overridePath)
+      ) {
         AndroidCtrlProxyManager.apkOverrideChecksums.delete(overridePath);
       }
       logger.warn("[CTRL_PROXY] Unable to hash local APK override; skipping checksum comparison", {

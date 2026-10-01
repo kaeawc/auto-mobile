@@ -21,7 +21,6 @@ import {
 } from "../../daemon/buildIdentity";
 import type { BuildIdentity } from "../../daemon/buildIdentity";
 import {
-  isExplicitPin,
   LATEST_RELEASE_VERSION,
   resolveApkUrl,
   resolveAssetVersion,
@@ -42,10 +41,10 @@ import { logger } from "../../utils/logger";
 import type { Logger } from "../../utils/logger";
 import { ActionableError } from "../../models/ActionableError";
 
-const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
+export const MAX_CTRL_PROXY_DOCTOR_DEVICES = 8;
 
 interface DaemonStatusManager {
-  status(): Promise<DaemonStatus>;
+  status(recoverIdentity?: boolean): Promise<DaemonStatus>;
 }
 
 export interface DaemonStatusDependencies {
@@ -213,7 +212,7 @@ export async function checkDaemonStatus(
     }
 
     const manager = dependencies.daemonManager ?? new DaemonManager();
-    const status = await awaitDoctorProbe(currentProbe, async () => await manager.status());
+    const status = await awaitDoctorProbe(currentProbe, async () => await manager.status(false));
 
     if (status.running) {
       return {
@@ -304,7 +303,7 @@ export async function checkDaemonBuildIdentity(
 ): Promise<CheckResult> {
   try {
     const manager = dependencies.daemonManager ?? new DaemonManager();
-    const status = await awaitDoctorProbe(probe, () => manager.status());
+    const status = await awaitDoctorProbe(probe, () => manager.status(false));
 
     if (!status.running) {
       return {
@@ -358,35 +357,36 @@ export async function checkCtrlProxy(
   adbFactory: AdbClientFactory = defaultAdbClientFactory,
   dependencies: CtrlProxyDoctorDependencies = {},
   probe: DoctorProbeOptions = {},
+  targetDeviceId?: string,
 ): Promise<CheckResult> {
   const log = dependencies.logger ?? logger;
   try {
     const currentProbe = remainingDoctorProbe(probe);
     return await runWithAbortSignal(currentProbe.signal, async () => {
-      const adb = adbFactory.create();
-      // Validate hermetic asset configuration before device-dependent shortcuts so
-      // a malformed mirror fails the doctor gate even on hosts with no Android device.
+      currentProbe.signal?.throwIfAborted();
       resolveApkUrl();
       resolveIpaUrl();
-      const devices = await adb.getBootedAndroidDevices({
+      const devices = await adbFactory.create().getBootedAndroidDevices({
         signal: currentProbe.signal,
         timeoutMs: currentProbe.timeoutMs,
       });
-
-      if (devices.length === 0) {
+      currentProbe.signal?.throwIfAborted();
+      const selected =
+        targetDeviceId === undefined
+          ? devices
+          : devices.filter((device) => device.deviceId === targetDeviceId);
+      if (selected.length === 0) {
         return {
           name: "CtrlProxy",
-          status: "skip",
-          message: "No Android devices connected",
+          status: targetDeviceId === undefined ? "skip" : "fail",
+          message:
+            targetDeviceId === undefined
+              ? "No Android devices connected"
+              : `Requested device is not booted: ${targetDeviceId}`,
         };
       }
-
-      // Check first connected device
-      const device = devices[0];
-
-      // An unverifiable explicit pin is a hard configuration failure — surface it as
-      // `fail` (not the `skip` the thrown guard would otherwise become in the catch),
-      // so the documented `--cli doctor` CI gate actually blocks (#2746).
+      // Keep #2746's deterministic first/targeted-device diagnostic and recommendation.
+      const device = selected[0];
       if (AndroidCtrlProxyManager.isPinnedVersionUnverifiable()) {
         return {
           name: "CtrlProxy",
@@ -396,133 +396,70 @@ export async function checkCtrlProxy(
             "The pinned CtrlProxy APK cannot be integrity-verified. Pin a released version, or set AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1 to override.",
         };
       }
-
-      // Reset cached instances to ensure fresh ADB reads for doctor diagnostics
-      // (getInstance memoizes isInstalled/isEnabled for 30 minutes which can report stale state)
-      AndroidCtrlProxyManager.resetInstances();
-      const serviceManager = AndroidCtrlProxyManager.getInstance(device, adbFactory);
-
-      const versionResult = await serviceManager.ensureCompatibleVersion();
-      currentProbe.signal?.throwIfAborted();
-      const isInstalled = await serviceManager.isInstalled();
-      const isEnabled = await serviceManager.isEnabled();
-
-      const diagnostics: string[] = [
-        `platform=${device.platform}`,
-        `device=${device.deviceId}`,
-        `installed=${isInstalled}`,
-        `enabled=${isEnabled}`,
+      const results: CheckResult[] = [];
+      for (const device of selected.slice(0, MAX_CTRL_PROXY_DOCTOR_DEVICES)) {
+        currentProbe.signal?.throwIfAborted();
+        const manager = AndroidCtrlProxyManager.createDetached(device, adbFactory);
+        const installed = await manager.isInstalled();
+        currentProbe.signal?.throwIfAborted();
+        const enabled = await manager.isEnabled();
+        currentProbe.signal?.throwIfAborted();
+        const version = await manager.inspectCompatibility(currentProbe.signal);
+        currentProbe.signal?.throwIfAborted();
+        const diagnostics = [
+          `platform=${device.platform}`,
+          `device=${device.deviceId}`,
+          `installed=${installed}`,
+          `enabled=${enabled}`,
+          `expectedSha256=${version.expectedSha256 || "n/a"}`,
+          `installedSha256=${version.installedSha256 || "unknown"} (${version.installedShaSource})`,
+          `versionStatus=${version.status}`,
+        ];
+        if (version.status === "mismatch") {
+          diagnostics.push("Installed CtrlProxy APK SHA differs from expected release checksum");
+          if (version.knownPinMismatch) {
+            diagnostics.push(`AUTOMOBILE_VERSION=${resolvePinnedVersion()}`);
+          }
+        }
+        const status = version.knownPinMismatch
+          ? "fail"
+          : installed &&
+              enabled &&
+              (version.status === "compatible" || version.status === "skipped")
+            ? "pass"
+            : "warn";
+        results.push({
+          name: "CtrlProxy",
+          status,
+          message: diagnostics.join("; "),
+          recommendation:
+            status === "pass"
+              ? undefined
+              : `${installed && !enabled ? "Enable CtrlProxy in device settings. " : ""}` +
+                `doctor does not install, update or enable CtrlProxy and does not reset running session state; run an AutoMobile device tool (for example observe) against ${device.deviceId} so readiness installs/updates it, or use the IDE plugin's update-service action.`,
+        });
+      }
+      const unchecked = selected.length - results.length;
+      const messages = results.map((result) => result.message);
+      if (unchecked) {
+        messages.push(
+          `${unchecked} Android devices not checked (limit=${MAX_CTRL_PROXY_DOCTOR_DEVICES})`,
+        );
+      }
+      const recommendations = [
+        ...new Set(
+          results.flatMap((result) => (result.recommendation ? [result.recommendation] : [])),
+        ),
       ];
-
-      if (versionResult.expectedSha256 !== undefined) {
-        diagnostics.push(`expectedSha256=${versionResult.expectedSha256 || "n/a"}`);
-      }
-
-      if (versionResult.installedSha256 !== undefined) {
-        const source = versionResult.installedShaSource || "unknown";
-        diagnostics.push(
-          `installedSha256=${versionResult.installedSha256 || "unknown"} (${source})`,
-        );
-      }
-
-      diagnostics.push(`versionStatus=${versionResult.status}`);
-
-      if (versionResult.error || versionResult.upgradeError || versionResult.reinstallError) {
-        diagnostics.push(
-          `versionError=${versionResult.error || versionResult.upgradeError || versionResult.reinstallError}`,
-        );
-      }
-
-      const attemptedDownloadOrInstall = Boolean(
-        versionResult.attemptedDownload ||
-        versionResult.attemptedInstall ||
-        versionResult.attemptedReinstall,
-      );
-      const downloadUnavailable = Boolean(versionResult.downloadUnavailable);
-      if (downloadUnavailable) {
-        diagnostics.push("downloadUnavailable=offline");
-      }
-
-      if (versionResult.acceptedPreinstalled) {
-        diagnostics.push("acceptedPreinstalled=true");
-      }
-
-      if (versionResult.status === "failed" && isExplicitPin()) {
-        return {
-          name: "CtrlProxy",
-          status: "fail",
-          message: diagnostics.join("; "),
-          recommendation:
-            "CtrlProxy APK provisioning failed for an explicit AutoMobile version pin. Fix the pinned asset source, checksum, or mirror configuration and re-run doctor.",
-        };
-      }
-
-      if (downloadUnavailable) {
-        return {
-          name: "CtrlProxy",
-          status: "warn",
-          message: diagnostics.join("; "),
-          recommendation:
-            "Newer CtrlProxy APK unavailable while offline. Connect to the internet and re-run doctor.",
-        };
-      }
-
-      if (versionResult.acceptedPreinstalled && isInstalled && isEnabled) {
-        return {
-          name: "CtrlProxy",
-          status: "warn",
-          message: diagnostics.join("; "),
-          recommendation:
-            "CtrlProxy is installed and enabled, but its APK SHA differs from the expected release. Re-run doctor after the background APK refresh completes or update CtrlProxy from the latest release.",
-        };
-      }
-
-      if (
-        isInstalled &&
-        isEnabled &&
-        (versionResult.status === "compatible" ||
-          versionResult.status === "upgraded" ||
-          versionResult.status === "installed" ||
-          versionResult.status === "reinstalled" ||
-          versionResult.status === "skipped")
-      ) {
-        return {
-          name: "CtrlProxy",
-          status: "pass",
-          message: diagnostics.join("; "),
-          recommendation: attemptedDownloadOrInstall
-            ? `If you need the latest APK, download from ${RELEASES_URL}`
-            : undefined,
-        };
-      }
-
-      if (isInstalled && !isEnabled) {
-        return {
-          name: "CtrlProxy",
-          status: "warn",
-          message: diagnostics.join("; "),
-          recommendation: attemptedDownloadOrInstall
-            ? `Enable CtrlProxy in device settings. If you need the latest APK, download from ${RELEASES_URL}`
-            : "Enable CtrlProxy in device settings",
-        };
-      }
-
-      if (!isInstalled) {
-        return {
-          name: "CtrlProxy",
-          status: "warn",
-          message: diagnostics.join("; "),
-          recommendation: "CtrlProxy will be installed automatically when needed",
-        };
-      }
-
       return {
         name: "CtrlProxy",
-        status: "warn",
-        message: diagnostics.join("; "),
-        recommendation: attemptedDownloadOrInstall
-          ? `If you need the latest APK, download from ${RELEASES_URL}`
-          : "Review CtrlProxy installation status",
+        status: results.some((result) => result.status === "fail")
+          ? "fail"
+          : unchecked || results.some((result) => result.status === "warn")
+            ? "warn"
+            : "pass",
+        message: messages.join(" | "),
+        recommendation: recommendations.length ? recommendations.join(" | ") : undefined,
       };
     });
   } catch (error) {
@@ -622,7 +559,7 @@ export async function checkWorkProfileAccessibility(
       name: "Work Profile Accessibility",
       status: "warn",
       message: `Accessibility service not enabled for work profile(s): ${profileList}`,
-      recommendation: `The accessibility service needs to be enabled in each work profile for full app install tracking. Run bunx ${resolveDaemonInstallSpecifier()} --cli doctor or enable manually in Settings > Accessibility.`,
+      recommendation: `The accessibility service needs to be enabled in each work profile for full app install tracking. Enable manually in Settings > Accessibility; doctor only reports status.`,
     };
   } catch (error) {
     logger.warn(`Work profile accessibility check failed: ${errorMessage(error)}`, error);

@@ -262,7 +262,17 @@ bunx @kaeawc/auto-mobile@0.0.81 --cli doctor
 
 Replace `0.0.81` with the version used by your test runner dependency.
 
-`--cli doctor` is status-only; repair is intentionally out of scope ([issue #7143](https://github.com/kaeawc/auto-mobile/issues/7143)). Use `--daemon restart` or `--daemon diagnose` for daemon remedies.
+`--cli doctor` is status-only: it never installs, updates or enables Android CtrlProxy,
+and never resets running session state. It reports installation, accessibility and
+APK checksum status for every booted Android device, up to eight devices per run;
+if more are attached, it reports how many were not checked. A mismatch is a warning
+(or a failure for a known explicit version pin).
+
+To install or update CtrlProxy, run an AutoMobile device tool such as `observe`
+against the affected device: device readiness performs the repair. Alternatively,
+use the IDE plugin's update-service action. Enable CtrlProxy in Settings >
+Accessibility if it is disabled. Use `--daemon restart` or `--daemon diagnose`
+for daemon remedies.
 
 # Foldable posture lane
 

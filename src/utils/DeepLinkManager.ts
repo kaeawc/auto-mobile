@@ -2,6 +2,7 @@ import { errorMessage } from "./describeUnknownError";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "./HostCommandExecutor";
 import { logger } from "./logger";
 import { shellQuote } from "./shellQuote";
+import { outputReportsMissingPackage } from "./android-cmdline-tools/shellOutputHeuristics";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -359,6 +360,20 @@ export class DeepLinkManager implements DeepLinkManager {
             supportedMimeTypes: [],
           },
           error: packageInfoResult.stderr,
+        };
+      }
+
+      if (outputReportsMissingPackage(packageInfoResult.stdout)) {
+        return {
+          success: false,
+          appId,
+          deepLinks: {
+            schemes: [],
+            hosts: [],
+            intentFilters: [],
+            supportedMimeTypes: [],
+          },
+          error: `Package ${appId} is not installed on the device. Use listApps to see installed packages.`,
         };
       }
 

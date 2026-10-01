@@ -10,6 +10,7 @@ import { AndroidCtrlProxyClient } from "./android";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { shellQuote } from "../../utils/shellQuote";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
+import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 
 export type { IosAppMetadataSource };
 
@@ -159,7 +160,7 @@ async function getAndroidAppMetadataFromAdb(
   }
 
   const output = result.stdout;
-  if (!output || output.includes("Unable to find package")) {
+  if (!output || outputReportsMissingPackage(output)) {
     return null;
   }
 

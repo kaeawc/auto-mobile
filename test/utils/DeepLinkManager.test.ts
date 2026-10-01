@@ -173,6 +173,50 @@ Receiver Resolver Table:
       expect(result.deepLinks.hosts).toContain("deep");
       expect(result.deepLinks.intentFilters.length).toBeGreaterThan(0);
     });
+
+    test("should report a missing package with actionable guidance", async () => {
+      fakeAdb.setCommandResponse("dumpsys package 'com.example.missing'", {
+        stdout: "Unable to find package: com.example.missing",
+        stderr: "",
+      });
+
+      const result = await deepLinkManager.getDeepLinks("com.example.missing");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("com.example.missing");
+      expect(result.error).toContain("listApps");
+      expect(result.deepLinks).toEqual({
+        schemes: [],
+        hosts: [],
+        intentFilters: [],
+        supportedMimeTypes: [],
+      });
+    });
+
+    test("should succeed for an installed package without deep links", async () => {
+      fakeAdb.setCommandResponse("dumpsys package 'com.example.empty'", {
+        stdout: `Package [com.example.empty] (12345):
+  userId=10123
+  pkg=Package{abcdef com.example.empty}
+  codePath=/data/app/com.example.empty-1
+  resourcePath=/data/app/com.example.empty-1
+  versionCode=1 minSdk=21 targetSdk=33
+  versionName=1.0
+  flags=[ INSTALLED HAS_CODE ]
+  User 0: ceDataInode=123456 installed=true hidden=false suspended=false stopped=false notLaunched=false enabled=0 instant=false virtual=false`,
+        stderr: "",
+      });
+
+      const result = await deepLinkManager.getDeepLinks("com.example.empty");
+
+      expect(result.success).toBe(true);
+      expect(result.deepLinks).toEqual({
+        schemes: [],
+        hosts: [],
+        intentFilters: [],
+        supportedMimeTypes: [],
+      });
+    });
   });
 
   describe("detectIntentChooser", () => {

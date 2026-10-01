@@ -3,6 +3,8 @@ import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import type { BootedDevice } from "../../../src/models";
 
 // Issue #6258: effect.screenChanged must not be false when a tap opens a
 // dialog that the `activeWindow` basis cannot see (the known dialog-window
@@ -33,6 +35,59 @@ function createTapOnElement(): TapOnElement {
 }
 
 describe("deriveTapEffect basis fallthrough (#6258)", () => {
+  test("ignores a dumpsys-to-hierarchy layout sequence difference on an identical screen", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = { name: "test-device", platform: "ios", deviceId: "test-device" };
+    const tap = new TapOnElement(device, new FakeAdbExecutor(), { timer });
+    const hierarchy = makeHierarchy("onboarding");
+    const previous = makeObservation({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 5120 },
+      viewHierarchy: hierarchy,
+    });
+    const current = makeObservation({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 },
+      viewHierarchy: hierarchy,
+    });
+
+    const result = await tap.deriveTapEffectAfterPostTapObservation(previous, current);
+    expect(result.effect).toEqual({ screenChanged: false, basis: "activeWindow unchanged" });
+  });
+
+  test("uses hierarchy evidence when only nonzero layout sequences differ", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = { name: "test-device", platform: "ios", deviceId: "test-device" };
+    const tap = new TapOnElement(device, new FakeAdbExecutor(), { timer });
+    const previous = makeObservation({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 41 },
+      viewHierarchy: makeHierarchy("onboarding"),
+    });
+    const current = makeObservation({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 42 },
+      viewHierarchy: makeHierarchy("next-screen"),
+    });
+
+    const result = await tap.deriveTapEffectAfterPostTapObservation(previous, current);
+    expect(result.effect).toEqual({ screenChanged: true, basis: "viewHierarchy changed" });
+  });
+
+  test("identical hierarchy hashes override stale identity metadata", async () => {
+    const timer = new FakeTimer();
+    const device: BootedDevice = { name: "test-device", platform: "ios", deviceId: "test-device" };
+    const tap = new TapOnElement(device, new FakeAdbExecutor(), { timer });
+    const hierarchy = makeHierarchy("onboarding");
+    const previous = makeObservation({
+      activeWindow: { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 1 },
+      viewHierarchy: hierarchy,
+    });
+    const current = makeObservation({
+      activeWindow: { appId: "com.example.app", activityName: "OtherActivity", layoutSeqSum: 2 },
+      viewHierarchy: hierarchy,
+    });
+
+    const result = await tap.deriveTapEffectAfterPostTapObservation(previous, current);
+    expect(result.effect).toEqual({ screenChanged: false, basis: "viewHierarchy unchanged" });
+  });
+
   test("falls through to viewHierarchy when activeWindow is unchanged but hierarchy changed (dialog open)", () => {
     const tap = createTapOnElement();
     const activeWindow = {

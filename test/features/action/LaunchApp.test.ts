@@ -4,7 +4,13 @@ import * as os from "os";
 import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { buildLaunchAppResponse } from "../../../src/server/appTools";
-import { BackStackInfo, BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
+import {
+  BackStackInfo,
+  BootedDevice,
+  ExecResult,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../src/models";
 import {
   DefaultPerformanceTracker,
   setDebugPerfEnabled,
@@ -51,6 +57,17 @@ describe("LaunchApp", () => {
       stderr: "",
     });
     fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+  };
+
+  const configureSuccessfulClearAppData = () => {
+    launchApp = new LaunchApp(device, fakeAdb, null, fakeTimer, {
+      createAndroidClearAppData: () => ({
+        execute: async () => ({ success: true, packageName }),
+      }),
+    });
+    launchApp.awaitIdle = fakeAwaitIdle;
+    launchApp.observeScreen = fakeObserveScreen;
+    launchApp.window = fakeWindow;
   };
 
   const hasStartedAppLaunch = () =>
@@ -1472,6 +1489,66 @@ describe("LaunchApp", () => {
     expect(clearCalls).toEqual([{ device, packageName, userId: 0 }]);
     expect(coldBootCalls).toEqual([]);
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}' --user 0 1`)).toBe(true);
+  });
+
+  test("waits for two matching fresh Android frames after clearing app data", async () => {
+    configureSuccessfulClearAppData();
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    const frame = (marker: string): ObserveResult => ({
+      ...createObserveResult(packageName),
+      viewHierarchy: {
+        packageName,
+        hierarchy: { node: { marker } },
+      } as unknown as ViewHierarchyResult,
+    });
+    fakeObserveScreen.setObserveSequence([
+      frame("launch"),
+      frame("loading"),
+      frame("onboarding"),
+      frame("onboarding"),
+    ]);
+
+    const result = await launchApp.execute(packageName, true, false);
+
+    expect(result.success).toBe(true);
+    expect(result.observation?.viewHierarchy).toEqual(frame("onboarding").viewHierarchy);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(4);
+    expect(fakeTimer.getCurrentTime()).toBeLessThanOrEqual(2_500);
+  });
+
+  test("bounds a cold launch with a perpetually changing hierarchy", async () => {
+    configureSuccessfulClearAppData();
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult((index) => ({
+      ...createObserveResult(packageName),
+      viewHierarchy: {
+        packageName,
+        hierarchy: { node: { marker: index } },
+      } as unknown as ViewHierarchyResult,
+    }));
+
+    const result = await launchApp.execute(packageName, true, false);
+
+    expect(result.success).toBe(true);
+    expect(fakeTimer.getCurrentTime()).toBe(2_500);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(2);
+  });
+
+  test("does not wait for stable frames on a launch without clearAppData", async () => {
+    fakeTimer.enableAutoAdvance();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(true);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
+    expect(fakeTimer.getCurrentTime()).toBe(0);
   });
 
   test("does not launch Android when clearing app data fails for a running app", async () => {

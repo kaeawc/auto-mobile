@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, spyOn } from "bun:test";
 import { Socket } from "node:net";
 import {
   DeviceDataStreamSocketServer,
@@ -19,6 +19,7 @@ import {
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
 import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
+import { loadSharp } from "../../src/utils/image/loadSharp";
 
 /** Deterministic deviceSessionUuid the harness mints for a given serial. */
 function sessionUuidFor(deviceId: string): string {
@@ -107,6 +108,20 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
 describe("DeviceDataStreamSocketServer", () => {
   let server: TestableDeviceDataStreamSocketServer;
   let timer: FakeTimer;
+  let encodedFrames: { jpeg: Buffer; webp: Buffer };
+
+  beforeAll(async () => {
+    const sharp = await loadSharp();
+    const pixels = Buffer.alloc(37 * 53 * 3, 127);
+    encodedFrames = {
+      jpeg: await sharp(pixels, { raw: { width: 37, height: 53, channels: 3 } })
+        .jpeg()
+        .toBuffer(),
+      webp: await sharp(pixels, { raw: { width: 37, height: 53, channels: 3 } })
+        .webp()
+        .toBuffer(),
+    };
+  });
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -984,6 +999,57 @@ describe("DeviceDataStreamSocketServer", () => {
       } finally {
         fromSpy.mockRestore();
       }
+    });
+
+    it("publishes measured JPEG/WebP dimensions and omits unknown geometry claims", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      const jpegBase64 = encodedFrames.jpeg.toString("base64");
+      const webpBase64 = encodedFrames.webp.toString("base64");
+
+      server.pushScreenshotUpdate(
+        "device-1",
+        jpegBase64,
+        1080,
+        2340,
+        {},
+        {
+          decodedImage: encodedFrames.jpeg,
+          captureSequence: 8,
+        },
+      );
+      server.pushScreenshotUpdate(
+        "device-1",
+        webpBase64,
+        1080,
+        2340,
+        {},
+        {
+          decodedImage: encodedFrames.webp,
+          captureSequence: 9,
+        },
+      );
+      const garbage = Buffer.from("not an image");
+      server.pushScreenshotUpdate(
+        "device-1",
+        garbage.toString("base64"),
+        undefined,
+        undefined,
+        {},
+        {
+          decodedImage: garbage,
+          captureSequence: 10,
+        },
+      );
+
+      const [jpegMessage, webpMessage, garbageMessage] =
+        socket.getWrittenMessages<Record<string, unknown>>();
+      expect(jpegMessage).toMatchObject({ screenWidth: 37, screenHeight: 53 });
+      expect(jpegMessage).not.toHaveProperty("captureSequence");
+      expect(webpMessage).toMatchObject({ screenWidth: 37, screenHeight: 53 });
+      expect(webpMessage).not.toHaveProperty("captureSequence");
+      expect(garbageMessage).not.toHaveProperty("screenWidth");
+      expect(garbageMessage).not.toHaveProperty("screenHeight");
+      expect(garbageMessage).not.toHaveProperty("captureSequence");
     });
 
     it("includes optional screenshot metadata when pushing updates", () => {

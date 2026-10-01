@@ -56,6 +56,7 @@ import {
   decodePngBase64Output,
   withAndroidScreenshotCaptureLock,
 } from "./android/AndroidPhysicalDisplayId";
+import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
   const oldExtension = path.extname(filePath);
@@ -578,26 +579,17 @@ export class TakeScreenshot implements ScreenshotService {
       return;
     }
 
-    // Try to get dimensions from the image
-    let width = 1080;
-    let height = 2340;
-
-    try {
-      // PNG header contains dimensions at bytes 16-24
-      if (imageBuffer.length >= 24 && imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) {
-        width = imageBuffer.readUInt32BE(16);
-        height = imageBuffer.readUInt32BE(20);
-      }
-    } catch {
-      // Use defaults if we can't read dimensions
+    const dimensions = readImageHeaderDimensions(imageBuffer);
+    if (!dimensions) {
+      logger.debug("[SCREENSHOT] Could not read screenshot dimensions from image header");
     }
 
     try {
       server.pushScreenshotUpdate(
         this.device.deviceId,
         base64Data,
-        width,
-        height,
+        dimensions?.width,
+        dimensions?.height,
         metadataForScreenshotFormat(
           this.device.platform === "ios"
             ? IOS_CTRLPROXY_SCREENSHOT_METADATA
@@ -607,6 +599,7 @@ export class TakeScreenshot implements ScreenshotService {
         { decodedImage: imageBuffer },
       );
     } catch (error) {
+      // The observation stream is an optional side channel; screenshot capture already succeeded.
       logger.debug(`[SCREENSHOT] Failed to push screenshot to observation stream: ${error}`);
     }
   }

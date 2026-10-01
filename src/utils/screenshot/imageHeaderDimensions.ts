@@ -5,8 +5,8 @@
  * falls back to a full decode through the image backend for anything that is not PNG. The
  * observation stream needs pixel dimensions on the **synchronous per-frame push path**, where a
  * decode per frame is not affordable and an async call would reorder pushes. This reader parses
- * only the container headers of the two formats CtrlProxy actually emits — JPEG on Android, PNG on
- * iOS and the ADB fallback — and returns null for anything it cannot read with certainty.
+ * only the container headers of PNG, JPEG, and WebP screenshots and returns null for anything it
+ * cannot read with certainty.
  *
  * Returning null is meaningful: callers use it to fail closed rather than to guess.
  */
@@ -82,6 +82,91 @@ function readPngDimensions(buffer: Buffer): ImagePixelDimensions | null {
   const width = buffer.readUInt32BE(PNG_IHDR_WIDTH_OFFSET);
   const height = buffer.readUInt32BE(PNG_IHDR_WIDTH_OFFSET + 4);
   return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** Read dimensions from a lossy VP8 frame header. */
+function readWebpLossyDimensions(buffer: Buffer): ImagePixelDimensions | null {
+  const dataOffset = 20;
+  // A lossy frame has a 3-byte tag, the 0x9d 0x01 0x2a start code, then 14-bit dimensions.
+  if (
+    buffer[dataOffset + 3] !== 0x9d ||
+    buffer[dataOffset + 4] !== 0x01 ||
+    buffer[dataOffset + 5] !== 0x2a
+  ) {
+    return null;
+  }
+  const width = buffer.readUInt16LE(dataOffset + 6) & 0x3fff;
+  const height = buffer.readUInt16LE(dataOffset + 8) & 0x3fff;
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** Read dimensions from a lossless VP8L frame header. */
+function readWebpLosslessDimensions(buffer: Buffer): ImagePixelDimensions | null {
+  const dataOffset = 20;
+  if (buffer[dataOffset] !== 0x2f) {
+    return null;
+  }
+  const bits1 = buffer[dataOffset + 1]!;
+  const bits2 = buffer[dataOffset + 2]!;
+  const bits3 = buffer[dataOffset + 3]!;
+  const bits4 = buffer[dataOffset + 4]!;
+  if (bits4 >> 4 !== 0) {
+    return null;
+  }
+  const width = 1 + bits1 + ((bits2 & 0x3f) << 8);
+  const height = 1 + (bits2 >> 6) + (bits3 << 2) + ((bits4 & 0x0f) << 10);
+  return width > 0 && height > 0 ? { width, height } : null;
+}
+
+/** Read dimensions from a VP8X extended canvas header. */
+function readWebpExtendedDimensions(buffer: Buffer): ImagePixelDimensions {
+  const dataOffset = 20;
+  // VP8X stores 24-bit little-endian canvas dimensions minus one.
+  const width =
+    1 + buffer[dataOffset + 4]! + (buffer[dataOffset + 5]! << 8) + (buffer[dataOffset + 6]! << 16);
+  const height =
+    1 + buffer[dataOffset + 7]! + (buffer[dataOffset + 8]! << 8) + (buffer[dataOffset + 9]! << 16);
+  return { width, height };
+}
+
+/** Read the canvas dimensions from the first WebP image chunk, or null when its header is unclear. */
+function readWebpDimensions(buffer: Buffer): ImagePixelDimensions | null {
+  if (
+    buffer.length < 20 ||
+    buffer.toString("ascii", 0, 4) !== "RIFF" ||
+    buffer.toString("ascii", 8, 12) !== "WEBP"
+  ) {
+    return null;
+  }
+
+  const riffSize = buffer.readUInt32LE(4);
+  const chunkType = buffer.toString("ascii", 12, 16);
+  const requiredDataLength = { "VP8 ": 10, VP8L: 5, VP8X: 10 }[
+    chunkType as "VP8 " | "VP8L" | "VP8X"
+  ];
+  if (requiredDataLength === undefined) {
+    return null;
+  }
+  const chunkSize = buffer.readUInt32LE(16);
+  // RIFF size starts after its 8-byte preamble; the first chunk header and inspected data must fit
+  // both the declarations and available bytes before any reads below.
+  if (
+    chunkSize < requiredDataLength ||
+    riffSize < 4 + 8 + requiredDataLength ||
+    20 + requiredDataLength > buffer.length
+  ) {
+    return null;
+  }
+
+  switch (chunkType) {
+    case "VP8 ":
+      return readWebpLossyDimensions(buffer);
+    case "VP8L":
+      return readWebpLosslessDimensions(buffer);
+    case "VP8X":
+      return readWebpExtendedDimensions(buffer);
+  }
+  return null;
 }
 
 /** Smallest SOFn segment length that can hold precision, height, width and a component count. */
@@ -162,5 +247,5 @@ function readJpegDimensions(buffer: Buffer): ImagePixelDimensions | null {
  * before the scan data).
  */
 export function readImageHeaderDimensions(buffer: Buffer): ImagePixelDimensions | null {
-  return readPngDimensions(buffer) ?? readJpegDimensions(buffer);
+  return readPngDimensions(buffer) ?? readJpegDimensions(buffer) ?? readWebpDimensions(buffer);
 }

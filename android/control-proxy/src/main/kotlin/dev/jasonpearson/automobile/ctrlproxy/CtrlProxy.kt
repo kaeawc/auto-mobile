@@ -1720,14 +1720,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // Each method delegates to the corresponding perform*/handle* implementation below.
   // ===========================================================================
 
-  override fun requestHierarchy(disableAllFiltering: Boolean) =
-    extractHierarchyNow(disableAllFiltering)
+  override fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
+    extractHierarchyNow(disableAllFiltering, requestId = requestId)
 
   override fun requestHierarchy(
     disableAllFiltering: Boolean,
     maxDepth: Int?,
     maxNodes: Int?,
     displayId: Int?,
+    requestId: String?,
   ) =
     extractHierarchyNow(
       disableAllFiltering,
@@ -1737,10 +1738,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         displayId = displayId,
         isCancelled = { serviceScope.coroutineContext[Job]?.isActive == false },
       ),
+      requestId,
     )
 
-  override fun requestHierarchyIfStale(sinceTimestamp: Long) =
-    hierarchyDebouncer.extractIfStale(sinceTimestamp)
+  override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
+    hierarchyDebouncer.extractIfStale(sinceTimestamp) {
+      launchRequestScope(requestId) { extractHierarchyNow(requestId = requestId) }
+    }
 
   override fun setHierarchyInterval(intervalMs: Long?) {
     val resolvedIntervalMs = intervalMs ?: DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS
@@ -3300,6 +3304,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private fun extractHierarchyNow(
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
+    requestId: String? = null,
   ) {
     Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
     val hierarchy =
@@ -3319,7 +3324,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           },
           write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
           broadcast = { serialized ->
-            broadcastHierarchyUpdate(hierarchy, sync = true, serialized = serialized)
+            broadcastHierarchyUpdate(
+              hierarchy,
+              sync = true,
+              serialized = serialized,
+              requestId = requestId,
+            )
           },
           releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
         )
@@ -3384,7 +3394,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 writeHierarchyToFile(hierarchy, filename, serialized = serialized)
               },
               broadcast = { serialized ->
-                broadcastHierarchyUpdate(hierarchy, serialized = serialized)
+                broadcastHierarchyUpdate(hierarchy, serialized = serialized, requestId = uuid)
               },
               releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
             )
@@ -3549,6 +3559,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     hierarchy: ViewHierarchy,
     sync: Boolean = false,
     serialized: String? = null,
+    requestId: String? = null,
   ) {
     val contextAtExtraction = extractedHierarchyFrameContexts.remove(hierarchy)
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
@@ -3568,6 +3579,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           append(
             """{"type":"hierarchy_update","timestamp":${System.currentTimeMillis()},"data":$jsonString"""
           )
+          if (requestId != null) {
+            append(""","requestId":${jsonCompact.encodeToString(requestId)}""")
+          }
           if (contextAtExtraction != null && contextAtExtraction == currentFrameContext()) {
             append(""","frameContext":"$contextAtExtraction"""")
           }
@@ -3582,10 +3596,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (sync) {
           // Enqueue in call order; each client's sender preserves FIFO without waiting for
           // delivery.
-          webSocketServer.broadcastWithPerfSync(messageBuilder)
+          webSocketServer.broadcastWithPerfSync(
+            routeByRequestId = false,
+            messageBuilder = messageBuilder,
+          )
         } else {
           // Async broadcast - for normal event-driven updates
-          webSocketServer.broadcastWithPerf(messageBuilder)
+          webSocketServer.broadcastWithPerf(
+            routeByRequestId = false,
+            messageBuilder = messageBuilder,
+          )
         }
       }
       Log.d(

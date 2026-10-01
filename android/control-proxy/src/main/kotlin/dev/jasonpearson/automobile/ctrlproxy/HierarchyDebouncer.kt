@@ -517,7 +517,7 @@ internal constructor(
    *
    * @param sinceTimestamp The timestamp to compare against (usually the MCP request start time)
    */
-  fun extractIfStale(sinceTimestamp: Long) {
+  fun extractIfStale(sinceTimestamp: Long, extract: () -> Unit = { extractNow() }) {
     if (lastEventTimestamp <= sinceTimestamp) {
       // No events since the given timestamp - the UI is "stale" from MCP's perspective
       // Trigger immediate extraction to push current state
@@ -525,7 +525,7 @@ internal constructor(
         TAG,
         "extractIfStale: no events since $sinceTimestamp (lastEvent=$lastEventTimestamp), triggering extraction",
       )
-      extractNow()
+      extract()
     } else {
       Log.d(
         TAG,

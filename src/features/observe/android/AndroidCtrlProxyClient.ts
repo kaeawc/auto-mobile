@@ -283,6 +283,7 @@ interface ObservationStreamSuppression {
 interface WsHierarchyUpdateMessage extends WsMessageBase {
   type: "hierarchy_update";
   data: AccessibilityHierarchy;
+  requestId?: string | null;
   perfTiming?: AndroidPerfTiming[];
   frameContext?: string;
 }
@@ -4575,7 +4576,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     hierarchy_update: (message) => {
       if (message.data) {
-        this.handleHierarchyUpdate(message.data, message.perfTiming, message.frameContext);
+        this.handleHierarchyUpdate(
+          message.data,
+          message.perfTiming,
+          message.frameContext,
+          message.requestId,
+        );
       }
     },
 
@@ -5287,11 +5293,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     data: AccessibilityHierarchy,
     perfTiming?: AndroidPerfTiming[],
     frameContext?: string,
+    requestId?: string | null,
   ): void {
     const now = this.timer.now();
     logger.debug(
       `[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`,
     );
+
+    const incomingHierarchy: CachedHierarchy = {
+      hierarchy: data,
+      receivedAt: now,
+      fresh: true,
+      requestId,
+      perfTiming,
+      frameContext,
+    };
+    // A must-deliver correlated frame can leave the runner after a newer coalesced push.
+    // Complete its own waiter, but do not regress the shared cache or observation stream.
+    this._hierarchy?.resolvePendingHierarchy(requestId, incomingHierarchy);
+    if (this.cachedHierarchy && data.updatedAt < this.cachedHierarchy.hierarchy.updatedAt) {
+      return;
+    }
 
     // Mark previous cache as stale
     if (this.cachedHierarchy) {
@@ -5299,13 +5321,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     // Update cache with fresh data
-    this.cachedHierarchy = {
-      hierarchy: data,
-      receivedAt: now,
-      fresh: true,
-      perfTiming,
-      frameContext,
-    };
+    this.cachedHierarchy = incomingHierarchy;
 
     // Update cached screen dimensions
     this.updateCachedScreenDimensions(data);

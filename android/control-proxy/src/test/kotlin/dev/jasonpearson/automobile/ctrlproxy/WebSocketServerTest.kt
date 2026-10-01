@@ -621,6 +621,28 @@ class WebSocketServerTest {
   }
 
   @Test
+  fun `correlationRequestId reads correlated hierarchy frame`() {
+    val event = HierarchyUpdateEvent(timestamp = 0L, data = "{}", requestId = "hierarchy-1")
+    assertEquals("hierarchy-1", WebSocketServer.correlationRequestId(event))
+  }
+
+  @Test
+  fun `correlated hierarchy broadcast reaches clients without an owner entry`() =
+    runTest(testScope.testScheduler) {
+      val first = RecordingTransport()
+      val second = RecordingTransport()
+      server.registerClient(1, first)
+      server.registerClient(2, second)
+      val frame = """{"type":"hierarchy_update","requestId":"hierarchy-1","data":{}}"""
+
+      server.broadcastWithPerfSync(routeByRequestId = false) { frame }
+      runCurrent()
+
+      assertEquals(listOf(frame), first.messages)
+      assertEquals(listOf(frame), second.messages)
+    }
+
+  @Test
   fun `correlated response is queued only for its request owner`() =
     runTest(testScope.testScheduler) {
       val ownerTransport = RecordingTransport()

@@ -4005,6 +4005,210 @@ describe("AndroidCtrlProxyClient", function () {
     });
   });
 
+  describe("hierarchy success frame correlation (issue #6419)", function () {
+    test("a raw waiter ignores idless filtered pushes after correlated frames appeared", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      try {
+        const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
+        let settled = false;
+        void pending.then(() => {
+          settled = true;
+        });
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket);
+        const request = socket.sentMessages
+          .map((s) => JSON.parse(s) as { type: string; requestId: string })
+          .find((s) => s.type === "request_hierarchy");
+        expect(request).toBeDefined();
+        const push = (text: string, requestId?: string) =>
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              requestId,
+              timestamp: timer.now(),
+              data: { updatedAt: timer.now(), packageName: "com.example.app", hierarchy: { text } },
+            }),
+          );
+        push("another raw tree", "another-request");
+        push("filtered push");
+        timer.advanceTime(50);
+        await flushPromises();
+        expect(settled).toBe(false);
+        push("requested raw tree", request!.requestId);
+        expect((await pending)?.hierarchy.hierarchy.text).toBe("requested raw tree");
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("an older correlated tree resolves its waiter without replacing a newer cached tree", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      try {
+        const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket);
+        const request = socket.sentMessages
+          .map((s) => JSON.parse(s) as { type: string; requestId: string })
+          .find((s) => s.type === "request_hierarchy");
+        expect(request).toBeDefined();
+        client.handleHierarchyUpdate({
+          updatedAt: 200,
+          packageName: "com.example.app",
+          hierarchy: { text: "new" },
+        });
+        client.handleHierarchyUpdate(
+          { updatedAt: 100, packageName: "com.example.app", hierarchy: { text: "old" } },
+          undefined,
+          undefined,
+          request!.requestId,
+        );
+        expect((await pending)?.hierarchy.hierarchy.text).toBe("old");
+        expect((await client.getLatestHierarchy(false))?.hierarchy?.hierarchy.text).toBe("new");
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("a raw waiter ignores a correlated default-filter stale nudge", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+      try {
+        const pending = client.requestHierarchySync(undefined, true, undefined, 10000);
+        let settled = false;
+        void pending.then(() => {
+          settled = true;
+        });
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket);
+        const primary = socket.sentMessages
+          .map((s) => JSON.parse(s) as { type: string; requestId: string })
+          .find((s) => s.type === "request_hierarchy");
+        expect(primary).toBeDefined();
+        await flushPromises();
+        timer.advanceTime(2100);
+        await flushPromises();
+        const stale = socket.sentMessages
+          .map((s) => JSON.parse(s) as { type: string; requestId: string })
+          .find((s) => s.type === "request_hierarchy_if_stale");
+        expect(stale).toBeDefined();
+        const push = (text: string, requestId: string) =>
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              requestId,
+              timestamp: timer.now(),
+              data: { updatedAt: timer.now(), packageName: "com.example.app", hierarchy: { text } },
+            }),
+          );
+        push("default filter", stale!.requestId);
+        timer.advanceTime(50);
+        await flushPromises();
+        expect(settled).toBe(false);
+        push("raw", primary!.requestId);
+        expect((await pending)?.hierarchy.hierarchy.text).toBe("raw");
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("a waiter rejects another requestId and accepts its own", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+
+      try {
+        const syncPromise = client.requestHierarchySync(undefined, true, undefined, 10000);
+        let settled = false;
+        void syncPromise.then(() => {
+          settled = true;
+        });
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket);
+        const requests = socket.sentMessages
+          .map(
+            (message) =>
+              JSON.parse(message) as {
+                type: string;
+                requestId: string;
+                disableAllFiltering?: boolean;
+              },
+          )
+          .filter((message) => message.type === "request_hierarchy");
+        expect(requests).toHaveLength(1);
+        const requestId = requests[0]!.requestId;
+
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            requestId: "another-request",
+            timestamp: timer.now(),
+            data: {
+              updatedAt: timer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "filtered" },
+            },
+          }),
+        );
+        timer.advanceTime(50);
+        await flushPromises();
+        expect(settled).toBe(false);
+
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            requestId,
+            timestamp: timer.now(),
+            data: {
+              updatedAt: timer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "raw" },
+            },
+          }),
+        );
+        expect((await syncPromise)?.hierarchy.hierarchy.text).toBe("raw");
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("an old runner's idless update still satisfies the existing freshness wait", async function () {
+      const timer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(timer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, timer);
+
+      try {
+        const syncPromise = client.requestHierarchySync(undefined, false, undefined, 10000);
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket);
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: timer.now(),
+            data: {
+              updatedAt: timer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "legacy" },
+            },
+          }),
+        );
+        timer.advanceTime(50);
+        expect((await syncPromise)?.hierarchy.hierarchy.text).toBe("legacy");
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
   describe("hierarchy stale-nudge error frame correlation (issue #3061)", function () {
     // Sibling of #3032 for the request_hierarchy_if_stale nudge. That nudge is minted with a
     // `stale_` requestId from INSIDE waitForFreshData's interval callback (the "no push after 2s"

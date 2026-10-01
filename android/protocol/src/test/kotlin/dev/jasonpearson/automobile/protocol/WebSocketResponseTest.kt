@@ -79,6 +79,17 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""type":"hierarchy_update""""))
     assertTrue(encoded.contains(""""data":"{\"nodes\":[]}""""))
     assertTrue(encoded.contains(""""perfTiming":"{\"total\":50}""""))
+    assertTrue(encoded.contains("\"requestId\":null"), encoded)
+  }
+
+  @Test
+  fun `serialize correlated hierarchy_update event`() {
+    val response: WebSocketResponse =
+      HierarchyUpdateEvent(timestamp = 123L, data = "{}", requestId = "req-1")
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""requestId":"req-1""""))
   }
 
   @Test

@@ -106,8 +106,10 @@ class CtrlProxyMessageHandler(
           request.maxDepth,
           request.maxNodes,
           request.displayId,
+          request.requestId,
         )
-      is RequestHierarchyIfStale -> actions.requestHierarchyIfStale(request.sinceTimestamp)
+      is RequestHierarchyIfStale ->
+        actions.requestHierarchyIfStale(request.sinceTimestamp, request.requestId)
       is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
       is RequestScreenshot -> actions.requestScreenshot(request.requestId, request.displayId)
       is RequestSwipe -> {

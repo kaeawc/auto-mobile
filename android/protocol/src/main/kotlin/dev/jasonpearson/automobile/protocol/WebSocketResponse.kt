@@ -56,6 +56,7 @@ data class HierarchyUpdateEvent(
   override val timestamp: Long,
   val data: String, // JSON string of hierarchy data
   val perfTiming: String? = null,
+  val requestId: String? = null,
 ) : WebSocketResponse()
 
 @Serializable

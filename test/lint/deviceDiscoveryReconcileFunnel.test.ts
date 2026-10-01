@@ -28,6 +28,8 @@ import { blankComments } from "./blankComments";
 describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
   const SRC = join(ROOT, "src");
+  // The source-tree inventory can exceed Bun's default hook limit on loaded CI runners.
+  const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 
   /** The producer/consumer APIs that constitute "a device discovery". */
   const DISCOVERY_CALL =
@@ -285,7 +287,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     discoveryReconcileSource = blankComments(
       readFileSync(join(ROOT, "src/daemon/discoveryReconcile.ts"), "utf8"),
     );
-  });
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   function discoveryCallCounts(): Map<string, number> {
     if (cachedCounts !== undefined) {

@@ -63,10 +63,12 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
   const SYMBOL_SET = new Set<string>(SYMBOLS);
 
   /**
-   * A cheap raw-byte prefilter: only files that mention `CtrlProxy` at all pay
-   * for AST parsing and scanning, which keeps this inside the 100ms budget.
+   * A cheap text prefilter: only files mentioning both `CtrlProxy` and
+   * `getInstance` need AST analysis. Every relevant assignment names the seam.
    */
   const PREFILTER = "CtrlProxy";
+  // A loaded CI runner can spend several seconds parsing the full test inventory.
+  const TREE_SCAN_HOOK_TIMEOUT_MS = 20_000;
 
   // This guard's own file, excluded from the scan: its example snippets live in
   // string literals fed to the classifier directly, not as real seams.
@@ -250,24 +252,33 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
    * `relPathHint` only labels the synthetic parse; nothing keys off it.
    */
   function analyzeSource(source: string, relPathHint = "synthetic.ts"): FileFacts {
+    const program = programForSources(new Map([[relPathHint, source]]));
+    const sf = program.getSourceFile(relPathHint);
+    if (sf === undefined) {
+      throw new Error(`TypeScript did not create source file: ${relPathHint}`);
+    }
+    return analyzeFile(sf, program.getTypeChecker());
+  }
+
+  function programForSources(sources: ReadonlyMap<string, string>): ts.Program {
     const compilerOptions: ts.CompilerOptions = {
       noLib: true,
       noResolve: true,
       target: ts.ScriptTarget.Latest,
     };
     const host = ts.createCompilerHost(compilerOptions);
-    host.getSourceFile = (fileName, languageVersion) =>
-      fileName === relPathHint
-        ? ts.createSourceFile(fileName, source, languageVersion, true)
-        : undefined;
-    host.fileExists = (fileName) => fileName === relPathHint;
-    host.readFile = (fileName) => (fileName === relPathHint ? source : undefined);
-    const program = ts.createProgram([relPathHint], compilerOptions, host);
-    const sf = program.getSourceFile(relPathHint);
-    if (sf === undefined) {
-      throw new Error(`TypeScript did not create source file: ${relPathHint}`);
-    }
-    const checker = program.getTypeChecker();
+    host.getSourceFile = (fileName, languageVersion) => {
+      const source = sources.get(fileName);
+      return source === undefined
+        ? undefined
+        : ts.createSourceFile(fileName, source, languageVersion, true);
+    };
+    host.fileExists = (fileName) => sources.has(fileName);
+    host.readFile = (fileName) => sources.get(fileName);
+    return ts.createProgram([...sources.keys()], compilerOptions, host);
+  }
+
+  function analyzeFile(sf: ts.SourceFile, checker: ts.TypeChecker): FileFacts {
     const ctrlProxyBindings = new Map<ts.Symbol, CtrlProxySymbol>();
     for (const statement of sf.statements) {
       if (
@@ -590,22 +601,33 @@ describe("CtrlProxy getInstance mocks are restored in-file (issue #7052)", () =>
 
   beforeAll(() => {
     scan();
-  });
+  }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   function scan(): Map<string, FileFacts> {
     if (cached !== undefined) {
       return cached;
     }
     const facts = new Map<string, FileFacts>();
+    const candidates = new Map<string, string>();
     for (const file of walk(TEST)) {
-      if (!readFileSync(file).includes(PREFILTER)) {
+      const source = readFileSync(file, "utf8");
+      if (!source.includes(PREFILTER) || !source.includes("getInstance")) {
         continue;
       }
       const relPath = relative(ROOT, file).split(sep).join("/");
       if (relPath === SELF) {
         continue;
       }
-      const f = analyzeSource(readFileSync(file, "utf8"), relPath);
+      candidates.set(relPath, source);
+    }
+    const program = programForSources(candidates);
+    const checker = program.getTypeChecker();
+    for (const relPath of candidates.keys()) {
+      const sf = program.getSourceFile(relPath);
+      if (sf === undefined) {
+        throw new Error(`TypeScript did not create source file: ${relPath}`);
+      }
+      const f = analyzeFile(sf, checker);
       if (f.installs.size > 0 || f.restores.size > 0) {
         facts.set(relPath, f);
       }

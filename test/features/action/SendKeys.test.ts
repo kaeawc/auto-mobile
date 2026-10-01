@@ -9,6 +9,7 @@ import {
   type SendKeysTextClient,
 } from "../../../src/features/action/SendKeys";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { DELETE_KEYEVENT_CHUNK_SIZE } from "../../../src/features/action/ClearText";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -702,9 +703,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(await executor.clear()).toMatchObject({ success: true });
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
     ]);
   });
 
@@ -1901,9 +1900,9 @@ describe("DefaultSendKeysCommandExecutor", () => {
   test("marks a replacement clear failure after a delete as partially applied", async () => {
     const adb = new FakeAdbExecutor();
     const executeCommand = adb.executeCommand.bind(adb);
-    let deleteCount = 0;
+    let deleteChunkCount = 0;
     adb.executeCommand = async (command, ...options) => {
-      if (command === "shell input keyevent KEYCODE_DEL" && ++deleteCount === 2) {
+      if (command.includes("KEYCODE_DEL") && ++deleteChunkCount === 2) {
         throw new Error("delete rejected");
       }
       return executeCommand(command, ...options);
@@ -1911,7 +1910,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     const executor = new DefaultSendKeysCommandExecutor(
       androidDevice,
       createAdbFactory(adb),
-      createObserver(focusedAndroidObservation("old")),
+      createObserver(focusedAndroidObservation("x".repeat(DELETE_KEYEVENT_CHUNK_SIZE + 1))),
       { textClient: createTextClient().client },
     );
 
@@ -1929,7 +1928,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
+      `shell input keyevent ${Array<string>(DELETE_KEYEVENT_CHUNK_SIZE).fill("KEYCODE_DEL").join(" ")}`,
     ]);
   });
 

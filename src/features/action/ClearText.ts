@@ -19,6 +19,7 @@ import { toSearchable } from "../utility/SearchableNode";
 import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
 
 export const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
+export const DELETE_KEYEVENT_CHUNK_SIZE = 50;
 
 function extractSearchRootGroups(
   viewHierarchy: ViewHierarchyResult,
@@ -119,9 +120,11 @@ export async function clearTextWithKeyEvents(
   await adb.executeCommand("shell input keyevent KEYCODE_MOVE_END");
   signal?.throwIfAborted();
 
-  for (let index = 0; index < count; index++) {
+  for (let index = 0; index < count; index += DELETE_KEYEVENT_CHUNK_SIZE) {
     signal?.throwIfAborted();
-    await adb.executeCommand("shell input keyevent KEYCODE_DEL");
+    const chunkSize = Math.min(DELETE_KEYEVENT_CHUNK_SIZE, count - index);
+    const deleteKeyEvents = Array<string>(chunkSize).fill("KEYCODE_DEL").join(" ");
+    await adb.executeCommand(`shell input keyevent ${deleteKeyEvents}`);
     onDelete?.();
     signal?.throwIfAborted();
   }

@@ -13,6 +13,10 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { FakeEmulatorConsoleBusyRegistry } from "../../fakes/FakeEmulatorConsoleBusyRegistry";
+import {
+  noOpSnapshotDirectorySync,
+  noOpSnapshotFileSync,
+} from "../../helpers/deviceSnapshotStoreSync";
 
 describe("CaptureSnapshot", () => {
   let device: BootedDevice;
@@ -40,7 +44,7 @@ describe("CaptureSnapshot", () => {
 
     // Create secure temporary directory for tests
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-test-"));
-    store = new DeviceSnapshotStore(testBasePath);
+    store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create CaptureSnapshot instance with fakes
     captureSnapshot = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
@@ -602,7 +606,7 @@ describe("CaptureSnapshot (iOS)", () => {
 
     simctl = new FakeSimCtlClient();
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-capture-"));
-    store = new DeviceSnapshotStore(testBasePath);
+    store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });
 
   afterEach(async () => {
@@ -1034,7 +1038,7 @@ describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => 
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-traversal-test-"));
-    store = new DeviceSnapshotStore(testBasePath);
+    store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });
 
   afterEach(async () => {

@@ -4,6 +4,10 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { logger } from "../../src/utils/logger";
+import {
+  noOpSnapshotDirectorySync,
+  noOpSnapshotFileSync,
+} from "../helpers/deviceSnapshotStoreSync";
 
 describe("DeviceSnapshotStore", () => {
   let store: DeviceSnapshotStore;
@@ -11,7 +15,7 @@ describe("DeviceSnapshotStore", () => {
 
   beforeEach(async () => {
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-store-test-"));
-    store = new DeviceSnapshotStore(testBasePath);
+    store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
     await store.ensureSnapshotsDirectory();
   });
 
@@ -161,6 +165,44 @@ describe("DeviceSnapshotStore", () => {
       expect(await fs.readdir(testBasePath)).toEqual([snapshotName]);
     });
 
+    it("syncs journal files before rename and the parent directory after rename", async () => {
+      const name = "sync-order";
+      const events: string[] = [];
+      const originalRename = fs.rename.bind(fs);
+      const renameSpy = spyOn(fs, "rename").mockImplementation(async (source, destination) => {
+        events.push(
+          String(source).endsWith(".journal.tmp.replacing") ? "rename-journal" : "rename-other",
+        );
+        await originalRename(source, destination);
+      });
+      const recordingStore = new DeviceSnapshotStore(
+        testBasePath,
+        async () => {
+          events.push("sync-directory");
+        },
+        async () => {
+          events.push("sync-file");
+        },
+      );
+
+      try {
+        await recordingStore.replaceSnapshotData(name, undefined, async () => {
+          await fs.mkdir(recordingStore.getSnapshotPath(name));
+        });
+      } finally {
+        renameSpy.mockRestore();
+      }
+
+      const journalRenameIndexes = events.flatMap((event, index) =>
+        event === "rename-journal" ? [index] : [],
+      );
+      expect(journalRenameIndexes.length).toBe(2);
+      for (const index of journalRenameIndexes) {
+        expect(events[index - 1]).toBe("sync-file");
+        expect(events[index + 1]).toBe("sync-directory");
+      }
+    });
+
     for (const code of ["EPERM", "EINVAL", "EISDIR", "ENOTSUP"]) {
       it(`replaces a snapshot when directory sync reports ${code}`, async () => {
         const name = "unsupported-directory-sync";
@@ -169,10 +211,14 @@ describe("DeviceSnapshotStore", () => {
         await fs.writeFile(path.join(dest, "old.txt"), "old");
         const syncPaths: string[] = [];
         const syncFailure = Object.assign(new Error("directory sync unsupported"), { code });
-        const storeWithSyncFailure = new DeviceSnapshotStore(testBasePath, async (dirPath) => {
-          syncPaths.push(dirPath);
-          throw syncFailure;
-        });
+        const storeWithSyncFailure = new DeviceSnapshotStore(
+          testBasePath,
+          async (dirPath) => {
+            syncPaths.push(dirPath);
+            throw syncFailure;
+          },
+          noOpSnapshotFileSync,
+        );
 
         await storeWithSyncFailure.replaceSnapshotData(name, undefined, async () => {
           await fs.mkdir(dest);
@@ -188,9 +234,13 @@ describe("DeviceSnapshotStore", () => {
 
     it("propagates EIO from directory sync", async () => {
       const syncFailure = Object.assign(new Error("directory sync failed"), { code: "EIO" });
-      const storeWithSyncFailure = new DeviceSnapshotStore(testBasePath, async () => {
-        throw syncFailure;
-      });
+      const storeWithSyncFailure = new DeviceSnapshotStore(
+        testBasePath,
+        async () => {
+          throw syncFailure;
+        },
+        noOpSnapshotFileSync,
+      );
 
       await expect(
         storeWithSyncFailure.replaceSnapshotData("failed-sync", undefined, async () => {
@@ -204,12 +254,16 @@ describe("DeviceSnapshotStore", () => {
       await fs.mkdir(path.join(testBasePath, name));
       const syncFailure = Object.assign(new Error("directory sync failed"), { code: "ENOENT" });
       let syncCalls = 0;
-      const storeWithSyncFailure = new DeviceSnapshotStore(testBasePath, async () => {
-        syncCalls++;
-        if (syncCalls === 2) {
-          throw syncFailure;
-        }
-      });
+      const storeWithSyncFailure = new DeviceSnapshotStore(
+        testBasePath,
+        async () => {
+          syncCalls++;
+          if (syncCalls === 2) {
+            throw syncFailure;
+          }
+        },
+        noOpSnapshotFileSync,
+      );
 
       await expect(
         storeWithSyncFailure.replaceSnapshotData(name, undefined, async () => {
@@ -290,7 +344,11 @@ describe("DeviceSnapshotStore", () => {
         name,
         `${name}.replacing`,
       ]);
-      await new DeviceSnapshotStore(testBasePath).recoverSnapshotData(name);
+      await new DeviceSnapshotStore(
+        testBasePath,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      ).recoverSnapshotData(name);
 
       expect(await fs.readdir(dest)).toEqual(["old.txt"]);
       expect(await fs.readdir(testBasePath)).toEqual([name]);
@@ -305,7 +363,11 @@ describe("DeviceSnapshotStore", () => {
       await fs.writeFile(path.join(`${dest}.replacing`, "old.txt"), "old");
       await fs.writeFile(journal(dest), "committed");
 
-      await new DeviceSnapshotStore(testBasePath).recoverSnapshotData(name);
+      await new DeviceSnapshotStore(
+        testBasePath,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      ).recoverSnapshotData(name);
 
       expect(await fs.readFile(path.join(dest, "new.txt"), "utf-8")).toBe("new");
       expect(await fs.readdir(testBasePath)).toEqual([name]);

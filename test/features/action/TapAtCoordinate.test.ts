@@ -8,6 +8,10 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import {
+  loadAndroidHomeObserve,
+  loadIosFractionalObserve,
+} from "../../fixtures/observe/observeFixture";
 
 const androidDevice = {
   name: "Android test device",
@@ -317,6 +321,85 @@ describe("TapAtCoordinate", () => {
 
     expect(result).toMatchObject({ success: true, x: 500, y: 700 });
     expect(androidDispatches).toEqual([{ x: 500, y: 700, frameContext: "frame-123" }]);
+  });
+
+  test("dispatches the center of a captured Android observe bound in physical pixels", async () => {
+    const captured = loadAndroidHomeObserve().observe;
+    const bounds = captured.elements?.clickable[0]?.bounds;
+    if (!bounds) {
+      throw new Error("Android capture has no clickable bounds");
+    }
+    const x = (bounds.left + bounds.right) / 2;
+    const y = (bounds.top + bounds.bottom) / 2;
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice);
+    observeScreen.setObserveResult(captured);
+
+    const result = await tapAt.execute({ x, y });
+
+    expect(captured.screenSize).toEqual({ width: 1080, height: 2400 });
+    expect(result).toMatchObject({ success: true, x: Math.round(x), y: Math.round(y) });
+    expect(androidDispatches).toEqual([
+      { x: Math.round(x), y: Math.round(y), frameContext: captured.viewHierarchy?.frameContext },
+    ]);
+  });
+
+  test("dispatches a fractional iOS observe bound in XCTest points despite Retina scale", async () => {
+    const captured = loadIosFractionalObserve();
+    const bounds = captured.elements?.text[0]?.bounds;
+    if (!bounds) {
+      throw new Error("iOS fixture has no text bounds");
+    }
+    const x = (bounds.left + bounds.right) / 2;
+    const y = (bounds.top + bounds.bottom) / 2;
+    const { tapAt, observeScreen, iosDispatches } = createTapAt(iosDevice);
+    observeScreen.setObserveResult(captured);
+
+    const result = await tapAt.execute({ x, y });
+
+    expect(captured.screenSize).toEqual({ width: 393, height: 852 });
+    expect(captured.viewHierarchy?.screenScale).toBe(3);
+    expect(result).toMatchObject({ success: true, x, y });
+    expect(iosDispatches).toEqual([{ x, y, frameContext: captured.viewHierarchy?.frameContext }]);
+  });
+
+  test("uses current-orientation landscape bounds without rotating the native tap", async () => {
+    const captured = loadAndroidHomeObserve().observe;
+    const portrait = captured.elements?.clickable[0]?.bounds;
+    if (!portrait) {
+      throw new Error("Android capture has no clickable bounds");
+    }
+    // Rotate the captured rectangle into a landscape observation; no landscape
+    // observe capture is stored in-tree. The input path must consume it as-is.
+    const landscape = observation(
+      captured.screenSize.height,
+      captured.screenSize.width,
+      "landscape-frame",
+      90,
+      {
+        bounds: {
+          left: captured.screenSize.height - portrait.bottom,
+          top: portrait.left,
+          right: captured.screenSize.height - portrait.top,
+          bottom: portrait.right,
+        },
+      },
+    );
+    const bounds = landscape.viewHierarchy?.hierarchy.node.bounds;
+    if (!bounds) {
+      throw new Error("Landscape observation has no bounds");
+    }
+    const x = (bounds.left + bounds.right) / 2;
+    const y = (bounds.top + bounds.bottom) / 2;
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(androidDevice);
+    observeScreen.setObserveResult(landscape);
+
+    const result = await tapAt.execute({ x, y });
+
+    expect(landscape.screenSize).toEqual({ width: 2400, height: 1080 });
+    expect(result).toMatchObject({ success: true, x: Math.round(x), y: Math.round(y) });
+    expect(androidDispatches).toEqual([
+      { x: Math.round(x), y: Math.round(y), frameContext: "landscape-frame" },
+    ]);
   });
 
   test("preserves iOS fractional XCTest points without scale or canonical-pixel conversion", async () => {

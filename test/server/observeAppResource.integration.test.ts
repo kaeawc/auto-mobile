@@ -33,8 +33,8 @@ describe("renderObserveAppHtml", () => {
     const html = renderObserveAppHtml(iosObserve());
     expect(html).toContain('viewBox="0 0 393 852"');
     expect(countBoxes(html)).toBe(4);
-    // 851.6666… must not be truncated to an integer.
-    expect(html).toMatch(/851\.667/);
+    // Fractional child coordinates must not be truncated to integers.
+    expect(html).toContain('y="59.333"');
   });
 
   test("embeds the screenshot as an inline <image> when provided, and omits it otherwise", () => {

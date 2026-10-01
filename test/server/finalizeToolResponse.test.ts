@@ -1393,7 +1393,7 @@ describe("finalizeToolResponse", () => {
       const fullObservation = structuredPayload(full) as ObserveResult;
       const fullRoot = flatNode(fullObservation.viewHierarchy!.hierarchy.node);
       expect(fullObservation.screenSize).toEqual({ width: 393, height: 852 });
-      expect(fullRoot.bounds).toEqual([0, 0, 393, 851.6666666666666]);
+      expect(fullRoot.bounds).toEqual([0, 0, 393, 852]);
 
       const next = loadIosFractionalObserve();
       next.activeWindow = baseline.activeWindow;

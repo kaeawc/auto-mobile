@@ -42,6 +42,14 @@ export interface WorkflowConcurrency {
 
 /** A job's own configuration, minus its steps. */
 export interface WorkflowJob {
+  "runs-on"?: string | string[] | Record<string, unknown>;
+  strategy?: {
+    matrix?: {
+      os?: string[];
+      config?: { runner?: string }[];
+      runner?: string[];
+    };
+  };
   "timeout-minutes"?: number;
   needs?: string | string[];
   /** Set when the job delegates to a reusable workflow. */

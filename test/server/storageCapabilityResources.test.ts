@@ -10,6 +10,10 @@ import { PlatformDeviceManagerFactory } from "../../src/utils/factories/Platform
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import type { BootedDevice } from "../../src/models";
+import type { StorageCapabilityDependencies } from "../../src/server/storageCapabilityResources";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { AndroidUserTargetUnavailableError } from "../../src/utils/android-cmdline-tools/AndroidUserTargetResolver";
 
 // Like storageResources, the handler builds a URI, resolves a booted device, and
 // returns a JSON envelope. With no booted device it returns "device not found"
@@ -34,9 +38,17 @@ describe("storageCapabilityResources", () => {
     ResourceRegistry.clearResources();
   });
 
-  function setDevices(devices: BootedDevice[]): void {
+  function setDevices(
+    devices: BootedDevice[],
+    dependencies: StorageCapabilityDependencies = {
+      adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 0, source: "currentUser" }),
+      }),
+    },
+  ): void {
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], devices));
-    registerStorageCapabilityResources();
+    registerStorageCapabilityResources(dependencies);
   }
 
   function readResource(uri: string) {
@@ -72,7 +84,7 @@ describe("storageCapabilityResources", () => {
     // future template on this prefix greedily capturing `capabilities`.
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], []));
     registerStorageResources();
-    registerStorageCapabilityResources();
+    registerStorageCapabilityResources({ adbFactory: new FakeAdbClientFactory() });
     const content = await readResource("automobile:devices/emulator-5554/storage/capabilities");
     const body = JSON.parse(content.text ?? "{}");
     // The capability handler emits schemaVersion; the files/entries handlers do not.
@@ -148,15 +160,97 @@ describe("storageCapabilityResources", () => {
     const previous = serverConfig.isEmbeddedSdkEnabled();
     serverConfig.setEmbeddedSdkEnabled(false);
     try {
-      const ctx = resolveStorageCapabilityContext(androidEmulator, "com.x");
+      const ctx = resolveStorageCapabilityContext(androidEmulator, "com.x", true);
       expect(ctx.platform).toBe("android");
       expect(ctx.deviceType).toBe("emulator");
       expect(ctx.embeddedSdk).toBe(false);
       expect(ctx.sessionActive).toBe(true);
       expect(ctx.appId).toBe("com.x");
+      expect(ctx.activeUserProfile).toBe(true);
     } finally {
       serverConfig.setEmbeddedSdkEnabled(previous);
     }
+  });
+
+  test("probes the current Android user and supports shared-storage operations", async () => {
+    const adb = new FakeAdbExecutor();
+    // Captured current-user output reused from AndroidUserTargetResolver.test.ts.
+    adb.setCommandResponse("am get-current-user", {
+      stdout: "0",
+      stderr: "",
+      toString: () => "0",
+      trim: () => "0",
+      includes: (value) => value === "0",
+    });
+    const factory = new FakeAdbClientFactory(adb);
+    setDevices([androidEmulator], { adbFactory: factory });
+    const content = await readResource("automobile:devices/emulator-5554/storage/capabilities");
+    const body = JSON.parse(content.text ?? "{}");
+    expect(factory.wasCalledForDevice(androidEmulator.deviceId)).toBe(true);
+    expect(adb.getExecutedCommands()).toEqual(["shell am get-current-user"]);
+    expect(body.context.activeUserProfile).toBe(true);
+    const userFiles = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "user_files",
+    );
+    expect(userFiles.operations.map((operation: { state: string }) => operation.state)).toEqual([
+      "supported",
+      "supported",
+      "supported",
+    ]);
+  });
+
+  test("reports unavailable when no Android user can be selected", async () => {
+    setDevices([androidEmulator], {
+      adbFactory: new FakeAdbClientFactory(),
+      createUserResolver: () => ({
+        resolve: async () => {
+          throw new AndroidUserTargetUnavailableError("no selectable user");
+        },
+      }),
+    });
+    const content = await readResource("automobile:devices/emulator-5554/storage/capabilities");
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.context.activeUserProfile).toBe(false);
+    const userFiles = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "user_files",
+    );
+    expect(userFiles.operations.map((operation: { state: string }) => operation.state)).toEqual([
+      "unavailable",
+      "unavailable",
+      "unavailable",
+    ]);
+  });
+
+  test("keeps the profile unverified when the device probe fails", async () => {
+    setDevices([androidEmulator], {
+      adbFactory: new FakeAdbClientFactory(),
+      createUserResolver: () => ({
+        resolve: async () => {
+          throw new Error("adb disconnected");
+        },
+      }),
+    });
+    const content = await readResource("automobile:devices/emulator-5554/storage/capabilities");
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.context.activeUserProfile).toBeUndefined();
+    const userFiles = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "user_files",
+    );
+    expect(userFiles.operations.map((operation: { state: string }) => operation.state)).toEqual([
+      "partial",
+      "partial",
+      "partial",
+    ]);
+  });
+
+  test("does not probe iOS devices", async () => {
+    const factory = new FakeAdbClientFactory();
+    setDevices([iosPhysical], { adbFactory: factory });
+    const content = await readResource(
+      "automobile:devices/00008110-000A1B2C3D4E5F60/storage/capabilities",
+    );
+    expect(JSON.parse(content.text ?? "{}").context.activeUserProfile).toBeUndefined();
+    expect(factory.getCallCount()).toBe(0);
   });
 
   // Regression: the resource registry already percent-decodes query params via

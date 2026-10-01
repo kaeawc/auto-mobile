@@ -44,6 +44,11 @@ public final class GesturePerformer: GesturePerforming {
         }
     }
 
+    nonisolated static func swipeVelocity(distance: Double, duration: TimeInterval) -> Double? {
+        guard distance.isFinite, duration.isFinite, distance > 0, duration > 0 else { return nil }
+        return min(max(distance / duration, 100), 10000)
+    }
+
     public enum GestureError: LocalizedError {
         case noApplication
         case elementNotFound(String)
@@ -719,7 +724,7 @@ public final class GesturePerformer: GesturePerforming {
 
         // MARK: - Swipe Gestures
 
-        public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration _: TimeInterval) throws {
+        public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
             guard let app = application else {
                 throw GestureError.noApplication
             }
@@ -729,11 +734,14 @@ public final class GesturePerformer: GesturePerforming {
                     .withOffset(CGVector(dx: startX, dy: startY))
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: endX, dy: endY))
+                let distance = hypot(endX - startX, endY - startY)
+                let velocity = Self.swipeVelocity(distance: distance, duration: duration)
+                    .map(XCUIGestureVelocity.init) ?? .default
 
                 startCoordinate.press(
                     forDuration: 0.05,
                     thenDragTo: endCoordinate,
-                    withVelocity: .default,
+                    withVelocity: velocity,
                     thenHoldForDuration: 0
                 )
             }

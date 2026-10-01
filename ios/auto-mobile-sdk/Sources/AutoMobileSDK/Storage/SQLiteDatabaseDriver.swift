@@ -217,7 +217,17 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         defer { operationLock.unlock() }
 
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let classification = classifySQL(trimmed)
+        let classification = Self.classifySQL(databasePath: databasePath, query: trimmed)
+        if classification.hasMultipleStatements {
+            let message = "Multiple SQL statements are not supported"
+            return SQLExecutionResult(
+                columns: nil,
+                rows: nil,
+                rowsAffected: 0,
+                error: message,
+                diagnostic: StorageDiagnostic(code: "multiple_statements_not_supported", message: message)
+            )
+        }
         guard let db = openDatabase(path: databasePath, readOnly: classification.readOnly) else {
             let diagnostic = StorageDiagnostic(
                 code: "store_unavailable",
@@ -274,7 +284,56 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return db
     }
 
-    private func classifySQL(_ query: String) -> SQLClassification {
+    static func classifySQL(
+        databasePath: String,
+        query: String,
+        allowSyntaxFallback: Bool = false
+    )
+        -> SQLClassification
+    {
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(databasePath, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              let connection
+        else {
+            if let connection { sqlite3_close(connection) }
+            return allowSyntaxFallback
+                ? classifySQLSyntax(query)
+                : SQLClassification(returnsRows: false, readOnly: false)
+        }
+        defer { sqlite3_close(connection) }
+
+        return query.withCString { sql in
+            var statement: OpaquePointer?
+            var tail: UnsafePointer<CChar>?
+            guard sqlite3_prepare_v2(connection, sql, -1, &statement, &tail) == SQLITE_OK else {
+                if let statement { sqlite3_finalize(statement) }
+                return SQLClassification(returnsRows: false, readOnly: false)
+            }
+            defer { sqlite3_finalize(statement) }
+            guard let statement else {
+                return SQLClassification(returnsRows: false, readOnly: false)
+            }
+
+            while let remaining = tail, remaining.pointee != 0 {
+                var nextStatement: OpaquePointer?
+                var nextTail: UnsafePointer<CChar>?
+                let result = sqlite3_prepare_v2(connection, remaining, -1, &nextStatement, &nextTail)
+                if let nextStatement { sqlite3_finalize(nextStatement) }
+                if result != SQLITE_OK || nextStatement != nil {
+                    return SQLClassification(returnsRows: false, readOnly: false, hasMultipleStatements: true)
+                }
+                guard nextTail != remaining else { break }
+                tail = nextTail
+            }
+
+            return SQLClassification(
+                returnsRows: sqlite3_column_count(statement) > 0,
+                readOnly: sqlite3_stmt_readonly(statement) != 0
+            )
+        }
+    }
+
+    private static func classifySQLSyntax(_ query: String) -> SQLClassification {
         guard let statement = findTopLevelStatement(in: query) else {
             return SQLClassification(returnsRows: false, readOnly: false)
         }
@@ -285,7 +344,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         case "PRAGMA":
             // PRAGMA is read-only unless it contains '=' (e.g. PRAGMA user_version = 1).
             return SQLClassification(returnsRows: !query.contains("="), readOnly: !query.contains("="))
-        case "INSERT", "UPDATE", "DELETE":
+        case "INSERT", "UPDATE", "DELETE", "REPLACE":
             let hasReturning = findTopLevelKeyword(
                 in: query,
                 from: query.index(statement.index, offsetBy: statement.keyword.count),
@@ -297,11 +356,11 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         }
     }
 
-    private func startsWithKeyword(_ text: String, _ keyword: String) -> Bool {
+    private static func startsWithKeyword(_ text: String, _ keyword: String) -> Bool {
         matchesKeyword(in: text, at: text.startIndex, keyword: keyword)
     }
 
-    private func matchesKeyword(in text: String, at index: String.Index, keyword: String) -> Bool {
+    private static func matchesKeyword(in text: String, at index: String.Index, keyword: String) -> Bool {
         if index > text.startIndex, isWordChar(text[text.index(before: index)]) {
             return false
         }
@@ -316,12 +375,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return !isWordChar(text[next])
     }
 
-    private func isWordChar(_ char: Character) -> Bool {
+    private static func isWordChar(_ char: Character) -> Bool {
         char.isLetter || char.isNumber || char == "_"
     }
 
-    private func findTopLevelStatement(in query: String) -> SQLKeyword? {
-        let keywords = ["SELECT", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE"]
+    private static func findTopLevelStatement(in query: String) -> SQLKeyword? {
+        let keywords = ["SELECT", "PRAGMA", "EXPLAIN", "INSERT", "UPDATE", "DELETE", "REPLACE"]
         if !startsWithKeyword(query, "WITH") {
             return keywords.first(where: { startsWithKeyword(query, $0) }).map {
                 SQLKeyword(keyword: $0, index: query.startIndex)
@@ -335,7 +394,13 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         )
     }
 
-    private func findTopLevelKeyword(in query: String, from start: String.Index, keywords: [String]) -> SQLKeyword? {
+    private static func findTopLevelKeyword(
+        in query: String,
+        from start: String.Index,
+        keywords: [String]
+    )
+        -> SQLKeyword?
+    {
         var depth = 0
         var i = start
         var inSingleQuote = false
@@ -625,9 +690,10 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 }
 
-private struct SQLClassification {
+struct SQLClassification {
     let returnsRows: Bool
     let readOnly: Bool
+    var hasMultipleStatements = false
 }
 
 private struct SQLKeyword {

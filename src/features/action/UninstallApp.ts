@@ -13,7 +13,11 @@ import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  resolveIosDeviceBackend,
+  type DeviceAppUninstaller,
+} from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+export type { DeviceAppUninstaller } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import {
   createGlobalPerformanceTracker,
   type PerformanceTracker,
@@ -38,10 +42,6 @@ import {
 
 const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
 const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
-
-export interface DeviceAppUninstaller {
-  uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
-}
 
 export class UninstallApp {
   private device: BootedDevice;
@@ -71,10 +71,6 @@ export class UninstallApp {
     this.installedAppsRepository = installedAppsRepository;
     this.createPerformanceTracker = performanceTrackerFactory;
     this.cacheInvalidator = cacheInvalidator || new DefaultDeviceWindowCacheInvalidator();
-  }
-
-  private isSimulator(): boolean {
-    return isIosSimulatorUdid(this.device.deviceId);
   }
 
   /**
@@ -144,8 +140,6 @@ export class UninstallApp {
    */
   private async executeiOS(bundleId: string): Promise<UninstallAppResult> {
     try {
-      const simulator = this.isSimulator();
-
       // Check if app is installed. Keep the cache disabled so the pre-uninstall
       // check always reflects live device state (the previous executor-arg path
       // left caching off; passing the default factory would silently enable it).
@@ -183,17 +177,10 @@ export class UninstallApp {
         };
       }
 
-      // Terminate app if it's running before uninstalling
-      if (simulator) {
-        try {
-          await this.simctl.terminateApp(bundleId, this.device.deviceId);
-        } catch (error) {
-          logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
-        }
-      }
-
-      // Uninstall the app via simctl (simulator) or devicectl (physical)
-      await this.deviceAppUninstaller.uninstallApp(this.device.deviceId, bundleId, simulator);
+      await resolveIosDeviceBackend(this.device.deviceId, {
+        simctl: this.simctl,
+        deviceAppUninstaller: this.deviceAppUninstaller,
+      }).uninstallApp(bundleId);
       await this.markInstalledAppsCacheStale();
 
       // Verify the app was uninstalled. A listing that fails here is

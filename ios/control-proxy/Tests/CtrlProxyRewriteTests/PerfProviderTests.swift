@@ -1,5 +1,6 @@
 @testable import CtrlProxyRewrite
 import Foundation
+import os
 import XCTest
 
 /// A `@MainActor` collaborator that records a nested perf block, standing in for the rewrite's
@@ -264,5 +265,106 @@ final class PerfProviderTests: XCTestCase {
     func testPerfProviderIsSendable() {
         func requireSendable(_: some Sendable) {}
         requireSendable(PerfProvider(timeProvider: FakeTimeProvider()))
+    }
+}
+
+final class FakeGestureLogSink: GestureLogSink, Sendable {
+    private let storage = OSAllocatedUnfairLock(initialState: [String]())
+    func warning(_ line: String) { storage.withLock { $0.append(line) } }
+    var lines: [String] { storage.withLock { $0 } }
+}
+
+extension PerfProviderTests {
+    func testGesturePhasesSumToTotalAndEncodeThroughRealResponse() throws {
+        let clock = FakeMonotonicClock()
+        let sink = FakeGestureLogSink()
+        let diagnostics = GesturePhaseDiagnostics(
+            command: "request_swipe",
+            receivedAtMs: 0,
+            deadlineMs: nil,
+            now: { clock.now() },
+            sink: sink
+        )
+        for phase in [
+            "executionPreparation",
+            "targetResolution",
+            "coordinateResolution",
+            "xcuitestGesture",
+            "postGesture",
+        ] {
+            clock.advance(by: 10)
+            diagnostics.begin(phase)
+        }
+        clock.advance(by: 10)
+        let timing = diagnostics.finish()
+        XCTAssertEqual(timing.durationMs, 60)
+        XCTAssertEqual(timing.children?.reduce(0) { $0 + $1.durationMs }, 60)
+        XCTAssertTrue(sink.lines.isEmpty)
+        let response = WebSocketResponse(type: "swipe_result", timestamp: 42, success: true, totalTimeMs: 60)
+            .withPerfTiming(timing, totalTimeMs: 60)
+        let encoded = try JSONEncoder().encode(response)
+        let decoded = try JSONDecoder().decode(WebSocketResponse.self, from: encoded)
+        XCTAssertEqual(
+            decoded.perfTiming?.children?.map(\.name),
+            [
+                "queueWait",
+                "executionPreparation",
+                "targetResolution",
+                "coordinateResolution",
+                "xcuitestGesture",
+                "postGesture",
+            ]
+        )
+    }
+
+    func testGestureDeadlineLogsExactlyOnceEvenBelowSlowThreshold() {
+        let clock = FakeMonotonicClock()
+        let sink = FakeGestureLogSink()
+        let diagnostics = GesturePhaseDiagnostics(
+            command: "request_swipe",
+            receivedAtMs: 0,
+            deadlineMs: 5,
+            now: { clock.now() },
+            sink: sink
+        )
+        clock.advance(by: 10)
+        diagnostics.begin("executionPreparation")
+        diagnostics.markDeadlineExceeded()
+        diagnostics.finish()
+        diagnostics.finish()
+        XCTAssertEqual(
+            sink.lines,
+            [
+                "gesture_phases command=request_swipe queueWaitMs=10 executionPreparationMs=0 totalMs=10 deadlineRemainingMs=-5",
+            ]
+        )
+    }
+
+    func testGestureSlowThresholdAndNoPerfResponseUnchanged() throws {
+        for (elapsed, expectedLogs) in [(1999, 0), (2000, 0), (2001, 1)] {
+            let clock = FakeMonotonicClock()
+            let sink = FakeGestureLogSink()
+            let diagnostics = GesturePhaseDiagnostics(
+                command: "request_tap_coordinates",
+                receivedAtMs: 0,
+                deadlineMs: nil,
+                now: { clock.now() },
+                sink: sink
+            )
+            diagnostics.begin("xcuitestGesture")
+            clock.advance(by: Int64(elapsed))
+            diagnostics.finish()
+            diagnostics.finish()
+            XCTAssertEqual(sink.lines.count, expectedLogs)
+            XCTAssertNil(diagnostics.attaching(to: nil))
+            let response = WebSocketResponse(type: "swipe_result", timestamp: 42, success: true, totalTimeMs: 12)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let before = try encoder.encode(response)
+            let after = try diagnostics.attaching(to: nil).map { timing in
+                try encoder.encode(response.withPerfTiming(timing, totalTimeMs: 12))
+            } ?? encoder.encode(response)
+            XCTAssertEqual(before, after)
+        }
     }
 }

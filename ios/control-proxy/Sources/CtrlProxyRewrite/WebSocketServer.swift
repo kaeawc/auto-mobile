@@ -169,6 +169,7 @@ final class WebSocketServer: @unchecked Sendable {
     /// the main-thread wedge this guards against lasted 45-51s, so >10s is pathological.
     static let defaultBusyBudgetMs: Int64 = 10000
     private let busyBudgetMs: Int64
+    private let gestureLogSink: any GestureLogSink
     private let monotonicNowMs: @Sendable () -> Int64
     private let commandState = OSAllocatedUnfairLock<CommandState>(initialState: CommandState())
 
@@ -199,6 +200,7 @@ final class WebSocketServer: @unchecked Sendable {
         monotonicNowMs: @escaping @Sendable () -> Int64 = {
             Int64(ProcessInfo.processInfo.systemUptime * 1000)
         },
+        gestureLogSink: any GestureLogSink = SystemGestureLogSink(),
         listenerFactory: @escaping @Sendable (UInt16) throws -> any ServerListening = {
             try WebSocketServer.makeLoopbackListener(port: $0)
         }
@@ -215,6 +217,7 @@ final class WebSocketServer: @unchecked Sendable {
         self.broadcastSink = broadcastSink
         self.busyBudgetMs = busyBudgetMs
         self.monotonicNowMs = monotonicNowMs
+        self.gestureLogSink = gestureLogSink
     }
 
     var isRunning: Bool {
@@ -387,7 +390,7 @@ final class WebSocketServer: @unchecked Sendable {
                     )
                 }
                 await self.handleMessage(
-                    data, responder: responder, deadlineMs: deadlineMs,
+                    data, responder: responder, deadlineMs: deadlineMs, receivedAtMs: receivedAtMs,
                     onCompleted: { self.commandState.withLock { $0.inFlight = nil } }
                 )
             }
@@ -414,11 +417,12 @@ final class WebSocketServer: @unchecked Sendable {
     /// `@MainActor` collaborators, same task) accumulates — without it every perf call is a
     /// silent no-op (§9.5). Runs on the serial command task-chain.
     func handleMessage(
-        _ data: Data, responder: any WebSocketResponding, deadlineMs: Int64? = nil,
+        _ data: Data, responder: any WebSocketResponding, deadlineMs: Int64? = nil, receivedAtMs: Int64? = nil,
         onCompleted: @Sendable () -> Void = {}
     )
         async
     {
+        let executionStartedAtMs = monotonicNowMs()
         let inFlightRequestId = failureCoordinator == nil ? nil : WireError.extractRequestId(from: data)
         failureCoordinator?.begin(requestId: inFlightRequestId)
         do {
@@ -427,18 +431,33 @@ final class WebSocketServer: @unchecked Sendable {
                 "[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")"
             )
 
-            let (response, responseData) = try await perf.withScope {
-                self.perf.serial("handleRequest:\(request.typeString)")
-                let startTime = Date()
-                let response = await self.commandHandler.handle(
-                    request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs
-                )
-                let totalTimeMs = Int64(Date().timeIntervalSince(startTime) * 1000)
-                self.perf.end()
+            let gestureCommands: Set<String> = [
+                "request_swipe",
+                "request_tap_coordinates",
+                "request_drag",
+                "request_pinch",
+            ]
+            let diagnostics = gestureCommands.contains(request.typeString) ? GesturePhaseDiagnostics(
+                command: request.typeString, receivedAtMs: receivedAtMs ?? executionStartedAtMs,
+                deadlineMs: deadlineMs, now: monotonicNowMs, sink: gestureLogSink
+            ) : nil
+            diagnostics?.begin("executionPreparation", at: executionStartedAtMs)
+            let (response, responseData) = try await GesturePhaseDiagnostics.$current.withValue(diagnostics) {
+                try await perf.withScope {
+                    self.perf.serial("handleRequest:\(request.typeString)")
+                    let startTime = Date()
+                    let response = await self.commandHandler.handle(
+                        request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs
+                    )
+                    let totalTimeMs = Int64(Date().timeIntervalSince(startTime) * 1000)
+                    self.perf.end()
 
-                let perfTiming = self.flushPerfTiming()
-                let data = try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
-                return (response, data)
+                    _ = diagnostics?.finish()
+                    let flushed = self.flushPerfTiming()
+                    let perfTiming = diagnostics?.attaching(to: flushed) ?? flushed
+                    let data = try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
+                    return (response, data)
+                }
             }
             let deflectedFailures = failureCoordinator?.finish() ?? []
             if deflectedFailures.isEmpty {

@@ -1,3 +1,4 @@
+import type { TimingData } from "../utils/PerformanceTracker";
 import { BaseActionResult } from "./BaseActionResult";
 import { Element } from "./Element";
 import { ToolDebugInfo } from "../utils/DebugContextBuilder";
@@ -7,6 +8,8 @@ import { ToolDebugInfo } from "../utils/DebugContextBuilder";
  */
 export interface SwipeOnResult extends BaseActionResult {
   warning?: string;
+  /** Requested iOS diagnostics retained when failure skips the post-action observation. */
+  timing?: TimingData;
 
   // Context to help callers target scrollable containers
   scrollableCandidates?: ScrollableCandidate[];

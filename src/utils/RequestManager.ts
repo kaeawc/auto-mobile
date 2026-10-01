@@ -1,3 +1,4 @@
+import type { TimingEntry } from "./PerformanceTracker";
 import { logger } from "./logger";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
 import { Timer, defaultTimer } from "./SystemTimer";
@@ -151,7 +152,12 @@ export class RequestManager {
    * Resolve a pending request with an error response, preserving request-specific
    * result shape when the caller registered an error result factory.
    */
-  resolveError(id: string, error: string, totalTimeMs: number = 0): boolean {
+  resolveError(
+    id: string,
+    error: string,
+    totalTimeMs: number = 0,
+    diagnostics?: { perfTiming: TimingEntry | TimingEntry[] },
+  ): boolean {
     const request = this.pending.get(id);
     if (!request) {
       logger.debug(`[RequestManager] No pending request found for id: ${id} (may have timed out)`);
@@ -168,7 +174,11 @@ export class RequestManager {
     logger.debug(
       `[RequestManager] Resolved errored request: ${request.type} (id: ${id}, duration: ${duration}ms)`,
     );
-    request.resolve(result);
+    request.resolve(
+      diagnostics && typeof result === "object" && result !== null
+        ? { ...result, ...diagnostics }
+        : result,
+    );
 
     return true;
   }

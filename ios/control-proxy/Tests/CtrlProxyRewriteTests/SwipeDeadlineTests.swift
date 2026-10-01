@@ -37,6 +37,8 @@ final class SwipeDeadlineTests: XCTestCase {
 
     private func server(
         gestures: RewriteFakeGesturePerformer, clock: FakeMonotonicClock,
+        logSink: any GestureLogSink = SystemGestureLogSink(),
+        timings: [PerfTiming]? = nil,
         other: @escaping @Sendable (WebSocketRequest) -> any WebSocketResponsePayload = { request in
             WebSocketResponse.success(type: "screenshot", requestId: request.requestId, totalTimeMs: 0)
         }
@@ -50,10 +52,11 @@ final class SwipeDeadlineTests: XCTestCase {
                     perf: FakePerfTracking(flushResult: nil)
                 ), other: other
             ),
-            perf: FakePerfTracking(flushResult: nil),
+            perf: FakePerfTracking(flushResult: timings),
             frameContext: FakeFrameContextRecording(token: nil),
             busyBudgetMs: 3000,
-            monotonicNowMs: { clock.now() }
+            monotonicNowMs: { clock.now() },
+            gestureLogSink: logSink
         )
     }
 
@@ -118,8 +121,18 @@ final class SwipeDeadlineTests: XCTestCase {
     func testSwipeReturningAfterDeadlineReportsIndeterminateOutcomeAndReleasesGuard() async throws {
         let clock = FakeMonotonicClock()
         let gestures = RewriteFakeGesturePerformer()
-        gestures.onSwipe = { clock.advance(by: 6000) }
-        let server = server(gestures: gestures, clock: clock)
+        let sink = FakeGestureLogSink()
+        gestures.onSwipe = {
+            GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+            clock.advance(by: 6000)
+            GesturePhaseDiagnostics.current?.begin("postGesture")
+        }
+        let server = server(
+            gestures: gestures,
+            clock: clock,
+            logSink: sink,
+            timings: [.timing("handleRequest:request_swipe", durationMs: 6000)]
+        )
         let swipeDone = expectation(description: "late swipe response")
         let nextDone = expectation(description: "next response")
         let swipeResponder = CapturingResponder(onEach: { swipeDone.fulfill() })
@@ -128,6 +141,12 @@ final class SwipeDeadlineTests: XCTestCase {
         server.dispatchCommand(swipe("late", timeout: ",\"timeoutMs\":5000"), responder: swipeResponder)
         await fulfillment(of: [swipeDone], timeout: 2)
         XCTAssertEqual(gestures.swipeCalls, 1)
+        XCTAssertEqual(sink.lines.count, 1)
+        XCTAssertTrue(sink.lines[0].contains("xcuitestGestureMs=6000"))
+        let encoded = try XCTUnwrap(swipeResponder.captured.first)
+        let decoded = try JSONDecoder().decode(WebSocketResponse.self, from: encoded)
+        XCTAssertEqual(decoded.perfTiming?.children?.last?.name, "gesturePhases")
+        XCTAssertEqual(decoded.perfTiming?.children?.last?.durationMs, 6000)
         XCTAssertEqual(try response(swipeResponder)["success"] as? Bool, false)
         XCTAssertEqual(
             try response(swipeResponder)["error"] as? String,

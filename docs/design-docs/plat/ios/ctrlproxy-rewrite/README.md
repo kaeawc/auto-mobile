@@ -127,3 +127,24 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
   Verification is easy (macOS target → every body compiles on the host). Keep `runBlocking` as-is.
 - **`ios/Playground`** (internal SwiftUI SDK demo/test-host app, not shipped) — **defer**; no
   concurrency surface of its own. Should follow `auto-mobile-sdk`, not lead.
+
+## Gesture phase diagnostics
+
+Tap-coordinate, swipe, drag, and pinch responses append a `gesturePhases` child to
+an existing optional `perfTiming` tree. Its monotonic durations include `queueWait`
+(receipt to execution start), `executionPreparation` (decode, handler validation,
+frame-context work and main-actor scheduling), `targetResolution` (stored app
+reference), `coordinateResolution`, `xcuitestGesture`, and `postGesture` where those
+phases execute. XCUITest's internal app resolution and idle waits remain inside
+`xcuitestGesture`; instrumentation adds no app-state queries. Child durations sum
+to the gesture total, which includes queue wait and can exceed the enclosing
+handler's execution-only duration. No perf tree means no added wire fields.
+
+A deadline breach or a total strictly greater than 2,000 ms emits one
+`gesture_phases command=... <phase>Ms=... totalMs=... deadlineRemainingMs=...`
+warning under subsystem `dev.jasonpearson.automobile`, category `GesturePerformer`.
+Unexecuted phases are omitted; deadline remaining is signed, or `none`. The
+frontmost app is not queried. The daemon preserves phase children on failures,
+adds them to requested iOS swipe timing, includes a received swipe failure's
+summary in its error, and warns with phases when the pending request has already
+been removed. It does not extend deadlines or wait for late replies.

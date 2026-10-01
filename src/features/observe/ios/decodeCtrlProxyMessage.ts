@@ -7,7 +7,7 @@
  * isolation; `IOSCtrlProxyClient.processMessage` is a thin adapter over it.
  */
 
-import type { WebSocketMessage } from "./types";
+import type { CtrlProxyPerfTiming, WebSocketMessage } from "./types";
 import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 
 /**
@@ -22,6 +22,7 @@ export interface DecodedCtrlProxyMessage {
   errorMessage?: string;
   runnerBusy?: boolean;
   totalTimeMs?: number;
+  perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
 }
 
 /**
@@ -72,6 +73,8 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
   }
 
   let result: unknown;
+  const phaseSummary =
+    type === "swipe_result" ? gesturePhaseSummary(message.perfTiming) : undefined;
 
   switch (type) {
     case "hierarchy_update":
@@ -125,7 +128,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       result = {
         success: message.success ?? (message.error === undefined || message.error === null),
         totalTimeMs: message.totalTimeMs ?? 0,
-        error: message.error,
+        error: message.error && phaseSummary ? `${message.error}; ${phaseSummary}` : message.error,
         perfTiming: message.perfTiming,
       };
       break;
@@ -385,6 +388,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         return {
           requestId,
           errorMessage: rewriteUnknownCommandError(message.error),
+          ...(message.perfTiming ? { perfTiming: message.perfTiming } : {}),
           totalTimeMs: message.totalTimeMs ?? 0,
         };
       }
@@ -392,4 +396,24 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
   }
 
   return { requestId, result };
+}
+
+/** Summarize only runner-owned gesture children; old runners simply have none. */
+export function gesturePhaseSummary(
+  timing?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[],
+): string | undefined {
+  if (!timing) {
+    return undefined;
+  }
+  const entries = Array.isArray(timing) ? timing : [timing];
+  for (const entry of entries) {
+    if (entry.name === "gesturePhases") {
+      return `gesture_phases ${(entry.children ?? []).map((phase) => `${phase.name}Ms=${phase.durationMs}`).join(" ")} totalMs=${entry.durationMs}`;
+    }
+    const nested = gesturePhaseSummary(entry.children);
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
 }

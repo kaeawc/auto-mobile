@@ -205,7 +205,7 @@ import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 import { CtrlProxyPermissions } from "./CtrlProxyPermissions";
-import { decodeCtrlProxyMessage } from "./decodeCtrlProxyMessage";
+import { gesturePhaseSummary, decodeCtrlProxyMessage } from "./decodeCtrlProxyMessage";
 import { DefaultIosSdkEventIngestor, type IosSdkEventIngestor } from "./IosSdkEventIngestor";
 import { deriveIosSdkScreenIdentity } from "./IosSdkScreenIdentity";
 
@@ -2626,6 +2626,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Handle request/response messages (with requestId) first
     if (requestId) {
+      const phases = gesturePhaseSummary(message.perfTiming);
+      if (phases) {
+        const line = `[IOSCtrlProxyClient] type=${type} requestId=${requestId} ${phases}`;
+        if (!this.requestManager.isPending(requestId)) {
+          logger.warn(`${line} lateResponse=true`);
+        } else {
+          logger.debug(line);
+        }
+      }
       const decoded = decodeCtrlProxyMessage(message);
       if (decoded) {
         if (decoded.runnerBusy && decoded.errorMessage !== undefined) {
@@ -2638,6 +2647,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
             decoded.requestId,
             decoded.errorMessage,
             decoded.totalTimeMs ?? 0,
+            decoded.perfTiming ? { perfTiming: decoded.perfTiming } : undefined,
           );
           return;
         }

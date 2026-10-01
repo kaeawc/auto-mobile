@@ -1,0 +1,44 @@
+{
+  "error": "Command request_swipe exceeded deadline at 5000ms (gesture completed after its deadline; outcome is indeterminate)",
+  "perfTiming": {
+    "children": [
+      {
+        "children": [
+          {
+            "durationMs": 100,
+            "name": "queueWait"
+          },
+          {
+            "durationMs": 100,
+            "name": "executionPreparation"
+          },
+          {
+            "durationMs": 200,
+            "name": "targetResolution"
+          },
+          {
+            "durationMs": 300,
+            "name": "coordinateResolution"
+          },
+          {
+            "durationMs": 5200,
+            "name": "xcuitestGesture"
+          },
+          {
+            "durationMs": 100,
+            "name": "postGesture"
+          }
+        ],
+        "durationMs": 6000,
+        "name": "gesturePhases"
+      }
+    ],
+    "durationMs": 5900,
+    "name": "handleRequest:request_swipe"
+  },
+  "requestId": "phase-swipe",
+  "success": false,
+  "timestamp": 42,
+  "totalTimeMs": 5900,
+  "type": "swipe_result"
+}

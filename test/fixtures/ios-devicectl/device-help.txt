@@ -1,0 +1,56 @@
+OVERVIEW: Commands to interact with devices.
+
+Allows users to interact with devices that CoreDevice is aware of.
+
+USAGE: devicectl device [--verbose] [--quiet] [--timeout <seconds>] [--json-output <path>] [--omit-deprecated-fields-in-json] [--log-output <path>] <subcommand>
+
+OUTPUT OPTIONS:
+  -v, --verbose           If given, provide more logging output than normal.
+  -q, --quiet             If given, output will include only errors.
+  -t, --timeout <seconds> The overall command timeout in seconds. If this limit
+                          is exceeded the command is abandoned as a failure.
+  -j, --json-output <path>
+                          An optional path to write a JSON file with command
+                          results. Pass '-' (or '/dev/stdout' / '/dev/fd/1') to
+                          write the JSON to stdout instead of a file.
+        For a file path, both absolute and working-directory-relative forms are
+        accepted; existing files are overwritten. Any of '-', '/dev/stdout',
+        and '/dev/fd/1' selects stdout. When the JSON document is on stdout,
+        human-readable output (progress, status, log lines) is routed to stderr
+        instead. A few commands write non-JSON content to stdout themselves
+        (binary payloads, bridged remote stdout, legal notices) and will reject
+        stdout-selecting values at validation time — see each command's help
+        for details.
+  --omit-deprecated-fields-in-json
+                          Omit deprecated fields from JSON output.
+        When set, fields that have been deprecated are omitted from
+        --json-output.
+  -l, --log-output <path> An optional path to write all logging otherwise
+                          passed to stdout/stderr.
+
+OPTIONS:
+  --version               Show the version.
+  -h, --help              Show help information.
+
+SUBCOMMANDS:
+  appResize               Manage resizable app sessions.
+  capture                 Capture the device's screen.
+  copy                    Copy files.
+  info                    Commands that provide information about a specific
+                          device
+  install                 Install content onto a device.
+  motion                  Monitor device motion data.
+  notification            Post and observe Darwin notifications on a device.
+  orientation             Control device orientation.
+  pairings                Manage watch and phone pairings.
+  pasteboard              Interact with the device pasteboard.
+  process                 Interact with processes on devices.
+  profile                 Manage profiles on a device.
+  reboot                  Reboot a device.
+  rename                  Rename a device.
+  settings                Customize device settings.
+  simulate                Simulate device behaviors.
+  sysdiagnose             Gather a sysdiagnose for a device.
+  uninstall               Uninstall content from a device.
+
+  See 'devicectl help device <subcommand>' for detailed help.

@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+const listDeviceOutput = readFileSync(
+  join(import.meta.dir, "../../fixtures/android-avdmanager/list-device.txt"),
+  "utf8",
+);
 
 const normalizePath = (value: string): string => value.replace(/\\/g, "/");
 
@@ -102,6 +109,35 @@ function createClient(overrides: Partial<ConstructorParameters<typeof AvdManager
 }
 
 describe("AvdManagerClient", () => {
+  test("parses cmdline-tools 23.0 device profiles with whitespace around field colons", async () => {
+    const { client, child } = createClient();
+    const pending = client.listDevices();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText(listDeviceOutput);
+    child.close(0);
+
+    const devices = await pending;
+    expect(devices).toHaveLength(96);
+    expect(devices.find(({ id }) => id === "ai_glasses_displayless")).toMatchObject({
+      name: "Audio Glasses",
+      oem: "Google",
+    });
+    expect(devices.find(({ id }) => id === "Galaxy Nexus")).toMatchObject({
+      name: "Galaxy Nexus",
+      oem: "Google",
+    });
+    expect(devices.find(({ id }) => id === "Nexus 5")?.oem).toBe("Google");
+    expect(devices.find(({ id }) => id === "3.7in WVGA (Nexus One)")).toMatchObject({
+      name: '3.7" WVGA (Nexus One)',
+      oem: "Generic",
+    });
+    expect(devices.find(({ id }) => id === "13.5in Freeform")).toMatchObject({
+      name: '13.5" Freeform',
+      oem: "Generic",
+    });
+    expect(devices.every(({ id, oem }) => !/^\d+ or /.test(id) && Boolean(oem?.trim()))).toBe(true);
+  });
+
   test("passes AVD names and paths as discrete argv values", async () => {
     const { client, child, calls } = createClient();
     const pending = client.createAvd({

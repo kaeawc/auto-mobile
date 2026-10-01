@@ -522,15 +522,21 @@ export class AvdManagerClient {
     let current: Partial<DeviceProfile> = {};
     for (const line of output.split("\n")) {
       const trimmed = line.trim();
-      if (trimmed.startsWith("id:")) {
+      const field = /^(\w+)\s*:\s*(.*)$/.exec(trimmed);
+      if (!field) {
+        continue;
+      }
+      const fieldName = field[1]?.toLowerCase();
+      const value = field[2]?.trim() ?? "";
+      if (fieldName === "id") {
         if (current.id) {
           devices.push(current as DeviceProfile);
         }
-        current = { id: this.normalizeDeviceProfileId(trimmed.slice(3).trim()) };
-      } else if (trimmed.startsWith("Name:")) {
-        current.name = trimmed.slice(5).trim();
-      } else if (trimmed.startsWith("OEM:")) {
-        current.oem = trimmed.slice(4).trim();
+        current = { id: this.normalizeDeviceProfileId(value) };
+      } else if (fieldName === "name") {
+        current.name = value;
+      } else if (fieldName === "oem") {
+        current.oem = value;
       }
     }
     if (current.id) {

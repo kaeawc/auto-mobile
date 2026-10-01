@@ -79,13 +79,13 @@ teardown() {
   [ -f coverage/shards/shard-1.log ]
   [ -f coverage/shards/shard-2.log ]
   [[ "$output" == *"log from shard 1"*"log from shard 2"* ]]
-  [ "$(rg -c '^SF:src/shared.ts$' coverage/lcov.info)" -eq 1 ]
+  [ "$(grep -c '^SF:src/shared.ts$' coverage/lcov.info)" -eq 1 ]
   grep -q '^FNDA:3,shared$' coverage/lcov.info
   grep -q '^FNF:2$' coverage/lcov.info
   grep -q '^FNH:2$' coverage/lcov.info
   grep -q '^BRDA:1,0,0,3$' coverage/lcov.info
   grep -q '^DA:1,3$' coverage/lcov.info
-  [ "$(rg -c '^LF:1$' coverage/lcov.info)" -eq 3 ]
+  [ "$(grep -c '^LF:1$' coverage/lcov.info)" -eq 3 ]
   grep -q 'tests="2"' coverage/junit.xml
   grep -q 'shard-1' coverage/junit.xml
   grep -q 'shard-2' coverage/junit.xml
@@ -96,7 +96,7 @@ teardown() {
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 bash "$SCRIPT" coverage
   [ "$status" -eq 0 ]
   [ -f coverage/shards/invoked-3 ]
-  [ "$(rg -c '^SF:' coverage/lcov.info)" -eq 4 ]
+  [ "$(grep -c '^SF:' coverage/lcov.info)" -eq 4 ]
 
   run env PATH="$STUB_BIN:$PATH" AUTOMOBILE_COVERAGE_SHARDS=1 \
     AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=10 bash "$SCRIPT" coverage
@@ -136,7 +136,7 @@ EOF
   [ "$status" -eq 0 ]
   [ -f coverage/lcov.info ]
   [ -f coverage/junit.xml ]
-  [ "$(rg -c '^SF:src/shared.ts$' coverage/lcov.info)" -eq 1 ]
+  [ "$(grep -c '^SF:src/shared.ts$' coverage/lcov.info)" -eq 1 ]
   grep -q '^FNDA:3,shared$' coverage/lcov.info
 }
 

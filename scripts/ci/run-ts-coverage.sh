@@ -31,10 +31,10 @@ if [[ -f "${shard_logs[0]:-}" ]]; then
   coverage_lcov_files=()
   coverage_junit_files=()
   for shard_log in "${shard_logs[@]}"; do
-    if rg -q 'error: An internal error occurred \(WriteFailed\)' "${shard_log}"; then
+    if grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${shard_log}"; then
       saw_write_failed=1
     fi
-    if ! rg -q '(^|[^0-9])0 fail' "${shard_log}" || rg -q '(^|[^0-9])[1-9][0-9]* fail' "${shard_log}"; then
+    if ! grep -Eq '(^|[^0-9])0 fail' "${shard_log}" || grep -Eq '(^|[^0-9])[1-9][0-9]* fail' "${shard_log}"; then
       tolerated=0
       break
     fi
@@ -64,7 +64,7 @@ if [[ -f "${shard_logs[0]:-}" ]]; then
     fi
     exit 0
   fi
-elif rg -q 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && rg -q '(^|[^0-9])0 fail' "${log_file}"; then
+elif grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && grep -Eq '(^|[^0-9])0 fail' "${log_file}"; then
   echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
   tail -n 80 "${log_file}"
   bash scripts/ci/verify-ts-coverage-output.sh coverage
@@ -72,7 +72,7 @@ elif rg -q 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && 
 fi
 
 echo "::group::Failing tests"
-rg -a '\(fail\)|^error:|^Ran [0-9]+ tests' "${log_file}" || true
+grep -aE '\(fail\)|^error:|^Ran [0-9]+ tests' "${log_file}" || true
 echo "::endgroup::"
 tail -n 200 "${log_file}"
 exit "${status}"

@@ -125,6 +125,7 @@ export function createSendKeysHarness(device: BootedDevice) {
   const adbFactory = createAdbFactory(adb, deliveries);
   return {
     adb,
+    client,
     inserted,
     replaced,
     committed,

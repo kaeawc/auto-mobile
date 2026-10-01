@@ -639,7 +639,7 @@ describe("DefaultSendKeysCommandExecutor", () => {
   );
 
   test.each(["eventAll", "eventLast"] as const)(
-    "%s documents a11y inserts that start inside ASCII-base graphemes",
+    "%s handles ASCII-base graphemes according to its delivery strategy",
     async (mode) => {
       for (const [text, remainder] of [
         ["1️⃣", "️⃣"],
@@ -652,11 +652,10 @@ describe("DefaultSendKeysCommandExecutor", () => {
           createObserver(focusedAndroidObservation()),
           { textClient: textClient.client },
         );
-        // Current event modes split after the ASCII base; the a11y suffix begins with a mark.
         expect(await executor.type({ action: "type", text, mode })).toMatchObject({
           success: true,
         });
-        expect(textClient.calls).toEqual([`insert:${remainder}`]);
+        expect(textClient.calls).toEqual([`insert:${mode === "eventAll" ? text : remainder}`]);
       }
     },
   );
@@ -1843,7 +1842,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({
       success: false,
       partialApplication: true,
-      error: "insert rejected",
+      committedGraphemes: 1,
+      error: expect.stringContaining("U+1F642"),
     });
     expect(adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
   });
@@ -1863,7 +1863,8 @@ describe("DefaultSendKeysCommandExecutor", () => {
     expect(result).toMatchObject({
       success: false,
       partialApplication: true,
-      error: "dispatch rejected",
+      committedGraphemes: 1,
+      error: expect.stringContaining("U+0062"),
     });
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_A",

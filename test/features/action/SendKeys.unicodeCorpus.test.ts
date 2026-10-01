@@ -74,7 +74,7 @@ describe("sendKeys Unicode corpus", () => {
     }
   });
 
-  test("eventAll and eventLast a11y chunks can start with combining marks, variation selectors, or ZWJ, never low surrogates", async () => {
+  test("eventAll keeps clusters whole while eventLast retains its split delivery", async () => {
     const cases = [
       ["e\u0301", "\u0301"],
       ["1\uFE0F\u20E3", "\uFE0F\u20E3"],
@@ -86,7 +86,10 @@ describe("sendKeys Unicode corpus", () => {
         expect(await harness.executor.type({ action: "type", text, mode })).toMatchObject({
           success: true,
         });
-        expect(harness.inserted[0]).toBe(expectedLeadingChunk);
+        expect(harness.inserted[0]).toBe(mode === "eventAll" ? text : expectedLeadingChunk);
+        if (mode === "eventAll") {
+          expect(harness.adb.getExecutedCommands()).toEqual([]);
+        }
         expect(
           harness.inserted.every((chunk) => {
             const firstCodeUnit = chunk.charCodeAt(0);

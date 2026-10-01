@@ -865,7 +865,7 @@ const sendKeysTypeCommandSchema = withJsonSchemaOverride(
         .enum(SEND_KEYS_TYPING_MODES)
         .default("auto")
         .describe(
-          "Android delivery mode. Use ime, a11y, or auto for Unicode and emoji. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. ime commits complete graphemes; eventAll and eventLast mix ASCII key events with accessibility insertion and can split keycaps or decomposed letters. eventOnly and imeKeyEvents are ASCII-only; imeKeyEvents requires a compatible CtrlProxy APK and does not verify resulting editor text. iOS uses xcuiTypeText for every requested mode",
+          "Android delivery mode. Use ime, a11y, or auto for Unicode and emoji. auto uses the AutoMobile IME when supported, otherwise eventAll for insert or a11y for replace. ime commits complete graphemes; eventAll inserts whole graphemes and uses key events only for single printable ASCII characters. eventLast can split keycaps or decomposed letters. eventOnly and imeKeyEvents are ASCII-only; imeKeyEvents requires a compatible CtrlProxy APK and does not verify resulting editor text. iOS uses xcuiTypeText for every requested mode",
         ),
       keyboardProfile: z
         .enum(KEYBOARD_PROFILE_IDS)

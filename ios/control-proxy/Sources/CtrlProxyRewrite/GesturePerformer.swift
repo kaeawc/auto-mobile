@@ -193,6 +193,45 @@ public final class GesturePerformer: GesturePerforming {
         return after.count < before.count ? .deleted : .noEffect
     }
 
+    enum FocusedElementKind: CaseIterable {
+        case textField, secureTextField, textView, searchField, other, unsupported
+    }
+
+    enum FocusedValueReliability: Equatable {
+        case reliable, other, unreliable
+    }
+
+    nonisolated static func focusedValueReliability(for kind: FocusedElementKind) -> FocusedValueReliability {
+        switch kind {
+        case .textField, .secureTextField, .textView, .searchField: return .reliable
+        case .other: return .other
+        case .unsupported: return .unreliable
+        }
+    }
+
+    enum DestructiveKeyPostCondition: Equatable {
+        case delivered, failed, deliveredWithWarning, boundaryNoOp
+    }
+
+    nonisolated static func destructiveKeyPostCondition(
+        kind: FocusedElementKind, before: String, after: String
+    )
+        -> DestructiveKeyPostCondition
+    {
+        switch destructiveKeyOutcome(before: before, after: after) {
+        case .deleted: return .delivered
+        case .boundaryNoOp: return .boundaryNoOp
+        case .noEffect:
+            if focusedValueReliability(for: kind) == .reliable { return .failed }
+            return before == after ? .deliveredWithWarning : .delivered
+        }
+    }
+
+    nonisolated static func destructiveKeyWarning(key: String) -> String {
+        "Key '\(key)' was delivered, but the accessibility value did not change; " +
+            "this element type does not reliably reflect edits, so delivery could not be confirmed"
+    }
+
     nonisolated static func validateDestructiveKeyModifiers(normalizedKey: String, modifiers: [String]) throws {
         guard normalizedKey == "backspace" || normalizedKey == "delete", !modifiers.isEmpty else { return }
         throw GestureError.notSupported(
@@ -400,6 +439,17 @@ public final class GesturePerformer: GesturePerforming {
     }
 
     #if canImport(XCTest) && os(iOS)
+        private static func focusedElementKind(_ type: XCUIElement.ElementType) -> FocusedElementKind {
+            switch type {
+            case .textField: return .textField
+            case .secureTextField: return .secureTextField
+            case .textView: return .textView
+            case .searchField: return .searchField
+            case .other: return .other
+            default: return .unsupported
+            }
+        }
+
         private weak var application: XCUIApplication?
         /// Strong reference to keep the application alive when set via updateApplication.
         /// Without this, the weak `application` property would immediately deallocate
@@ -1257,6 +1307,16 @@ public final class GesturePerformer: GesturePerforming {
 
         @discardableResult
         public func pressKey(key: String, modifiers: [String]) throws -> Bool? {
+            try pressKeyOutcome(key: key, modifiers: modifiers).verified
+        }
+
+        public func pressKeyOutcome(key: String, modifiers: [String]) throws -> PressKeyOutcome {
+            var warning: String?
+            let verified = try performPressKey(key: key, modifiers: modifiers, warning: &warning)
+            return PressKeyOutcome(verified: verified, warning: warning)
+        }
+
+        private func performPressKey(key: String, modifiers: [String], warning: inout String?) throws -> Bool? {
             let normalizedKey = key.lowercased()
             try GesturePerformer.validateDestructiveKeyModifiers(normalizedKey: normalizedKey, modifiers: modifiers)
 
@@ -1317,6 +1377,7 @@ public final class GesturePerformer: GesturePerforming {
                 try ensureArrowBudget(startedAt: arrowStartedAt, step: .initialProbe)
             }
             let focusedElement = isDestructiveKey || isPlainHorizontalArrow ? resolveFocusedTextElement(app: app) : nil
+            let focusedKind = focusedElement.map { GesturePerformer.focusedElementKind($0.elementType) }
             let valueBeforeKeyPress = focusedElement.map { fieldText($0) }
             let caretBefore: Int?
             if isPlainHorizontalArrow || normalizedKey == "delete", let focusedElement {
@@ -1470,14 +1531,19 @@ public final class GesturePerformer: GesturePerforming {
                     "Forward delete did not remove the character after the caret: expected length \(expectedForwardDelete?.count ?? 0), observed \(valueAfterKeyPress.count); use text replacement instead"
                 )
             }
-            if GesturePerformer.destructiveKeyOutcome(before: valueBeforeKeyPress, after: valueAfterKeyPress)
-                == .noEffect
-            {
+            switch GesturePerformer.destructiveKeyPostCondition(
+                kind: focusedKind ?? .unsupported, before: valueBeforeKeyPress, after: valueAfterKeyPress
+            ) {
+            case .failed:
                 throw GestureError.gestureFailed(
                     "Key '\(key)' did not decrease text length: before \(valueBeforeKeyPress.count), observed \(valueAfterKeyPress.count)"
                 )
+            case .deliveredWithWarning:
+                warning = GesturePerformer.destructiveKeyWarning(key: key)
+                return nil
+            case .delivered, .boundaryNoOp:
+                return nil
             }
-            return nil
         }
 
         private func observeArrowOutcome(

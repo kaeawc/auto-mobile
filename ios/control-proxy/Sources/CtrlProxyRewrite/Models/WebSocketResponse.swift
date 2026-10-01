@@ -16,6 +16,7 @@ public struct WebSocketResponse: Codable, Sendable {
     public let perfTiming: PerfTiming?
     /// Present on key results when caret movement was checked or could not be checked.
     public let verified: Bool?
+    public let warning: String?
     /// Which mechanism performed a pinch: `"event-path"` (private synthesis, honors
     /// center) or `"element-anchored"` (public fallback, center-less). Only set on
     /// `pinch_result` responses (issue #2910); nil elsewhere.
@@ -33,6 +34,7 @@ public struct WebSocketResponse: Codable, Sendable {
         text: String? = nil,
         perfTiming: PerfTiming? = nil,
         verified: Bool? = nil,
+        warning: String? = nil,
         pinchPath: String? = nil
     ) {
         self.type = type
@@ -46,6 +48,7 @@ public struct WebSocketResponse: Codable, Sendable {
         self.text = text
         self.perfTiming = perfTiming
         self.verified = verified
+        self.warning = warning
         self.pinchPath = pinchPath
     }
 
@@ -100,6 +103,7 @@ public struct WebSocketResponse: Codable, Sendable {
             text: text,
             perfTiming: perfTiming,
             verified: verified,
+            warning: warning,
             pinchPath: pinchPath
         )
     }

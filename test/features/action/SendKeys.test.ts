@@ -413,6 +413,92 @@ describe("SendKeys", () => {
     });
   });
 
+  test("surfaces successful iOS key warnings on commands and joins them on the result", async () => {
+    const observer = createObserver();
+    const warning = "Key 'backspace' value did not change; delivery could not be confirmed";
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      observer,
+      { inputKey: { press: async () => ({ success: true, warning }) } },
+    );
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer,
+      timestampProvider: { now: async () => 0 },
+    });
+    const result = await sendKeys.execute([
+      { action: "key", key: "backspace" },
+      { action: "key", key: "backspace" },
+    ]);
+    expect(result).toMatchObject({
+      success: true,
+      warning: `${warning} ${warning}`,
+      commands: [
+        { success: true, warning },
+        { success: true, warning },
+      ],
+    });
+  });
+
+  test("keeps a reliable-field runner error as a failed iOS key command", async () => {
+    const observer = createObserver();
+    const error = "Key 'backspace' did not decrease text length: before 4, observed 4";
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      observer,
+      { inputKey: { press: async () => ({ success: false, error }) } },
+    );
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer,
+      timestampProvider: { now: async () => 0 },
+    });
+    expect(await sendKeys.execute([{ action: "key", key: "backspace" }])).toMatchObject({
+      success: false,
+      error,
+      commands: [{ success: false, error }],
+    });
+  });
+
+  test("retains an earlier successful key warning when a later key fails", async () => {
+    const observer = createObserver();
+    const warning = "Earlier value did not change; delivery could not be confirmed";
+    const error = "Key 'backspace' did not decrease text length: before 4, observed 4";
+    let calls = 0;
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      observer,
+      {
+        inputKey: {
+          press: async () =>
+            ++calls === 1 ? { success: true, warning } : { success: false, error },
+        },
+      },
+    );
+    const sendKeys = new SendKeys(iosDevice, undefined, {
+      executor,
+      observer,
+      timestampProvider: { now: async () => 0 },
+    });
+    expect(
+      await sendKeys.execute([
+        { action: "key", key: "backspace" },
+        { action: "key", key: "backspace" },
+      ]),
+    ).toMatchObject({
+      success: false,
+      warning,
+      error,
+      commands: [
+        { success: true, warning },
+        { success: false, error },
+      ],
+    });
+  });
+
   test("accepts a hierarchy pushed before command delivery returns", async () => {
     let deviceTime = 1000;
     const pushedObservation = { timestamp: 1001 } as ObserveResult;

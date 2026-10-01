@@ -67,7 +67,7 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
     }
 
     func testPressKeyRequiresKeyboardFocusBeforeSynthesis() throws {
-        let pressKey = try gesturePerformerFunction(named: "pressKey(")
+        let pressKey = try gesturePerformerFunction(named: "performPressKey(")
         let focusGuard = try XCTUnwrap(pressKey.range(of: "try requireKeyboardFocus("))
         let keyPressFocus = try XCTUnwrap(pressKey.range(of: "forKeyPress: true"))
         let synthesis = try XCTUnwrap(pressKey.range(of: "app.typeKey(keyboardKey, modifierFlags: modifierFlags)"))
@@ -87,7 +87,7 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
             .deletingLastPathComponent()
         let sourceURL = packageRoot.appendingPathComponent("Sources/CtrlProxyRewrite/GesturePerformer.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let functionStart = try XCTUnwrap(source.range(of: "public func " + name))
+        let functionStart = try XCTUnwrap(source.range(of: "func " + name))
         let remainingSource = source[functionStart.upperBound...]
         let nextDeclaration = [
             remainingSource.range(of: "\n        public func ").map(\.lowerBound),

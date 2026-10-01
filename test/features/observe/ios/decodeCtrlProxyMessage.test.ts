@@ -110,6 +110,10 @@ describe("decodeCtrlProxyMessage", () => {
     expect(
       decodeCtrlProxyMessage(msg({ type: "press_key_result", verified: false }))?.result,
     ).toMatchObject({ success: true, verified: false });
+    expect(
+      decodeCtrlProxyMessage(msg({ type: "press_key_result", warning: "Value did not change" }))
+        ?.result,
+    ).toMatchObject({ success: true, warning: "Value did not change" });
   });
 
   test("pinch_result carries element-anchored pinchPath through (#2910)", () => {

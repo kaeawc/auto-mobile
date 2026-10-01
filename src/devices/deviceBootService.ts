@@ -90,6 +90,89 @@ export class AndroidAvdIdentityConflictError extends ActionableError {
   }
 }
 
+/** A live emulator with an unanswered AVD-name probe may be the requested image. */
+export class AndroidAvdIdentityUnresolvedError extends ActionableError {
+  readonly code = "target_identity_unresolved";
+  readonly retryable = true;
+
+  constructor(
+    readonly avdName: string,
+    readonly candidateSerials: readonly string[],
+  ) {
+    super(
+      `target_identity_unresolved: Cannot prove whether Android AVD '${avdName}' is already running; ` +
+        `AVD name is unavailable for ${candidateSerials.join(", ")}. Retry after identity discovery recovers.`,
+    );
+  }
+}
+
+function assertAndroidAvdIdentityResolved(devices: readonly BootedDevice[], avdName: string): void {
+  const unresolved = devices
+    .filter(
+      (device) =>
+        device.platform === "android" &&
+        isAndroidEmulatorSerial(device.deviceId) &&
+        device.name === `Unknown (${device.deviceId})`,
+    )
+    .map((device) => device.deviceId);
+  if (unresolved.length > 0) {
+    throw new AndroidAvdIdentityUnresolvedError(avdName, [...new Set(unresolved)].toSorted());
+  }
+}
+
+function assertBootedMatchesImage(device: BootedDevice, image: DeviceInfo): void {
+  if (image.platform !== "android") {
+    return;
+  }
+  if (device.platform !== image.platform || device.name !== image.name) {
+    throw new ActionableError(
+      `target_identity_mismatch: Configured ${image.platform} image '${image.name}' ` +
+        `(${image.deviceId ?? "no runtime ID"}) resolved to '${device.name}' (${device.deviceId}). ` +
+        "Retry after device discovery refreshes.",
+    );
+  }
+}
+
+function assertExactRunningDiscovery(
+  request: DeviceBootRequest,
+  devices: readonly BootedDevice[],
+): void {
+  if (request.matchExactName && request.name && request.platform === "android") {
+    assertAndroidAvdIdentityResolved(devices, request.name);
+  }
+}
+
+function assertExactRunningName(request: DeviceBootRequest, device: BootedDevice): void {
+  if (request.matchExactName && request.name && device.name !== request.name) {
+    throw new ActionableError(
+      `target_identity_mismatch: Requested ${request.platform} device '${request.name}' ` +
+        `resolved to '${device.name}' (${device.deviceId}).`,
+    );
+  }
+}
+
+function assertExactAndroidImageDiscovery(
+  image: DeviceInfo,
+  booted: readonly BootedDevice[],
+  exactTarget: boolean,
+): void {
+  if (!exactTarget || image.platform !== "android") {
+    return;
+  }
+  assertAndroidAvdIdentityResolved(booted, image.name);
+  const occupiedSerial =
+    image.deviceId && isAndroidEmulatorSerial(image.deviceId)
+      ? booted.find((device) => device.deviceId === image.deviceId && device.name !== image.name)
+      : undefined;
+  if (occupiedSerial) {
+    throw new ActionableError(
+      `target_identity_mismatch: Configured Android AVD '${image.name}' lists serial ` +
+        `'${image.deviceId}', but that serial is running '${occupiedSerial.name}'. ` +
+        "Refresh device inventory and retry.",
+    );
+  }
+}
+
 /**
  * Resolves an exact Android AVD name only when it maps to one live ADB serial.
  * Repeated discovery rows for the same serial do not make the identity ambiguous.
@@ -203,9 +286,7 @@ function findBootedDeviceMatchingImage(
 ): BootedDevice | undefined {
   if (image.platform === "android") {
     const sameName = findUniqueBootedAndroidDeviceByName(booted, image.name);
-    if (sameName || !image.isRunning) {
-      return sameName;
-    }
+    return sameName;
   }
   return image.deviceId ? booted.find((device) => device.deviceId === image.deviceId) : undefined;
 }
@@ -496,13 +577,16 @@ export class DeviceBootService {
     // Route through the same reuse-before-cold-boot path as the name matcher so
     // both spellings of the same target resolve identically (#3334): booting a
     // live image is rejected by the platform, or spawns a doomed second child.
-    return this.bootMatchedImage(
+    const result = await this.bootMatchedImage(
       image,
       context,
       progress,
       request.presentationOrder,
       request.preferRunning,
+      request.platform === "android" && request.deviceId === image.name,
     );
+    assertBootedMatchesImage(result.device, image);
+    return result;
   }
 
   private async waitForKnownRunningDevice(
@@ -633,12 +717,29 @@ export class DeviceBootService {
           ) ?? null)
         : deviceMatcher.matchDeviceImage(criteria, matchingImages, matchingStrategy);
     if (image) {
-      return this.bootMatchedImage(
+      const result = await this.bootMatchedImage(
         image,
         context,
         progress,
         request.presentationOrder,
         request.preferRunning,
+        request.matchExactName === true,
+      );
+      if (request.matchExactName) {
+        assertBootedMatchesImage(result.device, image);
+      }
+      return result;
+    }
+    if (request.matchExactName && request.name) {
+      if (matchingImages.some((candidate) => candidate.name === request.name)) {
+        throw new ActionableError(
+          `No ${request.platform} device matching criteria found for exact target '${request.name}'. ` +
+            describeDisplayRequirements(criteria, matchingImages),
+        );
+      }
+      throw new ActionableError(
+        `target_not_found: Configured ${request.platform} device '${request.name}' was not found; ` +
+          "an exact target cannot be replaced or created by acquisition.",
       );
     }
     const candidates = [
@@ -676,6 +777,7 @@ export class DeviceBootService {
       false,
       request.presentationOrder,
     );
+    assertExactRunningDiscovery(request, booted);
     const excludedDeviceNames = request.excludeDeviceNames;
     const excludedDeviceIds = request.excludeDeviceIds;
     const matchingBooted =
@@ -701,6 +803,7 @@ export class DeviceBootService {
     await this.reportProgress(context, progress, 100, "Found matching running device");
     const image = findImageForBootedDevice(match, images);
     const result = await this.waitForRunningDevice(match, context, progress);
+    assertExactRunningName(request, result.device);
     return image
       ? { ...result, device: enrichBootedDevice(result.device, image), sourceImage: image }
       : result;
@@ -712,6 +815,7 @@ export class DeviceBootService {
     progress?: DeviceBootProgress,
     presentationOrder?: BootedDeviceDiscoveryOptions["presentationOrder"],
     preferRunning?: boolean,
+    exactTarget?: boolean,
   ): Promise<DeviceBootResult> {
     // A cached `isRunning: false` overlay can go stale: an externally started
     // same-name AVD (or several) may already be live. iOS keeps trusting the
@@ -729,6 +833,7 @@ export class DeviceBootService {
       true,
       presentationOrder,
     );
+    assertExactAndroidImageDiscovery(image, booted, exactTarget === true);
     // iOS simulators can share a display name, so only their UDID is lifecycle
     // identity. Android `deviceId` may instead name an AVD image, where name
     // fallback is required because the booted device carries an ADB serial.

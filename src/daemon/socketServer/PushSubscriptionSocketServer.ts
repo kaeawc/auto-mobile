@@ -20,6 +20,15 @@ export interface SubscriptionResponse {
   error?: string;
   timestamp?: number;
   subscriptionId?: string;
+  code?: "BACKFILL_QUEUE_OVERFLOW";
+}
+
+const MAX_BACKFILL_QUEUE = 1_000;
+
+interface BackfillState<T> {
+  pending: T[];
+  pendingKeys: Set<string>;
+  seen: Set<string>;
 }
 
 interface ConnectionState {
@@ -38,6 +47,7 @@ interface ConnectionState {
 export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends BaseSocketServer {
   protected subscribers: Map<string, Subscriber<TFilter>> = new Map();
   private connections: Map<Socket, ConnectionState> = new Map();
+  private readonly backfills = new Map<string, BackfillState<TPushData>>();
   private subscriptionCounter = 0;
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
   protected readonly keepaliveConfig: KeepaliveConfig;
@@ -74,6 +84,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     }
     this.subscribers.clear();
     this.connections.clear();
+    this.backfills.clear();
   }
 
   /**
@@ -304,16 +315,22 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       if (deadSockets.has(subscriber.socket)) {
         continue;
       }
-      if (subscriber.backfilling) {
-        continue;
-      }
-
       if (!this.matchesFilter(subscriber.filter, data)) {
         continue;
       }
 
       if (subscriber.socket.destroyed) {
         deadSockets.add(subscriber.socket);
+        continue;
+      }
+
+      if (subscriber.backfilling) {
+        if (this.queueDuringBackfill(subscriptionId, subscriber, data)) {
+          sentCount++;
+        }
+        if (subscriber.socket.destroyed) {
+          deadSockets.add(subscriber.socket);
+        }
         continue;
       }
 
@@ -347,6 +364,150 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     }
 
     return sentCount;
+  }
+
+  private queueDuringBackfill(
+    subscriptionId: string,
+    subscriber: Subscriber<TFilter>,
+    data: TPushData,
+  ): boolean {
+    const state = this.getBackfillState(subscriptionId);
+    const key = this.pushEventKey(data);
+    if (key !== null && (state.seen.has(key) || state.pendingKeys.has(key))) {
+      return false;
+    }
+    if (state.pending.length === MAX_BACKFILL_QUEUE) {
+      logger.warn(`[${this.serverName}] Backfill queue overflow for ${subscriptionId}`);
+      try {
+        this.sendJson(subscriber.socket, {
+          type: "error",
+          success: false,
+          code: "BACKFILL_QUEUE_OVERFLOW",
+          subscriptionId,
+          error: `Backfill live-event queue exceeded ${MAX_BACKFILL_QUEUE} events`,
+        } satisfies SubscriptionResponse);
+      } catch (error) {
+        logger.warn(
+          `[${this.serverName}] Failed to report backfill overflow: ${errorMessage(error)}`,
+        );
+      }
+      this.removeSubscription(subscriptionId);
+      if (this.getSubscribersForSocket(subscriber.socket).length === 0) {
+        try {
+          subscriber.socket.end();
+        } catch (error) {
+          logger.warn(
+            `[${this.serverName}] Failed to close overflowing subscriber: ${errorMessage(error)}`,
+          );
+          subscriber.socket.destroy();
+        }
+      }
+      return false;
+    }
+    state.pending.push(data);
+    if (key !== null) {
+      state.pendingKeys.add(key);
+    }
+    return true;
+  }
+
+  /** Override for events with a stable persisted identity shared by backfill and live delivery. */
+  protected pushEventKey(_data: TPushData): string | null {
+    return null;
+  }
+
+  protected startBackfill(subscriptionId: string): void {
+    const subscriber = this.subscribers.get(subscriptionId);
+    if (subscriber) {
+      subscriber.backfilling = true;
+      this.getBackfillState(subscriptionId);
+    }
+  }
+
+  protected recordBackfillEvent(subscriptionId: string, data: TPushData): boolean {
+    const key = this.pushEventKey(data);
+    if (key === null) {
+      return true;
+    }
+    const state = this.getBackfillState(subscriptionId);
+    if (state.seen.has(key)) {
+      return false;
+    }
+    state.seen.add(key);
+    return true;
+  }
+
+  protected async finishBackfill(subscriptionId: string): Promise<void> {
+    const state = this.backfills.get(subscriptionId);
+    try {
+      while (state?.pending.length) {
+        const subscriber = this.subscribers.get(subscriptionId);
+        if (!subscriber || subscriber.socket.destroyed) {
+          return;
+        }
+        const data = state.pending.shift()!;
+        const key = this.pushEventKey(data);
+        if (key !== null) {
+          state.pendingKeys.delete(key);
+        }
+        if (key !== null && state.seen.has(key)) {
+          continue;
+        }
+        if (key !== null) {
+          state.seen.add(key);
+        }
+        const ok = this.sendJson(subscriber.socket, this.createPushMessage(data, subscriptionId));
+        if (!ok && !(await this.waitForDrain(subscriber.socket))) {
+          return;
+        }
+      }
+    } finally {
+      this.backfills.delete(subscriptionId);
+      const subscriber = this.subscribers.get(subscriptionId);
+      if (subscriber) {
+        subscriber.backfilling = false;
+      }
+    }
+  }
+
+  protected waitForDrain(socket: Socket): Promise<boolean> {
+    if (socket.destroyed) {
+      return Promise.resolve(false);
+    }
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        socket.off("drain", onDrain);
+        socket.off("close", onClose);
+        socket.off("error", onError);
+      };
+      const onDrain = () => {
+        cleanup();
+        resolve(true);
+      };
+      const onClose = () => {
+        cleanup();
+        resolve(false);
+      };
+      const onError = () => {
+        cleanup();
+        resolve(false);
+      };
+      socket.once("drain", onDrain);
+      socket.once("close", onClose);
+      socket.once("error", onError);
+      if (socket.destroyed) {
+        onClose();
+      }
+    });
+  }
+
+  private getBackfillState(subscriptionId: string): BackfillState<TPushData> {
+    let state = this.backfills.get(subscriptionId);
+    if (!state) {
+      state = { pending: [], pendingKeys: new Set(), seen: new Set() };
+      this.backfills.set(subscriptionId, state);
+    }
+    return state;
   }
 
   private armDrainListener(socket: Socket): void {
@@ -394,6 +555,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     const removed = this.getSubscribersForSocket(socket);
     for (const subscriber of removed) {
       this.subscribers.delete(subscriber.subscriptionId);
+      this.backfills.delete(subscriber.subscriptionId);
     }
     this.connections.delete(socket);
     return removed;
@@ -405,6 +567,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       return undefined;
     }
     this.subscribers.delete(subscriptionId);
+    this.backfills.delete(subscriptionId);
     if (this.getSubscribersForSocket(subscriber.socket).length === 0) {
       this.connections.delete(subscriber.socket);
     }

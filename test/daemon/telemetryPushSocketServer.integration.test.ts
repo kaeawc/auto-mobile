@@ -647,11 +647,26 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         drainPending: false,
       });
 
-      await (server as any).backfillRecentEvents(
+      const write = socket.write.bind(socket);
+      let didWrite: (() => void) | undefined;
+      const wrote = new Promise<void>((resolve) => {
+        didWrite = resolve;
+      });
+      socket.write = (data: string | Buffer) => {
+        write(data);
+        didWrite?.();
+        return false;
+      };
+      const drainingBackfill = (server as any).backfillRecentEvents(
         "backfill-test",
         { category: "crash", deviceId: "emulator-5554", sessionId: "session-abc" },
         socket as unknown as Socket,
       );
+      await wrote;
+      expect(socket.listenerCount("drain")).toBe(1);
+      socket.emit("drain");
+      await drainingBackfill;
+      expect(socket.listenerCount("drain")).toBe(0);
 
       const messages = socket.getWrittenMessages<{
         data: TelemetryEvent;

@@ -19,7 +19,7 @@ export interface EmulatorConsoleClient {
   gsmBusy(phoneNumber: string): Promise<void>;
   gsmHold(): Promise<void>;
   smsSend(phoneNumber: string, message: string): Promise<void>;
-  geoFix(lon: number, lat: number): Promise<void>;
+  geoFix(lon: number, lat: number, altitude?: number, signal?: AbortSignal): Promise<void>;
 }
 
 /**
@@ -34,6 +34,7 @@ export interface EmulatorConsoleTransport {
     port: number,
     authToken: string | null,
     commands: string[],
+    signal?: AbortSignal,
   ): Promise<string>;
 }
 
@@ -118,8 +119,13 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
     port: number,
     authToken: string | null,
     commands: string[],
+    signal?: AbortSignal,
   ): Promise<string> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason);
+        return;
+      }
       let settled = false;
       let buffer = "";
 
@@ -131,6 +137,8 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
           return;
         }
         settled = true;
+        signal?.removeEventListener("abort", onAbort);
+        this.timer.clearTimeout(timeoutHandle);
         socket.removeAllListeners();
         socket.destroy();
         if (err) {
@@ -149,6 +157,12 @@ export class NetEmulatorConsoleTransport implements EmulatorConsoleTransport {
           ),
         this.timeoutMs,
       );
+      const onAbort = () => finish(new ActionableError("Emulator console command cancelled"));
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
 
       socket.on("error", (err) => {
         this.timer.clearTimeout(timeoutHandle);
@@ -225,14 +239,15 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     private readonly tokenReader: EmulatorConsoleAuthTokenReader,
   ) {}
 
-  private runCommands(commands: string[]): Promise<void> {
+  private runCommands(commands: string[], signal?: AbortSignal): Promise<void> {
     // One span per emulator-console exchange, named by the leading verb so
     // spans aggregate (e.g. `emulator-console gsm`), recorded against the
     // ambient device-lifecycle tracker when one is in scope (see PerfContext).
     const verb = commands[0]?.split(" ")[0] ?? "";
     return trackAmbient(`emulator-console ${verb}`.trimEnd(), async () => {
       const token = await this.tokenReader.read();
-      const output = await this.transport.execute("localhost", this.port, token, commands);
+      signal?.throwIfAborted();
+      const output = await this.transport.execute("localhost", this.port, token, commands, signal);
       const acknowledgement = parseConsoleAcknowledgement(output, token !== null, commands.length);
       if (!acknowledgement.ok && acknowledgement.reason !== undefined) {
         throw new ActionableError(`Emulator console rejected command: ${acknowledgement.reason}`);
@@ -276,19 +291,23 @@ export class RealEmulatorConsoleClient implements EmulatorConsoleClient {
     await this.runCommands([`sms send ${number} ${safeMessage}`]);
   }
 
-  async geoFix(lon: number, lat: number): Promise<void> {
+  async geoFix(lon: number, lat: number, altitude?: number, signal?: AbortSignal): Promise<void> {
     if (
       !Number.isFinite(lon) ||
       lon < -180 ||
       lon > 180 ||
       !Number.isFinite(lat) ||
       lat < -90 ||
-      lat > 90
+      lat > 90 ||
+      (altitude !== undefined && !Number.isFinite(altitude))
     ) {
       throw new ActionableError(
         "geo fix requires longitude in [-180, 180] and latitude in [-90, 90]",
       );
     }
-    await this.runCommands([`geo fix ${lon} ${lat}`]);
+    await this.runCommands(
+      [`geo fix ${lon} ${lat}${altitude === undefined ? "" : ` ${altitude}`}`],
+      signal,
+    );
   }
 }

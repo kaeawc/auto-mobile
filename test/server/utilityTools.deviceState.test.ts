@@ -225,6 +225,25 @@ describe("device state tools", () => {
     expect(validate({ mode: "static", latitude: 0, longitude: 181 })).toBe(false);
     expect(validate({ mode: "static", latitude: 0, longitude: 0, extra: true })).toBe(false);
     expect(validate({ mode: "route", latitude: 0, longitude: 0 })).toBe(false);
+    const waypoints = [
+      { latitude: 0, longitude: 0 },
+      { latitude: 0, longitude: 1 },
+    ];
+    expect(validate({ mode: "route", waypoints, durationMs: 1000 })).toBe(true);
+    expect(
+      validate({
+        mode: "route",
+        waypoints,
+        speedMetersPerSecond: 2,
+        loop: true,
+        updateIntervalMs: 200,
+      }),
+    ).toBe(true);
+    expect(validate({ mode: "route", waypoints, durationMs: 1000, speedMetersPerSecond: 2 })).toBe(
+      false,
+    );
+    expect(validate({ mode: "route", waypoints })).toBe(false);
+    expect(validate({ mode: "stop" })).toBe(true);
   });
 
   test("threads connectivity through the setDeviceState handler", async () => {

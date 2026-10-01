@@ -10,7 +10,13 @@ import {
 } from "../../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
 
 class RecordingTransport implements EmulatorConsoleTransport {
-  public calls: { host: string; port: number; authToken: string | null; commands: string[] }[] = [];
+  public calls: {
+    host: string;
+    port: number;
+    authToken: string | null;
+    commands: string[];
+    signal?: AbortSignal;
+  }[] = [];
   public nextOutput: string = "Android Console\nOK\nOK\nOK\n";
   public failWith: Error | null = null;
 
@@ -19,8 +25,9 @@ class RecordingTransport implements EmulatorConsoleTransport {
     port: number,
     authToken: string | null,
     commands: string[],
+    signal?: AbortSignal,
   ): Promise<string> {
-    this.calls.push({ host, port, authToken, commands });
+    this.calls.push({ host, port, authToken, commands, signal });
     if (this.failWith) {
       throw this.failWith;
     }
@@ -80,6 +87,12 @@ describe("RealEmulatorConsoleClient", () => {
   test("geoFix sends longitude before latitude and accepts empty payload after OK", async () => {
     await client.geoFix(-122.4194, 37.7749);
     expect(transport.calls[0].commands).toEqual(["geo fix -122.4194 37.7749"]);
+  });
+
+  test("geoFix forwards cancellation to the transport", async () => {
+    const controller = new AbortController();
+    await client.geoFix(1, 2, undefined, controller.signal);
+    expect(transport.calls[0].signal).toBe(controller.signal);
   });
 
   test("geoFix rejects non-finite or out-of-range points before opening the console", async () => {
@@ -237,6 +250,23 @@ describe("NetEmulatorConsoleTransport wire protocol", () => {
   function makeTransport(socket: FakeSocket, timer: FakeTimer): NetEmulatorConsoleTransport {
     return new NetEmulatorConsoleTransport(() => socket as unknown as net.Socket, 5000, timer);
   }
+
+  test("abort closes an in-flight socket and clears its deadline", async () => {
+    const socket = new FakeSocket();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const pending = makeTransport(socket, timer).execute(
+      "localhost",
+      5554,
+      null,
+      ["geo fix 1 2"],
+      controller.signal,
+    );
+    controller.abort();
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(socket.written).toEqual([]);
+  });
 
   test("sends the auth line, each command, and a trailing quit on connect", async () => {
     const socket = new FakeSocket();

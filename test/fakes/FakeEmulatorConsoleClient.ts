@@ -41,7 +41,11 @@ export class FakeEmulatorConsoleClient implements EmulatorConsoleClient {
   smsSend(phoneNumber: string, message: string): Promise<void> {
     return this.record("smsSend", [phoneNumber, message]);
   }
-  geoFix(lon: number, lat: number): Promise<void> {
-    return this.record("geoFix", [String(lon), String(lat)]);
+  geoFix(lon: number, lat: number, altitude?: number): Promise<void> {
+    return this.record("geoFix", [
+      String(lon),
+      String(lat),
+      ...(altitude === undefined ? [] : [String(altitude)]),
+    ]);
   }
 }

@@ -10,6 +10,11 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { createMcpServer } from "../server";
 import { logger } from "../utils/logger";
 import { defaultDisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
+import {
+  defaultLocationRouteRegistry,
+  registerLocationRouteSessionCleanup,
+  stopLocationRouteForRemovedDevice,
+} from "../features/utility/LocationRoutePlayer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -473,6 +478,7 @@ export class Daemon {
     });
     this.deviceSessionRepository = deviceSessionRepository;
     this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
+    registerLocationRouteSessionCleanup(this.sessionManager);
     this.sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       this.hasActiveSessionExecution(sessionId, query),
     );
@@ -562,6 +568,7 @@ export class Daemon {
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryConfiguration.policy,
       onDeviceRemoved: (deviceId, platform) => {
+        stopLocationRouteForRemovedDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
@@ -3148,6 +3155,10 @@ export class Daemon {
             this.stopHealthCheckTimer();
             await this.databaseHealthProbe.dispose?.();
           },
+        },
+        {
+          name: "location routes",
+          run: () => defaultLocationRouteRegistry.stopAll(),
         },
         {
           name: "shutdown monitors",

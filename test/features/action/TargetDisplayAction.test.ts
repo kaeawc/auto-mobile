@@ -71,6 +71,30 @@ function screen(key: string, text = "Settings"): ObserveResult {
   } as ObserveResult;
 }
 
+function promotedLabelScreen(
+  key: string,
+  panel: { left: number; top: number; right: number; bottom: number },
+  label: { left: number; top: number; right: number; bottom: number },
+): ObserveResult {
+  const observation = screen(key);
+  observation.screenSize = { width: panel.right, height: panel.bottom };
+  observation.viewHierarchy = {
+    displayId: key === "external" ? 2 : 0,
+    screenWidth: panel.right,
+    screenHeight: panel.bottom,
+    hierarchy: {
+      bounds: { left: 0, top: 0, right: panel.right, bottom: panel.bottom },
+      node: {
+        $: { class: "android.view.View", bounds: panel, clickable: true },
+        node: [
+          { $: { class: "android.widget.TextView", text: "Network & internet", bounds: label } },
+        ],
+      },
+    },
+  };
+  return observation;
+}
+
 function adb(): FakeAdbExecutor {
   const result = new FakeAdbExecutor();
   result.setCommandResponse("cmd display get-displays", {
@@ -429,6 +453,259 @@ describe("explicit action display", () => {
     expect(result.success).toBe(true);
     expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 50 60");
   });
+
+  test("tapOn display taps the matched label within a promoted panel and reports the match", async () => {
+    const executor = adb();
+    const observation = promotedLabelScreen(
+      "external",
+      { left: 0, top: 0, right: 200, bottom: 200 },
+      { left: 20, top: 30, right: 80, bottom: 50 },
+    );
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation);
+    const action = new TapOnElement(android, executor, {
+      timer: new FakeTimer(),
+      lastRenderedObservation: () => observation,
+    });
+    action.observeScreen = observe;
+
+    const result = await action.execute({
+      text: "Network & internet",
+      action: "tap",
+      display: "external",
+    });
+
+    expect(result.success).toBe(true);
+    expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 50 40");
+    expect(result.selectedElement?.totalMatches).toBe(1);
+  });
+
+  test("tapOn display preserves non-zero hierarchy coordinates on logical display 2", async () => {
+    const executor = adb();
+    const observation = promotedLabelScreen(
+      "external",
+      { left: 100, top: 200, right: 300, bottom: 400 },
+      { left: 140, top: 230, right: 180, bottom: 270 },
+    );
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation);
+    const action = new TapOnElement(android, executor, {
+      timer: new FakeTimer(),
+      lastRenderedObservation: () => observation,
+    });
+    action.observeScreen = observe;
+
+    const result = await action.execute({
+      text: "Network & internet",
+      action: "tap",
+      display: "external",
+    });
+
+    expect(result.success).toBe(true);
+    expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 160 250");
+  });
+
+  test("dragAndDrop display uses the matched source and target rather than their promoted panel", async () => {
+    const fakeAdb = new FakeAdbClient();
+    fakeAdb.setCommandResult(
+      "shell cmd display get-displays",
+      'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+    );
+    const observation = promotedLabelScreen(
+      "external",
+      { left: 0, top: 0, right: 200, bottom: 200 },
+      { left: 20, top: 30, right: 80, bottom: 50 },
+    );
+    const root = observation.viewHierarchy?.hierarchy.node;
+    if (!root) {
+      throw new Error("Expected hierarchy root");
+    }
+    root.node = [
+      {
+        $: {
+          class: "android.widget.TextView",
+          text: "Source",
+          bounds: { left: 20, top: 30, right: 80, bottom: 50 },
+        },
+      },
+      {
+        $: {
+          class: "android.widget.TextView",
+          text: "Target",
+          bounds: { left: 120, top: 130, right: 180, bottom: 150 },
+        },
+      },
+    ];
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation);
+    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, new FakeTimer(), {
+      lastRenderedObservation: () => observation,
+    });
+    action.observeScreen = observe;
+
+    const result = await action.execute({
+      source: { text: "Source" },
+      target: { text: "Target" },
+      display: "external",
+    });
+
+    expect(result.success).toBe(true);
+    expect(fakeAdb.getAllCommands()).toContain(
+      "shell input -d 2 touchscreen draganddrop 50 40 150 140 600",
+    );
+  });
+
+  test("swipeOn display text container uses the same matched bounds as the default path", async () => {
+    const fakeAdb = new FakeAdbClient();
+    fakeAdb.setCommandResult(
+      "shell cmd display get-displays",
+      'Display id 0: DisplayInfo{uniqueId "local:internal" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+    );
+    const observation = promotedLabelScreen(
+      "external",
+      { left: 0, top: 0, right: 200, bottom: 200 },
+      { left: 20, top: 30, right: 80, bottom: 90 },
+    );
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation);
+    const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+      observeScreen: observe,
+      lastRenderedObservation: () => observation,
+    });
+
+    const result = await action.execute({
+      direction: "up",
+      container: { text: "Network & internet" },
+      display: "external",
+    });
+
+    expect(result.success).toBe(true);
+    expect(fakeAdb.getAllCommands()).toContain(
+      "shell input -d 2 touchscreen swipe 50 78 50 42 300",
+    );
+
+    const defaultCoordinates: number[] = [];
+    const defaultAction = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+      observeScreen: observe,
+    });
+    Object.assign(defaultAction, {
+      observedInteraction: async (run: (current: ObserveResult) => Promise<object>) =>
+        run(observation),
+      talkBackExecutor: {
+        executeSwipeGesture: async (x1: number, y1: number, x2: number, y2: number) => {
+          defaultCoordinates.push(x1, y1, x2, y2);
+          return { success: true, x1, y1, x2, y2, duration: 300 };
+        },
+      },
+    });
+    const defaultResult = await defaultAction.execute({
+      direction: "up",
+      container: { text: "Network & internet" },
+    });
+    expect(defaultResult.success).toBe(true);
+    expect(defaultCoordinates).toEqual([50, 84, 50, 36]);
+  });
+
+  for (const [actionName, command] of [
+    ["longPress", "shell input -d 2 touchscreen swipe 50 40 50 40 800"],
+    ["doubleTap", "shell input -d 2 touchscreen tap 50 40"],
+  ] as const) {
+    test(`tapOn display ${actionName} uses the matched visible centre`, async () => {
+      const executor = adb();
+      const observation = promotedLabelScreen(
+        "external",
+        { left: 0, top: 0, right: 200, bottom: 200 },
+        { left: 20, top: 30, right: 80, bottom: 50 },
+      );
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult(observation);
+      const action = new TapOnElement(android, executor, {
+        timer: new FakeTimer(),
+        lastRenderedObservation: () => observation,
+      });
+      action.observeScreen = observe;
+
+      const result = await action.execute({
+        text: "Network & internet",
+        action: actionName,
+        display: "external",
+      });
+
+      expect(result.success).toBe(true);
+      expect(
+        executor.getExecutedCommands().filter((executed) => executed.includes("touchscreen")),
+      ).toEqual(actionName === "doubleTap" ? [command, command] : [command]);
+    });
+  }
+
+  for (const [caseName, label] of [
+    ["outside the screen", { left: 220, top: 30, right: 280, bottom: 50 }],
+    ["zero area", { left: 20, top: 30, right: 20, bottom: 50 }],
+  ] as const) {
+    test(`tapOn handles a matched label ${caseName} consistently with and without display`, async () => {
+      const observation = promotedLabelScreen(
+        "external",
+        { left: 0, top: 0, right: 200, bottom: 200 },
+        label,
+      );
+      const executor = adb();
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult(observation);
+      const displayAction = new TapOnElement(android, executor, {
+        timer: new FakeTimer(),
+        lastRenderedObservation: () => observation,
+      });
+      displayAction.observeScreen = observe;
+      const displayResult = await displayAction.execute({
+        text: "Network & internet",
+        action: "tap",
+        display: "external",
+      });
+      expect(displayResult.success).toBe(caseName === "zero area");
+      if (caseName === "outside the screen") {
+        expect(displayResult.error).toContain(
+          "Matched element has no visible tap area on selected display",
+        );
+        expect(
+          executor.getExecutedCommands().filter((command) => command.includes("touchscreen tap")),
+        ).toEqual([]);
+      } else {
+        expect(executor.getExecutedCommands()).toContain(
+          "shell input -d 2 touchscreen tap 100 100",
+        );
+      }
+
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const defaultAction = new TapOnElement(android, adb(), { timer });
+      const defaultPoints: Array<{ x: number; y: number }> = [];
+      defaultAction.observedInteraction = async (run) => ({
+        ...(await run(observation)),
+        observation,
+      });
+      defaultAction.refreshViewHierarchy = async () => observation.viewHierarchy;
+      defaultAction.executeAndroidTap = async (_action, x, y) => {
+        defaultPoints.push({ x, y });
+      };
+      defaultAction.deriveTapEffectAfterPostTapObservation = async (_before, current) => ({
+        observation: current,
+      });
+      defaultAction.captureTerminalObservationScreenshot = async () => {};
+      defaultAction.recordDeferredPredictionOutcome = async () => {};
+      defaultAction.enforceFreshnessConsistencyWithEffect = () => {};
+      const defaultResult = await defaultAction.execute({
+        text: "Network & internet",
+        action: "tap",
+      });
+      expect(defaultResult.success).toBe(caseName === "zero area");
+      if (caseName === "outside the screen") {
+        expect(defaultResult.error).toContain("no visible tap area");
+        expect(defaultPoints).toEqual([]);
+      } else {
+        expect(defaultPoints).toEqual([{ x: 100, y: 100 }]);
+      }
+    });
+  }
 
   test("tapOn reports a missing target on the selected display", async () => {
     const executor = adb();

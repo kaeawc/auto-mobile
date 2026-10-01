@@ -97,15 +97,8 @@ export class DragAndDrop extends BaseVisualChange {
     if (!hierarchy) {
       throw new ActionableError("Selected display has no view hierarchy");
     }
-    const select = (value: DragAndDropOptions["source"]) =>
-      value.elementId
-        ? this.selector.selectByResourceId(hierarchy, value.elementId)
-        : this.selector.selectByText(hierarchy, value.text ?? "");
-    const source = select(options.source).element;
-    const destination = select(options.target).element;
-    if (!source || !destination) {
-      throw new ActionableError("Drag target not found on selected display");
-    }
+    const source = this.resolveTarget(hierarchy, options.source, "source");
+    const destination = this.resolveTarget(hierarchy, options.target, "target");
     const start = this.geometry.getElementCenter(source);
     const end = this.geometry.getElementCenter(destination);
     const duration = options.dragDurationMs ?? 600;

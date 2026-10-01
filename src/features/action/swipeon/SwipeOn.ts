@@ -60,7 +60,6 @@ import { buildContainerFromElement } from "../../../utils/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
-import { ResolverElementSelector } from "../../utility/ResolverElementSelector";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -293,11 +292,12 @@ export class SwipeOn extends BaseVisualChange {
     if (!options.container || !observation.viewHierarchy) {
       return undefined;
     }
-    const selector = new ResolverElementSelector();
-    const selected = options.container.elementId
-      ? selector.selectByResourceId(observation.viewHierarchy, options.container.elementId)
-      : selector.selectByText(observation.viewHierarchy, options.container.text ?? "");
-    return selected.element?.bounds;
+    return this.scrollUntilVisible.resolveElement(
+      observation.viewHierarchy,
+      options.container,
+      "inspect",
+      options.container.text !== undefined,
+    )?.bounds;
   }
 
   private async executeExplicitDisplay(

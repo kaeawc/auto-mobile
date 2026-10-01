@@ -18,7 +18,7 @@ public enum H264EncodeMath {
     public static let macroblockSize = 16
     /// Level 4.2 per-picture macroblock ceiling (`WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME`).
     /// RFC 6184 §8.2.2 / ITU-T H.264 Annex A.
-    public static let maxMacroblocksPerFrame = 8_192
+    public static let maxMacroblocksPerFrame = 8192
     /// Smallest 4:2:0 chroma-subsampled edge (`MIN_ENCODER_DIMENSION`).
     public static let minEncoderDimension = 2
     /// Bits budgeted per encoded pixel per frame (`IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL`).
@@ -44,8 +44,20 @@ public enum H264EncodeMath {
     /// dimensions are kept when even and already inside the Level 4.2 budget, odd
     /// dimensions round down to even (4:2:0 cannot encode an odd edge), and an
     /// oversized capture shrinks just far enough to fit the budget with its
-    /// aspect ratio intact.
-    public static func resolveEncoderScale(_ size: EncoderSize) -> EncoderSize? {
+    /// aspect ratio intact. A supplied long-side cap then shrinks it further.
+    public static func resolveEncoderScale(_ size: EncoderSize, maxLongSide: Int? = nil) -> EncoderSize? {
+        let levelSize = resolveLevelScale(size) ?? size
+        guard let maxLongSide, max(levelSize.width, levelSize.height) > maxLongSide else {
+            return levelSize == size ? nil : levelSize
+        }
+        let factor = Double(maxLongSide) / Double(max(levelSize.width, levelSize.height))
+        return EncoderSize(
+            width: evenFloor(Double(levelSize.width) * factor),
+            height: evenFloor(Double(levelSize.height) * factor)
+        )
+    }
+
+    private static func resolveLevelScale(_ size: EncoderSize) -> EncoderSize? {
         let width = size.width
         let height = size.height
         if macroblocksPerFrame(width: width, height: height) <= maxMacroblocksPerFrame {
@@ -133,11 +145,13 @@ public enum H264EncodeMath {
         width: Int,
         height: Int,
         fps: Int
-    ) -> Int? {
+    )
+        -> Int?
+    {
         switch bitrate {
-        case .explicitBps(let bps):
+        case let .explicitBps(bps):
             return bps
-        case .bitsPerPixel(let bpp):
+        case let .bitsPerPixel(bpp):
             switch source {
             case .simulator:
                 return bitrateBps(width: width, height: height, fps: fps, bitsPerPixel: bpp)

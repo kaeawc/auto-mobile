@@ -34,7 +34,11 @@ import {
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../utils/logger";
-import { qualityPresetBitrateBps } from "./qualityPresets";
+import {
+  capToQualityPreset,
+  QUALITY_PRESET_MAX_LONG_SIDE,
+  qualityPresetBitrateBps,
+} from "./qualityPresets";
 import {
   DefaultFfmpegClient,
   resolveFfmpegBinary,
@@ -664,8 +668,8 @@ export class IosH264Source implements H264CaptureSource {
    * (the helper rejects `--encode` without `--simulator-window`), is disabled by
    * the {@link IOS_WEBRTC_FORCE_RAW_ENV} escape hatch, is not re-probed after a
    * skew fallback, and yields to an explicit encoder-size override — the helper's
-   * `--encode` mode self-scales to the Level 4.2 budget and exposes no size flag,
-   * so an explicit size can only be honored by the raw ffmpeg `-vf scale` path.
+   * `--encode` mode has a preset long-side cap but no explicit-size flag,
+   * so an explicit size is honored by the raw ffmpeg `-vf scale` path.
    */
   private shouldAttemptEncoded(target: CaptureTarget): boolean {
     return (
@@ -682,9 +686,7 @@ export class IosH264Source implements H264CaptureSource {
    * passed for the helper to apply against the delivered pixels x fps (#4375).
    */
   private resolveEncodeSettings(): EncodeSettings {
-    // Explicit override > quality preset > bits-per-pixel budget. The preset's resolution cap
-    // cannot be honored here (the helper's --encode self-scales to Level 4.2 with no size flag),
-    // so mapping its bitrate is the half of the preset contract this path can keep.
+    // Explicit bitrate override > quality preset > bits-per-pixel budget.
     const override =
       this.options.bitrateBps && this.options.bitrateBps > 0
         ? this.options.bitrateBps
@@ -693,7 +695,14 @@ export class IosH264Source implements H264CaptureSource {
       override !== undefined
         ? { kind: "explicitBps", bps: override }
         : { kind: "bitsPerPixel", bpp: IOS_WEBRTC_DEFAULT_BITS_PER_PIXEL };
-    return { codec: "h264", bitrate };
+    const maxLongSide = this.options.quality
+      ? QUALITY_PRESET_MAX_LONG_SIDE[this.options.quality]
+      : undefined;
+    return {
+      codec: "h264",
+      bitrate,
+      ...(maxLongSide === undefined ? {} : { maxLongSide }),
+    };
   }
 
   /** The simulator target annotated with the resolved encode settings. */
@@ -1721,9 +1730,14 @@ export class IosH264Source implements H264CaptureSource {
       "pipe:0",
     ];
     // Explicit sizes are validated before source creation by
-    // webrtcStreamingConfig; otherwise keep the capture native unless it has to
-    // shrink to stay inside the Level 4.2 capability advertised in the WHIP SDP.
-    const scale = this.options.size ?? resolveIosEncoderScale(size);
+    // webrtcStreamingConfig; otherwise shrink only for the Level 4.2 budget or
+    // the requested quality preset's long-side cap.
+    const levelScale = resolveIosEncoderScale(size);
+    const scale =
+      this.options.size ??
+      (this.options.quality
+        ? capToQualityPreset(levelScale ?? size, this.options.quality)
+        : levelScale);
     if (scale) {
       args.push("-vf", `scale=${scale.width}:${scale.height}`);
     }
@@ -1777,9 +1791,7 @@ export class IosH264Source implements H264CaptureSource {
     const encodedSize = scale ?? size;
     const explicitBitrateBps =
       this.options.bitrateBps && this.options.bitrateBps > 0 ? this.options.bitrateBps : undefined;
-    // Explicit override > quality preset > resolution-aware Simulator default. iOS cannot honor
-    // the preset's resolution cap (the encoded path self-scales to Level 4.2 and exposes no size
-    // flag), so the preset's bitrate is the half of the contract this source can keep.
+    // Explicit bitrate override > quality preset > resolution-aware Simulator default.
     const bitrateBps =
       explicitBitrateBps ??
       qualityPresetBitrateBps(this.options.quality) ??

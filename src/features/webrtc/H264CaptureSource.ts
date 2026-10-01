@@ -44,8 +44,8 @@ export interface H264CaptureSourceOptions {
    * Device video-server quality preset. Selects resolution and default bitrate:
    * the persistent Android encoder forwards it as `--quality`, the Android
    * `screenrecord` fallback mirrors the same resolution cap and bitrate
-   * host-side, and the iOS sources honor the preset's bitrate only (their
-   * resolution self-scales to Level 4.2). Frame rate is carried separately by
+   * host-side, and the iOS sources cap resolution and set the preset bitrate.
+   * Frame rate is carried separately by
    * {@link fps} so it can be tuned independently. When omitted the device
    * defaults to `medium`.
    */

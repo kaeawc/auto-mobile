@@ -251,6 +251,29 @@ describe("IosScreenCaptureHelper", () => {
     ]);
   });
 
+  test("passes the quality preset resolution cap to encoded helper", () => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "simulator",
+      windowID: 1,
+      encode: {
+        codec: "h264",
+        bitrate: { kind: "explicitBps", bps: 2_000_000 },
+        maxLongSide: 540,
+      },
+    });
+    helper.start();
+    expect(spawnArgs.args).toEqual([
+      "--simulator-window",
+      "1",
+      "--encode",
+      "h264",
+      "--max-long-side",
+      "540",
+      "--bitrate-bps",
+      "2000000",
+    ]);
+  });
+
   test("passes --encode with no bitrate flag under the VideoToolbox default (#4789)", () => {
     const { spawnArgs, helper } = withFakeSpawner({
       kind: "simulator",

@@ -1394,9 +1394,7 @@ describe("IosH264Source", () => {
     );
   });
 
-  test("the quality preset supplies the bitrate when no explicit override is set", async () => {
-    // iOS cannot honor the preset's resolution cap (Level 4.2 self-scaling), so the preset's
-    // bitrate is the half of the contract this source keeps.
+  test("the quality preset caps raw resolution and supplies bitrate", async () => {
     const { source, helper, encoderSpawns } = createHarnessWithOverrides({ quality: "low" });
 
     await startWithFrame(source, helper, frame(750, 1334, 0x11));
@@ -1404,6 +1402,8 @@ describe("IosH264Source", () => {
     const rateIndex = encoderSpawns[0].args.indexOf("-b:v");
     expect(rateIndex).toBeGreaterThanOrEqual(0);
     expect(encoderSpawns[0].args[rateIndex + 1]).toBe("2000000");
+    const scaleIndex = encoderSpawns[0].args.indexOf("-vf");
+    expect(encoderSpawns[0].args[scaleIndex + 1]).toBe("scale=302:540");
   });
 
   test("does not apply the resolution-derived default bitrate to a physical device (#4375)", async () => {
@@ -3018,6 +3018,35 @@ describe("IosH264Source encoded path (#4789)", () => {
       codec: "h264",
       bitrate: { kind: "explicitBps", bps: 1_234_000 },
     });
+  });
+
+  test("passes the quality cap to encoded capture while keeping explicit bitrate precedence", async () => {
+    const { source, helpers, helperTargets } = createEncodedHarness({
+      quality: "low",
+      bitrateBps: 1_234_000,
+    });
+    await startEncoded(source, helpers);
+    const target = helperTargets[0];
+    expect(target.kind === "simulator" ? target.encode : undefined).toEqual({
+      codec: "h264",
+      bitrate: { kind: "explicitBps", bps: 1_234_000 },
+      maxLongSide: 540,
+    });
+    await source.stop();
+  });
+
+  test("an older helper rejecting the quality cap falls back to capped raw encode", async () => {
+    const { source, helpers, encoderSpawns } = createEncodedHarness({ quality: "low" });
+    const started = source.start();
+    await flush();
+    helpers[0].emitStderr("error: unknown argument --max-long-side");
+    await flush();
+    expect(helpers).toHaveLength(2);
+    helpers[1].emitFrame(frame(750, 1334, 0x11));
+    await started;
+    const scaleIndex = encoderSpawns[0].args.indexOf("-vf");
+    expect(encoderSpawns[0].args[scaleIndex + 1]).toBe("scale=302:540");
+    await source.stop();
   });
 
   test("requestKeyFrame sends the forceKeyFrame control command, throttled by the shorter interval", async () => {

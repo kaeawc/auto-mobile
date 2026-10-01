@@ -17,9 +17,11 @@ public struct CommandLineOptions: Equatable {
         }
 
         public let bitrate: Bitrate
+        public let maxLongSide: Int?
 
-        public init(bitrate: Bitrate) {
+        public init(bitrate: Bitrate, maxLongSide: Int? = nil) {
             self.bitrate = bitrate
+            self.maxLongSide = maxLongSide
         }
     }
 
@@ -65,6 +67,7 @@ public struct CommandLineOptions: Equatable {
         var encodeRequested = false
         var bitrateBps: Int?
         var bitsPerPixel: Double?
+        var maxLongSide: Int?
         var highlightJSON: String?
         var highlightDeviceName: String?
 
@@ -132,6 +135,12 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
                 bitsPerPixel = parsed
+            case "--max-long-side":
+                guard let value = iterator.next() else { throw ParseError.missingValue(flag: arg) }
+                guard let parsed = Int(value), parsed >= 2, parsed % 2 == 0 else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                maxLongSide = parsed
             case "-h", "--help":
                 help = true
             default:
@@ -146,7 +155,8 @@ public struct CommandLineOptions: Equatable {
         if highlightJSON != nil || highlightDeviceName != nil {
             guard let highlightJSON, let highlightDeviceName, simulatorWindowID == nil,
                   !listDevices, !listSimulators, deviceID == nil,
-                  simulatorFPS == nil, !audio, !encodeRequested, bitrateBps == nil, bitsPerPixel == nil
+                  simulatorFPS == nil, !audio, !encodeRequested, bitrateBps == nil,
+                  bitsPerPixel == nil, maxLongSide == nil
             else {
                 throw ParseError.conflictingFlags("--highlight-json requires only --highlight-simulator <device name>")
             }
@@ -177,8 +187,8 @@ public struct CommandLineOptions: Equatable {
         if bitrateBps != nil && bitsPerPixel != nil {
             throw ParseError.conflictingFlags("--bitrate-bps and --bits-per-pixel are mutually exclusive")
         }
-        if (bitrateBps != nil || bitsPerPixel != nil) && !encodeRequested {
-            throw ParseError.conflictingFlags("--bitrate-bps/--bits-per-pixel require --encode h264")
+        if (bitrateBps != nil || bitsPerPixel != nil || maxLongSide != nil) && !encodeRequested {
+            throw ParseError.conflictingFlags("encode options require --encode h264")
         }
         // In-helper encoding is wired for both the Simulator (ScreenCaptureKit) and
         // the physical-device (AVFoundation) capture paths (issues #4788 / #4790).
@@ -198,7 +208,7 @@ public struct CommandLineOptions: Equatable {
             } else {
                 bitrate = .videoToolboxDefault
             }
-            encodeSettings = EncodeSettings(bitrate: bitrate)
+            encodeSettings = EncodeSettings(bitrate: bitrate, maxLongSide: maxLongSide)
         }
 
         if listDevices {
@@ -256,6 +266,8 @@ public struct CommandLineOptions: Equatable {
                                 because the 0.1 figure was measured from Simulator
                                 screen content. Mutually exclusive with
                                 --bitrate-bps; omit both to let VideoToolbox choose.
+        --max-long-side <px>   Downscale encoded frames to this even-pixel long edge
+                                when larger, preserving aspect ratio (minimum 2).
 
         -h, --help              Show this help.
 

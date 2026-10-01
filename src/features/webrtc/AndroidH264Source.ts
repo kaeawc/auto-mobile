@@ -15,7 +15,8 @@ import type { AdbProcess } from "../../utils/android-cmdline-tools/interfaces/Ad
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../video/androidScreenrecord";
 import { H264AnnexBParser, isVclNal } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
-import { qualityPresetBitrateBps } from "./qualityPresets";
+import { capToQualityPreset, qualityPresetBitrateBps } from "./qualityPresets";
+export { capToQualityPreset } from "./qualityPresets";
 import type { H264CaptureSource, H264CaptureSourceOptions } from "./H264CaptureSource";
 
 export type { ProcessSpawner, SpawnedProcess } from "./processSpawner";
@@ -434,35 +435,6 @@ export class AndroidH264Source implements H264CaptureSource {
  * `low` does not silently pay full-resolution decode when the persistent
  * encoder is absent.
  */
-const QUALITY_PRESET_MAX_LONG_SIDE: Record<"low" | "medium" | "high", number> = {
-  low: 540,
-  medium: 720,
-  high: 1080,
-};
-
-/**
- * Scale [size] down (never up) so its longer side fits the [quality] preset,
- * truncating to even pixels exactly as the on-device scaler does.
- */
-export function capToQualityPreset(
-  size: { width: number; height: number },
-  quality: "low" | "medium" | "high" | undefined,
-): { width: number; height: number } {
-  if (!quality) {
-    return size;
-  }
-  const maxLongSide = QUALITY_PRESET_MAX_LONG_SIDE[quality];
-  const longSide = Math.max(size.width, size.height);
-  if (longSide <= maxLongSide) {
-    return { width: size.width & ~1, height: size.height & ~1 };
-  }
-  const scale = maxLongSide / longSide;
-  if (size.height >= size.width) {
-    return { width: Math.trunc(size.width * scale) & ~1, height: maxLongSide };
-  }
-  return { width: maxLongSide, height: Math.trunc(size.height * scale) & ~1 };
-}
-
 function capToLevel42(size: { width: number; height: number }): { width: number; height: number } {
   const scale = Math.min(
     1,

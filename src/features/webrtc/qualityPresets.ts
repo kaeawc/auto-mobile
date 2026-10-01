@@ -15,6 +15,33 @@ const QUALITY_PRESET_BITRATE_BPS: Record<CaptureQualityPreset, number> = {
   high: 8_000_000,
 };
 
+/** Maximum encoded long edge, matching the on-device video-server presets. */
+export const QUALITY_PRESET_MAX_LONG_SIDE: Record<CaptureQualityPreset, number> = {
+  low: 540,
+  medium: 720,
+  high: 1080,
+};
+
+/** Scale down to the preset's long edge, preserving aspect ratio and even dimensions. */
+export function capToQualityPreset(
+  size: { width: number; height: number },
+  quality: CaptureQualityPreset | undefined,
+): { width: number; height: number } {
+  if (!quality) {
+    return size;
+  }
+  const maxLongSide = QUALITY_PRESET_MAX_LONG_SIDE[quality];
+  const longSide = Math.max(size.width, size.height);
+  if (longSide <= maxLongSide) {
+    return { width: size.width & ~1, height: size.height & ~1 };
+  }
+  const scale = maxLongSide / longSide;
+  if (size.height >= size.width) {
+    return { width: Math.trunc(size.width * scale) & ~1, height: maxLongSide };
+  }
+  return { width: maxLongSide, height: Math.trunc(size.height * scale) & ~1 };
+}
+
 /** The preset's default bitrate, or undefined when no preset was requested. */
 export function qualityPresetBitrateBps(
   quality: CaptureQualityPreset | undefined,

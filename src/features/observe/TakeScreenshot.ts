@@ -61,6 +61,8 @@ import {
 } from "./android/AndroidPhysicalDisplayId";
 import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 import { displayTransitions } from "./DisplayTransition";
+import { combineWithAmbientAbort } from "../../utils/AbortContext";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 export function replaceScreenshotExtension(filePath: string, extension: string): string {
   const oldExtension = path.extname(filePath);
@@ -155,24 +157,49 @@ export class TakeScreenshot implements ScreenshotService {
     options: ScreenshotOptions,
     signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
-    if (this.device.platform !== "ios") {
-      const startedAt = this.timer.now();
-      const finalPath = this.generateScreenshotPath(startedAt, options);
-      try {
-        return await this.captureAndroidScreenshotViaAdb(finalPath, options, signal);
-      } catch (error) {
-        logger.warn(`[SCREENSHOT] Observer ADB capture failed: ${errorMessage(error)}`, error);
-        return { success: false, error: errorMessage(error) };
-      }
-    }
+    // Never register with the owner's ScreenshotJobTracker or abort its capture.
+    // Bound lock waits, display discovery, and capture with this read's own signal.
+    const deadline = new AbortController();
+    const callerSignal = combineWithAmbientAbort(signal);
+    const captureSignal = AbortSignal.any([
+      deadline.signal,
+      ...(callerSignal ? [callerSignal] : []),
+    ]);
     const startedAt = this.timer.now();
     const finalPath = this.generateScreenshotPath(startedAt, options);
     try {
-      const capture = await this.captureIosObserverScreenshot(signal);
-      return await this.writeiOSScreenshot(finalPath, capture, startedAt, options, signal, false);
+      return await raceWithDeadline(
+        async () => {
+          if (this.device.platform !== "ios") {
+            return this.captureAndroidScreenshotViaAdb(finalPath, options, captureSignal);
+          }
+          const capture = await this.captureIosObserverScreenshot(captureSignal);
+          return this.writeiOSScreenshot(
+            finalPath,
+            capture,
+            startedAt,
+            options,
+            captureSignal,
+            false,
+          );
+        },
+        {
+          timer: this.timer,
+          timeoutMs: 10_000,
+          signal: captureSignal,
+          label: "Observer screenshot capture",
+          onTimeout: () => deadline.abort(),
+        },
+      );
     } catch (error) {
-      logger.warn(`[SCREENSHOT] Observer iOS capture failed: ${errorMessage(error)}`, error);
-      return { success: false, error: errorMessage(error) };
+      logger.warn(`[SCREENSHOT] Observer capture failed: ${errorMessage(error)}`, error);
+      return {
+        success: false,
+        error: callerSignal?.aborted ? OPERATION_CANCELLED_MESSAGE : errorMessage(error),
+      };
+    } finally {
+      // Fence a late lock waiter or capture after timeout/cancellation.
+      deadline.abort();
     }
   }
 
@@ -196,7 +223,11 @@ export class TakeScreenshot implements ScreenshotService {
     const transient = IOSCtrlProxyClient.createForObservationRead(this.device);
     try {
       if (!(await transient.connectForObservationRead())) {
-        return { success: false, error: "Unowned iOS device has no reachable screenshot service" };
+        return {
+          success: false,
+          error:
+            "No screenshot could be captured: this unowned physical iOS device has no reachable runner. Physical iOS has no host-side screenshot capture path without the runner.",
+        };
       }
       return await transient.requestScreenshotForObserver(10000, signal);
     } finally {
@@ -492,14 +523,22 @@ export class TakeScreenshot implements ScreenshotService {
     }
   }
 
-  private async screencapDisplayArgument(options: ScreenshotOptions): Promise<string> {
+  private async screencapDisplayArgument(
+    options: ScreenshotOptions,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    throwIfAborted(signal);
     if (options.displayId !== undefined) {
       if (!Number.isSafeInteger(options.displayId) || options.displayId < 0) {
         throw new Error(`Invalid Android display id: ${options.displayId}`);
       }
       return `-d ${options.displayId} `;
     }
-    const displayId = await this.physicalDisplayIdResolver.resolve(this.adb, this.device.deviceId);
+    const displayId = await this.physicalDisplayIdResolver.resolve(
+      this.adb,
+      this.device.deviceId,
+      signal,
+    );
     return displayId ? `-d ${displayId} ` : "";
   }
 
@@ -729,13 +768,14 @@ export class TakeScreenshot implements ScreenshotService {
     const tempFile = `/data/local/tmp/am-shot-${screenshotTempIdToken(this.idGenerator.next())}.png`;
 
     // Single command: screencap -> base64 encode -> remove temp file
-    const displayArgument = await this.screencapDisplayArgument(options);
+    const displayArgument = await this.screencapDisplayArgument(options, signal);
     const command = `shell "screencap ${displayArgument}-p ${tempFile} && base64 ${tempFile} && rm ${tempFile}"`;
     // Use larger maxBuffer (50MB) to handle high-resolution screenshots
     const maxBuffer = 50 * 1024 * 1024; // 50MB
-    const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () =>
-      this.adb.executeCommand(command, undefined, maxBuffer, undefined, signal),
-    );
+    const result = await withAndroidScreenshotCaptureLock(this.device.deviceId, () => {
+      throwIfAborted(signal);
+      return this.adb.executeCommand(command, undefined, maxBuffer, undefined, signal);
+    });
     const cmdDuration = this.timer.now() - cmdStartTime;
     logger.info(`[SCREENSHOT] Combined ADB command took ${cmdDuration}ms`);
 
@@ -791,7 +831,8 @@ export class TakeScreenshot implements ScreenshotService {
       const cmdStartTime = this.timer.now();
 
       // Step 1: Take screenshot on device
-      const displayArgument = await this.screencapDisplayArgument(options);
+      const displayArgument = await this.screencapDisplayArgument(options, signal);
+      throwIfAborted(signal);
       const screencapResult = await this.adb.executeCommand(
         `shell "screencap ${displayArgument}-p ${shellQuote(tempFile)} ; echo AM_SCREENCAP_RC:$?"`,
         undefined,

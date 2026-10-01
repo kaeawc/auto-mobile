@@ -3252,8 +3252,9 @@ describe("AndroidCtrlProxyClient", function () {
 
   describe("getAccessibilityHierarchy", function () {
     test("should return null when service is not available", async function () {
-      // Configure service as not available
-      fakeAdb.setCommandResponse("pm list packages", { stdout: "", stderr: "" });
+      // Keep the unavailable verdict deterministic and independent of ADB I/O.
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
+      spyOn(manager, "isAvailable").mockResolvedValue(false);
 
       const result = await accessibilityServiceClient.getAccessibilityHierarchy();
       expect(result).toBeNull();

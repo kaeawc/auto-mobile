@@ -14,6 +14,7 @@ import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 /**
  * Internal tool-to-tool no-diff guard (issue #3053 part 2).
@@ -50,6 +51,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
   let originalNoObserve: boolean;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   /** Same-screen observation so `isSameObservationScreen` holds between calls. */
   function sameScreenObserve(): ObserveResult {
@@ -149,6 +151,9 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
@@ -174,6 +179,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     (ToolRegistry as any).afterToolCall = originalAfterToolCall;
     ToolRegistry.clearTools();

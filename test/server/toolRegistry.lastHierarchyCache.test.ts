@@ -16,6 +16,7 @@ import {
   stringifyToolResponse,
 } from "../../src/utils/toolUtils";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 /**
  * Integration coverage for the `lastHierarchy` session-cache write. The
@@ -34,6 +35,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   let originalDeviceSessionManager: unknown;
   let originalAfterToolCall: unknown;
   let daemonSessionManager: SessionManager | undefined;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   function makeObserveResult(): ObserveResult {
     return {
@@ -83,6 +85,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
@@ -106,6 +111,8 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     (ToolRegistry as any).afterToolCall = originalAfterToolCall;
     ToolRegistry.clearTools();

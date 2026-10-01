@@ -230,6 +230,12 @@ describe("IOSCtrlProxyManager", function () {
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
+  function createManagerWithFakeHealthClient(): IOSCtrlProxyManager {
+    const executor = new FakeProcessExecutor();
+    executor.setCommandResponse("curl -s", createExecResult("", ""));
+    return IOSCtrlProxyManager.createForTestingWithDeps(testDevice, fakeTimer, undefined, executor);
+  }
+
   describe("setup fail-closed on unverifiable pin", function () {
     test("returns failure for an unknown pin before any reuse short-circuit (#2746)", async function () {
       const prev = process.env.AUTOMOBILE_VERSION;
@@ -1172,7 +1178,7 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("keeps a subsequent start behind a forced restart whose stop is still settling", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const manager = createManagerWithFakeHealthClient();
       const stopped = deferred();
       spyOn(manager, "stop").mockImplementation(async () => await stopped.promise);
       spyOn(manager, "isRunning").mockResolvedValue(false);
@@ -1196,7 +1202,7 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("lets a live caller retry after an earlier cancelled restart settles", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const manager = createManagerWithFakeHealthClient();
       const stopped = deferred();
       const controller = new AbortController();
       const stop = spyOn(manager, "stop")
@@ -1223,7 +1229,7 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("extends a forced restart with a joining caller's health-poll budget", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const manager = createManagerWithFakeHealthClient();
       const stopped = deferred();
       spyOn(manager, "stop").mockImplementation(async () => await stopped.promise);
       spyOn(manager, "isRunning").mockResolvedValue(false);
@@ -1245,7 +1251,7 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("lets a live caller retry after the owner's startup-phase cancellation", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const manager = createManagerWithFakeHealthClient();
       const started = deferred();
       const controller = new AbortController();
       const stop = spyOn(manager, "stop").mockResolvedValue();
@@ -1278,7 +1284,7 @@ describe("IOSCtrlProxyManager", function () {
     });
 
     test("keeps a start behind a successor forced restart after cancellation", async function () {
-      const manager = IOSCtrlProxyManager.getInstance(testDevice);
+      const manager = createManagerWithFakeHealthClient();
       const firstStop = deferred();
       const secondStop = deferred();
       const startGate = deferred();

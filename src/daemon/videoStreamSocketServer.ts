@@ -77,6 +77,8 @@ export interface VideoStreamSocketServerDependencies {
   /** Monotonic microseconds, used for packet presentation timestamps. */
   nowUs: () => bigint;
   ownershipChanges?: () => DeviceOwnershipChanges | null;
+  /** Maximum time a subscriber may wait for outbound drain. */
+  outboundStallTimeoutMs?: number;
 }
 
 /** The only session-manager event surface the relay needs. */
@@ -174,6 +176,7 @@ const KEY_FRAME_RETRY_MAX_ATTEMPTS = 8;
 // Covers brief viewer reconnects without keeping an abandoned encoder alive for long.
 const CAPTURE_IDLE_GRACE_MS = 3_000;
 const RECONFIGURE_DEBOUNCE_MS = 200;
+const OUTBOUND_STALL_TIMEOUT_MS = 30_000;
 
 /**
  * Cadence for the relay-originated heartbeat (issue #7549), also advertised to the client in the
@@ -289,6 +292,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly socketDeviceIds = new Map<Socket, string>();
   private readonly socketSessionUuids = new Map<Socket, string | undefined>();
   private removeOwnershipListener: (() => void) | null = null;
+  private readonly outboundStalls = new Map<
+    Socket,
+    { timeout: NodeJS.Timeout; onDrain: () => void }
+  >();
   private closed = false;
 
   private readonly authenticator: StreamSocketAuthenticator;
@@ -1030,9 +1037,15 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       logger.debug(`[VideoStream] subscriber is behind on ${deviceId}; dropping to next key frame`);
       capture.backpressuredSubscribers.add(subscriber);
       capture.waitingForKeyFrame.add(subscriber);
-      subscriber.once("drain", () => {
+      const onDrain = () => {
+        const stall = this.outboundStalls.get(subscriber);
+        if (!stall) {
+          return;
+        }
+        this.timer.clearTimeout(stall.timeout);
+        this.outboundStalls.delete(subscriber);
         const current = this.captures.get(deviceId);
-        if (!current) {
+        if (current !== capture || !current.subscribers.has(subscriber)) {
           return;
         }
         current.backpressuredSubscribers.delete(subscriber);
@@ -1043,7 +1056,17 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         // takes ~one round-trip instead. Idempotent enough: a burst of drains just coalesces into
         // one IDR at the encoder.
         this.requestKeyFrameForWaitingSubscriber(deviceId, subscriber);
-      });
+      };
+      const timeout = this.timer.setTimeout(() => {
+        if (!this.outboundStalls.has(subscriber)) {
+          return;
+        }
+        logger.warn(`[VideoStream] subscriber stalled on ${deviceId}; detaching`);
+        this.detach(subscriber);
+        subscriber.destroy();
+      }, this.deps.outboundStallTimeoutMs ?? OUTBOUND_STALL_TIMEOUT_MS);
+      this.outboundStalls.set(subscriber, { timeout, onDrain });
+      subscriber.once("drain", onDrain);
     }
   }
 
@@ -1102,6 +1125,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 
   private detach(socket: Socket): void {
+    const stall = this.outboundStalls.get(socket);
+    if (stall) {
+      this.timer.clearTimeout(stall.timeout);
+      socket.off("drain", stall.onDrain);
+      this.outboundStalls.delete(socket);
+    }
     const deviceId = this.socketDeviceIds.get(socket);
     if (!deviceId) {
       return;
@@ -1285,8 +1314,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
 
     for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
-      this.socketDeviceIds.delete(subscriber);
-      this.socketSessionUuids.delete(subscriber);
+      this.detach(subscriber);
       subscriber.end();
     }
     capture.pendingSubscribers.clear();

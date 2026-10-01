@@ -39,6 +39,25 @@ final class UnmatchedHTTPRequestTests: XCTestCase {
         XCTAssertEqual(recorder.sends.count, 1)
         XCTAssertTrue(String(decoding: recorder.sends[0], as: UTF8.self).contains("HTTP/1.1 200 OK"))
     }
+
+    func testWebSocketUpgradeSendsExpectedAcceptKey() {
+        let request = [
+            "GET /chat HTTP/1.1",
+            "Host: x",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            "Sec-WebSocket-Version: 13",
+            "",
+            "",
+        ].joined(separator: "\r\n")
+        let recorder = RewriteConnectionDriver.run(inbound: Data(request.utf8))
+
+        XCTAssertFalse(recorder.sends.isEmpty)
+        let response = String(decoding: recorder.sends[0], as: UTF8.self)
+        XCTAssertTrue(response.contains("HTTP/1.1 101"))
+        XCTAssertTrue(response.contains("Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="))
+    }
 }
 
 private final class UnmatchedRequestByteChannel: ByteChannel, @unchecked Sendable {

@@ -6,7 +6,7 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 
 // Populate at module scope because test definitions are collected before hooks
 // run. The daemon-only tools are included to cover the generator's complete
-// 84-tool catalog rather than this test process's stdio-only default registry.
+// complete catalog rather than this test process's stdio-only default registry.
 createMcpServer();
 registerCriticalSectionTools();
 registerBarrierTools();

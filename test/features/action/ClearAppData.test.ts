@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import * as os from "os";
 import * as path from "path";
 import { ClearAppData, IosAppReinstaller } from "../../../src/features/action/ClearAppData";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { BootedDevice } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -197,9 +198,10 @@ describe("ClearAppData", () => {
 
       test("returns failure when reinstall throws", async () => {
         const fakeSimctl = new FakeSimCtlClient();
+        const failureMessage = `${bundleId} is now UNINSTALLED: device offline`;
         const reinstaller: IosAppReinstaller = {
           clearAppDataViaReinstall: async () => {
-            throw new Error("device offline");
+            throw new ActionableError(failureMessage);
           },
         };
 
@@ -211,7 +213,7 @@ describe("ClearAppData", () => {
         ).execute(bundleId);
 
         expect(result.success).toBe(false);
-        expect(result.error).toContain("device offline");
+        expect(result.error).toBe(failureMessage);
       });
     });
   });

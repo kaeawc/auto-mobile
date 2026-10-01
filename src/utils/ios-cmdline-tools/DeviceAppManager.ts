@@ -530,13 +530,33 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * installed (device-signed) bundle off the device, uninstall the app — which
    * removes its data container — and reinstall the copied bundle. The app
    * returns in a fresh state. Throws if the installed bundle can't be resolved,
-   * or with the underlying devicectl error if the uninstall/install step fails
-   * (so a post-uninstall install failure surfaces rather than being masked).
+   * or with an actionable error if a step fails. Once uninstall succeeds, a
+   * reinstall failure reports that the app is no longer installed.
    */
   public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
     const done = await this.withInstalledAppBundle(deviceUdid, bundleId, async (bundlePath) => {
+      try {
+        const stats = await this.deps.stat(bundlePath);
+        if (!stats.isDirectory()) {
+          throw new Error("copied app bundle is not a directory");
+        }
+        await this.deps.readdir(bundlePath);
+      } catch (error) {
+        throw toActionableError(
+          error,
+          `Cannot reinstall ${bundleId}: copied app bundle at ${bundlePath} is missing or unreadable; the app has not been uninstalled`,
+        );
+      }
       await this.uninstallApp(deviceUdid, bundleId, false);
-      await this.installApp(deviceUdid, bundlePath);
+      try {
+        await this.installApp(deviceUdid, bundlePath);
+      } catch (error) {
+        throw new ActionableError(
+          `${bundleId} is now UNINSTALLED from device ${deviceUdid} after reinstalling from ${bundlePath} failed: ${errorMessage(error)}. ` +
+            "The temporary copy is removed after this operation. Reinstall the app from its original .ipa/build with the installApp tool, or from the App Store if available. The deleted app data cannot be restored.",
+          { cause: error },
+        );
+      }
       return true;
     });
     if (!done) {

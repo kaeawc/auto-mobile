@@ -69,11 +69,14 @@ const resolveWithFakeTimer = async <T>(
 
 describe("listDevices tool (#5870)", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
+  let inventoryHydrate: (device: BootedDevice, identityToken: string) => Promise<BootedDevice>;
 
   const android: BootedDevice = {
     platform: "android",
     name: "Pixel_9_API_36",
     deviceId: "emulator-5554",
+    screenWidth: 1080,
+    screenHeight: 2400,
   };
   const ios: BootedDevice = {
     platform: "ios",
@@ -129,6 +132,10 @@ describe("listDevices tool (#5870)", () => {
     fakeDeviceUtils = new FakeDeviceUtils();
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
+      displayInventory: {
+        hydrate: (device, identityToken) => inventoryHydrate(device, identityToken),
+        invalidate: () => {},
+      },
       avdManagerFactory: () => ({
         listDeviceImages: async () => [
           {
@@ -147,6 +154,10 @@ describe("listDevices tool (#5870)", () => {
   });
 
   beforeEach(() => {
+    inventoryHydrate = async (device, identityToken) => {
+      expect(identityToken).toBe(device.deviceId);
+      return device;
+    };
     fakeDeviceUtils.clearHistory();
     fakeDeviceUtils.failedPlatforms.clear();
     fakeDeviceUtils.failedSources.clear();
@@ -209,6 +220,43 @@ describe("listDevices tool (#5870)", () => {
     );
   });
 
+  test("matches a booted single-display device without a displays block", async () => {
+    const payload = await callListDevices({ platform: "android", requires: { panels: 1 } });
+    expect(payload.count).toBe(1);
+    expect(payload.devices[0].name).toBe(android.name);
+    expect(payload.devices[0].displays).toBeUndefined();
+
+    await expect(callListDevices({ platform: "android", requires: { panels: 2 } })).rejects.toThrow(
+      /Pixel_9_API_36: 1 panel\(s\), postures=default/,
+    );
+  });
+
+  test("resolves a booted foldable's missing inventory before matching", async () => {
+    const panels = [
+      { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 } },
+      { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 } },
+    ] satisfies NonNullable<BootedDevice["displays"]>["panels"];
+    inventoryHydrate = async (device) => ({
+      ...device,
+      displays: { panels, postures: ["opened"] },
+    });
+    const payload = await callListDevices({ platform: "android", requires: { panels: 2 } });
+    expect(payload.count).toBe(1);
+    expect(payload.devices[0].displays.panels).toHaveLength(2);
+  });
+
+  test("reports an unreadable booted inventory as unknown", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [
+      { ...android, screenWidth: undefined, screenHeight: undefined },
+    ]);
+    inventoryHydrate = async () => {
+      throw new Error("inventory unavailable");
+    };
+    await expect(callListDevices({ platform: "android", requires: { panels: 1 } })).rejects.toThrow(
+      /Pixel_9_API_36: panels and postures could not be read/,
+    );
+  });
+
   test("publishes discovered panels in listDevices", async () => {
     const displays = {
       panels: [
@@ -218,9 +266,15 @@ describe("listDevices tool (#5870)", () => {
       postures: ["unknown"],
     } satisfies NonNullable<BootedDevice["displays"]>;
     fakeDeviceUtils.setBootedDevices("ios", [{ ...ios, displays }]);
+    let hydrationCalls = 0;
+    inventoryHydrate = async () => {
+      hydrationCalls++;
+      throw new Error("already hydrated device was read");
+    };
 
-    const payload = await callListDevices({ platform: "ios" });
+    const payload = await callListDevices({ platform: "ios", requires: { panels: 2 } });
     expect(payload.devices[0].displays).toEqual(displays);
+    expect(hydrationCalls).toBe(0);
   });
 
   test("normalizes unknown booted form factors canonically", async () => {

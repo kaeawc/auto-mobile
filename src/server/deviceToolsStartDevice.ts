@@ -109,6 +109,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     const bootService = new DeviceBootService({
       deviceManager: deviceUtils,
       deviceMatcher,
+      displayInventory: deps.displayInventory,
       deviceCreationGate: deps.deviceCreationGateFactory(),
       deviceProvisioner: deps.deviceProvisionerFactory(),
       matchingStrategy: DEVICE_POOL_MATCHING,

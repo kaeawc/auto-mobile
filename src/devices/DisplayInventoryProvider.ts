@@ -113,3 +113,28 @@ export function createDisplayInventoryProvider(
 }
 
 export const defaultDisplayInventoryProvider = createDisplayInventoryProvider();
+
+/** Read missing inventories only when a caller needs panel or posture matching. */
+export async function hydrateRequiredDisplayInventories(
+  devices: readonly BootedDevice[],
+  requires: { panels?: number; posture?: string } | undefined,
+  provider: DisplayInventoryProvider,
+  signal?: AbortSignal,
+): Promise<BootedDevice[]> {
+  if (requires?.panels === undefined && requires?.posture === undefined) {
+    return [...devices];
+  }
+  return Promise.all(
+    devices.map(async (device) => {
+      if (device.displays) {
+        return device;
+      }
+      try {
+        return await provider.hydrate(device, device.deviceId, signal);
+      } catch (error) {
+        logger.warn(`Display inventory for ${device.deviceId} could not be read: ${error}`, error);
+        return device;
+      }
+    }),
+  );
+}

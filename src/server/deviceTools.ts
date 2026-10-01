@@ -91,6 +91,10 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "../utils/deviceMatcher";
+import {
+  defaultDisplayInventoryProvider,
+  type DisplayInventoryProvider,
+} from "../devices/DisplayInventoryProvider";
 import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import {
   deleteInternalToolParams,
@@ -1194,6 +1198,7 @@ export interface DeviceToolsDependencies {
   deviceManagerFactory: () => PlatformDeviceManager;
   avdManagerFactory: () => Pick<AvdManager, "listDeviceImages">;
   deviceMatcherFactory: () => DeviceMatcher;
+  displayInventory: DisplayInventoryProvider;
   notifyResourcesChanged: () => Promise<void>;
   notifyDeviceInventoryResourcesChanged: (installedAppResourcesChanged: boolean) => Promise<void>;
   syncInstalledAppResourceRegistry: () => Promise<boolean>;
@@ -3398,6 +3403,7 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       avdManagerFactory: () => new AvdManagerService(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
+      displayInventory: defaultDisplayInventoryProvider,
       notifyResourcesChanged: defaultNotifyResourcesChanged,
       notifyDeviceInventoryResourcesChanged: defaultNotifyDeviceInventoryResourcesChanged,
       syncInstalledAppResourceRegistry,
@@ -3475,6 +3481,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
     avdManagerFactory: deps.avdManagerFactory ?? currentDeps.avdManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
+    displayInventory: deps.displayInventory ?? currentDeps.displayInventory,
     ...resourceNotificationDependencyOverrides(deps, currentDeps),
     ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
     deviceCreationGateFactory:

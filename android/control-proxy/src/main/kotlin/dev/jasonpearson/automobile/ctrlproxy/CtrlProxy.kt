@@ -687,6 +687,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
   private lateinit var webSocketServer: WebSocketServer
+  private val webSocketLifecycle = ServerLifecycle<WebSocketServer> { it.stop() }
   private lateinit var hierarchyDebouncer: HierarchyDebouncer
   private lateinit var rotationProvenance: RotationProvenanceTracker
   private var deviceStateRegistration: AutoCloseable? = null
@@ -1519,6 +1520,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               ),
             onPermanentStartFailure = { disableSelf() },
           )
+        webSocketLifecycle.replace(webSocketServer)
         webSocketServer.start()
       } catch (e: Exception) {
         Log.e(TAG, "Error initializing WebSocket server during service connection", e)
@@ -1585,6 +1587,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.e(TAG, "Error during service connection", e)
       // Service will continue running even if some initialization fails
     }
+  }
+
+  override fun onUnbind(intent: Intent?): Boolean {
+    // Android can reconnect this service in the same process before onDestroy runs.
+    webSocketLifecycle.stop()
+    return super.onUnbind(intent)
   }
 
   override fun onDestroy() {
@@ -1691,7 +1699,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     // Stop WebSocket server
     if (::webSocketServer.isInitialized) {
-      webSocketServer.stop()
+      webSocketLifecycle.stop()
       Log.d(TAG, "WebSocket server stopped")
     }
 

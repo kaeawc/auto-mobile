@@ -349,8 +349,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     await super.close();
   }
 
+  private isStreamingOrSubscribing(socket: Socket): boolean {
+    return this.socketDeviceIds.has(socket) || this.subscribing.has(socket);
+  }
+
   protected async processLine(socket: Socket, line: string): Promise<void> {
-    if (this.socketDeviceIds.has(socket) || this.subscribing.has(socket)) {
+    if (this.isStreamingOrSubscribing(socket)) {
       // Already streaming; clients send nothing else, so ignore stray input rather than
       // interrupting the stream.
       return;

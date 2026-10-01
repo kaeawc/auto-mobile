@@ -1,8 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "path";
 import os from "os";
-import { mkdirSync, rmSync, readdirSync, existsSync, writeFileSync, utimesSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync, readdirSync, existsSync, writeFileSync, utimesSync } from "node:fs";
 import { writeFileAsync } from "../../../../src/utils/io";
 import {
   FileSystemObserveCacheStore,
@@ -11,6 +10,8 @@ import {
 } from "../../../../src/features/observe/cache/FileSystemObserveCacheStore";
 import { capLayoutWarnings } from "../../../../src/features/observe/audits/SafeAreaAuditor";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../../../src/utils/IdGenerator";
+import { logger } from "../../../../src/utils/logger";
 import type { ObserveResult } from "../../../../src/models";
 
 function makeResult(label: string): ObserveResult {
@@ -25,13 +26,14 @@ describe("FileSystemObserveCacheStore", function () {
   let cacheDir: string;
   let timer: FakeTimer;
   let store: FileSystemObserveCacheStore;
+  let idGenerator: CountingIdGenerator;
 
   beforeEach(function () {
-    cacheDir = path.join(os.tmpdir(), `observe-cache-test-${randomUUID()}`);
-    mkdirSync(cacheDir, { recursive: true });
+    cacheDir = mkdtempSync(path.join(os.tmpdir(), "observe-cache-test-"));
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
-    store = new FileSystemObserveCacheStore(timer, cacheDir);
+    idGenerator = new CountingIdGenerator("process");
+    store = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator);
   });
 
   afterEach(function () {
@@ -41,11 +43,12 @@ describe("FileSystemObserveCacheStore", function () {
   });
 
   test("creates the cache directory on construction if missing", function () {
-    const fresh = path.join(os.tmpdir(), `observe-cache-fresh-${randomUUID()}`);
+    const freshRoot = mkdtempSync(path.join(os.tmpdir(), "observe-cache-fresh-"));
+    const fresh = path.join(freshRoot, "cache");
     expect(existsSync(fresh)).toBe(false);
     new FileSystemObserveCacheStore(timer, fresh);
     expect(existsSync(fresh)).toBe(true);
-    rmSync(fresh, { recursive: true, force: true });
+    rmSync(freshRoot, { recursive: true, force: true });
   });
 
   test("put then getRecentInMemoryForDevice returns the cached result", async function () {
@@ -119,7 +122,7 @@ describe("FileSystemObserveCacheStore", function () {
     expect(store.getRecentCachedAtForDevice(deviceId)).toBe(1_000_000);
     expect(readdirSync(cacheDir).filter((file) => file.endsWith(".json"))).toHaveLength(1);
 
-    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir);
+    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator);
     expect((await reloaded.getMostRecent(deviceId))?.recompositionSummary).toEqual(
       completed.recompositionSummary,
     );
@@ -160,7 +163,12 @@ describe("FileSystemObserveCacheStore", function () {
     // Drop the in-memory cache by constructing a fresh store backed by the same disk dir.
     const reloadedTimer = new FakeTimer();
     reloadedTimer.setCurrentTime(timer.now() + 1); // 1ms later so file is still within TTL
-    const reloaded = new FileSystemObserveCacheStore(reloadedTimer, cacheDir);
+    const reloaded = new FileSystemObserveCacheStore(
+      reloadedTimer,
+      cacheDir,
+      undefined,
+      idGenerator,
+    );
     expect(reloaded.getRecentInMemoryForDevice("device-1")).toBeUndefined();
     const restored = await reloaded.getMostRecent("device-1");
     expect(restored).toBeDefined();
@@ -284,7 +292,7 @@ describe("FileSystemObserveCacheStore", function () {
       utimesSync(filePath, new Date(expiredAt), new Date(expiredAt));
     }
 
-    const currentFile = `observe_device-1_${timer.now()}_g0-current.json`;
+    const currentFile = `observe_device-1_${timer.now()}_iprocess-1_g0.json`;
     const currentPath = path.join(cacheDir, currentFile);
     writeFileSync(currentPath, JSON.stringify(makeResult("current")));
     utimesSync(currentPath, new Date(timer.now()), new Date(timer.now()));
@@ -332,7 +340,7 @@ describe("FileSystemObserveCacheStore", function () {
     store.clear("device-1"); // currentGeneration("device-1") === 1
     // A stale file slipped onto disk (e.g. a clear() that landed mid disk-write,
     // per Residual 1) stamped with the pre-clear generation 0.
-    const staleName = `observe_device-1_${timer.now()}_g0.json`;
+    const staleName = `observe_device-1_${timer.now()}_iprocess-1_g0.json`;
     writeFileSync(path.join(cacheDir, staleName), JSON.stringify(makeResult("stale-hierarchy")));
 
     expect(await store.getMostRecent("device-1")).toBeUndefined();
@@ -341,22 +349,99 @@ describe("FileSystemObserveCacheStore", function () {
 
   test("getMostRecent serves a disk file stamped with the current generation", async function () {
     store.clear("device-1"); // generation -> 1
-    const currentName = `observe_device-1_${timer.now()}_g1.json`;
+    const currentName = `observe_device-1_${timer.now()}_iprocess-1_g1.json`;
     writeFileSync(path.join(cacheDir, currentName), JSON.stringify(makeResult("current")));
 
     const restored = await store.getMostRecent("device-1");
     expect(restored?.updatedAt).toBe("current");
   });
 
-  test("getMostRecent still serves a legacy disk file with no generation stamp (cross-restart back-compat)", async function () {
+  test("getMostRecent does not serve a legacy disk file with no instance stamp", async function () {
     store.clear("device-1"); // generation -> 1
-    // Pre-#5892 filename format (or a file from another process instance): no
-    // generation stamp. We cannot prove it stale, so it must still be served.
-    const legacyName = `observe_device-1_${timer.now()}.json`;
-    writeFileSync(path.join(cacheDir, legacyName), JSON.stringify(makeResult("legacy")));
+    // Pre-#5892 filename format has no process identity and cannot be trusted.
+    const legacyNames = [
+      `observe_device-1_${timer.now()}.json`,
+      `observe_device-1_${timer.now()}_g1.json`,
+    ];
+    for (const legacyName of legacyNames) {
+      writeFileSync(path.join(cacheDir, legacyName), JSON.stringify(makeResult("legacy")));
+    }
 
     const restored = await store.getMostRecent("device-1");
-    expect(restored?.updatedAt).toBe("legacy");
+    expect(restored).toBeUndefined();
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+  });
+
+  test("getMostRecent ignores a foreign-process entry even with a current generation", async function () {
+    const foreignName = `observe_device-1_${timer.now()}_iforeign-1_g0.json`;
+    writeFileSync(path.join(cacheDir, foreignName), JSON.stringify(makeResult("foreign")));
+
+    expect(await store.getMostRecent("device-1")).toBeUndefined();
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+  });
+
+  test("getMostRecent serves an own-process disk entry", async function () {
+    await store.put("device-1", makeResult("own"));
+    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir, undefined, idGenerator);
+
+    expect((await reloaded.getMostRecent("device-1"))?.updatedAt).toBe("own");
+  });
+
+  test("failed foreign-entry unlink is debug logged and does not throw into observe", async function () {
+    const foreignName = `observe_device-1_${timer.now()}_iforeign-1_g0.json`;
+    writeFileSync(path.join(cacheDir, foreignName), JSON.stringify(makeResult("foreign")));
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const unlinkFile = async (): Promise<void> => {
+      throw new Error("denied");
+    };
+    try {
+      const reader = new FileSystemObserveCacheStore(
+        timer,
+        cacheDir,
+        undefined,
+        idGenerator,
+        unlinkFile,
+      );
+      expect(await reader.getMostRecent("device-1")).toBeUndefined();
+      expect(existsSync(path.join(cacheDir, foreignName))).toBe(true);
+      expect(debug).toHaveBeenCalledWith(
+        expect.stringContaining(
+          `Failed to delete foreign cache file ${foreignName}: Error: denied`,
+        ),
+      );
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  test("failed stale-generation cleanup unlink is warn logged", async function () {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const writeAfterClear = async (filePath: string, data: string): Promise<void> => {
+      store.clear("device-1");
+      await writeFileAsync(filePath, data);
+    };
+    const unlinkFile = async (): Promise<void> => {
+      throw new Error("denied");
+    };
+    try {
+      store = new FileSystemObserveCacheStore(
+        timer,
+        cacheDir,
+        writeAfterClear,
+        idGenerator,
+        unlinkFile,
+      );
+      const generation = store.currentGeneration("device-1");
+      await store.put("device-1", makeResult("stale"), generation);
+
+      expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        `[OBSERVE_CACHE] Failed to delete stale cache file observe_device-1_${timer.now()}_iprocess-1_g0.json: Error: denied`,
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("a clear() landing during the disk write cleans up the stale file (Residual 1)", async function () {
@@ -370,7 +455,7 @@ describe("FileSystemObserveCacheStore", function () {
       await gate;
       await writeFileAsync(filePath, data);
     };
-    const gatedStore = new FileSystemObserveCacheStore(timer, cacheDir, gatedWriter);
+    const gatedStore = new FileSystemObserveCacheStore(timer, cacheDir, gatedWriter, idGenerator);
 
     const gen = gatedStore.currentGeneration("device-1");
     const putPromise = gatedStore.put("device-1", makeResult("mid-write"), gen);

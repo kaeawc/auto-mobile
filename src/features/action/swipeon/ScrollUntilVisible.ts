@@ -112,7 +112,7 @@ export class ScrollUntilVisible {
     this.resolver = deps.resolver ?? new ElementResolver();
   }
 
-  private resolveElement(
+  resolveElement(
     hierarchy: ViewHierarchyResult,
     selector: ResolverSelector,
     action: ResolutionAction = "inspect",

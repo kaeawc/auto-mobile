@@ -2783,12 +2783,23 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!hierarchy) {
       throw new ActionableError("Selected display has no view hierarchy");
     }
-    const element = this.selectElementOnDisplay(options, hierarchy);
+    const selection = this.selectElementOnDisplay(options, hierarchy);
+    const element = selection.element;
     if (!element?.bounds) {
       throw new ActionableError("Element not found on selected display");
     }
-    const x = Math.round((element.bounds.left + element.bounds.right) / 2);
-    const y = Math.round((element.bounds.top + element.bounds.bottom) / 2);
+    const visibleBounds = this.visibleTapBounds(
+      selection,
+      hierarchy,
+      target.observation.screenSize,
+      options,
+    );
+    const point =
+      visibleBounds && this.resolveVisibleTapPoint(element, hierarchy, visibleBounds, options);
+    if (!point) {
+      throw new ActionableError("Matched element has no visible tap area on selected display");
+    }
+    const { x, y } = point;
     const tap = `shell input -d ${target.displayId} touchscreen tap ${x} ${y}`;
     target.assertCurrent();
     if (options.action === "longPress") {
@@ -2810,13 +2821,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       freshness: "fresh",
       signal,
     });
-    return { success: true, action: options.action, element, observation: after };
+    return {
+      success: true,
+      action: options.action,
+      element,
+      selectedElement: this.buildSelectedElementMetadata(selection),
+      observation: after,
+    };
   }
 
   private selectElementOnDisplay(
     options: TapOnElementOptions,
     hierarchy: ViewHierarchyResult,
-  ): Element | undefined {
+  ): ElementSelectionResult {
     const selectorOptions = {
       container: options.container,
       strategy: options.selectionStrategy,
@@ -2832,7 +2849,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             options.text ?? options.textAny?.[0] ?? "",
             selectorOptions,
           );
-    return selected.element ?? undefined;
+    return selected;
   }
 
   private async executeOnDisplay(

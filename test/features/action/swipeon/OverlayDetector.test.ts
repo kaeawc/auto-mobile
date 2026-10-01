@@ -14,8 +14,33 @@ import { OverlayDetector } from "../../../../src/features/action/swipeon/Overlay
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeElementParser } from "../../../fakes/FakeElementParser";
+import containerFixture from "../../../fixtures/observe/android-container-scope.json";
 
 describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)", () => {
+  test("reads captured flat bounds while identifying the selected container", () => {
+    const parser = new FakeElementParser();
+    const parseBounds = spyOn(parser, "parseBounds");
+    const bounds = { left: 0, top: 0, right: 300, bottom: 140 };
+    const containerElement = {
+      bounds,
+      "resource-id": "example.app:id/left",
+    } as Element;
+    const overlayDetector = new OverlayDetector(
+      new FakeElementFinder(),
+      new FakeElementGeometry(),
+      parser,
+    );
+
+    overlayDetector.collectOverlayCandidates(
+      containerFixture.viewHierarchy as ViewHierarchyResult,
+      { elementId: "example.app:id/left" },
+      containerElement,
+    );
+
+    expect(parseBounds).toHaveBeenCalledWith(bounds);
+    parseBounds.mockRestore();
+  });
+
   const b = (left: number, top: number, right: number, bottom: number): ElementBounds => ({
     left,
     top,

@@ -11,6 +11,7 @@ import type { ElementParser } from "../../../utils/interfaces/ElementParser";
 import { SwipeInterval, OverlayCandidate, OverlayAnalyzer } from "./types";
 import { toSearchable } from "../../utility/SearchableNode";
 import { boundsArea, boundsEqual, clamp } from "../../../utils/bounds";
+import { nodeBounds } from "../../../models/ViewHierarchyResult";
 import { isTruthyFlag, buildContainerFromElement } from "../../../utils/elementProperties";
 
 export class OverlayDetector implements OverlayAnalyzer {
@@ -505,7 +506,7 @@ export class OverlayDetector implements OverlayAnalyzer {
           return;
         }
 
-        const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
+        const parsedBounds = this.elementParser.parseBounds(nodeBounds(node));
         if (parsedBounds === null || !boundsEqual(parsedBounds, containerBounds)) {
           return;
         }
@@ -573,7 +574,7 @@ export class OverlayDetector implements OverlayAnalyzer {
       return true;
     }
 
-    const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
+    const parsedBounds = this.elementParser.parseBounds(nodeBounds(node));
     return parsedBounds !== null && boundsEqual(parsedBounds, containerBounds);
   }
 }

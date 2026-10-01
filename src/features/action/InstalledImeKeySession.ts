@@ -1,4 +1,5 @@
 import type { BootedDevice, ViewHierarchyResult, ViewHierarchyNode } from "../../models";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -359,7 +360,7 @@ function matchingImeKeyCenter(
   if (!owned) {
     return null;
   }
-  const candidate = parser.parseBounds(node.bounds ?? properties.bounds);
+  const candidate = parser.parseBounds(nodeBounds(node));
   if (!candidate || candidate.right <= candidate.left || candidate.bottom <= candidate.top) {
     return null;
   }

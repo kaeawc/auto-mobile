@@ -1,6 +1,7 @@
 import type { ObserveResult, ViewHierarchyResult } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { parseBounds } from "../../utils/bounds";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
 
 /**
  * Metadata describing what a long-press appeared to trigger, derived purely
@@ -142,7 +143,7 @@ export class LongPressMetadataDetector {
     // oxlint-disable-next-line auto-mobile/no-raw-selector-field-read -- F7 preserves menu detection and capture signatures; these are internal classifiers, not user selectors.
     const resourceId = props["resource-id"] ?? props.resourceId ?? "";
     const className = props.class ?? props.className ?? "";
-    const parsedBounds = parseBounds(props.bounds);
+    const parsedBounds = parseBounds(nodeBounds(root));
     const bounds = parsedBounds
       ? `${parsedBounds.left},${parsedBounds.top},${parsedBounds.right},${parsedBounds.bottom}`
       : "";

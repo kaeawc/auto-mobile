@@ -12,23 +12,44 @@ describe("DefaultElementParser", () => {
   });
 
   describe("extractNodeProperties", () => {
-    test("returns $ properties when present", () => {
-      const node = { $: { text: "hello", bounds: bounds(0, 0, 100, 100) } } as ViewHierarchyNode;
+    test("returns only attributes from $ without mutating it", () => {
+      const node = {
+        $: { text: "hello", bounds: bounds(0, 0, 100, 100), node: [], children: [] },
+      } as ViewHierarchyNode;
       const props = parser.extractNodeProperties(node);
-      expect(props.text).toBe("hello");
-      expect(props.bounds).toEqual(bounds(0, 0, 100, 100));
+      expect(props).toEqual({ text: "hello" });
+      expect(props).not.toBe(node.$);
+      expect(node.$).toEqual({
+        text: "hello",
+        bounds: bounds(0, 0, 100, 100),
+        node: [],
+        children: [],
+      });
     });
 
-    test("returns node itself when $ is missing", () => {
-      const node = { text: "hello" } as any;
+    test("returns only attributes from a flat node without mutating it", () => {
+      const node = {
+        text: "hello",
+        bounds: bounds(0, 0, 100, 100),
+        node: [],
+        children: [],
+      } as ViewHierarchyNode;
       const props = parser.extractNodeProperties(node);
-      expect(props.text).toBe("hello");
+      expect(props).toEqual({ text: "hello" });
+      expect(props).not.toBe(node);
+      expect(node).toEqual({
+        text: "hello",
+        bounds: bounds(0, 0, 100, 100),
+        node: [],
+        children: [],
+      });
     });
 
-    test("returns node itself for null $", () => {
-      const node = { $: null } as any;
+    test("returns a copy for null $", () => {
+      const node = { $: null } as ViewHierarchyNode;
       const props = parser.extractNodeProperties(node);
-      expect(props).toBe(node);
+      expect(props).toEqual({ $: null });
+      expect(props).not.toBe(node);
     });
   });
 

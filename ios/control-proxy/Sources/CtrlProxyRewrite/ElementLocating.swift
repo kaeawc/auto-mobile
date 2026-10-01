@@ -25,6 +25,7 @@ public protocol ElementLocating: Sendable {
 
     /// Find an element by (partial) text content.
     func findElement(byText text: String) -> Any?
+    func findElement(byText text: String, bounds: ElementBounds) -> Any?
 
     /// Record a bundle id the foreground-app detector should recognize as observed.
     func trackObservedBundleId(_ bundleId: String)

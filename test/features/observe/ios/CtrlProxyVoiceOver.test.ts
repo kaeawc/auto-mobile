@@ -294,7 +294,17 @@ describe("CtrlProxyVoiceOver", function () {
       );
 
       try {
-        const resultPromise = client.requestVoiceOverActivate("Row", "long_press");
+        const bounds = { left: 0, top: 50, right: 50, bottom: 90 };
+        const resultPromise = client.requestVoiceOverActivate(
+          "Row",
+          "long_press",
+          5000,
+          undefined,
+          {
+            bounds,
+            duration: 1750,
+          },
+        );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -302,6 +312,8 @@ describe("CtrlProxyVoiceOver", function () {
         const sentMsg = commandPayloads(socket!)[0];
         expect(sentMsg.type).toBe("request_action");
         expect(sentMsg.action).toBe("long_press");
+        expect(sentMsg.bounds).toEqual(bounds);
+        expect(sentMsg.duration).toBe(1750);
 
         socket!.simulateMessage(
           JSON.stringify({
@@ -384,6 +396,46 @@ describe("CtrlProxyVoiceOver", function () {
   });
 
   describe("requestAction", function () {
+    test("sends long-press duration with the resource-id action", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+
+      try {
+        const resultPromise = client.requestAction(
+          "long_press",
+          "com.test.app:id/submit_button",
+          undefined,
+          5000,
+          undefined,
+          { duration: 1750 },
+        );
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMsg = commandPayloads(socket!)[0];
+        expect(sentMsg).toMatchObject({
+          type: "request_action",
+          action: "long_press",
+          resourceId: "com.test.app:id/submit_button",
+          label: null,
+          duration: 1750,
+        });
+
+        socket!.simulateMessage(
+          JSON.stringify({ type: "action_result", requestId: sentMsg.requestId, success: true }),
+        );
+        expect((await resultPromise).success).toBe(true);
+      } finally {
+        await client.close();
+      }
+    });
+
     test("does not dispatch a cancelled system-alert action", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
       const client = IOSCtrlProxyClient.createForTesting(
@@ -402,7 +454,7 @@ describe("CtrlProxyVoiceOver", function () {
           undefined,
           5000,
           undefined,
-          controller.signal,
+          { abortSignal: controller.signal },
         );
         const sentTypes = (getSocket()?.sentMessages ?? []).map(
           (raw) => (JSON.parse(raw) as { type?: string }).type,
@@ -433,7 +485,7 @@ describe("CtrlProxyVoiceOver", function () {
           undefined,
           5000,
           undefined,
-          controller.signal,
+          { abortSignal: controller.signal },
         );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);

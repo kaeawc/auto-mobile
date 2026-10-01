@@ -1376,6 +1376,50 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return element
         }
 
+        public func findElement(byText text: String, bounds: ElementBounds) -> Any? {
+            let app = currentApplication
+            return catchingObjCExceptionNonThrowing({
+                Self.firstMatchingElement(
+                    foregroundLookup: {
+                        Self.findElement(in: app, byText: text, matchingBounds: bounds)
+                    },
+                    springBoardLookup: {
+                        guard self.foregroundBundleId != "com.apple.springboard" else { return nil }
+                        return self.findSpringBoardAlertElement(byText: text, matchingBounds: bounds)
+                    }
+                )
+            }, fallback: nil)
+        }
+
+        private static func findElement(
+            in app: XCUIApplication, byText text: String, matchingBounds bounds: ElementBounds
+        )
+            -> XCUIElement?
+        {
+            let matches = app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", text)).allElementsBoundByIndex
+            guard matches.count > 1 else { return matches.first }
+            let candidates = (try? app.snapshot()).map { snapshot in
+                resolvedFrameCandidates(
+                    roots: [snapshot], frame: { $0.frame }, children: { $0.children },
+                    matches: { $0.label == text }
+                )
+            } ?? []
+            return closestLiveMatch(matches, candidates: candidates, target: bounds)
+        }
+
+        private static func closestLiveMatch(
+            _ matches: [XCUIElement], candidates: [FrameCandidate], target: ElementBounds
+        )
+            -> XCUIElement?
+        {
+            guard !matches.isEmpty else { return nil }
+            guard matches.count > 1 else { return matches.first }
+            guard let index = matchingLiveIndex(frames: matches.map(\.frame), candidates: candidates, target: target)
+            else { return matches.first }
+            return matches[index]
+        }
+
         private static func findElement(in app: XCUIApplication, byResourceId resourceId: String) -> XCUIElement? {
             let anyMatch = app.descendants(matching: .any)
                 .matching(identifier: resourceId).firstMatch
@@ -1418,6 +1462,29 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 matches: { $0.label == text }
             )
             return Self.findElement(in: springboard, byText: text, constrainedTo: matchingFrames)
+        }
+
+        private func findSpringBoardAlertElement(
+            byText text: String,
+            matchingBounds bounds: ElementBounds
+        )
+            -> XCUIElement?
+        {
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            guard let snapshot = try? springboard.snapshot() else { return nil }
+            let candidates = Self.resolvedFrameCandidates(
+                roots: collectAlertElements(from: snapshot),
+                frame: { $0.frame }, children: { $0.children }, matches: { $0.label == text }
+            )
+            guard !candidates.isEmpty else { return nil }
+            let matches = springboard.descendants(matching: .any)
+                .matching(NSPredicate(format: "label == %@", text)).allElementsBoundByIndex
+                .filter { element in
+                    candidates.contains {
+                        Self.frameDistance($0, element.frame) <= 64
+                    }
+                }
+            return Self.closestLiveMatch(matches, candidates: candidates, target: bounds)
         }
 
         private static func findElement(
@@ -1499,6 +1566,10 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         }
 
         public func findElement(byText _: String) -> Any? {
+            return nil
+        }
+
+        public func findElement(byText _: String, bounds _: ElementBounds) -> Any? {
             return nil
         }
 
@@ -2112,5 +2183,91 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             return "nobounds"
         }
         return "\(bounds.left),\(bounds.top),\(bounds.right),\(bounds.bottom)"
+    }
+
+    struct FrameCandidate {
+        let rawFrame: CGRect
+        let screenFrame: CGRect
+    }
+
+    /// Walk the same roots and parent offsets used by hierarchy serialization.
+    /// Alert roots start at offset zero because observe serializes them separately.
+    nonisolated static func resolvedFrameCandidates<Node>(
+        roots: [Node], frame: (Node) -> CGRect, children: (Node) -> [Node], matches: (Node) -> Bool
+    )
+        -> [FrameCandidate]
+    {
+        var result: [FrameCandidate] = []
+        func visit(_ node: Node, enclosingFrame: CGRect?, offset: CGPoint) {
+            let rawFrame = frame(node)
+            let resolved = screenFrame(rawFrame, enclosingFrame: enclosingFrame, coordinateOffset: offset)
+            if matches(node) {
+                result.append(FrameCandidate(rawFrame: rawFrame, screenFrame: resolved.frame))
+            }
+            for child in children(node) {
+                visit(child, enclosingFrame: resolved.frame, offset: resolved.offset)
+            }
+        }
+        for root in roots {
+            visit(root, enclosingFrame: nil, offset: .zero)
+        }
+        return result
+    }
+
+    nonisolated static func elementBounds(_ frame: CGRect) -> ElementBounds {
+        ElementBounds(left: Int(frame.minX), top: Int(frame.minY), right: Int(frame.maxX), bottom: Int(frame.maxY))
+    }
+
+    nonisolated static func matchingLiveIndex(
+        frames: [CGRect], candidates: [FrameCandidate], target: ElementBounds
+    )
+        -> Int?
+    {
+        var unusedCandidates = Array(candidates.indices)
+        let screenFrames = frames.map { liveFrame in
+            guard let candidateIndex = unusedCandidates.min(by: { lhs, rhs in
+                let lhsDistance = frameDistance(candidates[lhs], liveFrame)
+                let rhsDistance = frameDistance(candidates[rhs], liveFrame)
+                return lhsDistance == rhsDistance ? lhs < rhs : lhsDistance < rhsDistance
+            }) else { return liveFrame }
+            unusedCandidates.removeAll { $0 == candidateIndex }
+            return candidates[candidateIndex].screenFrame
+        }
+        return matchingIndex(bounds: screenFrames.map(elementBounds), target: target)
+    }
+
+    /// Prefer candidates within 8 pt of the observed center. If all have moved
+    /// farther, keep the nearest label match so a stale observation still acts.
+    nonisolated static func matchingIndex(bounds: [ElementBounds], target: ElementBounds) -> Int? {
+        bounds.indices.min { lhs, rhs in
+            let lhsDistance = centerDistanceSquared(bounds[lhs], target)
+            let rhsDistance = centerDistanceSquared(bounds[rhs], target)
+            let lhsNear = lhsDistance <= 64
+            let rhsNear = rhsDistance <= 64
+            if lhsNear != rhsNear { return lhsNear }
+            if lhsDistance != rhsDistance { return lhsDistance < rhsDistance }
+            let lhsSize = sizeDifference(bounds[lhs], target)
+            let rhsSize = sizeDifference(bounds[rhs], target)
+            if lhsSize != rhsSize { return lhsSize < rhsSize }
+            return lhs < rhs
+        }
+    }
+
+    private nonisolated static func centerDistanceSquared(_ lhs: ElementBounds, _ rhs: ElementBounds) -> Int {
+        let dx = (lhs.left + lhs.right) - (rhs.left + rhs.right)
+        let dy = (lhs.top + lhs.bottom) - (rhs.top + rhs.bottom)
+        return (dx * dx + dy * dy) / 4
+    }
+
+    private nonisolated static func sizeDifference(_ lhs: ElementBounds, _ rhs: ElementBounds) -> Int {
+        abs(lhs.width - rhs.width) + abs(lhs.height - rhs.height)
+    }
+
+    private nonisolated static func frameDistance(_ candidate: FrameCandidate, _ liveFrame: CGRect) -> Int {
+        let live = elementBounds(liveFrame)
+        return min(
+            centerDistanceSquared(elementBounds(candidate.rawFrame), live),
+            centerDistanceSquared(elementBounds(candidate.screenFrame), live)
+        )
     }
 }

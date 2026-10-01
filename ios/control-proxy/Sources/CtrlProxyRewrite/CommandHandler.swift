@@ -1092,7 +1092,8 @@ final class CommandHandler: CommandHandling {
     private func handleAction(_ request: RequestAction, startTime: Date) async throws -> WebSocketResponse {
         try await performContextCheckedGesture(expected: request.frameContext) {
             try self.gesturePerformer.performAction(
-                request.action, resourceId: request.resourceId, label: request.label
+                request.action, resourceId: request.resourceId, label: request.label,
+                bounds: request.bounds, duration: request.duration
             )
         }
 

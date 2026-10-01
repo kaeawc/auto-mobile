@@ -1642,7 +1642,12 @@ public final class GesturePerformer: GesturePerforming {
 
         // MARK: - Actions
 
-        public func performAction(_ action: String, resourceId: String? = nil, label: String? = nil) throws {
+        public func performAction(
+            _ action: String, resourceId: String? = nil, label: String? = nil,
+            bounds: ElementBounds? = nil, duration: Int? = nil
+        )
+            throws
+        {
             if action.caseInsensitiveCompare("system_alert_accept") == .orderedSame {
                 try catchingObjCException {
                     // iOS 26.5 can render a SpringBoard confirmation that is
@@ -1663,7 +1668,14 @@ public final class GesturePerformer: GesturePerforming {
                 element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement
             }
             if element == nil, let label = label {
-                element = elementLocator.findElement(byText: label) as? XCUIElement
+                if let bounds {
+                    element = elementLocator.findElement(byText: label, bounds: bounds) as? XCUIElement
+                    if element == nil {
+                        element = elementLocator.findElement(byText: label) as? XCUIElement
+                    }
+                } else {
+                    element = elementLocator.findElement(byText: label) as? XCUIElement
+                }
             }
             guard let found = element else {
                 throw GestureError.elementNotFound(resourceId ?? label ?? "unknown")
@@ -1676,7 +1688,7 @@ public final class GesturePerformer: GesturePerforming {
                     // element located by label it resolves to a tap, matching "click"/"tap".
                     found.tap()
                 case "long_click", "long_press":
-                    found.press(forDuration: 1.0)
+                    found.press(forDuration: Self.longPressDuration(duration))
                 case "double_tap", "double_click":
                     found.doubleTap()
                 case "scroll_forward":
@@ -2462,7 +2474,15 @@ public final class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func performAction(_: String, resourceId _: String?, label _: String?) throws {
+        public func performAction(
+            _: String,
+            resourceId _: String?,
+            label _: String?,
+            bounds _: ElementBounds?,
+            duration _: Int?
+        )
+            throws
+        {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
@@ -2530,4 +2550,8 @@ public final class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
     #endif
+
+    nonisolated static func longPressDuration(_ milliseconds: Int?) -> TimeInterval {
+        TimeInterval(milliseconds ?? 1000) / 1000.0
+    }
 }

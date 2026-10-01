@@ -7,6 +7,7 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { ElementBounds } from "../../../models/ElementBounds";
 import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
@@ -18,6 +19,16 @@ import { sendCommand } from "../DeviceServiceUtils";
  * instead of duplicating the literal (issue #6248 review, P2).
  */
 export const IOS_VOICEOVER_STATE_REQUEST_TIMEOUT_MS = 5000;
+
+export interface VoiceOverActivationOptions {
+  bounds?: ElementBounds;
+  duration?: number;
+}
+
+export interface CtrlProxyRequestActionOptions {
+  abortSignal?: AbortSignal;
+  duration?: number;
+}
 
 /**
  * Delegate class for VoiceOver state detection via CtrlProxy WebSocket.
@@ -82,7 +93,7 @@ export class CtrlProxyVoiceOver {
    * @param label - The accessibility label (content-desc) as fallback when no resourceId
    * @param timeoutMs - Request timeout in milliseconds (default: 5000)
    * @param perf - Optional performance tracker
-   * @param abortSignal - Optional caller cancellation signal
+   * @param options - Optional caller cancellation signal and action duration
    * @returns Action result
    */
   async requestAction(
@@ -91,17 +102,22 @@ export class CtrlProxyVoiceOver {
     label?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    abortSignal?: AbortSignal,
+    options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     return sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "action",
       responseType: "action",
       messageType: "request_action",
-      params: { action, resourceId: resourceId ?? null, label: label ?? null },
+      params: {
+        action,
+        resourceId: resourceId ?? null,
+        label: label ?? null,
+        duration: options?.duration,
+      },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,
-      abortSignal,
+      abortSignal: options?.abortSignal,
       notConnectedError: () => ({ success: false, error: "Not connected to CtrlProxy" }),
       timeoutError: () => ({ success: false, error: "Timeout waiting for action_result" }),
     });
@@ -195,12 +211,13 @@ export class CtrlProxyVoiceOver {
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    options?: VoiceOverActivationOptions,
   ): Promise<CtrlProxyActionResult> {
     return sendCommand<CtrlProxyActionResult>(this.context, {
       idPrefix: "voiceover_action",
       responseType: "action",
       messageType: "request_action",
-      params: { label, action },
+      params: { label, action, bounds: options?.bounds, duration: options?.duration },
       timeoutMs,
       perf,
       cancelScreenshotBackoff: false,

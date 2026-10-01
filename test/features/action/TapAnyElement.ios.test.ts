@@ -151,7 +151,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(true);
     expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
-      { label: "Target Button", action: "activate" },
+      {
+        label: "Target Button",
+        action: "activate",
+        bounds: makeClickableElement().bounds,
+        duration: undefined,
+      },
     ]);
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
@@ -178,7 +183,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(true);
     expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
-      { label: "Target Button", action: "activate" },
+      {
+        label: "Target Button",
+        action: "activate",
+        bounds: makeClickableElement().bounds,
+        duration: undefined,
+      },
     ]);
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
@@ -190,7 +200,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(true);
     expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
-      { label: "Target Button", action: "long_press" },
+      {
+        label: "Target Button",
+        action: "long_press",
+        bounds: makeClickableElement().bounds,
+        duration: 1500,
+      },
     ]);
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
@@ -208,7 +223,12 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("no such label");
     expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
-      { label: "Target Button", action: "activate" },
+      {
+        label: "Target Button",
+        action: "activate",
+        bounds: makeClickableElement().bounds,
+        duration: undefined,
+      },
     ]);
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
   });
@@ -328,6 +348,8 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "Target Button",
       "activate",
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      undefined,
+      { bounds: makeClickableElement().bounds, duration: undefined },
     );
   });
 
@@ -456,7 +478,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration });
 
     expect(result.success).toBe(true);
-    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", duration + 2000);
+    expect(activateSpy).toHaveBeenCalledWith(
+      "Target Button",
+      "long_press",
+      duration + 2000,
+      undefined,
+      {
+        bounds: makeClickableElement().bounds,
+        duration,
+      },
+    );
   });
 
   test("VoiceOver longPress over 5s sizes the requestVoiceOverActivate timeout from the duration", async () => {
@@ -466,7 +497,10 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
     const result = await tapAny.execute({ action: "longPress", duration: 6000 });
 
     expect(result.success).toBe(true);
-    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", 8000);
+    expect(activateSpy).toHaveBeenCalledWith("Target Button", "long_press", 8000, undefined, {
+      bounds: makeClickableElement().bounds,
+      duration: 6000,
+    });
   });
 
   // Thread PRRT_kwDOP-GF5M6ftxl4: the public schema accepts a fractional longPress
@@ -528,6 +562,8 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "com.test.app:id/submit_button",
       undefined,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      undefined,
+      undefined,
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
@@ -576,12 +612,37 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "com.test.app:id/submit_button",
       undefined,
       TAP_ANY_ORDINARY_TAP_CTRL_PROXY_MIN_TIMEOUT_MS,
+      undefined,
+      undefined,
     );
     expect(fakeIosClient.getActionHistory()).toEqual([
       { action: "activate", resourceId: "com.test.app:id/submit_button", label: undefined },
     ]);
     expect(fakeIosClient.getVoiceOverActivateHistory()).toHaveLength(0);
     expect(fakeIosClient.getTapHistory()).toHaveLength(0);
+  });
+
+  test("VoiceOver resource-id longPress forwards its requested duration", async () => {
+    fakeVoiceOverDetector.setVoiceOverEnabled(true);
+    fakeElementSelector.setNextElement({
+      bounds: { left: 0, top: 0, right: 84, bottom: 168 },
+      "resource-id": "com.test.app:id/submit_button",
+      clickable: "true",
+    } as Element);
+    const actionSpy = spyOn(fakeIosClient, "requestAction");
+
+    const result = await tapAny.execute({ action: "longPress", duration: 1750 });
+
+    expect(result.success).toBe(true);
+    expect(actionSpy).toHaveBeenCalledWith(
+      "long_press",
+      "com.test.app:id/submit_button",
+      undefined,
+      3750,
+      undefined,
+      { duration: 1750 },
+    );
+    expect(fakeIosClient.getActionHistory()[0]?.duration).toBe(1750);
   });
 
   test("VoiceOver enabled + no label and no resource-id fails fast instead of a focus-only coordinate press", async () => {

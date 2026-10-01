@@ -33,6 +33,7 @@ import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOp
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import type { Timer } from "../../src/utils/SystemTimer";
+import type { CtrlProxyRequestActionOptions } from "../../src/features/observe/ios/CtrlProxyVoiceOver";
 import type { InputKeyModifier, InputKeyName } from "../../src/features/action/InputKey";
 import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
 
@@ -146,6 +147,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private voiceOverActivateHistory: Array<{
     label: string;
     action: "activate" | "long_press";
+    bounds?: { left: number; top: number; right: number; bottom: number };
+    duration?: number;
   }> = [];
 
   // requestSetVoiceOverEnabled call history
@@ -155,6 +158,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     action: string;
     resourceId?: string;
     label?: string;
+    duration?: number;
   }> = [];
 
   private multiFingerSwipeHistory: Array<{
@@ -474,7 +478,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   /**
    * Get requestAction call history
    */
-  getActionHistory(): Array<{ action: string; resourceId?: string; label?: string }> {
+  getActionHistory(): Array<{
+    action: string;
+    resourceId?: string;
+    label?: string;
+    duration?: number;
+  }> {
     return [...this.actionHistory];
   }
 
@@ -1150,11 +1159,15 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     action: "activate" | "long_press",
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    options?: {
+      bounds?: { left: number; top: number; right: number; bottom: number };
+      duration?: number;
+    },
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("voiceOverActivate");
     this.checkFailure("voiceOverActivate");
 
-    this.voiceOverActivateHistory.push({ label, action });
+    this.voiceOverActivateHistory.push({ label, action, ...options });
 
     if (this.voiceOverActivateResult) {
       return this.voiceOverActivateResult;
@@ -1221,12 +1234,17 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     label?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    _abortSignal?: AbortSignal,
+    options?: CtrlProxyRequestActionOptions,
   ): Promise<CtrlProxyActionResult> {
     await this.applyDelay("action");
     this.checkFailure("action");
 
-    this.actionHistory.push({ action, resourceId, label });
+    this.actionHistory.push({
+      action,
+      resourceId,
+      label,
+      ...(options?.duration !== undefined && { duration: options.duration }),
+    });
 
     if (this.actionResult) {
       return this.actionResult;

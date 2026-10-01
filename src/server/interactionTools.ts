@@ -2840,7 +2840,7 @@ export function registerInteractionTools() {
                     undefined,
                     IOS_OPEN_ALERT_HIERARCHY_TIMEOUT_MS,
                     undefined,
-                    signal,
+                    { abortSignal: signal },
                   )
               : undefined,
           )

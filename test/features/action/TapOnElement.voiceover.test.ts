@@ -90,7 +90,7 @@ describe("TapOnElement VoiceOver mode", () => {
       await (tapOnElement as any).executeiOSTap("tap", 50, 50, 50, element, true);
 
       expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
-        { label: "Settings", action: "activate" },
+        { label: "Settings", action: "activate", bounds: element.bounds, duration: undefined },
       ]);
       expect(fakeIosClient.getTapHistory()).toHaveLength(0);
     });
@@ -193,6 +193,8 @@ describe("TapOnElement VoiceOver mode", () => {
       const history = fakeIosClient.getVoiceOverActivateHistory();
       expect(history).toHaveLength(1);
       expect(history[0].action).toBe("long_press");
+      expect(history[0].bounds).toEqual(element.bounds);
+      expect(history[0].duration).toBe(1000);
 
       getInstanceSpy.mockRestore();
     });

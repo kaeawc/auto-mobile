@@ -101,7 +101,13 @@ public protocol GesturePerforming: Sendable {
     // MARK: - Actions
 
     /// Perform action on element by resourceId or label (content-desc)
-    func performAction(_ action: String, resourceId: String?, label: String?) throws
+    func performAction(
+        _ action: String,
+        resourceId: String?,
+        label: String?,
+        bounds: ElementBounds?,
+        duration: Int?
+    ) throws
     func activateAccessibilityLink(text: String, occurrence: Int, ownerResourceId: String?) throws
 
     // MARK: - Screenshots

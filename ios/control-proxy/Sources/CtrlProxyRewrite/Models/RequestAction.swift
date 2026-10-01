@@ -6,6 +6,8 @@ public struct RequestAction: Decodable, Sendable {
     public var action: String
     public var resourceId: String?
     public var label: String?
+    public var bounds: ElementBounds?
+    public var duration: Int?
 }
 
 extension RequestAction: CommandPayload {}

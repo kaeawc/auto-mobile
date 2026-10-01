@@ -97,6 +97,7 @@ interface DeviceCapture {
   /** Latest explicit hint for each field wins; omitted fields retain their current value. */
   desiredHints: CaptureHints;
   appliedHints: CaptureHints;
+  /** Also identifies the SPS/PPS and GOP cache; both are cleared when this advances at swap. */
   generation: number;
   reconfigureTimer: NodeJS.Timeout | null;
   reconfiguring: Promise<void> | null;
@@ -108,6 +109,8 @@ interface DeviceCapture {
   subscribers: Set<Socket>;
   backpressuredSubscribers: Set<Socket>;
   waitingForKeyFrame: Set<Socket>;
+  /** Joiners held off the old encoder until the requested configuration is applied. */
+  waitingForReplacement: Set<Socket>;
   /**
    * Most recent parameter sets (SPS/PPS). A client that joins mid-stream cannot decode until it
    * sees these, and the encoder only re-emits them on key frames.
@@ -445,21 +448,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
       socket.write(encodeStreamHeader(capture.size?.width ?? 0, capture.size?.height ?? 0));
 
-      // Replay the parameter sets so a late joiner can decode immediately instead of waiting for
-      // the encoder's next key frame.
-      this.replayParameterSets(capture, socket);
-      // A raw iOS encoder cannot produce a new IDR until ScreenCaptureKit delivers another
-      // complete frame. On an unchanged screen, replay one complete IDR without claiming
-      // either producer or encoder progress.
-      this.replayCurrentIosKeyFrame(device, capture, socket);
-      // Startup can synchronously emit an IDR before the acknowledgement makes this socket
-      // eligible for binary data. Gate the subscriber and ask for a post-ack keyframe so it
-      // never begins on an undecodable inter-frame. Retried through the injected timer when the
-      // source throttles the request (same helper as the drain path): a bare call that lands
-      // inside the throttle window (~3s Android/raw-iOS) would leave this just-promoted
-      // subscriber parked in waitingForKeyFrame until the encoder's natural GOP — which on an
-      // idle screen is exactly the frozen-pane-on-reconnect symptom.
-      this.requestKeyFrameForWaitingSubscriber(device.deviceId, socket);
+      // The cache belongs to capture.generation. A joiner held for a future configuration must
+      // not receive its old parameter sets or GOP, even though existing viewers still can.
+      this.primeAcknowledgedSubscriber(capture, socket);
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
       this.detach(socket);
@@ -569,6 +560,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       subscribers: new Set(),
       backpressuredSubscribers: new Set(),
       waitingForKeyFrame: new Set(),
+      waitingForReplacement: new Set(),
       sps: null,
       pps: null,
       parser: new H264AnnexBParser(),
@@ -760,6 +752,42 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (!sameHints(capture.desiredHints, capture.appliedHints)) {
       logger.info(`[VideoStream] ${deviceId} scheduling shared capture quality change`);
     }
+    if (!this.reconfigurePending(capture)) {
+      this.releaseReplacementWaiters(capture);
+    }
+  }
+
+  private reconfigurePending(capture: DeviceCapture): boolean {
+    return capture.reconfiguring !== null || !sameHints(capture.desiredHints, capture.appliedHints);
+  }
+
+  private primeSubscriber(capture: DeviceCapture, socket: Socket): void {
+    this.replayParameterSets(capture, socket);
+    this.replayCurrentIosKeyFrame(capture.device, capture, socket);
+  }
+
+  private primeAcknowledgedSubscriber(capture: DeviceCapture, socket: Socket): void {
+    if (!this.reconfigurePending(capture)) {
+      capture.waitingForReplacement.delete(socket);
+      this.primeSubscriber(capture, socket);
+    }
+    // A source may have emitted before acknowledgement. Ask for a post-ack IDR when the
+    // subscriber is allowed to consume this encoder; throttled requests use the retry path.
+    this.requestKeyFrameForWaitingSubscriber(capture.device.deviceId, socket);
+  }
+
+  private releaseReplacementWaiters(capture: DeviceCapture): void {
+    if (this.reconfigurePending(capture)) {
+      return;
+    }
+    for (const subscriber of capture.waitingForReplacement) {
+      if (!capture.subscribers.has(subscriber)) {
+        continue;
+      }
+      capture.waitingForReplacement.delete(subscriber);
+      this.primeSubscriber(capture, subscriber);
+      this.requestKeyFrameForWaitingSubscriber(capture.device.deviceId, subscriber);
+    }
   }
 
   private scheduleReconfigure(deviceId: string, capture: DeviceCapture): void {
@@ -773,6 +801,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       !this.hasSubscribers(capture) ||
       sameHints(capture.desiredHints, capture.appliedHints)
     ) {
+      this.releaseReplacementWaiters(capture);
       return;
     }
     capture.reconfigureTimer = this.timer.setTimeout(() => {
@@ -781,6 +810,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       capture.reconfiguring = running;
       void running.finally(() => {
         capture.reconfiguring = null;
+        this.releaseReplacementWaiters(capture);
         this.scheduleReconfigure(deviceId, capture);
       });
     }, RECONFIGURE_DEBOUNCE_MS);
@@ -820,8 +850,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     if (!outgoing || this.captures.get(deviceId) !== capture) {
       return;
     }
-    // Fence callbacks from the retiring encoder before its asynchronous stop. The socket sets
-    // stay in place; every viewer waits for the replacement's SPS/PPS and IDR.
+    // Fence the retiring source and its cache only at the swap. Existing viewers can consume its
+    // output through the debounce; joiners held for the new hints cannot.
     capture.generation++;
     capture.source = null;
     this.resetForNewEncoder(capture);
@@ -882,6 +912,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       // The immediate key-frame request that unfreezes it lives in the subscribe-ack path (which
       // runs for late joiners too); the backpressure-drain recovery is handled in the drain handler.
       capture.waitingForKeyFrame.add(socket);
+    }
+    if (this.reconfigurePending(capture)) {
+      capture.waitingForReplacement.add(socket);
     }
   }
 
@@ -1033,19 +1066,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.detach(subscriber);
       return;
     }
-    if (capture.backpressuredSubscribers.has(subscriber)) {
+    if (this.shouldSkipPacket(capture, subscriber, isConfig, isKeyFrame)) {
       return;
-    }
-    if (capture.waitingForKeyFrame.has(subscriber)) {
-      // Keep codec configuration flowing while waiting for an IDR. A late
-      // join can occur after SPS but before PPS, and suppressing PPS leaves
-      // the otherwise complete IDR undecodable.
-      if (!isKeyFrame && !isConfig) {
-        return;
-      }
-      if (isKeyFrame) {
-        capture.waitingForKeyFrame.delete(subscriber);
-      }
     }
     if (!subscriber.write(packet)) {
       logger.debug(`[VideoStream] subscriber is behind on ${deviceId}; dropping to next key frame`);
@@ -1084,6 +1106,33 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
   }
 
+  private shouldSkipPacket(
+    capture: DeviceCapture,
+    subscriber: Socket,
+    isConfig: boolean,
+    isKeyFrame: boolean,
+  ): boolean {
+    if (
+      capture.waitingForReplacement.has(subscriber) ||
+      capture.backpressuredSubscribers.has(subscriber)
+    ) {
+      return true;
+    }
+    if (!capture.waitingForKeyFrame.has(subscriber)) {
+      return false;
+    }
+    // Keep configuration flowing while waiting for an IDR. An IDR from a replacement encoder
+    // is not decodable until its parameter sets have arrived.
+    if (!isKeyFrame) {
+      return !isConfig;
+    }
+    if (capture.generation > 0 && (!capture.sps || !capture.pps)) {
+      return true;
+    }
+    capture.waitingForKeyFrame.delete(subscriber);
+    return false;
+  }
+
   /**
    * Ask the capture source for an immediate key frame on behalf of a subscriber waiting to resync,
    * retrying through the injected timer while the request is throttled.
@@ -1106,6 +1155,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     }
     // Nothing to do once the subscriber left or already resynced on a key frame.
     if (subscriber.destroyed || !capture.waitingForKeyFrame.has(subscriber)) {
+      return;
+    }
+    if (capture.waitingForReplacement.has(subscriber)) {
       return;
     }
     const source = capture.source;
@@ -1160,6 +1212,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.subscribers.delete(socket);
     capture.backpressuredSubscribers.delete(socket);
     capture.waitingForKeyFrame.delete(socket);
+    capture.waitingForReplacement.delete(socket);
     if (!this.hasSubscribers(capture)) {
       if (capture.reconfigureTimer) {
         this.timer.clearTimeout(capture.reconfigureTimer);
@@ -1335,6 +1388,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.subscribers.clear();
     capture.backpressuredSubscribers.clear();
     capture.waitingForKeyFrame.clear();
+    capture.waitingForReplacement.clear();
 
     const stopping = (async () => {
       try {

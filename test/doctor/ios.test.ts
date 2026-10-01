@@ -1,4 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import * as childProcess from "node:child_process";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
+import { FakeWebSocket, createInstantFailureWebSocketFactory } from "../fakes/FakeWebSocket";
+import { ObserveElementsBuilder } from "../../src/features/observe/ObserveElementsBuilder";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IosDoctorDependencies } from "../../src/doctor/checks/ios";
@@ -1335,11 +1340,256 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     getReportedRunnerPort: async () => 8765,
   };
 
+  test("both inspectors read a connected resident client despite stale manager state", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeIOSCtrlProxyManager(timer);
+    manager.setInstalled(true);
+    manager.setRunning(false);
+    class ResidentSocket extends FakeWebSocket {
+      override send(data: unknown): void {
+        super.send(data);
+        const message = JSON.parse(String(data)) as { type: string; requestId: string };
+        if (message.type === "request_hierarchy_if_stale") {
+          this.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              requestId: message.requestId,
+              data: {
+                updatedAt: 1,
+                packageName: "SpringBoard",
+                hierarchy: {},
+                screenWidth: 390,
+                screenHeight: 844,
+              },
+            }),
+          );
+        }
+      }
+    }
+    let socket: ResidentSocket | undefined;
+    const client = IOSCtrlProxyClient.createForTesting(
+      { name: "iPhone", deviceId: "SIM-1", platform: "ios" },
+      8765,
+      (url) => {
+        socket = new ResidentSocket(url, "none", 0, timer);
+        return socket;
+      },
+      timer,
+      () => manager,
+    );
+    const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
+    try {
+      expect(await client.connectWithoutSetup()).toBe(true);
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          supportedCommands: [...IOS_RUNNER_FEATURE_COMMANDS],
+          supportedFeatures: [...IOS_RUNNER_FEATURE_FLAGS],
+        }),
+      );
+      const createClient = () => {
+        throw new Error("must reuse the resident connection");
+      };
+      const runner = createIosCtrlProxyRunnerInspector(() => simctl, new FakeLogger(), {
+        getManager: () => manager,
+        getExistingClient: () => client,
+        createClient,
+      });
+      const observe = createIosObserveRoundTripInspector(() => simctl, new FakeLogger(), {
+        getManager: () => manager,
+        getExistingClient: () => client,
+        createClient,
+        elementsBuilder: new ObserveElementsBuilder(),
+      });
+      expect((await runner.inspectBootedRunners())[0]).toMatchObject({
+        running: true,
+        supportedCommands: [...IOS_RUNNER_FEATURE_COMMANDS].sort(),
+        supportedFeatures: [...IOS_RUNNER_FEATURE_FLAGS].sort(),
+      });
+      expect((await observe.inspectBootedObserveRoundTrips())[0]).toMatchObject({
+        connected: true,
+        hierarchyError: null,
+        screenSize: { width: 390, height: 844 },
+      });
+      expect(client.isConnected()).toBe(true);
+      expect(manager.getExecutedOperations()).not.toContain("start");
+      expect(manager.getExecutedOperations()).not.toContain("setup:force=true");
+      expect(manager.getExecutedOperations()).not.toContain("forceRestart");
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("closed resident probes ignore stale manager state and never retain a successful handshake", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeIOSCtrlProxyManager(timer);
+    manager.setInstalled(true);
+    manager.setRunning(false);
+    let reachable = true;
+    let dials = 0;
+    class ProbeSocket extends FakeWebSocket {
+      override send(data: unknown): void {
+        super.send(data);
+        const request = JSON.parse(String(data)) as { type: string; requestId: string };
+        if (request.type === "request_hierarchy_if_stale") {
+          this.simulateMessage(
+            JSON.stringify({
+              type: "hierarchy_update",
+              requestId: request.requestId,
+              data: {
+                updatedAt: 1,
+                packageName: "SpringBoard",
+                hierarchy: {},
+                screenWidth: 390,
+                screenHeight: 844,
+              },
+            }),
+          );
+        }
+      }
+    }
+    const client = IOSCtrlProxyClient.createForTesting(
+      { name: "iPhone", deviceId: "SIM-1", platform: "ios" },
+      8765,
+      (url) => {
+        dials++;
+        const socket = new ProbeSocket(url, reachable ? "none" : "instant", 0, timer);
+        socket.on("open", () =>
+          queueMicrotask(() =>
+            socket.simulateMessage(
+              JSON.stringify({
+                type: "connected",
+                supportedCommands: [...IOS_RUNNER_FEATURE_COMMANDS],
+                supportedFeatures: [...IOS_RUNNER_FEATURE_FLAGS],
+              }),
+            ),
+          ),
+        );
+        return socket;
+      },
+      timer,
+      () => manager,
+    );
+    const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
+    const hooks = {
+      getManager: () => manager,
+      getExistingClient: () => client,
+      createClient: () => {
+        throw new Error("resident client exists");
+      },
+    };
+    const runner = createIosCtrlProxyRunnerInspector(() => simctl, new FakeLogger(), hooks);
+    const observe = createIosObserveRoundTripInspector(() => simctl, new FakeLogger(), {
+      ...hooks,
+      elementsBuilder: new ObserveElementsBuilder(),
+    });
+    try {
+      const [identity, hierarchy] = await Promise.all([
+        runner.inspectBootedRunners(),
+        observe.inspectBootedObserveRoundTrips(),
+      ]);
+      expect(identity[0]).toMatchObject({
+        running: true,
+        supportedCommands: [...IOS_RUNNER_FEATURE_COMMANDS].sort(),
+      });
+      expect(hierarchy[0]).toMatchObject({ connected: true, hierarchyError: null });
+      expect(client.getCachedSupportedCommands()).toBeNull();
+      expect(client.getCachedSupportedFeatures()).toBeNull();
+      expect(client.isConnected()).toBe(false);
+      expect(client["autoReconnectEnabled"]).toBe(true);
+      reachable = false;
+      expect((await runner.inspectBootedRunners())[0]).toMatchObject({
+        running: false,
+        supportedCommands: null,
+        supportedFeatures: null,
+      });
+      expect((await observe.inspectBootedObserveRoundTrips())[0]).toMatchObject({
+        connected: false,
+        hierarchyError: "iOS CtrlProxy runner is not running or unreachable",
+      });
+      expect(dials).toBe(6);
+      expect(client["connectionAttempts"]).toBe(0);
+      expect(client["autoReconnectEnabled"]).toBe(true);
+      expect(
+        manager
+          .getExecutedOperations()
+          .filter((operation) =>
+            ["setup:force=true", "setup:force=false", "start", "forceRestart"].includes(operation),
+          ),
+      ).toEqual([]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("both inspectors leave an unreachable resident runner untouched", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const manager = new FakeIOSCtrlProxyManager(timer);
+    manager.setInstalled(true);
+    manager.setRunning(false);
+    const setup = spyOn(manager, "setup");
+    const start = spyOn(manager, "start");
+    const restart = spyOn(manager, "forceRestart");
+    const spawn = spyOn(childProcess, "spawn").mockImplementation(() => {
+      throw new Error("doctor must not spawn a process");
+    });
+    const client = IOSCtrlProxyClient.createForTesting(
+      { name: "iPhone", deviceId: "SIM-1", platform: "ios" },
+      8765,
+      createInstantFailureWebSocketFactory(timer),
+      timer,
+      () => manager,
+    );
+    const simctl = simctlReturning([{ name: "iPhone", deviceId: "SIM-1" }]);
+    const runner = createIosCtrlProxyRunnerInspector(() => simctl, new FakeLogger(), {
+      getManager: () => manager,
+      getExistingClient: () => client,
+      createClient: () => {
+        throw new Error("resident client exists");
+      },
+    });
+    const observe = createIosObserveRoundTripInspector(() => simctl, new FakeLogger(), {
+      getManager: () => manager,
+      getExistingClient: () => client,
+      createClient: () => {
+        throw new Error("resident client exists");
+      },
+      elementsBuilder: new ObserveElementsBuilder(),
+    });
+    try {
+      // Cross the normal auto-restart threshold as well as the setup fallback.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        expect((await runner.inspectBootedRunners())[0]).toMatchObject({
+          running: false,
+          supportedCommands: null,
+          supportedFeatures: null,
+        });
+        expect((await observe.inspectBootedObserveRoundTrips())[0].connected).toBe(false);
+        timer.advanceTime(10000);
+      }
+      expect(setup).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      expect(restart).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(client["consecutiveConnectionFailures"]).toBe(0);
+      expect(client["restartRearmTimeout"]).toBeNull();
+    } finally {
+      await client.close();
+      spawn.mockRestore();
+      setup.mockRestore();
+      start.mockRestore();
+      restart.mockRestore();
+    }
+  });
+
   test("closes a probe client it created (no pre-existing client)", async () => {
     let closes = 0;
     const probe = {
-      getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+      getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
       close: async () => {
         closes += 1;
       },
@@ -1365,8 +1615,8 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
   test("does not close a pre-existing client it did not create", async () => {
     let closes = 0;
     const existing = {
-      getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+      getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
       close: async () => {
         closes += 1;
       },
@@ -1394,8 +1644,8 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
 
   test("treats a reachable pre-existing client as running when manager port state is stale", async () => {
     const existing = {
-      getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+      getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
       close: async () => {},
     };
     const hooks: IosRunnerInspectorHooks = {
@@ -1423,10 +1673,10 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
   test("closes the created probe client even when the command read throws", async () => {
     let closes = 0;
     const probe = {
-      getSupportedCommands: async () => {
+      getSupportedCommandsForDiagnostics: async () => {
         throw new Error("unreachable");
       },
-      getSupportedFeatures: async () => null,
+      getSupportedFeaturesForDiagnostics: async () => null,
       close: async () => {
         closes += 1;
       },
@@ -1457,14 +1707,14 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       const readStarted = Promise.withResolvers<void>();
       let closes = 0;
       const probe = {
-        getSupportedCommands: async () => {
+        getSupportedCommandsForDiagnostics: async () => {
           if (stalledRead === "commands") {
             readStarted.resolve();
             return await new Promise<never>(() => {});
           }
           return [...IOS_RUNNER_FEATURE_COMMANDS];
         },
-        getSupportedFeatures: async () => {
+        getSupportedFeaturesForDiagnostics: async () => {
           if (stalledRead === "features") {
             readStarted.resolve();
             return await new Promise<never>(() => {});
@@ -1510,8 +1760,8 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       createClient: (device) => {
         clientDevices.push(device.deviceId);
         return {
-          getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-          getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+          getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+          getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
           close: async () => {},
         };
       },
@@ -1604,7 +1854,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         requestedPorts.push(port);
         return {
           getConnectionPortForDiagnostics: () => port,
-          requestHierarchySync: async () => ({
+          requestHierarchySyncForDiagnostics: async () => ({
             hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
           }),
           convertToViewHierarchyResult: () => viewHierarchy as any,
@@ -1642,7 +1892,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     let created = false;
     const existing = {
       getConnectionPortForDiagnostics: () => 8765,
-      requestHierarchySync: async () => ({
+      requestHierarchySyncForDiagnostics: async () => ({
         hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
       }),
       convertToViewHierarchyResult: () => viewHierarchy as any,
@@ -1676,7 +1926,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
   test("uses a healthy resident client when manager port state no longer reaches its runner", async () => {
     const existing = {
       getConnectionPortForDiagnostics: () => 8765,
-      requestHierarchySync: async () => ({
+      requestHierarchySyncForDiagnostics: async () => ({
         hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
       }),
       convertToViewHierarchyResult: () => viewHierarchy as any,
@@ -1716,7 +1966,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     let currentClientPort = 8765;
     const existing = {
       getConnectionPortForDiagnostics: () => currentClientPort,
-      requestHierarchySync: async () => {
+      requestHierarchySyncForDiagnostics: async () => {
         currentClientPort = 8790;
         return { hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any };
       },
@@ -1841,7 +2091,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
       getExistingClient: () => null,
       createClient: (_device, port) => ({
         getConnectionPortForDiagnostics: () => port,
-        requestHierarchySync: async () => ({
+        requestHierarchySyncForDiagnostics: async () => ({
           hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
         }),
         convertToViewHierarchyResult: () => viewHierarchy as any,

@@ -908,22 +908,66 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   /** Connect only to an already-running runner for one observation. */
-  public static createForObservationRead(device: BootedDevice): IOSCtrlProxyClient {
+  public static createForObservationRead(
+    device: BootedDevice,
+    resident?: IOSCtrlProxyClient,
+  ): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.createForObservationRead");
-    const ownsPortAllocation = PortManager.getPort(device.deviceId) === undefined;
-    const port = PortManager.allocate(device.deviceId, {
-      reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
-    });
+    // A probe of a resident borrows only its endpoint and injected dependencies,
+    // never its port allocation or connection lifecycle.
+    const ownsPortAllocation = !resident && PortManager.getPort(device.deviceId) === undefined;
+    const port =
+      resident?.port ??
+      PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
+    const dependencies = resident
+      ? {
+          timer: resident.timer,
+          serviceManagerFactory: resident.serviceManagerFactory,
+          bootedDeviceLister: resident.bootedDeviceLister,
+          deviceConnectionLostNotifier: resident.deviceConnectionLostNotifier,
+          retryExecutor: resident.retryExecutor,
+        }
+      : {
+          timer: defaultTimer,
+          serviceManagerFactory: defaultServiceManagerFactory,
+          bootedDeviceLister: defaultBootedDeviceLister,
+          deviceConnectionLostNotifier: observationStreamDeviceConnectionLostNotifier,
+          retryExecutor: defaultRetryExecutor,
+        };
+    // Ordinary transient observers intentionally ignore connected pushes. A
+    // diagnostic probe captures capability metadata on its own socket without
+    // changing those handlers or synchronizing the runner's configuration.
+    const socketFactory: WebSocketFactory = resident
+      ? (url) => {
+          const socket = resident.webSocketFactory(url);
+          socket.on("message", (data: WebSocket.Data) => {
+            try {
+              const message: WebSocketMessage = JSON.parse(data.toString());
+              if (message.type === "connected") {
+                client.supportedCommands = Array.isArray(message.supportedCommands)
+                  ? new Set(message.supportedCommands)
+                  : null;
+                client.supportedFeatures = Array.isArray(message.supportedFeatures)
+                  ? new Set(message.supportedFeatures)
+                  : null;
+              }
+            } catch (error) {
+              logger.warn(`iOS diagnostic handshake failed: ${errorMessage(error)}`, error);
+            }
+          });
+          return socket;
+        }
+      : defaultWebSocketFactory;
     const client = new IOSCtrlProxyClient(
       device,
       port,
-      defaultWebSocketFactory,
-      defaultTimer,
-      defaultServiceManagerFactory,
-      defaultBootedDeviceLister,
-      observationStreamDeviceConnectionLostNotifier,
+      socketFactory,
+      dependencies.timer,
+      dependencies.serviceManagerFactory,
+      dependencies.bootedDeviceLister,
+      dependencies.deviceConnectionLostNotifier,
       undefined,
-      defaultRetryExecutor,
+      dependencies.retryExecutor,
       true,
     );
     if (ownsPortAllocation) {
@@ -942,6 +986,83 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public getConnectionPortForDiagnostics(): number {
     return this.port;
+  }
+
+  /**
+   * An open resident socket can serve a read. Otherwise only a transient observer
+   * dials: its promises, timers, budgets and handshake cache belong to the probe.
+   * Never close, reconnect, or update any state on the resident client.
+   */
+  private async readForDiagnostics<T>(
+    read: (client: IOSCtrlProxyClient) => Promise<T>,
+    unavailable: T,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    signal?.throwIfAborted();
+    if (this.isConnected()) {
+      return read(this);
+    }
+    if (this.transientObserver) {
+      return (await this.connectWithoutSetup(signal)) ? read(this) : unavailable;
+    }
+    const probe = IOSCtrlProxyClient.createForObservationRead(this.device, this);
+    try {
+      return (await probe.connectWithoutSetup(signal)) ? await read(probe) : unavailable;
+    } finally {
+      await probe.close();
+    }
+  }
+
+  /** Cached handshake or connection-only read; never sets up a runner. */
+  public async getSupportedCommandsForDiagnostics(signal?: AbortSignal): Promise<string[] | null> {
+    return this.readForDiagnostics(
+      async (client) => {
+        await client.waitForHandshake();
+        signal?.throwIfAborted();
+        return client.getCachedSupportedCommands();
+      },
+      null,
+      signal,
+    );
+  }
+
+  public async getSupportedFeaturesForDiagnostics(signal?: AbortSignal): Promise<string[] | null> {
+    return this.readForDiagnostics(
+      async (client) => {
+        await client.waitForHandshake();
+        signal?.throwIfAborted();
+        return client.getCachedSupportedFeatures();
+      },
+      null,
+      signal,
+    );
+  }
+
+  /** Hierarchy read on a connection-only transport, with no reconnect fallback. */
+  public async requestHierarchySyncForDiagnostics(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs: number = 5000,
+  ): Promise<{
+    hierarchy: XCTestHierarchy;
+    perfTiming?: CtrlProxyPerfTiming;
+    frameContext?: string;
+  } | null> {
+    const deadline = this.timer.now() + Math.max(0, timeoutMs);
+    return this.readForDiagnostics(
+      (client) =>
+        client.hierarchy.requestHierarchySync(
+          perf,
+          disableAllFiltering,
+          signal,
+          Math.max(0, deadline - this.timer.now()),
+          true,
+          { observerMode: true },
+        ),
+      null,
+      signal,
+    );
   }
 
   /**

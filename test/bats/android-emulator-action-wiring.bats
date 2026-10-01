@@ -65,3 +65,20 @@ wiring_requires_yq() {
   [ "$reset_working_directory" = "null" ]
   [ "$attempt_condition" = "null" ]
 }
+
+@test "foldable posture lane stays advisory and nightly-only with profile artifacts" {
+  wiring_requires_yq
+  local nightly workflow artifact_name artifact_paths
+  nightly=".github/workflows/nightly.yml"
+  [ "$(yq -r '.jobs | has("foldable-posture-tests")' "$nightly")" = "true" ]
+  for workflow in .github/workflows/*.yml; do
+    [ "$workflow" = "$nightly" ] && continue
+    [ "$(yq -r '.jobs | has("foldable-posture-tests")' "$workflow")" = "false" ]
+  done
+  [ "$(yq -r '.jobs."foldable-posture-tests"."continue-on-error"' "$nightly")" = "true" ]
+  [ "$(yq -r '.jobs."foldable-posture-tests".env.AUTOMOBILE_FOLDABLE_LANE' "$nightly")" = "1" ]
+  artifact_name="$(yq -r '.jobs."foldable-posture-tests".steps[] | select(.uses == "actions/upload-artifact@v6") | .with.name' "$nightly")"
+  [[ "$artifact_name" == *"\${{ matrix.profile }}"* ]]
+  artifact_paths="$(yq -r '.jobs."foldable-posture-tests".steps[] | select(.uses == "actions/upload-artifact@v6") | .with.path' "$nightly")"
+  [[ "$artifact_paths" == *'scratch/foldable-lane/'* ]]
+}

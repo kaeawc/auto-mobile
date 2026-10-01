@@ -613,6 +613,12 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
+      # Android recording streams screenrecord through FFmpeg on the host.
+      - name: "Install FFmpeg for recording"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: "Download CtrlProxy APK"
         uses: actions/download-artifact@v7
         with:
@@ -663,7 +669,7 @@ jobs:
         continue-on-error: true
         run: bash scripts/android/prepare-foldable-emulator.sh --check-emulator-libs
 
-      - name: "Upload foldable diagnostics and screenshots"
+      - name: "Upload foldable diagnostics, screenshots and recordings"
         if: failure()
         uses: actions/upload-artifact@v6
         with:

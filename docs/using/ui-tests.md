@@ -278,8 +278,9 @@ for daemon remedies.
 
 The nightly workflow and manual workflow dispatch run the opt-in foldable
 scenario on API 36 `google_apis` AVD profiles `pixel_10_pro_fold` and
-`resizable`. This new job is advisory until the profiles and display server are
-verified on the hosted Linux runner. To run it locally, boot one of those AVDs,
+`resizable`. This job remains advisory until the first nightly run confirms the
+profiles, display server, and recording assertions on the hosted Linux runner.
+To run it locally, install FFmpeg, boot one of those AVDs,
 build AutoMobile, install the matching CtrlProxy APK, then run:
 
 ```bash
@@ -311,3 +312,14 @@ the Qt xcb plugin with `ldd`. The failure artifact includes
 The lane remains advisory. The next nightly must confirm the exact profiles
 exist, all windowed libraries resolve, and both AVDs boot and pass their posture
 round trips.
+
+A separate recording test starts on the opened panel, folds, then unfolds. On
+Pixel Fold it checks that `metadata.recordedPanel` remains the inner panel and
+that `metadata.transitions` reports the cover then inner changes in order.
+Resizable checks that the opened panel is reported. The stop result does not
+expose measured video dimensions, so a size-based check for a letterboxed union
+canvas is deferred. Recordings and stop metadata are copied under
+`scratch/foldable-lane/recordings/`, included in the nightly failure artifact.
+Both tests release their session and restore opened posture in `finally`; the
+recording test also stops capture in `finally`. Without
+`AUTOMOBILE_FOLDABLE_LANE=1`, both tests skip.

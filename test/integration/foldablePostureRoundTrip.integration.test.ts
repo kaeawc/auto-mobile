@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import type { ObserveResult, SkeletonElement } from "../../src/models/ObserveResult";
+import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
 
 const runLane = process.env.AUTOMOBILE_FOLDABLE_LANE === "1";
@@ -26,6 +28,14 @@ interface SessionResult {
 interface ActionResult {
   success?: boolean;
   error?: string;
+}
+
+interface RecordingResult {
+  recordings: Array<{
+    recordingId: string;
+    outputPath?: string;
+    metadata?: VideoRecordingMetadata;
+  }>;
 }
 
 async function cli(args: string[]): Promise<ToolResponse> {
@@ -134,6 +144,30 @@ async function setPosture(
   ]);
 }
 
+async function acquireSession(): Promise<string> {
+  if (profile !== "pixel_10_pro_fold" && profile !== "resizable") {
+    throw new Error("AUTOMOBILE_FOLDABLE_PROFILE must be pixel_10_pro_fold or resizable");
+  }
+  const response = await cli(["getAndroid", "--deviceId", deviceId]);
+  const sessionUuid = payload<SessionResult>(response).runtime?.session?.sessionUuid;
+  if (!sessionUuid) {
+    throw new Error(`getAndroid did not return a daemon session UUID: ${JSON.stringify(response)}`);
+  }
+  return sessionUuid;
+}
+
+async function releaseSession(sessionUuid: string): Promise<void> {
+  try {
+    await setPosture(sessionUuid, "opened", profile === "resizable" ? "unfolded" : undefined);
+  } finally {
+    await execFileAsync(
+      process.execPath,
+      [entrypoint, "--cli", "--daemon", "release-session", sessionUuid],
+      { timeout: 30_000 },
+    );
+  }
+}
+
 async function tapAt(sessionUuid: string, x: number, y: number): Promise<ActionResult> {
   return tool<ActionResult>(sessionUuid, "tapAt", ["--x", String(x), "--y", String(y)]);
 }
@@ -171,14 +205,7 @@ async function assertFreshTap(sessionUuid: string, current: ObserveResult): Prom
 
 describeLane("foldable posture round trips through the daemon", () => {
   test("open → closed → open; open → rear display → open on Pixel Fold", async () => {
-    if (profile !== "pixel_10_pro_fold" && profile !== "resizable") {
-      throw new Error("AUTOMOBILE_FOLDABLE_PROFILE must be pixel_10_pro_fold or resizable");
-    }
-    const session = payload<SessionResult>(await cli(["getAndroid", "--deviceId", deviceId]));
-    const sessionUuid = session.runtime?.session?.sessionUuid;
-    if (!sessionUuid) {
-      throw new Error("getAndroid did not return a daemon session UUID");
-    }
+    const sessionUuid = await acquireSession();
     const isFold = profile === "pixel_10_pro_fold";
     const inner = isFold ? { width: 2076, height: 2152 } : undefined;
     const cover = isFold ? { width: 1080, height: 2364 } : undefined;
@@ -224,17 +251,95 @@ describeLane("foldable posture round trips through the daemon", () => {
         await assertFreshTap(sessionUuid, reset);
       }
     } finally {
+      await releaseSession(sessionUuid);
+    }
+  }, 600_000);
+
+  test("recording stays on the opened panel across fold and unfold", async () => {
+    const sessionUuid = await acquireSession();
+    const isFold = profile === "pixel_10_pro_fold";
+    const outputDirectory = join("scratch/foldable-lane/recordings", profile!);
+    let recordingStarted = false;
+    let recording: RecordingResult["recordings"][number] | undefined;
+    let stopped: RecordingResult | undefined;
+    let opened: ObserveResult | undefined;
+    let closed: ObserveResult | undefined;
+    try {
+      await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
+      opened = await expectPanel(sessionUuid, undefined, isFold ? "inner" : undefined, "opened");
+      const started = await tool<RecordingResult>(sessionUuid, "videoRecording", [
+        "--action",
+        "start",
+        "--platform",
+        "android",
+        "--display",
+        isFold ? "inner" : "active",
+        "--maxDuration",
+        "180",
+        "--outputName",
+        "foldable-panel",
+      ]);
+      recordingStarted = true;
+      recording = started.recordings[0];
+      expect(started.recordings).toHaveLength(1);
+      expect(recording?.recordingId).toBeTruthy();
+      // Let the encoder receive frames before the first panel goes inactive.
+      await Bun.sleep(1000);
+      await setPosture(sessionUuid, "closed", isFold ? undefined : "phone");
+      closed = await expectPanel(sessionUuid, undefined, isFold ? "cover" : undefined, "closed");
+      await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
+      await expectPanel(sessionUuid, opened.screenSize, isFold ? "inner" : undefined, "opened");
+    } finally {
       try {
-        await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
+        if (recordingStarted) {
+          stopped = await tool<RecordingResult>(sessionUuid, "videoRecording", [
+            "--action",
+            "stop",
+            ...(recording?.recordingId ? ["--recordingId", recording.recordingId] : []),
+          ]);
+          await mkdir(outputDirectory, { recursive: true });
+          await writeFile(
+            join(outputDirectory, "stop-result.json"),
+            JSON.stringify(stopped, null, 2),
+          );
+        }
       } finally {
-        await execFileAsync(
-          process.execPath,
-          [entrypoint, "--cli", "--daemon", "release-session", sessionUuid],
-          {
-            timeout: 30_000,
-          },
-        );
+        try {
+          if (recording?.outputPath) {
+            await mkdir(outputDirectory, { recursive: true });
+            await cp(dirname(recording.outputPath), join(outputDirectory, recording.recordingId), {
+              recursive: true,
+            });
+          }
+        } finally {
+          await releaseSession(sessionUuid);
+        }
       }
+    }
+
+    expect(stopped?.recordings).toHaveLength(1);
+    const metadata = stopped?.recordings[0]?.metadata;
+    expect(metadata?.recordedPanel?.key).toBeTruthy();
+    expect(metadata?.recordedPanel).toMatchObject({
+      key: opened!.display.key,
+      role: opened!.display.role,
+    });
+    // config.resolution is a requested size, not measured output dimensions;
+    // the stop result cannot assert the absence of a letterboxed union canvas.
+    if (isFold) {
+      expect(metadata?.recordedPanel?.role).toBe("inner");
+      const transitions = metadata?.transitions ?? [];
+      const toCover = transitions.findIndex(
+        ({ from, to }) => from.key === opened!.display.key && to.key === closed!.display.key,
+      );
+      expect(toCover).toBeGreaterThanOrEqual(0);
+      const toInner = transitions.findIndex(
+        ({ from, to }, index) =>
+          index > toCover && from.key === closed!.display.key && to.key === opened!.display.key,
+      );
+      expect(toInner).toBeGreaterThan(toCover);
+      expect(transitions[toCover].to.role).toBe(closed!.display.role);
+      expect(transitions[toInner].to.role).toBe("inner");
     }
   }, 600_000);
 });

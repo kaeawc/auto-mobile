@@ -25,6 +25,12 @@ export interface ProvisionDeviceLifecycleOutcome {
     code: string;
     message: string;
     retryable?: boolean;
+    providerCode?: string;
+    readinessPhase?: string;
+    attempt?: number;
+    incidentId?: string;
+    deviceId?: string;
+    daemonBuild?: string;
   };
   cleanup?: {
     status: "in_progress" | "succeeded" | "failed";

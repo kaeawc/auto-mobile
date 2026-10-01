@@ -33,6 +33,7 @@ import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 
 const READINESS_RETRY_DELAY_MS = 250;
 const READINESS_PROBE_TIMEOUT_MS = 2_000;
+const CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS = 5_000;
 const MAX_DIAGNOSTIC_LENGTH = 4_000;
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
@@ -79,6 +80,9 @@ export class RunnerReadinessError extends ActionableError {
      * retry it (`provisionDevice` maps this to error code `"timeout"`).
      */
     readonly deadlineExhausted = false,
+    readonly phase?: RunnerReadinessPhase,
+    readonly attempts?: number,
+    readonly diagnosticCause?: unknown,
   ) {
     super(message);
   }
@@ -99,11 +103,12 @@ export interface AndroidCompatibilityResult {
   error?: string;
   upgradeError?: string;
   reinstallError?: string;
+  cause?: unknown;
 }
 
 export interface ReadinessAndroidManager {
   isInstalled(signal?: AbortSignal): Promise<boolean>;
-  isEnabled(signal?: AbortSignal): Promise<boolean>;
+  isEnabled(signal?: AbortSignal, options?: { bypassCache?: boolean }): Promise<boolean>;
   /** Returns whether an unhealthy CtrlProxy accessibility service was rebound. */
   rebindIfUnhealthy?(): Promise<boolean>;
   /**
@@ -797,7 +802,7 @@ export class RunnerReadinessService {
         : undefined,
       compatibility.status === "skipped" ? "package compatibility check was skipped" : undefined,
     ].filter((value): value is string => Boolean(value));
-    this.fail(context, "package-compatibility", 1, details.join("; "));
+    this.fail(context, "package-compatibility", 1, compatibility.cause ?? details.join("; "));
   }
 
   private async isResponsiveFastPath(
@@ -821,17 +826,47 @@ export class RunnerReadinessService {
       manager.setup(false, context.perf, signal),
     );
     if (!setup.success) {
-      this.fail(context, "runner-setup", 1, setup.error ?? setup.message);
+      this.fail(context, "runner-setup", 1, setup.cause ?? setup.error ?? setup.message);
     }
-    const [installed, enabled] = await this.runPhase(context, "runner-setup", 1, async (signal) => [
-      await manager.isInstalled(signal),
-      await manager.isEnabled(signal),
-    ]);
+    const verificationDeadlineMs = Math.min(
+      context.totalDeadlineMs,
+      this.dependencies.timer.now() + CTRL_PROXY_ENABLEMENT_VERIFY_BUDGET_MS,
+    );
+    let attempts = 0;
+    let installed = false;
+    let enabled = false;
+    for (;;) {
+      attempts++;
+      [installed, enabled] = await this.runPhase(
+        context,
+        "runner-setup",
+        attempts,
+        async (signal) => [
+          await manager.isInstalled(signal),
+          await manager.isEnabled(signal, { bypassCache: attempts > 1 }),
+        ],
+        verificationDeadlineMs,
+      );
+      if (installed && enabled) {
+        return;
+      }
+      if (!installed || this.dependencies.timer.now() >= verificationDeadlineMs) {
+        break;
+      }
+      this.throwIfCallerCancelled(context);
+      await this.dependencies.timer.sleep(
+        Math.min(READINESS_RETRY_DELAY_MS, verificationDeadlineMs - this.dependencies.timer.now()),
+      );
+      this.throwIfCallerCancelled(context);
+      if (this.dependencies.timer.now() >= verificationDeadlineMs) {
+        break;
+      }
+    }
     if (!installed || !enabled) {
       this.fail(
         context,
         "runner-setup",
-        1,
+        attempts,
         `CtrlProxy state after setup: installed=${installed}, enabled=${enabled}`,
       );
     }
@@ -1339,13 +1374,19 @@ export class RunnerReadinessService {
     phase: RunnerReadinessPhase,
     attempts: number,
     operation: (signal: AbortSignal) => Promise<T>,
+    operationDeadlineMs?: number,
   ): Promise<T> {
-    if (this.remainingForPhase(context, phase) <= 0) {
+    const remainingMs = Math.min(
+      this.remainingForPhase(context, phase),
+      operationDeadlineMs === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, operationDeadlineMs - this.dependencies.timer.now()),
+    );
+    if (remainingMs <= 0) {
       this.fail(context, phase, attempts, "readiness budget exhausted before phase started", {
         deadlineExhausted: true,
       });
     }
-    const remainingMs = this.remainingForPhase(context, phase);
     let phaseTimedOut = false;
     const phaseStartedMs = this.dependencies.timer.now();
     let elapsedRecorded = false;
@@ -1388,7 +1429,7 @@ export class RunnerReadinessService {
       this.throwIfCallerCancelled(context, error);
       // Only the phase-timeout path above is budget-driven; an error thrown by
       // the operation itself is a platform fault whatever the clock says.
-      return this.fail(context, phase, attempts, normalizeDiagnostic(error), {
+      return this.fail(context, phase, attempts, error, {
         deadlineExhausted: phaseTimedOut,
       });
     } finally {
@@ -1476,7 +1517,7 @@ export class RunnerReadinessService {
     context: ReadinessAttemptContext,
     phase: RunnerReadinessPhase,
     attempts: number,
-    detail: string,
+    detail: unknown,
     options?: { deadlineExhausted?: boolean },
   ): never {
     const { device } = context;
@@ -1494,6 +1535,9 @@ export class RunnerReadinessService {
         RunnerReadinessService.isSetupPhase(phase) &&
         isAndroidFrameworkUnavailable(detail),
       options?.deadlineExhausted ?? false,
+      phase,
+      attempts,
+      detail,
     );
   }
 }

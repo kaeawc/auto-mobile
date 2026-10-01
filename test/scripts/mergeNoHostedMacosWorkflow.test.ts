@@ -20,7 +20,9 @@ describe("On Merge hosted macOS removal (#8583)", () => {
     const jobs = loadJobs(WORKFLOW);
     const offenders = Object.entries(jobs)
       .filter(([id, job]) => {
-        if (MACOS_EXCEPTIONS.has(id)) return false;
+        if (MACOS_EXCEPTIONS.has(id)) {
+          return false;
+        }
         const runsOn = JSON.stringify(job["runs-on"] ?? "");
         const matrix = JSON.stringify(job.strategy?.matrix ?? {});
         return /macos/i.test(runsOn) || /macos-(?:latest|\d+)/i.test(matrix);

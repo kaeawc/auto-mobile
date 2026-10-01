@@ -82,6 +82,8 @@ export interface ExactProvisionedDevice {
 export type ProvisionDeviceFailureCode =
   | "cleanup_failed"
   | "creation_not_allowed"
+  | "device_lost"
+  | "device_offline"
   | "discovery_incomplete"
   | "identity_conflict"
   | "timeout"
@@ -93,6 +95,8 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
 > = {
   cleanup_failed: false,
   creation_not_allowed: false,
+  device_lost: true,
+  device_offline: true,
   discovery_incomplete: true,
   identity_conflict: false,
   timeout: true,
@@ -100,11 +104,20 @@ export const DEFAULT_PROVISION_DEVICE_RETRYABILITY: Readonly<
   platform_command_failed: false,
 };
 
+interface ProvisionDeviceErrorDiagnostics {
+  providerCode?: string;
+  readinessPhase?: string;
+  attempt?: number;
+  incidentId?: string;
+  deviceId?: string;
+}
+
 export class ProvisionDeviceError extends ActionableError {
   constructor(
     public readonly code: ProvisionDeviceFailureCode,
     message: string,
     public readonly retryable = DEFAULT_PROVISION_DEVICE_RETRYABILITY[code],
+    public readonly diagnostics: ProvisionDeviceErrorDiagnostics = {},
   ) {
     super(message);
     this.name = "ProvisionDeviceError";

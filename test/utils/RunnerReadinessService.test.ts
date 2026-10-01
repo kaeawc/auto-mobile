@@ -2,6 +2,7 @@ import { describe, expect, test, spyOn } from "bun:test";
 import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
 import {
   RunnerReadinessError,
   RunnerReadinessService,
@@ -509,6 +510,71 @@ describe("RunnerReadinessService", () => {
     expect(manager.resetSetupStateCalls).toBeGreaterThanOrEqual(2);
   });
 
+  test("accepts delayed CtrlProxy enablement after setup", async () => {
+    const manager = new FakeAndroidManager();
+    const enabledStates = [false, false, false, true];
+    let bypassedCacheReads = 0;
+    manager.isEnabled = async (_signal, options) => {
+      if (options?.bypassCache) {
+        bypassedCacheReads++;
+      }
+      return enabledStates.shift() ?? true;
+    };
+    const { service, timer } = createService({ androidManager: manager });
+
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    expect(timer.now()).toBe(500);
+    expect(bypassedCacheReads).toBe(2);
+  });
+
+  test("fails bounded verification when CtrlProxy remains disabled", async () => {
+    const manager = new FakeAndroidManager();
+    manager.isEnabled = async () => false;
+    const { service, timer } = createService({ androidManager: manager });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 10_000,
+        readinessTimeoutMs: 10_000,
+      }),
+    ).rejects.toThrow(
+      /phase=runner-setup attempts=20 .*CtrlProxy state after setup: installed=true, enabled=false/,
+    );
+    expect(timer.now()).toBe(5_000);
+  });
+
+  test("bounds a hung CtrlProxy enablement probe by the verification deadline", async () => {
+    const manager = new FakeAndroidManager();
+    let reads = 0;
+    manager.isEnabled = async () => {
+      reads++;
+      if (reads <= 2) {
+        return false;
+      }
+      return await new Promise<boolean>(() => {});
+    };
+    const { service, timer } = createService({ androidManager: manager });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+      }),
+    ).rejects.toThrow(/readiness phase exceeded/);
+
+    expect(timer.now()).toBeLessThanOrEqual(6_000);
+  });
+
   test("stops transient setup retries at the shared absolute deadline", async () => {
     const manager = new FakeAndroidManager();
     let attempts = 0;
@@ -583,6 +649,32 @@ describe("RunnerReadinessService", () => {
     ).rejects.toThrow("INSTALL_FAILED_INVALID_APK");
     expect(attempts).toBe(1);
     expect(timer.now()).toBe(0);
+  });
+
+  test("preserves a typed device loss from compatibility inspection", async () => {
+    const manager = new FakeAndroidManager();
+    const loss = new DeviceLostError("emulator-5554", "error: device 'emulator-5554' not found");
+    manager.ensureCompatibleVersion = async () => ({
+      status: "failed",
+      error: loss.message,
+      cause: loss,
+    });
+    const { service } = createService({ androidManager: manager });
+
+    const ready = service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "android",
+      totalDeadlineMs: 30_000,
+      readinessTimeoutMs: 10_000,
+    });
+
+    try {
+      await ready;
+      throw new Error("expected readiness failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      expect((error as RunnerReadinessError).diagnosticCause).toBe(loss);
+    }
   });
 
   test("classifies the setup failure without treating device names as diagnostics", async () => {

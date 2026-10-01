@@ -2252,6 +2252,7 @@ export class ProvisionDeviceRollbackError extends ProvisionDeviceError {
         : provisionFailure.message,
       // Retry risks an identity collision while the failed-rollback device may still exist.
       cleanup.status === "failed" ? false : provisionFailure.retryable,
+      provisionFailure.diagnostics,
     );
     this.name = "ProvisionDeviceRollbackError";
   }

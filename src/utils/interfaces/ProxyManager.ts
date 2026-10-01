@@ -34,6 +34,8 @@ export interface ProxySetupResult {
   success: boolean;
   message: string;
   error?: string;
+  /** Original typed failure for in-process readiness and retry classification. */
+  cause?: unknown;
   /**
    * Set on failure by the catching manager (see {@link ProxySetupErrorCategory}).
    * Optional so managers/test doubles that never set it default to being

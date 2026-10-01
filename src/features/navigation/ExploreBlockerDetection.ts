@@ -111,7 +111,7 @@ function wordBoundaryPattern(keywords: string[]): RegExp {
  * "bookmark", and "allow" never matches inside "disallowance", regardless of
  * how the surrounding text is punctuated or cased.
  */
-function tokenize(field: string): string[] {
+export function tokenize(field: string): string[] {
   return field
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
@@ -135,7 +135,7 @@ function tokenize(field: string): string[] {
  * (see `PERMISSION_KEYWORDS`), so the match surface is exactly what was
  * asked for, never a guess.
  */
-function containsTokenSequence(fieldTokens: string[], keywordTokens: string[]): boolean {
+export function containsTokenSequence(fieldTokens: string[], keywordTokens: string[]): boolean {
   if (keywordTokens.length === 0) {
     return false;
   }
@@ -160,7 +160,7 @@ function toKeywordTokenLists(keywords: string[]): string[][] {
  * this time"), so each field is tokenized and searched on its own (issue
  * #6122 follow-up).
  */
-function matchesAnyKeywordInAnyField(keywordTokenLists: string[][], el: Element): boolean {
+export function matchesAnyKeywordInAnyField(keywordTokenLists: string[][], el: Element): boolean {
   const fields = [el.text, el["content-desc"]];
   return fields.some((field) => {
     if (field === undefined) {
@@ -207,7 +207,7 @@ const RATING_KEYWORD_PATTERN = wordBoundaryPattern(RATING_KEYWORDS);
  * (e.g. "Block this contact") and would misclassify those as permission
  * dialogs.
  */
-const PERMISSION_KEYWORDS = [
+export const PERMISSION_KEYWORDS = [
   "allow",
   "allows",
   "permission",
@@ -295,7 +295,7 @@ export function isRatingDialog(elements: Element[]): boolean {
  * "okay" as its own affirmative. "ok"/"okay" are never inflected — "notes"
  * must never satisfy "not", so no keyword here is derived by stemming.
  */
-const ALLOW_KEYWORDS = ["allow", "allows", "while using", "only this time", "ok", "okay"];
+export const ALLOW_KEYWORDS = ["allow", "allows", "while using", "only this time", "ok", "okay"];
 
 const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
 
@@ -342,7 +342,7 @@ const ALLOW_KEYWORD_TOKENS = toKeywordTokenLists(ALLOW_KEYWORDS);
  *     single-token entries. This is normalization for known machine labels,
  *     not generic stemming or substring matching.
  */
-const DENY_KEYWORDS = [
+export const DENY_KEYWORDS = [
   "don't allow",
   "dont allow",
   "dontallow",
@@ -388,7 +388,7 @@ export function filterPermissionNavigationCandidates(
     : candidates;
 }
 
-function isAffirmativeGrantElement(element: Element): boolean {
+export function isAffirmativeGrantElement(element: Element): boolean {
   return (
     matchesAnyKeywordInAnyField(ALLOW_KEYWORD_TOKENS, element) && !isPermissionDenyElement(element)
   );

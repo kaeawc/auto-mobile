@@ -27,9 +27,12 @@ import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screenshotCacheEviction";
 import { IOSCtrlProxyClient } from "./ios";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
+import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, IdGenerator } from "../../utils/IdGenerator";
 import {
@@ -146,29 +149,62 @@ export class TakeScreenshot implements ScreenshotService {
     );
   }
 
-  /** Capture on an existing iOS socket only; never connect or recover a runner. */
+  /** Read a screenshot without changing an owner's client or starting a service. */
   async executeObservationRead(
     options: ScreenshotOptions,
     signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     if (this.device.platform !== "ios") {
-      return this.execute(options, signal);
-    }
-    const client = IOSCtrlProxyClient.getExistingInstance(this.device.deviceId);
-    if (!client?.isConnected()) {
-      return { success: false, error: "iOS runner is not connected" };
+      const startedAt = this.timer.now();
+      const finalPath = this.generateScreenshotPath(startedAt, options);
+      try {
+        return await this.captureAndroidScreenshotViaAdb(finalPath, options, signal);
+      } catch (error) {
+        logger.warn(`[SCREENSHOT] Observer ADB capture failed: ${errorMessage(error)}`, error);
+        return { success: false, error: errorMessage(error) };
+      }
     }
     const startedAt = this.timer.now();
     const finalPath = this.generateScreenshotPath(startedAt, options);
     try {
-      const capture = await client.requestScreenshot(10000, undefined, signal);
-      return await this.writeiOSScreenshot(finalPath, capture, startedAt, options, signal);
+      const capture = await this.captureIosObserverScreenshot(signal);
+      return await this.writeiOSScreenshot(finalPath, capture, startedAt, options, signal, false);
     } catch (error) {
-      logger.warn(
-        `[SCREENSHOT] Existing iOS connection capture failed: ${errorMessage(error)}`,
-        error,
-      );
+      logger.warn(`[SCREENSHOT] Observer iOS capture failed: ${errorMessage(error)}`, error);
       return { success: false, error: errorMessage(error) };
+    }
+  }
+
+  private async captureIosObserverScreenshot(
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyScreenshotResult> {
+    const client = IOSCtrlProxyClient.getExistingInstance(this.device.deviceId);
+    if (client?.isConnected()) {
+      return client.requestScreenshotForObserver(10000, signal);
+    }
+    if (isIosSimulatorUdid(this.device.deviceId)) {
+      const png = await new SimCtlClient(this.device).screenshot(
+        this.device.deviceId,
+        this.device.displays?.panels[0]?.key ?? "main",
+        signal,
+      );
+      return { success: true, data: png.toString("base64"), format: "png" };
+    }
+    const daemon = DaemonState.getInstance();
+    if (
+      daemon.isInitialized() &&
+      daemon.getDevicePool().getDevice(this.device.deviceId)?.sessionId
+    ) {
+      return { success: false, error: "Owned iOS device has no connected screenshot service" };
+    }
+    const transient = IOSCtrlProxyClient.createForObservationRead(this.device);
+    try {
+      if (!(await transient.connectForObservationRead())) {
+        return { success: false, error: "Unowned iOS device has no reachable screenshot service" };
+      }
+      return await transient.requestScreenshotForObserver(10000, signal);
+    } finally {
+      await transient.close();
     }
   }
   private readonly device: BootedDevice;
@@ -419,6 +455,14 @@ export class TakeScreenshot implements ScreenshotService {
       }
     }
 
+    return this.captureAndroidScreenshotViaAdb(finalPath, options, signal);
+  }
+
+  private async captureAndroidScreenshotViaAdb(
+    finalPath: string,
+    options: ScreenshotOptions,
+    signal?: AbortSignal,
+  ): Promise<ScreenshotResult> {
     // Try base64 approach first (faster for smaller screenshots)
     try {
       return await this.captureScreenshotBase64(finalPath, options, signal);
@@ -566,6 +610,7 @@ export class TakeScreenshot implements ScreenshotService {
     startTime: number,
     options: ScreenshotOptions,
     signal?: AbortSignal,
+    pushToStream = true,
   ): Promise<ScreenshotResult> {
     if (signal?.aborted) {
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
@@ -595,18 +640,29 @@ export class TakeScreenshot implements ScreenshotService {
     const durationMs = this.timer.now() - startTime;
     logger.info(`[SCREENSHOT] iOS screenshot captured in ${durationMs}ms, saved to ${finalPath}`);
 
-    // Push to observation stream for IDE plugins
-    this.pushScreenshotToStream(
-      encoded === imageBuffer ? result.data : encoded.toString("base64"),
-      encoded,
-      format,
-    );
+    this.pushiOSScreenshotIfAllowed(result, imageBuffer, encoded, format, pushToStream);
 
     return {
       success: true,
       path: finalPath,
       ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, format),
     };
+  }
+
+  private pushiOSScreenshotIfAllowed(
+    result: CtrlProxyScreenshotResult,
+    original: Buffer,
+    encoded: Buffer,
+    format: "png" | "jpeg" | "webp",
+    allowed: boolean,
+  ): void {
+    if (allowed && result.data) {
+      this.pushScreenshotToStream(
+        encoded === original ? result.data : encoded.toString("base64"),
+        encoded,
+        format,
+      );
+    }
   }
 
   /**

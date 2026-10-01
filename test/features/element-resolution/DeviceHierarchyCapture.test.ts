@@ -130,3 +130,49 @@ test.each([false, true])(
     expect(adb.getCommandCalls()).toEqual([]);
   },
 );
+
+test.each(["android", "ios"] as const)(
+  "observer capture on %s uses the existing read request while an owner action is pending",
+  async (platform) => {
+    const raw: ViewHierarchyResult = {
+      hierarchy: { node: { text: "Observer", bounds: { left: 0, top: 0, right: 20, bottom: 20 } } },
+      screenWidth: 20,
+      screenHeight: 20,
+    };
+    let releaseAction: (() => void) | undefined;
+    const action = new Promise<void>((resolve) => {
+      releaseAction = resolve;
+    });
+    let actionCompleted = false;
+    void action.then(() => {
+      actionCompleted = true;
+    });
+    let observerCalls = 0;
+    let normalCalls = 0;
+    const capture = createDeviceHierarchyCapture(
+      { platform, deviceId: `${platform}-observer`, name: "Observer" },
+      {
+        timer: new FakeTimer(),
+        syncClientFactory: () => ({
+          requestHierarchySync: async () => {
+            normalCalls++;
+            return { hierarchy: raw };
+          },
+          requestHierarchySyncForObserver: async () => {
+            observerCalls++;
+            return { hierarchy: raw };
+          },
+          convertToViewHierarchyResult: () => raw,
+        }),
+      },
+    );
+    const observed = await capture.capture({ freshness: "fresh", observerMode: true });
+    expect(observed.hierarchy.hierarchy.node).toBeDefined();
+    expect(observerCalls).toBe(1);
+    expect(normalCalls).toBe(0);
+    expect(actionCompleted).toBe(false);
+    releaseAction?.();
+    await action;
+    expect(actionCompleted).toBe(true);
+  },
+);

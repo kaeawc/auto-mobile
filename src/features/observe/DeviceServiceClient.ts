@@ -87,12 +87,31 @@ const LIVENESS_TIMEOUT_INTERVAL_MULTIPLIER = 2;
 // periodic health-check tick.
 const REQUEST_TIMEOUT_LIVENESS_THRESHOLD = 3;
 
+export class ObserverPendingRequestTimeoutError extends Error {
+  constructor() {
+    super("Owner's in-flight request exceeded the observer hierarchy deadline");
+  }
+}
+
 /**
  * Abstract base class for device service WebSocket clients.
  *
  * Provides shared connection lifecycle management for both Android and iOS clients.
  */
 export abstract class DeviceServiceClient {
+  /** Queue an observer read behind the owner's already-dispatched requests. */
+  protected async waitForPendingRequests(timeoutMs: number, signal?: AbortSignal): Promise<void> {
+    const deadline = this.timer.now() + timeoutMs;
+    while (this.requestManager.getPendingCount() > 0) {
+      signal?.throwIfAborted();
+      const remaining = deadline - this.timer.now();
+      if (remaining <= 0) {
+        throw new ObserverPendingRequestTimeoutError();
+      }
+      await this.timer.sleep(Math.min(10, remaining));
+    }
+    signal?.throwIfAborted();
+  }
   // Connection state
   protected ws: WebSocket | null = null;
   /** Socket owning the current handshake/open lifecycle, used to reject delayed stale events. */

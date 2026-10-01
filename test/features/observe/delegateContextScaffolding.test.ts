@@ -104,10 +104,12 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "getLastWebSocketTimeout",
         "getWebSocket",
         "isCommandSupported",
+        "markObserverHierarchyRequest",
         "requestManager",
         "setCachedHierarchy",
         "setLastWebSocketTimeout",
         "timer",
+        "unmarkObserverHierarchyRequest",
       ]);
       expect(ctx.device).toBe((client as any).device);
       expect(ctx.adb).toBe((client as any).adb);
@@ -160,10 +162,12 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "getSupportedCommands",
         "getWebSocket",
         "isCommandSupported",
+        "markObserverHierarchyRequest",
         "requestManager",
         "setCachedHierarchy",
         "suppressHierarchyObservationStreamPush",
         "timer",
+        "unmarkObserverHierarchyRequest",
         "unsupportedCommandError",
       ]);
     });

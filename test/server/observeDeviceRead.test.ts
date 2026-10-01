@@ -5,7 +5,6 @@ import * as path from "node:path";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { ActionableError } from "../../src/models/ActionableError";
 import {
-  hasObservationReadAccess,
   defaultDeviceObservationAccess,
   type DeviceObservationAccess,
 } from "../../src/server/deviceObservationAccess";
@@ -14,10 +13,14 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { observationScreenshotEvidence } from "../../src/features/observe/screenshot/observationScreenshotEvidence";
-import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
+import {
+  loadAndroidHomeObserve,
+  loadIosFractionalObserve,
+} from "../fixtures/observe/observeFixture";
 import toolDefinitions from "../../schemas/tool-definitions.json";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
+import { ObserverPendingRequestTimeoutError } from "../../src/features/observe/DeviceServiceClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveCacheStore } from "../fakes/FakeObserveCacheStore";
@@ -38,6 +41,7 @@ import {
   registerDirectSessionDevice,
 } from "../../src/server/directSessionDeviceRegistry";
 import { getStructuredField } from "../../src/utils/toolUtils";
+import { snapshotReferences } from "../../src/features/observe/SnapshotReferenceStore";
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const originalManager = Reflect.get(ToolRegistry, "deviceSessionManager");
@@ -171,15 +175,7 @@ describe("session-free observe device read", () => {
     }
   });
 
-  test("owner access requires the matching transport binding", () => {
-    expect(hasObservationReadAccess("owner", "owner", undefined)).toBe(false);
-    expect(hasObservationReadAccess("owner", "other", () => true)).toBe(false);
-    expect(hasObservationReadAccess("owner", "owner", () => false)).toBe(false);
-    expect(hasObservationReadAccess("owner", "owner", () => true)).toBe(true);
-    expect(hasObservationReadAccess(undefined, undefined, undefined)).toBe(true);
-  });
-
-  test("registry ownership denies a device held by another session", async () => {
+  test("registry ownership permits a session-free observer", async () => {
     const daemon = DaemonState.getInstance();
     Reflect.set(daemon, "sessionManager", { getDeviceLabels: () => undefined });
     Reflect.set(daemon, "devicePool", { getDevice: () => ({ sessionId: "owner" }) });
@@ -190,17 +186,59 @@ describe("session-free observe device read", () => {
         isAuthorized: defaultDeviceObservationAccess.isAuthorized,
       },
     });
-    await expect(
-      runWithToolSelectionContext(
-        {
-          explicitObserveDeviceRead: true,
-          routingSessionUuid: "other",
-          ownsDeviceSession: () => false,
-        },
-        () => ToolRegistry.getTool("observe")!.handler({ deviceId: device.deviceId }),
-      ),
-    ).rejects.toThrow("Observation access denied.");
+    expect(defaultDeviceObservationAccess.isAuthorized(device)).toBe(true);
   });
+
+  test.each(["android", "ios"] as const)(
+    "owned %s device returns a full observation without changing assignment or owner snapshot references",
+    async (platform) => {
+      const target = { ...device, platform, deviceId: `${platform}-owned` };
+      const owner = { sessionId: "owner", poolStatus: "assigned" };
+      const daemon = DaemonState.getInstance();
+      Reflect.set(daemon, "sessionManager", { getDeviceLabels: () => undefined });
+      Reflect.set(daemon, "devicePool", { getDevice: () => owner });
+      Reflect.set(daemon, "deviceSessionRegistry", {});
+      const capture = spyOn(snapshotReferences, "capture");
+      try {
+        const observation =
+          platform === "ios" ? loadIosFractionalObserve() : loadAndroidHomeObserve().observe;
+        registerObserveTools({
+          deviceReadAccess: {
+            listBooted: async () => [target],
+            isAuthorized: defaultDeviceObservationAccess.isAuthorized,
+          },
+          createScreen: () => ({
+            executeDeviceRead: async () => ({
+              ...observation,
+              deviceId: target.deviceId,
+              screenshotPath: "/fake/owned.png",
+              screenshotSource: "fresh",
+            }),
+            execute: async () => {
+              throw new Error("observer entered owner observe");
+            },
+            appendRawViewHierarchy: async () => {},
+            getMostRecentCachedObserveResult: async () => observation,
+          }),
+        });
+        const response = await runWithToolSelectionContext(
+          { explicitObserveDeviceRead: true, ownsDeviceSession: () => false },
+          () =>
+            ToolRegistry.getTool("observe")!.handler({
+              deviceId: target.deviceId,
+              project: "full",
+            }),
+        );
+        expect(getStructuredField(response, "viewHierarchy")).toBeDefined();
+        expect(getStructuredField(response, "screenSize")).toBeDefined();
+        expect(getStructuredField(response, "screenshotPath")).toBe("/fake/owned.png");
+        expect(owner).toEqual({ sessionId: "owner", poolStatus: "assigned" });
+        expect(capture).not.toHaveBeenCalled();
+      } finally {
+        capture.mockRestore();
+      }
+    },
+  );
 
   test("published observe alone exposes deviceId", () => {
     registerObserveTools();
@@ -325,14 +363,29 @@ describe("session-free observe device read", () => {
     expect(modes).toEqual([undefined]);
   });
 
-  test("real screen device read has no setup, shared-state writes or session calls", async () => {
+  test("real screen device read returns hierarchy without shared-state writes or session calls", async () => {
     const manager = new FakeDeviceSessionManager();
     Reflect.set(ToolRegistry, "deviceSessionManager", manager);
     ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
     const timer = new FakeTimer();
     const cache = new FakeObserveCacheStore(timer);
+    const ownerObservation = {
+      ...loadAndroidHomeObserve().observe,
+      displayRevision: 0,
+      rotation: 0,
+      viewHierarchy: {
+        ...loadAndroidHomeObserve().observe.viewHierarchy!,
+        nativeScale: 1,
+        frameContext: "owner-frame",
+      },
+    };
+    await cache.put(device.deviceId, ownerObservation);
+    const ownerSnapshot = snapshotReferences.capture(device.deviceId, ownerObservation);
+    expect(ownerSnapshot).toBeDefined();
+    const priorWrites = cache.getPutCallCount();
     const screenshotState = new FakeScreenshotStateStore(timer);
     const adb = new FakeAdbExecutor();
+    adb.setDeviceLock({ locked: false, keyguardShowing: false });
     const factory = new FakeAdbClientFactory(adb);
     const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated");
     const nav = spyOn(NavigationGraphManager, "getInstance");
@@ -364,14 +417,47 @@ describe("session-free observe device read", () => {
                 generateScreenshotPath: () => "/fake/read.png",
                 getActivityHash: async () => "",
               },
+              hierarchyCapture: {
+                capture: async (request) => {
+                  expect(request.observerMode).toBe(true);
+                  const hierarchy = loadAndroidHomeObserve().observe.viewHierarchy!;
+                  return {
+                    captureId: "observer",
+                    platform: "android",
+                    requestedFreshness: "fresh",
+                    receivedAt: timer.now(),
+                    hierarchy,
+                    nodes: [],
+                  };
+                },
+              },
               deviceReadOnly: true,
             },
             timer,
           ),
       });
-      const response = await callDeviceRead({ deviceId: device.deviceId });
+      const response = await callDeviceRead({ deviceId: device.deviceId, project: "full" });
       expect(response.structuredContent).toMatchObject({ screenshotPath: "/fake/read.png" });
-      expect(cache.getPutCallCount()).toBe(0);
+      expect(getStructuredField(response, "viewHierarchy")?.hierarchy?.node).toBeDefined();
+      expect(getStructuredField(response, "screenSize")).toMatchObject({
+        width: 1080,
+        height: 2400,
+      });
+      expect(getStructuredField(response, "activeWindow")).toBeDefined();
+      expect(getStructuredField(response, "display")).toBeDefined();
+      expect(getStructuredField(response, "deviceLock")).toEqual({
+        locked: false,
+        keyguardShowing: false,
+      });
+      expect(cache.getPutCallCount()).toBe(priorWrites);
+      expect(cache.getRecentInMemoryForDevice(device.deviceId)).toEqual(ownerObservation);
+      expect(
+        snapshotReferences.staleReason(
+          ownerSnapshot!.snapshotId,
+          device.deviceId,
+          ownerObservation,
+        ),
+      ).toBeUndefined();
       expect(screenshotState.getPath(device.deviceId)).toBeUndefined();
       expect(manager.getEnsureDeviceReadyCalls()).toBe(0);
       expect(manager.getSetCurrentDeviceCalls()).toEqual([]);
@@ -379,13 +465,64 @@ describe("session-free observe device read", () => {
       expect(nav).not.toHaveBeenCalled();
       expect(proxy).not.toHaveBeenCalled();
       expect(audits).toBe(0);
-      expect(adb.getExecutedCommands()).toEqual([]);
+      expect(adb.getExecutedCommands()).toEqual(["shell dumpsys activity activities"]);
     } finally {
       notify.mockRestore();
       nav.mockRestore();
       proxy.mockRestore();
       restorePipeline();
     }
+  });
+
+  test.each([
+    [
+      "owned disconnected client",
+      "Device emulator-5554 is session-owned and has no connected hierarchy service",
+      "connection_lost",
+    ],
+    [
+      "unowned unreachable service",
+      "Device emulator-5554 has no reachable hierarchy service",
+      "connection_lost",
+    ],
+    ["owner request deadline", new ObserverPendingRequestTimeoutError(), "request_timed_out"],
+  ] as const)("observer keeps screenshot and reports %s", async (_label, failure, reason) => {
+    const timer = new FakeTimer();
+    const screen = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      {
+        deviceReadOnly: true,
+        hierarchyCapture: {
+          capture: async () => {
+            throw failure;
+          },
+        },
+        screenshot: {
+          execute: async () => ({ success: true, path: "/fake/unavailable.png" }),
+          generateScreenshotPath: () => "/fake/unavailable.png",
+          getActivityHash: async () => "",
+        },
+        screenshotEvidenceFiles: {
+          stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
+        },
+      },
+      timer,
+    );
+    let perfAttachments = 0;
+    Reflect.set(screen, "attachPerfSnapshot", async () => {
+      perfAttachments++;
+    });
+    const result = await screen.executeDeviceRead();
+    expect(result.screenshotPath).toBe("/fake/unavailable.png");
+    expect(result.freshness).toMatchObject({
+      category: "unavailable",
+      unavailableReason: reason,
+    });
+    expect(result.freshness?.unavailableDetail).toContain(
+      failure instanceof Error ? failure.message : failure,
+    );
+    expect(perfAttachments).toBe(0);
   });
 
   test("device read passes WebP encoding options into capture and reports its MIME type", async () => {
@@ -395,6 +532,16 @@ describe("session-free observe device read", () => {
       createScreen: (target) =>
         new RealObserveScreen(target, new FakeAdbClientFactory(new FakeAdbExecutor()), {
           deviceReadOnly: true,
+          hierarchyCapture: {
+            capture: async () => ({
+              captureId: "webp-observer",
+              platform: "android",
+              requestedFreshness: "fresh",
+              receivedAt: 0,
+              hierarchy: loadAndroidHomeObserve().observe.viewHierarchy!,
+              nodes: [],
+            }),
+          },
           screenshotEvidenceFiles: {
             stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
           },
@@ -456,6 +603,19 @@ describe("session-free observe device read", () => {
           display,
           deviceReadOnly: true,
           cacheStore: cache,
+          hierarchyCapture: {
+            capture: async () => ({
+              captureId: "observer-display",
+              platform: "android",
+              requestedFreshness: "fresh",
+              receivedAt: timer.now(),
+              hierarchy: {
+                ...loadAndroidHomeObserve().observe.viewHierarchy!,
+                displayId: display === "inner" ? 2 : 0,
+              },
+              nodes: [],
+            }),
+          },
           screenshotEvidenceFiles: {
             stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }),
           },

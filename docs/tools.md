@@ -157,6 +157,20 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 | 🔍 <code>debugSearch</code>          | Shows selector matches, the chosen match, and near-misses.                |
 
+### Observe a booted device by ID
+
+`observe {"deviceId":"emulator-5554"}` returns the normal screen observation,
+including hierarchy or skeleton, active window, screen size, display, device lock,
+and a screenshot path with its fresh or cached label. It does not acquire a
+session or change device ownership, and it works while another session owns the
+device. An observer read does not update that session's observation baseline,
+snapshot references, navigation graph, or observation stream. When an owned
+device has no connected hierarchy service, the read returns a screenshot with a
+specific unavailable reason. An unowned device returns a full observation when
+its hierarchy service is already running and reachable; otherwise it returns a
+screenshot with the unavailable reason. Observer reads never install, enable, or
+restart the service. `deviceId` and `sessionUuid` cannot be combined.
+
 ## Interact with the UI
 
 | Tool                          | What it does                                                                                                                   |

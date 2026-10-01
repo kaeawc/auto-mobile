@@ -56,6 +56,7 @@ import {
 } from "../../../utils/ContentHashProvider";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigationDetector";
+import { isDeepStrictEqual } from "node:util";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../../db/installedAppsCacheWriteCoordinator";
@@ -126,6 +127,7 @@ import type {
 } from "../../storage/storageTypes";
 import {
   DeviceServiceClient,
+  ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
@@ -1394,6 +1396,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Per-instance port allocation for multi-device support
   private localPort: number;
+  private readonly ownsPortAllocation: boolean;
 
   // Singleton instances per device
   private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
@@ -1496,6 +1499,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private reportedScaleMetadata: ScreenScaleMetadata | null = null;
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
+  private readonly observerHierarchyRequestIds = new Set<string>();
+  private readonly transientObserver: boolean;
   // Request ids whose screenshot responses must not be auto-pushed to the
   // observation stream. Scoped per-request so an unrelated in-flight screenshot
   // (e.g. backoff capture or MCP screenshot) cannot consume the suppression.
@@ -1579,6 +1584,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     ctrlProxyForwardLease?: CtrlProxyForwardLease,
     serviceManagerFactory: AndroidServiceManagerFactory = defaultAndroidServiceManagerFactory,
     idGenerator: IdGenerator = defaultIdGenerator,
+    transientObserver?: boolean,
   ) {
     super(
       timer ?? defaultTimer,
@@ -1593,6 +1599,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.device = device;
     this.adb = adb;
     this.idGenerator = idGenerator;
+    this.transientObserver = transientObserver === true;
+    this.autoReconnectEnabled = transientObserver !== true;
     this.physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(this.timer);
     this.installedAppsRepository = installedAppsRepository ?? null;
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
@@ -1601,6 +1609,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.certificateFileSystem = certificateFileSystem;
     this.ctrlProxyForwardLease =
       ctrlProxyForwardLease ?? new FileCtrlProxyForwardLease(device.deviceId);
+    this.ownsPortAllocation = PortManager.getPort(device.deviceId) === undefined;
     this.localPort = PortManager.allocate(device.deviceId, {
       reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
     });
@@ -1647,6 +1656,34 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   public static getExistingInstance(deviceId: string): AndroidCtrlProxyClient | null {
     return AndroidCtrlProxyClient.instances.get(deviceId) ?? null;
+  }
+
+  /** A one-read client; never registers as an owner or recovers the service. */
+  public static createForObservationRead(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+  ): AndroidCtrlProxyClient {
+    return new AndroidCtrlProxyClient(
+      device,
+      adbFactory.create(device),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      logger,
+      undefined,
+      undefined,
+      defaultAndroidServiceManagerFactory,
+      defaultIdGenerator,
+      true,
+    );
+  }
+
+  public connectForObservationRead(): Promise<boolean> {
+    return super.ensureConnected();
   }
 
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
@@ -1928,6 +1965,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     ctrlProxyForwardLease?: CtrlProxyForwardLease,
     serviceManagerFactory?: AndroidServiceManagerFactory,
     idGenerator?: IdGenerator,
+    transientObserver = false,
   ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(
       device,
@@ -1944,6 +1982,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
       serviceManagerFactory ?? defaultAndroidServiceManagerFactory,
       idGenerator,
+      transientObserver,
     );
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
@@ -1980,6 +2019,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       getLastWebSocketTimeout: () => this.lastWebSocketTimeout,
       setLastWebSocketTimeout: (time) => {
         this.lastWebSocketTimeout = time;
+      },
+      markObserverHierarchyRequest: (requestId) => {
+        this.observerHierarchyRequestIds.add(requestId);
+      },
+      unmarkObserverHierarchyRequest: (requestId) => {
+        this.observerHierarchyRequestIds.delete(requestId);
       },
     };
   }
@@ -2165,6 +2210,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   protected onConnectionEstablished(): void {
+    if (this.transientObserver) {
+      return;
+    }
     // Reset failure escalation state on every successful connect (issue #7532).
     this.consecutiveConnectionFailures = 0;
     // A newly connected CtrlProxy may be a different runner or service version.
@@ -2289,6 +2337,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.supportedCommands = null;
     this.rejectedCommands.clear();
     this.lateCancelledScreenshotRequestIds.clear();
+    this.observerHierarchyRequestIds.clear();
     this.cancelScreenshotBackoff();
     this._hierarchy?.rejectAllPendingHierarchy("WebSocket connection closed");
     // Issue #7540: the cache describes device UI state as of the closed connection, and the
@@ -2299,6 +2348,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // Mirrors IOSCtrlProxyClient.onConnectionClosed() clearing `cachedHierarchy`.
     this.cachedHierarchy = null;
     this._hierarchy?.resetConnectionScopedState();
+    if (this.transientObserver) {
+      return;
+    }
     void this.markInstalledAppsStale("websocket_closed");
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
@@ -2729,6 +2781,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
     this.hierarchyObservationStreamSuppressions.add(suppression);
     return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+  }
+
+  async requestHierarchySyncForObserver(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    disableAllFiltering = false,
+    signal?: AbortSignal,
+    timeoutMs = 10000,
+    displayId?: number,
+  ): Promise<{ hierarchy: AccessibilityHierarchy; frameContext?: string } | null> {
+    const deadline = this.timer.now() + timeoutMs;
+    await this.waitForPendingRequests(timeoutMs, signal);
+    const remaining = deadline - this.timer.now();
+    if (remaining <= 0) {
+      throw new ObserverPendingRequestTimeoutError();
+    }
+    return this.hierarchy.requestHierarchySyncForObserver(
+      perf,
+      disableAllFiltering,
+      signal,
+      remaining,
+      displayId,
+    );
   }
 
   convertToViewHierarchyResult(
@@ -4224,7 +4298,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.portForwardingSetup = !(await this.removeCtrlProxyPortForward(this.localPort));
       }
 
-      PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+      if (this.ownsPortAllocation) {
+        PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
+      }
       await this.finishInvalidatedConnectionCleanup();
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
@@ -4547,6 +4623,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private readonly webSocketMessageHandlers = {
     connected: (message) => {
+      if (this.transientObserver) {
+        return;
+      }
       this.rejectedCommands.clear();
       this.supportedCommands = Array.isArray(message.supportedCommands)
         ? new Set(message.supportedCommands)
@@ -5270,6 +5349,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const message = parseCtrlProxyJson<WebSocketMessage>(data.toString());
       const type = (message as { type: string }).type;
+      if (this.transientObserver && !["connected", "hierarchy_update", "error"].includes(type)) {
+        return;
+      }
       if (Object.hasOwn(this.webSocketMessageHandlers, type)) {
         // The mapped type checks each entry; this cast reconnects key and value after lookup.
         const handler = this.webSocketMessageHandlers[type as WebSocketMessage["type"]] as (
@@ -5310,7 +5392,40 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
     // A must-deliver correlated frame can leave the runner after a newer coalesced push.
     // Complete its own waiter, but do not regress the shared cache or observation stream.
+    const observerResponse = !!requestId && this.observerHierarchyRequestIds.has(requestId);
     this._hierarchy?.resolvePendingHierarchy(requestId, incomingHierarchy);
+    if (observerResponse) {
+      this.observerHierarchyRequestIds.delete(requestId);
+      if (
+        this.transientObserver ||
+        (this.cachedHierarchy !== null &&
+          isDeepStrictEqual(
+            {
+              hierarchy: data.hierarchy,
+              packageName: data.packageName,
+              windows: data.windows,
+              screenWidth: data.screenWidth,
+              screenHeight: data.screenHeight,
+              rotation: data.rotation,
+              displayId: data.displayId,
+            },
+            {
+              hierarchy: this.cachedHierarchy.hierarchy.hierarchy,
+              packageName: this.cachedHierarchy.hierarchy.packageName,
+              windows: this.cachedHierarchy.hierarchy.windows,
+              screenWidth: this.cachedHierarchy.hierarchy.screenWidth,
+              screenHeight: this.cachedHierarchy.hierarchy.screenHeight,
+              rotation: this.cachedHierarchy.hierarchy.rotation,
+              displayId: this.cachedHierarchy.hierarchy.displayId,
+            },
+          ))
+      ) {
+        return;
+      }
+    }
+    if (this.transientObserver) {
+      return;
+    }
     if (this.cachedHierarchy && data.updatedAt < this.cachedHierarchy.hierarchy.updatedAt) {
       return;
     }

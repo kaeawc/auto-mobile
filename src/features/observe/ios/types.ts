@@ -317,6 +317,8 @@ export interface CtrlProxyHierarchyResponse {
  * Extended context for hierarchy delegate with additional state access.
  */
 export interface HierarchyDelegateContext extends DelegateContext {
+  markObserverHierarchyRequest?(requestId: string): void;
+  unmarkObserverHierarchyRequest?(requestId: string): void;
   getLastConnectFailure?(): { reason: IosHierarchyUnavailableReason; detail?: string } | undefined;
   /** Cache freshness TTL in milliseconds */
   cacheFreshTtlMs: number;

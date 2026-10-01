@@ -354,6 +354,8 @@ export interface A11yLaunchIntentResult extends BaseResult {
  * Extended context for hierarchy delegate with additional state access.
  */
 export interface HierarchyDelegateContext extends DelegateContext {
+  markObserverHierarchyRequest?(requestId: string): void;
+  unmarkObserverHierarchyRequest?(requestId: string): void;
   /** The device this client is connected to */
   device: BootedDevice;
   /** ADB executor for running device commands */

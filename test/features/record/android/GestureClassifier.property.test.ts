@@ -21,6 +21,13 @@ const identityScaler: CoordScaler = {
   toScreenPoint: (x: number, y: number) => ({ x, y }),
 };
 
+/** An intentionally simple scaler that exposes independent axis conversion. */
+function anisotropicScaler(scaleX: number, scaleY: number): CoordScaler {
+  return {
+    toScreenPoint: (x: number, y: number) => ({ x: x * scaleX, y: y * scaleY }),
+  };
+}
+
 function makeFrame(
   arrivedAt: number,
   activeSlots: Array<{ slotId: number; trackingId: number; x: number; y: number }>,
@@ -36,9 +43,11 @@ function makeFrame(
 const dist = (x1: number, y1: number, x2: number, y2: number): number =>
   Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
 
-// Density in the range real Android screens report (mdpi..xxxhdpi ≈ 1..4).
-const density = fc.integer({ min: 10, max: 40 }).map((d) => d / 10);
+// Android reports an integer DPI, converted to dp multiplier with DPI / 160.
+// 120..640 covers realistic screens from 0.75x through 4x (max slop = 8*4 = 32px).
+const density = fc.integer({ min: 120, max: 640 }).map((dpi) => dpi / 160);
 const coord = fc.integer({ min: 0, max: 2000 });
+const axisScale = fc.constantFrom(0.5, 1, 2, 3);
 
 /**
  * Drive a single finger through DOWN → (optional MOVE) → UP against a fresh
@@ -51,8 +60,9 @@ function singleFinger(
   down: { x: number; y: number },
   up: { x: number; y: number },
   durationMs: number,
+  scaler: CoordScaler = identityScaler,
 ) {
-  const c = new GestureClassifier(identityScaler, d);
+  const c = new GestureClassifier(scaler, d);
   c.feedFrame(makeFrame(0, [{ slotId: 0, trackingId: 1, x: down.x, y: down.y }]));
   c.feedFrame(makeFrame(1, [{ slotId: 0, trackingId: 1, x: up.x, y: up.y }]));
   return c.feedFrame(makeFrame(durationMs, [], [0]));
@@ -65,8 +75,9 @@ function twoFinger(
   b0: { x: number; y: number },
   a1: { x: number; y: number },
   b1: { x: number; y: number },
+  scaler: CoordScaler = identityScaler,
 ) {
-  const c = new GestureClassifier(identityScaler, d);
+  const c = new GestureClassifier(scaler, d);
   c.feedFrame(
     makeFrame(0, [
       { slotId: 0, trackingId: 1, x: a0.x, y: a0.y },
@@ -94,8 +105,9 @@ function swipeTimed(
   to: { x: number; y: number },
   downT: number,
   upT: number,
+  scaler: CoordScaler = identityScaler,
 ) {
-  const c = new GestureClassifier(identityScaler, d);
+  const c = new GestureClassifier(scaler, d);
   c.feedFrame(makeFrame(downT, [{ slotId: 0, trackingId: 1, x: from.x, y: from.y }]));
   c.feedFrame(makeFrame(downT, [{ slotId: 0, trackingId: 1, x: to.x, y: to.y }]));
   return c.feedFrame(makeFrame(upT, [], [0]));
@@ -105,6 +117,78 @@ describe("GestureClassifier (property-based)", () => {
   // -------------------------------------------------------------------------
   // Single-finger classification partition
   // -------------------------------------------------------------------------
+
+  test("tap coordinates are reported in anisotropically scaled screen space", () => {
+    fc.assert(
+      fc.property(density, coord, coord, axisScale, axisScale, (d, x, y, sx, sy) => {
+        const g = singleFinger(d, { x, y }, { x, y }, 50, anisotropicScaler(sx, sy));
+        expect(g?.type).toBe("tap");
+        expect(g?.screenX).toBe(x * sx);
+        expect(g?.screenY).toBe(y * sy);
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("swipe geometry, direction, and speed use anisotropically scaled coordinates", () => {
+    const flipScaler = anisotropicScaler(0.5, 2);
+    // Raw displacement points right, but scaled displacement points down and
+    // still clears the 32px max slop at density 4.
+    expect(singleFinger(4, { x: 0, y: 0 }, { x: 40, y: 15 }, 100, flipScaler)).toMatchObject({
+      type: "swipe",
+      direction: "down",
+      startX: 0,
+      startY: 0,
+      endX: 20,
+      endY: 30,
+    });
+    // A raw 50px move would clear 32px, but the scaled 25px move remains a tap.
+    expect(singleFinger(4, { x: 0, y: 0 }, { x: 50, y: 0 }, 50, flipScaler)?.type).toBe("tap");
+
+    fc.assert(
+      fc.property(
+        density,
+        coord,
+        coord,
+        fc.integer({ min: -150, max: 150 }),
+        fc.integer({ min: -150, max: 150 }),
+        axisScale,
+        axisScale,
+        fc.integer({ min: 1, max: 5000 }),
+        (d, x, y, dx, dy, sx, sy, durationMs) => {
+          const scaler = anisotropicScaler(sx, sy);
+          const start = scaler.toScreenPoint(x, y);
+          const end = scaler.toScreenPoint(x + dx, y + dy);
+          const screenDx = end.x - start.x;
+          const screenDy = end.y - start.y;
+          const displacement = dist(start.x, start.y, end.x, end.y);
+          fc.pre(displacement >= GESTURE_THRESHOLDS.TOUCH_SLOP_DP * d);
+
+          const g = singleFinger(d, { x, y }, { x: x + dx, y: y + dy }, durationMs, scaler);
+          expect(g?.type).toBe("swipe");
+          expect(g?.startX).toBe(start.x);
+          expect(g?.startY).toBe(start.y);
+          expect(g?.endX).toBe(end.x);
+          expect(g?.endY).toBe(end.y);
+
+          const direction =
+            Math.abs(screenDx) >= Math.abs(screenDy)
+              ? screenDx > 0
+                ? "right"
+                : "left"
+              : screenDy > 0
+                ? "down"
+                : "up";
+          expect(g?.direction).toBe(direction);
+          const velocity = (displacement / durationMs) * 1000;
+          expect(g?.speed).toBe(
+            velocity >= GESTURE_THRESHOLDS.FLING_MIN_DP_PER_S * d ? "fast" : "normal",
+          );
+        },
+      ),
+      RUN_OPTIONS,
+    );
+  });
 
   test("a zero-displacement contact is a tap iff short, a longPress iff long", () => {
     fc.assert(
@@ -215,6 +299,28 @@ describe("GestureClassifier (property-based)", () => {
     );
   });
 
+  test("fractional DPI densities retain their precise touch-slop pivot", () => {
+    // A 0.1x X scaler makes fractional screen-pixel displacements observable
+    // with simple raw coordinates. At 420dpi, slop is exactly 21px: 20.9px is
+    // a tap. Rounding 2.625 to 2.6 lowers slop to 20.8px and flips that case.
+    // At the 440dpi fallback, slop is 22px: 22.1px is a swipe. Rounding 2.75
+    // to 2.8 raises slop to 22.4px and flips that case in the other direction.
+    const fractionalDensity = fc.constantFrom(2.625, 2.75);
+    const scaler = anisotropicScaler(0.1, 0.2);
+    fc.assert(
+      fc.property(fractionalDensity, coord, coord, (d, x, y) => {
+        const slopPx = GESTURE_THRESHOLDS.TOUCH_SLOP_DP * d;
+        const rawEndpoint = (screenOffset: number) => ({ x: x + screenOffset / 0.1, y });
+
+        expect(singleFinger(d, { x, y }, rawEndpoint(slopPx - 0.1), 50, scaler)?.type).toBe("tap");
+        expect(singleFinger(d, { x, y }, rawEndpoint(slopPx + 0.1), 50, scaler)?.type).toBe(
+          "swipe",
+        );
+      }),
+      RUN_OPTIONS,
+    );
+  });
+
   test("a zero-duration swipe is guarded to 'normal', not a divide-by-zero 'fast'", () => {
     // The swipe property above draws durationMs from [1, 5000], so it never
     // exercises the classifier's `durationMs > 0 ? ... : 0` guard. Same-
@@ -301,6 +407,46 @@ describe("GestureClassifier (property-based)", () => {
           expect(Number.isFinite(g?.scale)).toBe(true);
           expect(g!.scale!).toBeGreaterThanOrEqual(0);
           expect(g!.scale!).toBeCloseTo(scale, 6);
+          expect(g?.pinchDirection).toBe(scale < 1 ? "in" : "out");
+        },
+      ),
+      RUN_OPTIONS,
+    );
+  });
+
+  test("pinch scale is derived from anisotropically scaled finger distances", () => {
+    fc.assert(
+      fc.property(
+        density,
+        coord,
+        coord,
+        fc.integer({ min: -100, max: 100 }),
+        fc.integer({ min: -100, max: 100 }),
+        fc.integer({ min: -100, max: 100 }),
+        fc.integer({ min: -100, max: 100 }),
+        axisScale,
+        axisScale,
+        (d, x, y, ax, ay, bx, by, sx, sy) => {
+          const scaler = anisotropicScaler(sx, sy);
+          const initialA = scaler.toScreenPoint(x, y);
+          const initialB = scaler.toScreenPoint(x + 100, y + 100);
+          const finalA = scaler.toScreenPoint(x + ax, y + ay);
+          const finalB = scaler.toScreenPoint(x + bx, y + by);
+          const initialDist = dist(initialA.x, initialA.y, initialB.x, initialB.y);
+          const finalDist = dist(finalA.x, finalA.y, finalB.x, finalB.y);
+          const scale = finalDist / initialDist;
+          fc.pre(Math.abs(scale - 1) >= GESTURE_THRESHOLDS.PINCH_MIN_SCALE_DELTA);
+
+          const g = twoFinger(
+            d,
+            { x, y },
+            { x: x + 100, y: y + 100 },
+            { x: x + ax, y: y + ay },
+            { x: x + bx, y: y + by },
+            scaler,
+          );
+          expect(g?.type).toBe("pinch");
+          expect(g?.scale).toBeCloseTo(scale, 6);
           expect(g?.pinchDirection).toBe(scale < 1 ? "in" : "out");
         },
       ),

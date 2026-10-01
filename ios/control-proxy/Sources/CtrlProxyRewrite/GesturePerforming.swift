@@ -1,5 +1,15 @@
 import Foundation
 
+public struct PressKeyOutcome: Sendable {
+    public let verified: Bool?
+    public let warning: String?
+
+    public init(verified: Bool?, warning: String? = nil) {
+        self.verified = verified
+        self.warning = warning
+    }
+}
+
 /// Performs gestures and interactions via XCUITest.
 ///
 /// `@MainActor` — same archetype as `ElementLocating`. Every method ultimately drives
@@ -91,6 +101,7 @@ public protocol GesturePerforming: Sendable {
     /// Returns true when caret movement was checked, false when it could not be checked,
     /// and nil for keys without a caret post-condition.
     func pressKey(key: String, modifiers: [String]) throws -> Bool?
+    func pressKeyOutcome(key: String, modifiers: [String]) throws -> PressKeyOutcome
     func keyboard(action: String) throws -> KeyboardActionResult
 
     // MARK: - Clipboard
@@ -170,6 +181,10 @@ public protocol GesturePerforming: Sendable {
 }
 
 extension GesturePerforming {
+    public func pressKeyOutcome(key: String, modifiers: [String]) throws -> PressKeyOutcome {
+        try PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers))
+    }
+
     public func getScreenshotCapture() throws -> ScreenshotCapture {
         let rotationBeforeCapture = getDisplayRotation()
         let data = try getScreenshot()

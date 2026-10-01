@@ -15,6 +15,7 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
             blockingElapsedMs: 42,
             text: "result text",
             verified: false,
+            warning: "Value did not change",
             pinchPath: "element-anchored"
         )
         let timing = PerfTiming(name: "handleRequest", durationMs: 12)
@@ -32,6 +33,7 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
         XCTAssertEqual(decoded.blockingElapsedMs, 42)
         XCTAssertEqual(decoded.text, "result text")
         XCTAssertEqual(decoded.verified, false)
+        XCTAssertEqual(decoded.warning, "Value did not change")
         XCTAssertEqual(decoded.pinchPath, "element-anchored")
         XCTAssertEqual(decoded.perfTiming?.name, "handleRequest")
         XCTAssertEqual(decoded.perfTiming?.durationMs, 12)

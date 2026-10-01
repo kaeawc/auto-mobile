@@ -236,6 +236,12 @@ final class PressKeyDispatchTests: XCTestCase {
         XCTAssertEqual(gestures.keyCalls.count, 1)
         XCTAssertEqual(gestures.keyCalls.first?.0, "tab")
         XCTAssertEqual(gestures.keyCalls.first?.1, ["shift", "meta"])
+        gestures.keyWarning = "Value did not change; delivery could not be confirmed"
+        let warnedResult = await handler.handle(request)
+        let warned = try XCTUnwrap(warnedResult as? WebSocketResponse)
+        let warningJSON = try XCTUnwrap(String(data: JSONEncoder().encode(warned), encoding: .utf8))
+        XCTAssertTrue(warningJSON.contains("\"warning\":\"Value did not change; delivery could not be confirmed\""))
+        gestures.keyWarning = nil
         gestures.keyVerified = false
         let unverifiedResult = await handler.handle(request)
         let unverified = try XCTUnwrap(unverifiedResult as? WebSocketResponse)
@@ -247,6 +253,6 @@ final class PressKeyDispatchTests: XCTestCase {
         XCTAssertEqual(failure.success, false)
         XCTAssertEqual(failure.type, "press_key_result")
         XCTAssertEqual(failure.requestId, "key-1")
-        XCTAssertEqual(gestures.keyCalls.count, 2)
+        XCTAssertEqual(gestures.keyCalls.count, 3)
     }
 }

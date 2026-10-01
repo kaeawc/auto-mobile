@@ -143,6 +143,7 @@ export interface WebSocketMessage {
   rotation?: number;
   success?: boolean;
   verified?: boolean;
+  warning?: string;
   ok?: boolean;
   open?: boolean;
   method?: "escape" | "dismissKey" | "returnKey";
@@ -208,6 +209,7 @@ export interface CtrlProxyKeyboardResult extends BaseResult {
 /** Discrete keyboard key result from CtrlProxy iOS */
 export interface CtrlProxyPressKeyResult extends BaseResult {
   verified?: boolean;
+  warning?: string;
 }
 
 /** Press home result from CtrlProxy iOS */

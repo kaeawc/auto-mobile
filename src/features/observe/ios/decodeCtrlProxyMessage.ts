@@ -127,6 +127,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
         verified: message.verified,
+        warning: message.warning,
         perfTiming: message.perfTiming,
       };
       break;

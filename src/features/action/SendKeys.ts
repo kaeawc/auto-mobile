@@ -160,6 +160,7 @@ export interface SendKeysCommandResult {
   error?: string;
   retryable?: boolean;
   verified?: boolean;
+  warning?: string;
   backend?: "autoMobileIme";
   capability?: "semanticText";
   keyboard?: KeyboardIdentity;
@@ -266,7 +267,7 @@ export interface SendKeysInputKey {
     timeoutMs?: number,
     frameContext?: string,
     modifiers?: readonly InputKeyModifier[],
-  ): Promise<{ success: boolean; error?: string; verified?: boolean }>;
+  ): Promise<{ success: boolean; error?: string; verified?: boolean; warning?: string }>;
 }
 
 export interface SendKeysPlatformDependencies {
@@ -442,6 +443,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       modifiers,
       success: result.success,
       ...(result.verified === undefined ? {} : { verified: result.verified }),
+      ...(result.warning === undefined ? {} : { warning: result.warning }),
       ...(result.error ? { error: result.error } : {}),
     };
   }
@@ -1811,6 +1813,9 @@ export class SendKeys {
     failure: SendKeysFailure | undefined,
     observation: ObserveResult,
   ): SendKeysResult {
+    const warnings = results
+      .filter((result) => result.success && result.warning)
+      .map((result) => result.warning);
     if (failure) {
       return {
         success: false,
@@ -1819,6 +1824,7 @@ export class SendKeys {
         commands: results,
         observation,
         error: failure.error,
+        ...(warnings.length ? { warning: warnings.join(" ") } : {}),
       };
     }
 
@@ -1827,6 +1833,7 @@ export class SendKeys {
       completedCommands: results.length,
       commands: results,
       observation,
+      ...(warnings.length ? { warning: warnings.join(" ") } : {}),
     };
   }
 

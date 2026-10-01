@@ -49,6 +49,34 @@ describe("InputKey", () => {
     expect(await inputKey.press("arrow_left")).toMatchObject({ success: true, verified: false });
   });
 
+  test("carries an iOS delete warning and preserves a reliable-field failure", async () => {
+    const requestPressKey = mock(async () => ({
+      success: true,
+      warning: "Key 'backspace' value did not change; delivery could not be confirmed",
+      error: undefined as string | undefined,
+    }));
+    const inputKey = new InputKey(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      undefined,
+      new FakeTimer(),
+      () => ({ requestPressKey }),
+    );
+    expect(await inputKey.press("backspace")).toMatchObject({
+      success: true,
+      warning: "Key 'backspace' value did not change; delivery could not be confirmed",
+    });
+    requestPressKey.mockImplementation(async () => ({
+      success: false,
+      warning: undefined,
+      error: "Key 'backspace' did not decrease text length: before 4, observed 4",
+    }));
+    expect(await inputKey.press("backspace")).toMatchObject({
+      success: false,
+      error: "Key 'backspace' did not decrease text length: before 4, observed 4",
+    });
+  });
+
   test("sends supported Android keys through ADB keyevent with the caller timeout", async () => {
     const fakeAdb = new FakeAdbExecutor();
     // Inject a FakeTimer so `now()` is constant: with the real timer, a 1ms tick between the two

@@ -76,6 +76,7 @@ describe("InputText.execute", () => {
     iosGetInstanceSpy?.mockRestore();
     getInstanceSpy = null;
     iosGetInstanceSpy = null;
+    AndroidCtrlProxyClient.resetInstances();
   });
 
   test("returns a no-text failure without invoking any transport when text is undefined", async () => {

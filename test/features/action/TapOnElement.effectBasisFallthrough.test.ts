@@ -1,10 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { BootedDevice } from "../../../src/models";
+
+afterEach(() => {
+  AndroidCtrlProxyClient.resetInstances();
+});
 
 // Issue #6258: effect.screenChanged must not be false when a tap opens a
 // dialog that the `activeWindow` basis cannot see (the known dialog-window

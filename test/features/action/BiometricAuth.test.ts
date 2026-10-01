@@ -1,5 +1,6 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { BiometricAuth } from "../../../src/features/action/BiometricAuth";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { ObserveResult, BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -64,6 +65,10 @@ describe("BiometricAuth", () => {
     (biometricAuth as any).observeScreen = fakeObserveScreen;
     (biometricAuth as any).window = fakeWindow;
     (biometricAuth as any).awaitIdle = fakeAwaitIdle;
+  });
+
+  afterEach(() => {
+    AndroidCtrlProxyClient.resetInstances();
   });
 
   describe("execute - match action", () => {

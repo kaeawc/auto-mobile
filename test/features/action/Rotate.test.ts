@@ -1,5 +1,6 @@
-import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { Rotate } from "../../../src/features/action/Rotate";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -17,6 +18,10 @@ describe("Rotate", () => {
   let fakeWindow: FakeWindow;
   let fakeTimer: FakeTimer;
   let mockDevice: BootedDevice;
+
+  afterEach(() => {
+    AndroidCtrlProxyClient.resetInstances();
+  });
 
   // Helper function to create mock ExecResult
   const createExecResult = (stdout: string = ""): ExecResult => ({

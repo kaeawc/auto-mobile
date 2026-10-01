@@ -576,7 +576,12 @@ function parseNativeFrameMetrics(line: string): NativeFrameMetrics | null {
     if (!isNativeFrameMetrics(value)) {
       return null;
     }
-    return value;
+    return {
+      ...value,
+      captureTimestampMs: value.captureTimestampMs ?? null,
+      frameQueueAgeMs: value.frameQueueAgeMs ?? null,
+      lastOutputWriteDurationMs: value.lastOutputWriteDurationMs ?? null,
+    };
   } catch (error) {
     logger.debug(
       `[IOSScreenCaptureHelper] ignored malformed native frame metrics: ${errorMessage(error)}`,
@@ -585,20 +590,32 @@ function parseNativeFrameMetrics(line: string): NativeFrameMetrics | null {
   }
 }
 
-function isNativeFrameMetrics(value: unknown): value is NativeFrameMetrics {
+type NativeFrameMetricsInput = Omit<
+  NativeFrameMetrics,
+  "captureTimestampMs" | "frameQueueAgeMs" | "lastOutputWriteDurationMs"
+> &
+  Partial<
+    Pick<NativeFrameMetrics, "captureTimestampMs" | "frameQueueAgeMs" | "lastOutputWriteDurationMs">
+  >;
+
+function isNativeFrameMetrics(value: unknown): value is NativeFrameMetricsInput {
   if (value === null || typeof value !== "object") {
     return false;
   }
   const metrics = value as Record<string, unknown>;
   return (
-    isNullableNumber(metrics.captureTimestampMs) &&
-    isNullableNumber(metrics.frameQueueAgeMs) &&
+    isOptionalNullableNumber(metrics.captureTimestampMs) &&
+    isOptionalNullableNumber(metrics.frameQueueAgeMs) &&
     (metrics.frameQueueDepth === 0 || metrics.frameQueueDepth === 1) &&
     isNonNegativeNumber(metrics.droppedFrames) &&
     isNonNegativeNumber(metrics.bytesQueued) &&
     isNonNegativeNumber(metrics.highWaterMarkBytes) &&
-    isNullableNumber(metrics.lastOutputWriteDurationMs)
+    isOptionalNullableNumber(metrics.lastOutputWriteDurationMs)
   );
+}
+
+function isOptionalNullableNumber(value: unknown): value is number | null | undefined {
+  return value === undefined || isNullableNumber(value);
 }
 
 function isNullableNumber(value: unknown): value is number | null {

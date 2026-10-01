@@ -6,6 +6,7 @@ import {
   CAPTURE_PERMISSION_PREFIX,
   CAPTURE_PERMISSION_TARGET_PREFIX,
   ENCODED_VIDEO_CAPABILITY,
+  NATIVE_FRAME_METRICS_PREFIX,
   SIMULATOR_IDLE_EVIDENCE_CAPABILITY,
   IosScreenCaptureHelper,
   type CapturePermission,
@@ -1435,9 +1436,13 @@ export class IosH264Source implements H264CaptureSource {
       }
       if (line.length > 0) {
         this.lastHelperStderr = line.slice(-2_048);
-        // The helper runs in a separate process. Preserve its diagnostics in the
-        // daemon log: a SIGABRT otherwise leaves CI with only an exit signal.
-        logger.warn(`[IosH264Source] screen-capture-helper stderr: ${line}`);
+        if (line.startsWith(NATIVE_FRAME_METRICS_PREFIX)) {
+          logNativeFrameMetricsStderr(line);
+        } else {
+          // The helper runs in a separate process. Preserve its diagnostics in the
+          // daemon log: a SIGABRT otherwise leaves CI with only an exit signal.
+          logger.warn(`[IosH264Source] screen-capture-helper stderr: ${line}`);
+        }
       }
       if (isHelperError(line)) {
         this.failIfCurrentHelper(helper, generation, this.helperFailureFor(line));
@@ -2043,6 +2048,27 @@ export class IosH264Source implements H264CaptureSource {
         `[IosH264Source] helper stop exceeded ${IOS_HELPER_STOP_TIMEOUT_MS}ms; continuing teardown`,
       );
     }
+  }
+}
+
+function logNativeFrameMetricsStderr(line: string): void {
+  try {
+    const value: unknown = JSON.parse(line.slice(NATIVE_FRAME_METRICS_PREFIX.length));
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      logger.warn(`[IosH264Source] unrecognised frame-metrics line: ${line}`);
+      return;
+    }
+    const metrics = value as Record<string, unknown>;
+    if (
+      (typeof metrics.droppedFrames === "number" && metrics.droppedFrames > 0) ||
+      (typeof metrics.frameQueueDepth === "number" && metrics.frameQueueDepth !== 0)
+    ) {
+      logger.warn(`[IosH264Source] screen-capture-helper frame metrics: ${line}`);
+      return;
+    }
+    logger.debug(`[IosH264Source] screen-capture-helper frame metrics: ${line}`);
+  } catch (error) {
+    logger.warn(`[IosH264Source] unrecognised frame-metrics line: ${line}; ${errorMessage(error)}`);
   }
 }
 

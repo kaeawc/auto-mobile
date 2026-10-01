@@ -50,6 +50,89 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     resetDbWriteBarrier();
   });
 
+  test("waits for pending device cleanup before closing the database", async () => {
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      new FakeTimer(),
+      new FakeDeviceSessionRepository(),
+    );
+    const cleanup = Promise.withResolvers<void>();
+    const cleanupStarted = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const drain = daemon
+      .getSessionManager()
+      .drainPendingDeviceCleanups.bind(daemon.getSessionManager());
+    const drainSpy = spyOn(
+      daemon.getSessionManager(),
+      "drainPendingDeviceCleanups",
+    ).mockImplementation(async (timeoutMs) => {
+      cleanupStarted.resolve();
+      const result = await drain(timeoutMs);
+      events.push("cleanup settled");
+      return result;
+    });
+    const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
+      events.push("database closed");
+    });
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+    try {
+      daemon.getSessionManager().registerPendingDeviceCleanup("sim-dirty", cleanup.promise);
+      const stopping = daemon.stop();
+      await cleanupStarted.promise;
+      expect(events).toEqual([]);
+
+      cleanup.resolve();
+      await stopping;
+      expect(events).toEqual(["cleanup settled", "database closed"]);
+    } finally {
+      cleanup.resolve();
+      drainSpy.mockRestore();
+      closeDatabaseSpy.mockRestore();
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
+  test("continues shutdown when pending device cleanup exceeds its deadline", async () => {
+    const timer = new FakeTimer();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      new FakeDeviceSessionRepository(),
+    );
+    const cleanup = Promise.withResolvers<void>();
+    const cleanupStarted = Promise.withResolvers<void>();
+    const drain = daemon
+      .getSessionManager()
+      .drainPendingDeviceCleanups.bind(daemon.getSessionManager());
+    const drainSpy = spyOn(
+      daemon.getSessionManager(),
+      "drainPendingDeviceCleanups",
+    ).mockImplementation(async (timeoutMs) => {
+      cleanupStarted.resolve();
+      return await drain(timeoutMs);
+    });
+    const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockResolvedValue(undefined);
+    const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
+    try {
+      daemon.getSessionManager().registerPendingDeviceCleanup("sim-dirty", cleanup.promise);
+      const stopping = daemon.stop();
+      await cleanupStarted.promise;
+      timer.advanceTime(2_000);
+
+      await stopping;
+      expect(drainSpy).toHaveReturned();
+      expect(closeDatabaseSpy).toHaveBeenCalledTimes(1);
+      expect(daemon.getSessionManager().getPendingDeviceCleanup("sim-dirty")).not.toBeNull();
+    } finally {
+      cleanup.resolve();
+      drainSpy.mockRestore();
+      closeDatabaseSpy.mockRestore();
+      loggerCloseSpy.mockRestore();
+    }
+  });
+
   test("releases active sessions before closing the database", async () => {
     const timer = new FakeTimer();
     const repository = new FakeDeviceSessionRepository();

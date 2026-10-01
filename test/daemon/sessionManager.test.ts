@@ -1823,6 +1823,35 @@ describe("SessionManager", () => {
   });
 
   describe("rebindSession", () => {
+    test("times out a stalled setup without persisting or publishing the rebind", async () => {
+      const timer = new FakeTimer();
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(timer, repository);
+      const setupFinished = Promise.withResolvers<void>();
+      try {
+        const session = await manager.createSession("stalled-rebind", "sim-old", "ios");
+        const setup = manager.trackSessionSetup(session, () => setupFinished.promise);
+        const rebind = manager.rebindSession("stalled-rebind", "sim-new", "ios");
+        await Promise.resolve();
+        timer.advanceTime(1_000);
+
+        await expect(rebind).rejects.toThrow("retry the device rebind after it settles");
+        expect(manager.getDeviceForSession("stalled-rebind")).toBe("sim-old");
+        expect(repository.upsertedDeviceIds).toEqual(["sim-old"]);
+
+        setupFinished.resolve();
+        await setup;
+        await expect(
+          manager.rebindSession("stalled-rebind", "sim-new", "ios"),
+        ).resolves.toMatchObject({
+          assignedDevice: "sim-new",
+        });
+      } finally {
+        setupFinished.resolve();
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("retains the existing binding when replacement persistence rejects", async () => {
       const repository = new FakeDeviceSessionPersistence();
       const manager = new SessionManager(fakeTimer, repository);
@@ -2096,6 +2125,26 @@ describe("SessionManager", () => {
         manager.stopCleanupTimer();
       }
     });
+  });
+
+  test("drains pending device cleanups with a bounded wait", async () => {
+    const timer = new FakeTimer();
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const cleanup = Promise.withResolvers<void>();
+    try {
+      manager.registerPendingDeviceCleanup("sim-dirty", cleanup.promise);
+      const timedDrain = manager.drainPendingDeviceCleanups(50);
+      timer.advanceTime(50);
+      await expect(timedDrain).resolves.toBe(false);
+
+      const settledDrain = manager.drainPendingDeviceCleanups(50);
+      cleanup.resolve();
+      await expect(settledDrain).resolves.toBe(true);
+      expect(manager.getPendingDeviceCleanup("sim-dirty")).toBeNull();
+    } finally {
+      cleanup.resolve();
+      manager.stopCleanupTimer();
+    }
   });
 
   describe("cache management", () => {

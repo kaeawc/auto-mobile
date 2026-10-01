@@ -157,6 +157,25 @@ describe("Simctl", function () {
   });
 
   describe("executeCommand", function () {
+    test("bounds and aborts a command without an explicit timeout", async function () {
+      const timer = new FakeTimer();
+      let commandSignal: AbortSignal | undefined;
+      mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
+        commandSignal = signal;
+        return await new Promise<ExecResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("command aborted")));
+        });
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+
+      const command = simctl.executeCommand("list devices");
+      expect(timer.getPendingTimeouts()).toEqual([60_000]);
+      timer.advanceTime(60_000);
+
+      await expect(command).rejects.toThrow("Command timed out after 60000ms");
+      expect(commandSignal?.aborted).toBe(true);
+    });
+
     test("dispatches a simctl command once without a version preflight", async function () {
       const commands: Array<{ file: string; args: string[] }> = [];
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {

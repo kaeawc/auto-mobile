@@ -51,6 +51,7 @@ import type { DeviceDisplays } from "../../models/DisplayPanel";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
+const SIMCTL_COMMAND_TIMEOUT_MS = 60_000;
 /**
  * Backoff between retried `simctl list devices --json` reads when boot
  * verification cannot trust a single failed read (issue #6411). Small and
@@ -750,7 +751,12 @@ export class SimCtlClient implements SimCtl {
     signal?: AbortSignal,
   ): Promise<ExecResult> {
     const hostArgs = splitCommandArgs(command);
-    return this.executeCommandArgv(hostArgs, timeoutMs, command, signal);
+    return this.executeCommandArgv(
+      hostArgs,
+      timeoutMs && timeoutMs > 0 ? timeoutMs : SIMCTL_COMMAND_TIMEOUT_MS,
+      command,
+      signal,
+    );
   }
 
   async executeCommandArgs(
@@ -758,7 +764,12 @@ export class SimCtlClient implements SimCtl {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<ExecResult> {
-    return this.executeCommandArgv(args, timeoutMs, args.join(" "), signal);
+    return this.executeCommandArgv(
+      args,
+      timeoutMs && timeoutMs > 0 ? timeoutMs : SIMCTL_COMMAND_TIMEOUT_MS,
+      args.join(" "),
+      signal,
+    );
   }
 
   async startCommandArgs(args: string[], options?: SpawnOptions): Promise<ChildProcess> {

@@ -85,7 +85,10 @@ describe("snapshotOf tool", () => {
     });
     expect(JSON.stringify(result)).not.toContain("png-crop");
     expect(await fs.readFile(result.path, "utf8")).toBe("png-crop");
-    expect((await fs.stat(result.path)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      // Windows does not enforce POSIX file permission modes.
+      expect((await fs.stat(result.path)).mode & 0o777).toBe(0o600);
+    }
     await expect(
       tool.deviceAwareHandler!(device, tool.schema.parse({ elementId: "missing" })),
     ).rejects.toThrow("not found");

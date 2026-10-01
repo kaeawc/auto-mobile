@@ -3233,20 +3233,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val foreground = getForegroundActivity(capturedRootPackage, capturedWindowClass)
     val density = getDensity()
     val enriched =
-      hierarchy?.copy(
-        displayId = targetDisplayId,
-        panelUniqueId = panelUniqueId(targetDisplayId),
-        screenWidth = screenDimensions?.width,
-        screenHeight = screenDimensions?.height,
-        rotation = rotation,
-        systemInsets = legacySystemInsets(captureInsets),
-        insets = captureInsets,
-        wakefulness = wakefulness,
-        foregroundActivity = foreground,
-        density = density,
-        sdkInt = Build.VERSION.SDK_INT,
-        deviceModel = Build.MODEL,
-        isEmulator = getIsEmulator(),
+      HierarchyMetadataBuilder.enrich(
+        hierarchy,
+        HierarchyMetadata(
+          displayId = targetDisplayId,
+          panelUniqueId = panelUniqueId(targetDisplayId),
+          screenWidth = screenDimensions?.width,
+          screenHeight = screenDimensions?.height,
+          rotation = rotation,
+          systemInsets = legacySystemInsets(captureInsets),
+          insets = captureInsets,
+          wakefulness = wakefulness,
+          foregroundActivity = foreground,
+          density = density,
+          sdkInt = Build.VERSION.SDK_INT,
+          deviceModel = Build.MODEL,
+          isEmulator = getIsEmulator(),
+        ),
       )
     val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
     if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
@@ -3410,6 +3413,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val allWindows = selected.windows
     val rootNode =
       viewHierarchyExtractor.rootForDisplay(rootInActiveWindow, allWindows, targetDisplayId)
+    val capturedRootPackage = rootNode?.packageName?.toString()
+    val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions(targetDisplayId)
     val insets = getObservationInsets(screenDimensions, targetDisplayId)
 
@@ -3453,21 +3458,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         getRotationOrNull(targetDisplayId),
         targetDisplayId,
       )
-    // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
-    // add the other device metadata, but the daemon retains scale metadata off any route).
     val captureInsets =
       if (rotation == null) insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown()) else insets
-    val hierarchyWithScaleMetadata =
-      withScaleMetadata(
-        hierarchy?.copy(
+    val enriched =
+      HierarchyMetadataBuilder.enrich(
+        hierarchy,
+        HierarchyMetadata(
           displayId = targetDisplayId,
           panelUniqueId = panelUniqueId(targetDisplayId),
+          screenWidth = screenDimensions?.width,
+          screenHeight = screenDimensions?.height,
           rotation = rotation,
           systemInsets = legacySystemInsets(captureInsets),
           insets = captureInsets,
+          wakefulness = getWakefulness(),
+          foregroundActivity = getForegroundActivity(capturedRootPackage, capturedWindowClass),
+          density = getDensity(),
+          sdkInt = Build.VERSION.SDK_INT,
+          deviceModel = Build.MODEL,
+          isEmulator = getIsEmulator(),
         ),
-        screenDimensions,
       )
+    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
     if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
       extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
     }

@@ -190,6 +190,10 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     this.admissionGate = admissionGate;
   }
 
+  protected bypassesRequestChain(request: WebRtcStreamSocketRequest): boolean {
+    return request.action === "stop";
+  }
+
   /** Resolve dependencies, lazily loading the (werift-heavy) manager on first use. */
   private async getDeps(): Promise<WebRtcStreamSocketServerDependencies> {
     if (this.injectedDeps) {

@@ -107,14 +107,22 @@ class GatedSequencingServer extends RequestResponseSocketServer<TestRequest, Tes
     this.releaseGate();
   }
 
+  send(socket: FakeSocket, request: TestRequest): Promise<void> {
+    return this.processLine(socket, JSON.stringify(request));
+  }
+
+  protected bypassesRequestChain(request: TestRequest): boolean {
+    return request.action === "bypass";
+  }
+
   protected async handleRequest(request: TestRequest): Promise<TestResponse> {
     if (request.id === "1") {
       this.order.push("req1-start");
       await this.gate;
       this.order.push("req1-end");
     } else {
-      this.order.push("req2-start");
-      this.order.push("req2-end");
+      this.order.push(`req${request.id}-start`);
+      this.order.push(`req${request.id}-end`);
     }
     return { id: request.id, type: "test_response", success: true };
   }
@@ -205,6 +213,42 @@ describe("RequestResponseSocketServer", () => {
     await (sequencer as any).pendingBySocket.get(seqSocket);
 
     expect(sequencer.order).toEqual(["req1-start", "req1-end", "req2-start", "req2-end"]);
+  });
+
+  it("answers a bypass request during a gated request without delaying later queued requests", async () => {
+    const sequencer = new GatedSequencingServer(timer);
+    const seqSocket = new FakeSocket();
+
+    await sequencer.send(seqSocket, { id: "1", action: "noop" });
+    await flushMicrotasks();
+    await sequencer.send(seqSocket, { id: "2", action: "noop" });
+    await sequencer.send(seqSocket, { id: "stop", action: "bypass" });
+    await sequencer.send(seqSocket, { id: "3", action: "noop" });
+    await flushMicrotasks();
+
+    expect(seqSocket.getWrittenMessages<TestResponse>().map((message) => message.id)).toEqual([
+      "stop",
+    ]);
+    expect(sequencer.order).toEqual(["req1-start", "reqstop-start", "reqstop-end"]);
+
+    sequencer.release();
+    await flushMicrotasks();
+    expect(seqSocket.getWrittenMessages<TestResponse>().map((message) => message.id)).toEqual([
+      "stop",
+      "1",
+      "2",
+      "3",
+    ]);
+    expect(sequencer.order).toEqual([
+      "req1-start",
+      "reqstop-start",
+      "reqstop-end",
+      "req1-end",
+      "req2-start",
+      "req2-end",
+      "req3-start",
+      "req3-end",
+    ]);
   });
 
   it("stores last request for verification", async () => {

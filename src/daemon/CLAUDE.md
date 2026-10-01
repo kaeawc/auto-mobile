@@ -22,6 +22,8 @@ class MySocketServer extends RequestResponseSocketServer<MyRequest, MyResponse> 
 
 **Examples:** `videoRecordingSocketServer`, `deviceSnapshotSocketServer`, `testRecordingSocketServer`, `appearanceSocketServer`, `performanceStreamSocketServer`, `failuresStreamSocketServer`
 
+Requests are sequential per socket unless a subclass explicitly opts a safe control request out of the chain.
+
 ### Push Subscription Pattern
 
 For servers that maintain subscribers and push updates:

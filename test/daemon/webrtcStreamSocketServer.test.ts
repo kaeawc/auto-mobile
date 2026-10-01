@@ -104,6 +104,16 @@ class TestableServer extends WebRtcStreamSocketServer {
       await pending;
     }
   }
+
+  enqueue(socket: FakeSocket, request: WebRtcStreamSocketRequest): Promise<void> {
+    return this.processLine(socket, JSON.stringify(request));
+  }
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    await Promise.resolve();
+  }
 }
 
 let started: Array<{
@@ -290,6 +300,45 @@ describe("WebRtcStreamSocketServer", () => {
     expect(response.action).toBe("stop");
     expect(response.stream?.state).toBe("stopped");
     expect(stopped).toContain("s1");
+  });
+
+  test("answers stop while await is pending and keeps other awaits ordered", async () => {
+    let releaseAwait!: (stream: WebRtcStreamDescriptor) => void;
+    const gate = new Promise<WebRtcStreamDescriptor>((resolve) => {
+      releaseAwait = resolve;
+    });
+    const calls: string[] = [];
+    const deps = makeDeps({
+      awaitReadiness: (streamId) => {
+        calls.push(`await:${streamId}`);
+        return streamId === "first" ? gate : Promise.resolve(descriptor(streamId));
+      },
+      stopStream: async (streamId) => {
+        calls.push(`stop:${streamId}`);
+        return descriptor(streamId ?? "first", "stopped");
+      },
+    });
+    const server = new TestableServer(deps);
+    const socket = new FakeSocket();
+
+    await server.enqueue(socket, { id: "first", action: "await", streamId: "first" });
+    await flushMicrotasks();
+    await server.enqueue(socket, { id: "second", action: "await", streamId: "second" });
+    await server.enqueue(socket, { id: "stop", action: "stop", streamId: "first" });
+    await server.enqueue(socket, { id: "list", action: "list" });
+    await flushMicrotasks();
+
+    expect(calls).toEqual(["await:first", "stop:first"]);
+    expect(
+      socket.getWrittenMessages<WebRtcStreamSocketResponse>().map((response) => response.id),
+    ).toEqual(["stop"]);
+
+    releaseAwait(descriptor("first"));
+    await flushMicrotasks();
+    expect(calls).toEqual(["await:first", "stop:first", "await:second"]);
+    expect(
+      socket.getWrittenMessages<WebRtcStreamSocketResponse>().map((response) => response.id),
+    ).toEqual(["stop", "first", "second", "list"]);
   });
 
   test("list returns all active streams", async () => {

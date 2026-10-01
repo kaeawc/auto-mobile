@@ -7,7 +7,8 @@ import { SocketRequest, SocketResponse } from "./SocketServerTypes";
 
 /**
  * Abstract base class for request-response socket servers.
- * Handles sequential request processing with JSON-over-newline protocol.
+ * Handles sequential request processing with JSON-over-newline protocol, with
+ * an opt-in bypass for requests safe to dispatch out of order.
  *
  * Subclasses implement:
  * - handleRequest(): Process a request and return a response
@@ -29,15 +30,23 @@ export abstract class RequestResponseSocketServer<
   }
 
   /**
-   * Process a single line of input. Queues requests for sequential processing.
+   * Process a single line of input. Queues requests for sequential processing
+   * unless the subclass opts the parsed request out of the chain.
    */
   protected async processLine(socket: Socket, line: string): Promise<void> {
+    const request = this.bypassesRequestChain ? this.parseJson<TRequest>(line) : undefined;
+    if (request && this.bypassesRequestChain?.(request)) {
+      return this.handleLine(socket, line, request).catch((error) => {
+        logger.error(`[${this.serverName}] Request processing error: ${error}`);
+      });
+    }
+
     // Get or create the pending promise chain for this socket
     const pending = this.pendingBySocket.get(socket) ?? Promise.resolve();
 
     // Chain this request to run after any pending requests
     const newPending = pending
-      .then(() => this.handleLine(socket, line))
+      .then(() => this.handleLine(socket, line, request))
       .catch((error) => {
         logger.error(`[${this.serverName}] Request processing error: ${error}`);
       });
@@ -46,11 +55,14 @@ export abstract class RequestResponseSocketServer<
   }
 
   /**
-   * Handle a single line by parsing JSON and dispatching to handleRequest.
+   * Dispatch a parsed request or answer invalid JSON.
    */
-  private async handleLine(socket: Socket, line: string): Promise<void> {
-    const request = this.parseJson<TRequest>(line);
-
+  private async handleLine(
+    socket: Socket,
+    line: string,
+    parsedRequest?: TRequest | null,
+  ): Promise<void> {
+    const request = parsedRequest === undefined ? this.parseJson<TRequest>(line) : parsedRequest;
     if (!request) {
       const errorResponse = this.createErrorResponse(undefined, "Invalid JSON");
       this.sendJson(socket, errorResponse);
@@ -66,6 +78,9 @@ export abstract class RequestResponseSocketServer<
       this.sendJson(socket, errorResponse);
     }
   }
+
+  /** Implement only for requests that may safely run outside per-socket ordering. */
+  protected bypassesRequestChain?(request: TRequest): boolean;
 
   /**
    * Handle a request and return a response.

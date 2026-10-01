@@ -112,7 +112,11 @@ import { registerDeviceIncarnationListener } from "../../../utils/deviceIncarnat
 import type { StackTraceElement } from "../../../server/failuresResources";
 import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
-import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
+import {
+  ANDROID_CAPABILITY_GATED_COMMANDS,
+  ctrlProxyRequests,
+  serializeCtrlProxyRequest,
+} from "./ctrlProxyProtocol";
 import type {
   PreferenceFile,
   KeyValueEntry,
@@ -5862,10 +5866,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private isCommandSupported(messageType: string): boolean {
-    return (
-      !this.rejectedCommands.has(messageType) &&
-      (this.supportedCommands === null || this.supportedCommands.has(messageType))
-    );
+    if (this.rejectedCommands.has(messageType)) {
+      return false;
+    }
+    if (this.supportedCommands === null) {
+      return true;
+    }
+    // #8585: Android advertises optional capabilities, while iOS advertises its
+    // complete command set (#8408). Core Android requests remain available.
+    if (ANDROID_CAPABILITY_GATED_COMMANDS.has(messageType)) {
+      return this.supportedCommands.has(messageType);
+    }
+    return true;
   }
 
   // Cancel only this caller's wait; connection establishment is shared with other operations.

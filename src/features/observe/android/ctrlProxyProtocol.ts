@@ -686,6 +686,33 @@ export type CtrlProxyRequest =
 export type CtrlProxyRequestType = CtrlProxyRequest["type"];
 
 /**
+ * Optional Android capabilities advertised by
+ * android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt:431-439.
+ * Before #8408, AndroidCtrlProxyClient.supportsNodeActionSelectors,
+ * supportsAccessibilityLinkActivation, and refreshObservationStreamHierarchyCadence
+ * gated node_selector_actions, request_activate_accessibility_link, and
+ * set_hierarchy_interval. SendKeys.ts and interactionTools.ts consult
+ * the raw advertised list for the remaining optional text/keyboard capabilities.
+ */
+export const ANDROID_CAPABILITY_REQUEST_TYPES = [
+  "set_hierarchy_interval",
+  "request_activate_accessibility_link",
+  "request_insert_text",
+  "request_commit_text",
+  "request_cancel_ime_commit",
+  "request_set_keyboard_profile",
+  "request_list_keyboard_profiles",
+] as const satisfies readonly CtrlProxyRequestType[];
+
+/** Capability flags in the handshake that are never sent as wire requests. */
+export const ANDROID_CAPABILITY_FLAGS = ["node_selector_actions", "ime_key_events_v1"] as const;
+
+export const ANDROID_CAPABILITY_GATED_COMMANDS: ReadonlySet<string> = new Set([
+  ...ANDROID_CAPABILITY_REQUEST_TYPES,
+  ...ANDROID_CAPABILITY_FLAGS,
+]);
+
+/**
  * Every `@SerialName` accepted by `WebSocketRequest.kt`, transcribed by hand. The
  * `Record<CtrlProxyRequestType, true>` type forces this map to list exactly the union's
  * discriminators: adding a request type to the union without listing it here (or vice versa) is a

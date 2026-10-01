@@ -82,7 +82,7 @@ export interface DelegateContext {
   ensureConnected(perf?: PerformanceTracker): Promise<boolean>;
   /** Return reconnect cooldown metadata when connection attempts are temporarily suppressed. */
   getReconnectStatus?(): CtrlProxyReconnectStatus | null;
-  /** Return false when a connected service advertises that it cannot handle this wire command. */
+  /** Return false only when the service explicitly lacks or rejected this command; unknown is true. */
   isCommandSupported?(messageType: string): boolean;
   /** Wait for the connected service's command handshake, then return its advertised commands. */
   getSupportedCommands?(): Promise<string[] | null>;

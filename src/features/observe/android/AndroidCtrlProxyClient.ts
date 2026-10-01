@@ -156,6 +156,7 @@ import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
 // Import types
+import type { DelegateContext } from "../shared/types";
 import type {
   HierarchyDelegateContext,
   CertificatesDelegateContext,
@@ -1523,6 +1524,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
   private supportedCommands: Set<string> | null = null;
+  private readonly rejectedCommands = new Set<string>();
   private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
   private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
   // Matches iOS's CONNECTION_RESET_MS (set for #2695). The base default
@@ -1977,6 +1979,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     };
   }
 
+  protected override extraDelegateContextFields(): Partial<DelegateContext> {
+    return { isCommandSupported: (messageType) => this.isCommandSupported(messageType) };
+  }
+
   private createCertificatesDelegateContext(): CertificatesDelegateContext {
     return {
       ...this.createDelegateContext(),
@@ -2276,6 +2282,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.pendingRecoveryStability.stableSocket = null;
     }
     this.supportedCommands = null;
+    this.rejectedCommands.clear();
     this.lateCancelledScreenshotRequestIds.clear();
     this.cancelScreenshotBackoff();
     this._hierarchy?.rejectAllPendingHierarchy("WebSocket connection closed");
@@ -3259,7 +3266,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       await this.waitForHandshake(undefined, combinedSignal);
     }
     combinedSignal?.throwIfAborted();
-    return connected && this.isCommandSupported("node_selector_actions");
+    // Unknown selector support must stay closed: an old runner could click the wrong repeated node.
+    return (
+      connected &&
+      this.supportedCommands !== null &&
+      this.isCommandSupported("node_selector_actions")
+    );
   }
 
   /**
@@ -4530,14 +4542,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private readonly webSocketMessageHandlers = {
     connected: (message) => {
+      this.rejectedCommands.clear();
       this.supportedCommands = Array.isArray(message.supportedCommands)
         ? new Set(message.supportedCommands)
-        : new Set();
+        : null;
       logger.debug(`[CTRL_PROXY] Received connection confirmation`);
       this.refreshObservationStreamHierarchyCadence();
     },
 
     error: (message) => {
+      const rejectedCommand = /^Unknown command type: (.+)$/.exec(message.error ?? "")?.[1];
+      if (rejectedCommand) {
+        this.rejectedCommands.add(rejectedCommand);
+      }
       const errorText = rewriteUnknownCommandError(
         message.error || "Runner reported an unstructured protocol error",
         "android",
@@ -5845,7 +5862,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private isCommandSupported(messageType: string): boolean {
-    return this.supportedCommands?.has(messageType) === true;
+    return (
+      !this.rejectedCommands.has(messageType) &&
+      (this.supportedCommands === null || this.supportedCommands.has(messageType))
+    );
   }
 
   // Cancel only this caller's wait; connection establishment is shared with other operations.

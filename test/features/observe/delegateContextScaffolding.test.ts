@@ -72,6 +72,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "cancelScreenshotBackoff",
         "ensureConnected",
         "getWebSocket",
+        "isCommandSupported",
         "requestManager",
         "timer",
       ]);
@@ -85,6 +86,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
       // Not connected yet: the WebSocket accessor mirrors the client's null socket.
       expect(ctx.getWebSocket()).toBe((client as any).ws);
       expect(typeof ctx.ensureConnected).toBe("function");
+      expect(typeof ctx.isCommandSupported).toBe("function");
       expect(typeof ctx.cancelScreenshotBackoff).toBe("function");
     });
   });
@@ -101,6 +103,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "getCachedHierarchy",
         "getLastWebSocketTimeout",
         "getWebSocket",
+        "isCommandSupported",
         "requestManager",
         "setCachedHierarchy",
         "setLastWebSocketTimeout",

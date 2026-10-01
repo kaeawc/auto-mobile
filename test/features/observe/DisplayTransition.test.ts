@@ -14,6 +14,11 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { setObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const deviceStateFixture = (name: string): string =>
+  readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
 
 const device: BootedDevice = {
   deviceId: "display-transition-test",
@@ -376,9 +381,12 @@ describe("display transitions", () => {
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
       stderr: "",
     });
-    adb.setCommandResponse("shell cmd device_state state", { stdout: "State: 0", stderr: "" });
+    adb.setCommandResponse("shell cmd device_state state", {
+      stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"),
+      stderr: "",
+    });
     adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: "DeviceState{identifier=0, name='CLOSED'}",
+      stdout: deviceStateFixture("foldpf-print-states.txt"),
       stderr: "",
     });
     const hierarchy = new FakeViewHierarchy();

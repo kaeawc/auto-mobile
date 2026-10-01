@@ -9,6 +9,18 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { parseAndroidCommittedStateIdentifier } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
+
+const fixture = (name: string): string =>
+  readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
+const foldStates = fixture("foldpf-print-states.txt");
+const phoneStates = fixture("phone-states.txt");
+const closedState = fixture("foldpf-5-after-reset-state.txt");
+const openedState = fixture("foldpf-1-default-state.txt");
+const rearState = fixture("foldpf-2-rear-display-override-state.txt");
 
 const display = {
   key: "panel-inner",
@@ -34,7 +46,8 @@ function makeDevice(
   };
 }
 
-function makeFeature(device: BootedDevice, adb: FakeAdbExecutor) {
+function makeFeature(device: BootedDevice, adb: FakeAdbExecutor, timer = new FakeTimer()) {
+  timer.enableAutoAdvance();
   const adbFactory: AdbClientFactory = { create: () => adb };
   let observeCount = 0;
   const observeFactory = () =>
@@ -45,15 +58,30 @@ function makeFeature(device: BootedDevice, adb: FakeAdbExecutor) {
       },
     }) as ObserveScreen;
   return {
-    feature: new SetPosture(device, { adbFactory, observeFactory }),
+    feature: new SetPosture(device, { adbFactory, observeFactory, timer }),
     getObserveCount: () => observeCount,
+    timer,
   };
 }
 
 describe("SetPosture", () => {
+  test("parses only the committed state, even when base and override differ", () => {
+    expect(parseAndroidCommittedStateIdentifier(rearState)).toBe(3);
+    expect(
+      parseAndroidCommittedStateIdentifier(
+        fixture("foldpf-6-fold-from-closed-base-while-override-state.txt"),
+      ),
+    ).toBe(3);
+    expect(
+      parseAndroidCommittedStateIdentifier(
+        fixture("foldpf-2-rear-display-override-print-state.txt"),
+      ),
+    ).toBe(3);
+  });
+
   test("maps each emulator posture to its console command and returns fresh display state", async () => {
     const mappings = [
-      ["closed", ["emu fold"]],
+      ["closed", ["shell cmd device_state state reset", "emu fold"]],
       ["half_opened", ["emu posture 2"]],
       ["opened", ["shell cmd device_state state reset", "emu unfold"]],
       ["flipped", ["emu posture 4"]],
@@ -62,9 +90,16 @@ describe("SetPosture", () => {
 
     for (const [posture, commands] of mappings) {
       const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(phoneStates, ""),
+      );
       const { feature, getObserveCount } = makeFeature(makeDevice(), adb);
       const result = await feature.execute(posture);
-      expect(adb.getExecutedCommands()).toEqual(commands);
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell cmd device_state print-states",
+        ...commands,
+      ]);
       expect(getObserveCount()).toBe(1);
       expect(result).toEqual({ posture, display, locked: true });
     }
@@ -72,87 +107,168 @@ describe("SetPosture", () => {
 
   test("sets the Resizable emulator display preset", async () => {
     const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(phoneStates, ""),
+    );
     const { feature } = makeFeature(makeDevice("emulator-5554", ["closed", "opened"]), adb);
     await feature.execute("opened", "tablet");
-    expect(adb.getExecutedCommands()).toEqual(["emu unfold", "emu resize-display 2"]);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd device_state print-states",
+      "emu unfold",
+      "emu resize-display 2",
+    ]);
+  });
+
+  test("non-foldable emulator proceeds when device_state service is absent", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "shell cmd device_state print-states",
+      new Error("Can't find service: device_state"),
+    );
+    const { feature } = makeFeature(makeDevice("emulator-5554", ["closed", "opened"]), adb);
+    await feature.execute("closed");
+    expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states", "emu fold"]);
   });
 
   test("uses the emulator rear display device state instead of closing its hinge", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse(
-      "shell cmd device_state print-states",
-      createExecResult(
-        "DeviceState{identifier=0, name='CLOSED'}\nDeviceState{identifier=7, name='REAR_DISPLAY_STATE'}",
-        "",
-      ),
-    );
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(rearState, ""));
     const { feature } = makeFeature(makeDevice(), adb);
     await feature.execute("rear_display");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
-      "shell cmd device_state state 7",
+      "shell cmd device_state state 3",
+      "shell cmd device_state state",
     ]);
   });
 
   test("resets rear display state before unfolding the emulator", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse(
-      "shell cmd device_state print-states",
-      createExecResult("DeviceState{identifier=7, name='REAR_DISPLAY_STATE'}", ""),
-    );
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponseSequence("shell cmd device_state state", [
+      createExecResult(rearState, ""),
+      createExecResult(rearState, ""),
+      createExecResult(openedState, ""),
+      createExecResult(openedState, ""),
+    ]);
     const { feature } = makeFeature(makeDevice(), adb);
     await feature.execute("rear_display");
     await feature.execute("opened");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
-      "shell cmd device_state state 7",
+      "shell cmd device_state state 3",
+      "shell cmd device_state state",
+      "shell cmd device_state print-states",
       "shell cmd device_state state reset",
       "emu unfold",
+      "shell cmd device_state state",
     ]);
+  });
+
+  test("resets before closing and completes rear display to opened to closed", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponseSequence("shell cmd device_state state", [
+      createExecResult(rearState, ""),
+      createExecResult(rearState, ""),
+      createExecResult(openedState, ""),
+      createExecResult(openedState, ""),
+      createExecResult(closedState, ""),
+      createExecResult(closedState, ""),
+    ]);
+    const { feature } = makeFeature(makeDevice(), adb);
+    await feature.execute("rear_display");
+    await feature.execute("opened");
+    await feature.execute("closed");
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd device_state print-states",
+      "shell cmd device_state state 3",
+      "shell cmd device_state state",
+      "shell cmd device_state print-states",
+      "shell cmd device_state state reset",
+      "emu unfold",
+      "shell cmd device_state state",
+      "shell cmd device_state print-states",
+      "shell cmd device_state state reset",
+      "emu fold",
+      "shell cmd device_state state",
+    ]);
+  });
+
+  test("polls committed state until opened is applied", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponseSequence("shell cmd device_state state", [
+      createExecResult(rearState, ""),
+      createExecResult(fixture("foldpf-7-unfold-from-closed-base-while-override-state.txt"), ""),
+      createExecResult(rearState, ""),
+      createExecResult(openedState, ""),
+    ]);
+    const { feature, timer } = makeFeature(makeDevice(), adb);
+    await feature.execute("opened");
+    expect(timer.getSleepHistory()).toEqual([250, 250]);
+    expect(
+      adb.getExecutedCommands().filter((command) => command === "shell cmd device_state state"),
+    ).toHaveLength(3);
+  });
+
+  test("reports the actual committed override when readback times out", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse(
+      "shell cmd device_state state",
+      createExecResult(fixture("foldpf-6-fold-from-closed-base-while-override-state.txt"), ""),
+    );
+    const { feature, timer } = makeFeature(makeDevice(), adb);
+    const attempt = feature.execute("closed");
+    await expect(attempt).rejects.toBeInstanceOf(ActionableError);
+    await expect(attempt).rejects.toThrow(
+      "'closed' after 3000 ms; committed state is 'rear_display' (REAR_DISPLAY_MODE, 3)",
+    );
+    expect(timer.now()).toBe(3000);
   });
 
   test("rejects rear display when it is absent from print-states", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
       "shell cmd device_state print-states",
-      createExecResult("DeviceState{identifier=0, name='CLOSED'}", ""),
+      createExecResult(phoneStates, ""),
     );
     const { feature } = makeFeature(makeDevice(), adb);
     await expect(feature.execute("rear_display")).rejects.toThrow(
-      "Posture 'rear_display' is not supported by this device. Supported postures: closed.",
+      "Posture 'rear_display' is not supported by this device. Supported postures: none.",
     );
     expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states"]);
   });
 
   test("parses physical print-states and sets the matching state identifier", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse(
-      "shell cmd device_state print-states",
-      createExecResult(
-        "Supported states: [\nDeviceState{identifier=0, name='CLOSED'}\nDeviceState{identifier=8, name='HALF_OPENED'}\nDeviceState{identifier=2, name='OPENED'}\n]",
-        "",
-      ),
-    );
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
     const { feature } = makeFeature(makeDevice("R5CT123"), adb);
-    const result = await feature.execute("half_opened");
+    const result = await feature.execute("closed");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
-      "shell cmd device_state state 8",
+      "shell cmd device_state state reset",
+      "shell cmd device_state state 0",
+      "shell cmd device_state state",
     ]);
-    expect(result).toEqual({ posture: "half_opened", display, locked: true });
+    expect(result).toEqual({ posture: "closed", display, locked: true });
   });
 
   test("sets the matching physical device state for opened posture", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandResponse(
-      "shell cmd device_state print-states",
-      createExecResult("DeviceState{identifier=2, name='OPENED'}", ""),
-    );
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(openedState, ""));
     const { feature } = makeFeature(makeDevice("R5CT123"), adb);
     await feature.execute("opened");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
+      "shell cmd device_state state reset",
       "shell cmd device_state state 2",
+      "shell cmd device_state state",
     ]);
   });
 
@@ -160,10 +276,7 @@ describe("SetPosture", () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse(
       "shell cmd device_state print-states",
-      createExecResult(
-        "DeviceState{identifier=0, name='CLOSED'}\nDeviceState{identifier=8, name='HALF_OPENED'}",
-        "",
-      ),
+      createExecResult(phoneStates, ""),
     );
     const { feature } = makeFeature(makeDevice("R5CT123"), adb);
     await feature.execute("opened");

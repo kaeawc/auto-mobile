@@ -160,6 +160,18 @@ export function parseAndroidDeviceStates(output: string): AndroidDeviceState[] {
   return states;
 }
 
+/** Read the committed identifier from `state` or the numeric `print-state` output. */
+export function parseAndroidCommittedStateIdentifier(output: string): number | undefined {
+  const trimmed = output.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  const committed = output
+    .split(/\r?\n/)
+    .find((line) => line.trimStart().startsWith("Committed state:"));
+  return committed === undefined ? undefined : parseAndroidDeviceStates(committed)[0]?.identifier;
+}
+
 export function parseAndroidPostures(output: string): Posture[] {
   const postures = new Set(parseAndroidDeviceStates(output).map((state) => state.posture));
   return postures.size ? [...postures] : ["unknown"];

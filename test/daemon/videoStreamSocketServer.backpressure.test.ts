@@ -94,6 +94,33 @@ describe("VideoStreamSocketServer outbound stalls", () => {
     await server.close();
   });
 
+  test("a dropped stalled subscriber can subscribe again", async () => {
+    const { server, timer, emit } = createHarness();
+    const stalled = new SubscriberSocket();
+    stalled.blockWrites = true;
+    await server.subscribe(stalled);
+
+    emit(frame);
+    timer.advanceTime(stallMs);
+    expect(stalled.destroyCalls).toBe(1);
+    expect(server.subscriberCount(device.deviceId)).toBe(0);
+
+    const replacement = new SubscriberSocket();
+    await server.subscribe(replacement);
+    expect(server.subscriberCount(device.deviceId)).toBe(1);
+    const responses = replacement.written
+      .filter((data): data is string => typeof data === "string")
+      .map((data) => JSON.parse(data) as { success: boolean });
+    expect(responses).toHaveLength(1);
+    expect(responses[0]?.success).toBe(true);
+    expect(replacement.destroyed).toBe(false);
+
+    const before = replacement.written.length;
+    emit(frame);
+    expect(replacement.written.length).toBeGreaterThan(before);
+    await server.close();
+  });
+
   test("draining before the deadline cancels the stall timer", async () => {
     const { server, timer, source, emit } = createHarness();
     const socket = new SubscriberSocket();

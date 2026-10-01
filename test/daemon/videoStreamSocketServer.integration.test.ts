@@ -131,6 +131,7 @@ async function startHarness(
     startData?: Buffer;
     resolveError?: Error;
     onResolveDevice?: () => void;
+    resolveGate?: Promise<void>;
     authenticator?: StreamSocketAuthenticator;
     timer?: Timer;
     /** Pre-arms each created source to throttle this many key-frame requests. */
@@ -159,6 +160,7 @@ async function startHarness(
     {
       resolveDevice: async () => {
         options.onResolveDevice?.();
+        await options.resolveGate;
         if (options.resolveError) {
           throw options.resolveError;
         }
@@ -306,6 +308,50 @@ afterEach(async () => {
 });
 
 describe("VideoStreamSocketServer", () => {
+  test("ignores a pipelined duplicate subscribe before device resolution", async () => {
+    let releaseResolve = () => {};
+    const resolveGate = new Promise<void>((resolve) => {
+      releaseResolve = resolve;
+    });
+    let resolveCalls = 0;
+    const h = await startHarness({
+      resolveGate,
+      onResolveDevice: () => resolveCalls++,
+    });
+    const socket = new net.Socket();
+    await connectBounded(socket, h.socketPath);
+    const chunks: Buffer[] = [];
+    socket.on("data", (chunk) => chunks.push(chunk));
+    const request = JSON.stringify({ action: "subscribe", deviceId: DEVICE.deviceId });
+    socket.write(`${request}\n${request}\n`);
+
+    await waitFor(() => resolveCalls > 0);
+    releaseResolve();
+    await waitFor(() => Buffer.concat(chunks).includes(Buffer.from("\n")));
+    await waitFor(() => Buffer.concat(chunks).length >= Buffer.concat(chunks).indexOf(0x0a) + 13);
+
+    const frame = Buffer.from([0, 0, 0, 1, 5, 0xaa, 0xbb, 0, 0, 0, 1, 1]);
+    h.emit(frame);
+    await waitFor(() => Buffer.concat(chunks).length >= Buffer.concat(chunks).indexOf(0x0a) + 32);
+
+    const received = Buffer.concat(chunks);
+    const ackEnd = received.indexOf(0x0a);
+    const ack = JSON.parse(received.subarray(0, ackEnd).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+    const binary = received.subarray(ackEnd + 1);
+    expect(ack.success).toBe(true);
+    expect(resolveCalls).toBe(1);
+    expect(h.sources).toHaveLength(1);
+    expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(1);
+    expect(binary.length).toBe(12 + 12 + 7);
+    expect(binary.readInt32BE(0)).toBe(CODEC_ID_H264);
+    expect(binary.readInt32BE(12 + 8)).toBe(7);
+    expect(binary.subarray(12 + 12)).toEqual(frame.subarray(0, 7));
+    socket.destroy();
+  });
+
   test("acknowledges a subscribe and announces the framing", async () => {
     const h = await startHarness();
 

@@ -7,6 +7,7 @@ import {
   PortManager,
 } from "../../src/utils/PortManager";
 import { FakePortAvailabilityChecker } from "../fakes/FakePortAvailabilityChecker";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 function expectedAllocatedPort(index: number): number {
   return 8765 + index;
@@ -91,6 +92,33 @@ describe("PortManager", () => {
     // Device-2 should get the released port
     const port2 = PortManager.allocate("device-2");
     expect(port2).toBe(8765);
+  });
+
+  test("quarantine skips a port until its timer expiry and then purges it", () => {
+    const timer = new FakeTimer();
+    PortManager.setClockForTesting(timer);
+    PortManager.quarantine(8765);
+
+    expect(PortManager.isPortAvailable(8765)).toBe(false);
+    expect(PortManager.allocate("first-device")).toBe(8766);
+
+    timer.advanceTime(60_000);
+    expect(PortManager.isPortAvailable(8765)).toBe(true);
+    expect(PortManager.allocate("second-device")).toBe(8765);
+  });
+
+  test("allocation purges expired quarantine and explicit clear releases it early", () => {
+    const timer = new FakeTimer();
+    PortManager.setClockForTesting(timer);
+    PortManager.quarantine(8765);
+    timer.advanceTime(60_000);
+    expect(PortManager.allocate("expired-device")).toBe(8765);
+
+    PortManager.release("expired-device");
+    PortManager.quarantine(8765);
+    expect(PortManager.isPortAvailable(8765)).toBe(false);
+    PortManager.clearQuarantine(8765);
+    expect(PortManager.allocate("cleared-device")).toBe(8765);
   });
 
   test("should reserve a known port for a device", () => {

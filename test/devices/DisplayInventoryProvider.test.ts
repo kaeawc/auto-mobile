@@ -11,6 +11,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
+import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
+import { DefaultDeviceMatcher, describeDisplayRequirements } from "../../src/utils/deviceMatcher";
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Fold", platform: "android" };
 const displays = {
@@ -22,6 +24,84 @@ const displays = {
 };
 
 describe("CachingDisplayInventoryProvider", () => {
+  test("real phone capture confirms one panel without exposing displays", async () => {
+    const fixture = (name: string): string =>
+      readFileSync(join(import.meta.dir, "../fixtures/android-display", name), "utf8");
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger --display-id",
+      createExecResult(fixture("phone-surfaceflinger.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "dumpsys display",
+      createExecResult(fixture("phone-display-device-info.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "cmd device_state print-states",
+      createExecResult(fixture("phone-states.txt"), ""),
+    );
+    const provider = createDisplayInventoryProvider(
+      new FakeAdbClientFactory(adb),
+      { readDeviceDisplays: async () => undefined },
+      new FakeTimer(),
+    );
+    const phone = await provider.hydrate({ ...device, screenWidth: 1080, screenHeight: 2400 }, "1");
+    expect(phone[displayInventoryOutcome]).toEqual({ kind: "single" });
+    expect(phone.displays).toBeUndefined();
+    expect(
+      new DefaultDeviceMatcher().matchBootedDevice(
+        { platform: "android", requires: { panels: 1 } },
+        [phone],
+        "LATEST",
+      ),
+    ).toBe(phone);
+  });
+
+  test("source failure refuses legacy-size panel and posture matches", async () => {
+    const source = {
+      read: async () => {
+        throw new Error("source offline");
+      },
+    };
+    const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+    const fold = await provider.hydrate({ ...device, screenWidth: 1080, screenHeight: 2400 }, "1");
+    expect(fold[displayInventoryOutcome]).toEqual({
+      kind: "unreadable",
+      reason: "source offline",
+    });
+    const matcher = new DefaultDeviceMatcher();
+    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "default" }]) {
+      expect(
+        matcher.matchBootedDevice({ platform: "android", requires }, [fold], "LATEST"),
+      ).toBeNull();
+    }
+    expect(
+      describeDisplayRequirements({ platform: "android", requires: { panels: 1 } }, [
+        { ...fold, booted: true },
+      ]),
+    ).toContain("could not be read (source offline)");
+  });
+
+  test("an unreadable empty inventory retries on the failure clock", async () => {
+    const timer = new FakeTimer();
+    const source = new FakeDisplayInventorySource({
+      degraded: false,
+      outcome: { kind: "unreadable", reason: "no matched physical display records" },
+    });
+    const provider = new CachingDisplayInventoryProvider(source, source, timer);
+    expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]?.kind).toBe("unreadable");
+    await provider.hydrate(device, "1");
+    expect(source.reads).toBe(1);
+    source.result = { degraded: false };
+    timer.advanceTime(30_000);
+    await provider.hydrate(device, "1");
+    await Promise.resolve();
+    expect((await provider.hydrate(device, "1"))[displayInventoryOutcome]).toEqual({
+      kind: "single",
+    });
+    expect(source.reads).toBe(2);
+  });
+
   test("the production Android adapter runs three adb commands only on its first read", async () => {
     const fixture = (name: string): string =>
       readFileSync(join(import.meta.dir, "../fixtures/android-display", name), "utf8");

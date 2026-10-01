@@ -1,4 +1,5 @@
 import type { DeviceDisplays, DisplayPanel, PanelRole, Posture } from "../../models/DisplayPanel";
+import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
@@ -208,6 +209,28 @@ export function parseAndroidDeviceDisplays(
   return { panels, postures: parseAndroidPostures(statesOutput) };
 }
 
+/** Distinguish a proven single panel from a failed physical-display join. */
+export function parseAndroidDeviceDisplayOutcome(
+  physicalIdsOutput: string,
+  displayDeviceInfosOutput: string,
+  statesOutput: string,
+): DisplayInventoryOutcome {
+  const ids = parseSurfaceFlingerDisplayIds(physicalIdsOutput);
+  const matched = parseAndroidDisplayDeviceInfos(displayDeviceInfosOutput).filter((record) =>
+    ids.has(record.key),
+  );
+  if (matched.length === 0) {
+    return { kind: "unreadable", reason: "no matched physical display records" };
+  }
+  if (matched.length === 1) {
+    return { kind: "single" };
+  }
+  // The existing parser owns panel roles and posture extraction.
+  return parseAndroidDeviceDisplays(physicalIdsOutput, displayDeviceInfosOutput, statesOutput)
+    ? { kind: "multi" }
+    : { kind: "unreadable", reason: "physical display records could not be parsed" };
+}
+
 /** Optional, bounded inventory enrichment through the device-bound ADB seam. */
 export async function readAndroidDeviceDisplays(
   adb: Pick<AdbExecutor, "executeCommand">,
@@ -219,7 +242,7 @@ export async function readAndroidDeviceDisplays(
 export async function readAndroidDeviceDisplaysChecked(
   adb: Pick<AdbExecutor, "executeCommand">,
   signal?: AbortSignal,
-): Promise<{ displays?: DeviceDisplays; degraded: boolean }> {
+): Promise<{ displays?: DeviceDisplays; degraded: boolean; outcome: DisplayInventoryOutcome }> {
   const commands = [
     "shell dumpsys SurfaceFlinger --display-id",
     "shell dumpsys display",
@@ -239,8 +262,26 @@ export async function readAndroidDeviceDisplaysChecked(
   }
   const output = (index: number): string =>
     results[index].status === "fulfilled" ? results[index].value.stdout : "";
+  const failedCommand = results.findIndex(
+    (result, index) => index < 2 && result.status === "rejected",
+  );
+  const failedResult = results[failedCommand];
+  const outcome =
+    failedResult?.status === "rejected"
+      ? {
+          kind: "unreadable" as const,
+          reason: `${commands[failedCommand]} failed: ${errorMessage(failedResult.reason)}`,
+        }
+      : parseAndroidDeviceDisplayOutcome(output(0), output(1), output(2));
+  if (outcome.kind === "unreadable") {
+    logger.warn(`Android display inventory could not be read: ${outcome.reason}`);
+  }
   return {
-    displays: parseAndroidDeviceDisplays(output(0), output(1), output(2)),
+    displays:
+      outcome.kind === "multi"
+        ? parseAndroidDeviceDisplays(output(0), output(1), output(2))
+        : undefined,
     degraded: results[0].status === "rejected" || results[1].status === "rejected",
+    outcome,
   };
 }

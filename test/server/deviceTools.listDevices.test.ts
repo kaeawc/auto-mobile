@@ -1,4 +1,6 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerDeviceTools,
@@ -17,6 +19,10 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { createExecResult } from "../../src/utils/execResult";
+import { createDisplayInventoryProvider } from "../../src/devices/DisplayInventoryProvider";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
 import {
@@ -221,6 +227,27 @@ describe("listDevices tool (#5870)", () => {
   });
 
   test("matches a booted single-display device without a displays block", async () => {
+    const fixture = (name: string): string =>
+      readFileSync(join(import.meta.dir, "../fixtures/android-display", name), "utf8");
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger --display-id",
+      createExecResult(fixture("phone-surfaceflinger.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "dumpsys display",
+      createExecResult(fixture("phone-display-device-info.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "cmd device_state print-states",
+      createExecResult(fixture("phone-states.txt"), ""),
+    );
+    const provider = createDisplayInventoryProvider(
+      new FakeAdbClientFactory(adb),
+      { readDeviceDisplays: async () => undefined },
+      new FakeTimer(),
+    );
+    inventoryHydrate = (device, token) => provider.hydrate(device, token);
     const payload = await callListDevices({ platform: "android", requires: { panels: 1 } });
     expect(payload.count).toBe(1);
     expect(payload.devices[0].name).toBe(android.name);
@@ -246,14 +273,11 @@ describe("listDevices tool (#5870)", () => {
   });
 
   test("reports an unreadable booted inventory as unknown", async () => {
-    fakeDeviceUtils.setBootedDevices("android", [
-      { ...android, screenWidth: undefined, screenHeight: undefined },
-    ]);
     inventoryHydrate = async () => {
       throw new Error("inventory unavailable");
     };
     await expect(callListDevices({ platform: "android", requires: { panels: 1 } })).rejects.toThrow(
-      /Pixel_9_API_36: panels and postures could not be read/,
+      /Pixel_9_API_36: panels and postures could not be read \(inventory unavailable\)/,
     );
   });
 

@@ -1,4 +1,5 @@
 import type { BootedDevice } from "../models";
+import { displayInventoryOutcome, type DisplayInventoryOutcome } from "../models/DeviceInfo";
 import type { DeviceDisplays } from "../models/DisplayPanel";
 import type { AdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -6,6 +7,7 @@ import { readAndroidDeviceDisplaysChecked } from "../utils/android-cmdline-tools
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { awaitWhileRequestIsLive } from "../utils/toolUtils";
 
 export interface DisplayInventoryProvider {
@@ -14,12 +16,17 @@ export interface DisplayInventoryProvider {
 }
 
 export interface DisplayInventorySource {
-  read(device: BootedDevice): Promise<{ displays?: DeviceDisplays; degraded: boolean }>;
+  read(device: BootedDevice): Promise<{
+    displays?: DeviceDisplays;
+    degraded: boolean;
+    outcome?: DisplayInventoryOutcome;
+  }>;
 }
 
 interface InventoryEntry {
   token: string;
   displays: DeviceDisplays | null;
+  outcome?: DisplayInventoryOutcome;
   retryAt?: number;
   pending?: Promise<void>;
 }
@@ -57,7 +64,11 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       // Join the initial read, with this caller's cancellation limited to its own wait.
       await awaitWhileRequestIsLive(entry.pending, signal);
     }
-    return entry.displays ? { ...device, displays: entry.displays } : device;
+    return {
+      ...device,
+      ...(entry.displays ? { displays: entry.displays } : {}),
+      ...(entry.outcome ? { [displayInventoryOutcome]: entry.outcome } : {}),
+    };
   }
 
   invalidate(deviceId: string): void {
@@ -74,22 +85,41 @@ export class CachingDisplayInventoryProvider implements DisplayInventoryProvider
       // The shared read has its own bounded source timeout, not a caller's signal.
       const result = await source.read(device);
       if (this.entries.get(key) === entry) {
-        if (result.displays || !result.degraded) {
-          entry.displays = result.displays ?? null;
-        }
-        entry.retryAt = result.degraded ? this.timer.now() + this.degradedRetryMs : undefined;
+        this.recordRead(entry, result);
       }
     } catch (error) {
       logger.warn(
-        `[DisplayInventoryProvider] Inventory read failed for ${device.deviceId}: ${error}`,
+        `[DisplayInventoryProvider] Inventory read failed for ${device.deviceId}: ${errorMessage(error)}`,
         error,
       );
       if (this.entries.get(key) === entry) {
+        entry.displays = null;
+        entry.outcome = { kind: "unreadable", reason: errorMessage(error) };
         entry.retryAt = this.timer.now() + this.failureRetryMs;
       }
     } finally {
       entry.pending = undefined;
     }
+  }
+
+  private recordRead(
+    entry: InventoryEntry,
+    result: Awaited<ReturnType<DisplayInventorySource["read"]>>,
+  ): void {
+    if (result.displays || !result.degraded) {
+      entry.displays = result.displays ?? null;
+      entry.outcome = result.outcome ?? (result.displays ? { kind: "multi" } : { kind: "single" });
+    } else if (!entry.outcome) {
+      entry.outcome = result.outcome ?? {
+        kind: "unreadable",
+        reason: "display inventory command failed",
+      };
+    }
+    entry.retryAt = result.degraded
+      ? this.timer.now() + this.degradedRetryMs
+      : result.outcome?.kind === "unreadable"
+        ? this.timer.now() + this.failureRetryMs
+        : undefined;
   }
 }
 
@@ -132,8 +162,14 @@ export async function hydrateRequiredDisplayInventories(
       try {
         return await provider.hydrate(device, device.deviceId, signal);
       } catch (error) {
-        logger.warn(`Display inventory for ${device.deviceId} could not be read: ${error}`, error);
-        return device;
+        logger.warn(
+          `Display inventory for ${device.deviceId} could not be read: ${errorMessage(error)}`,
+          error,
+        );
+        return {
+          ...device,
+          [displayInventoryOutcome]: { kind: "unreadable" as const, reason: errorMessage(error) },
+        };
       }
     }),
   );

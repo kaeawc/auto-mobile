@@ -1,5 +1,6 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import type { DeviceDisplays } from "../models/DisplayPanel";
+import { displayInventoryOutcome, type DisplayInventoryOutcome } from "../models/DeviceInfo";
 import type {
   DeviceMatchCriteria,
   FormFactor,
@@ -191,6 +192,7 @@ export function matchesDeviceCriteria(
     osVersion?: string;
     formFactor?: FormFactor;
     displays?: DeviceDisplays;
+    [displayInventoryOutcome]?: DisplayInventoryOutcome;
     screenWidth?: number;
     screenHeight?: number;
     isRunning?: boolean;
@@ -210,6 +212,7 @@ export function matchesDeviceCriteria(
 function matchesRequiredDisplays(
   item: {
     displays?: DeviceDisplays;
+    [displayInventoryOutcome]?: DisplayInventoryOutcome;
     screenWidth?: number;
     screenHeight?: number;
     isRunning?: boolean;
@@ -217,6 +220,12 @@ function matchesRequiredDisplays(
   criteria: DeviceMatchCriteria,
 ): boolean {
   const { panels, posture } = criteria.requires ?? {};
+  if (
+    (panels !== undefined || posture !== undefined) &&
+    item[displayInventoryOutcome]?.kind === "unreadable"
+  ) {
+    return false;
+  }
   const support = matchingDisplays(item, item.isRunning !== false);
   return (
     (panels === undefined || (support?.panels.length ?? 0) >= panels) &&
@@ -225,7 +234,12 @@ function matchesRequiredDisplays(
 }
 
 function matchingDisplays(
-  item: { displays?: DeviceDisplays; screenWidth?: number; screenHeight?: number },
+  item: {
+    displays?: DeviceDisplays;
+    screenWidth?: number;
+    screenHeight?: number;
+    [displayInventoryOutcome]?: DisplayInventoryOutcome;
+  },
   booted: boolean,
 ):
   | {
@@ -236,11 +250,20 @@ function matchingDisplays(
   if (item.displays) {
     return item.displays;
   }
-  if (!booted || item.screenWidth === undefined || item.screenHeight === undefined) {
+  if (
+    !booted ||
+    (item[displayInventoryOutcome]?.kind !== "single" &&
+      (item.screenWidth === undefined || item.screenHeight === undefined))
+  ) {
     return undefined;
   }
   return {
-    panels: [{ role: "inner", sizePx: { width: item.screenWidth, height: item.screenHeight } }],
+    panels: [
+      {
+        role: "inner",
+        sizePx: { width: item.screenWidth ?? 0, height: item.screenHeight ?? 0 },
+      },
+    ],
     postures: ["default"],
   };
 }
@@ -251,6 +274,7 @@ export function describeDisplayRequirements(
   candidates: readonly {
     name: string;
     displays?: DeviceDisplays;
+    [displayInventoryOutcome]?: DisplayInventoryOutcome;
     screenWidth?: number;
     screenHeight?: number;
     booted?: boolean;
@@ -265,6 +289,10 @@ export function describeDisplayRequirements(
     return "";
   }
   const support = candidates.map((candidate) => {
+    const outcome = candidate[displayInventoryOutcome];
+    if (candidate.booted && outcome?.kind === "unreadable") {
+      return `${candidate.name}: panels and postures could not be read (${outcome.reason})`;
+    }
     const displays = matchingDisplays(candidate, candidate.booted === true);
     return `${candidate.name}: ${displays ? `${displays.panels.length} panel(s), postures=${displays.postures.join("|") || "none"}` : candidate.booted ? "panels and postures could not be read" : "panels and postures unknown until booted"}`;
   });

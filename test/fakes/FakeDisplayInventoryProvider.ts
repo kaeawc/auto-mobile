@@ -8,9 +8,9 @@ import type {
 export class FakeDisplayInventorySource implements DisplayInventorySource {
   reads = 0;
   constructor(
-    public result: { displays?: DeviceDisplays; degraded: boolean } = { degraded: false },
+    public result: Awaited<ReturnType<DisplayInventorySource["read"]>> = { degraded: false },
   ) {}
-  async read(): Promise<{ displays?: DeviceDisplays; degraded: boolean }> {
+  async read(): ReturnType<DisplayInventorySource["read"]> {
     this.reads++;
     return this.result;
   }

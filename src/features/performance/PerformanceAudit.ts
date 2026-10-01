@@ -9,9 +9,10 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { Idle } from "../observe/Idle";
 import { DeviceCapabilitiesDetector, DeviceCapabilities } from "../../utils/DeviceCapabilities";
 import { TouchLatencyTracker, InertTouchPointResolver } from "./TouchLatencyTracker";
+import { isTouchLatencySamplingEnabled } from "./performanceAuditConfig";
 import { serverConfig } from "../../utils/ServerConfig";
 import { PerformanceAuditRepository } from "../../db/performanceAuditRepository";
-import { defaultTimer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { selectTopContributors } from "../../utils/topContributors";
 import { shellQuote } from "../../utils/shellQuote";
 import {
@@ -135,6 +136,7 @@ export class PerformanceAudit {
      * in unit tests) leaves the caller-provided point in place unchanged.
      */
     inertTouchPointResolver?: InertTouchPointResolver,
+    timer: Timer = defaultTimer,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -143,7 +145,7 @@ export class PerformanceAudit {
     this.touchLatencyTracker = new TouchLatencyTracker(
       device,
       adbFactory,
-      defaultTimer,
+      timer,
       inertTouchPointResolver,
     );
   }
@@ -369,7 +371,7 @@ export class PerformanceAudit {
   /**
    * Measure touch response latency
    * Injects touch on non-clickable area and measures response time
-   * Only runs when --ui-perf-mode flag is enabled
+   * Only runs when UI perf mode and synthetic touch sampling are enabled.
    */
   private async measureTouchLatency(
     packageName: string,
@@ -390,11 +392,9 @@ export class PerformanceAudit {
       return null;
     }
 
-    // Only measure touch latency when UI performance mode is enabled
-    if (!serverConfig.isUiPerfModeEnabled()) {
-      logger.debug(
-        "[PerformanceAudit] Touch latency measurement skipped (--ui-perf-mode not enabled)",
-      );
+    // Audits may run after a gesture; sampling must never add touches by default.
+    if (!serverConfig.isUiPerfModeEnabled() || !isTouchLatencySamplingEnabled()) {
+      logger.debug("[PerformanceAudit] Touch latency measurement skipped (sampling not enabled)");
       return null;
     }
 

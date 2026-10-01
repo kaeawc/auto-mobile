@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PerformanceAudit } from "../../../src/features/performance/PerformanceAudit";
+import { isTouchLatencySamplingEnabled } from "../../../src/features/performance/performanceAuditConfig";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { NoOpPerformanceTracker } from "../../../src/utils/PerformanceTracker";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 
 interface TestViolation {
   metric: string;
@@ -257,5 +260,71 @@ describe("PerformanceAudit.measureTouchLatency skip (#6167 P1)", function () {
     const result = await measure(true);
     expect(result).toBeNull();
     expect(factory.getFakeClient().wasCommandExecuted("input tap")).toBe(false);
+  });
+});
+
+describe("PerformanceAudit touch-latency opt-in", () => {
+  const originalSampling = process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING;
+
+  afterEach(() => {
+    if (originalSampling === undefined) {
+      delete process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING;
+    } else {
+      process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING = originalSampling;
+    }
+    serverConfig.setUiPerfMode(true);
+  });
+
+  test("parses the opt-in from the performance config and defaults to disabled", () => {
+    delete process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING;
+    expect(isTouchLatencySamplingEnabled()).toBe(false);
+    process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING = " YeS ";
+    expect(isTouchLatencySamplingEnabled()).toBe(true);
+    process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING = "0";
+    expect(isTouchLatencySamplingEnabled()).toBe(false);
+  });
+
+  test("default audit collects non-touch metrics and issues zero synthetic taps", async () => {
+    delete process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING;
+    serverConfig.setUiPerfMode(true);
+    const factory = new FakeAdbClientFactory();
+    const audit = new PerformanceAudit(
+      { deviceId: "test-device", name: "test", platform: "android" },
+      factory,
+    );
+
+    const metrics = await audit.collectMetrics("com.example", { width: 1080, height: 1920 });
+
+    expect(metrics.touchLatencyMs).toBeNull();
+    expect(factory.getFakeClient().getAllCommands()).toContain(
+      "shell dumpsys gfxinfo 'com.example'",
+    );
+    expect(
+      factory
+        .getFakeClient()
+        .getAllCommands()
+        .filter((command) => command.includes("input tap")),
+    ).toEqual([]);
+  });
+
+  test("opted-in audit runs the existing touch sampler", async () => {
+    process.env.AUTOMOBILE_TOUCH_LATENCY_SAMPLING = "1";
+    serverConfig.setUiPerfMode(true);
+    const factory = new FakeAdbClientFactory();
+    const device = { deviceId: "test-device", name: "test", platform: "android" as const };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const audit = new PerformanceAudit(device, factory, undefined, timer);
+
+    await audit.collectMetrics("com.example", { width: 1080, height: 1920 }, undefined, {
+      touchPoint: { x: 540, y: 960 },
+    });
+
+    expect(
+      factory
+        .getFakeClient()
+        .getAllCommands()
+        .filter((command) => command === "shell input tap 540 960"),
+    ).toHaveLength(3);
   });
 });

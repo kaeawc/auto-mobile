@@ -208,6 +208,12 @@
 
 ## Measure performance
 
+UI performance audits collect frame, CPU, and ANR metrics without adding touches.
+Touch latency is unmeasured (`null`) by default. To allow the audit to inject
+synthetic taps for touch-latency sampling, start AutoMobile with
+`AUTOMOBILE_TOUCH_LATENCY_SAMPLING=1`. This opt-in applies only while UI perf
+auditing is enabled.
+
 <div class="content-tabs" markdown>
 
 ### Android

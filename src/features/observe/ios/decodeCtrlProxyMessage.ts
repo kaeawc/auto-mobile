@@ -54,10 +54,19 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       typeof elapsedMs === "number" && Number.isFinite(elapsedMs) && elapsedMs >= 0
         ? `${(elapsedMs / 1000).toFixed(1)}s`
         : "an unknown duration";
+    const remainingMs = message.blockingDeadlineRemainingMs;
+    let deadlineDetail = "";
+    if (typeof remainingMs === "number" && Number.isFinite(remainingMs)) {
+      const deadlineStatus =
+        remainingMs < 0
+          ? `passed ${(-remainingMs / 1000).toFixed(1)}s ago`
+          : `has ${(remainingMs / 1000).toFixed(1)}s remaining`;
+      deadlineDetail = ` (its deadline ${deadlineStatus}; the gesture is a blocking XCUITest call the runner cannot interrupt)`;
+    }
     return {
       requestId,
       runnerBusy: true,
-      errorMessage: `iOS runner is busy executing ${blockingType} for ${elapsedDuration}; retry shortly`,
+      errorMessage: `iOS runner is busy executing ${blockingType} for ${elapsedDuration}${deadlineDetail}; retry shortly`,
       totalTimeMs: message.totalTimeMs ?? 0,
     };
   }

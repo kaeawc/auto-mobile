@@ -55,6 +55,8 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var keyCalls: [(String, [String])] = []
     var keyError: CommandError?
     var tapCalls = 0
+    var swipeCalls = 0
+    var onSwipe: (() -> Void)?
     var multiFingerSwipeCalls = 0
     var pinchCalls = 0
     var clearTextCalls = 0
@@ -90,7 +92,11 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     func tap(x _: Double, y _: Double, duration _: TimeInterval) throws { tapCalls += 1 }
     func doubleTap(x _: Double, y _: Double) throws {}
     func longPress(x _: Double, y _: Double, duration _: TimeInterval) throws {}
-    func swipe(startX _: Double, startY _: Double, endX _: Double, endY _: Double, duration _: TimeInterval) throws {}
+    func swipe(startX _: Double, startY _: Double, endX _: Double, endY _: Double, duration _: TimeInterval) throws {
+        swipeCalls += 1
+        onSwipe?()
+    }
+
     func multiFingerSwipe(
         startX _: Double, startY _: Double, endX _: Double, endY _: Double,
         fingerCount _: Int, fingerSpacing _: Double, duration _: TimeInterval

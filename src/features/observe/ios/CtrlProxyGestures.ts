@@ -12,7 +12,11 @@ import { sendCommand } from "../DeviceServiceUtils";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
-    super(context, { logTag: "CTRL_PROXY", roundCoordinates: false });
+    super(context, {
+      logTag: "CTRL_PROXY",
+      roundCoordinates: false,
+      includeSwipeTimeoutMs: true,
+    });
   }
 
   /**

@@ -22,11 +22,23 @@ final class WebSocketServerBehaviorTests: XCTestCase {
 
     func testAdmissionDecisionUsesElapsedInFlightTime() {
         XCTAssertEqual(admissionDecision(inFlight: nil, nowMs: 5000, budgetMs: 3000), .queue)
-        let inFlight = InFlightRunnerCommand(type: "request_set_text", requestId: "blocker", startedAtMs: 1000)
+        let inFlight = InFlightRunnerCommand(
+            type: "request_set_text", requestId: "blocker", startedAtMs: 1000, deadlineMs: nil
+        )
         XCTAssertEqual(admissionDecision(inFlight: inFlight, nowMs: 4000, budgetMs: 3000), .queue)
         XCTAssertEqual(
             admissionDecision(inFlight: inFlight, nowMs: 4001, budgetMs: 3000),
-            .busy(blockingType: "request_set_text", elapsedMs: 3001)
+            .busy(blockingType: "request_set_text", elapsedMs: 3001, deadlineRemainingMs: nil)
+        )
+    }
+
+    func testAdmissionDecisionReportsSignedDeadlineRemaining() {
+        let inFlight = InFlightRunnerCommand(
+            type: "request_swipe", requestId: "swipe", startedAtMs: 1000, deadlineMs: 6000
+        )
+        XCTAssertEqual(
+            admissionDecision(inFlight: inFlight, nowMs: 7000, budgetMs: 3000),
+            .busy(blockingType: "request_swipe", elapsedMs: 6000, deadlineRemainingMs: -1000)
         )
     }
 
@@ -64,6 +76,7 @@ final class WebSocketServerBehaviorTests: XCTestCase {
         XCTAssertEqual(response?["error"] as? String, "runner_busy")
         XCTAssertEqual(response?["blockingCommandType"] as? String, "request_set_text")
         XCTAssertEqual(response?["blockingElapsedMs"] as? Int, 3100)
+        XCTAssertNil(response?["blockingDeadlineRemainingMs"])
         XCTAssertTrue(blocker.captured.isEmpty, "the blocking command has not finished")
         release.signal()
         wait(for: [finished], timeout: 2)

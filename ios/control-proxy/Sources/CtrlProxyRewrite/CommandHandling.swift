@@ -10,4 +10,17 @@ import Foundation
 /// command ordering is preserved even though execution is no longer synchronous.
 protocol CommandHandling: Sendable {
     func handle(_ request: WebSocketRequest) async -> any WebSocketResponsePayload
+    func handle(
+        _ request: WebSocketRequest, deadlineMs: Int64?, monotonicNowMs: @escaping @Sendable () -> Int64
+    ) async -> any WebSocketResponsePayload
+}
+
+extension CommandHandling {
+    func handle(
+        _ request: WebSocketRequest, deadlineMs _: Int64?, monotonicNowMs _: @escaping @Sendable () -> Int64
+    )
+        async -> any WebSocketResponsePayload
+    {
+        await handle(request)
+    }
 }

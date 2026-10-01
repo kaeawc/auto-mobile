@@ -34,6 +34,35 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
+  test("decodes overdue and remaining swipe deadlines", () => {
+    expect(
+      decodeCtrlProxyMessage(
+        msg({
+          type: "error",
+          error: "runner_busy",
+          blockingCommandType: "request_swipe",
+          blockingElapsedMs: 48000,
+          blockingDeadlineRemainingMs: -43000,
+        }),
+      )?.errorMessage,
+    ).toBe(
+      "iOS runner is busy executing request_swipe for 48.0s (its deadline passed 43.0s ago; the gesture is a blocking XCUITest call the runner cannot interrupt); retry shortly",
+    );
+    expect(
+      decodeCtrlProxyMessage(
+        msg({
+          type: "error",
+          error: "runner_busy",
+          blockingCommandType: "request_swipe",
+          blockingElapsedMs: 3100,
+          blockingDeadlineRemainingMs: 1900,
+        }),
+      )?.errorMessage,
+    ).toBe(
+      "iOS runner is busy executing request_swipe for 3.1s (its deadline has 1.9s remaining; the gesture is a blocking XCUITest call the runner cannot interrupt); retry shortly",
+    );
+  });
+
   test("returns null for a push message with no requestId", () => {
     expect(decodeCtrlProxyMessage({ type: "hierarchy_update" })).toBeNull();
     expect(decodeCtrlProxyMessage({ type: "performance_update" })).toBeNull();

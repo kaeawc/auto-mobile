@@ -14,6 +14,7 @@ import { sendCommand } from "../DeviceServiceUtils";
 interface SharedGestureConfig {
   logTag: string;
   roundCoordinates: boolean;
+  includeSwipeTimeoutMs?: boolean;
 }
 
 export class SharedGestureDelegate {
@@ -86,6 +87,7 @@ export class SharedGestureDelegate {
         y2: this.coord(y2),
         duration,
         frameContext,
+        ...(this.config.includeSwipeTimeoutMs ? { timeoutMs } : {}),
       },
       timeoutMs,
       perf,

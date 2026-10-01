@@ -17,6 +17,7 @@ public enum CommandError: LocalizedError, Sendable {
     case missingParameter(String)
     case invalidParameter(String, String)
     case executionFailed(String)
+    case deadlineExceeded(command: String, deadlineMs: Int64, gestureCompleted: Bool)
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +31,11 @@ public enum CommandError: LocalizedError, Sendable {
             return "Invalid value '\(value)' for parameter '\(param)'"
         case let .executionFailed(reason):
             return "Command execution failed: \(reason)"
+        case let .deadlineExceeded(command, deadlineMs, gestureCompleted):
+            let outcome = gestureCompleted
+                ? "gesture completed after its deadline; outcome is indeterminate"
+                : "gesture was not started"
+            return "Command \(command) exceeded deadline at \(deadlineMs)ms (\(outcome))"
         }
     }
 }

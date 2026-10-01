@@ -6,46 +6,37 @@ import { spawnSync } from "node:child_process";
 import { loadJobSteps, loadJobs, stepNamed } from "../helpers/workflowSteps";
 
 describe("root SPM toolchain floor workflow", () => {
-  // The documented SwiftLint exception and the macOS-only installer-minimal matrix
-  // leg route kaeawc-authored PRs to the self-hosted runner. Every other PR job
-  // stays on a GitHub-hosted runner.
-  const SELF_HOSTED_PR_EXCEPTIONS = new Set(["swiftlint", "installer-minimal"]);
-
-  test("keeps every non-excepted pull-request job off the self-hosted runner", () => {
+  test("keeps every pull-request job off the self-hosted runner", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
     const prohibitedRunners = ["self-hosted", "automobile-mac"];
     const selfHostedJobs = Object.entries(jobs)
-      .filter(
-        ([name, job]) =>
-          !SELF_HOSTED_PR_EXCEPTIONS.has(name) &&
-          prohibitedRunners.some((runner) => JSON.stringify(job["runs-on"] ?? "").includes(runner)),
+      .filter(([, job]) =>
+        prohibitedRunners.some((runner) => JSON.stringify(job["runs-on"] ?? "").includes(runner)),
       )
       .map(([name]) => name);
 
     expect(selfHostedJobs).toEqual([]);
   });
 
-  test("routes swiftlint to the self-hosted runner behind the kaeawc author guard", () => {
+  test("runs swiftlint on hosted macos-26", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
-    const runsOn = JSON.stringify(jobs["swiftlint"]?.["runs-on"] ?? "");
+    const runsOn = jobs["swiftlint"]?.["runs-on"];
 
-    expect(runsOn).toContain("automobile-mac");
-    expect(runsOn).toContain("github.event.pull_request.user.login == 'kaeawc'");
-    // Fallback to a GitHub-hosted runner for every other author.
-    expect(runsOn).toContain("macos-26");
+    expect(runsOn).toBe("macos-26");
+    expect(JSON.stringify(runsOn)).not.toContain("self-hosted");
+    expect(JSON.stringify(runsOn)).not.toContain("automobile-mac");
   });
 
-  test("routes only kaeawc's macOS installer-minimal leg to the self-hosted runner", () => {
+  test("runs both installer-minimal legs on their hosted matrix runners", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
-    const runsOn = JSON.stringify(jobs["installer-minimal"]?.["runs-on"] ?? "");
+    const runsOn = jobs["installer-minimal"]?.["runs-on"];
 
-    expect(runsOn).toContain("matrix.os == 'macos-latest'");
-    expect(runsOn).toContain("github.event.pull_request.user.login == 'kaeawc'");
-    expect(runsOn).toContain("automobile-mac");
-    expect(runsOn).toContain("|| matrix.os");
+    expect(runsOn).toBe("${{ matrix.os }}");
+    expect(JSON.stringify(runsOn)).not.toContain("self-hosted");
+    expect(JSON.stringify(runsOn)).not.toContain("automobile-mac");
   });
 
-  test("isolates installer side effects on the persistent runner", () => {
+  test("isolates installer side effects on the runner", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "installer-minimal");
     const fixture = stepNamed(steps, "Confirm clean installer fixture");

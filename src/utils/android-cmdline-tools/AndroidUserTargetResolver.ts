@@ -21,6 +21,9 @@ export interface UserTargetRequest {
   signal?: AbortSignal;
 }
 
+/** Device state was read, but no unambiguous active target can be selected. */
+export class AndroidUserTargetUnavailableError extends Error {}
+
 /**
  * Resolves the user for one public operation. Explicit IDs (including zero)
  * win; otherwise a foreground instance of the requested package wins, followed
@@ -68,7 +71,7 @@ export class AndroidUserTargetResolver {
     }
 
     if (managedProfiles.length > 1) {
-      throw new Error(
+      throw new AndroidUserTargetUnavailableError(
         `Android target user is ambiguous: ${managedProfiles.length} managed profiles are running`,
       );
     }
@@ -80,7 +83,7 @@ export class AndroidUserTargetResolver {
       return { userId: primary.userId, source: "primary" };
     }
 
-    throw new Error(
+    throw new AndroidUserTargetUnavailableError(
       "Android target user is unavailable: no running primary or uniquely selectable managed profile",
     );
   }

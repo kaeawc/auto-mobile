@@ -10,6 +10,17 @@ import {
   type StorageDeviceType,
 } from "../features/storage/storageCapabilities";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  AndroidUserTargetResolver,
+  AndroidUserTargetUnavailableError,
+  type ResolvedUserTarget,
+  type UserTargetRequest,
+} from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 
 // Single RFC 6570 template; the optional {?appId} query variant matches both the
 // bare capabilities URI and the app-scoped form (issue #4933 ordering note: a
@@ -34,15 +45,21 @@ export function resolveDeviceType(device: BootedDevice): StorageDeviceType {
   return device.deviceId.startsWith("emulator-") ? "emulator" : "physical";
 }
 
-/**
- * Resolve the capability context from a booted device plus server configuration.
- * Runtime prerequisites the descriptor cannot cheaply verify (debuggable build,
- * authorization, active profile, opt-in iOS integration) are left undefined so the
- * model reports them as prerequisites rather than over-claiming availability.
- */
+/** Narrow seam for the Android user target resolver. */
+export interface StorageCapabilityUserResolver {
+  resolve(request: UserTargetRequest): Promise<ResolvedUserTarget>;
+}
+
+export interface StorageCapabilityDependencies {
+  adbFactory?: AdbClientFactory;
+  createUserResolver?: (adb: AdbExecutor) => StorageCapabilityUserResolver;
+}
+
+/** Build the context from device configuration and the probed profile signal. */
 export function resolveStorageCapabilityContext(
   device: BootedDevice,
   appId?: string,
+  activeUserProfile?: boolean,
 ): StorageCapabilityContext {
   return {
     platform: device.platform,
@@ -50,8 +67,37 @@ export function resolveStorageCapabilityContext(
     embeddedSdk: serverConfig.isEmbeddedSdkEnabled(),
     // A resolved booted device implies a live runner session for the SDK path.
     sessionActive: true,
+    activeUserProfile,
     appId,
   };
+}
+
+async function resolveActiveUserProfile(
+  device: BootedDevice,
+  dependencies: StorageCapabilityDependencies,
+): Promise<boolean | undefined> {
+  let activeUserProfile: boolean | undefined;
+  if (device.platform === "android") {
+    try {
+      const adb = (dependencies.adbFactory ?? defaultAdbClientFactory).create(device);
+      const resolver = (
+        dependencies.createUserResolver ??
+        ((executor: AdbExecutor) => new AndroidUserTargetResolver(executor))
+      )(adb);
+      await resolver.resolve({ currentUser: true });
+      activeUserProfile = true;
+    } catch (error) {
+      if (error instanceof AndroidUserTargetUnavailableError) {
+        // A resolved absence or ambiguous target is an expected unavailable state.
+        logger.debug(`[StorageCapabilityResources] No selectable Android profile: ${error}`);
+        activeUserProfile = false;
+      } else {
+        // A failed device probe cannot establish whether a profile is active.
+        logger.warn(`[StorageCapabilityResources] Active Android profile probe failed: ${error}`);
+      }
+    }
+  }
+  return activeUserProfile;
 }
 
 function buildUri(deviceId: string, appId?: string): string {
@@ -64,6 +110,7 @@ function buildUri(deviceId: string, appId?: string): string {
  */
 export async function getStorageCapabilitiesResource(
   params: Record<string, string>,
+  dependencies: StorageCapabilityDependencies = {},
 ): Promise<ResourceContent> {
   const { deviceId } = params;
   // The resource registry already percent-decodes query params via URLSearchParams
@@ -90,7 +137,10 @@ export async function getStorageCapabilitiesResource(
       };
     }
 
-    const report = computeStorageCapabilities(resolveStorageCapabilityContext(device, appId));
+    const activeUserProfile = await resolveActiveUserProfile(device, dependencies);
+    const report = computeStorageCapabilities(
+      resolveStorageCapabilityContext(device, appId, activeUserProfile),
+    );
 
     return {
       uri,
@@ -117,13 +167,15 @@ export async function getStorageCapabilitiesResource(
 /**
  * Register the storage-capabilities resource (issue #5602).
  */
-export function registerStorageCapabilityResources(): void {
+export function registerStorageCapabilityResources(
+  dependencies: StorageCapabilityDependencies = {},
+): void {
   ResourceRegistry.registerTemplate(
     STORAGE_CAPABILITIES_TEMPLATE,
     "Storage Capabilities",
     "Versioned descriptor of which storage operations (list, read, write, namespace reset, media indexing, observation) are available per logical domain (app containers, user-visible files, media library, key-value state, databases, secure state) for a device and optional app context. Clients negotiate capabilities instead of inferring them from platform names.",
     "application/json",
-    getStorageCapabilitiesResource,
+    (params) => getStorageCapabilitiesResource(params, dependencies),
   );
 
   logger.info("[StorageCapabilityResources] Registered storage capability resources");

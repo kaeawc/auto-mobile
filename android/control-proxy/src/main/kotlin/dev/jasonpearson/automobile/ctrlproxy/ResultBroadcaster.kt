@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
+import dev.jasonpearson.automobile.ctrlproxy.perf.PerfRequestContext
 import dev.jasonpearson.automobile.protocol.ErrorResponse
+import kotlinx.coroutines.withContext
 
 /**
  * Guards a result broadcast so that a throw while *sending* a result still yields a correlated
@@ -50,15 +52,17 @@ class ResultBroadcaster(
    *   triage.
    */
   suspend fun guard(requestId: String?, action: String, block: suspend () -> Unit) {
-    reporter.guarding(
-      requestId = requestId,
-      failureLogMessage = { "Error broadcasting $action (requestId=$requestId)" },
-      errorMessagePrefix = { "Broadcast failed for $action" },
-      doubleFailureLogMessage = {
-        "Failed to broadcast fallback error for $action (requestId=$requestId)"
-      },
-      block = block,
-    )
+    withContext(PerfRequestContext(requestId)) {
+      reporter.guarding(
+        requestId = requestId,
+        failureLogMessage = { "Error broadcasting $action (requestId=$requestId)" },
+        errorMessagePrefix = { "Broadcast failed for $action" },
+        doubleFailureLogMessage = {
+          "Failed to broadcast fallback error for $action (requestId=$requestId)"
+        },
+        block = block,
+      )
+    }
   }
 
   companion object {

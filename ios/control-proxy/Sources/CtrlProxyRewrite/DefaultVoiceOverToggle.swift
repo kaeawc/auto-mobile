@@ -15,7 +15,7 @@ struct DefaultVoiceOverToggle: VoiceOverToggling {
     private static let switchExistenceTimeout: TimeInterval = 5
 
     @MainActor
-    func setVoiceOver(enabled _: Bool) throws {
+    func setVoiceOver(enabled: Bool) throws {
         #if canImport(XCTest) && os(iOS)
             let settings = XCUIApplication(bundleIdentifier: Self.settingsBundleId)
             settings.activate()
@@ -39,9 +39,9 @@ struct DefaultVoiceOverToggle: VoiceOverToggling {
             guard voSwitch.waitForExistence(timeout: Self.switchExistenceTimeout) else {
                 throw VoiceOverToggleError.switchNotFound
             }
-            // The caller (CommandHandler) has already confirmed the current state
-            // differs, so an unconditional tap moves VoiceOver to the target state.
-            voSwitch.tap()
+            if try VoiceOverSwitchState.decision(for: voSwitch.value, enabled: enabled) == .tapNeeded {
+                voSwitch.tap()
+            }
         #else
             throw VoiceOverToggleError.unsupportedPlatform
         #endif

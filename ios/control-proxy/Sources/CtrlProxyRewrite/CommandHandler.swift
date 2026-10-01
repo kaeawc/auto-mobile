@@ -1505,10 +1505,8 @@ final class CommandHandler: CommandHandling {
         )
     }
 
-    /// Enable/disable VoiceOver on a physical device by driving Settings (#2501). Idempotent:
-    /// when VoiceOver is already in the requested state this early-returns WITHOUT tapping —
-    /// load-bearing, since once VoiceOver is on every tap requires the double-tap idiom, so a
-    /// blind re-tap on the switch would be a VoiceOver activation rather than a toggle.
+    /// Enable/disable VoiceOver on a physical device by driving Settings (#2501).
+    /// The toggle reads the switch value and skips the tap when it already matches.
     private func handleSetVoiceOverState(
         _ request: RequestSetVoiceOverState,
         startTime: Date
@@ -1516,14 +1514,6 @@ final class CommandHandler: CommandHandling {
         async -> VoiceOverSetResponse
     {
         let enabled = request.enabled
-
-        if voiceOverStateProvider.isVoiceOverRunning() == enabled {
-            return VoiceOverSetResponse(
-                requestId: request.requestId,
-                success: true,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
-        }
 
         do {
             // `setVoiceOver` is `@MainActor` (it drives XCUITest); `await` hops this async

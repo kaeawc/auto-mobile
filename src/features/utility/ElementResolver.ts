@@ -89,6 +89,10 @@ export interface ElementResolution {
   error?: string;
 }
 
+export function isMissingContainerError(error: string | undefined): boolean {
+  return /^Container level \d+ not found:/.test(error ?? "");
+}
+
 /** The source that satisfied a selector, before action-target promotion. */
 export function matchedSourceNode(
   result: ElementResolution,
@@ -309,6 +313,33 @@ export class ElementResolver {
     return this.resolveInNodes(snapshot, selector, intent, snapshot.nodes);
   }
 
+  private containerFailure(
+    selector: ResolverSelector,
+    result: ElementResolution,
+  ): ElementResolution {
+    if (result.error?.startsWith("Container level ")) {
+      return result;
+    }
+    let level = 1;
+    for (let parent = selector.container; parent; parent = parent.container) {
+      level += 1;
+    }
+    return {
+      ...result,
+      error: `Container level ${level} ${result.error?.includes("ambiguous") ? "ambiguous" : "not found"}: ${selector.elementId ?? selector.text}`,
+    };
+  }
+
+  private containerSelector(selector: ResolverSelector): ResolverSelector {
+    const container = selector.container!;
+    return {
+      ...container,
+      selectionStrategy:
+        container.selectionStrategy ??
+        (selector.selectionStrategy === "unique" ? "unique" : undefined),
+    };
+  }
+
   private resolveInNodes(
     snapshot: ResolverSnapshot,
     selector: ResolverSelector,
@@ -332,14 +363,14 @@ export class ElementResolver {
     if (selector.container) {
       const container = this.resolveInNodes(
         snapshot,
-        selector.container,
+        this.containerSelector(selector),
         { action: "inspect" },
         nodes,
         scope,
         true,
       );
       if (!container.chosen) {
-        return { ...container, error: container.error ?? "Container not found" };
+        return this.containerFailure(selector.container, container);
       }
       // A text match may be promoted to its clickable row. Keep the container
       // rooted at the node that actually supplied the text, so siblings in
@@ -488,6 +519,18 @@ export class ElementResolver {
     if (selector.index !== undefined) {
       const selected = result.candidates[selector.index];
       result.chosen = actionTarget(selected);
+    } else if (selector.selectionStrategy === "unique") {
+      const eligibleMatches = result.candidates
+        .map(actionTarget)
+        .filter((node): node is SearchableEntry => node !== null);
+      if (eligibleMatches.length !== 1) {
+        result.error =
+          eligibleMatches.length === 0
+            ? "Target not found"
+            : `Target ambiguous: ${eligibleMatches.length} matches`;
+      } else {
+        result.chosen = eligibleMatches[0];
+      }
     } else if (selector.selectionStrategy === "random") {
       result.chosen =
         actionable[

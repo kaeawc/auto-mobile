@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import type { ElementContainerSelector } from "../models/PinchOnOptions";
 
 type ElementIdTextDescriptions = {
   elementId: string;
@@ -23,6 +24,27 @@ export const elementContainerSchema = createElementIdTextSelectorSchema({
   elementId: "Container resource ID",
   text: "Container text",
 });
+
+export const nestedElementContainerSchema: z.ZodType<ElementContainerSelector> = z.lazy(() =>
+  z.union([
+    z
+      .object({
+        elementId: z.string().min(1).describe("Container resource ID"),
+        index: z.number().int().nonnegative().optional(),
+        selectionStrategy: z.enum(["first", "random", "unique"]).optional(),
+        container: nestedElementContainerSchema.optional(),
+      })
+      .strict(),
+    z
+      .object({
+        text: z.string().trim().min(1).describe("Container text"),
+        index: z.number().int().nonnegative().optional(),
+        selectionStrategy: z.enum(["first", "random", "unique"]).optional(),
+        container: nestedElementContainerSchema.optional(),
+      })
+      .strict(),
+  ]),
+);
 
 export const elementIdTextFieldsSchema = z
   .object({
@@ -57,7 +79,7 @@ export interface ResolverSelector {
   contentDescription?: string;
   className?: string;
   index?: number;
-  selectionStrategy?: "first" | "random";
+  selectionStrategy?: "first" | "random" | "unique";
   match?: "exact" | "contains" | "regex";
   caseSensitive?: boolean;
   container?: ResolverSelector;

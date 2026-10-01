@@ -52,7 +52,11 @@ import {
 } from "./toolSchemaHelpers";
 import { elementContainerSchema } from "./elementSelectorSchemas";
 import { observeToolResultSchema } from "./toolOutputSchemas";
-import { ElementResolver, type MatchMode } from "../features/utility/ElementResolver";
+import {
+  ElementResolver,
+  isMissingContainerError,
+  type MatchMode,
+} from "../features/utility/ElementResolver";
 import { SearchableHierarchy } from "../features/utility/SearchableNode";
 import { normalizeQuotes } from "../features/utility/TextMatcher";
 import type { ResolverSelector } from "./elementSelectorSchemas";
@@ -960,7 +964,7 @@ export const findWaitForElement = (
       { ...selector, container: waitForContainerForFinder(waitFor) ?? undefined },
       { action: "inspect", negative, matchMode: modes.get(key) },
     );
-    if (result.error === "Container not found") {
+    if (isMissingContainerError(result.error)) {
       return [];
     }
     if (result.error) {

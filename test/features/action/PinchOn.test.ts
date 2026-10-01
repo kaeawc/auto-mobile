@@ -22,6 +22,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { serverConfig } from "../../../src/utils/ServerConfig";
+import containerFixture from "../../fixtures/observe/android-container-scope.json";
 
 describe("PinchOn", () => {
   const device: BootedDevice = {
@@ -347,6 +348,37 @@ describe("PinchOn", () => {
     expect(pinchCall).toBeDefined();
     expect(pinchCall.centerX).toBe(100);
     expect(pinchCall.centerY).toBe(100);
+  });
+
+  test("pinches the selected nested descendant and never a peer", async () => {
+    fakeObserveScreen.setObserveResult({
+      ...createObserveResult(),
+      viewHierarchy: {
+        hierarchy: {
+          node: { "resource-id": "cart_A", node: containerFixture.viewHierarchy.hierarchy.node },
+        },
+      },
+    });
+    const container = {
+      elementId: "action",
+      selectionStrategy: "unique" as const,
+      container: {
+        elementId: "left",
+        selectionStrategy: "unique" as const,
+        container: { elementId: "cart_A", selectionStrategy: "unique" as const },
+      },
+    };
+    const result = await pinchOn.execute({ direction: "out", container });
+    expect(result.success).toBe(true);
+    expect(fakeA11yService.getPinchHistory()[0]).toMatchObject({ centerX: 120, centerY: 70 });
+
+    const missing = await pinchOn.execute({
+      direction: "out",
+      container: { ...container, container: { ...container.container, elementId: "missing" } },
+    });
+    expect(missing.success).toBe(false);
+    expect(missing.error).toContain("Container level 2 not found");
+    expect(fakeA11yService.getPinchHistory()).toHaveLength(1);
   });
 
   test("routes iOS pinch through the iOS CtrlProxy request_pinch command", async () => {

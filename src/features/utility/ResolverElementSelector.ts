@@ -6,6 +6,7 @@ import { ActionableError } from "../../models/ActionableError";
 import type { ResolverSelector } from "../../server/elementSelectorSchemas";
 import {
   ElementResolver,
+  isMissingContainerError,
   matchedSourceNode,
   type ElementResolution,
   type ResolutionAction,
@@ -123,7 +124,7 @@ export class ResolverElementSelector implements ElementSelector {
       container,
       { action: "inspect" },
     );
-    if (result.error && result.error !== "Container not found") {
+    if (result.error && !isMissingContainerError(result.error)) {
       throw new ActionableError(result.error);
     }
     return result.chosen !== null;
@@ -172,7 +173,7 @@ export class ResolverElementSelector implements ElementSelector {
         requireBounds: options.intentAction === "inspect",
       },
     );
-    if (result.error && result.error !== "Container not found") {
+    if (result.error && !isMissingContainerError(result.error)) {
       throw new ActionableError(result.error);
     }
     if (!result.error && !result.chosen && options.intentAction === "long-press") {

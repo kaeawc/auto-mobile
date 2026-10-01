@@ -3,6 +3,7 @@ import type { ConditionEvaluation, ConditionPredicate } from "./interfaces/WaitF
 import { ActionableError } from "../../models/ActionableError";
 import {
   ElementResolver,
+  isMissingContainerError,
   type ElementResolution,
   type MatchMode,
   type ResolutionIntent,
@@ -38,7 +39,7 @@ function searchForWait(
         : selector,
       { ...intent, matchMode },
     );
-    if (result.error === "Container not found") {
+    if (isMissingContainerError(result.error)) {
       return undefined;
     }
     if (result.error) {
@@ -237,7 +238,7 @@ export function textEquals(
         : { text: expected, container, match: "exact", caseSensitive: true },
       { action: "inspect", matchMode: "exact" },
     );
-    if (result.error === "Container not found") {
+    if (isMissingContainerError(result.error)) {
       return { matched: false, candidates: [] };
     }
     if (result.error) {

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
+import containerFixture from "../../fixtures/observe/android-container-scope.json";
 import {
   assignStableViewIds,
   STABLE_VIEW_ID_PREFIX,
@@ -8,6 +9,110 @@ import {
 
 const resolver = new ElementResolver();
 const tap = { action: "tap" as const };
+
+test("nested scopes resolve outer to inner and identify the failing level", () => {
+  const original = containerFixture.viewHierarchy.hierarchy.node;
+  const hierarchy = { hierarchy: { node: { "resource-id": "cart_A", node: original } } };
+  const capture = { id: "nested", nodes: new SearchableHierarchy().project(hierarchy) };
+  const query = {
+    elementId: "action",
+    selectionStrategy: "unique" as const,
+    container: {
+      elementId: "left",
+      selectionStrategy: "unique" as const,
+      container: { elementId: "cart_A", selectionStrategy: "unique" as const },
+    },
+  };
+  expect(resolver.resolve(capture, query, tap).chosen?.bounds?.top).toBe(40);
+  expect(
+    resolver.resolve(
+      capture,
+      { ...query, container: { ...query.container, elementId: "missing" } },
+      tap,
+    ).error,
+  ).toContain("Container level 2 not found");
+  expect(
+    resolver.resolve(
+      capture,
+      { ...query, container: { ...query.container, container: { elementId: "missing" } } },
+      tap,
+    ).error,
+  ).toContain("Container level 1 not found");
+  expect(resolver.resolve(capture, { ...query, elementId: "missing" }, tap).error).toBe(
+    "Target not found",
+  );
+});
+
+test("unique scopes fail before considering a matching descendant and indices stay scoped", () => {
+  const hierarchy = {
+    hierarchy: {
+      node: [
+        {
+          "resource-id": "cart",
+          node: [
+            {
+              "resource-id": "row",
+              node: [
+                {
+                  "resource-id": "action",
+                  clickable: true,
+                  bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+                },
+              ],
+            },
+          ],
+        },
+        {
+          "resource-id": "cart",
+          node: [
+            {
+              "resource-id": "row",
+              node: [
+                {
+                  "resource-id": "other",
+                  clickable: true,
+                  bounds: { left: 20, top: 0, right: 30, bottom: 10 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const capture = { id: "duplicates", nodes: new SearchableHierarchy().project(hierarchy) };
+  const selector = {
+    elementId: "action",
+    container: {
+      elementId: "row",
+      container: { elementId: "cart", selectionStrategy: "unique" as const },
+    },
+  };
+  expect(resolver.resolve(capture, selector, tap).error).toContain("Container level 1 ambiguous");
+  expect(
+    resolver.resolve(capture, { ...selector, selectionStrategy: "unique" }, tap).error,
+  ).toContain("Container level 1 ambiguous");
+  expect(
+    resolver.resolve(
+      capture,
+      {
+        ...selector,
+        container: { ...selector.container, container: { elementId: "cart", index: 0 } },
+      },
+      tap,
+    ).chosen?.nativeId,
+  ).toBe("action");
+  expect(
+    resolver.resolve(
+      capture,
+      {
+        ...selector,
+        container: { ...selector.container, container: { elementId: "cart", index: 2 } },
+      },
+      tap,
+    ).error,
+  ).toContain("Container level 1 not found");
+});
 
 test("text container stays on its matching child instead of promoted row", () => {
   const hierarchy = {

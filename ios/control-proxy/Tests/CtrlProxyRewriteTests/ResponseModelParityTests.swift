@@ -13,7 +13,7 @@ final class ResponseModelParityTests: XCTestCase {
     // MARK: - connected handshake (supportedCommands is the runner-version signal)
 
     func testConnectedEventMatches() {
-        // The command list is non-empty and sorted (RequestType.allCases, sorted).
+        // The handler's runtime-capable command list is non-empty and sorted.
         let commands = RewriteResponses.connectedSupportedCommands(id: 0)
         XCTAssertFalse(commands.isEmpty)
         XCTAssertEqual(commands, commands.sorted())

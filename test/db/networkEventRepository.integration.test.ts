@@ -65,6 +65,17 @@ describe("networkEventRepository extended queries", () => {
     expect(event!.responseBody).toBe('{"results":[]}');
   });
 
+  test("nullable legacy metadata and structured metadata read through list and detail", async () => {
+    const legacyId = await recordNetworkEvent(makeInput(), db);
+    const metadata = { duration_ms: "12.5", connection_state: "ready" };
+    const currentId = await recordNetworkEvent(makeInput({ metadata }), db);
+    expect((await getNetworkEventById(legacyId, db))?.metadata).toBeNull();
+    expect((await getNetworkEventById(currentId, db))?.metadata).toEqual(metadata);
+    const listed = await getNetworkEvents({}, db);
+    expect(listed.find((event) => event.id === legacyId)?.metadata).toBeNull();
+    expect(listed.find((event) => event.id === currentId)?.metadata).toEqual(metadata);
+  });
+
   test("getNetworkEventById returns null for missing id", async () => {
     const event = await getNetworkEventById(99999, db);
     expect(event).toBeNull();

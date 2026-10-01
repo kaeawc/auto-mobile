@@ -13,6 +13,7 @@
  * - CtrlProxyNavigation: pressHome, pressBack, launchApp
  */
 
+import { decodeSdkEventBatches, type DecodedSdkEvent } from "./decodeSdkEventBatches";
 import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
@@ -527,14 +528,6 @@ type SdkEventPollResult = {
 type SdkScreenIdentityPollGeneration = {
   clearGeneration: number;
   applicationGenerations: Map<string, number>;
-};
-
-type DecodedSdkEvent = {
-  eventType: string;
-  applicationId: string | undefined;
-  payload: Record<string, unknown>;
-  timestamp: number;
-  sequenceNumber: number | undefined;
 };
 
 function numberOrDefault(value: number | null | undefined): number {
@@ -2183,50 +2176,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     batches: Array<{ bundleId?: string; events?: Array<{ eventType: string; payload: string }> }>,
     generation: number,
   ): DecodedSdkEvent[] {
-    const decodedEvents: DecodedSdkEvent[] = [];
-    for (const batch of batches) {
-      if (generation !== this.sdkEventPollGeneration) {
-        return [];
-      }
-      for (const envelope of batch.events ?? []) {
-        const event = this.decodeSdkEventEnvelope(batch.bundleId, envelope);
-        if (event) {
-          decodedEvents.push(event);
-        }
-      }
-    }
-    return decodedEvents;
-  }
-
-  private decodeSdkEventEnvelope(
-    applicationId: string | undefined,
-    envelope: { eventType: string; payload: string },
-  ): DecodedSdkEvent | undefined {
-    try {
-      const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
-      const decodedPayload = JSON.parse(payloadJson);
-      if (!decodedPayload || typeof decodedPayload !== "object" || Array.isArray(decodedPayload)) {
-        throw new Error("SDK event payload must be an object");
-      }
-      const payload = decodedPayload as Record<string, unknown>;
-      return {
-        eventType: envelope.eventType,
-        applicationId,
-        payload,
-        timestamp:
-          typeof payload.timestamp === "number" && Number.isFinite(payload.timestamp)
-            ? payload.timestamp
-            : this.timer.now(),
-        sequenceNumber:
-          typeof payload.sequenceNumber === "number" && Number.isSafeInteger(payload.sequenceNumber)
-            ? payload.sequenceNumber
-            : undefined,
-      };
-    } catch (error) {
-      // Malformed SDK envelope (bad base64/JSON) — skip it, but leave a trace.
-      logger.debug(`[IOSCtrlProxy] skipping malformed SDK event envelope: ${error}`);
-      return undefined;
-    }
+    return decodeSdkEventBatches(
+      batches,
+      () => this.timer.now(),
+      () => generation === this.sdkEventPollGeneration,
+    ).events;
   }
 
   private stopSdkEventPolling(): void {

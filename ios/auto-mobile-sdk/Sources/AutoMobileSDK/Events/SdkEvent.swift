@@ -196,6 +196,8 @@ public struct SdkHangEvent: SdkEvent {
 
 /// A network request/response event with URL, status code, timing, and optional body capture.
 public struct SdkNetworkRequestEvent: SdkEvent {
+    public static let currentSchemaVersion = 1
+    public let schemaVersion: Int
     public private(set) var eventType: SdkEventType = .networkRequest
     public let timestamp: Int64
     public let url: String
@@ -240,8 +242,10 @@ public struct SdkNetworkRequestEvent: SdkEvent {
         path: String? = nil,
         requestBody: String? = nil,
         responseBody: String? = nil,
-        contentType: String? = nil
+        contentType: String? = nil,
+        schemaVersion: Int = SdkNetworkRequestEvent.currentSchemaVersion
     ) {
+        self.schemaVersion = schemaVersion
         self.timestamp = timestamp
         self.url = url
         self.method = method
@@ -263,6 +267,42 @@ public struct SdkNetworkRequestEvent: SdkEvent {
         self.requestBody = requestBody
         self.responseBody = responseBody
         self.contentType = contentType
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case eventType, schemaVersion, timestamp, url, method, requestId, connectionId, direction, protocolName
+        case metadata, sequenceNumber, requestHeaders, requestBodySize, statusCode, responseHeaders
+        case responseBodySize, durationMs, error, host, path, requestBody, responseBody, contentType
+    }
+
+    // EventPersistence.loadPending must still load events written before versioning.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let type = try container.decodeIfPresent(SdkEventType.self, forKey: .eventType) {
+            eventType = type
+        }
+        schemaVersion = try container.contains(.schemaVersion) ? container.decode(Int.self, forKey: .schemaVersion) : 0
+        timestamp = try container.decode(Int64.self, forKey: .timestamp)
+        url = try container.decode(String.self, forKey: .url)
+        method = try container.decode(String.self, forKey: .method)
+        requestId = try container.decodeIfPresent(String.self, forKey: .requestId)
+        connectionId = try container.decodeIfPresent(String.self, forKey: .connectionId)
+        direction = try container.decodeIfPresent(NetworkCaptureDirection.self, forKey: .direction)
+        protocolName = try container.decodeIfPresent(String.self, forKey: .protocolName)
+        metadata = try container.decodeIfPresent([String: String].self, forKey: .metadata)
+        sequenceNumber = try container.decodeIfPresent(UInt64.self, forKey: .sequenceNumber)
+        requestHeaders = try container.decodeIfPresent([String: String].self, forKey: .requestHeaders)
+        requestBodySize = try container.decodeIfPresent(Int.self, forKey: .requestBodySize)
+        statusCode = try container.decodeIfPresent(Int.self, forKey: .statusCode)
+        responseHeaders = try container.decodeIfPresent([String: String].self, forKey: .responseHeaders)
+        responseBodySize = try container.decodeIfPresent(Int.self, forKey: .responseBodySize)
+        durationMs = try container.decodeIfPresent(Double.self, forKey: .durationMs)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        host = try container.decodeIfPresent(String.self, forKey: .host)
+        path = try container.decodeIfPresent(String.self, forKey: .path)
+        requestBody = try container.decodeIfPresent(String.self, forKey: .requestBody)
+        responseBody = try container.decodeIfPresent(String.self, forKey: .responseBody)
+        contentType = try container.decodeIfPresent(String.self, forKey: .contentType)
     }
 }
 

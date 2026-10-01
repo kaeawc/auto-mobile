@@ -169,6 +169,8 @@ public struct SdkHangEvent: SdkEvent
   public let bundleId: String
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), durationMs: Double, stackTrace: String?, bundleId: String )
 public struct SdkNetworkRequestEvent: SdkEvent
+  public static let currentSchemaVersion = 1
+  public let schemaVersion: Int
   public private(set) var eventType: SdkEventType = .networkRequest
   public let timestamp: Int64
   public let url: String
@@ -191,7 +193,8 @@ public struct SdkNetworkRequestEvent: SdkEvent
   public let requestBody: String?
   public let responseBody: String?
   public let contentType: String?
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), url: String, method: String, requestId: String? = nil, connectionId: String? = nil, direction: NetworkCaptureDirection? = nil, protocolName: String? = nil, metadata: [String: String]? = nil, sequenceNumber: UInt64? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, host: String? = nil, path: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), url: String, method: String, requestId: String? = nil, connectionId: String? = nil, direction: NetworkCaptureDirection? = nil, protocolName: String? = nil, metadata: [String: String]? = nil, sequenceNumber: UInt64? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, host: String? = nil, path: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil, schemaVersion: Int = SdkNetworkRequestEvent.currentSchemaVersion )
+  public init(from decoder: Decoder) throws
 public struct SdkWebSocketFrameEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .webSocketFrame
   public let timestamp: Int64

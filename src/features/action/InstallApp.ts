@@ -1,6 +1,7 @@
 import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { errorMessage } from "../../utils/describeUnknownError";
 import path from "path";
+import AdmZip from "adm-zip";
 import {
   AdbClientFactory,
   defaultAdbClientFactory,
@@ -36,8 +37,14 @@ import { shellQuote } from "../../utils/shellQuote";
 import { InstalledAppsRepository, type InstalledAppsStore } from "../../db/installedAppsRepository";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
+import type { IosPhysicalAppLister } from "../observe/ListInstalledApps";
+import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 
 const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
+const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
+const IOS_PHYSICAL_VERIFY_RETRY_DELAY_MS = 200;
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -51,6 +58,8 @@ export class InstallApp {
   private simctl: SimCtlClient;
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
+  private physicalAppLister?: IosPhysicalAppLister;
+  private timer?: Timer;
   private plist: PlistReader;
   private installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository();
 
@@ -64,6 +73,8 @@ export class InstallApp {
     deviceAppInstaller: DeviceAppInstaller | null = null,
     plist: PlistReader = new PlistClient(),
     installedAppsRepository?: InstalledAppsStore,
+    physicalAppLister?: IosPhysicalAppLister,
+    timer?: Timer,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -72,6 +83,8 @@ export class InstallApp {
     this.createPerformanceTracker = performanceTrackerFactory;
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceAppInstaller = deviceAppInstaller || new DeviceAppManager();
+    this.physicalAppLister = physicalAppLister;
+    this.timer = timer;
     this.plist = plist;
     this.setInstalledAppsRepository(installedAppsRepository);
   }
@@ -397,12 +410,12 @@ export class InstallApp {
     return lower.includes("newer version") && lower.includes("already installed");
   }
 
-  /**
-   * Read CFBundleIdentifier from a simulator .app bundle's Info.plist so the
-   * existing (newer) version can be uninstalled before a downgrade reinstall.
-   */
+  /** Read CFBundleIdentifier from a simulator .app or physical-device .ipa. */
   private async resolveAppBundleId(appPath: string): Promise<string | undefined> {
     try {
+      if (path.extname(appPath).toLowerCase() === ".ipa") {
+        return await this.resolveIpaBundleId(appPath);
+      }
       const bundleId = (
         await this.plist.extractRawFile("CFBundleIdentifier", path.join(appPath, "Info.plist"))
       ).trim();
@@ -413,6 +426,21 @@ export class InstallApp {
       );
       return undefined;
     }
+  }
+
+  private async resolveIpaBundleId(ipaPath: string): Promise<string | undefined> {
+    const infoPlists = new AdmZip(ipaPath)
+      .getEntries()
+      .filter((entry) => /^Payload\/[^/]+\.app\/Info\.plist$/.test(entry.entryName));
+    if (infoPlists.length !== 1) {
+      return undefined;
+    }
+    const plist = await this.plist.readJsonBytes(infoPlists[0].getData());
+    if (!plist || typeof plist !== "object" || Array.isArray(plist)) {
+      return undefined;
+    }
+    const bundleId = (plist as Record<string, unknown>).CFBundleIdentifier;
+    return typeof bundleId === "string" ? bundleId.trim() || undefined : undefined;
   }
 
   private validateiOSArtifact(ext: string): void {
@@ -597,8 +625,7 @@ export class InstallApp {
     } catch (error) {
       const text = this.extractErrorText(error);
       if (this.isiOSDowngradeError(text)) {
-        // devicectl has no downgrade flag and the bundle identifier cannot be
-        // reliably derived from the .ipa, so guide the user to uninstall first.
+        // devicectl has no downgrade flag, so guide the user to uninstall first.
         throw new Error(
           `Install failed because a newer version is already installed on the device. ` +
             `Uninstall the app first with uninstallApp, then reinstall. Original error: ${text}`,
@@ -607,12 +634,63 @@ export class InstallApp {
       throw error;
     }
 
-    return {
-      success: true,
-      upgrade: false,
-      warning:
-        "Bundle ID detection is not available for physical device installations via devicectl.",
-    };
+    const bundleId = await perf.track("resolveBundleId", () => this.resolveAppBundleId(ipaPath));
+    if (!bundleId) {
+      return {
+        success: true,
+        upgrade: false,
+        warning: "Could not determine the bundle ID from the .ipa; installation was not verified.",
+      };
+    }
+
+    const timer = this.timer ?? defaultTimer;
+    let bundlePresent: boolean;
+    try {
+      bundlePresent = await perf.track("verifyPhysicalInstall", () =>
+        raceWithDeadline(
+          async () => {
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              if (signal?.aborted) {
+                throw new Error(OPERATION_CANCELLED_MESSAGE);
+              }
+              const apps = await (
+                this.physicalAppLister ?? new DeviceAppManager()
+              ).listInstalledApps(this.device.deviceId);
+              if (apps.some((app) => getIosInstalledAppBundleId(app) === bundleId)) {
+                return true;
+              }
+              if (attempt < 2) {
+                await timer.sleep(IOS_PHYSICAL_VERIFY_RETRY_DELAY_MS);
+              }
+            }
+            return false;
+          },
+          {
+            timer,
+            timeoutMs: IOS_PHYSICAL_VERIFY_TIMEOUT_MS,
+            signal,
+            label: `Verification of ${bundleId} on physical iOS device`,
+          },
+        ),
+      );
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      logger.warn(`[InstallApp] Failed to verify ${bundleId} on ${this.device.deviceId}`, error);
+      return {
+        success: true,
+        upgrade: false,
+        packageName: bundleId,
+        warning: `Installed, but could not verify the bundle is present: ${errorMessage(error)}`,
+      };
+    }
+    if (!bundlePresent) {
+      throw new ActionableError(
+        `Install reported success, but bundle ${bundleId} was not present on physical iOS device ${this.device.deviceId} after installation.`,
+      );
+    }
+    return { success: true, upgrade: false, packageName: bundleId };
   }
 
   private async extractPackageName(

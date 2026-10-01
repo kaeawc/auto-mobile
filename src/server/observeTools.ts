@@ -75,6 +75,7 @@ import {
   shouldSkipObserveWaitForScreenshot,
   type ScreenshotMode,
 } from "../features/observe/automaticScreenshotPolicy";
+import { inlineScreenshotImage } from "../features/observe/screenshot/inlineScreenshotImage";
 
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are
@@ -562,6 +563,12 @@ const observeBaseSchema = withJsonSchemaOverride(
         screenshotOptions: screenshotOptionsSchema
           .optional()
           .describe("Encoding for a settled screenshot; omitted uses PNG"),
+        includeScreenshotImage: z
+          .boolean()
+          .optional()
+          .describe(
+            "Opt in to a bounded MCP image block from the completed settled capture (default: path only)",
+          ),
         display: z
           .string()
           .optional()
@@ -585,7 +592,17 @@ const observeBaseSchema = withJsonSchemaOverride(
   )
     .superRefine(refineWaitForArgs)
     .superRefine((args, ctx) => {
-      if (args.screenshotOptions !== undefined && args.screenshot !== "settled") {
+      if (args.includeScreenshotImage && args.screenshot && args.screenshot !== "settled") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["screenshot"],
+          message: "includeScreenshotImage requires screenshot: settled",
+        });
+      }
+      if (
+        args.screenshotOptions !== undefined &&
+        (args.includeScreenshotImage ? "settled" : args.screenshot) !== "settled"
+      ) {
         ctx.addIssue({
           code: "custom",
           path: ["screenshotOptions"],
@@ -1505,6 +1522,47 @@ export function invalidateReadinessForDisabledAccessibility(
 }
 
 // Register tools (this will be called when this file is imported)
+async function withCapturedScreenshotImage(
+  result: ObserveToolPayload,
+  screenshotPath: string | undefined,
+  signal?: AbortSignal,
+): Promise<ObserveResponse> {
+  const delivery = await inlineScreenshotImage(screenshotPath, result, signal);
+  const response = createStructuredToolResponse({
+    ...result,
+    screenshotImage: delivery.screenshotImage,
+  });
+  return {
+    ...response,
+    content: delivery.image ? [...response.content, delivery.image] : response.content,
+  };
+}
+
+type ObserveResponse = Omit<StructuredToolResponse<ObserveToolPayload>, "content"> & {
+  content: Array<
+    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+  >;
+};
+
+function createObserveResponse(
+  result: ObserveToolPayload,
+  includeScreenshotImage: boolean | undefined,
+  signal?: AbortSignal,
+): Promise<ObserveResponse> | ObserveResponse {
+  return includeScreenshotImage
+    ? withCapturedScreenshotImage(result, result.screenshotPath, signal)
+    : createStructuredToolResponse(result);
+}
+
+function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined {
+  if (args.includeScreenshotImage && args.screenshot && args.screenshot !== "settled") {
+    throw new ActionableError(
+      "includeScreenshotImage requires screenshot: 'settled' (or omit screenshot). No capture was started.",
+    );
+  }
+  return args.includeScreenshotImage ? "settled" : args.screenshot;
+}
+
 export function registerObserveTools() {
   // Observe handler
   const observeHandler = async (
@@ -1512,7 +1570,7 @@ export function registerObserveTools() {
     args: ObserveArgs,
     _progress?: unknown,
     signal?: AbortSignal,
-  ): Promise<StructuredToolResponse<ObserveToolPayload>> => {
+  ): Promise<ObserveResponse> => {
     const waitFor = args.waitFor;
     // #6154 follow-up: `platform` is optional on the wire, so the schema's
     // iOS-rejects-activityName check (which runs against the raw request
@@ -1520,6 +1578,7 @@ export function registerObserveTools() {
     // against the resolved `device.platform`, before the try/catch below so the
     // actionable message isn't re-wrapped as a generic execution failure.
     assertActiveWindowWaitForSupportedOnPlatform(device.platform, waitFor);
+    const screenshotMode = requestedScreenshotMode(args);
     try {
       const observeScreen = new RealObserveScreen(device, undefined, {
         display: args.display,
@@ -1546,7 +1605,7 @@ export function registerObserveTools() {
             args.skipBackStack ?? false,
             defaultTimer,
             device.platform,
-            args.screenshot,
+            screenshotMode,
             args.screenshotOptions,
           )
         : null;
@@ -1556,7 +1615,7 @@ export function registerObserveTools() {
             perf: createGlobalPerformanceTracker(),
             skipWaitForFresh: true,
             signal,
-            screenshot: args.screenshot,
+            screenshot: screenshotMode,
             screenshotOptions: args.screenshotOptions,
           });
 
@@ -1619,13 +1678,14 @@ export function registerObserveTools() {
           matchedElement: waitOutcome.matchedElement,
           candidates: waitOutcome.candidates,
         };
-        return createStructuredToolResponse({
-          ...result,
-          ...waitMetadata,
-        });
+        return await createObserveResponse(
+          { ...result, ...waitMetadata },
+          args.includeScreenshotImage,
+          signal,
+        );
       }
 
-      return createStructuredToolResponse(result);
+      return await createObserveResponse(result, args.includeScreenshotImage, signal);
     } catch (error) {
       throw toActionableError(error, `Failed to execute observe`);
     }

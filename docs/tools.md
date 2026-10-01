@@ -81,7 +81,8 @@ native absolute-input coordinates.
 native coordinate space described above. For a fresh screenshot matching an
 observation, call `observe({ screenshot: "settled" })` and read its
 `screenshotPath`.
-For encoded captures, pass `screenshotOptions` with `screenshot: "settled"`,
+For encoded captures, pass `screenshotOptions` with `screenshot: "settled"` or
+`includeScreenshotImage: true`,
 for example `observe({ screenshot: "settled", screenshotOptions: { format: "webp", quality: 80 } })`.
 Omitting options requests PNG. JPEG and WebP accept integer `quality` from 1 to 100. WebP also accepts `lossless: true`, which cannot be combined with
 `quality`; PNG accepts neither. The returned `screenshotFormat`,
@@ -119,6 +120,31 @@ transformed hit regions, custom drawing inside a canvas, and screen-reader
 behavior can all make the actual native event recipient differ from this
 estimate. Re-observe after navigation, scrolling, or animation before using the
 point with `tapAt`.
+
+### Screenshot delivery to local and remote clients
+
+For a local client with access to the AutoMobile host filesystem, `observe` returns
+the screenshot path in its structured observation. This remains the default: omitting
+`includeScreenshotImage` or setting it to `false` never reads or embeds image bytes.
+Use `screenshot: "settled"` when the path must correspond to the completed observation.
+
+For a remote client that cannot read that path, call
+`observe({ screenshot: "settled", includeScreenshotImage: true })`. The tool keeps
+the structured observation and its path, and adds an MCP image content block with
+the exact captured bytes and the observation's reported MIME type when available
+(otherwise detected from bytes or file extension). Setting `includeScreenshotImage:
+true` alone also selects settled capture. It cannot be combined with explicit
+`screenshot: "async"` or `"none"`.
+
+Inline delivery supports PNG, JPEG, and WebP, with a 5 MiB file limit. The
+structured result includes `screenshotImage: { included: true, mimeType, sizeBytes }`
+when delivery succeeds. If the path is missing, the image exceeds the limit,
+its format is unsupported, or reading fails, the observation still returns with
+`screenshotImage: { included: false, reason, sizeBytes?, capBytes? }` and its
+usual screenshot path when available. Use that path (local clients) or the
+observation screenshot resource (remote clients) for the completed capture.
+Cancellation before or during delivery stops the response. The opt-in can substantially increase MCP
+response size, so use it only when the client needs image bytes in the tool result.
 
 | Tool                                 | What it does                                                              |
 | ------------------------------------ | ------------------------------------------------------------------------- |

@@ -194,7 +194,10 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
             } else if request.contains("GET /sdk-events") {
                 self.handleSdkEventsGet()
             } else {
-                self.receiveHTTPUpgrade()
+                let response = Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                self.channel.send(response) { [weak self] _ in
+                    self?.channel.cancel()
+                }
             }
         }
     }

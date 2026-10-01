@@ -10130,6 +10130,12 @@
             ]
           }
         },
+        "userId": {
+          "description": "Android user ID",
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]

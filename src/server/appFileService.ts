@@ -35,6 +35,7 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { shellQuote } from "../utils/shellQuote";
+import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { logger } from "../utils/logger";
 import { prepareFileSource } from "./fileSourcePreparation";
 import { getSharedStorageService, type SharedStorageService } from "./sharedStorageService";
@@ -58,6 +59,7 @@ export type LegacyPutAppFileRequest = Omit<LegacyPutAppFileArgs, "device"> & {
 
 export interface PutAppFileProviderRequest {
   device: BootedDevice;
+  userId?: number;
   target: PutAppFileTarget;
   destinationPath: string;
   sourcePath: string;
@@ -67,11 +69,13 @@ export interface PutAppFileProviderRequest {
 
 export interface AppFileProviderListRequest extends AppFileListRequest {
   device: BootedDevice;
+  userId?: number;
 }
 
 export interface AppFileProviderReadRequest extends AppFileReadRequest {
   device: BootedDevice;
   path: string;
+  userId?: number;
 }
 
 export interface AppFileWriteProvider {
@@ -331,6 +335,7 @@ function buildProviderRequests(
         : target;
     return {
       device: request.device,
+      userId: request.userId,
       target: providerTarget,
       destinationPath: file.destinationPath,
       sourcePath: source.path,
@@ -455,6 +460,7 @@ class DefaultAppFileService implements AppFileService {
       deviceId: device.deviceId,
       appId,
       container: request.container,
+      userId: request.userId,
     });
   }
 
@@ -475,6 +481,7 @@ class DefaultAppFileService implements AppFileService {
       appId,
       container: request.container,
       path,
+      userId: request.userId,
     });
   }
 
@@ -527,6 +534,21 @@ class DefaultAppFileService implements AppFileService {
     }
     return provider;
   }
+}
+
+async function androidRunAsPrefix(
+  adb: AdbExecutor,
+  appId: string,
+  userId: number | undefined,
+): Promise<string> {
+  if (userId !== undefined && (!Number.isSafeInteger(userId) || userId < 0)) {
+    throw new ActionableError("Android userId must be a non-negative safe integer.");
+  }
+  const resolvedUserId =
+    userId === undefined
+      ? undefined
+      : (await new AndroidUserTargetResolver(adb).resolve({ explicitUserId: userId })).userId;
+  return `shell run-as ${shellQuote(appId)}${resolvedUserId ? ` --user ${resolvedUserId}` : ""}`;
 }
 
 class AndroidAppFileProvider
@@ -586,6 +608,7 @@ class AndroidAppFileProvider
       return;
     }
 
+    const runAs = await androidRunAsPrefix(adb, appTarget.appId, request.userId);
     const tempDevicePath = `/data/local/tmp/automobile-${this.idGenerator.next()}-${posix.basename(request.destinationPath)}`;
     await executeAndroidAppFileCommand(
       adb,
@@ -606,7 +629,7 @@ class AndroidAppFileProvider
         `chmod 600 ${shellQuote(target.relativePath)}`;
       await executeAndroidAppFileCommand(
         adb,
-        `shell run-as ${shellQuote(appTarget.appId)} sh -c ${shellQuote(command)}`,
+        `${runAs} sh -c ${shellQuote(command)}`,
         {
           device: request.device,
           appId: appTarget.appId,
@@ -647,6 +670,10 @@ class AndroidAppFileProvider
         ? posix.dirname(base.absolutePath)
         : posix.dirname(base.relativePath);
     const script = `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -exec stat -c '%F|%s|%Y|%n' {} \\; ; fi`;
+    const runAs =
+      base.kind === "external"
+        ? undefined
+        : await androidRunAsPrefix(adb, request.appId, request.userId);
     const stdout =
       base.kind === "external"
         ? (
@@ -670,7 +697,7 @@ class AndroidAppFileProvider
         : (
             await executeAndroidAppFileCommand(
               adb,
-              `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(script)}`,
+              `${runAs} sh -c ${shellQuote(script)}`,
               {
                 device: request.device,
                 appId: request.appId,
@@ -716,6 +743,10 @@ class AndroidAppFileProvider
       );
     }
 
+    const runAs =
+      target.kind === "external"
+        ? undefined
+        : await androidRunAsPrefix(adb, request.appId, request.userId);
     const stdout =
       target.kind === "external"
         ? (
@@ -739,7 +770,7 @@ class AndroidAppFileProvider
         : (
             await executeAndroidAppFileCommand(
               adb,
-              `shell run-as ${shellQuote(request.appId)} base64 ${shellQuote(target.relativePath)}`,
+              `${runAs} base64 ${shellQuote(target.relativePath)}`,
               {
                 device: request.device,
                 appId: request.appId,
@@ -795,6 +826,7 @@ class AndroidUserFilesProvider implements AppFileWriteProvider {
     }
     const result = await this.sharedStorageService.stage({
       device: request.device,
+      ...(request.userId === undefined ? {} : { explicitUserId: request.userId }),
       namespace: request.target.namespace,
       reset: request.target.reset,
       indexMedia: request.target.indexMedia ?? false,
@@ -859,6 +891,7 @@ class AndroidMediaLibraryProvider implements AppFileWriteProvider {
     }
     const result = await this.sharedStorageService.stage({
       device: request.device,
+      ...(request.userId === undefined ? {} : { explicitUserId: request.userId }),
       namespace: ANDROID_MEDIA_LIBRARY_NAMESPACE,
       files: requests.map((file) => ({
         sourcePath: file.sourcePath,

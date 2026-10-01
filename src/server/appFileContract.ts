@@ -118,6 +118,7 @@ export interface PutAppFileInput {
 export interface PutAppFileArgs {
   target: PutAppFileTarget;
   files: PutAppFileInput[];
+  userId?: number;
   /** Internal compatibility marker populated by the legacy-shape preprocessor. */
   legacySingleFile?: boolean;
   platform?: Platform;
@@ -131,6 +132,7 @@ export interface PutAppFileArgs {
 export interface LegacyPutAppFileArgs {
   appId: string;
   container: AppFileContainer;
+  userId?: number;
   destinationPath: string;
   sourcePath?: string;
   contentText?: string;
@@ -178,6 +180,7 @@ export interface AppFileListRequest {
   deviceId: string;
   appId: string;
   container: AppFileContainer;
+  userId?: number;
 }
 
 export interface AppFileListEntry {
@@ -365,6 +368,7 @@ const canonicalPutAppFileSchema = addDeviceTargetingToSchema(
         mediaLibraryTargetSchema,
       ]),
       files: z.array(putAppFileInputSchema).min(1).describe("Files to write"),
+      userId: z.number().int().nonnegative().safe().optional().describe("Android user ID"),
       // This marker is populated only by the compatibility preprocessor and is
       // removed from the advertised schema below.
       legacySingleFile: z.literal(true).optional(),

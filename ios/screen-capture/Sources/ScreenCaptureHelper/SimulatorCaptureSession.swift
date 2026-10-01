@@ -338,7 +338,7 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     /// Encode-mode screen path (issue #4788). Converges the ScreenCaptureKit
-    /// output size to the Level 4.2 macroblock-budgeted encode resolution — so
+    /// output size to the Level 4.2 and quality-capped encode resolution — so
     /// SCK does the downscale, not a separate stage — then feeds the delivered
     /// 420v buffer straight to VideoToolbox. On a size change the encoder is torn
     /// down and recreated (seamless reconfig); the new session's first frame is a
@@ -351,7 +351,8 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate,
     ) {
         guard let pipeline = currentPipeline() else { return }
         let target = H264EncodeMath.resolveEncoderScale(
-            H264EncodeMath.EncoderSize(width: width, height: height)
+            H264EncodeMath.EncoderSize(width: width, height: height),
+            maxLongSide: encodeSettings?.maxLongSide
         ) ?? H264EncodeMath.EncoderSize(width: width, height: height)
 
         // Ask SCK to deliver the encode resolution. Until it does, skip encoding

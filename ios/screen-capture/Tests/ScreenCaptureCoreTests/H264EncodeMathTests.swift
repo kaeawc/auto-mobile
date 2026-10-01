@@ -1,5 +1,5 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 /// Pins the in-helper H.264 resolution/bitrate arithmetic (issue #4788) against
 /// the shared golden vectors in `test/fixtures/h264-level42-scale-golden-vectors.json`.
@@ -39,7 +39,9 @@ final class H264EncodeMathTests: XCTestCase {
     private func loadGolden() throws -> Golden {
         // <repo>/ios/screen-capture/Tests/ScreenCaptureCoreTests/<thisFile>.
         var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { root.deleteLastPathComponent() }
+        for _ in 0 ..< 5 {
+            root.deleteLastPathComponent()
+        }
         let fixture = root
             .appendingPathComponent("test")
             .appendingPathComponent("fixtures")
@@ -97,6 +99,35 @@ final class H264EncodeMathTests: XCTestCase {
                 H264EncodeMath.maxMacroblocksPerFrame
             )
         }
+    }
+
+    func testPresetLongSideCapPreservesAspectRatioAndNeverUpscales() throws {
+        let portrait = H264EncodeMath.EncoderSize(width: 750, height: 1334)
+        XCTAssertEqual(
+            H264EncodeMath.resolveEncoderScale(portrait, maxLongSide: 540),
+            H264EncodeMath.EncoderSize(width: 302, height: 540)
+        )
+        XCTAssertNil(H264EncodeMath.resolveEncoderScale(
+            H264EncodeMath.EncoderSize(width: 320, height: 480), maxLongSide: 540
+        ))
+        XCTAssertEqual(
+            H264EncodeMath.resolveEncoderScale(
+                H264EncodeMath.EncoderSize(width: 1334, height: 750), maxLongSide: 720
+            ),
+            H264EncodeMath.EncoderSize(width: 720, height: 404)
+        )
+        let large = H264EncodeMath.resolveEncoderScale(
+            H264EncodeMath.EncoderSize(width: 3840, height: 2160), maxLongSide: 1080
+        )
+        XCTAssertNotNil(large)
+        XCTAssertLessThanOrEqual(try max(XCTUnwrap(large?.width), XCTUnwrap(large?.height)), 1080)
+        XCTAssertLessThanOrEqual(
+            try H264EncodeMath.macroblocksPerFrame(
+                width: XCTUnwrap(large?.width),
+                height: XCTUnwrap(large?.height)
+            ),
+            H264EncodeMath.maxMacroblocksPerFrame
+        )
     }
 
     /// The bits-per-pixel -> bitrate arithmetic matches `defaultIosBitrateBps`

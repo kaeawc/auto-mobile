@@ -1,5 +1,5 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 /// Parsing tests for the `--encode h264` flag family (issue #4788). Without the
 /// flag the mode carries `encode: nil` — the guarantee that the raw path is
@@ -13,8 +13,12 @@ final class CommandLineOptionsEncodeTests: XCTestCase {
         let opts = try parse(["--simulator-window", "7", "--encode", "h264"])
         XCTAssertEqual(
             opts.mode,
-            .captureSimulator(windowID: 7, fps: 5, audio: false,
-                              encode: .init(bitrate: .videoToolboxDefault))
+            .captureSimulator(
+                windowID: 7,
+                fps: 5,
+                audio: false,
+                encode: .init(bitrate: .videoToolboxDefault)
+            )
         )
     }
 
@@ -22,28 +26,65 @@ final class CommandLineOptionsEncodeTests: XCTestCase {
         let opts = try parse(["--simulator-window", "7", "--encode", "h264", "--bitrate-bps", "2500000"])
         XCTAssertEqual(
             opts.mode,
-            .captureSimulator(windowID: 7, fps: 5, audio: false,
-                              encode: .init(bitrate: .explicitBps(2_500_000)))
+            .captureSimulator(
+                windowID: 7,
+                fps: 5,
+                audio: false,
+                encode: .init(bitrate: .explicitBps(2_500_000))
+            )
         )
+    }
+
+    func testEncodeWithMaxLongSide() throws {
+        let opts = try parse(["--simulator-window", "7", "--encode", "h264", "--max-long-side", "540"])
+        XCTAssertEqual(
+            opts.mode,
+            .captureSimulator(
+                windowID: 7,
+                fps: 5,
+                audio: false,
+                encode: .init(bitrate: .videoToolboxDefault, maxLongSide: 540)
+            )
+        )
+    }
+
+    func testRejectsMaxLongSideWithoutEncodeOrWithInvalidValue() {
+        XCTAssertThrowsError(try parse(["--simulator-window", "7", "--max-long-side", "540"]))
+        for value in ["0", "1", "539", "abc"] {
+            XCTAssertThrowsError(try parse(["--encode", "h264", "--max-long-side", value])) {
+                XCTAssertEqual(
+                    $0 as? CommandLineOptions.ParseError,
+                    .invalidValue(flag: "--max-long-side", value: value)
+                )
+            }
+        }
     }
 
     func testEncodeWithBitsPerPixel() throws {
         let opts = try parse(["--simulator-window", "7", "--encode", "h264", "--bits-per-pixel", "0.1"])
         XCTAssertEqual(
             opts.mode,
-            .captureSimulator(windowID: 7, fps: 5, audio: false,
-                              encode: .init(bitrate: .bitsPerPixel(0.1)))
+            .captureSimulator(
+                windowID: 7,
+                fps: 5,
+                audio: false,
+                encode: .init(bitrate: .bitsPerPixel(0.1))
+            )
         )
     }
 
     func testEncodeCarriesFpsAndAudio() throws {
         let opts = try parse([
-            "--simulator-window", "7", "--simulator-fps", "15", "--audio", "--encode", "h264"
+            "--simulator-window", "7", "--simulator-fps", "15", "--audio", "--encode", "h264",
         ])
         XCTAssertEqual(
             opts.mode,
-            .captureSimulator(windowID: 7, fps: 15, audio: true,
-                              encode: .init(bitrate: .videoToolboxDefault))
+            .captureSimulator(
+                windowID: 7,
+                fps: 15,
+                audio: true,
+                encode: .init(bitrate: .videoToolboxDefault)
+            )
         )
     }
 
@@ -55,7 +96,7 @@ final class CommandLineOptionsEncodeTests: XCTestCase {
 
     func testRejectsBitrateAndBitsPerPixelTogether() {
         XCTAssertThrowsError(try parse([
-            "--simulator-window", "7", "--encode", "h264", "--bitrate-bps", "1000", "--bits-per-pixel", "0.1"
+            "--simulator-window", "7", "--encode", "h264", "--bitrate-bps", "1000", "--bits-per-pixel", "0.1",
         ])) {
             guard case CommandLineOptions.ParseError.conflictingFlags = $0 else {
                 return XCTFail("expected conflictingFlags, got \($0)")
@@ -125,7 +166,7 @@ final class CommandLineOptionsEncodeTests: XCTestCase {
 
     func testRejectsNonPositiveBitsPerPixel() {
         XCTAssertThrowsError(try parse([
-            "--simulator-window", "7", "--encode", "h264", "--bits-per-pixel", "0"
+            "--simulator-window", "7", "--encode", "h264", "--bits-per-pixel", "0",
         ])) {
             XCTAssertEqual(
                 $0 as? CommandLineOptions.ParseError,

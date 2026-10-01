@@ -50,7 +50,7 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         onFatalError: @escaping (Error) -> Void
     ) {
         self.writer = writer
-        self.encodeSettings = encode
+        encodeSettings = encode
         self.diagnosticSink = diagnosticSink
         self.onFatalError = onFatalError
     }
@@ -61,7 +61,9 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
 
     /// Whether this session encodes H.264 in-process instead of streaming raw
     /// BGRA.
-    var isEncoding: Bool { encodeSettings != nil }
+    var isEncoding: Bool {
+        encodeSettings != nil
+    }
 
     func start(device: AVCaptureDevice) throws {
         let input = try AVCaptureDeviceInput(device: device)
@@ -77,7 +79,7 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
             // 420v (NV12) feeds VideoToolbox directly with no color conversion.
             output.videoSettings = [
                 kCVPixelBufferPixelFormatTypeKey as String:
-                    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
             ]
             // Drop policy (issue #4790): the encode path relies SOLELY on #4788's
             // encoder-input drop (`EncoderDropPolicy.shouldDropBeforeEncode`), which
@@ -106,7 +108,7 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
             // edge, 32BGRA delivery.
             output.alwaysDiscardsLateVideoFrames = true
             output.videoSettings = [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             ]
         }
 
@@ -195,9 +197,9 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
     }
 
     func captureOutput(
-        _ output: AVCaptureOutput,
+        _: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
+        from _: AVCaptureConnection
     ) {
         stateLock.lock()
         let pipeline = _pipeline
@@ -210,7 +212,7 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
     }
 
     /// Encode-mode frame path (issue #4790). Unlike the Simulator path — which
-    /// asks ScreenCaptureKit to deliver the Level 4.2 macroblock-budgeted size —
+    /// asks ScreenCaptureKit to deliver the Level 4.2 and quality-capped size —
     /// AVFoundation cannot reshape its delivery size, so the encoder is sized to
     /// the budgeted target and VideoToolbox scales the native buffer into it. On a
     /// delivered-size change the encoder is torn down and recreated (the new
@@ -220,7 +222,8 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         let target = H264EncodeMath.resolveEncoderScale(
-            H264EncodeMath.EncoderSize(width: width, height: height)
+            H264EncodeMath.EncoderSize(width: width, height: height),
+            maxLongSide: encodeSettings?.maxLongSide
         ) ?? H264EncodeMath.EncoderSize(width: width, height: height)
 
         guard pipeline.ensureEncoder(width: target.width, height: target.height) else { return }

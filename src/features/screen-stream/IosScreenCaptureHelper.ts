@@ -70,6 +70,8 @@ export interface EncodeSettings {
   /** Only H.264 exists today; the field pins the vocabulary for future codecs. */
   codec: "h264";
   bitrate: EncodeBitratePolicy;
+  /** Optional quality preset cap on the encoded frame's longer edge. */
+  maxLongSide?: number;
 }
 
 /**
@@ -662,6 +664,9 @@ function appendEncodeArgs(args: string[], encode: EncodeSettings | undefined): v
     return;
   }
   args.push("--encode", encode.codec);
+  if (encode.maxLongSide !== undefined) {
+    args.push("--max-long-side", String(encode.maxLongSide));
+  }
   switch (encode.bitrate.kind) {
     case "explicitBps":
       args.push("--bitrate-bps", String(Math.round(encode.bitrate.bps)));

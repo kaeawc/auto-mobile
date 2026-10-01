@@ -748,7 +748,32 @@ export class RealObserveScreen implements ObserveScreen {
       if (cached) {
         logger.debug(`[OBSERVE_CACHE] Found recent result in cache (${duration}ms)`);
         this.identifyCapture(cached, "cached-ok");
-        return cached;
+        // A cache read does not re-verify the hierarchy, even when the capture
+        // was verified when stored. Recompute its age in the host clock domain.
+        const freshness = computeFreshness({
+          actualTimestamp: this.resolveObservationTimestampMs(cached),
+          hostAgeBasisMs: this.resolveHostReceivedAtMs(cached),
+          now: this.timer.now(),
+        });
+        freshness.requestedAfter = cached.freshness?.requestedAfter;
+        const displayChanged =
+          (cached.displayRevision !== undefined &&
+            cached.displayRevision !== displayTransitions.revision(this.device.deviceId)) ||
+          displayTransitions.geometryChanged(this.device.deviceId, cached.screenSize);
+        if (cached.freshness?.isFresh === false) {
+          return { ...cached, freshness: { ...cached.freshness, ageMs: freshness.ageMs } };
+        }
+        return {
+          ...cached,
+          freshness: displayChanged
+            ? {
+                ...freshness,
+                isFresh: false,
+                category: "cache_age",
+                warning: "Display changed since this observation was captured; observe again.",
+              }
+            : freshness,
+        };
       }
       logger.debug(`[OBSERVE_CACHE] No cached observe result available (${duration}ms)`);
       return { ...this.createBaseResult(), error: "No cached observe result available" };

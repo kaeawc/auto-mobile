@@ -204,8 +204,8 @@ export interface ObserveResult {
   screenshotOrientation?: "native" | "display";
   /** Local path to this observation's validated settled screenshot. */
   screenshotPath?: string;
-  screenshotFormat?: "png";
-  screenshotMimeType?: "image/png";
+  screenshotFormat?: "png" | "jpeg" | "webp";
+  screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";
 
   /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)

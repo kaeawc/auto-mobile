@@ -70,6 +70,20 @@ class JimpImageTransformer {
     return this;
   }
 
+  public jpeg(options?: { quality?: number }): JimpImageTransformer {
+    if (
+      options?.quality !== undefined &&
+      (!Number.isInteger(options.quality) || options.quality < 1 || options.quality > 100)
+    ) {
+      throw new Error("JPEG quality must be an integer between 1 and 100");
+    }
+    this.pipeline.encoding = {
+      mime: "image/jpeg",
+      options: options?.quality === undefined ? undefined : { quality: options.quality },
+    };
+    return this;
+  }
+
   /**
    * Convert image to WebP format
    * @param options Configuration options
@@ -196,6 +210,10 @@ export class Image {
 
   public png(): JimpImageTransformer {
     return new JimpImageTransformer(this.buffer, this.backend, this.timer).png();
+  }
+
+  public jpeg(options?: { quality?: number }): JimpImageTransformer {
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer).jpeg(options);
   }
 
   /**

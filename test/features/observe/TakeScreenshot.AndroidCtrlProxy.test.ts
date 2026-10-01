@@ -41,7 +41,7 @@ describe("TakeScreenshot Android CtrlProxy and fallback paths", function () {
       }),
     })) as typeof AndroidCtrlProxyClient.getInstance;
     try {
-      const result = await screenshot.execute({});
+      const result = await screenshot.execute({ format: "jpeg" });
       expect(result.success).toBe(true);
       expect(result.path).toMatch(/\.jpg$/);
       expect(result.screenshotFormat).toBe("jpeg");

@@ -46,7 +46,7 @@ export type ImageOperation =
  * booleans). Concrete backends translate that intent to codec-specific flags.
  */
 export interface ImageEncoding {
-  mime: "image/png" | "image/webp";
+  mime: "image/png" | "image/jpeg" | "image/webp";
   options?: Record<string, unknown>;
 }
 

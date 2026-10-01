@@ -35,7 +35,8 @@ Usage: scripts/prepush-node.sh [--changed] [--timing]
 Run the Node pull-request gates in fail-fast order. --changed uses the
 repository's affected-unit-test runner; format, typecheck, and lint remain
 full because their repository-wide baselines and boundaries have no safe
-changed-file mode. --timing forces the unit timing budget gate on every OS.
+changed-file mode. Tool definitions drift also runs in both modes. --timing
+forces the unit timing budget gate on every OS.
 EOF
       exit 0
       ;;
@@ -102,6 +103,14 @@ stale_base_guard() {
   fi
 }
 
+tool_definitions_drift_guard() {
+  if bun scripts/generate-tool-definitions.ts --check; then
+    return 0
+  fi
+  echo "Regenerate with: bun scripts/generate-tool-definitions.ts && bunx oxfmt schemas/tool-definitions.json" >&2
+  return 1
+}
+
 db_integration_fast_path() {
   local branch_changes worktree_changes rc paths_changed
   branch_changes="$(vcs_changed_files_since_merge_base origin/main)"
@@ -122,6 +131,7 @@ run_gate "stale-base guard" stale_base_guard
 run_gate "format check" bun run format:check
 run_gate "typecheck" bun run typecheck
 run_gate "lint" bun run lint
+run_gate "tool definitions drift" tool_definitions_drift_guard
 run_gate "repository lint tests" bun test test/lint/
 run_gate "image runtime smoke" bun run test:image:bun
 

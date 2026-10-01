@@ -140,6 +140,50 @@ describe("BaseVisualChange post-action observation", () => {
     ).rejects.toThrow("Display changed");
   });
 
+  test("internal swipe skips a stale caller fence", async () => {
+    fakeObserveScreen.setObserveResult(makeObserve());
+    displayTransitions.notifyTransition("device-123", "test");
+    let ran = false;
+    const result = await createVisualChange("ios", () => 0).observedInteraction(
+      async () => {
+        ran = true;
+        return { success: true };
+      },
+      {
+        changeExpected: false,
+        skipCallerDisplayFence: true,
+        predictionContext: { toolName: "swipeOn", toolArgs: {} },
+      },
+    );
+    expect(ran).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("internal swipe retains the while-preparing display fence", async () => {
+    fakeObserveScreen.setObserveResult(makeObserve());
+    displayTransitions.notifyTransition("device-123", "test");
+    let ran = false;
+    await expect(
+      createVisualChange("ios", () => 0).observedInteraction(
+        async () => {
+          ran = true;
+          return { success: true };
+        },
+        {
+          changeExpected: false,
+          skipCallerDisplayFence: true,
+          progress: async (step) => {
+            if (step === 10) {
+              displayTransitions.notifyTransition("device-123", "test");
+            }
+          },
+          predictionContext: { toolName: "swipeOn", toolArgs: {} },
+        },
+      ),
+    ).rejects.toThrow("Display changed while preparing this action");
+    expect(ran).toBe(false);
+  });
+
   test("same-observation Duo orientation correction during tapOn preparation does not reject the panel", async () => {
     const inner = {
       key: "primary-1",

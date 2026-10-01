@@ -12,6 +12,7 @@ import { SwipeResult } from "../../../models/SwipeResult";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
+import type { RenderedDisplayRevisionReader } from "../BaseVisualChange";
 import type { RenderedObservationReader } from "../TargetDisplayAction";
 
 export type SwipeOnResolvedOptions = SwipeOnOptions & { direction: SwipeDirection };
@@ -115,6 +116,8 @@ export interface ScrollAccessibilityService {
 }
 
 export interface SwipeOnDependencies {
+  skipCallerDisplayFence?: boolean;
+  renderedDisplayRevision?: RenderedDisplayRevisionReader;
   /** Avoid post-action runner reads after an iOS lock-screen gesture fails. */
   stopAfterIosGestureFailure?: boolean;
   /** Cap the iOS gesture request inside a caller's remaining action budget. */

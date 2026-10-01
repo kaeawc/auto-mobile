@@ -93,6 +93,7 @@ function displaySwipeCoordinates(
 }
 
 export class SwipeOn extends BaseVisualChange {
+  private readonly skipCallerDisplayFence: boolean;
   private readonly stopAfterIosGestureFailure: boolean;
   private readonly iosGestureTimeoutMs?: () => number;
   private readonly lastRenderedObservation?: RenderedObservationReader;
@@ -118,7 +119,8 @@ export class SwipeOn extends BaseVisualChange {
     adb: AdbClient | null = null,
     dependencies: SwipeOnDependencies = {},
   ) {
-    super(device, adb);
+    super(device, adb, undefined, dependencies.renderedDisplayRevision);
+    this.skipCallerDisplayFence = dependencies.skipCallerDisplayFence ?? false;
     this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
     this.iosGestureTimeoutMs = dependencies.iosGestureTimeoutMs;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
@@ -684,6 +686,7 @@ export class SwipeOn extends BaseVisualChange {
         progress,
         perf,
         signal,
+        skipCallerDisplayFence: this.skipCallerDisplayFence,
         observationTimestampProvider: () => iosDispatchTimestamp,
         predictionContext: {
           toolName: "swipeOn",

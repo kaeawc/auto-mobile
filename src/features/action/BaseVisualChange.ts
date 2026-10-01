@@ -92,6 +92,10 @@ interface ObservedChangeOptions {
   tolerancePercent?: number;
   queryOptions?: ViewHierarchyQueryOptions;
   perf?: PerformanceTracker;
+  /** Internal gesture coordinates come from the current observation inside the block.
+   * Skips only the caller-revision fence; preparing and dispatch fences remain.
+   */
+  skipCallerDisplayFence?: boolean;
   skipPreviousObserve?: boolean;
   skipUiStability?: boolean;
   observationTimestampProvider?: () => number | undefined;
@@ -191,6 +195,7 @@ export class BaseVisualChange {
     const displayRevision = actionDisplayRevision();
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
     if (
+      !options.skipCallerDisplayFence &&
       COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
       callerDisplayRevision !== undefined &&
       (this.device.platform === "ios"
@@ -217,9 +222,13 @@ export class BaseVisualChange {
         }
         previousObserveResult = await perf.track("getPreviousObserve", async () => {
           const cached = await this.observeScreen.getMostRecentCachedObserveResult();
-          if (!cached?.viewHierarchy || cached.viewHierarchy.hierarchy.error) {
+          if (
+            !cached?.viewHierarchy ||
+            cached.viewHierarchy.hierarchy.error ||
+            (options.skipCallerDisplayFence && cached.freshness?.isFresh !== true)
+          ) {
             return this.observeScreen.execute({
-              freshness: "cached-ok",
+              freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
               queryOptions: options.queryOptions,
               perf,
               signal: options.signal,
@@ -230,7 +239,7 @@ export class BaseVisualChange {
       } catch {
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
-            freshness: "cached-ok",
+            freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
             queryOptions: options.queryOptions,
             perf,
             signal: options.signal,

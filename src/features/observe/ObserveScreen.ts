@@ -75,6 +75,8 @@ import {
   RealHierarchyPlatformValidator,
 } from "./HierarchyPlatformValidator";
 import { deriveIosScreenIdentity } from "./ios/IosScreenIdentity";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { NotifyutilIosLockStateProbe, type IosLockStateProbe } from "./ios/IosLockStateProbe";
 import { computeFreshness } from "./observationFreshness";
 import { SafeAreaAuditor, capLayoutWarnings } from "./audits/SafeAreaAuditor";
 import { DefaultElementParser } from "../utility/ElementParser";
@@ -519,6 +521,7 @@ export class RealObserveScreen implements ObserveScreen {
   private screenshotRecorder: ObserveScreenshotRecorder;
   private hierarchyCollector: HierarchyCollector;
   private deviceStateCollector: DeviceStateCollector;
+  private readonly iosLockStateProbe: IosLockStateProbe;
   private performanceAuditor: PerformanceAuditor;
   private accessibilityAuditor: AccessibilityAuditor;
   private accessibilityStateDetector: AccessibilityStateDetector;
@@ -685,6 +688,7 @@ export class RealObserveScreen implements ObserveScreen {
         adb: this.adb,
         timer: this.timer,
       });
+    this.iosLockStateProbe = dependencies?.iosLockStateProbe ?? new NotifyutilIosLockStateProbe();
     this.performanceAuditor =
       dependencies?.performanceAuditor ??
       new PerformanceAuditor({
@@ -802,6 +806,10 @@ export class RealObserveScreen implements ObserveScreen {
     const screenshotMode = options?.skipScreenshot
       ? "none"
       : resolveScreenshotMode(options?.screenshot);
+    const iosLockState =
+      this.device.platform === "ios" && isIosSimulatorUdid(this.device.deviceId)
+        ? this.iosLockStateProbe.read(this.device.deviceId, signal)
+        : undefined;
 
     try {
       logger.debug(
@@ -1190,6 +1198,9 @@ export class RealObserveScreen implements ObserveScreen {
         await this.deviceStateCollector.collectDeviceLock(result, signal);
       }
       this.identifyCapture(result, options?.freshness ?? "cached-ok");
+      if (iosLockState) {
+        result.deviceLock = await iosLockState;
+      }
 
       // Polls defer their cache write until ObservePoll selects the returned result.
       if (!options?.skipCache && !options?.skipRecompositionTracking) {
@@ -1232,6 +1243,9 @@ export class RealObserveScreen implements ObserveScreen {
         `Observation failed: ${errorMessage}`,
       );
       const fallback = this.createBaseResult();
+      if (iosLockState) {
+        fallback.deviceLock = await iosLockState;
+      }
       this.stampScreenSizeUnits(fallback);
       appendObserveError(fallback, {
         phase: "critical",

@@ -176,6 +176,48 @@ describe("Simctl", function () {
       expect(commandSignal?.aborted).toBe(true);
     });
 
+    test("preserves explicit cancellation without adding a default timeout", async function () {
+      const timer = new FakeTimer();
+      let commandSignal: AbortSignal | undefined;
+      mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
+        commandSignal = signal;
+        return await new Promise<ExecResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+
+      const caller = new AbortController();
+      const command = simctl.executeCommandArgs(["list", "devices"], undefined, caller.signal);
+      expect(commandSignal).toBe(caller.signal);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+
+      caller.abort(new Error("caller cancelled"));
+      await expect(command).rejects.toThrow("caller cancelled");
+    });
+
+    test("preserves ambient cancellation without adding a default timeout", async function () {
+      const timer = new FakeTimer();
+      let commandSignal: AbortSignal | undefined;
+      mockExecAsync = async (_file, _args, _maxBuffer, signal) => {
+        commandSignal = signal;
+        return await new Promise<ExecResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+
+      const caller = new AbortController();
+      const command = runWithAbortSignal(caller.signal, () =>
+        simctl.executeCommand("list devices"),
+      );
+      expect(commandSignal).toBe(caller.signal);
+      expect(timer.getPendingTimeouts()).toEqual([]);
+
+      caller.abort(new Error("request cancelled"));
+      await expect(command).rejects.toThrow("request cancelled");
+    });
+
     test("dispatches a simctl command once without a version preflight", async function () {
       const commands: Array<{ file: string; args: string[] }> = [];
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {

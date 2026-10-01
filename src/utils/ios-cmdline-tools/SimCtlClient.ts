@@ -753,7 +753,7 @@ export class SimCtlClient implements SimCtl {
     const hostArgs = splitCommandArgs(command);
     return this.executeCommandArgv(
       hostArgs,
-      timeoutMs && timeoutMs > 0 ? timeoutMs : SIMCTL_COMMAND_TIMEOUT_MS,
+      timeoutMs ?? ((signal ?? getAbortSignal()) ? undefined : SIMCTL_COMMAND_TIMEOUT_MS),
       command,
       signal,
     );
@@ -766,7 +766,7 @@ export class SimCtlClient implements SimCtl {
   ): Promise<ExecResult> {
     return this.executeCommandArgv(
       args,
-      timeoutMs && timeoutMs > 0 ? timeoutMs : SIMCTL_COMMAND_TIMEOUT_MS,
+      timeoutMs ?? ((signal ?? getAbortSignal()) ? undefined : SIMCTL_COMMAND_TIMEOUT_MS),
       args.join(" "),
       signal,
     );

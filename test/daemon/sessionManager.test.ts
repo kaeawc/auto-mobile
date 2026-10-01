@@ -174,6 +174,23 @@ test("device ownership listeners observe assignment, rebind, release, and remova
   expect(changed).toHaveLength(4);
 });
 
+test("release notifies ownership listeners after removing the session", async () => {
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
+  await manager.createSession("owner", "emulator-5554", "android");
+  const observed: Array<{ session: unknown; owner: string | null }> = [];
+  manager.onDeviceOwnershipChange((deviceId) => {
+    observed.push({
+      session: manager.getSession("owner"),
+      owner: manager.getSessionForDevice(deviceId),
+    });
+  });
+
+  await manager.releaseSession("owner", "explicit-release");
+
+  expect(observed).toEqual([{ session: null, owner: null }]);
+  manager.stopCleanupTimer();
+});
+
 test("invalidateAutomationReadiness downgrades a session and ignores unknown ids", async () => {
   const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
   await manager.createSession("lost-service", "emulator-5554", "android");

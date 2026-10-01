@@ -245,6 +245,9 @@ export type A11yPinchResult = GestureTimingResult;
 /** Set text result from accessibility service */
 export interface A11ySetTextResult extends BaseResult {
   partialApplication?: boolean;
+  warning?: string;
+  caretPlaced?: boolean;
+  resultingTextLength?: number;
 }
 
 /** IME action result from accessibility service */

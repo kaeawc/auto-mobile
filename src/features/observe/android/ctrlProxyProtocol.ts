@@ -192,6 +192,8 @@ export interface RequestInsertTextMessage {
   type: "request_insert_text";
   requestId: string;
   text: string;
+  expectedSuffix?: string;
+  acceptsCaretNotPlaced?: boolean;
 }
 
 /** `@SerialName("request_commit_text")` → `RequestCommitText` */

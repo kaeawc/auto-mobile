@@ -270,7 +270,13 @@ class CtrlProxyMessageHandler(
             request.frameContext,
           )
         }
-      is RequestInsertText -> actions.requestInsertText(request.requestId, request.text)
+      is RequestInsertText ->
+        actions.requestInsertText(
+          request.requestId,
+          request.text,
+          request.expectedSuffix,
+          request.acceptsCaretNotPlaced,
+        )
       is RequestCommitText ->
         actions.requestCommitText(
           request.requestId,

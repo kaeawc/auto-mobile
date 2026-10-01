@@ -7,7 +7,7 @@
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { BaseResult } from "../shared/types";
-import type { DelegateContext } from "./types";
+import type { A11ySetTextResult, DelegateContext } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
@@ -57,12 +57,17 @@ export class CtrlProxyText extends SharedTextDelegate {
     text: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-  ): Promise<BaseResult> {
-    return sendCommand<BaseResult>(this.context, {
+    options?: { expectedSuffix?: string; acceptsCaretNotPlaced?: boolean },
+  ): Promise<A11ySetTextResult> {
+    return sendCommand<A11ySetTextResult>(this.context, {
       idPrefix: "insertText",
       responseType: "insert_text",
       messageType: "request_insert_text",
-      params: { text },
+      params: {
+        text,
+        acceptsCaretNotPlaced: options?.acceptsCaretNotPlaced ?? true,
+        ...(options?.expectedSuffix ? { expectedSuffix: options.expectedSuffix } : {}),
+      },
       timeoutMs,
       perf,
       errorLabel: "Insert text",

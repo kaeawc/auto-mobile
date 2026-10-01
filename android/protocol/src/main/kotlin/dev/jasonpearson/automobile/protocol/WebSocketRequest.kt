@@ -201,6 +201,8 @@ data class RequestSetText(
 data class RequestInsertText(
   override val requestId: String? = null,
   val text: String,
+  val expectedSuffix: String? = null,
+  val acceptsCaretNotPlaced: Boolean = false,
 ) : WebSocketRequest()
 
 @Serializable

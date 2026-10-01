@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
+import { android, createSendKeysHarness, observer as harnessObserver } from "./SendKeysTestHarness";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
   DefaultSendKeysCommandExecutor,
@@ -2250,5 +2251,55 @@ describe("DefaultSendKeysCommandExecutor", () => {
     ).rejects.toThrow();
 
     expect(calls).toEqual(["clear"]);
+  });
+});
+
+test("type copies a11y insert warnings into command results and sendKeys joins them", async () => {
+  const h = createSendKeysHarness(android);
+  h.client.insert = async () => ({ success: true, warning: "caret warning" });
+  const sendKeys = new SendKeys(android, undefined, {
+    executor: h.executor,
+    observer: harnessObserver,
+    timestampProvider: { now: async () => 0 },
+  });
+  const result = await sendKeys.execute([
+    { action: "type", text: "👍🏽", mode: "a11y" },
+    { action: "type", text: "é", mode: "a11y" },
+  ]);
+  expect(result).toMatchObject({
+    success: true,
+    warning: "caret warning caret warning",
+    commands: [
+      { success: true, warning: "caret warning" },
+      { success: true, warning: "caret warning" },
+    ],
+  });
+});
+
+test("sendKeys retains warnings from the failed command and preceding successful commands", async () => {
+  const h = createSendKeysHarness(android);
+  let calls = 0;
+  h.client.insert = async () =>
+    ++calls === 1
+      ? { success: true, warning: "earlier warning" }
+      : { success: false, warning: "failed command warning", error: "write failed" };
+  const sendKeys = new SendKeys(android, undefined, {
+    executor: h.executor,
+    observer: harnessObserver,
+    timestampProvider: { now: async () => 0 },
+  });
+  expect(
+    await sendKeys.execute([
+      { action: "type", text: "é", mode: "a11y" },
+      { action: "type", text: "👍🏽", mode: "a11y" },
+    ]),
+  ).toMatchObject({
+    success: false,
+    warning: "earlier warning failed command warning",
+    error: "write failed",
+    commands: [
+      { warning: "earlier warning" },
+      { success: false, warning: "failed command warning" },
+    ],
   });
 });

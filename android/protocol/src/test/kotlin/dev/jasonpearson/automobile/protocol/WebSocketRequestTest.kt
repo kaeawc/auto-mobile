@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
@@ -208,11 +210,32 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize request_insert_text with expectedSuffix`() {
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text","requestId":"id","text":"t","expectedSuffix":"ab"}"""
+      )
+    assertIs<RequestInsertText>(request)
+    assertEquals("ab", request.expectedSuffix)
+  }
+
+  @Test
+  fun `deserialize request_insert_text capability opt in`() {
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text","text":"t","acceptsCaretNotPlaced":true}"""
+      ) as RequestInsertText
+    assertTrue(request.acceptsCaretNotPlaced)
+  }
+
+  @Test
   fun `deserialize request_insert_text`() {
     val message = """{"type":"request_insert_text","requestId":"insert-1","text":"Hello World"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestInsertText>(request)
+    assertEquals(null, request.expectedSuffix)
+    assertFalse(request.acceptsCaretNotPlaced)
     assertEquals("insert-1", request.requestId)
     assertEquals("Hello World", request.text)
   }

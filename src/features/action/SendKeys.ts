@@ -232,6 +232,9 @@ interface SendKeysRouting {
 
 export type TextActionResult = {
   success: boolean;
+  warning?: string;
+  caretPlaced?: boolean;
+  resultingTextLength?: number;
   error?: string;
   partialApplication?: boolean;
   committedGraphemes?: number;
@@ -240,7 +243,10 @@ export type TextActionResult = {
 
 export interface SendKeysTextClient {
   replace(text: string): Promise<TextActionResult>;
-  insert(text: string): Promise<TextActionResult>;
+  insert(
+    text: string,
+    options?: { expectedSuffix?: string; acceptsCaretNotPlaced?: boolean },
+  ): Promise<TextActionResult>;
   clear(): Promise<TextActionResult>;
   ime(action: ImeAction, signal?: AbortSignal, onDispatch?: () => void): Promise<TextActionResult>;
   supportsImeCommit(): Promise<boolean>;
@@ -255,6 +261,15 @@ export interface SendKeysTextClient {
     signal?: AbortSignal,
     delivery?: "commit" | "keyEvents",
   ): Promise<TextActionResult>;
+}
+
+interface AndroidEventAllProgress {
+  mutated: boolean;
+  committedGraphemes: number;
+  pendingKeyText: string;
+  warnings: string[];
+  lastInsert?: TextActionResult;
+  sinceLastInsertEvents: boolean;
 }
 
 type DefaultImeReadResult =
@@ -344,6 +359,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         ...baseResult,
         success: result.success,
         error: result.error,
+        ...this.textWarningFields(result),
         ...(result.partialApplication ? { partialApplication: true } : {}),
         committedGraphemes: result.committedGraphemes,
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
@@ -1141,16 +1157,34 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return initialResult;
     }
 
+    if (initialResult.caretPlaced === false) {
+      return markPartialAfterMutation({
+        ...initialResult,
+        success: false,
+        error:
+          "eventLast requires a real tail key event, but the prefix insert could not place the caret; remaining text was not sent",
+      });
+    }
     const eventFailure = await this.executeKeyEventPlanSafely(
       split.plan,
       operation === "replace" || prefix.length > 0,
       signal,
     );
     if (eventFailure) {
-      return eventFailure;
+      return this.withTextWarnings(eventFailure, [initialResult.warning]);
     }
-    const suffixResult = suffix ? await this.textClient.insert(suffix) : { success: true };
-    return markPartialAfterMutation(suffixResult);
+    try {
+      const suffixResult = suffix
+        ? await this.textClient.insert(suffix, { expectedSuffix: chars[split.index] })
+        : { success: true };
+      return this.withTextWarnings(markPartialAfterMutation(suffixResult), [initialResult.warning]);
+    } catch (error) {
+      logger.warn("[SendKeys] eventLast suffix insertion failed", error);
+      return this.withTextWarnings(
+        { success: false, partialApplication: true, error: errorMessage(error) },
+        [initialResult.warning],
+      );
+    }
   }
 
   private async findLastKeyEvent(
@@ -1205,49 +1239,155 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!clearResult.success) {
       return clearResult;
     }
-    return this.executeAndroidEventAllCharacters(graphemes, operation === "replace", signal);
+    return this.executeAndroidEventAllCharacters(
+      graphemes,
+      operation === "replace",
+      operation === "replace",
+      signal,
+    );
+  }
+
+  private withTextWarnings(
+    result: TextActionResult,
+    warnings: Array<string | undefined>,
+  ): TextActionResult {
+    const combined = [...warnings, result.warning].filter((warning) => warning);
+    return { ...result, ...(combined.length ? { warning: combined.join(" ") } : {}) };
+  }
+
+  private textWarningFields(result: TextActionResult): Pick<TextActionResult, "warning"> {
+    return result.warning ? { warning: result.warning } : {};
   }
 
   private async executeAndroidEventAllCharacters(
     graphemes: string[],
     previouslyMutated: boolean,
+    replacing: boolean,
     signal?: AbortSignal,
   ): Promise<TextActionResult> {
-    let mutated = previouslyMutated;
-    let committedGraphemes = 0;
+    const progress: AndroidEventAllProgress = {
+      mutated: previouslyMutated,
+      committedGraphemes: 0,
+      pendingKeyText: "",
+      warnings: [],
+      sinceLastInsertEvents: false,
+    };
     for (let index = 0; index < graphemes.length; index++) {
       signal?.throwIfAborted();
       const plan = await this.getEventAllKeyEventPlan(graphemes[index] ?? "");
       if (plan) {
-        const eventFailure = await this.executeKeyEventPlanSafely(plan, mutated, signal);
+        const eventFailure = await this.executeKeyEventPlanSafely(plan, progress.mutated, signal);
         if (eventFailure) {
-          return {
-            ...eventFailure,
-            error: `eventAll could not deliver grapheme ${graphemeCodePoints([graphemes[index] ?? ""])}: ${eventFailure.error ?? "unknown error"}`,
-            committedGraphemes,
-          };
+          return this.withTextWarnings(
+            {
+              ...eventFailure,
+              error: `eventAll could not deliver grapheme ${graphemeCodePoints([graphemes[index] ?? ""])}: ${eventFailure.error ?? "unknown error"}`,
+              committedGraphemes: progress.committedGraphemes,
+            },
+            progress.warnings,
+          );
         }
-        mutated = true;
-        committedGraphemes++;
+        progress.mutated = true;
+        progress.committedGraphemes++;
+        progress.pendingKeyText += graphemes[index];
+        progress.sinceLastInsertEvents = true;
         continue;
       }
-
       const runStart = index;
-      while (
-        index + 1 < graphemes.length &&
-        !(await this.getEventAllKeyEventPlan(graphemes[index + 1] ?? ""))
-      ) {
-        index++;
-      }
-      const run = graphemes.slice(runStart, index + 1);
-      const insertResult = await this.insertGraphemeRun(run, committedGraphemes, mutated);
+      index = await this.eventAllInsertRunEnd(graphemes, index);
+      const insertResult = await this.insertEventAllRun(
+        graphemes.slice(runStart, index + 1),
+        progress,
+      );
       if (!insertResult.success) {
         return insertResult;
       }
-      mutated = true;
-      committedGraphemes += run.length;
+      // Within this type command, an unknown caret prohibits further key events.
+      if (insertResult.caretPlaced === false) {
+        const remainder = await this.insertEventAllRemainder(
+          graphemes.slice(index + 1),
+          progress,
+          signal,
+        );
+        if (!remainder.success) {
+          return remainder;
+        }
+        break;
+      }
     }
-    return { success: true };
+    return this.finishEventAll(graphemes, replacing, progress);
+  }
+
+  private async eventAllInsertRunEnd(graphemes: string[], index: number): Promise<number> {
+    while (
+      index + 1 < graphemes.length &&
+      !(await this.getEventAllKeyEventPlan(graphemes[index + 1] ?? ""))
+    ) {
+      index++;
+    }
+    return index;
+  }
+
+  private async insertEventAllRun(
+    run: string[],
+    progress: AndroidEventAllProgress,
+  ): Promise<TextActionResult> {
+    const result = await this.insertGraphemeRun(
+      run,
+      progress.committedGraphemes,
+      progress.mutated,
+      progress.pendingKeyText ? { expectedSuffix: progress.pendingKeyText } : undefined,
+    );
+    if (result.success) {
+      progress.mutated = true;
+      progress.committedGraphemes += run.length;
+      progress.pendingKeyText = "";
+      progress.sinceLastInsertEvents = false;
+      progress.lastInsert = result;
+      if (result.warning) {
+        progress.warnings.push(result.warning);
+      }
+    }
+    return result.success ? result : this.withTextWarnings(result, progress.warnings);
+  }
+
+  private async insertEventAllRemainder(
+    rest: string[],
+    progress: AndroidEventAllProgress,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult> {
+    if (!rest.length) {
+      return { success: true };
+    }
+    signal?.throwIfAborted();
+    // insertEventAllRun reset pendingKeyText; the service supplies the remembered caret.
+    return this.insertEventAllRun(rest, progress);
+  }
+
+  private finishEventAll(
+    graphemes: string[],
+    replacing: boolean,
+    progress: AndroidEventAllProgress,
+  ): TextActionResult {
+    // Planned length only: insert has an unknown prefix, and later key events are unobserved.
+    // Old APKs omit the length. Other typing modes do not use this check.
+    if (
+      replacing &&
+      !progress.sinceLastInsertEvents &&
+      progress.lastInsert?.resultingTextLength !== undefined
+    ) {
+      const expected = graphemes.reduce((length, grapheme) => length + grapheme.length, 0);
+      const actual = progress.lastInsert.resultingTextLength;
+      if (actual !== expected) {
+        progress.warnings.push(
+          `eventAll finished with ${actual} UTF-16 units in the field, expected ${expected}; some input may have been lost or overwritten`,
+        );
+      }
+    }
+    return {
+      success: true,
+      ...(progress.warnings.length ? { warning: progress.warnings.join(" ") } : {}),
+    };
   }
 
   private async getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null> {
@@ -1260,11 +1400,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     run: string[],
     committedGraphemes: number,
     previouslyMutated: boolean,
+    options?: { expectedSuffix?: string; acceptsCaretNotPlaced?: boolean },
   ): Promise<TextActionResult> {
     const text = run.join("");
     const codePoints = graphemeCodePoints(run);
     try {
-      const result = await this.textClient.insert(text);
+      const result = await this.textClient.insert(text, options);
       if (result.success) {
         return result;
       }
@@ -1432,7 +1573,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       const client = AndroidCtrlProxyClient.getInstance(this.device, adbFactory);
       return {
         replace: async (text) => client.requestSetText(text),
-        insert: async (text) => client.requestInsertText(text),
+        insert: async (text, options) =>
+          client.requestInsertText(text, undefined, undefined, {
+            ...options,
+            acceptsCaretNotPlaced: true,
+          }),
         clear: async () => client.requestClearText(),
         ime: async (action) => client.requestImeAction(action),
         supportsImeCommit: async () =>
@@ -1813,9 +1958,7 @@ export class SendKeys {
     failure: SendKeysFailure | undefined,
     observation: ObserveResult,
   ): SendKeysResult {
-    const warnings = results
-      .filter((result) => result.success && result.warning)
-      .map((result) => result.warning);
+    const warnings = results.filter((result) => result.warning).map((result) => result.warning);
     if (failure) {
       return {
         success: false,

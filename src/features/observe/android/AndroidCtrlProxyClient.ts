@@ -435,6 +435,9 @@ interface WsKeyboardProfilesResultMessage extends WsMessageBase {
 interface WsInsertTextResultMessage extends WsRequestBase {
   type: "insert_text_result";
   partialApplication?: boolean;
+  warning?: string;
+  caretPlaced?: boolean;
+  resultingTextLength?: number;
 }
 
 interface WsImeActionResultMessage extends WsRequestBase {
@@ -1057,6 +1060,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     text: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: { expectedSuffix?: string; acceptsCaretNotPlaced?: boolean },
   ): Promise<A11ySetTextResult>;
 
   commitViaIme(
@@ -3061,8 +3065,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     text: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: { expectedSuffix?: string; acceptsCaretNotPlaced?: boolean },
   ): Promise<A11ySetTextResult> {
-    return this.text.requestInsertText(text, timeoutMs, perf);
+    return this.text.requestInsertText(text, timeoutMs, perf, options);
   }
 
   async commitViaIme(
@@ -4909,6 +4914,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         partialApplication: message.partialApplication,
+        warning: message.warning,
+        caretPlaced: message.caretPlaced,
+        resultingTextLength: message.resultingTextLength,
         perfTiming: message.perfTiming,
       })),
 

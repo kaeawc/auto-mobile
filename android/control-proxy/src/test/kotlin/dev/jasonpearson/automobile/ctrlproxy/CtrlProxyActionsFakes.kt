@@ -335,6 +335,16 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun requestInsertText(requestId: String?, text: String) =
     record("requestInsertText", requestId, text)
 
+  override fun requestInsertText(requestId: String?, text: String, expectedSuffix: String?) =
+    record("requestInsertText", requestId, text, expectedSuffix)
+
+  override fun requestInsertText(
+    requestId: String?,
+    text: String,
+    expectedSuffix: String?,
+    acceptsCaretNotPlaced: Boolean,
+  ) = record("requestInsertText", requestId, text, expectedSuffix, acceptsCaretNotPlaced)
+
   override fun requestCommitText(requestId: String?, text: String, priorImeId: String?) =
     record("requestCommitText", requestId, text, priorImeId)
 

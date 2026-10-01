@@ -307,6 +307,55 @@ describe("NavigationRetention prune", () => {
     expect(node?.screenshot_path).toBe("/tmp/shot-home.webp");
   });
 
+  test("rechecks protection before accepting an empty screenshot batch", async () => {
+    const nodeId = await seedNode("Old", 100);
+    await repo.updateNodeScreenshotById(nodeId, "/tmp/old.webp");
+    const oldBuild = await buildKey(APP, 1);
+    const activeBuild = await buildKey(APP, 2);
+    await nodeObs(nodeId, oldBuild, "old", 100);
+    const activeNodeId = await seedNode("Active", 10_000);
+    await nodeObs(activeNodeId, activeBuild, "active", 10_000);
+    let fullReads = 0;
+    const summary = await retention(CONFIG, undefined, async (database, keys, apps) => {
+      if (apps === undefined && ++fullReads === 1) {
+        return [oldBuild];
+      }
+      return computeProtectedBuildKeyIds(database, keys, apps);
+    }).prune(10_000);
+
+    expect(summary.screenshotsCleared).toBe(1);
+    expect(removed).toEqual(["/tmp/old.webp"]);
+  });
+
+  test("yields and stops when the protected set keeps flapping", async () => {
+    const nodeId = await seedNode("Home", 100);
+    await repo.updateNodeScreenshotById(nodeId, "/tmp/flap.webp");
+    const firstBuild = await buildKey(APP, 1);
+    const secondBuild = await buildKey(APP, 2);
+    await nodeObs(nodeId, firstBuild, "active", 100);
+    let fullReads = 0;
+    let yields = 0;
+    const summary = await retention(
+      { ...CONFIG, structureTtlMs: 10_000_000 },
+      async () => {
+        yields++;
+      },
+      async (database, keys, apps) => {
+        if (apps !== undefined) {
+          return computeProtectedBuildKeyIds(database, keys, apps);
+        }
+        if (++fullReads > 100) {
+          throw new Error("protection retry did not terminate");
+        }
+        return fullReads % 2 === 1 ? [firstBuild] : [secondBuild];
+      },
+    ).prune(10_000);
+
+    expect(summary.screenshotsCleared).toBe(0);
+    expect(yields).toBeGreaterThan(0);
+    expect(fullReads).toBeLessThan(100);
+  });
+
   test("clears stale screenshots in bounded batches (oversized UPDATE cannot form)", async () => {
     // Node cardinality is not bounded by the observation caps, so the stale-
     // screenshot UPDATE must batch. chunkSize 2 forces several UPDATEs of <= 2 ids.
@@ -351,6 +400,24 @@ describe("NavigationRetention prune", () => {
       .select("session_uuid")
       .execute();
     expect(rows.map((row) => row.session_uuid)).toEqual(["active"]);
+  });
+
+  test("rechecks protection before accepting an empty node TTL batch", async () => {
+    const nodeId = await seedNode("Home", 100);
+    const oldBuild = await buildKey(APP, 1);
+    const activeBuild = await buildKey(APP, 2);
+    await nodeObs(nodeId, oldBuild, "old", 100);
+    await nodeObs(nodeId, activeBuild, "active", 10_000);
+    let fullReads = 0;
+    const summary = await retention(CONFIG, undefined, async (database, keys, apps) => {
+      if (apps === undefined && ++fullReads === 2) {
+        return [oldBuild];
+      }
+      return computeProtectedBuildKeyIds(database, keys, apps);
+    }).prune(10_000);
+
+    expect(summary.nodeObservationsDeleted).toBe(1);
+    expect(await countNodeObs()).toBe(1);
   });
 
   test("prunes old node + edge observations, keeps recent ones", async () => {
@@ -628,10 +695,10 @@ describe("NavigationRetention prune", () => {
         const protectedIds = await computeProtectedBuildKeyIds(database, buildKeys, scopedAppIds);
         if (scopedAppIds === undefined) {
           fullProtectedReads += 1;
-          // With empty screenshot/TTL tiers, the fifth full read is the global
+          // With empty screenshot/TTL tiers, the ninth full read is the global
           // eviction snapshot. Land the new app-A observation after that query
           // has returned its stale result but before its first batch transaction.
-          if (fullProtectedReads === 5) {
+          if (fullProtectedReads === 9) {
             await nodeObs(appANode, appANewBuild, "a-active", 1_000);
             shiftedAppA = true;
           }
@@ -641,16 +708,12 @@ describe("NavigationRetention prune", () => {
     ).prune(1_000_000);
 
     expect(shiftedAppA).toBe(true);
-    expect(summary.nodeObservationsDeleted).toBe(1);
+    expect(summary.nodeObservationsDeleted).toBe(2);
     const survivors = await db
       .selectFrom("navigation_node_observations")
       .select("session_uuid")
       .execute();
-    expect(survivors.map((row) => row.session_uuid).sort()).toEqual([
-      "a-active",
-      "b-active",
-      "b-old",
-    ]);
+    expect(survivors.map((row) => row.session_uuid).sort()).toEqual(["a-active", "b-active"]);
   });
 
   test("cap bounds a continuously-used SINGLE-build app, keeping the most recent", async () => {
@@ -726,6 +789,85 @@ describe("NavigationRetention prune", () => {
       .select("session_uuid")
       .execute();
     expect(remaining.map((r) => r.session_uuid)).toEqual(["s6"]);
+  });
+
+  test("recounts per-app overflow after a batch yield admits a new row", async () => {
+    const nodeId = await seedNode("Home", 1);
+    const build = await buildKey(APP, 1);
+    for (let i = 0; i < 4; i++) {
+      await nodeObs(nodeId, build, `s${i}`, 100 + i);
+    }
+    let inserted = false;
+    const summary = await retention(
+      { ...CONFIG, structureTtlMs: 10_000_000, perAppMaxObservations: 2, evictionChunkSize: 1 },
+      async () => {
+        if (!inserted && (await countNodeObs()) === 3) {
+          inserted = true;
+          await nodeObs(nodeId, build, "new", 1_000);
+        }
+      },
+    ).prune(10_000);
+
+    expect(inserted).toBe(true);
+    expect(summary.nodeObservationsDeleted).toBe(3);
+    expect(await countNodeObs()).toBe(2);
+  });
+
+  test("recounts global overflow after a batch yield admits a new row", async () => {
+    const nodeId = await seedNode("Home", 1);
+    const build = await buildKey(APP, 1);
+    for (let i = 0; i < 4; i++) {
+      await nodeObs(nodeId, build, `s${i}`, 100 + i);
+    }
+    let inserted = false;
+    const summary = await retention(
+      {
+        ...CONFIG,
+        structureTtlMs: 10_000_000,
+        perAppMaxObservations: 100,
+        globalMaxObservations: 2,
+        evictionChunkSize: 1,
+      },
+      async () => {
+        if (!inserted && (await countNodeObs()) === 3) {
+          inserted = true;
+          await nodeObs(nodeId, build, "new", 1_000);
+        }
+      },
+    ).prune(10_000);
+
+    expect(inserted).toBe(true);
+    expect(summary.nodeObservationsDeleted).toBe(3);
+    expect(await countNodeObs()).toBe(2);
+  });
+
+  test("recounts a single-batch cap after a protection retry yields", async () => {
+    const nodeId = await seedNode("Home", 1);
+    const activeBuild = await buildKey(APP, 1);
+    const otherBuild = await buildKey(APP, 2);
+    await nodeObs(nodeId, activeBuild, "old", 100);
+    await nodeObs(nodeId, activeBuild, "active", 200);
+    let scopedReads = 0;
+    let inserted = false;
+    const summary = await retention(
+      { ...CONFIG, structureTtlMs: 10_000_000, perAppMaxObservations: 1 },
+      async () => {
+        if (!inserted) {
+          inserted = true;
+          await nodeObs(nodeId, activeBuild, "new", 300);
+        }
+      },
+      async (database, keys, apps) => {
+        if (apps?.[0] === APP && ++scopedReads === 1) {
+          return [otherBuild];
+        }
+        return computeProtectedBuildKeyIds(database, keys, apps);
+      },
+    ).prune(10_000);
+
+    expect(inserted).toBe(true);
+    expect(summary.nodeObservationsDeleted).toBe(2);
+    expect(await countNodeObs()).toBe(1);
   });
 
   test("global LRU cap evicts oldest across apps, sparing each app's active build", async () => {
@@ -837,6 +979,20 @@ describe("NavigationRetention prune", () => {
     expect(keys.map((k) => k.id)).toEqual([bkNew]);
   });
 
+  test("sweeps an orphan newer than the observed active build", async () => {
+    const nodeId = await seedNode("Home", 100_000);
+    const activeBuild = await buildKey(APP, 1);
+    const orphanBuild = await buildKey(APP, 2);
+    await nodeObs(nodeId, activeBuild, "active", 100_000);
+
+    const summary = await retention().prune(100_000);
+
+    expect(summary.buildKeysDeleted).toBe(1);
+    const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
+    expect(keys.map((key) => key.id)).toEqual([activeBuild]);
+    expect(keys.some((key) => key.id === orphanBuild)).toBe(false);
+  });
+
   test("sweeps orphan build keys in bounded batches", async () => {
     await repo.getOrCreateApp(APP);
     for (let version = 1; version <= 5; version += 1) {
@@ -852,6 +1008,98 @@ describe("NavigationRetention prune", () => {
     expect(yields).toBeGreaterThan(0);
     const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
     expect(keys).toHaveLength(1);
+  });
+
+  test("keeps a new app's only orphan key inserted between sweep chunks", async () => {
+    const aKeys: number[] = [];
+    for (let version = 1; version <= 7; version++) {
+      aKeys.push(await buildKey(APP, version));
+    }
+    let bKey: number | undefined;
+    const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
+      if (
+        bKey === undefined &&
+        (await db.selectFrom("navigation_build_keys").select("id").execute()).length === 5
+      ) {
+        bKey = await buildKey(APP2, 1);
+      }
+    }).prune(1_000_000);
+
+    expect(bKey).toBeDefined();
+    expect(summary.buildKeysDeleted).toBe(6);
+    const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
+    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[6], bKey].sort());
+  });
+
+  test("refreshes the sweep anchor after it is deleted between chunks", async () => {
+    const aKeys: number[] = [];
+    for (let version = 1; version <= 7; version++) {
+      aKeys.push(await buildKey(APP, version));
+    }
+    let bKey: number | undefined;
+    const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
+      if (
+        bKey === undefined &&
+        (await db.selectFrom("navigation_build_keys").select("id").execute()).length === 5
+      ) {
+        await db.deleteFrom("navigation_build_keys").where("id", "=", aKeys[6]).execute();
+        bKey = await buildKey(APP2, 1);
+      }
+    }).prune(1_000_000);
+
+    expect(bKey).toBeDefined();
+    expect(summary.buildKeysDeleted).toBe(5);
+    const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
+    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[5], bKey].sort());
+  });
+
+  test("refreshes the sweep anchor after it loses its observations between chunks", async () => {
+    const nodeId = await seedNode("Home", 100_000);
+    const aKeys: number[] = [];
+    for (let version = 1; version <= 7; version++) {
+      aKeys.push(await buildKey(APP, version));
+    }
+    await nodeObs(nodeId, aKeys[0], "active", 100_000);
+    let bKey: number | undefined;
+    const summary = await retention({ ...CONFIG, evictionChunkSize: 2 }, async () => {
+      if (
+        bKey === undefined &&
+        (await db.selectFrom("navigation_build_keys").select("id").execute()).length === 5
+      ) {
+        await db
+          .deleteFrom("navigation_node_observations")
+          .where("build_key_id", "=", aKeys[0])
+          .execute();
+        bKey = await buildKey(APP2, 1);
+      }
+    }).prune(100_000);
+
+    expect(bKey).toBeDefined();
+    expect(summary.buildKeysDeleted).toBe(6);
+    const keys = await db.selectFrom("navigation_build_keys").select("id").execute();
+    expect(keys.map((key) => key.id).sort()).toEqual([aKeys[6], bKey].sort());
+  });
+
+  test("bounds full protection reads across orphan chunks", async () => {
+    await repo.getOrCreateApp(APP);
+    for (let version = 1; version <= 21; version++) {
+      await buildKey(APP, version);
+    }
+    let fullReads = 0;
+    const summary = await retention(
+      { ...CONFIG, evictionChunkSize: 2 },
+      undefined,
+      async (database, keys, apps) => {
+        if (apps === undefined) {
+          fullReads++;
+        }
+        return computeProtectedBuildKeyIds(database, keys, apps);
+      },
+    ).prune(1_000_000);
+
+    expect(summary.buildKeysDeleted).toBe(20);
+    // Empty-tier rechecks add fixed reads; orphan chunks must add no more.
+    expect(fullReads).toBeLessThanOrEqual(10);
   });
 
   test("is idempotent: a second pass at the same clock deletes nothing", async () => {

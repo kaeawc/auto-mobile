@@ -15,27 +15,23 @@ private func recordNestedBlockOnMainActor(_ provider: PerfProvider, clock: FakeT
 }
 
 final class PerfProviderTests: XCTestCase {
-    // MARK: - The load-bearing @TaskLocal validation (STATUS §9.3)
+    // MARK: - Scope propagation across actor hops
 
-    /// The whole reason the rewrite uses `@TaskLocal` (not the reference's thread-local): a
-    /// hierarchy request opens its perf scope on the (off-main) command path, then `await`s into
-    /// the `@MainActor` `ElementLocator`, which opens a sub-block. A thread-local would split the
-    /// tree at that executor boundary (the sub-block would land as a separate root). A task-local
-    /// propagates across the `await` — same task, different executor — so the sub-block nests under
-    /// the outer block exactly as the reference's single-threaded tree did.
+    /// A hierarchy request opens its perf scope on the command path, then `await`s into the
+    /// `@MainActor` `ElementLocator`, which opens a sub-block. The task-local scope ID must survive
+    /// that executor boundary so the interval ledger can attach the sub-block to its parent.
     ///
     /// Fail-closed: the outer scope runs inside a `Task.detached` (which drops all isolation, so it
     /// executes on the cooperative pool, never the main thread — even if this class were later
     /// annotated `@MainActor`) and the sub-block is pinned to `MainActor`. The hop is therefore a
-    /// real executor boundary regardless of test-runner scheduling; a thread-local impl would split
-    /// the tree there and fail `roots.count == 1`.
-    func testTaskLocalScopeNestsAcrossMainActorHop() async throws {
+    /// real executor boundary regardless of test-runner scheduling; losing the scope ID there
+    /// would split the intervals and fail `roots.count == 1`.
+    func testScopeNestsAcrossMainActorHop() async throws {
         let clock = FakeTimeProvider()
         let provider = PerfProvider(timeProvider: clock)
 
-        // `withScope` binds the `@TaskLocal` on the detached task; the `await` into the `@MainActor`
-        // sub-block is a genuine cross-executor hop within that one task — the exact condition under
-        // which a thread-local would split the tree but a task-local must not.
+        // `withScope` binds the interval scope on the detached task; the `await` into the `@MainActor`
+        // sub-block is a genuine cross-executor hop within that one task.
         let timings = await Task.detached { () -> [PerfTiming]? in
             await provider.withScope { () async -> [PerfTiming]? in
                 XCTAssertFalse(Thread.isMainThread, "the outer scope must run off the main thread")
@@ -81,6 +77,32 @@ final class PerfProviderTests: XCTestCase {
         let children = try XCTUnwrap(roots[0].children)
         XCTAssertEqual(children.map(\.name), ["inner"])
         XCTAssertEqual(children[0].durationMs, 4)
+    }
+
+    /// Lock the serialized `perfTiming` payload shape so interval recording preserves the wire
+    /// representation, including omitted `children` on leaf intervals.
+    func testNestedIntervalsKeepPerfTimingWireShape() throws {
+        let clock = FakeTimeProvider()
+        let provider = PerfProvider(timeProvider: clock)
+
+        let timing = try XCTUnwrap(provider.withScope {
+            provider.serial("root")
+            clock.advance(by: 2)
+            provider.serial("child")
+            clock.advance(by: 3)
+            provider.end()
+            clock.advance(by: 3)
+            provider.end()
+            return provider.flush()?.first
+        })
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(timing)
+
+        XCTAssertEqual(
+            String(decoding: data, as: UTF8.self),
+            #"{"children":[{"durationMs":3,"name":"child"}],"durationMs":8,"name":"root"}"#
+        )
     }
 
     /// `trackAsync` is the variant most exposed to the `@TaskLocal`/executor change: its `defer`

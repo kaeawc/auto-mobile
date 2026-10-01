@@ -20,7 +20,6 @@
 		147EE12F840887B1DAA3117B /* RequestMultiFingerSwipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B54EAB69764CABF5E7EDDD /* RequestMultiFingerSwipe.swift */; };
 		16EF071673818EE44FF57A68 /* RequestImeAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 915298B310D89499E3D4EDBC /* RequestImeAction.swift */; };
 		1712D731FCBD0B9E778085DB /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84ADB05144552602BFFBCBE9 /* ElementLocator.swift */; };
-		187D0B93D5EFA3A85EA3F8DD /* MutablePerfEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13EF0BF4C39764DC43A487B /* MutablePerfEntry.swift */; };
 		19A4629ED3587AE65B59C3AB /* RunnerFeature.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CE328D52B98CBC997DFC84A /* RunnerFeature.swift */; };
 		1ADA688FB2AA722A8F3D4691 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87B4E19BA37655980362B1ED /* SdkDatabaseClient.swift */; };
 		1EFA58D41D7D318CED6BEDC6 /* RequestAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EB47E18423E1A008B101D2C /* RequestAction.swift */; };
@@ -390,7 +389,6 @@
 		AE3F18728033EBBB0EE739F5 /* RangeReplaceableCollection+MaxSizeEnforcement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RangeReplaceableCollection+MaxSizeEnforcement.swift"; sourceTree = "<group>"; };
 		B084E428AAE58F95B68D767D /* SdkViewNode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkViewNode.swift; sourceTree = "<group>"; };
 		B0D573E92E5E1082DCD7E97B /* RequestSetPreference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetPreference.swift; sourceTree = "<group>"; };
-		B13EF0BF4C39764DC43A487B /* MutablePerfEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MutablePerfEntry.swift; sourceTree = "<group>"; };
 		B2E262C2217BCFDEDBD29BE4 /* VoiceOverStateProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverStateProviding.swift; sourceTree = "<group>"; };
 		B3718FC01521C4607DF5B517 /* NetworkMockRuleDTO.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMockRuleDTO.swift; sourceTree = "<group>"; };
 		B3EF41BE84B004D16947F5C5 /* SdkStorageCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkStorageCapabilities.swift; sourceTree = "<group>"; };
@@ -517,7 +515,6 @@
 				6B0FF21979A287EB6DCB27FF /* HTTPRequesting.swift */,
 				5EE91327E1CDF30FE2822A6C /* MainThreadRunner.swift */,
 				45517B48E59B41FF3D502E97 /* MultiFingerSwipeDiagnostics.swift */,
-				B13EF0BF4C39764DC43A487B /* MutablePerfEntry.swift */,
 				25155DA16B0B4FAA517B15FF /* NWByteChannel.swift */,
 				C6857A73BC6AAAE5D1B811D6 /* ObjCExceptionBridge.swift */,
 				DB9DF4A4DBB37DC5084A1E80 /* ObservedAppState.swift */,
@@ -960,7 +957,6 @@
 				886D4873F0DAB203910923CF /* ListTablesResponse.swift in Sources */,
 				5E92E7A0DD1F3D051FF4B968 /* MainThreadRunner.swift in Sources */,
 				8CAB2DDDC010144CA65D84ED /* MultiFingerSwipeDiagnostics.swift in Sources */,
-				187D0B93D5EFA3A85EA3F8DD /* MutablePerfEntry.swift in Sources */,
 				80A9C386313397C265317240 /* NWByteChannel.swift in Sources */,
 				76AF1BC9492B889D1EF00682 /* NetworkErrorSimulationDTO.swift in Sources */,
 				E58F1DA1BC5CAA18BB218DC1 /* NetworkFaultRuleDTO.swift in Sources */,

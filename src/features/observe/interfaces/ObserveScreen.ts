@@ -16,6 +16,8 @@ export interface ObserveScreenExecuteOptions {
   signal?: AbortSignal;
   skipBackStack?: boolean;
   skipScreenshot?: boolean;
+  /** Defer caching an intermediate observation until its caller selects a result. */
+  skipCache?: boolean;
   /** Per-call override; omitted reads the env and persisted flag. */
   screenshot?: ScreenshotMode;
   /** Physical display panel key or role; "active" follows focus. */
@@ -68,17 +70,10 @@ export interface ObserveScreen {
    */
   processRecomposition?(observation: ObserveResult, perf?: PerformanceTracker): Promise<void>;
 
-  /**
-   * Capture the device cache generation at observation start so a deferred
-   * #6932 cache write can use the same #5884 stale-write fence as execute().
-   */
+  /** Capture the cache generation at poll start for the deferred write's stale-write fence. */
   captureCacheGeneration?(): number;
 
-  /**
-   * Persist a deferred recomposition-processed observation so cache and memory
-   * agree after #6932 settle-loop tracking. Pass the generation captured at
-   * observation start so a concurrent #5884 invalidation cannot resurrect it.
-   */
+  /** Persist the selected poll result with its observation-start generation and host time. */
   cacheObserveResult?(
     observation: ObserveResult,
     generation?: number,

@@ -43,13 +43,14 @@ export async function dispatchAndroidCoordinateTap(
   // Only the Android client accepts a dispatch callback in position seven;
   // the iOS client uses that position for an abort signal.
   const androidService = accessibilityService as CoordinateTapClient<() => void>;
+  const timeoutMs = durationMs > 3000 ? durationMs + 2000 : undefined;
   const result =
     frameContext === undefined
       ? await androidService.requestTapCoordinates(
           x,
           y,
           durationMs,
-          undefined,
+          timeoutMs,
           undefined,
           undefined,
           onDispatch,
@@ -58,7 +59,7 @@ export async function dispatchAndroidCoordinateTap(
           x,
           y,
           durationMs,
-          undefined,
+          timeoutMs,
           undefined,
           frameContext,
           onDispatch,
@@ -82,7 +83,12 @@ export async function dispatchAndroidCoordinateTap(
   logger.warn(
     `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
   );
-  await executeTouchscreenInput(adb, `tap ${x} ${y}`, undefined, signal);
+  await executeTouchscreenInput(
+    adb,
+    durationMs >= 500 ? `swipe ${x} ${y} ${x} ${y} ${durationMs}` : `tap ${x} ${y}`,
+    undefined,
+    signal,
+  );
 }
 
 /** Dispatch one iOS coordinate tap and preserve CtrlProxy's actionable failure. */
@@ -94,10 +100,11 @@ export async function dispatchIosCoordinateTap(
   frameContext?: string,
   failureLabel: "tap" | "second tap" = "tap",
 ): Promise<void> {
+  const timeoutMs = durationMs > 3000 ? durationMs + 2000 : undefined;
   const result =
     frameContext === undefined
-      ? await client.requestTapCoordinates(x, y, durationMs)
-      : await client.requestTapCoordinates(x, y, durationMs, undefined, undefined, frameContext);
+      ? await client.requestTapCoordinates(x, y, durationMs, timeoutMs)
+      : await client.requestTapCoordinates(x, y, durationMs, timeoutMs, undefined, frameContext);
   if (!result.success) {
     throw new ActionableError(`CtrlProxy iOS ${failureLabel} failed: ${result.error}`);
   }

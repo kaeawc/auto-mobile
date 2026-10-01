@@ -80,8 +80,14 @@ function createTapAt(
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   let iosCacheInvalidations = 0;
-  const androidDispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
-  const iosDispatches: Array<{ x: number; y: number; frameContext?: string }> = [];
+  const androidDispatches: Array<{
+    x: number;
+    y: number;
+    duration: number;
+    frameContext?: string;
+  }> = [];
+  const iosDispatches: Array<{ x: number; y: number; duration: number; frameContext?: string }> =
+    [];
   const unusedClient: CoordinateTapClient = {
     requestTapCoordinates: async () => ({ success: true }),
   };
@@ -91,11 +97,11 @@ function createTapAt(
     snapshotReferences,
     androidClient: unusedClient,
     iosClient: unusedClient,
-    dispatchAndroidCoordinateTap: async (_client, _adb, x, y, _duration, frameContext) => {
-      androidDispatches.push({ x, y, frameContext });
+    dispatchAndroidCoordinateTap: async (_client, _adb, x, y, duration, frameContext) => {
+      androidDispatches.push({ x, y, duration, frameContext });
     },
-    dispatchIosCoordinateTap: async (_client, x, y, _duration, frameContext) => {
-      iosDispatches.push({ x, y, frameContext });
+    dispatchIosCoordinateTap: async (_client, x, y, duration, frameContext) => {
+      iosDispatches.push({ x, y, duration, frameContext });
       onIosDispatch?.(timer);
     },
     invalidateIosCache: () => {
@@ -128,6 +134,84 @@ describe("TapAtCoordinate", () => {
     }
     expect(iosDispatches).toHaveLength(1);
   });
+  test.each([androidDevice, iosDevice])("dispatches bounded long press on %s", async (device) => {
+    const { tapAt, androidDispatches, iosDispatches } = createTapAt(device, 100, 200);
+    const result = await tapAt.execute({ x: 50, y: 100, action: "longPress", durationMs: 750 });
+    expect(result).toMatchObject({ success: true, action: "longPress", x: 50, y: 100 });
+    const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
+    expect(dispatches).toHaveLength(1);
+    expect(dispatches[0]?.duration).toBe(750);
+  });
+
+  test.each([androidDevice, iosDevice])(
+    "double taps with a fake 200ms interval on %s",
+    async (device) => {
+      const { tapAt, androidDispatches, iosDispatches, timer } = createTapAt(device, 100, 200);
+      const start = timer.now();
+      const result = await tapAt.execute({ x: 10, y: 20, action: "doubleTap" });
+      expect(result).toMatchObject({ success: true, action: "doubleTap" });
+      const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
+      expect(dispatches).toHaveLength(2);
+      expect(dispatches.map(({ x, y }) => [x, y])).toEqual([
+        [10, 20],
+        [10, 20],
+      ]);
+      expect(timer.now() - start).toBeGreaterThanOrEqual(200);
+    },
+  );
+
+  test.each([androidDevice, iosDevice])(
+    "rejects invalid gesture and ratios before dispatch on %s",
+    async (device) => {
+      const { tapAt, androidDispatches, iosDispatches } = createTapAt(device, 100, 200);
+      for (const options of [
+        { x: 101, y: 0, coordinateSpace: "percent" as const },
+        { x: Number.NaN, y: 0, coordinateSpace: "normalized" as const },
+        { x: 1.01, y: 0, coordinateSpace: "normalized" as const },
+        { x: 0, y: 0, action: "longPress" as const, durationMs: 499 },
+        { x: 0, y: 0, action: "tap" as const, durationMs: 750 },
+      ]) {
+        expect((await tapAt.execute(options)).success).toBe(false);
+      }
+      expect(androidDispatches).toHaveLength(0);
+      expect(iosDispatches).toHaveLength(0);
+    },
+  );
+
+  test.each([
+    { device: androidDevice, width: 10.5, height: 20.25 },
+    { device: androidDevice, width: 20.25, height: 10.5 },
+    { device: iosDevice, width: 10.5, height: 20.25 },
+    { device: iosDevice, width: 20.25, height: 10.5 },
+  ])(
+    "resolves percentage and normalized edges on $device.platform $width x $height",
+    async ({ device, width, height }) => {
+      const { tapAt, androidDispatches, iosDispatches } = createTapAt(device, width, height);
+      const values = [0, 0.25, 0.5, 0.75, 1];
+      for (const ratio of values) {
+        const result = await tapAt.execute({ x: ratio, y: ratio, coordinateSpace: "normalized" });
+        expect(result.success).toBe(true);
+        const percentage = await tapAt.execute({
+          x: ratio * 100,
+          y: ratio * 100,
+          coordinateSpace: "percent",
+        });
+        expect(percentage).toMatchObject({ success: true, x: result.x, y: result.y });
+        expect(Math.abs(result.x / width - ratio)).toBeLessThanOrEqual(
+          0.5 / width + Number.EPSILON,
+        );
+        expect(Math.abs(result.y / height - ratio)).toBeLessThanOrEqual(
+          0.5 / height + Number.EPSILON,
+        );
+      }
+      const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
+      expect(dispatches.map(({ x }) => x)).toEqual(
+        [...dispatches.map(({ x }) => x)].sort((a, b) => a - b),
+      );
+      expect(dispatches.at(-1)?.x).toBeLessThan(width);
+      expect(dispatches.at(-1)?.y).toBeLessThan(height);
+    },
+  );
   beforeEach(() => {
     displayTransitions.reset(androidDevice.deviceId);
     displayTransitions.reset(iosDevice.deviceId);
@@ -185,7 +269,46 @@ describe("TapAtCoordinate", () => {
       x: 30,
       y: 40,
     });
-    expect(androidDispatches).toEqual([{ x: 30, y: 40, frameContext: "frame-123" }]);
+    expect(androidDispatches).toEqual([{ x: 30, y: 40, duration: 10, frameContext: "frame-123" }]);
+  });
+
+  test("dispatches snapshot-bound long presses and double taps with gesture durations", async () => {
+    const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const captured = {
+      ...observation(100, 100),
+      display: { key: "main", role: "unknown" as const },
+      displayRevision: 0,
+    } as ObserveResult;
+    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const { tapAt, observeScreen, androidDispatches, timer } = createTapAt(
+      androidDevice,
+      100,
+      100,
+      undefined,
+      undefined,
+      references,
+    );
+    observeScreen.setObserveResult(captured);
+    expect(
+      await tapAt.execute({
+        x: 0.3,
+        y: 0.4,
+        coordinateSpace: "normalized",
+        action: "longPress",
+        durationMs: 750,
+        snapshotId: reference.snapshotId,
+      }),
+    ).toMatchObject({ success: true, action: "longPress", x: 30, y: 40 });
+    const start = timer.now();
+    expect(
+      await tapAt.execute({ x: 30, y: 40, action: "doubleTap", snapshotId: reference.snapshotId }),
+    ).toMatchObject({ success: true, action: "doubleTap" });
+    expect(androidDispatches).toEqual([
+      { x: 30, y: 40, duration: 750, frameContext: "frame-123" },
+      { x: 30, y: 40, duration: 10, frameContext: "frame-123" },
+      { x: 30, y: 40, duration: 10, frameContext: "frame-123" },
+    ]);
+    expect(timer.now() - start).toBeGreaterThanOrEqual(200);
   });
 
   test("rejects changed snapshot frame context and geometry before dispatch", async () => {
@@ -365,7 +488,7 @@ describe("TapAtCoordinate", () => {
     const result = await tapAt.execute({ x: 1.6, y: 2.5 });
 
     expect(result).toMatchObject({ success: true, x: 2, y: 3 });
-    expect(androidDispatches).toEqual([{ x: 2, y: 3, frameContext: "frame-123" }]);
+    expect(androidDispatches).toEqual([{ x: 2, y: 3, duration: 10, frameContext: "frame-123" }]);
     expect(observeScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(0);
     expect(observeScreen.getExecuteOptions()[0]?.freshness).toBe("cached-ok");
   });
@@ -376,7 +499,9 @@ describe("TapAtCoordinate", () => {
     const result = await tapAt.execute({ x: 1079.999, y: 500 });
 
     expect(result).toMatchObject({ success: true, x: 1079, y: 500 });
-    expect(androidDispatches).toEqual([{ x: 1079, y: 500, frameContext: "frame-123" }]);
+    expect(androidDispatches).toEqual([
+      { x: 1079, y: 500, duration: 10, frameContext: "frame-123" },
+    ]);
   });
 
   test("reports the clamped Android pixel when dispatch fails at the screen edge", async () => {
@@ -420,7 +545,9 @@ describe("TapAtCoordinate", () => {
     const result = await tapAt.execute({ x: 500, y: 700 });
 
     expect(result).toMatchObject({ success: true, x: 500, y: 700 });
-    expect(androidDispatches).toEqual([{ x: 500, y: 700, frameContext: "frame-123" }]);
+    expect(androidDispatches).toEqual([
+      { x: 500, y: 700, duration: 10, frameContext: "frame-123" },
+    ]);
   });
 
   test("dispatches the center of a captured Android observe bound in physical pixels", async () => {
@@ -439,7 +566,12 @@ describe("TapAtCoordinate", () => {
     expect(captured.screenSize).toEqual({ width: 1080, height: 2400 });
     expect(result).toMatchObject({ success: true, x: Math.round(x), y: Math.round(y) });
     expect(androidDispatches).toEqual([
-      { x: Math.round(x), y: Math.round(y), frameContext: captured.viewHierarchy?.frameContext },
+      {
+        x: Math.round(x),
+        y: Math.round(y),
+        duration: 10,
+        frameContext: captured.viewHierarchy?.frameContext,
+      },
     ]);
   });
 
@@ -459,7 +591,9 @@ describe("TapAtCoordinate", () => {
     expect(captured.screenSize).toEqual({ width: 393, height: 852 });
     expect(captured.viewHierarchy?.screenScale).toBe(3);
     expect(result).toMatchObject({ success: true, x, y });
-    expect(iosDispatches).toEqual([{ x, y, frameContext: captured.viewHierarchy?.frameContext }]);
+    expect(iosDispatches).toEqual([
+      { x, y, duration: 50, frameContext: captured.viewHierarchy?.frameContext },
+    ]);
   });
 
   test("uses current-orientation landscape bounds without rotating the native tap", async () => {
@@ -498,7 +632,7 @@ describe("TapAtCoordinate", () => {
     expect(landscape.screenSize).toEqual({ width: 2400, height: 1080 });
     expect(result).toMatchObject({ success: true, x: Math.round(x), y: Math.round(y) });
     expect(androidDispatches).toEqual([
-      { x: Math.round(x), y: Math.round(y), frameContext: "landscape-frame" },
+      { x: Math.round(x), y: Math.round(y), duration: 10, frameContext: "landscape-frame" },
     ]);
   });
 
@@ -508,7 +642,7 @@ describe("TapAtCoordinate", () => {
     const result = await tapAt.execute({ x: 1.25, y: 2.75 });
 
     expect(result).toMatchObject({ success: true, x: 1.25, y: 2.75 });
-    expect(iosDispatches).toEqual([{ x: 1.25, y: 2.75, frameContext: "frame-123" }]);
+    expect(iosDispatches).toEqual([{ x: 1.25, y: 2.75, duration: 50, frameContext: "frame-123" }]);
   });
 
   test("iOS tap invalidates the cache and observes from the dispatch time", async () => {
@@ -572,13 +706,15 @@ describe("TapAtCoordinate", () => {
     const android = createTapAt(androidDevice, 1080, 2400);
     const androidResult = await android.tapAt.execute({ x: 640.6, y: 1200.4 });
     expect(androidResult).toMatchObject({ success: true, x: 641, y: 1200 });
-    expect(android.androidDispatches).toEqual([{ x: 641, y: 1200, frameContext: "frame-123" }]);
+    expect(android.androidDispatches).toEqual([
+      { x: 641, y: 1200, duration: 10, frameContext: "frame-123" },
+    ]);
 
     const ios = createTapAt(iosDevice, 393, 852);
     const iosResult = await ios.tapAt.execute({ x: 20.5, y: 68.33333333333333 });
     expect(iosResult).toMatchObject({ success: true, x: 20.5, y: 68.33333333333333 });
     expect(ios.iosDispatches).toEqual([
-      { x: 20.5, y: 68.33333333333333, frameContext: "frame-123" },
+      { x: 20.5, y: 68.33333333333333, duration: 50, frameContext: "frame-123" },
     ]);
   });
 
@@ -604,7 +740,7 @@ describe("TapAtCoordinate", () => {
     }
 
     expect(iosDispatches).toEqual(
-      scaleMetadata.map(() => ({ ...logicalPoint, frameContext: "frame-123" })),
+      scaleMetadata.map(() => ({ ...logicalPoint, duration: 50, frameContext: "frame-123" })),
     );
   });
 
@@ -705,6 +841,16 @@ describe("TapAtCoordinate", () => {
     await expect(
       dispatchAndroidCoordinateTap(staleClient, adb, 1, 2, 10, "frame-123"),
     ).rejects.toThrow("Stale frame context");
+    expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
+  });
+
+  test("uses a held Android swipe if CtrlProxy cannot start a long press", async () => {
+    const adb = new FakeAdbExecutor();
+    const rejectedClient: CoordinateTapClient = {
+      requestTapCoordinates: async () => ({ success: false, error: "gesture unavailable" }),
+    };
+    await dispatchAndroidCoordinateTap(rejectedClient, adb, 1, 2, 750, "frame-123");
+    expect(adb.wasCommandExecuted("shell input touchscreen swipe 1 2 1 2 750")).toBe(true);
     expect(adb.wasCommandExecuted("shell input touchscreen tap 1 2")).toBe(false);
   });
 

@@ -2467,12 +2467,17 @@
           "minLength": 1
         },
         "x": {
-          "description": "Absolute screen x coordinate in the native observe coordinate space",
+          "description": "Screen x coordinate in the selected coordinateSpace (native by default)",
           "type": "number"
         },
         "y": {
-          "description": "Absolute screen y coordinate in the native observe coordinate space",
+          "description": "Screen y coordinate in the selected coordinateSpace (native by default)",
           "type": "number"
+        },
+        "coordinateSpace": {
+          "description": "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -13035,7 +13040,7 @@
   },
   {
     "name": "tapAt",
-    "description": "Tap one absolute platform-native screen coordinate visible through observe.",
+    "description": "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -13050,12 +13055,17 @@
           "minLength": 1
         },
         "x": {
-          "description": "Absolute screen x coordinate in the native observe coordinate space",
+          "description": "Screen x coordinate in the selected coordinateSpace (native by default)",
           "type": "number"
         },
         "y": {
-          "description": "Absolute screen y coordinate in the native observe coordinate space",
+          "description": "Screen y coordinate in the selected coordinateSpace (native by default)",
           "type": "number"
+        },
+        "coordinateSpace": {
+          "description": "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
+          "type": "string",
+          "enum": ["absolute", "normalized", "percent"]
         },
         "raw": {
           "description": "Return the raw view hierarchy instead of the compact skeleton",
@@ -13080,11 +13090,22 @@
         "device": {
           "description": "Device label",
           "type": "string"
+        },
+        "action": {
+          "description": "Coordinate gesture (default: tap)",
+          "type": "string",
+          "enum": ["tap", "longPress", "doubleTap"]
+        },
+        "durationMs": {
+          "description": "Long-press duration in milliseconds (500–10000; default 1000); only with longPress",
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 10000
         }
       },
       "required": ["x", "y"],
       "additionalProperties": false,
-      "description": "Tap one absolute point in the platform-native coordinate space returned by observe."
+      "description": "Tap, long press, or double tap a screen point. Bare x/y use the platform-native coordinate space returned by observe."
     }
   },
   {

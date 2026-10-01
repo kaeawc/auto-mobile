@@ -37,6 +37,10 @@ import {
 
 const ANDROID_TAP_DURATION_MS = 10;
 const IOS_TAP_DURATION_MS = 50;
+const DOUBLE_TAP_GAP_MS = 200;
+const LONG_PRESS_DEFAULT_MS = 1000;
+const LONG_PRESS_MIN_MS = 500;
+const LONG_PRESS_MAX_MS = 10000;
 
 // These capture-only fields are documented by the observation diff as nondeterministic between
 // captures of one unchanged Android screen. They cannot establish that a coordinate was retargeted.
@@ -50,6 +54,59 @@ const VOLATILE_TAP_LAYOUT_FIELDS = new Set([
 
 type AndroidCoordinateTapDispatch = typeof dispatchAndroidCoordinateTap;
 type IosCoordinateTapDispatch = typeof dispatchIosCoordinateTap;
+
+function tapDurationMs(options: TapAtOptions, platform: BootedDevice["platform"]): number {
+  if (options.action === "longPress") {
+    return options.durationMs ?? LONG_PRESS_DEFAULT_MS;
+  }
+  return platform === "android" ? ANDROID_TAP_DURATION_MS : IOS_TAP_DURATION_MS;
+}
+
+function gestureOptionError(options: TapAtOptions): string | undefined {
+  const { durationMs } = options;
+  const action = options.action ?? "tap";
+  if (action !== "tap" && action !== "longPress" && action !== "doubleTap") {
+    return "tapAt action is unsupported";
+  }
+  if (
+    durationMs !== undefined &&
+    (action !== "longPress" ||
+      !Number.isInteger(durationMs) ||
+      durationMs < LONG_PRESS_MIN_MS ||
+      durationMs > LONG_PRESS_MAX_MS)
+  ) {
+    return `tapAt durationMs requires longPress and must be ${LONG_PRESS_MIN_MS}–${LONG_PRESS_MAX_MS} ms`;
+  }
+  return undefined;
+}
+
+function coordinateOptionError(options: TapAtOptions): string | undefined {
+  const { x, y } = options;
+  const space = options.coordinateSpace ?? "absolute";
+  if (space !== "absolute" && space !== "normalized" && space !== "percent") {
+    return "tapAt coordinateSpace is unsupported";
+  }
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return "tapAt requires finite x and y coordinates";
+  }
+  const max = space === "normalized" ? 1 : space === "percent" ? 100 : undefined;
+  if (max !== undefined && !axesWithinRange(x, y, max)) {
+    return `tapAt ${space} coordinates must be between 0 and ${max}`;
+  }
+  return undefined;
+}
+
+function axesWithinRange(x: number, y: number, max: number): boolean {
+  return x >= 0 && x <= max && y >= 0 && y <= max;
+}
+
+function resolveAxis(value: number, size: number, space: TapAtOptions["coordinateSpace"]): number {
+  const max = space === "normalized" ? 1 : space === "percent" ? 100 : undefined;
+  if (max === undefined) {
+    return value;
+  }
+  return value === max ? size * (1 - Number.EPSILON) : (value / max) * size;
+}
 
 function hasPositiveScreenSize(screenSize: ObserveResult["screenSize"] | undefined): boolean {
   if (!screenSize) {
@@ -71,9 +128,11 @@ export function resolveTapAtCoordinates(
 ): { x: number; y: number } | { x: number; y: number; error: string } {
   const rawX = options.x;
   const rawY = options.y;
-  if (!Number.isFinite(rawX) || !Number.isFinite(rawY)) {
-    return { x: rawX, y: rawY, error: "tapAt requires finite x and y coordinates" };
+  const optionError = coordinateOptionError(options);
+  if (optionError) {
+    return { x: rawX, y: rawY, error: optionError };
   }
+  const space = options.coordinateSpace ?? "absolute";
 
   const screenSize = observeResult.screenSize;
   if (!hasPositiveScreenSize(screenSize)) {
@@ -83,15 +142,28 @@ export function resolveTapAtCoordinates(
       error: "tapAt requires a positive screenSize from a fresh observation",
     };
   }
-  if (rawX < 0 || rawX >= screenSize.width || rawY < 0 || rawY >= screenSize.height) {
+  const resolvedX = resolveAxis(rawX, screenSize.width, space);
+  const resolvedY = resolveAxis(rawY, screenSize.height, space);
+  if (
+    resolvedX < 0 ||
+    resolvedX >= screenSize.width ||
+    resolvedY < 0 ||
+    resolvedY >= screenSize.height
+  ) {
     return {
       x: rawX,
       y: rawY,
       error: `tapAt coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
     };
   }
-  const x = platform === "android" ? Math.min(Math.round(rawX), screenSize.width - 1) : rawX;
-  const y = platform === "android" ? Math.min(Math.round(rawY), screenSize.height - 1) : rawY;
+  const x =
+    platform === "android"
+      ? Math.min(Math.round(resolvedX), Math.ceil(screenSize.width) - 1)
+      : resolvedX;
+  const y =
+    platform === "android"
+      ? Math.min(Math.round(resolvedY), Math.ceil(screenSize.height) - 1)
+      : resolvedY;
   return { x, y };
 }
 
@@ -232,26 +304,28 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
     const resolved = this.resolveCoordinates(options, observation);
     if ("error" in resolved) {
-      return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
+      return {
+        success: false,
+        x: resolved.x,
+        y: resolved.y,
+        action: options.action ?? "tap",
+        error: resolved.error,
+      };
     }
     assertCurrent();
-    if (this.device.platform === "android") {
-      await executeTouchscreenInput(this.adb, `tap ${resolved.x} ${resolved.y}`, displayId, signal);
-    } else {
-      await this.iosCoordinateTap(
-        this.iosClient,
-        resolved.x,
-        resolved.y,
-        IOS_TAP_DURATION_MS,
-        observation.viewHierarchy?.frameContext,
-      );
-    }
+    await this.dispatchGesture(options, resolved, observation, signal, displayId, assertCurrent);
     const after = await this.observeScreen.execute({
       display,
       freshness: "fresh",
       signal,
     });
-    return { success: true, x: resolved.x, y: resolved.y, observation: after };
+    return {
+      success: true,
+      x: resolved.x,
+      y: resolved.y,
+      action: options.action ?? "tap",
+      observation: after,
+    };
   }
 
   async execute(
@@ -270,8 +344,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       if (options.display !== undefined) {
         return await this.executeOnDisplay(options, options.display, signal);
       }
-      const callerRevision = this.renderedDisplayRevision(this.device.deviceId);
-      if (callerRevision !== undefined && callerRevision !== transitionRevision) {
+      if (this.hasStaleCallerRevision(transitionRevision)) {
         return {
           success: false,
           x: options.x,
@@ -316,7 +389,7 @@ export class TapAtCoordinate extends BaseVisualChange {
                   this.adb,
                   resolved.x,
                   resolved.y,
-                  ANDROID_TAP_DURATION_MS,
+                  tapDurationMs(options, "android"),
                   frameContext,
                   signal,
                 );
@@ -330,14 +403,28 @@ export class TapAtCoordinate extends BaseVisualChange {
                   signal,
                 );
               }
+              await this.dispatchSecondAndroidTap(
+                options,
+                resolved,
+                frameContext,
+                transitionRevision,
+                signal,
+              );
               break;
             case "ios":
               await this.iosCoordinateTap(
                 this.iosClient,
                 resolved.x,
                 resolved.y,
-                IOS_TAP_DURATION_MS,
+                tapDurationMs(options, "ios"),
                 frameContext,
+              );
+              await this.dispatchSecondIosTap(
+                options,
+                resolved,
+                frameContext,
+                transitionRevision,
+                signal,
               );
               iosDispatchTimestamp = this.timer.now();
               this.invalidateIosCache();
@@ -346,7 +433,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               throw unsupportedPlatformError(this.device.platform, "tap at coordinates");
           }
 
-          return { success: true, x: resolved.x, y: resolved.y };
+          return { success: true, x: resolved.x, y: resolved.y, action: options.action ?? "tap" };
         },
         {
           changeExpected: false,
@@ -359,7 +446,12 @@ export class TapAtCoordinate extends BaseVisualChange {
           observationTimestampProvider: () => iosDispatchTimestamp,
           predictionContext: {
             toolName: "tapAt",
-            toolArgs: { x: options.x, y: options.y, platform: this.device.platform },
+            toolArgs: {
+              x: options.x,
+              y: options.y,
+              action: options.action ?? "tap",
+              platform: this.device.platform,
+            },
           },
         },
       );
@@ -374,6 +466,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           dispatchedCoordinates?.y ??
           (this.device.platform === "android" ? Math.round(options.y) : options.y),
         error: `Failed to tap at coordinates: ${errorMessage(error)}`,
+        action: options.action ?? "tap",
       };
     } finally {
       perf.end();
@@ -395,7 +488,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         this.adb,
         resolved.x,
         resolved.y,
-        ANDROID_TAP_DURATION_MS,
+        tapDurationMs(options, "android"),
         frameContext,
         signal,
       );
@@ -435,7 +528,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         this.adb,
         refreshed.x,
         refreshed.y,
-        ANDROID_TAP_DURATION_MS,
+        tapDurationMs(options, "android"),
         refreshedFrameContext,
         signal,
       );
@@ -457,10 +550,105 @@ export class TapAtCoordinate extends BaseVisualChange {
       : undefined;
   }
 
+  private hasStaleCallerRevision(revision: number): boolean {
+    const callerRevision = this.renderedDisplayRevision(this.device.deviceId);
+    return callerRevision !== undefined && callerRevision !== revision;
+  }
+
+  private async dispatchSecondAndroidTap(
+    options: TapAtOptions,
+    point: { x: number; y: number },
+    frameContext: string | undefined,
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (options.action !== "doubleTap") {
+      return;
+    }
+    await this.timer.sleep(DOUBLE_TAP_GAP_MS);
+    throwIfAborted(signal);
+    this.assertDisplayRevisionCurrent(revision);
+    await this.androidCoordinateTap(
+      this.androidClient,
+      this.adb,
+      point.x,
+      point.y,
+      tapDurationMs(options, "android"),
+      frameContext,
+      signal,
+    );
+  }
+
+  private async dispatchSecondIosTap(
+    options: TapAtOptions,
+    point: { x: number; y: number },
+    frameContext: string | undefined,
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (options.action !== "doubleTap") {
+      return;
+    }
+    await this.timer.sleep(DOUBLE_TAP_GAP_MS);
+    throwIfAborted(signal);
+    this.assertDisplayRevisionCurrent(revision);
+    await this.iosCoordinateTap(
+      this.iosClient,
+      point.x,
+      point.y,
+      IOS_TAP_DURATION_MS,
+      frameContext,
+      "second tap",
+    );
+  }
+
   private resolveCoordinates(
     options: TapAtOptions,
     observeResult: ObserveResult,
   ): { x: number; y: number } | { x: number; y: number; error: string } {
+    const gestureError = gestureOptionError(options);
+    if (gestureError) {
+      return { x: options.x, y: options.y, error: gestureError };
+    }
     return resolveTapAtCoordinates(options, observeResult, this.device.platform);
+  }
+
+  private async dispatchGesture(
+    options: TapAtOptions,
+    point: { x: number; y: number },
+    observation: ObserveResult,
+    signal?: AbortSignal,
+    displayId?: number,
+    assertCurrent?: () => void,
+  ): Promise<void> {
+    const action = options.action ?? "tap";
+    const duration = tapDurationMs(options, this.device.platform);
+    const dispatch = async (second: boolean) => {
+      throwIfAborted(signal);
+      assertCurrent?.();
+      if (this.device.platform === "android") {
+        const command =
+          action === "longPress"
+            ? `swipe ${point.x} ${point.y} ${point.x} ${point.y} ${duration}`
+            : `tap ${point.x} ${point.y}`;
+        await executeTouchscreenInput(this.adb, command, displayId, signal);
+      } else if (this.device.platform === "ios") {
+        await this.iosCoordinateTap(
+          this.iosClient,
+          point.x,
+          point.y,
+          duration,
+          observation.viewHierarchy?.frameContext,
+          second ? "second tap" : "tap",
+        );
+      } else {
+        throw unsupportedPlatformError(this.device.platform, "tapAt gesture");
+      }
+    };
+    await dispatch(false);
+    if (action === "doubleTap") {
+      await this.timer.sleep(DOUBLE_TAP_GAP_MS);
+      await dispatch(true);
+    }
   }
 }

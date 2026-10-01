@@ -337,7 +337,7 @@ describe("tapAtHandler (registered handler wiring)", () => {
     expect(ToolRegistry.getTool("tapAt")?.deviceAwareHandler).toBe(tapAtHandler);
   });
 
-  test("accepts only coordinates, response controls, and shared device targeting", () => {
+  test("accepts coordinate gestures, response controls, and shared device targeting", () => {
     expect(
       tapAtSchema.safeParse({
         x: 12,
@@ -355,6 +355,26 @@ describe("tapAtHandler (registered handler wiring)", () => {
     expect(tapAtSchema.safeParse({ x: 12, y: 34, duration: 10 }).success).toBe(false);
     expect(tapAtSchema.safeParse({ x: 12, y: 34, snapshotId: "ref-1" }).success).toBe(true);
     expect(tapAtSchema.safeParse({ x: 12, y: 34, snapshotId: "" }).success).toBe(false);
+    expect(
+      tapAtSchema.safeParse({
+        x: 1,
+        y: 0.5,
+        coordinateSpace: "normalized",
+        action: "doubleTap",
+        display: "cover",
+      }).success,
+    ).toBe(true);
+    expect(
+      tapAtSchema.safeParse({
+        x: 100,
+        y: 50,
+        coordinateSpace: "percent",
+        action: "longPress",
+        durationMs: 750,
+      }).success,
+    ).toBe(true);
+    expect(tapAtSchema.safeParse({ x: 101, y: 0, coordinateSpace: "percent" }).success).toBe(false);
+    expect(tapAtSchema.safeParse({ x: 0, y: 0, durationMs: 750 }).success).toBe(false);
   });
 
   test("serializes a successful native-coordinate tap", async () => {
@@ -370,6 +390,34 @@ describe("tapAtHandler (registered handler wiring)", () => {
     expect(getStructuredField(response, "platform")).toBe(fakeDevice.platform);
     expect(getStructuredField(response, "x")).toBe(12);
     expect(getStructuredField(response, "y")).toBe(34);
+  });
+
+  test("passes snapshot and gesture options through to tapAt", async () => {
+    let received: unknown;
+    setTapAtElementFactory(() => ({
+      execute: async (options) => {
+        received = options;
+        return { success: true, x: 30, y: 40, action: "doubleTap" };
+      },
+    }));
+
+    const response = await tapAtHandler(fakeDevice, {
+      ...args,
+      x: 0.3,
+      y: 0.4,
+      snapshotId: "ref-1",
+      coordinateSpace: "normalized",
+      action: "doubleTap",
+    });
+
+    expect(received).toMatchObject({
+      x: 0.3,
+      y: 0.4,
+      snapshotId: "ref-1",
+      coordinateSpace: "normalized",
+      action: "doubleTap",
+    });
+    expect(getStructuredField(response, "message")).toBe("Double tapped at (30, 40)");
   });
 
   test("marks a coordinate-tap failure as an MCP error", async () => {
@@ -406,6 +454,13 @@ describe("hitTestHandler", () => {
     expect(hitTestSchema.safeParse({ ...validInput, unexpected: true }).success).toBe(false);
     expect(tapAtSchema.safeParse({ ...validInput, unexpected: true }).success).toBe(false);
     expect(hitTestSchema.safeParse({ x: 1, y: 2, selector: "wrong" }).success).toBe(false);
+    expect(hitTestSchema.safeParse({ x: 0.5, y: 1, coordinateSpace: "normalized" }).success).toBe(
+      true,
+    );
+    expect(hitTestSchema.safeParse({ x: 1.01, y: 0, coordinateSpace: "normalized" }).success).toBe(
+      false,
+    );
+    expect(hitTestSchema.safeParse({ x: 0, y: 0, action: "doubleTap" }).success).toBe(false);
     const definitions = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
       name: string;
       inputSchema?: { description?: string };
@@ -434,6 +489,23 @@ describe("hitTestHandler", () => {
     expect(getStructuredField(response, "method")).toBe("hierarchy-bounds");
     expect(getStructuredField(response, "dispatchGuaranteed")).toBe(false);
     expect(getStructuredField(response, "deviceId")).toBe("fake");
+  });
+
+  test("resolves normalized hitTest coordinates in the shared native space", async () => {
+    const device = { deviceId: "fake", platform: "android" } as BootedDevice;
+    const observation = loadAndroidHomeObserve().observe;
+    setHitTestObservationFactory(() => ({ execute: async () => observation }));
+
+    const response = await hitTestHandler(device, {
+      x: 0.5,
+      y: 0.5,
+      coordinateSpace: "normalized",
+    });
+
+    expect(getStructuredField(response, "point")).toEqual({
+      x: Math.round(observation.screenSize!.width / 2),
+      y: Math.round(observation.screenSize!.height / 2),
+    });
   });
 
   test("rejects an unknown snapshot reference before producing a preview", async () => {

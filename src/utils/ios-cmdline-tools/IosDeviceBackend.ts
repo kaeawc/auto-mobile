@@ -51,3 +51,50 @@ export function resolveIosDeviceBackend(
     ? new SimulatorIosDeviceBackend(deviceId, deps)
     : new PhysicalIosDeviceBackend(deviceId, deps);
 }
+
+type LaunchResult = { success: boolean; pid?: number; error?: string };
+
+export interface DeviceAppLauncher {
+  launchApp(
+    deviceUdid: string,
+    bundleId: string,
+    options?: { terminateExisting?: boolean },
+  ): Promise<LaunchResult>;
+}
+
+export interface IosLaunchBackend {
+  launchApp(bundleId: string, options?: { foregroundIfRunning?: boolean }): Promise<LaunchResult>;
+}
+
+export interface IosLaunchBackendDeps {
+  simctl: Pick<SimCtlClient, "launchApp">;
+  deviceAppLauncher: DeviceAppLauncher;
+}
+
+export class SimulatorIosLaunchBackend implements IosLaunchBackend {
+  constructor(private readonly simctl: Pick<SimCtlClient, "launchApp">) {}
+
+  launchApp(bundleId: string, options?: { foregroundIfRunning?: boolean }): Promise<LaunchResult> {
+    return this.simctl.launchApp(bundleId, options);
+  }
+}
+
+export class PhysicalIosLaunchBackend implements IosLaunchBackend {
+  constructor(
+    private readonly deviceId: string,
+    private readonly deviceAppLauncher: DeviceAppLauncher,
+  ) {}
+
+  launchApp(bundleId: string): Promise<LaunchResult> {
+    return this.deviceAppLauncher.launchApp(this.deviceId, bundleId, { terminateExisting: true });
+  }
+}
+
+export function resolveIosLaunchBackend(
+  deviceId: string,
+  deps: IosLaunchBackendDeps,
+): IosLaunchBackend {
+  return isIosSimulatorUdid(deviceId)
+    ? new SimulatorIosLaunchBackend(deps.simctl)
+    : new PhysicalIosLaunchBackend(deviceId, deps.deviceAppLauncher);
+}

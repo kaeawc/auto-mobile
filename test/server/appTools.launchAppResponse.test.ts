@@ -66,6 +66,25 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.success).toBe(true);
   });
 
+  test("does not verify when primary foreground package signals disagree", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.expected",
+      observation: {
+        activeWindow: { appId: "com.expected", activityName: "MainActivity", layoutSeqSum: 1 },
+        viewHierarchy: { packageName: "com.other" },
+      },
+    };
+
+    const payload = buildLaunchAppResponse("com.expected", result);
+
+    expect(payload.observedAppId).toBe("com.expected");
+    expect(payload.verified).toBe(false);
+    expect(payload.verifyFailureReason).toBe(
+      "foreground signals disagree: activeWindow=com.expected, hierarchy=com.other",
+    );
+  });
+
   test("omits verification when a matching observation is marked unverified", () => {
     const result: LaunchAppResult = {
       success: true,
@@ -94,7 +113,16 @@ describe("buildLaunchAppResponse", () => {
     const result: LaunchAppResult = {
       success: true,
       packageName: "com.android.settings",
-      observation: observationForApp("com.google.android.permissioncontroller"),
+      observation: {
+        ...observationForApp("com.google.android.permissioncontroller"),
+        notificationPermissionDetected: true,
+        activeWindow: {
+          appId: "com.google.android.permissioncontroller",
+          activityName: "GrantPermissionsActivity",
+          layoutSeqSum: 1,
+          type: "notification_permission_dialog",
+        },
+      } as ObserveResult,
     };
 
     const payload = buildLaunchAppResponse("com.android.settings", result);
@@ -196,6 +224,13 @@ describe("buildLaunchAppResponse", () => {
         viewHierarchy: {
           node: {},
           foregroundActivity: "com.google.android.permissioncontroller/.GrantPermissionsActivity",
+        },
+        notificationPermissionDetected: true,
+        activeWindow: {
+          appId: "com.google.android.permissioncontroller",
+          activityName: "GrantPermissionsActivity",
+          layoutSeqSum: 1,
+          type: "notification_permission_dialog",
         },
       } as ObserveResult,
     };

@@ -470,6 +470,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         this.authenticator.authorize({
           sessionUuid: this.socketSessionUuids.get(socket),
           deviceId,
+          requireOwnership: true,
         });
       } catch (error) {
         logger.warn(`[VideoStream] revoking subscriber for ${deviceId}: ${error}`);

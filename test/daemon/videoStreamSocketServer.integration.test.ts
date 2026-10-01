@@ -12,9 +12,12 @@ import {
   VideoStreamSocketServer,
   type DeviceOwnershipChanges,
 } from "../../src/daemon/videoStreamSocketServer";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { ScreenRecordingPermissionError } from "../../src/features/webrtc";
 import {
   SessionScopedStreamAuthenticator,
+  STREAM_SOCKET_AUTH_ENV,
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
@@ -1888,6 +1891,7 @@ describe("VideoStreamSocketServer", () => {
       ownership.changed(DEVICE.deviceId);
       expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(1);
       await waitFor(() => oldViewer.binary().includes(Buffer.from('"terminal":true')));
+      expect(oldViewer.binary().toString()).toContain('"action":"unsubscribe"');
       expect(oldViewer.binary().toString()).toContain("Video stream ended: authorization changed");
       expect(newViewer.binary().toString()).not.toContain('"terminal":true');
       expect(h.sources[0].consumerStates.at(-1)).toBe(true);
@@ -1898,6 +1902,72 @@ describe("VideoStreamSocketServer", () => {
       await waitFor(() => newViewer.binary().includes(Buffer.from('"terminal":true')));
       timer.advanceTime(3_000);
       await waitFor(() => h.sources[0].stopped);
+    });
+
+    test("release revokes the subscriber and stops capture after idle grace", async () => {
+      const timer = new FakeTimer();
+      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      await manager.createSession("session-1", DEVICE.deviceId, "android");
+      const h = await startHarness({
+        timer,
+        ownershipChanges: () => manager,
+        authenticator: enforcing(manager),
+      });
+      const viewer = await subscribe(h.socketPath, {
+        action: "subscribe",
+        deviceId: DEVICE.deviceId,
+        sessionUuid: "session-1",
+      });
+      expect(viewer.ack.success).toBe(true);
+
+      await manager.releaseSession("session-1", "explicit-release");
+
+      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(0);
+      await waitFor(() => viewer.binary().includes(Buffer.from('"terminal":true')));
+      expect(viewer.binary().toString()).toContain('"action":"unsubscribe"');
+      await waitFor(() => viewer.socket.destroyed);
+      expect(h.sources[0].stopped).toBe(false);
+      timer.advanceTime(3_000);
+      await waitFor(() => h.sources[0].stopped);
+      manager.stopCleanupTimer();
+    });
+
+    test("rebind revokes a subscriber while its session remains live", async () => {
+      const ownership = ownershipHarness();
+      let owner: string | null = "session-1";
+      const h = await startHarness({
+        ownershipChanges: () => ownership.source,
+        authenticator: enforcing(fakeSessionManager({ getSessionForDevice: () => owner })),
+      });
+      const viewer = await subscribe(h.socketPath, {
+        action: "subscribe",
+        deviceId: DEVICE.deviceId,
+        sessionUuid: "session-1",
+      });
+      owner = null;
+      ownership.changed(DEVICE.deviceId);
+
+      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(0);
+      await waitFor(() => viewer.binary().includes(Buffer.from('"terminal":true')));
+      expect(viewer.binary().toString()).toContain('"action":"unsubscribe"');
+    });
+
+    test("auth off leaves subscribers attached after ownership changes", async () => {
+      const ownership = ownershipHarness();
+      const auth = new SessionScopedStreamAuthenticator(() => null, "video-stream subscribe", {
+        [STREAM_SOCKET_AUTH_ENV]: "0",
+      } as NodeJS.ProcessEnv);
+      const h = await startHarness({
+        ownershipChanges: () => ownership.source,
+        authenticator: auth,
+      });
+      const viewer = await subscribe(h.socketPath);
+
+      ownership.changed(DEVICE.deviceId);
+
+      expect(viewer.ack.success).toBe(true);
+      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(1);
+      expect(viewer.binary().toString()).not.toContain('"terminal":true');
     });
 
     test("an authorization error for one subscriber leaves the other streaming", async () => {

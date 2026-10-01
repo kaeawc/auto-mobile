@@ -54,6 +54,26 @@ describe("SessionScopedStreamAuthenticator", () => {
     ).not.toThrow();
   });
 
+  test("strict re-authorization requires ownership by the base session", () => {
+    let owner: string | null = null;
+    const sm = sessionManager({
+      getSessionForDevice: () => owner,
+      getDeviceLabels: (uuid) => (uuid === "live" ? { phone: "live:phone" } : undefined),
+    });
+    const auth = authenticator(sm);
+    expect(() => auth.authorize({ sessionUuid: "live", deviceId: "emu" })).not.toThrow();
+    expect(() =>
+      auth.authorize({ sessionUuid: "live", deviceId: "emu", requireOwnership: true }),
+    ).toThrow(/no longer owned/);
+    owner = "live";
+    expect(() =>
+      auth.authorize({ sessionUuid: "live", deviceId: "emu", requireOwnership: true }),
+    ).not.toThrow();
+    expect(() =>
+      auth.authorize({ sessionUuid: "live:phone", deviceId: "emu", requireOwnership: true }),
+    ).not.toThrow();
+  });
+
   test("permits a device owned by the same session", () => {
     const sm = sessionManager({ getSessionForDevice: () => "live" });
     expect(() =>

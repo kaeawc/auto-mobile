@@ -39,6 +39,8 @@ export interface StreamAuthorizeInput {
   sessionUuid?: string;
   /** Target device, when the request names one. */
   deviceId?: string;
+  /** Rechecks of an attached subscriber require its session to still own the device. */
+  requireOwnership?: boolean;
 }
 
 export interface StreamSocketAuthenticator {
@@ -92,8 +94,9 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
       : uuid;
   }
 
-  authorize({ sessionUuid, deviceId }: StreamAuthorizeInput): void {
+  authorize({ sessionUuid, deviceId, requireOwnership }: StreamAuthorizeInput): void {
     if (!authEnforced(this.env)) {
+      // Auth-off subscribers may have no session, so ownership changes cannot revoke them.
       return;
     }
 
@@ -124,21 +127,27 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     }
 
     if (deviceId) {
-      this.assertDeviceScope(sessionManager, deviceId, baseSessionUuid);
+      this.assertDeviceScope(sessionManager, deviceId, baseSessionUuid, requireOwnership);
     }
   }
 
   /**
-   * A subscriber may only target a device that is unowned or owned by its own
-   * base session — it cannot ride along on another session's capture.
+   * Initial subscribers may target an unowned device; attached subscribers
+   * must retain ownership by their base session on every ownership change.
    */
   private assertDeviceScope(
     sessionManager: StreamAuthSessionManager,
     deviceId: string,
     baseSessionUuid: string,
+    requireOwnership = false,
   ): void {
     const owner = sessionManager.getSessionForDevice(deviceId) ?? undefined;
     if (!owner) {
+      if (requireOwnership) {
+        throw new ActionableError(
+          `${this.operation} rejected: device ${deviceId} is no longer owned by session ${baseSessionUuid}.`,
+        );
+      }
       return;
     }
     const ownerBase = resolveToolSelectionBaseSessionUuid(owner, sessionManager) ?? owner;

@@ -4105,14 +4105,17 @@ export class SessionManager {
     if (!session || (expectedSession && session !== expectedSession)) {
       return false;
     }
-    if (this.deviceSessionMap.get(session.assignedDevice) === sessionId) {
+    const ownedDevice = this.deviceSessionMap.get(session.assignedDevice) === sessionId;
+    if (ownedDevice) {
       this.deviceSessionMap.delete(session.assignedDevice);
-      this.notifyDeviceOwnershipChange(session.assignedDevice);
     }
     this.sessions.delete(sessionId);
     this.sessionDeviceMap.delete(sessionId);
     this.networkConditionGeneration.delete(sessionId);
     this.networkConditionMutationQueues.delete(sessionId);
+    if (ownedDevice) {
+      this.notifyDeviceOwnershipChange(session.assignedDevice);
+    }
     return true;
   }
 

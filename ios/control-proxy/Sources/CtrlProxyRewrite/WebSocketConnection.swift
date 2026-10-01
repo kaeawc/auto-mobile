@@ -145,61 +145,65 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
     // MARK: - HTTP handshake / endpoints
 
     private func receiveHTTPUpgrade() {
-        channel.receive(minimumIncompleteLength: 1, maximumLength: Self.maximumHTTPRequestLength) { [weak self] data, isComplete, error in
-            guard let self = self else { return }
-            dispatchPrecondition(condition: .onQueue(self.queue))
+        channel
+            .receive(
+                minimumIncompleteLength: 1,
+                maximumLength: Self.maximumHTTPRequestLength
+            ) { [weak self] data, isComplete, error in
+                guard let self = self else { return }
+                dispatchPrecondition(condition: .onQueue(self.queue))
 
-            if let error = error {
-                print("[WebSocketConnection] Error: \(error)")
-                self.closeConnection()
-                return
-            }
-            if isComplete {
-                self.closeConnection()
-                return
-            }
-            guard let data = data else {
-                self.receiveHTTPUpgrade()
-                return
-            }
+                if let error = error {
+                    print("[WebSocketConnection] Error: \(error)")
+                    self.closeConnection()
+                    return
+                }
+                if isComplete {
+                    self.closeConnection()
+                    return
+                }
+                guard let data = data else {
+                    self.receiveHTTPUpgrade()
+                    return
+                }
 
-            self.inboundBuffer.append(data)
-            guard self.inboundBuffer.count <= Self.maximumHTTPRequestLength else {
-                print("[WebSocketConnection] HTTP request exceeds maximum length")
-                self.channel.cancel()
-                return
-            }
+                self.inboundBuffer.append(data)
+                guard self.inboundBuffer.count <= Self.maximumHTTPRequestLength else {
+                    print("[WebSocketConnection] HTTP request exceeds maximum length")
+                    self.channel.cancel()
+                    return
+                }
 
-            guard let requestLength = WebSocketFraming.completeHTTPRequestLength(in: self.inboundBuffer) else {
-                self.receiveHTTPUpgrade()
-                return
-            }
+                guard let requestLength = WebSocketFraming.completeHTTPRequestLength(in: self.inboundBuffer) else {
+                    self.receiveHTTPUpgrade()
+                    return
+                }
 
-            let requestData = Data(self.inboundBuffer.prefix(requestLength))
-            self.inboundBuffer.removeFirst(requestLength)
-            guard let request = String(data: requestData, encoding: .utf8) else {
-                self.channel.cancel()
-                return
-            }
+                let requestData = Data(self.inboundBuffer.prefix(requestLength))
+                self.inboundBuffer.removeFirst(requestLength)
+                guard let request = String(data: requestData, encoding: .utf8) else {
+                    self.channel.cancel()
+                    return
+                }
 
-            // Only the WebSocket-upgrade branch consumes bytes left in inboundBuffer
-            // after the slice (a frame pipelined with the upgrade request, #5678); the
-            // HTTP branches send-then-cancel, discarding any residual (AC4).
-            if request.contains("Upgrade: websocket") || request.contains("upgrade: websocket") {
-                self.handleWebSocketUpgrade(request)
-            } else if request.contains("GET /health") {
-                self.handleHealthCheck()
-            } else if request.contains("POST /sdk-events") {
-                self.handleSdkEventsPost(request)
-            } else if request.contains("GET /sdk-events") {
-                self.handleSdkEventsGet()
-            } else {
-                let response = Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
-                self.channel.send(response) { [weak self] _ in
-                    self?.channel.cancel()
+                // Only the WebSocket-upgrade branch consumes bytes left in inboundBuffer
+                // after the slice (a frame pipelined with the upgrade request, #5678); the
+                // HTTP branches send-then-cancel, discarding any residual (AC4).
+                if request.contains("Upgrade: websocket") || request.contains("upgrade: websocket") {
+                    self.handleWebSocketUpgrade(request)
+                } else if request.contains("GET /health") {
+                    self.handleHealthCheck()
+                } else if request.contains("POST /sdk-events") {
+                    self.handleSdkEventsPost(request)
+                } else if request.contains("GET /sdk-events") {
+                    self.handleSdkEventsGet()
+                } else {
+                    let response = Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                    self.channel.send(response) { [weak self] _ in
+                        self?.channel.cancel()
+                    }
                 }
             }
-        }
     }
 
     private func handleHealthCheck() {
@@ -237,7 +241,8 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
         } else {
             print("[CtrlProxy] POST /sdk-events: no header separator found in \(request.count) chars")
         }
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"ok\":true}\r\n"
+        let response =
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"ok\":true}\r\n"
         channel.send(Data(response.utf8)) { [weak self] _ in
             self?.channel.cancel()
         }
@@ -272,7 +277,8 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
 
         let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
         // A String always encodes to UTF-8, so .data(using: .utf8) is never nil.
-        let acceptKey = (key + magic).data(using: .utf8)!.sha1().base64EncodedString() // swiftlint:disable:this force_unwrapping
+        let acceptKey = (key + magic).data(using: .utf8)!.sha1()
+            .base64EncodedString() // swiftlint:disable:this force_unwrapping
 
         let response = """
         HTTP/1.1 101 Switching Protocols\r
@@ -442,7 +448,8 @@ final class WebSocketConnection: WebSocketResponding, @unchecked Sendable {
                declaredPayloadLength: length,
                inProgressOpcode: fragmentedOpcode,
                alreadyBuffered: fragmentBuffer.count
-           ) {
+           )
+        {
             print("[WebSocketConnection] Fragmentation protocol error (pre-read): \(reason), closing connection")
             fragmentedOpcode = nil
             fragmentBuffer = Data()

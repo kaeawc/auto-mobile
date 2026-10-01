@@ -61,8 +61,8 @@ private final class UnmatchedRequestByteChannel: ByteChannel, @unchecked Sendabl
     }
 
     func receive(
-        minimumIncompleteLength: Int,
-        maximumLength: Int,
+        minimumIncompleteLength _: Int,
+        maximumLength _: Int,
         completion: @escaping @Sendable (Data?, Bool, Error?) -> Void
     ) {
         receiveCount += 1

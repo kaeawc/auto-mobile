@@ -12,6 +12,8 @@ public struct WebSocketResponse: Codable, Sendable {
     /// Present only on a runner_busy error response.
     public let blockingCommandType: String?
     public let blockingElapsedMs: Int64?
+    /// Signed milliseconds until the blocking command's deadline; negative means overdue.
+    public let blockingDeadlineRemainingMs: Int64?
     public let text: String?
     public let perfTiming: PerfTiming?
     /// Present on key results when caret movement was checked or could not be checked.
@@ -31,6 +33,7 @@ public struct WebSocketResponse: Codable, Sendable {
         error: String? = nil,
         blockingCommandType: String? = nil,
         blockingElapsedMs: Int64? = nil,
+        blockingDeadlineRemainingMs: Int64? = nil,
         text: String? = nil,
         perfTiming: PerfTiming? = nil,
         verified: Bool? = nil,
@@ -45,6 +48,7 @@ public struct WebSocketResponse: Codable, Sendable {
         self.error = error
         self.blockingCommandType = blockingCommandType
         self.blockingElapsedMs = blockingElapsedMs
+        self.blockingDeadlineRemainingMs = blockingDeadlineRemainingMs
         self.text = text
         self.perfTiming = perfTiming
         self.verified = verified
@@ -100,6 +104,7 @@ public struct WebSocketResponse: Codable, Sendable {
             error: error,
             blockingCommandType: blockingCommandType,
             blockingElapsedMs: blockingElapsedMs,
+            blockingDeadlineRemainingMs: blockingDeadlineRemainingMs,
             text: text,
             perfTiming: perfTiming,
             verified: verified,

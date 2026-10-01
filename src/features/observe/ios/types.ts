@@ -152,6 +152,8 @@ export interface WebSocketMessage {
   /** Typed runner_busy metadata for a command rejected before entering the serial queue. */
   blockingCommandType?: string;
   blockingElapsedMs?: number;
+  /** Signed milliseconds to the blocking command's deadline; negative means overdue. */
+  blockingDeadlineRemainingMs?: number;
   perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
   previousOrientation?: string;
   currentOrientation?: string;

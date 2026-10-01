@@ -142,6 +142,7 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
 
     expect(twoFingerMsg.type).toBe("request_two_finger_swipe");
     expect(swipeMsg.type).toBe("request_swipe");
+    expect(swipeMsg).not.toHaveProperty("timeoutMs");
     for (const key of ["x1", "y1", "x2", "y2"] as const) {
       expect(twoFingerMsg[key]).toBe(swipeMsg[key]);
       expect(Number.isInteger(twoFingerMsg[key])).toBe(true);

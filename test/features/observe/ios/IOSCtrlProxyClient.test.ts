@@ -1620,7 +1620,7 @@ describe("IOSCtrlProxyClient", function () {
       );
 
       try {
-        const resultPromise = testClient.requestSwipe(100, 200, 100, 500, 300, 5000);
+        const resultPromise = testClient.requestSwipe(100, 200, 100, 500, 300, 4200);
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -1634,6 +1634,7 @@ describe("IOSCtrlProxyClient", function () {
         expect(sentMessage.x2).toBe(100);
         expect(sentMessage.y2).toBe(500);
         expect(sentMessage.duration).toBe(300);
+        expect(sentMessage.timeoutMs).toBe(4200);
 
         // Simulate response
         socket!.simulateMessage(

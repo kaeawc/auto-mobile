@@ -6,11 +6,12 @@ struct InFlightRunnerCommand: Sendable, Equatable {
     let type: String
     let requestId: String?
     let startedAtMs: Int64
+    let deadlineMs: Int64?
 }
 
 enum CommandAdmissionDecision: Equatable {
     case queue
-    case busy(blockingType: String, elapsedMs: Int64)
+    case busy(blockingType: String, elapsedMs: Int64, deadlineRemainingMs: Int64?)
 }
 
 /// Pure admission rule. The caller snapshots state and time under the dispatch lock.
@@ -22,7 +23,10 @@ func admissionDecision(
     guard let inFlight else { return .queue }
     let elapsedMs = max(0, nowMs - inFlight.startedAtMs)
     return elapsedMs > budgetMs
-        ? .busy(blockingType: inFlight.type, elapsedMs: elapsedMs)
+        ? .busy(
+            blockingType: inFlight.type, elapsedMs: elapsedMs,
+            deadlineRemainingMs: inFlight.deadlineMs.map { $0 - nowMs }
+        )
         : .queue
 }
 
@@ -353,11 +357,20 @@ final class WebSocketServer: @unchecked Sendable {
     /// `responder` is captured strongly so it outlives the hop; enqueuing is non-blocking.
     func dispatchCommand(_ data: Data, responder: any WebSocketResponding) {
         // Network.framework delivers this call on the server queue, never the main actor.
-        // Parse only the wire envelope here; malformed requests still take the normal
-        // queued decode/error path. Keep send outside the lock and task-chain.
+        // Inspect the envelope and swipe budget here; malformed requests still take the
+        // normal queued decode/error path. Keep send outside the lock and task-chain.
+        let receivedAtMs = monotonicNowMs()
         let envelope = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let type = envelope?["type"] as? String ?? "unknown"
         let requestId = envelope?["requestId"] as? String
+        // Decode only swipe's optional budget here so queue wait counts against the client's
+        // transport timeout. The normal decode/error path still handles malformed requests.
+        let swipeTimeoutMs = type == "request_swipe"
+            ? (try? JSONDecoder().decode(RequestSwipe.self, from: data))?.timeoutMs : nil
+        let deadlineMs: Int64? = swipeTimeoutMs.map { timeout in
+            let (deadline, overflow) = receivedAtMs.addingReportingOverflow(Int64(timeout))
+            return overflow ? Int64.max : deadline
+        }
         let decision = commandState.withLock { state -> CommandAdmissionDecision in
             let decision = admissionDecision(
                 inFlight: state.inFlight, nowMs: monotonicNowMs(), budgetMs: busyBudgetMs
@@ -369,18 +382,22 @@ final class WebSocketServer: @unchecked Sendable {
                 guard let self else { return }
                 self.commandState.withLock { state in
                     state.inFlight = InFlightRunnerCommand(
-                        type: type, requestId: requestId, startedAtMs: self.monotonicNowMs()
+                        type: type, requestId: requestId, startedAtMs: self.monotonicNowMs(),
+                        deadlineMs: deadlineMs
                     )
                 }
-                await self.handleMessage(data, responder: responder)
-                self.commandState.withLock { $0.inFlight = nil }
+                await self.handleMessage(
+                    data, responder: responder, deadlineMs: deadlineMs,
+                    onCompleted: { self.commandState.withLock { $0.inFlight = nil } }
+                )
             }
             return .queue
         }
-        if case let .busy(blockingType, elapsedMs) = decision {
+        if case let .busy(blockingType, elapsedMs, deadlineRemainingMs) = decision {
             let response = WebSocketResponse(
                 type: "error", requestId: requestId, success: false, error: "runner_busy",
-                blockingCommandType: blockingType, blockingElapsedMs: elapsedMs
+                blockingCommandType: blockingType, blockingElapsedMs: elapsedMs,
+                blockingDeadlineRemainingMs: deadlineRemainingMs
             )
             do {
                 try responder.send(JSONEncoder().encode(response))
@@ -396,7 +413,12 @@ final class WebSocketServer: @unchecked Sendable {
     /// command and every `serial`/`track` inside `handle` (including across its `await`s into
     /// `@MainActor` collaborators, same task) accumulates — without it every perf call is a
     /// silent no-op (§9.5). Runs on the serial command task-chain.
-    func handleMessage(_ data: Data, responder: any WebSocketResponding) async {
+    func handleMessage(
+        _ data: Data, responder: any WebSocketResponding, deadlineMs: Int64? = nil,
+        onCompleted: @Sendable () -> Void = {}
+    )
+        async
+    {
         let inFlightRequestId = failureCoordinator == nil ? nil : WireError.extractRequestId(from: data)
         failureCoordinator?.begin(requestId: inFlightRequestId)
         do {
@@ -408,7 +430,9 @@ final class WebSocketServer: @unchecked Sendable {
             let (response, responseData) = try await perf.withScope {
                 self.perf.serial("handleRequest:\(request.typeString)")
                 let startTime = Date()
-                let response = await self.commandHandler.handle(request)
+                let response = await self.commandHandler.handle(
+                    request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs
+                )
                 let totalTimeMs = Int64(Date().timeIntervalSince(startTime) * 1000)
                 self.perf.end()
 
@@ -418,6 +442,7 @@ final class WebSocketServer: @unchecked Sendable {
             }
             let deflectedFailures = failureCoordinator?.finish() ?? []
             if deflectedFailures.isEmpty {
+                onCompleted()
                 responder.send(responseData)
             } else {
                 let existingError = (response as? WebSocketResponse).flatMap { $0.success == false ? $0.error : nil }
@@ -436,12 +461,16 @@ final class WebSocketServer: @unchecked Sendable {
                         error: error.errorDescription,
                         blockingCommandType: original.blockingCommandType,
                         blockingElapsedMs: original.blockingElapsedMs,
+                        blockingDeadlineRemainingMs: original.blockingDeadlineRemainingMs,
                         text: original.text,
                         perfTiming: encoded.perfTiming,
                         pinchPath: original.pinchPath
                     )
-                    try responder.send(JSONEncoder().encode(deflected))
+                    let data = try JSONEncoder().encode(deflected)
+                    onCompleted()
+                    responder.send(data)
                 } else {
+                    onCompleted()
                     responder.send(ErrorResponse.build(requestId: inFlightRequestId, error: error))
                 }
             }
@@ -458,6 +487,7 @@ final class WebSocketServer: @unchecked Sendable {
                 )
             }
             let requestId = WireError.extractRequestId(from: data)
+            onCompleted()
             responder.send(ErrorResponse.build(requestId: requestId, error: responseError))
         }
     }

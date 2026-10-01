@@ -13,6 +13,7 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
             error: "diagnostic",
             blockingCommandType: "request_tap",
             blockingElapsedMs: 42,
+            blockingDeadlineRemainingMs: -7,
             text: "result text",
             verified: false,
             warning: "Value did not change",
@@ -31,6 +32,7 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
         XCTAssertEqual(decoded.error, "diagnostic")
         XCTAssertEqual(decoded.blockingCommandType, "request_tap")
         XCTAssertEqual(decoded.blockingElapsedMs, 42)
+        XCTAssertEqual(decoded.blockingDeadlineRemainingMs, -7)
         XCTAssertEqual(decoded.text, "result text")
         XCTAssertEqual(decoded.verified, false)
         XCTAssertEqual(decoded.warning, "Value did not change")

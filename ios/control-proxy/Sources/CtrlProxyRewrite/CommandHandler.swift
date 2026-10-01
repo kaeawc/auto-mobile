@@ -118,6 +118,14 @@ final class CommandHandler: CommandHandling {
     /// command case without a branch here fails compilation, so the dispatch table can
     /// never silently drop a command.
     func handle(_ request: WebSocketRequest) async -> any WebSocketResponsePayload {
+        await handle(request, deadlineMs: nil, monotonicNowMs: { 0 })
+    }
+
+    func handle(
+        _ request: WebSocketRequest, deadlineMs: Int64?, monotonicNowMs: @escaping @Sendable () -> Int64
+    )
+        async -> any WebSocketResponsePayload
+    {
         let startTime = Date()
 
         do {
@@ -137,7 +145,9 @@ final class CommandHandler: CommandHandling {
                 return try await handleTapCoordinates(payload, startTime: startTime)
 
             case let .swipe(payload):
-                return try await handleSwipe(payload, startTime: startTime)
+                return try await handleSwipe(
+                    payload, startTime: startTime, deadlineMs: deadlineMs, monotonicNowMs: monotonicNowMs
+                )
 
             case let .twoFingerSwipe(payload), let .multiFingerSwipe(payload):
                 return try await handleMultiFingerSwipe(payload, startTime: startTime)
@@ -617,16 +627,19 @@ final class CommandHandler: CommandHandling {
     @discardableResult
     private func performContextCheckedGesture<T: Sendable>(
         expected: String?,
+        beforeOperation: (@Sendable () throws -> Void)? = nil,
         operation: @escaping @MainActor () throws -> T
     )
         async throws -> T
     {
         guard let expected else {
+            try beforeOperation?()
             return try await perf.withScope { try await MainActor.run { try operation() } }
         }
 
         let hierarchy = (try? await elementLocator.getViewHierarchy(disableAllFiltering: false))
             .map(enrichWithCachedSdkHierarchy)
+        try beforeOperation?()
 
         return try await perf.withScope {
             try await MainActor.run {
@@ -672,18 +685,39 @@ final class CommandHandler: CommandHandling {
         )
     }
 
-    private func handleSwipe(_ request: RequestSwipe, startTime: Date) async throws -> WebSocketResponse {
+    private func handleSwipe(
+        _ request: RequestSwipe, startTime: Date, deadlineMs: Int64?,
+        monotonicNowMs: @escaping @Sendable () -> Int64
+    )
+        async throws -> WebSocketResponse
+    {
+        let checkDeadline: @Sendable () throws -> Void = {
+            if let deadlineMs, monotonicNowMs() >= deadlineMs {
+                throw CommandError.deadlineExceeded(
+                    command: "request_swipe", deadlineMs: deadlineMs, gestureCompleted: false
+                )
+            }
+        }
+        try checkDeadline()
         try requireFinite(request.x1, field: "x1")
         try requireFinite(request.y1, field: "y1")
         try requireFinite(request.x2, field: "x2")
         try requireFinite(request.y2, field: "y2")
         let duration = request.duration ?? 300
-        try await performContextCheckedGesture(expected: request.frameContext) {
+        try await performContextCheckedGesture(expected: request.frameContext, beforeOperation: checkDeadline) {
+            try checkDeadline()
+            // XCUITest press is synchronous on the main actor and cannot be interrupted.
+            // Its app resolution/activation and idle waits may outlast the client deadline.
             try self.gesturePerformer.swipe(
                 startX: request.x1, startY: request.y1,
                 endX: request.x2, endY: request.y2,
                 duration: TimeInterval(duration) / 1000.0
             )
+            if let deadlineMs, monotonicNowMs() >= deadlineMs {
+                throw CommandError.deadlineExceeded(
+                    command: "request_swipe", deadlineMs: deadlineMs, gestureCompleted: true
+                )
+            }
         }
 
         return WebSocketResponse.success(

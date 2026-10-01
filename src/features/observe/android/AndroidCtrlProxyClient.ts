@@ -1459,13 +1459,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Interaction listeners
   private interactionListeners: Set<(event: InteractionEvent) => void> = new Set();
-  // Last interaction for correlating with navigation events
-  private lastInteraction: {
-    type: string;
-    elementText?: string;
-    elementResourceId?: string;
-    timestamp: number;
-  } | null = null;
+  private static readonly INTERACTION_NAVIGATION_WINDOW_MS = 5_000;
+  private static readonly MAX_CACHED_INTERACTIONS = 100;
+  // Recent interactions keyed by the app package reported on the wire.
+  private lastInteractionByApp: Map<
+    string,
+    {
+      type: string;
+      elementText?: string;
+      elementResourceId?: string;
+      timestamp: number | undefined;
+      receivedAtMs: number;
+    }
+  > = new Map();
   private installedAppsRepository: InstalledAppsStore | null = null;
 
   // Hierarchy navigation detector
@@ -5029,14 +5035,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           // event may still record under the default key.
           this.ensureBuildContext(event.applicationId);
         }
-        // Attach last interaction for telemetry correlation
-        if (this.lastInteraction) {
-          event.triggeringInteraction = {
-            type: this.lastInteraction.type,
-            elementText: this.lastInteraction.elementText,
-            elementResourceId: this.lastInteraction.elementResourceId,
-          };
-        }
+        this.attachRecentInteraction(event);
 
         logger.info(
           `[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`,
@@ -5081,12 +5080,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     interaction_event: (message) => {
       const interaction = message.event;
       if (interaction) {
-        this.lastInteraction = {
-          type: interaction.type,
-          elementText: interaction.element?.text ?? undefined,
-          elementResourceId: interaction.element?.["resource-id"] ?? undefined,
-          timestamp: interaction.timestamp,
-        };
+        const now = this.timer.now();
+        this.pruneStaleInteractions(now);
+        if (interaction.packageName) {
+          this.lastInteractionByApp.delete(interaction.packageName);
+          this.lastInteractionByApp.set(interaction.packageName, {
+            type: interaction.type,
+            elementText: interaction.element?.text ?? undefined,
+            elementResourceId: interaction.element?.["resource-id"] ?? undefined,
+            timestamp: interaction.timestamp,
+            receivedAtMs: now,
+          });
+          while (this.lastInteractionByApp.size > AndroidCtrlProxyClient.MAX_CACHED_INTERACTIONS) {
+            const oldestApplicationId = this.lastInteractionByApp.keys().next().value;
+            this.lastInteractionByApp.delete(oldestApplicationId ?? "");
+          }
+        }
         this.notifyInteractionListeners(interaction);
       }
     },
@@ -5165,6 +5174,47 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     lifecycle_event: (message) => this.recordSdkTelemetryEvent(message),
   } satisfies WebSocketMessageHandlers;
+
+  private pruneStaleInteractions(now: number): void {
+    for (const [applicationId, interaction] of this.lastInteractionByApp) {
+      if (
+        now < interaction.receivedAtMs ||
+        now - interaction.receivedAtMs > AndroidCtrlProxyClient.INTERACTION_NAVIGATION_WINDOW_MS
+      ) {
+        this.lastInteractionByApp.delete(applicationId);
+      }
+    }
+  }
+
+  private attachRecentInteraction(event: NavigationEvent): void {
+    const hostNow = this.timer.now();
+    this.pruneStaleInteractions(hostNow);
+    const interaction = event.applicationId
+      ? this.lastInteractionByApp.get(event.applicationId)
+      : undefined;
+    if (!interaction) {
+      return;
+    }
+    const receivedAgeMs = hostNow - interaction.receivedAtMs;
+    if (
+      receivedAgeMs < 0 ||
+      receivedAgeMs > AndroidCtrlProxyClient.INTERACTION_NAVIGATION_WINDOW_MS
+    ) {
+      return;
+    }
+    if (
+      typeof event.timestamp === "number" &&
+      typeof interaction.timestamp === "number" &&
+      event.timestamp < interaction.timestamp
+    ) {
+      return;
+    }
+    event.triggeringInteraction = {
+      type: interaction.type,
+      elementText: interaction.elementText,
+      elementResourceId: interaction.elementResourceId,
+    };
+  }
 
   private async handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
     try {

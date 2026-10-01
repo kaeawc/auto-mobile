@@ -31,6 +31,10 @@ import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { AdbCommandTimeoutError } from "../../utils/android-cmdline-tools/AdbClient";
 import { throwIfAborted } from "../../utils/toolUtils";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "./TerminateApp";
 
 const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
 const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
@@ -47,7 +51,9 @@ export class UninstallApp {
   private deviceAppUninstaller: DeviceAppUninstaller;
   private installedAppsRepository: InstalledAppsStore;
   private createPerformanceTracker: () => PerformanceTracker;
+  private cacheInvalidator: DeviceWindowCacheInvalidator;
 
+  // oxlint-disable-next-line max-params -- Required trailing invalidator preserves the existing constructor parameter order.
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
@@ -55,6 +61,7 @@ export class UninstallApp {
     deviceAppUninstaller: DeviceAppUninstaller | null = null,
     installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository(),
     performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
+    cacheInvalidator: DeviceWindowCacheInvalidator | null = null,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -63,6 +70,7 @@ export class UninstallApp {
     this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppManager();
     this.installedAppsRepository = installedAppsRepository;
     this.createPerformanceTracker = performanceTrackerFactory;
+    this.cacheInvalidator = cacheInvalidator || new DefaultDeviceWindowCacheInvalidator();
   }
 
   private isSimulator(): boolean {
@@ -316,13 +324,7 @@ export class UninstallApp {
         };
       }
 
-      return {
-        success: true,
-        packageName,
-        wasInstalled: true,
-        keepData,
-        userId: targetUserId,
-      };
+      return this.successfulAndroidUninstall(packageName, keepData, targetUserId);
     } catch (error) {
       throwIfAborted(signal);
       return {
@@ -428,6 +430,7 @@ export class UninstallApp {
     keepData: boolean,
     userId: number,
   ): UninstallAppResult {
+    this.cacheInvalidator.invalidate(this.device);
     return {
       success: true,
       packageName,

@@ -18,6 +18,7 @@ import { PortManager } from "../../src/utils/PortManager";
 import type { BootedDevice } from "../../src/models";
 import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 describe("navigation tool session graph selection", () => {
   const device: BootedDevice = {
@@ -91,6 +92,9 @@ describe("navigation tool session graph selection", () => {
     };
     const originalDevices = registry.deviceSessionManager;
     registry.deviceSessionManager = fakeDevices;
+    const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     const graph = new FakeNavigationGraphManager();
     Object.assign(graph, {
       getStatsForApp: async () => ({
@@ -139,6 +143,7 @@ describe("navigation tool session graph selection", () => {
       ).rejects.toThrow("No android device found");
       expect(fakeDevices.getLastEnsureDeviceReadyPlatform()).toBe("android");
     } finally {
+      restorePipelineOverrides();
       registry.deviceSessionManager = originalDevices;
       graphSpy.mockRestore();
       exploreSpy.mockRestore();

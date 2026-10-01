@@ -32,6 +32,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { FakeDialogTapAction } from "../../fakes/FakeDialogTapAction";
+import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
 
 // `dumpsys window windows` output parseable (by Window.parseActiveWindowModern)
 // as the launcher being foreground. Used to satisfy home-press verification
@@ -1042,6 +1043,9 @@ describe("Explore", () => {
       const registry = ToolRegistry as unknown as { deviceSessionManager: unknown };
       const originalDeviceSessionManager = registry.deviceSessionManager;
       registry.deviceSessionManager = sessions;
+      const restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+        displayInventory: new FakeDisplayInventoryProvider(),
+      });
       const selectedDeviceIds: string[] = [];
 
       try {
@@ -1060,6 +1064,7 @@ describe("Explore", () => {
 
         expect(selectedDeviceIds).toEqual([iosB.deviceId]);
       } finally {
+        restorePipelineOverrides();
         registry.deviceSessionManager = originalDeviceSessionManager;
       }
     });

@@ -34,6 +34,7 @@ import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type {
@@ -3059,6 +3060,10 @@ describe("killDevice handler", () => {
     const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
       stop: async () => {},
     } as never);
+    const registry = new ToolRegistryClass();
+    const restorePipelineOverrides = registry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     try {
       expect(await client.connectWithoutSetup()).toBe(true);
       const screenshotResult = client.requestScreenshot(5_000).then(
@@ -3073,7 +3078,6 @@ describe("killDevice handler", () => {
 
       // The next resolver still sees the caller's selected device, without a
       // fresh boot observation. Binding the session must preserve its tombstone.
-      const registry = new ToolRegistryClass();
       const fakeSessionManager = new FakeDeviceSessionManager();
       fakeSessionManager.setConnectedDevices([device]);
       (
@@ -3103,6 +3107,7 @@ describe("killDevice handler", () => {
       expect(socketCreations).toBe(1);
       expect(restarts).toBe(0);
     } finally {
+      restorePipelineOverrides();
       managerSpy.mockRestore();
     }
   });

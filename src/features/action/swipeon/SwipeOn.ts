@@ -93,6 +93,8 @@ function displaySwipeCoordinates(
 }
 
 export class SwipeOn extends BaseVisualChange {
+  private readonly stopAfterIosGestureFailure: boolean;
+  private readonly iosGestureTimeoutMs?: () => number;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private executeGesture: GestureExecutor;
   private finder: ElementFinder;
@@ -117,6 +119,8 @@ export class SwipeOn extends BaseVisualChange {
     dependencies: SwipeOnDependencies = {},
   ) {
     super(device, adb);
+    this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
+    this.iosGestureTimeoutMs = dependencies.iosGestureTimeoutMs;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
     const parser = dependencies.parser ?? new DefaultElementParser();
@@ -619,7 +623,11 @@ export class SwipeOn extends BaseVisualChange {
         const gestureOptions: GestureOptions = {
           duration,
           scrollMode: options.scrollMode,
+          timeoutMs: this.iosGestureTimeoutMs?.(),
         };
+        if (gestureOptions.timeoutMs !== undefined && gestureOptions.timeoutMs <= 0) {
+          throw new ActionableError("iOS swipe budget exhausted before gesture dispatch");
+        }
 
         throwIfAborted(signal);
         const swipeResult = await perf.track("executeScreenSwipe", () =>
@@ -649,6 +657,15 @@ export class SwipeOn extends BaseVisualChange {
                 signal,
               ),
         );
+        if (
+          this.stopAfterIosGestureFailure &&
+          this.device.platform === "ios" &&
+          !swipeResult.success
+        ) {
+          // A timed-out request may still be executing in the Swift runner.
+          // Skip observedInteraction's post-swipe reads on this recovery path.
+          throw new ActionableError(swipeResult.error ?? "iOS lock-screen swipe failed");
+        }
         throwIfAborted(signal);
         if (this.device.platform === "ios" && swipeResult.success) {
           iosDispatchTimestamp = this.timer.now();

@@ -1,9 +1,20 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { ActionableError } from "../../models";
 import { PressButton } from "./PressButton";
 import { SwipeOn } from "./swipeon/SwipeOn";
 import type { IosScreenUnlocker } from "./WakeAndUnlock";
+
+export interface IosUnlockActions {
+  pressHome(timeoutMs: number): Promise<{ success: boolean; error?: string }>;
+  swipeUp(
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string; warning?: string }>;
+}
 
 /**
  * iOS wake + swipe-dismiss, over the existing gesture primitives.
@@ -13,29 +24,85 @@ import type { IosScreenUnlocker } from "./WakeAndUnlock";
  * screen up. No PIN is involved — WakeAndUnlock ignores it on iOS (issue #4360).
  */
 export class IosLockScreenUnlocker implements IosScreenUnlocker {
-  private readonly device: BootedDevice;
+  private readonly actions: IosUnlockActions;
 
-  constructor(device: BootedDevice) {
-    this.device = device;
+  constructor(
+    device: BootedDevice,
+    actions?: IosUnlockActions,
+    private readonly timer: Timer = defaultTimer,
+  ) {
+    this.actions = actions ?? {
+      // press() skips execute()'s observedInteraction, but simulator Home still
+      // verifies foreground through a runner hierarchy read.
+      pressHome: (timeoutMs) => new PressButton(device).press("home", timeoutMs),
+      swipeUp: (timeoutMs, signal) => {
+        const deadline = this.timer.now() + timeoutMs;
+        return new SwipeOn(device, null, {
+          stopAfterIosGestureFailure: true,
+          iosGestureTimeoutMs: () => deadline - this.timer.now(),
+        }).execute({ direction: "up", autoTarget: false }, undefined, signal);
+      },
+    };
   }
 
-  async wakeAndDismiss(): Promise<{ success: boolean; error?: string }> {
+  async wakeAndDismiss(
+    remainingMs: () => number = () => Infinity,
+  ): Promise<{ success: boolean; error?: string }> {
+    await this.pressHomeBestEffort(remainingMs);
+    const swipeBudget = Math.min(5_000, remainingMs());
+    if (swipeBudget <= 0) {
+      throw new ActionableError(
+        "wakeAndUnlock: iOS unlock budget exhausted before swipe; retry after the runner reconnects",
+      );
+    }
     try {
-      // Wake the display so the lock screen is present and interactable.
-      await new PressButton(this.device).execute("home");
-      // A full-screen upward swipe dismisses the (non-secure) lock screen.
-      const swipe = await new SwipeOn(this.device).execute({ direction: "up", autoTarget: false });
+      const swipeAbort = new AbortController();
+      const swipe = await raceWithDeadline(
+        () => this.actions.swipeUp(swipeBudget, swipeAbort.signal),
+        {
+          timer: this.timer,
+          timeoutMs: swipeBudget,
+          label: "iOS lock-screen swipe",
+          onTimeout: () => swipeAbort.abort(),
+        },
+      );
+      if (!swipe.success) {
+        logger.warn(
+          `[IosLockScreenUnlocker] lock-screen swipe failed: ${swipe.error ?? swipe.warning ?? "unknown error"}`,
+        );
+      }
       return {
         success: swipe.success !== false,
         error:
           swipe.success === false
-            ? (swipe.warning ?? "iOS lock-screen swipe did not report success")
+            ? (swipe.error ?? swipe.warning ?? "iOS lock-screen swipe did not report success")
             : undefined,
       };
     } catch (error) {
       const message = errorMessage(error);
-      logger.warn(`[IosLockScreenUnlocker] wake+dismiss failed: ${message}`);
+      logger.warn(`[IosLockScreenUnlocker] lock-screen swipe failed: ${message}`, error);
       return { success: false, error: message };
+    }
+  }
+
+  private async pressHomeBestEffort(remainingMs: () => number): Promise<void> {
+    // Home is best effort: its lock-screen foreground verification can fail
+    // even after the display wakes. The swipe and lock-state probe decide success.
+    try {
+      const homeBudget = Math.min(2_000, remainingMs());
+      if (homeBudget <= 0) {
+        throw new ActionableError("iOS unlock budget exhausted before Home press");
+      }
+      const home = await raceWithDeadline(() => this.actions.pressHome(homeBudget), {
+        timer: this.timer,
+        timeoutMs: homeBudget,
+        label: "iOS Home press before unlock",
+      });
+      if (!home.success) {
+        logger.warn(`[IosLockScreenUnlocker] Home press failed: ${home.error ?? "unknown error"}`);
+      }
+    } catch (error) {
+      logger.warn(`[IosLockScreenUnlocker] Home press failed: ${errorMessage(error)}`, error);
     }
   }
 }

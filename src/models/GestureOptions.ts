@@ -10,6 +10,7 @@ export type ScrollMode = "adb" | "a11y";
  */
 export interface GestureOptions {
   duration?: number; // Total duration of gesture in ms
+  timeoutMs?: number; // Internal transport timeout for a bounded gesture
   easing?: "linear" | "decelerate" | "accelerate" | "accelerateDecelerate";
   fingers?: number; // Number of touch points (default: 1)
   randomize?: boolean; // Add small random variations to path

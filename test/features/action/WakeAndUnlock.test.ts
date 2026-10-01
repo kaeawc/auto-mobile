@@ -9,6 +9,12 @@ import type {
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, DeviceLockState } from "../../../src/models";
+import { ActionableError } from "../../../src/models";
+import type { IosLockStateProbe } from "../../../src/features/observe/ios/IosLockStateProbe";
+import {
+  IosLockScreenUnlocker,
+  type IosUnlockActions,
+} from "../../../src/features/action/IosLockScreenUnlocker";
 
 const LOCKED_SECURE: DeviceLockState = { locked: true, keyguardShowing: true, secure: true };
 const LOCKED_SWIPE: DeviceLockState = { locked: true, keyguardShowing: true, secure: false };
@@ -41,21 +47,43 @@ class FakeIosUnlocker implements IosScreenUnlocker {
   }
 }
 
+class FakeIosLockProbe implements IosLockStateProbe {
+  reads = 0;
+  states: Array<DeviceLockState | undefined> = [];
+  state: DeviceLockState | undefined = LOCKED_SWIPE;
+  async read(): Promise<DeviceLockState | undefined> {
+    this.reads++;
+    return this.states.length > 0 ? this.states.shift() : this.state;
+  }
+}
+
 class FakeIosRecovery implements IosRunnerRecovery {
   connected = true;
   starts = 0;
   budgets: number[] = [];
   outcomes: Array<"recovered" | "not_recovering" | "failed" | "timed_out"> = [];
+  connectResult = false;
+  connects = 0;
+  recoveryDelayMs = 0;
+  timer?: FakeTimer;
   isConnected(): boolean {
     return this.connected;
   }
   ensureRecoveryStarted(): void {
     this.starts++;
   }
+  async ensureConnected(): Promise<boolean> {
+    this.connects++;
+    this.connected = this.connectResult;
+    return this.connected;
+  }
   async awaitRecovery(
     budgetMs: number,
   ): Promise<"recovered" | "not_recovering" | "failed" | "timed_out"> {
     this.budgets.push(budgetMs);
+    if (this.recoveryDelayMs > 0) {
+      await this.timer?.sleep(this.recoveryDelayMs);
+    }
     const outcome = this.outcomes.shift() ?? "not_recovering";
     if (outcome === "recovered") {
       this.connected = true;
@@ -69,7 +97,16 @@ const androidDevice: BootedDevice = {
   platform: "android",
   name: "Android",
 };
-const iosDevice: BootedDevice = { deviceId: "wau-ios", platform: "ios", name: "iOS" };
+const iosDevice: BootedDevice = {
+  deviceId: "12345678-1234-1234-1234-123456789ABC",
+  platform: "ios",
+  name: "iOS Simulator",
+};
+const physicalIosDevice: BootedDevice = {
+  deviceId: "00008030-001C2D3E1234567A",
+  platform: "ios",
+  name: "iPhone",
+};
 
 const SECURE_PIN_COMMANDS = [
   "shell input keyevent KEYCODE_WAKEUP",
@@ -288,84 +325,241 @@ describe("WakeAndUnlock", () => {
     ]);
   });
 
-  test("iOS: delegates to the iOS unlocker and ignores the pin", async () => {
+  test("iOS: already unlocked sends no home or swipe request", async () => {
     const ios = new FakeIosUnlocker();
-    const result = await new WakeAndUnlock(iosDevice, adb, { timer, iosUnlocker: ios }).execute(
-      "1234",
-    );
-
-    expect(ios.calls).toBe(1);
-    expect(result).toMatchObject({ success: true, platform: "ios", unlocked: true });
-    // The pin is ignored on iOS: no Android key events are sent.
-    expect(adb.getExecutedCommands()).toEqual([]);
-  });
-
-  test("iOS: waits for a disconnected runner before swiping", async () => {
-    const ios = new FakeIosUnlocker();
+    const lock = new FakeIosLockProbe();
+    lock.state = UNLOCKED;
     const recovery = new FakeIosRecovery();
-    recovery.connected = false;
-    recovery.outcomes = ["recovered", "not_recovering"];
-
     const result = await new WakeAndUnlock(iosDevice, adb, {
       timer,
       iosUnlocker: ios,
+      iosLockStateProbe: lock,
+      iosRunnerRecovery: recovery,
+    }).execute("1234");
+
+    expect(result).toMatchObject({ success: true, wasLocked: false, unlocked: true });
+    expect(ios.calls).toBe(0);
+    expect(recovery.starts).toBe(0);
+    expect(lock.reads).toBe(1);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("iOS: locked and connected swipes then confirms unlocked", async () => {
+    const ios = new FakeIosUnlocker();
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, UNLOCKED];
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: ios,
+      iosLockStateProbe: lock,
+      iosRunnerRecovery: new FakeIosRecovery(),
+    }).execute();
+
+    expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+    expect(ios.calls).toBe(1);
+    expect(lock.reads).toBe(2);
+  });
+
+  test("iOS: disconnected runner waits for recovery before swiping", async () => {
+    const manualTimer = new FakeTimer();
+    manualTimer.enableAutoAdvance();
+    const ios = new FakeIosUnlocker();
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, UNLOCKED];
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = ["recovered"];
+    recovery.recoveryDelayMs = 1_000;
+    recovery.timer = manualTimer;
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer: manualTimer,
+      iosUnlocker: ios,
+      iosLockStateProbe: lock,
       iosRunnerRecovery: recovery,
     }).execute();
 
-    expect(result.success).toBe(true);
+    expect(result).toMatchObject({ success: true, wasLocked: true });
     expect(ios.calls).toBe(1);
     expect(recovery.starts).toBe(1);
     expect(recovery.budgets).toEqual([20_000]);
   });
 
-  test("iOS: retries one failed swipe after runner recovery", async () => {
+  test("iOS: recovery with no active promise starts normal connection", async () => {
     const ios = new FakeIosUnlocker();
-    ios.results = [{ success: false, error: "runner disconnected" }, { success: true }];
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, UNLOCKED];
     const recovery = new FakeIosRecovery();
-    recovery.outcomes = ["not_recovering", "recovered"];
-
+    recovery.connected = false;
+    recovery.outcomes = ["not_recovering"];
+    recovery.connectResult = true;
     const result = await new WakeAndUnlock(iosDevice, adb, {
       timer,
       iosUnlocker: ios,
+      iosLockStateProbe: lock,
       iosRunnerRecovery: recovery,
     }).execute();
 
     expect(result.success).toBe(true);
-    expect(ios.calls).toBe(2);
-    expect(recovery.budgets).toEqual([20_000, 20_000]);
+    expect(recovery.connects).toBe(1);
+    expect(ios.calls).toBe(1);
   });
 
-  test("iOS: recovery timeout fails without a swipe", async () => {
+  test("iOS: recovery timeout identifies the failure and sends no gesture", async () => {
+    const manualTimer = new FakeTimer();
+    manualTimer.enableAutoAdvance();
     const ios = new FakeIosUnlocker();
     const recovery = new FakeIosRecovery();
     recovery.connected = false;
     recovery.outcomes = ["timed_out"];
-
-    const result = await new WakeAndUnlock(iosDevice, adb, {
-      timer,
+    recovery.recoveryDelayMs = 20_000;
+    recovery.timer = manualTimer;
+    const action = new WakeAndUnlock(iosDevice, adb, {
+      timer: manualTimer,
       iosUnlocker: ios,
+      iosLockStateProbe: new FakeIosLockProbe(),
       iosRunnerRecovery: recovery,
-    }).execute();
+    });
 
-    expect(result.success).toBe(false);
-    expect(result.error).toContain("did not recover");
+    await expect(action.execute()).rejects.toThrow(/runner recovery.*(timed out|timed_out)/);
     expect(ios.calls).toBe(0);
     expect(recovery.budgets).toEqual([20_000]);
   });
 
-  test("iOS: a failed swipe without recovery is not repeated", async () => {
+  test("iOS: successful swipe that leaves lock showing reports observed state", async () => {
     const ios = new FakeIosUnlocker();
-    ios.result = { success: false, error: "swipe failed" };
-    const recovery = new FakeIosRecovery();
-
-    const result = await new WakeAndUnlock(iosDevice, adb, {
+    const action = new WakeAndUnlock(iosDevice, adb, {
       timer,
       iosUnlocker: ios,
+      iosLockStateProbe: new FakeIosLockProbe(),
+    });
+
+    const failure = action.execute();
+    await expect(failure).rejects.toBeInstanceOf(ActionableError);
+    await expect(failure).rejects.toThrow(/still locked/);
+    expect(ios.calls).toBe(1);
+    expect(timer.now()).toBe(2_500);
+  });
+
+  test("iOS: physical device skips simctl lock probe and retains unknown wasLocked", async () => {
+    const ios = new FakeIosUnlocker();
+    const lock = new FakeIosLockProbe();
+    lock.state = undefined;
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = ["recovered"];
+    const result = await new WakeAndUnlock(physicalIosDevice, adb, {
+      timer,
+      iosUnlocker: ios,
+      iosLockStateProbe: lock,
       iosRunnerRecovery: recovery,
     }).execute();
 
-    expect(result.error).toBe("swipe failed");
+    expect(result).toMatchObject({ success: true, wasLocked: false, unlocked: true });
+    expect(lock.reads).toBe(0);
     expect(ios.calls).toBe(1);
-    expect(recovery.starts).toBe(0);
+    expect(recovery.starts).toBe(1);
+  });
+
+  test("iOS: unreadable simulator pre-check fails without a runner request", async () => {
+    const ios = new FakeIosUnlocker();
+    const lock = new FakeIosLockProbe();
+    lock.state = undefined;
+    await expect(
+      new WakeAndUnlock(iosDevice, adb, {
+        timer,
+        iosUnlocker: ios,
+        iosLockStateProbe: lock,
+      }).execute(),
+    ).rejects.toThrow(/could not read.*before unlock/);
+    expect(ios.calls).toBe(0);
+    expect(lock.reads).toBe(1);
+  });
+
+  test("iOS: failed Home continues to swipe and post-swipe state determines success", async () => {
+    const calls: string[] = [];
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        calls.push("home");
+        return { success: false, error: "hierarchy unavailable" };
+      },
+      async swipeUp() {
+        calls.push("swipe");
+        return { success: true };
+      },
+    };
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, UNLOCKED];
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+      iosLockStateProbe: lock,
+    }).execute();
+    expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+    expect(calls).toEqual(["home", "swipe"]);
+    expect(lock.reads).toBe(2);
+  });
+
+  test("iOS: late recovery shares the overall budget with Home, swipe, and poll", async () => {
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = ["recovered"];
+    recovery.recoveryDelayMs = 19_000;
+    recovery.timer = timer;
+    const calls: number[] = [];
+    const actions: IosUnlockActions = {
+      async pressHome(timeoutMs) {
+        calls.push(timeoutMs);
+        await timer.sleep(1_500);
+        return { success: false };
+      },
+      async swipeUp(timeoutMs) {
+        calls.push(timeoutMs);
+        await timer.sleep(3_000);
+        return { success: true };
+      },
+    };
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, undefined];
+    lock.state = undefined;
+    const action = new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+      iosLockStateProbe: lock,
+      iosRunnerRecovery: recovery,
+    });
+    await expect(action.execute()).rejects.toThrow(/could not read.*after the swipe/);
+    expect(calls).toEqual([2_000, 4_500]);
+    expect(timer.now()).toBe(25_000);
+    expect(lock.reads).toBeGreaterThan(1);
+  });
+
+  test("iOS: unreadable post-swipe probes report unknown state, not still locked", async () => {
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, undefined];
+    lock.state = undefined;
+    const action = new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: new FakeIosUnlocker(),
+      iosLockStateProbe: lock,
+    });
+    await expect(action.execute()).rejects.toThrow(/could not read.*after the swipe.*re-observe/);
+    expect(timer.now()).toBe(2_500);
+  });
+
+  test("iOS: swipe timeout fails without another request or lock probe", async () => {
+    const ios = new FakeIosUnlocker();
+    ios.result = { success: false, error: "Swipe timed out after 5000ms" };
+    const lock = new FakeIosLockProbe();
+    const result = await new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      iosUnlocker: ios,
+      iosLockStateProbe: lock,
+      iosRunnerRecovery: new FakeIosRecovery(),
+    }).execute();
+
+    expect(result).toMatchObject({ success: false, wasLocked: true, unlocked: false });
+    expect(result.error).toContain("timed out");
+    expect(ios.calls).toBe(1);
+    expect(lock.reads).toBe(1);
   });
 });

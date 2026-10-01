@@ -115,6 +115,10 @@ export interface ScrollAccessibilityService {
 }
 
 export interface SwipeOnDependencies {
+  /** Avoid post-action runner reads after an iOS lock-screen gesture fails. */
+  stopAfterIosGestureFailure?: boolean;
+  /** Cap the iOS gesture request inside a caller's remaining action budget. */
+  iosGestureTimeoutMs?: () => number;
   lastRenderedObservation?: RenderedObservationReader;
   resolver?: Pick<import("../../utility/ElementResolver").ElementResolver, "resolve">;
   executeGesture?: GestureExecutor;

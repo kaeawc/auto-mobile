@@ -283,7 +283,7 @@ export class ExecuteGesture extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const duration = options.duration || 300;
-    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf, signal);
+    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf, signal, options.timeoutMs);
   }
 
   /**
@@ -306,13 +306,22 @@ export class ExecuteGesture extends BaseVisualChange {
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<SwipeResult> {
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
     const result = await perf.track("xctestSwipe", async () => {
       throwIfAborted(signal);
-      return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf);
+      return await client.requestSwipe(
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        Math.min(5_000, timeoutMs ?? 5_000),
+        perf,
+      );
     });
     throwIfAborted(signal);
 

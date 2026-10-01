@@ -661,7 +661,7 @@ jobs:
   build-desktop-app:
     timeout-minutes: 20
     name: "Build Desktop App (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || matrix.os }}
     needs: detect-changes
     if: (needs.detect-changes.outputs.desktop_app_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'
     strategy:
@@ -672,19 +672,75 @@ jobs:
       run:
         working-directory: android
     steps:
+      - name: "Select JDK 21"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        working-directory: .
+        run: |
+          if ! jdk_home=$(/usr/libexec/java_home -v 21) || [[ -z "$jdk_home" ]]; then
+            echo '::error::The self-hosted desktop build requires an installed JDK 21.' >&2
+            exit 1
+          fi
+          if ! ("$jdk_home/bin/javac" -version 2>&1 | grep -Eq '^javac 21([.]|$)'); then
+            echo "::error::The selected JDK at $jdk_home does not provide javac 21." >&2
+            exit 1
+          fi
+          echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"
+          echo "$jdk_home/bin" >> "$GITHUB_PATH"
+
+      - name: "Isolate self-hosted desktop build"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        working-directory: .
+        run: |
+          sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
+          if [[ ! -d "$sdk_root" ]]; then
+            echo "::error::The self-hosted desktop build requires an Android SDK directory at $sdk_root (set ANDROID_HOME or ANDROID_SDK_ROOT)." >&2
+            exit 1
+          fi
+          isolated_home="$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data" "$isolated_home/gradle" "$isolated_home/action-state"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+            echo "ANDROID_HOME=$sdk_root"
+            echo "ANDROID_SDK_ROOT=$sdk_root"
+            echo "GRADLE_USER_HOME=$isolated_home/gradle"
+            echo "GRADLE_STATE_DIR=$isolated_home/action-state"
+            echo "GRADLE_RETRY_LOG_DIR=$isolated_home/gradle-retry"
+            echo "JAVA_TOOL_OPTIONS=-Duser.home=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       - uses: ./.github/actions/gradle-task-run
         with:
           gradle-tasks: ":desktop-app:build -x test"
+          gradle-flags: ${{ runner.environment == 'self-hosted' && '["-Dorg.gradle.java.installations.auto-download=false"]' || '[]' }}
           gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}-${{ matrix.os }}"
+          gradle-home-directory: ${{ runner.environment == 'self-hosted' && format('{0}/desktop-home-{1}-{2}/gradle', runner.temp, github.run_id, github.run_attempt) || format('~/.gradle/{0}-{1}', github.job, matrix.os) }}
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
           malloc-replacement: ${{ runner.os == 'Linux' && 'jemalloc' || 'none' }}
+
+      - name: "Stop isolated Gradle daemon and remove desktop home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        working-directory: android
+        run: |
+          if [[ -d "${GRADLE_USER_HOME:-}" ]]; then
+            if ! ./gradlew --stop; then
+              echo '::warning::Failed to stop the isolated Gradle daemon before removing its home.' >&2
+            fi
+          fi
+          rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   desktop-app-unit-tests:
     timeout-minutes: 30
@@ -1048,8 +1104,7 @@ jobs:
   installer-minimal:
     timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
-    # Keep per-PR installer coverage on hosted Ubuntu and macOS runners.
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || matrix.os }}
     needs: detect-changes
     env:
       RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
@@ -1068,11 +1123,26 @@ jobs:
         if: env.RUN_INSTALLER != 'true'
         run: echo "Skipping installer validation for documentation-only changes"
 
+      - name: "Isolate self-hosted installer home"
+        if: env.RUN_INSTALLER == 'true' && runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/installer-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         if: env.RUN_INSTALLER == 'true'
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       - name: "Confirm clean installer fixture"
         if: env.RUN_INSTALLER == 'true'
@@ -1143,6 +1213,11 @@ jobs:
           echo "Installer exit code: ${INSTALL_EXIT_CODE:-0}"
           echo "Uninstaller exit code: ${UNINSTALL_EXIT_CODE:-0}"
           exit 1
+
+      - name: "Remove isolated installer home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/installer-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # =============================================================================
   # Security Analysis (Skip for docs-only changes)
@@ -1682,29 +1757,58 @@ jobs:
   swiftlint:
     timeout-minutes: 20
     name: "SwiftLint"
-    # Run SwiftLint on hosted macos-26 for every pull request.
-    runs-on: macos-26
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
     # Do not spend a macOS slot when the inexpensive Ubuntu validation has
     # already proved this revision cannot merge.
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
+      - name: "Isolate self-hosted SwiftLint home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/swiftlint-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
+
+      - name: "Require ambient SwiftLint"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          if ! command -v swiftlint >/dev/null; then
+            echo '::error::The self-hosted SwiftLint job requires the pinned SwiftLint binary on PATH.' >&2
+            exit 1
+          fi
 
       # Full-tree lint (validate_swiftlint.sh defaults: ONLY_TOUCHED_FILES=false,
       # STRICT_MODE=false), so the whole ios/ tree must stay error-clean on every
       # iOS-affecting PR. The script exits non-zero only on error-severity rules
       # (force_unwrapping/force_try are configured as errors — the fail-fast crash
       # class we burned down in 2026-07); warnings remain non-blocking. SwiftLint is
-      # installed on demand at the version pinned in install_swiftlint.sh.
+      # installed on demand on hosted runners; the self-hosted runner must
+      # already have the pinned binary.
       - name: "Run SwiftLint (fail on error-severity rules)"
         shell: bash
         env:
-          INSTALL_SWIFTLINT_WHEN_MISSING: "true"
+          INSTALL_SWIFTLINT_WHEN_MISSING: ${{ runner.environment == 'github-hosted' && 'true' || 'false' }}
         run: bash scripts/swiftlint/validate_swiftlint.sh
+
+      - name: "Remove isolated SwiftLint home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/swiftlint-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # =============================================================================
   # Swift Code Coverage
@@ -1713,25 +1817,45 @@ jobs:
   swift-code-coverage:
     timeout-minutes: 20
     name: "Swift Code Coverage"
-    # Keep pull-request coverage on hosted macOS.
     # macos-26 + Xcode 26.5 (Swift 6.3): the sole coverage package, control-proxy,
     # declares swift-tools-version 6.3 (its strict-concurrency floor, matching the
     # repo-wide iOS 6.3 migration), which the Swift 5.10 toolchain on macos-14 /
     # Xcode 15.4 cannot even parse. Mirrors the other Swift-6.3 jobs' toolchain.
-    runs-on: macos-26
+    runs-on: ${{ (github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","automobile-mac"]') || 'macos-26' }}
     # Keep costly hosted macOS work behind the inexpensive Fast Validation gate.
     needs: [detect-changes, fast-validation]
     if: needs.detect-changes.outputs.ios_should_run == 'true' && needs.fast-validation.result == 'success'
     steps:
+      - name: "Isolate self-hosted Swift coverage home"
+        if: runner.environment == 'self-hosted'
+        shell: bash
+        run: |
+          isolated_home="$RUNNER_TEMP/swift-coverage-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          {
+            echo "HOME=$isolated_home"
+            echo "TMPDIR=$isolated_home/tmp"
+            echo "XDG_CONFIG_HOME=$isolated_home/config"
+            echo "XDG_DATA_HOME=$isolated_home/data"
+            echo "CFFIXED_USER_HOME=$isolated_home"
+          } >> "$GITHUB_ENV"
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
+          clean: true
 
       - name: "Select Xcode 26.5"
+        if: runner.environment == 'github-hosted'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.5"
+
+      - name: "Record Xcode version"
+        id: coverage-xcode-version
+        shell: bash
+        run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" >> "$GITHUB_OUTPUT"
 
       - name: "Cache Swift coverage dependencies"
         uses: actions/cache@v5
@@ -1740,9 +1864,9 @@ jobs:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm/cache
-          key: ${{ runner.os }}-spm-swift-coverage-26.5-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
+          key: ${{ runner.os }}-${{ runner.environment }}-spm-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
-            ${{ runner.os }}-spm-swift-coverage-26.5-
+            ${{ runner.os }}-${{ runner.environment }}-spm-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-
 
       - name: "Resolve Swift coverage dependencies"
         run: (cd ios/control-proxy && swift package resolve)
@@ -1760,6 +1884,11 @@ jobs:
           name: swift-coverage-badge
           path: coverage/swift-coverage-badge.json
           retention-days: 7
+
+      - name: "Remove isolated Swift coverage home"
+        if: always() && runner.environment == 'self-hosted'
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/swift-coverage-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # =============================================================================
   # iOS Build and Test Jobs (Skip for docs-only changes)

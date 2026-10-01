@@ -19,6 +19,7 @@ export interface WorkflowStep {
   id?: string;
   run?: string;
   uses?: string;
+  "working-directory"?: string;
   /** Native parallel-steps: run this step asynchronously. */
   background?: boolean;
   /** Native parallel-steps barrier: a single step id or a list of them. */
@@ -42,7 +43,9 @@ export interface WorkflowConcurrency {
 
 /** A job's own configuration, minus its steps. */
 export interface WorkflowJob {
+  name?: string;
   "runs-on"?: string | string[] | Record<string, unknown>;
+  defaults?: { run?: { "working-directory"?: string } };
   strategy?: {
     matrix?: {
       os?: string[];

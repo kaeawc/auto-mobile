@@ -14,6 +14,7 @@ interface CompositeActionStep {
   name?: string;
   run?: string;
   uses?: string;
+  if?: string;
 }
 
 function usesRefs(action: CompositeAction): string[] {
@@ -26,6 +27,21 @@ function majorVersion(ref: string): number | undefined {
 }
 
 describe("gradle-task-run action", () => {
+  test("installs JDK and Android SDK only on hosted runners", () => {
+    const action = load(readFileSync(actionPath, "utf8")) as CompositeAction;
+    const steps = action.runs?.steps ?? [];
+    expect(steps.find((step) => step.name === "Install JDK")?.if).toBe(
+      "runner.environment == 'github-hosted'",
+    );
+    expect(steps.find((step) => step.name === "Restore Android SDK Cache")?.if).toBe(
+      "runner.environment == 'github-hosted'",
+    );
+    for (const name of ["Setup Android SDK", "Save Android SDK Cache"]) {
+      expect(steps.find((step) => step.name === name)?.if).toContain(
+        "runner.environment == 'github-hosted'",
+      );
+    }
+  });
   test("uses action versions at or above the supported Node runtime floor", () => {
     const action = load(readFileSync(actionPath, "utf8")) as CompositeAction;
     const refs = usesRefs(action);
@@ -50,7 +66,7 @@ describe("gradle-task-run action", () => {
 
     const evalGradle = action.runs?.steps?.find((step) => step.id === "eval_gradle");
     expect(evalGradle?.run).toContain(
-      'echo "version=$(cat /tmp/gradle_version.txt)" >> "$GITHUB_OUTPUT"',
+      'echo "version=$(cat "${GRADLE_STATE_DIR:-/tmp}/gradle_version.txt")" >> "$GITHUB_OUTPUT"',
     );
     expect(evalGradle?.run).toContain(
       'echo "version=${{ inputs.gradle-version }}" >> "$GITHUB_OUTPUT"',

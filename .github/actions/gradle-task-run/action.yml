@@ -86,6 +86,7 @@ runs:
   using: "composite"
   steps:
     - name: "Install JDK"
+      if: runner.environment == 'github-hosted'
       uses: actions/setup-java@v5
       with:
         distribution: "zulu"
@@ -138,8 +139,8 @@ runs:
       run: |
         if [ "${{ inputs.gradle-version }}" == "" ]; then
           echo "Reading Gradle version from Gradle wrapper properties file."
-          grep "distributionUrl" gradle/wrapper/gradle-wrapper.properties | sed -E 's/.*gradle-([0-9.]+)-(all|bin).zip/\1/' > /tmp/gradle_version.txt
-          echo "version=$(cat /tmp/gradle_version.txt)" >> "$GITHUB_OUTPUT"
+          grep "distributionUrl" gradle/wrapper/gradle-wrapper.properties | sed -E 's/.*gradle-([0-9.]+)-(all|bin).zip/\1/' > "${GRADLE_STATE_DIR:-/tmp}/gradle_version.txt"
+          echo "version=$(cat "${GRADLE_STATE_DIR:-/tmp}/gradle_version.txt")" >> "$GITHUB_OUTPUT"
         else
           echo "Reading custom Gradle version provided to action."
           echo "version=${{ inputs.gradle-version }}" >> "$GITHUB_OUTPUT"
@@ -170,7 +171,7 @@ runs:
         export GRADLE_FLAGS="${GRADLE_FLAGS//[$'\t\r\n']}"
 
         # Write temporary file for checksum
-        echo "$GRADLE_FLAGS" > /tmp/gradle_flags.txt
+        echo "$GRADLE_FLAGS" > "${GRADLE_STATE_DIR:-/tmp}/gradle_flags.txt"
 
         echo "Printing evaluated Gradle flags"
         echo "GRADLE_FLAGS: $GRADLE_FLAGS"
@@ -213,6 +214,7 @@ runs:
         validate-wrappers: true
 
     - name: "Restore Android SDK Cache"
+      if: runner.environment == 'github-hosted'
       id: cache-android-sdk
       uses: actions/cache/restore@v5.1.0
       with:
@@ -222,7 +224,7 @@ runs:
         key: v4-${{ runner.os }}-android-sdk
 
     - name: Setup Android SDK
-      if: steps.cache-android-sdk.outputs.cache-hit != 'true'
+      if: runner.environment == 'github-hosted' && steps.cache-android-sdk.outputs.cache-hit != 'true'
       uses: android-actions/setup-android@v3.2.2
       with:
         # The action's legacy default requests the removed `tools` package.
@@ -231,7 +233,7 @@ runs:
 
     - name: "Save Android SDK Cache"
       uses: actions/cache/save@v5.1.0
-      if: steps.cache-android-sdk.outputs.cache-hit != 'true'
+      if: runner.environment == 'github-hosted' && steps.cache-android-sdk.outputs.cache-hit != 'true'
       with:
         path: |
           ~/.android
@@ -254,7 +256,7 @@ runs:
       shell: ${{ inputs.shell }}
       working-directory: ${{ inputs.gradle-project-directory }}
       run: |
-        export GRADLE_FLAGS=$(cat /tmp/gradle_flags.txt)
+        export GRADLE_FLAGS=$(cat "${GRADLE_STATE_DIR:-/tmp}/gradle_flags.txt")
         "${GITHUB_WORKSPACE}/scripts/ci/run-gradle-with-retry.sh" -- ./gradlew ${{ inputs.gradle-tasks }} $GRADLE_FLAGS
 
     - name: "Check if any JUnit tests reports were created"

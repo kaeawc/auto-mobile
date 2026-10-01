@@ -74,5 +74,13 @@ describe("tool availability and per-connection selection", () => {
         ),
       ).rejects.toThrow(`Unknown tool: ${unavailableTool}`);
     }
+    await expect(
+      fixture.client.request(
+        { method: "tools/call", params: { name: "debugSearch", arguments: {} } },
+        z.any(),
+      ),
+    ).rejects.toThrow(
+      "Unknown tool: debugSearch. debugSearch was removed; use observe to see elements, and the diagnostics returned by tapOn/waitFor failures",
+    );
   });
 });

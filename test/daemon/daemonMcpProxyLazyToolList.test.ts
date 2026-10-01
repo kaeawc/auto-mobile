@@ -155,7 +155,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
-  test("connected fallback retains launch-gated schemas only when the daemon enabled them", async () => {
+  test("connected fallback retains embedded SDK schemas when the daemon enabled them", async () => {
     const fakeClient = new FakeDaemonClient({
       onCallDaemonMethod: (method) => {
         if (method === "tools/list") {
@@ -166,73 +166,7 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     const daemonManager = matchingDaemonManager();
     daemonManager.statusResult = {
       ...daemonManager.statusResult,
-      options: { debug: true, embeddedSdk: true },
-    };
-    const proxy = new DaemonMcpProxy({
-      clientFactory: () => fakeClient,
-      daemonManager,
-      daemonAvailabilityProbe: async () => true,
-      autoStartDaemon: false,
-    });
-
-    try {
-      await proxy.callTool("observe", {});
-      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
-
-      expect(toolNames).toContain("debugSearch");
-      expect(toolNames).toContain("sqlQuery");
-    } finally {
-      await proxy.close();
-    }
-  });
-
-  test("connected fallback retains debug schemas when only effective debug is enabled", async () => {
-    const fakeClient = new FakeDaemonClient({
-      onCallDaemonMethod: (method) => {
-        if (method === "tools/list") {
-          throw new Error("wedged live list");
-        }
-      },
-    });
-    const daemonManager = matchingDaemonManager();
-    daemonManager.statusResult = {
-      ...daemonManager.statusResult,
-      effectiveDebug: true,
-      options: { debug: false },
-    };
-    const proxy = new DaemonMcpProxy({
-      clientFactory: () => fakeClient,
-      daemonManager,
-      daemonAvailabilityProbe: async () => true,
-      autoStartDaemon: false,
-    });
-
-    try {
-      await proxy.callTool("observe", {});
-      const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
-
-      expect(toolNames).toContain("debugSearch");
-      expect(
-        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "ide/status"),
-      ).toHaveLength(0);
-    } finally {
-      await proxy.close();
-    }
-  });
-
-  test("connected fallback omits debug schemas when effective debug is disabled", async () => {
-    const fakeClient = new FakeDaemonClient({
-      onCallDaemonMethod: (method) => {
-        if (method === "tools/list") {
-          throw new Error("wedged live list");
-        }
-      },
-    });
-    const daemonManager = matchingDaemonManager();
-    daemonManager.statusResult = {
-      ...daemonManager.statusResult,
-      effectiveDebug: false,
-      options: { debug: true },
+      options: { embeddedSdk: true },
     };
     const proxy = new DaemonMcpProxy({
       clientFactory: () => fakeClient,
@@ -246,48 +180,11 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       const toolNames = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
 
       expect(toolNames).not.toContain("debugSearch");
-      expect(
-        fakeClient.callDaemonMethodCalls.filter((call) => call.method === "ide/status"),
-      ).toHaveLength(0);
+      expect(toolNames).toContain("sqlQuery");
     } finally {
       await proxy.close();
     }
   });
-
-  test.each([true, false])(
-    "tools/list_changed refreshes fallback debug state after a runtime toggle to %s",
-    async (enabled) => {
-      const fakeClient = new FakeDaemonClient({
-        onCallDaemonMethod: (method) => {
-          if (method === "tools/list") {
-            throw new Error("wedged live list");
-          }
-        },
-      });
-      const daemonManager = matchingDaemonManager();
-      daemonManager.statusResult = {
-        ...daemonManager.statusResult,
-        effectiveDebug: !enabled,
-      };
-      const proxy = new DaemonMcpProxy({
-        clientFactory: () => fakeClient,
-        daemonManager,
-        daemonAvailabilityProbe: async () => true,
-        daemonStatusProbe: async () => daemonManager.statusResult,
-        autoStartDaemon: false,
-      });
-      try {
-        await proxy.callTool("observe", {});
-        await proxy.listAdvertisedTools();
-        daemonManager.statusResult = { ...daemonManager.statusResult, effectiveDebug: enabled };
-        fakeClient.emitNotification("notifications/tools/list_changed");
-        const names = (await proxy.listAdvertisedTools()).map((tool) => tool.name);
-        expect(names.includes("debugSearch")).toBe(enabled);
-      } finally {
-        await proxy.close();
-      }
-    },
-  );
 
   test("serves connected static schemas when the live tools list fails", async () => {
     const fakeClient = new FakeDaemonClient({

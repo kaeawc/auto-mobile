@@ -111,7 +111,6 @@ export * from "./ExportPlanResult";
 export * from "./ExecutePlanResult";
 export * from "./FailureObservation";
 export * from "./RawViewHierarchyResult";
-export * from "./DebugSearchResult";
 export * from "./VisualHighlight";
 export * from "./VideoRecording";
 export * from "./DeviceSnapshot";

@@ -27,7 +27,7 @@ import {
   NoOpPerformanceTracker,
 } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
-import { buildElementSearchDebugContext } from "../../../utils/DebugContextBuilder";
+import { buildElementSearchDebugContext } from "../../utility/ElementSearchDebugContext";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { resolveSwipeDirection } from "../../../utils/swipeOnUtils";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";

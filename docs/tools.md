@@ -155,7 +155,6 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
-| 🔍 <code>debugSearch</code>          | Shows selector matches, the chosen match, and near-misses.                |
 
 ## Interact with the UI
 

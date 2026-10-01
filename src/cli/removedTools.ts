@@ -1,19 +1,9 @@
-/** Known removed MCP tools and the supported tool to use in their place. */
-export const REMOVED_TOOLS: Readonly<Record<string, string>> = {
-  captureScreenshot: 'observe {screenshot:"settled"} (returns screenshotPath)',
-  inputText: "sendKeys",
-  clearText: "sendKeys",
-  imeAction: "sendKeys",
-};
-
-export function getRemovedToolReplacement(toolName: string): string | undefined {
-  return REMOVED_TOOLS[toolName];
-}
+import { getRemovedToolHint } from "../models/removedTools";
 
 export function formatDaemonToolError(toolName: string, message: string): string {
-  const replacement = getRemovedToolReplacement(toolName);
-  if (replacement && /Unknown tool\b/i.test(message)) {
-    return `${toolName} was removed; use ${replacement}`;
+  const hint = getRemovedToolHint(toolName);
+  if (hint && /Unknown tool\b/i.test(message)) {
+    return hint;
   }
 
   const detail = message.replace(/[.]+$/, "");

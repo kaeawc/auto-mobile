@@ -40,7 +40,6 @@ import { registerFormTools } from "../src/server/formTools";
 import { registerAccessibilityTools } from "../src/server/accessibilityTools";
 import { registerAccessibilityFocusTools } from "../src/server/accessibilityFocusTools";
 import { registerNetworkTools } from "../src/server/networkTools";
-import { registerDebugTools } from "../src/server/debugTools";
 
 const OUTPUT_PATH = "schemas/tool-definitions.json";
 
@@ -74,7 +73,6 @@ function registerAllTools(): void {
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
   registerNetworkTools();
-  registerDebugTools();
 }
 
 function getToolDefinitions(): unknown[] {

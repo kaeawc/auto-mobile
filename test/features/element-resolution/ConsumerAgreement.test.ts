@@ -4,8 +4,6 @@ import { projectSkeleton } from "../../../src/features/observe/output/SkeletonPr
 import { SearchableHierarchy } from "../../../src/features/utility/SearchableNode";
 import { ElementResolver } from "../../../src/features/utility/ElementResolver";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
-import { DebugSearch } from "../../../src/features/debug/DebugSearch";
-import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ViewHierarchyResult } from "../../../src/models";
 
 const bounds = { left: 0, top: 0, right: 100, bottom: 50 };
@@ -89,7 +87,7 @@ test("folded padded row label is identical in observe, exact resolution and cont
   expect(partial.chosen?.bounds).toEqual(bounds);
 });
 
-test("debug, tap and highlight agree on scoped default target and ranked explicit indices", async () => {
+test("tap and highlight agree on scoped default target and ranked explicit indices", () => {
   const child = (id: string, size: number, clickable = true) => ({
     "resource-id": id,
     text: "Save",
@@ -115,29 +113,10 @@ test("debug, tap and highlight agree on scoped default target and ranked explici
     container,
     intentAction: "highlight",
   });
-  const debug = new DebugSearch(
-    { name: "test", deviceId: "agreement", platform: "android" },
-    undefined,
-    new FakeTimer(),
-    undefined,
-    {
-      capture: async (request) => ({
-        captureId: "agreement",
-        platform: "android",
-        requestedFreshness: request.freshness,
-        receivedAt: 0,
-        hierarchy,
-        nodes: project(hierarchy).nodes,
-      }),
-    },
-  );
-  const result = await debug.execute({ text: "Save", container });
   expect(tap.element?.["resource-id"]).toBe("second");
-  expect(result.selectedMatch?.resourceId).toBe("second");
   // Highlight can intentionally target a bounded inert label; tap eligibility is distinct.
   expect(highlight.element?.["resource-id"]).toBe("label");
   expect(
     selector.selectByText(hierarchy, "Save", { container, index: 0 }).element?.["resource-id"],
   ).toBe("second");
-  expect(result.matches.some((entry) => entry.resourceId === "outside")).toBe(false);
 });

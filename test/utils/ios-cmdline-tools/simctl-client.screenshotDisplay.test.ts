@@ -71,14 +71,15 @@ test("multi-panel screenshot falls back with a warning when simctl returns cover
 
 test("multi-panel screenshot selects the inner panel from live hierarchy pixels", async () => {
   const captures: string[] = [];
-  const frame = png(2853, 2007);
+  // Synthetic PNG header using the issue-reported landscape dimensions.
+  const issueReportedPanelPng = png(2853, 2007);
   const result = await captureIosPanelScreenshot(
     device,
     { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2007, pixelHeight: 2853 },
     {
       screenshot: async (_deviceId, display) => {
         captures.push(display);
-        return frame;
+        return issueReportedPanelPng;
       },
     },
     async () => {
@@ -86,5 +87,29 @@ test("multi-panel screenshot selects the inner panel from live hierarchy pixels"
     },
   );
   expect(captures).toEqual(["primary-1"]);
-  expect(result.data).toBe(frame.toString("base64"));
+  expect(result.data).toBe(issueReportedPanelPng.toString("base64"));
+});
+
+test("inner panel rejects a cover-sized PNG despite matching hierarchy points at scale", async () => {
+  const frame = png(1398, 2034);
+  expect(device.displays?.panels.find((panel) => panel.key === "primary-1")?.sizePx).toEqual({
+    width: 2007,
+    height: 2853,
+  });
+  const result = await captureIosPanelScreenshot(
+    device,
+    {
+      updatedAt: 0,
+      packageName: "app",
+      hierarchy: {},
+      screenWidth: 466,
+      screenHeight: 678,
+      screenScale: 3,
+    },
+    { screenshot: async () => frame },
+    async () => ({ success: true, data: "runner" }),
+    undefined,
+    "primary-1",
+  );
+  expect(result.data).toBe("runner");
 });

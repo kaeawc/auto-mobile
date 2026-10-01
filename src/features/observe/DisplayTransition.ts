@@ -16,6 +16,21 @@ interface PanelGeometry {
   height: number;
 }
 
+function identifiedPanel(panel: Pick<PanelGeometry, "key" | "role" | "posture">): boolean {
+  return panel.key !== "0" && panel.role !== "unknown" && panel.posture !== "unknown";
+}
+
+function samePanelIdentity(
+  current: Pick<PanelGeometry, "key" | "role" | "posture">,
+  previous: PanelGeometry,
+): boolean {
+  return (
+    current.key === previous.key &&
+    current.role === previous.role &&
+    current.posture === previous.posture
+  );
+}
+
 /** Fields supplied by the Android display listener; no wire parser dependency. */
 export interface PushedDisplayTransition {
   change: "added" | "changed" | "removed" | "device_state";
@@ -65,8 +80,11 @@ function samePushedPanel(event: PushedDisplayTransition, previous: PanelGeometry
 
 export class DisplayTransitionTracker implements DisplayTransitionSink {
   private readonly panels = new Map<string, PanelGeometry>();
+  private readonly observationIds = new Map<string, string>();
   private readonly panelRevisions = new Map<string, number>();
   private readonly revisions = new Map<string, number>();
+  private readonly identityRevisions = new Map<string, number>();
+  private readonly lastIdentityChangeRevisions = new Map<string, number>();
   private readonly pendingPushes = new Map<string, number>();
   private readonly deviceStates = new Map<string, number>();
   private readonly listeners = new Map<
@@ -78,6 +96,19 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
 
   revision(deviceId: string): number {
     return this.revisions.get(deviceId) ?? 0;
+  }
+
+  /** Action fence; only a correction to one identified observation leaves it stable. */
+  identityRevision(deviceId: string): number {
+    return this.identityRevisions.get(deviceId) ?? 0;
+  }
+
+  /** Whether a previously rendered full revision still targets this iOS panel/posture. */
+  sameIdentitySince(deviceId: string, renderedRevision: number): boolean {
+    return (
+      renderedRevision >= (this.lastIdentityChangeRevisions.get(deviceId) ?? 0) &&
+      renderedRevision <= this.revision(deviceId)
+    );
   }
 
   /** Most recent accepted observation stamp, unless a push has fenced it. */
@@ -126,31 +157,59 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
   }
 
   /** Fence an iOS geometry change before the new observation is recorded. */
-  checkIosGeometry(deviceId: string, size: ObserveResult["screenSize"]): boolean {
+  checkIosGeometry(
+    deviceId: string,
+    size: ObserveResult["screenSize"],
+    observationId?: string,
+    display?: DisplayRef,
+  ): boolean {
     if (!this.geometryChanged(deviceId, size)) {
       return false;
     }
-    this.panels.delete(deviceId);
-    this.notifyTransition(deviceId, "iOS display geometry changed");
+    const previous = this.panels.get(deviceId)!;
+    previous.width = size.width;
+    previous.height = size.height;
+    if (
+      observationId &&
+      this.observationIds.get(deviceId) === observationId &&
+      identifiedPanel(previous) &&
+      display &&
+      identifiedPanel(display) &&
+      previous.key === display.key &&
+      previous.posture === display.posture
+    ) {
+      this.notifyGeometryTransition(deviceId, "iOS display geometry corrected within observation");
+    } else {
+      this.notifyTransition(deviceId, "iOS display geometry changed");
+    }
     return true;
   }
 
   /** Compare identity before hierarchy collection, so a new panel cannot hit the old cache. */
-  checkIdentity(deviceId: string, display: DisplayRef): boolean {
+  checkIdentity(
+    deviceId: string,
+    display: DisplayRef,
+    platform: "ios" | "android" = "android",
+  ): boolean {
     const previous = this.panels.get(deviceId);
-    if (
-      !previous ||
-      (previous.key === display.key &&
-        previous.role === display.role &&
-        previous.posture === display.posture)
-    ) {
+    if (!previous || samePanelIdentity(display, previous)) {
       return false;
     }
     if (this.pendingPushes.get(deviceId) === this.revision(deviceId)) {
       return false;
     }
     this.panels.delete(deviceId);
-    this.notifyTransition(deviceId, "display key, role, or posture changed");
+    if (
+      platform === "ios" &&
+      identifiedPanel(previous) &&
+      identifiedPanel(display) &&
+      previous.key === display.key &&
+      previous.posture === display.posture
+    ) {
+      this.notifyGeometryTransition(deviceId, "display role changed");
+    } else {
+      this.notifyTransition(deviceId, "display key, role, or posture changed");
+    }
     if (previous.key !== display.key || previous.role !== display.role) {
       this.emitPanel(deviceId, display);
     }
@@ -160,7 +219,8 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
   /** Compare the finalized hierarchy's pixel geometry as well as physical identity. */
   record(
     deviceId: string,
-    result: Pick<ObserveResult, "display" | "screenSize">,
+    result: Pick<ObserveResult, "display" | "screenSize"> &
+      Partial<Pick<ObserveResult, "observationId">>,
     platform: "ios" | "android" = "android",
   ): boolean {
     // The first completed observation after a push consumes its fence, even if
@@ -179,7 +239,15 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
       height,
     };
     const previous = this.panels.get(deviceId);
+    const sameObservation =
+      result.observationId !== undefined &&
+      this.observationIds.get(deviceId) === result.observationId;
     this.panels.set(deviceId, current);
+    if (result.observationId) {
+      this.observationIds.set(deviceId, result.observationId);
+    } else {
+      this.observationIds.delete(deviceId);
+    }
     this.panelRevisions.set(deviceId, this.revision(deviceId));
     const unchanged =
       previous !== undefined && samePanelAndGeometry(current, previous, platform === "ios");
@@ -190,7 +258,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     if (!previous || unchanged) {
       return false;
     }
-    this.notifyTransition(deviceId, "display geometry changed");
+    this.notifyObservedTransition(deviceId, current, previous, platform, sameObservation);
     this.panelRevisions.set(deviceId, this.revision(deviceId));
     if (previous.key !== current.key || previous.role !== current.role) {
       this.emitPanel(deviceId, current);
@@ -198,7 +266,34 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     return true;
   }
 
+  private notifyObservedTransition(
+    deviceId: string,
+    current: PanelGeometry,
+    previous: PanelGeometry,
+    platform: "ios" | "android",
+    sameObservation: boolean,
+  ): void {
+    if (
+      platform === "ios" &&
+      sameObservation &&
+      identifiedPanel(current) &&
+      identifiedPanel(previous) &&
+      current.key === previous.key &&
+      current.posture === previous.posture
+    ) {
+      this.notifyGeometryTransition(deviceId, "display geometry changed");
+      return;
+    }
+    this.notifyTransition(deviceId, "display geometry changed");
+  }
+
   notifyTransition(deviceId: string, reason: string): void {
+    this.identityRevisions.set(deviceId, this.identityRevision(deviceId) + 1);
+    this.notifyGeometryTransition(deviceId, reason);
+    this.lastIdentityChangeRevisions.set(deviceId, this.revision(deviceId));
+  }
+
+  private notifyGeometryTransition(deviceId: string, reason: string): void {
     this.revisions.set(deviceId, this.revision(deviceId) + 1);
     this.invalidate(deviceId, reason);
   }
@@ -233,8 +328,11 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
 
   reset(deviceId: string): void {
     this.panels.delete(deviceId);
+    this.observationIds.delete(deviceId);
     this.panelRevisions.delete(deviceId);
     this.revisions.delete(deviceId);
+    this.identityRevisions.delete(deviceId);
+    this.lastIdentityChangeRevisions.delete(deviceId);
     this.pendingPushes.delete(deviceId);
     this.deviceStates.delete(deviceId);
     ObservedAndroidDisplayCache.release(deviceId);

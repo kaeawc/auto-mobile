@@ -137,7 +137,12 @@ export function createDeviceHierarchyCapture(
       recordAcquisitionTimestamp(supplemented, updatedAt);
       return supplemented;
     },
-    (hierarchy) => projectActionableHierarchy(device.platform, hierarchy),
+    (hierarchy) =>
+      projectActionableHierarchy(
+        device.platform,
+        hierarchy,
+        device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
+      ),
     dependencies.settle,
   );
   return new DefaultHierarchyCapture(device.platform, reader, dependencies.timer, dependencies.ids);

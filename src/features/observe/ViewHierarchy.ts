@@ -427,7 +427,11 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   projectActionableHierarchy(hierarchy: ViewHierarchyResult): ViewHierarchyResult {
-    return projectActionableHierarchy(this.device.platform, hierarchy);
+    return projectActionableHierarchy(
+      this.device.platform,
+      hierarchy,
+      this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+    );
   }
 
   /**

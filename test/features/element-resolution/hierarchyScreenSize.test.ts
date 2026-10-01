@@ -58,3 +58,33 @@ test("keeps a single-panel portrait root when a carousel cell extends beyond its
     }),
   ).toEqual({ width: 393, height: 852 });
 });
+
+test("synthetic Duo values resolve a sparse inner-panel element beyond a portrait root", () => {
+  const root = { left: 0, top: 0, right: 669, bottom: 951 };
+  const search = { left: 700, top: 20, right: 867, bottom: 76 };
+  const hierarchy = {
+    hierarchy: {
+      bounds: root,
+      node: {
+        bounds: root,
+        node: [{ bounds: search, "resource-id": "duo.search", clickable: true }],
+      },
+    },
+  };
+  expect(extractHierarchyScreenSize(hierarchy, true)).toEqual({ width: 951, height: 669 });
+  const projected = projectActionableHierarchy("ios", hierarchy, true);
+  expect(projected.screenWidth).toBe(951);
+  expect(
+    new SearchableHierarchy().project(projected).some((node) => node.nativeId === "duo.search"),
+  ).toBe(true);
+});
+
+test("ordinary portrait overflow does not imply landscape on iOS or Android", () => {
+  const root = { left: 0, top: 0, right: 393, bottom: 852 };
+  const child = { left: 350, top: 100, right: 620, bottom: 380 };
+  const hierarchy = {
+    hierarchy: { bounds: root, node: { bounds: root, node: [{ bounds: child }] } },
+  };
+  expect(extractHierarchyScreenSize(hierarchy)).toEqual({ width: 393, height: 852 });
+  expect(extractHierarchyScreenSize(hierarchy, false)).toEqual({ width: 393, height: 852 });
+});

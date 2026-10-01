@@ -34,6 +34,38 @@ final class PressKeyTests: XCTestCase {
         XCTAssertEqual(GesturePerformer.destructiveKeyOutcome(before: "hello", after: "helloo"), .noEffect)
     }
 
+    func testDestructiveKeyModifiersAreRejectedWithActionableError() {
+        for (key, modifiers) in [
+            ("backspace", ["shift"]),
+            ("delete", ["meta"]),
+            ("BACKSPACE", ["shift"]),
+            ("DELETE", ["meta"]),
+        ] {
+            XCTAssertThrowsError(try GesturePerformer.validateDestructiveKeyModifiers(
+                normalizedKey: key.lowercased(), modifiers: modifiers
+            )) { error in
+                guard case let GesturePerformer.GestureError.notSupported(message) = error else {
+                    return XCTFail("Expected notSupported error, got \(error)")
+                }
+                XCTAssertEqual(
+                    message,
+                    "Modifiers (\(modifiers[0])) are not supported with \(key.lowercased()); send the key without modifiers"
+                )
+            }
+        }
+    }
+
+    func testDestructiveKeysWithoutModifiersAndOtherKeysWithModifiersAreAllowed() {
+        for key in ["backspace", "delete"] {
+            XCTAssertNoThrow(try GesturePerformer.validateDestructiveKeyModifiers(normalizedKey: key, modifiers: []))
+        }
+        for key in ["arrow_left", "enter"] {
+            XCTAssertNoThrow(try GesturePerformer.validateDestructiveKeyModifiers(
+                normalizedKey: key, modifiers: ["shift"]
+            ))
+        }
+    }
+
     func testFieldTextExcludesEmptyFieldPlaceholders() {
         XCTAssertEqual(GesturePerformer.fieldText(
             snapshotValue: nil, value: "Search or enter website name", placeholderValue: "Search or enter website name"

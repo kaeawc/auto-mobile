@@ -193,6 +193,13 @@ public final class GesturePerformer: GesturePerforming {
         return after.count < before.count ? .deleted : .noEffect
     }
 
+    nonisolated static func validateDestructiveKeyModifiers(normalizedKey: String, modifiers: [String]) throws {
+        guard normalizedKey == "backspace" || normalizedKey == "delete", !modifiers.isEmpty else { return }
+        throw GestureError.notSupported(
+            "Modifiers (\(modifiers.joined(separator: ", "))) are not supported with \(normalizedKey); send the key without modifiers"
+        )
+    }
+
     nonisolated static func fieldText(snapshotValue: String?, value: String?, placeholderValue: String?) -> String {
         guard snapshotValue != nil, value != placeholderValue else { return "" }
         return value ?? ""
@@ -1249,11 +1256,13 @@ public final class GesturePerformer: GesturePerforming {
 
         @discardableResult
         public func pressKey(key: String, modifiers: [String]) throws -> Bool? {
+            let normalizedKey = key.lowercased()
+            try GesturePerformer.validateDestructiveKeyModifiers(normalizedKey: normalizedKey, modifiers: modifiers)
+
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
-            let normalizedKey = key.lowercased()
             let keyboardKey: XCUIKeyboardKey
             switch normalizedKey {
             case "enter":

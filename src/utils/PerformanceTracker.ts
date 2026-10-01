@@ -87,20 +87,23 @@ export interface PerformanceTracker {
   isEnabled(): boolean;
 
   /**
-   * Add external timing data (e.g., from Android side) to the current block
+   * Add external timing data (e.g., from Android side) to the current block.
+   * Concurrent callers that may move the current block should fork() first.
    * @param name - Name for the timing entry
    * @param entry - The timing entry to add (with durationMs and optional children)
    */
   addExternalTiming(name: string, entry: TimingEntry | TimingEntry[]): void;
 
   /**
-   * Start tracking an operation manually (for operations with complex timing)
+   * Start tracking an operation manually (for operations with complex timing).
+   * Captures the current block so endOperation() records under this block.
    * @param name - Operation name
    */
   startOperation(name: string): void;
 
   /**
-   * End a manually tracked operation
+   * End a manually tracked operation in the block captured by startOperation().
+   * Does nothing when no matching operation was started.
    * @param name - Operation name (must match startOperation)
    */
   endOperation(name: string): void;
@@ -267,6 +270,7 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
     return true;
   }
 
+  /** Appends to the current block; concurrent callers that may move it should fork() first. */
   addExternalTiming(name: string, entry: TimingEntry | TimingEntry[]): void {
     const entries = Array.isArray(entry) ? entry : [entry];
 
@@ -284,26 +288,28 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
     }
   }
 
-  private operationStarts: Map<string, number> = new Map();
+  private operationStarts: Map<string, { startMs: number; block: TimingBlock }> = new Map();
 
+  /** Captures both the start time and the current block for endOperation(). */
   startOperation(name: string): void {
-    this.operationStarts.set(name, this.timer.now());
+    this.operationStarts.set(name, { startMs: this.timer.now(), block: this.current });
   }
 
+  /** Appends to the block captured by startOperation(), regardless of the current cursor. */
   endOperation(name: string): void {
-    const startMs = this.operationStarts.get(name);
-    if (startMs === undefined) {
+    const operation = this.operationStarts.get(name);
+    if (operation === undefined) {
       return;
     }
     this.operationStarts.delete(name);
 
-    const durationMs = this.timer.now() - startMs;
+    const durationMs = this.timer.now() - operation.startMs;
     const entry: TimingEntry = { name, durationMs };
 
-    if (Array.isArray(this.current.entries)) {
-      this.current.entries.push(entry);
+    if (Array.isArray(operation.block.entries)) {
+      operation.block.entries.push(entry);
     } else {
-      this.current.entries[name] = entry;
+      operation.block.entries[name] = entry;
     }
   }
 }

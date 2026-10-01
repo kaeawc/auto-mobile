@@ -278,6 +278,7 @@ describe("ToolRegistry display inventory resolution", () => {
         sessionUuid: "display-session",
       });
       expect(result).toEqual({ displays: inventory, hasDisplays: true });
+      expect(sessionManager.getSession("display-session")?.assignedDevice).toBe(target.deviceId);
       const incarnation = pool.getDevice(target.deviceId)?.incarnation;
       expect(incarnation).toBeNumber();
       expect(provider.tokens).toEqual([`${incarnation}:${target.name}`]);

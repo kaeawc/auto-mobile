@@ -4487,15 +4487,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Android exposes replacement through ACTION_SET_TEXT but no separate insert primitive. Build the
    * new value from the node's UTF-16 selection range, then restore the caret immediately after the
    * inserted text. This matches ordinary typing: a collapsed selection inserts at the caret, while
-   * a non-empty selection is replaced.
+   * a non-empty selection is replaced. If the selection is invalid, refresh the node once and
+   * append at the end of its current text if the refreshed selection is still invalid.
    */
   private fun performInsertText(requestId: String?, text: String) {
     val startTime = System.currentTimeMillis()
     perfProvider.serial("performInsertText")
 
     try {
-      val targetNode = findFocusedEditableNode(rootInActiveWindow)
-      if (targetNode == null) {
+      val originalNode = findFocusedEditableNode(rootInActiveWindow)
+      if (originalNode == null) {
         perfProvider.end()
         launchRequestScope(requestId) {
           broadcastInsertTextResult(
@@ -4508,6 +4509,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         return
       }
 
+      var targetNode: android.view.accessibility.AccessibilityNodeInfo = originalNode
       if (targetNode.isPassword) {
         targetNode.recycle()
         perfProvider.end()
@@ -4522,31 +4524,66 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         return
       }
 
-      val currentText = targetNode.text?.toString().orEmpty()
-      val rawStart = targetNode.textSelectionStart
-      val rawEnd = targetNode.textSelectionEnd
-      val hasValidSelection = rawStart in 0..currentText.length && rawEnd in 0..currentText.length
-      if (!hasValidSelection) {
+      fun planForNode() =
+        planInsertText(
+          targetNode.text?.toString(),
+          targetNode.isShowingHintText,
+          targetNode.textSelectionStart,
+          targetNode.textSelectionEnd,
+          text,
+        )
+
+      var plan = planForNode()
+      if (plan.usedFallbackCaret) {
+        if (!targetNode.refresh()) {
+          val replacementNode = findFocusedEditableNode(rootInActiveWindow)
+          targetNode.recycle()
+          if (replacementNode == null) {
+            perfProvider.end()
+            kotlinx.coroutines.runBlocking {
+              broadcastInsertTextResult(
+                requestId,
+                false,
+                "No focused editable node found",
+                System.currentTimeMillis() - startTime,
+              )
+            }
+            return
+          }
+          targetNode = replacementNode
+        }
+        plan = planForNode()
+      }
+
+      if (!targetNode.isEditable || !targetNode.isFocused || targetNode.isPassword) {
+        val error =
+          when {
+            targetNode.isPassword ->
+              "Cannot insert text into a password field without exposing its original value"
+            !targetNode.isEditable -> "Focused node is not editable"
+            else -> "No focused editable node found"
+          }
         targetNode.recycle()
         perfProvider.end()
         kotlinx.coroutines.runBlocking {
-          broadcastInsertTextResult(
-            requestId,
-            false,
-            "Focused editable node did not report a valid text selection",
-            System.currentTimeMillis() - startTime,
-          )
+          broadcastInsertTextResult(requestId, false, error, System.currentTimeMillis() - startTime)
         }
         return
       }
 
       val actionIds = targetNode.actionList.map { it.id }.toSet()
       val requiredActions =
-        mapOf(
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
-          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION to
-            "ACTION_SET_SELECTION",
-        )
+        if (plan.usedFallbackCaret) {
+          mapOf(
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT"
+          )
+        } else {
+          mapOf(
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT to "ACTION_SET_TEXT",
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION to
+              "ACTION_SET_SELECTION",
+          )
+        }
       val unsupportedAction = requiredActions.entries.firstOrNull { it.key !in actionIds }
       if (unsupportedAction != null) {
         targetNode.recycle()
@@ -4562,17 +4599,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         return
       }
 
-      val selectionStart = minOf(rawStart, rawEnd).coerceIn(0, currentText.length)
-      val selectionEnd = maxOf(rawStart, rawEnd).coerceIn(selectionStart, currentText.length)
-      val updatedText =
-        currentText.substring(0, selectionStart) + text + currentText.substring(selectionEnd)
-      val updatedCaret = selectionStart + text.length
-
       val setTextArguments =
         android.os.Bundle().apply {
           putCharSequence(
             android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            updatedText,
+            plan.updatedText,
           )
         }
       val setTextSucceeded =
@@ -4581,17 +4612,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           setTextArguments,
         )
       val selectionSucceeded =
-        if (setTextSucceeded) {
+        if (
+          setTextSucceeded &&
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION in actionIds
+        ) {
           val selectionArguments =
             android.os.Bundle().apply {
               putInt(
                 android.view.accessibility.AccessibilityNodeInfo
                   .ACTION_ARGUMENT_SELECTION_START_INT,
-                updatedCaret,
+                plan.caret,
               )
               putInt(
                 android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
-                updatedCaret,
+                plan.caret,
               )
             }
           targetNode.performAction(
@@ -4599,7 +4633,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             selectionArguments,
           )
         } else {
-          false
+          plan.usedFallbackCaret && setTextSucceeded
         }
       targetNode.recycle()
       perfProvider.end()

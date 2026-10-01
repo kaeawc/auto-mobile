@@ -52,21 +52,24 @@ class SetTextAcknowledgementOrderTest {
   }
 
   @Test
-  fun `performInsertText validates password caret and actions before mutating text`() {
+  fun `performInsertText validates password and actions before mutating text`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     val body = functionBody(source, "private fun performInsertText(")
     val passwordGuard = body.indexOf("if (targetNode.isPassword)")
-    val currentText = body.indexOf("val currentText")
-    val invalidSelection = body.indexOf("if (!hasValidSelection)")
+    val selectionPlan = body.indexOf("var plan = planForNode()")
+    val invalidSelection = body.indexOf("if (plan.usedFallbackCaret)")
     val unsupportedAction = body.indexOf("val unsupportedAction")
     val setText = body.indexOf("targetNode.performAction(", startIndex = unsupportedAction)
 
     assertTrue("performInsertText must reject password fields", passwordGuard >= 0)
     assertTrue(
       "performInsertText must reject password fields before reading masked text",
-      currentText > passwordGuard,
+      selectionPlan > passwordGuard,
     )
-    assertTrue("performInsertText must reject an unknown selection", invalidSelection > currentText)
+    assertTrue(
+      "performInsertText must refresh an unknown selection",
+      invalidSelection > selectionPlan,
+    )
     assertTrue(
       "performInsertText must validate the required accessibility actions",
       unsupportedAction > invalidSelection,

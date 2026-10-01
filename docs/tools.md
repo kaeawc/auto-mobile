@@ -180,7 +180,8 @@ session or change device ownership, and it works while another session owns the
 device. An observer read does not update that session's observation baseline,
 snapshot references, navigation graph, or observation stream. The read only
 connects to an already-running hierarchy service; it never starts, installs,
-enables, or restarts one. `deviceId` and `sessionUuid` cannot be combined.
+enables, or restarts one. With `sessionUuid`, the call is a
+session observe, and `deviceId` must match that session's device.
 
 - If the owning session's hierarchy client is disconnected, hierarchy freshness
   reports `connection_lost`; `unavailableDetail` and the warning tell the owner
@@ -196,6 +197,17 @@ enables, or restarts one. `deviceId` and `sessionUuid` cannot be combined.
   cached screenshot is available, `screenshotPath` is absent,
   `screenshotSettled` is false, and `screenshotSettledError` explains why no
   screenshot could be captured. Otherwise a cached screenshot is labelled as such.
+
+Session-less device reads reject `waitFor`, `raw: true`, and `skipBackStack: true`
+before hierarchy or screenshot capture. Use a session observe (pass `sessionUuid`)
+for waiting; `settled` requires `waitFor` and is covered by that rejection.
+Use `project: "full"` for the full filtered hierarchy. Device reads omit
+`snapshotReference`.
+
+The default `screenshot: "settled"` awaits a fresh validated capture; it does not
+wait for action history to settle. `screenshot: "async"` also awaits capture on
+device reads, while `"none"` skips it. If capture fails, an eligible cached
+screenshot may be returned with its cached label and capture failure details.
 
 ## Interact with the UI
 

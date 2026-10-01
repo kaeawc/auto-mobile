@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parseAndroidDeviceDisplays,
+  parseAndroidDeviceDisplayOutcome,
   parseAndroidDeviceStates,
   parseAndroidPostures,
   readAndroidDeviceDisplays,
@@ -57,6 +58,10 @@ describe("Android physical display inventory", () => {
     adb.setCommandError("dumpsys SurfaceFlinger --display-id", new Error("unavailable"));
     const checked = await readAndroidDeviceDisplaysChecked(adb);
     expect(checked.degraded).toBe(true);
+    expect(checked.outcome).toEqual({
+      kind: "unreadable",
+      reason: "shell dumpsys SurfaceFlinger --display-id failed: unavailable",
+    });
     expect((await readAndroidDeviceDisplays(adb))?.panels).toEqual(checked.displays?.panels);
   });
 
@@ -78,12 +83,38 @@ describe("Android physical display inventory", () => {
 
   test("omits a single-display phone", () => {
     expect(
+      parseAndroidDeviceDisplayOutcome(
+        fixture("phone-surfaceflinger.txt"),
+        fixture("phone-display-device-info.txt"),
+        fixture("phone-states.txt"),
+      ),
+    ).toEqual({ kind: "single" });
+    expect(
       parseAndroidDeviceDisplays(
         fixture("phone-surfaceflinger.txt"),
         fixture("phone-display-device-info.txt"),
         fixture("phone-states.txt"),
       ),
     ).toBeUndefined();
+  });
+
+  test("marks empty executor output unreadable", async () => {
+    const checked = await readAndroidDeviceDisplaysChecked(new FakeAdbExecutor());
+    expect(checked.outcome).toEqual({
+      kind: "unreadable",
+      reason: "no matched physical display records",
+    });
+    expect(checked.degraded).toBe(false);
+  });
+
+  test("classifies the real fold capture as multi", () => {
+    expect(
+      parseAndroidDeviceDisplayOutcome(
+        fixture("fold-surfaceflinger.txt"),
+        fixture("fold-open-display-device-info.txt"),
+        fixture("fold-states.txt"),
+      ),
+    ).toEqual({ kind: "multi" });
   });
 
   test("keeps the two-enabled-display rig working", () => {

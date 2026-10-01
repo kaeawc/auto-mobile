@@ -95,7 +95,7 @@ describe("DeviceBootService", () => {
     expect(inventory.tokens).toEqual([running.deviceId]);
   });
 
-  it("describes an exact booted phone's single panel after inventory hydration fails", async () => {
+  it("refuses an exact booted device's panels when inventory hydration fails", async () => {
     const devices = new FakeDeviceUtils();
     const running: BootedDevice = {
       name: "Phone",
@@ -121,7 +121,7 @@ describe("DeviceBootService", () => {
 
     await expect(
       boot.boot({ platform: "android", deviceId: running.deviceId, requires: { panels: 2 } }),
-    ).rejects.toThrow(/Phone: 1 panel\(s\), postures=default/);
+    ).rejects.toThrow(/Phone: panels and postures could not be read \(inventory unavailable\)/);
   });
 
   it("reports unmet panel requirements and candidate support", async () => {

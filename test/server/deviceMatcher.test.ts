@@ -7,6 +7,7 @@ import {
   versionToApiLevelRange,
 } from "../../src/utils/android-cmdline-tools/AvdConfigReader";
 import { SeededRandom } from "../fakes/SeededRandom";
+import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 
 const matcher = new DefaultDeviceMatcher();
 
@@ -579,6 +580,25 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
         "LATEST",
       ),
     ).toBeNull();
+  });
+
+  it("refuses all display constraints when a booted foldable inventory is unreadable", () => {
+    const fold = bootedDevice({
+      deviceId: "fold",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      [displayInventoryOutcome]: { kind: "unreadable", reason: "display service offline" },
+    });
+    for (const requires of [{ panels: 1 }, { panels: 2 }, { posture: "default" }]) {
+      expect(
+        matcher.matchBootedDevice({ platform: "android", requires }, [fold], "LATEST"),
+      ).toBeNull();
+    }
+    expect(
+      describeDisplayRequirements({ platform: "android", requires: { panels: 1 } }, [
+        { ...fold, booted: true },
+      ]),
+    ).toContain("could not be read (display service offline)");
   });
 
   it("filters by screenSize with tolerance", () => {

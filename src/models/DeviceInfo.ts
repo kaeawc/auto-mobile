@@ -3,6 +3,13 @@ import { FormFactor } from "./DeviceMatchCriteria";
 import type { VirtualDeviceCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
 import type { DeviceDisplays } from "./DisplayPanel";
 
+/** Internal matching evidence; symbol keys are excluded from JSON tool payloads. */
+export const displayInventoryOutcome: unique symbol = Symbol("displayInventoryOutcome");
+export type DisplayInventoryOutcome =
+  | { kind: "multi" }
+  | { kind: "single" }
+  | { kind: "unreadable"; reason: string };
+
 export interface DeviceInfo {
   name: string;
   platform: Platform;
@@ -68,6 +75,7 @@ export interface BootedDevice {
   screenDensity?: number;
   /** Multi-panel inventory; omitted for ordinary single-display devices. */
   displays?: DeviceDisplays;
+  [displayInventoryOutcome]?: DisplayInventoryOutcome;
   /**
    * Exact system-image identifier: the Android AVD package (for example,
    * `system-images;android-36;google_apis;arm64-v8a`) or iOS simctl runtime identifier.

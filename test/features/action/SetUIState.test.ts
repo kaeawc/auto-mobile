@@ -88,6 +88,135 @@ describe("SetUIState", () => {
   });
 
   describe("text field handling", () => {
+    const textField = (elementId: string, top: number): Element => ({
+      "resource-id": elementId,
+      text: "",
+      class: "android.widget.EditText",
+      bounds: { left: 0, top, right: 100, bottom: top + 50 },
+    });
+
+    const buildCancellableTextAction = (
+      onClear: (signal?: AbortSignal) => void = () => {},
+      onInput: (text: string, signal?: AbortSignal) => void = () => {},
+    ) =>
+      new SetUIState(device, null, {
+        tapOnElement: fakeTap,
+        clearText: {
+          execute: async (progress, signal) => {
+            onClear(signal);
+            return fakeClear.execute(progress);
+          },
+        },
+        inputText: {
+          execute: async (text, _imeAction, _dismissKeyboard, _mode, signal) => {
+            const result = await fakeInput.execute(text);
+            onInput(text, signal);
+            return result;
+          },
+        },
+        swipeOn: fakeSwipe,
+        observeScreen: fakeObserve,
+        fieldTypeDetector: fakeFieldTypeDetector,
+        timer: fakeTimer,
+      });
+
+    test("pre-aborted signal rejects before touching a field", async () => {
+      const controller = new AbortController();
+      const reason = new Error("stop before first field");
+      controller.abort(reason);
+      fakeObserve.setResult(createObserveResult(createHierarchyWithElement(textField("first", 0))));
+
+      await expect(
+        buildCancellableTextAction().execute(
+          { fields: [{ selector: { elementId: "first" }, value: "one" }] },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(reason);
+      expect(fakeObserve.getCallCount()).toBe(0);
+      expect(fakeTap.getCallCount()).toBe(0);
+      expect(fakeClear.getCallCount()).toBe(0);
+      expect(fakeInput.getCallCount()).toBe(0);
+    });
+
+    test("abort during the first field preserves its input and never touches the second", async () => {
+      const controller = new AbortController();
+      const reason = new Error("stop after first input");
+      fakeObserve.setResult(
+        createObserveResult({
+          hierarchy: {
+            node: [textField("first", 0), textField("second", 60)].map((element) => ({
+              $: element,
+            })),
+          },
+        }),
+      );
+      fakeFieldTypeDetector.setFieldType("first", "text");
+      fakeFieldTypeDetector.setFieldType("second", "text");
+      let firstFieldValue = "";
+      const action = buildCancellableTextAction(undefined, (text) => {
+        firstFieldValue = text;
+        controller.abort(reason);
+      });
+
+      await expect(
+        action.execute(
+          {
+            fields: [
+              { selector: { elementId: "first" }, value: "one" },
+              { selector: { elementId: "second" }, value: "two" },
+            ],
+          },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(reason);
+      expect(firstFieldValue).toBe("one");
+      expect(fakeTap.getCallCount()).toBe(1);
+      expect(fakeClear.getCallCount()).toBe(1);
+      expect(fakeInput.getCalls().map((call) => call.text)).toEqual(["one"]);
+    });
+
+    test("forwards the same signal to clear and input", async () => {
+      const controller = new AbortController();
+      const clearSignals: Array<AbortSignal | undefined> = [];
+      const inputSignals: Array<AbortSignal | undefined> = [];
+      fakeObserve.setResult(createObserveResult(createHierarchyWithElement(textField("first", 0))));
+      fakeFieldTypeDetector.setFieldType("first", "text");
+      fakeFieldTypeDetector.setSkipVerification("first", true);
+      const action = buildCancellableTextAction(
+        (signal) => clearSignals.push(signal),
+        (_text, signal) => inputSignals.push(signal),
+      );
+
+      const result = await action.execute(
+        { fields: [{ selector: { elementId: "first" }, value: "one" }] },
+        undefined,
+        controller.signal,
+      );
+      expect(result.success).toBe(true);
+      expect(clearSignals).toEqual([controller.signal]);
+      expect(inputSignals).toEqual([controller.signal]);
+    });
+
+    test("abort from clear prevents the input step", async () => {
+      const controller = new AbortController();
+      const reason = new Error("stop after clear");
+      fakeObserve.setResult(createObserveResult(createHierarchyWithElement(textField("first", 0))));
+      fakeFieldTypeDetector.setFieldType("first", "text");
+      const action = buildCancellableTextAction(() => controller.abort(reason));
+
+      await expect(
+        action.execute(
+          { fields: [{ selector: { elementId: "first" }, value: "one" }] },
+          undefined,
+          controller.signal,
+        ),
+      ).rejects.toBe(reason);
+      expect(fakeClear.getCallCount()).toBe(1);
+      expect(fakeInput.getCallCount()).toBe(0);
+    });
+
     test("sets text field value with tap, clear, and input", async () => {
       const initialHierarchy = createHierarchyWithElement({
         "resource-id": "username",

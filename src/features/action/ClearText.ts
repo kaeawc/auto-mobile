@@ -120,6 +120,7 @@ export async function clearTextWithKeyEvents(
   signal?.throwIfAborted();
 
   for (let index = 0; index < count; index++) {
+    signal?.throwIfAborted();
     await adb.executeCommand("shell input keyevent KEYCODE_DEL");
     onDelete?.();
     signal?.throwIfAborted();
@@ -138,7 +139,8 @@ export class ClearText extends BaseVisualChange {
     this.parser = parser;
   }
 
-  async execute(progress?: ProgressCallback): Promise<ClearTextResult> {
+  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<ClearTextResult> {
+    signal?.throwIfAborted();
     const perf = createGlobalPerformanceTracker();
     perf.serial("clearText");
 
@@ -149,11 +151,11 @@ export class ClearText extends BaseVisualChange {
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidClearText", () =>
-                this.executeAndroidClearText(observeResult),
+                this.executeAndroidClearText(observeResult, signal),
               );
             case "ios":
               return await perf.track("iOSClearText", () =>
-                this.executeiOSClearText(observeResult),
+                this.executeiOSClearText(observeResult, signal),
               );
             default:
               perf.end();
@@ -161,6 +163,7 @@ export class ClearText extends BaseVisualChange {
           }
         } catch (error) {
           perf.end();
+          signal?.throwIfAborted();
           const actionableError = toActionableError(error, "Failed to clear text");
           logger.warn(`[ClearText] ${actionableError.message}`);
           return {
@@ -174,6 +177,7 @@ export class ClearText extends BaseVisualChange {
         tolerancePercent: 0.0,
         timeoutMs: 100,
         progress,
+        signal,
         perf,
         skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
       },
@@ -184,7 +188,10 @@ export class ClearText extends BaseVisualChange {
    * Execute Android-specific clear text using accessibility service.
    * Falls back to ADB delete key events if a11y service is unavailable.
    */
-  private async executeAndroidClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
+  private async executeAndroidClearText(
+    observeResult: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<ClearTextResult> {
     const viewHierarchy = observeResult.viewHierarchy;
     let fallbackObserveResult = observeResult;
     if (
@@ -194,7 +201,9 @@ export class ClearText extends BaseVisualChange {
     ) {
       const refreshedObserveResult = await this.refreshFocusedTextInputObservation(
         viewHierarchy,
+        signal,
       ).catch((error: unknown) => {
+        signal?.throwIfAborted();
         logger.warn("[ClearText] Focus refresh unavailable; trying live clearing", error);
         return undefined;
       });
@@ -215,7 +224,9 @@ export class ClearText extends BaseVisualChange {
 
     // Use accessibility service (fastest method, ~50-80ms vs ~200-500ms for ADB deletes)
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    signal?.throwIfAborted();
     const a11yResult = await a11yClient.requestClearText();
+    signal?.throwIfAborted();
 
     if (a11yResult.success) {
       logger.info(
@@ -228,18 +239,21 @@ export class ClearText extends BaseVisualChange {
     logger.warn(
       `[ClearText] Accessibility service clear failed: ${a11yResult.error}, falling back to ADB`,
     );
-    return this.executeAdbClearText(fallbackObserveResult);
+    return this.executeAdbClearText(fallbackObserveResult, signal);
   }
 
   /** Returns a fresh usable hierarchy, or undefined when focus cannot be determined. */
   private async refreshFocusedTextInputObservation(
     viewHierarchy: ViewHierarchyResult,
+    signal?: AbortSignal,
   ): Promise<ObserveResult | undefined> {
     let minTimestamp: number;
     if (typeof viewHierarchy.updatedAt === "number") {
       minTimestamp = viewHierarchy.updatedAt + 1;
     } else {
+      signal?.throwIfAborted();
       const timestampResult = await this.adb.getDeviceTimestampMsWithSource();
+      signal?.throwIfAborted();
       if (timestampResult.source === "host") {
         return undefined;
       }
@@ -249,10 +263,13 @@ export class ClearText extends BaseVisualChange {
           : timestampResult.timestampMs;
     }
 
+    signal?.throwIfAborted();
     const refreshedObserveResult = await this.observeScreen.execute({
       freshness: "fresh",
       minTimestamp,
+      signal,
     });
+    signal?.throwIfAborted();
     const refreshedViewHierarchy = refreshedObserveResult.viewHierarchy;
     return refreshedObserveResult.freshness?.isFresh !== false &&
       refreshedViewHierarchy &&
@@ -265,23 +282,26 @@ export class ClearText extends BaseVisualChange {
    * [LEGACY] Execute clear text using ADB delete key events.
    * Kept as fallback if accessibility service is unavailable.
    */
-  private async executeAdbClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
+  private async executeAdbClearText(
+    observeResult: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<ClearTextResult> {
     if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy.error) {
       // Fallback: if we can't get view hierarchy, use a reasonable default
-      await this.clearWithDeletes(200);
+      await this.clearWithDeletes(200, signal);
       return { success: true };
     }
 
     const textLength = getFocusedTextLength(observeResult.viewHierarchy, this.parser);
     if (textLength === undefined) {
-      await this.clearWithDeletes(200);
+      await this.clearWithDeletes(200, signal);
       return { success: true };
     }
 
     // Cursor position is not moved to the end of the text.
 
     if (textLength > 0) {
-      await this.clearWithDeletes(textLength);
+      await this.clearWithDeletes(textLength, signal);
     }
 
     return { success: true };
@@ -290,12 +310,17 @@ export class ClearText extends BaseVisualChange {
   /**
    * Execute iOS-specific clear text using CtrlProxy iOS.
    */
-  private async executeiOSClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
+  private async executeiOSClearText(
+    observeResult: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<ClearTextResult> {
     const startMs = Date.now();
     logger.debug(`[ClearText] iOS begin`);
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
+      signal?.throwIfAborted();
       const result = await client.requestClearText();
+      signal?.throwIfAborted();
 
       if (result.success) {
         logger.info(`[ClearText] Cleared text via CtrlProxy iOS totalMs=${Date.now() - startMs}`);
@@ -307,6 +332,7 @@ export class ClearText extends BaseVisualChange {
       );
       return { success: false, error: result.error };
     } catch (error) {
+      signal?.throwIfAborted();
       logger.error(`[ClearText] CtrlProxy iOS exception: ${error} totalMs=${Date.now() - startMs}`);
       return { success: false, error: String(error) };
     }
@@ -334,7 +360,7 @@ export class ClearText extends BaseVisualChange {
     return textLength;
   }
 
-  private async clearWithDeletes(count: number): Promise<void> {
-    await clearTextWithKeyEvents(this.adb, count);
+  private async clearWithDeletes(count: number, signal?: AbortSignal): Promise<void> {
+    await clearTextWithKeyEvents(this.adb, count, signal);
   }
 }

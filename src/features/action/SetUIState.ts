@@ -5,6 +5,7 @@ import { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../..
 import { SetUIStateOptions, FieldSpec, ElementSelector } from "../../models/SetUIStateOptions";
 import { SetUIStateResult, FieldResult, FieldType } from "../../models/SetUIStateResult";
 import { FieldTypeDetector } from "./FieldTypeDetector";
+import type { InputTextMode } from "./InputText";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
@@ -48,6 +49,9 @@ interface InputTextLike {
   execute(
     text: string,
     imeAction?: string,
+    dismissKeyboard?: boolean,
+    mode?: InputTextMode,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; text: string; observation?: ObserveResult; error?: string }>;
 }
 
@@ -57,6 +61,7 @@ interface InputTextLike {
 interface ClearTextLike {
   execute(
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; observation?: ObserveResult; error?: string }>;
 }
 
@@ -262,6 +267,7 @@ export class SetUIState extends BaseVisualChange {
     getLiveTransportDeadlineMs?: () => number | undefined,
     subscribeLiveTransportDeadline?: LiveDeadlineSubscriber,
   ): Promise<SetUIStateResult> {
+    signal?.throwIfAborted();
     const scrollDirection = options.scrollDirection ?? DEFAULT_SCROLL_DIRECTION;
 
     const fieldResults: FieldResult[] = new Array(options.fields.length);
@@ -408,16 +414,16 @@ export class SetUIState extends BaseVisualChange {
     // can leave slightly more than `PER_FIELD_ADMISSION_HEADROOM_MS` of
     // budget, passing the check above, and a cold or stalled observation can
     // still overrun the transport deadline if simply awaited unbounded. This
-    // is a safety net, not real cancellation: `ObserveScreen` cannot
-    // currently be cancelled, so a timed-out observe is left running in the
-    // background (see `raceAgainstDeadline`) and this call returns the same
-    // structured all-`notAttempted` shape used by the admission check above.
+    // is a safety net for a stalled observe, which may remain in the
+    // background when the deadline wins (see `raceAgainstDeadline`). It returns
+    // the same structured all-`notAttempted` shape used by the admission check.
     const initialObservationRaced = await this.raceAgainstDeadline(
       () => this.getObserveScreen().execute(undefined, undefined, false, 0, signal),
       () => cutoffMs(),
       "initial observation",
       subscribeLiveTransportDeadline,
     );
+    signal?.throwIfAborted();
     if (initialObservationRaced === "timed-out") {
       const missing = options.fields.map((f) => this.describeSelector(f.selector));
       const notAttemptedReason = `Not attempted: setUIState's initial observation did not settle within setUIState's result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s)`;
@@ -440,6 +446,7 @@ export class SetUIState extends BaseVisualChange {
     let budgetSpent = false;
 
     while (processed.size < options.fields.length) {
+      signal?.throwIfAborted();
       // Check the whole-call budget BEFORE starting another field's work --
       // give each field the same bounded budget it gets when it is the only
       // field in the call, then stop and return what has already been
@@ -484,23 +491,24 @@ export class SetUIState extends BaseVisualChange {
           () => cutoffMs(),
           this.describeSelector(fieldSpec.selector),
           subscribeLiveTransportDeadline,
-        ).catch((error: unknown): InternalFieldResult => ({
-          selector: fieldSpec.selector,
-          success: false,
-          attempts: 0,
-          error: errorMessage(error),
-        }));
+        ).catch((error: unknown): InternalFieldResult => {
+          signal?.throwIfAborted();
+          return {
+            selector: fieldSpec.selector,
+            success: false,
+            attempts: 0,
+            error: errorMessage(error),
+          };
+        });
+        signal?.throwIfAborted();
 
         processed.add(fieldIndex);
 
         if (raced === "timed-out") {
           // The field WAS admitted and started but did not settle within its
           // remaining share of the real transport deadline -- `processField`
-          // (and the `ClearTextLike`/`InputTextLike` it delegates into)
-          // cannot currently be cancelled, so this is a safety net rather
-          // than real cancellation: the underlying call may still be running
-          // against the device, its eventual outcome no longer awaited or
-          // reported. Stop immediately and return the accumulated partial
+          // may still be running against the device. Its eventual outcome is
+          // no longer awaited or reported. Stop and return the partial
           // result instead of risking the SAME overrun this whole feature
           // exists to prevent (issue #6222 review, coderabbit fuTtO).
           fieldResults[fieldIndex] = {
@@ -555,12 +563,14 @@ export class SetUIState extends BaseVisualChange {
           // mode this whole feature exists to prevent. Race it against the
           // SAME live cutoff every other device call in this method already
           // respects (issue #6222 review, PRRT_kwDOP-GF5M6fu4ev).
+          signal?.throwIfAborted();
           const observationRaced = await this.raceAgainstDeadline<ObserveResult>(
             () => this.observationAfterSuccess(result, signal),
             () => cutoffMs(),
             "post-success observation refresh",
             subscribeLiveTransportDeadline,
           );
+          signal?.throwIfAborted();
 
           if (observationRaced === "timed-out") {
             logger.warn(
@@ -658,12 +668,14 @@ export class SetUIState extends BaseVisualChange {
             );
 
             // Re-observe after scroll
+            signal?.throwIfAborted();
             return this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
           },
           () => cutoffMs(),
           "off-screen search (swipe + re-observe)",
           subscribeLiveTransportDeadline,
         );
+        signal?.throwIfAborted();
 
         if (searchRaced === "timed-out") {
           resultBudgetSpent = true;
@@ -842,17 +854,13 @@ export class SetUIState extends BaseVisualChange {
   /**
    * Race a unit of device I/O against a live-read cutoff (issue #6222 P1,
    * unifying fujug/fujuk/fujun). Used for both the initial observation and
-   * each admitted field's `processField()` call. Neither can currently be
-   * cancelled -- without this, either can run past the transport deadline
-   * and reproduce the exact silent-discard this whole feature exists to
+   * each admitted field's `processField()` call. Without this, either can run
+   * past the transport deadline and reproduce the exact silent-discard this whole feature exists to
    * prevent, even though it was correctly started under budget at the time.
    *
-   * This is a SAFETY NET, not real cancellation: the started call is left
-   * running in the background when the timeout wins the race -- its eventual
-   * settlement is swallowed (only logged) rather than aborted. Real
-   * cancellation via an `AbortSignal` into `ClearText`/`InputText`/
-   * `ObserveScreen` is a larger, separate change; tracked as a follow-up
-   * rather than attempted here.
+   * This deadline is a safety net: when it wins, started work may remain
+   * active in the background. An external AbortSignal is forwarded to the
+   * text actions and observation so they can stop between device calls.
    *
    * Takes a THUNK, not an already-started promise: `startWork()` must not be
    * called until AFTER the timeout is armed. Its own dependencies can run
@@ -1034,6 +1042,7 @@ export class SetUIState extends BaseVisualChange {
     let element = initialElement;
 
     while (attempts < DEFAULT_MAX_RETRIES) {
+      signal?.throwIfAborted();
       attempts++;
 
       try {
@@ -1114,6 +1123,7 @@ export class SetUIState extends BaseVisualChange {
           freshObservation: verification.observation,
         };
       } catch (error) {
+        signal?.throwIfAborted();
         lastError = errorMessage(error);
         logger.warn(`[SetUIState] Attempt ${attempts} failed: ${lastError}`);
       }
@@ -1304,6 +1314,7 @@ export class SetUIState extends BaseVisualChange {
             ? { elementId: element["resource-id"], action: "focus" }
             : this.buildTapOptions(fieldSpec.selector, "focus");
           const tapResult = await tapOnElement.execute(focusOptions, progress, signal);
+          signal?.throwIfAborted();
           logger.debug(
             `[SetUIState] text.focus done selector=${selectorDesc} success=${tapResult.success} focusVerified=${tapResult.focusVerified === true} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`,
           );
@@ -1317,7 +1328,9 @@ export class SetUIState extends BaseVisualChange {
           // Clear existing text
           logger.debug(`[SetUIState] text.clear selector=${selectorDesc}`);
           const clearStart = Date.now();
-          const clearResult = await clearText.execute(progress);
+          signal?.throwIfAborted();
+          const clearResult = await clearText.execute(progress, signal);
+          signal?.throwIfAborted();
           logger.debug(
             `[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`,
           );
@@ -1334,7 +1347,15 @@ export class SetUIState extends BaseVisualChange {
             `[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value.length}`,
           );
           const inputStart = Date.now();
-          const inputResult = await inputText.execute(fieldSpec.value);
+          signal?.throwIfAborted();
+          const inputResult = await inputText.execute(
+            fieldSpec.value,
+            undefined,
+            false,
+            undefined,
+            signal,
+          );
+          signal?.throwIfAborted();
           logger.debug(
             `[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`,
           );
@@ -1416,6 +1437,7 @@ export class SetUIState extends BaseVisualChange {
           };
       }
     } catch (error) {
+      signal?.throwIfAborted();
       return {
         success: false,
         error: errorMessage(error),

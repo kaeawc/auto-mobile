@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { ClearText } from "../../../src/features/action/ClearText";
+import { ClearText, clearTextWithKeyEvents } from "../../../src/features/action/ClearText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
@@ -71,6 +71,7 @@ describe("ClearText Android ADB fallback", () => {
   const runClearText = (
     observeResult: ObserveResult,
     configure?: (clearText: ClearText) => void,
+    signal?: AbortSignal,
   ) => {
     const clearText = new ClearText(device, fakeAdb as any);
     observedSpy = spyOn(
@@ -80,7 +81,7 @@ describe("ClearText Android ADB fallback", () => {
       "observedInteraction",
     ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) => fn(observeResult));
     configure?.(clearText);
-    return clearText.execute();
+    return clearText.execute(undefined, signal);
   };
 
   beforeEach(() => {
@@ -106,6 +107,35 @@ describe("ClearText Android ADB fallback", () => {
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("propagates an abort during the accessibility clear", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancel clear");
+    const clearSpy = spyOn(fakeA11yService, "requestClearText").mockImplementation(async () => {
+      controller.abort(reason);
+      return { success: true, totalTimeMs: 0 };
+    });
+    try {
+      await expect(
+        runClearText(focusedFieldObserve("hello"), undefined, controller.signal),
+      ).rejects.toBe(reason);
+      expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    } finally {
+      clearSpy.mockRestore();
+    }
+  });
+
+  test("stops ADB deletes as soon as the signal aborts", async () => {
+    const controller = new AbortController();
+    const reason = new Error("cancel deletes");
+    await expect(
+      clearTextWithKeyEvents(fakeAdb, 20, controller.signal, () => controller.abort(reason)),
+    ).rejects.toBe(reason);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      "shell input keyevent KEYCODE_DEL",
+    ]);
   });
 
   test("rejects an accessibility success when no editable field remains focused after refresh", async () => {

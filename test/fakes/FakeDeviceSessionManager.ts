@@ -1,4 +1,8 @@
-import { DeviceReadyOptions, DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import {
+  type ConnectedPlatformScan,
+  DeviceReadyOptions,
+  DeviceSessionManager,
+} from "../../src/utils/DeviceSessionManager";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
 
 /**
@@ -8,6 +12,7 @@ import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src
 export class FakeDeviceSessionManager implements DeviceSessionManager {
   private currentDevice: BootedDevice | undefined;
   private currentPlatform: Platform | undefined;
+  private explicitDevicePin: BootedDevice | undefined;
   private connectedDevices: BootedDevice[] = [];
   private connectedPlatforms: BootedDevice[] = [];
   private preferredPlatform: Platform | undefined;
@@ -19,6 +24,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   private accessibilityServiceFailure: boolean = false;
   private windowVerificationFailure: boolean = false;
   private simulateDisconnection: boolean = false;
+  private failedPlatformScans: Record<Platform, boolean> = { android: false, ios: false };
 
   // Call tracking for assertions
   private setCurrentDeviceCalls: BootedDevice[] = [];
@@ -103,6 +109,10 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
    */
   simulateDeviceDisconnection(shouldDisconnect: boolean): void {
     this.simulateDisconnection = shouldDisconnect;
+  }
+
+  setPlatformScanFailure(platform: Platform, shouldFail: boolean): void {
+    this.failedPlatformScans[platform] = shouldFail;
   }
 
   /**
@@ -207,6 +217,20 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     this.setCurrentDeviceCalls.push(device);
   }
 
+  getExplicitDevicePin(): BootedDevice | undefined {
+    return this.explicitDevicePin;
+  }
+
+  setExplicitDevicePin(device: BootedDevice): void {
+    this.explicitDevicePin = device;
+  }
+
+  clearExplicitDevicePin(deviceId: string): void {
+    if (this.explicitDevicePin?.deviceId === deviceId) {
+      this.explicitDevicePin = undefined;
+    }
+  }
+
   async ensureDeviceReady(
     platform: SomePlatform,
     providedDeviceId?: string,
@@ -244,16 +268,24 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
           );
         }
         const resolvedPlatform =
-          hasAndroid && hasIos ? this.currentPlatform : hasAndroid ? "android" : "ios";
+          hasAndroid && hasIos
+            ? (this.explicitDevicePin?.platform ?? this.currentPlatform)
+            : hasAndroid
+              ? "android"
+              : "ios";
         selectedDevice =
-          this.currentPlatform === resolvedPlatform
-            ? this.currentDevice
-            : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
+          this.explicitDevicePin?.platform === resolvedPlatform
+            ? this.explicitDevicePin
+            : this.currentPlatform === resolvedPlatform
+              ? this.currentDevice
+              : this.connectedDevices.find((device) => device.platform === resolvedPlatform);
       } else {
         selectedDevice =
-          this.currentPlatform === platform
-            ? this.currentDevice
-            : this.connectedDevices.find((d) => d.platform === platform);
+          this.explicitDevicePin?.platform === platform
+            ? this.explicitDevicePin
+            : this.currentPlatform === platform
+              ? this.currentDevice
+              : this.connectedDevices.find((d) => d.platform === platform);
       }
 
       if (!selectedDevice) {
@@ -274,8 +306,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
     }
 
     // Set as current device
-    this.currentDevice = selectedDevice;
-    this.currentPlatform = selectedDevice.platform;
+    this.setCurrentDevice(selectedDevice, selectedDevice.platform);
 
     return selectedDevice;
   }
@@ -300,19 +331,28 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   }
 
   async detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]> {
+    return (await this.detectConnectedPlatformsWithStatus(signal)).devices;
+  }
+
+  async detectConnectedPlatformsWithStatus(signal?: AbortSignal): Promise<ConnectedPlatformScan> {
     this.detectConnectedPlatformsCalls++;
     this.detectConnectedPlatformsSignals.push(signal);
     signal?.throwIfAborted();
-
+    const scanned = {
+      android: !this.failedPlatformScans.android,
+      ios: !this.failedPlatformScans.ios,
+    };
     if (this.simulateDisconnection) {
-      return [];
+      return { devices: [], scanned };
     }
-
     const devices = this.detectConnectedPlatformsHook
       ? await this.detectConnectedPlatformsHook(signal)
       : [...this.connectedPlatforms];
     signal?.throwIfAborted();
-    return devices;
+    return {
+      devices: devices.filter((device) => scanned[device.platform]),
+      scanned,
+    };
   }
 
   async verifyDevice(

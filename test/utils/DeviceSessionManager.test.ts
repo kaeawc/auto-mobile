@@ -1324,6 +1324,17 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     expect(result.deviceId).toBe("ios-sim-1");
   });
 
+  test("explicit pin wins over a later ambient device resolution", async () => {
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    manager.setCurrentDevice(iosDevice, "ios");
+    manager.setExplicitDevicePin(iosDevice);
+    manager.setCurrentDevice(androidDevice, "android");
+
+    const result = await manager.ensureDeviceReady("either");
+    expect(result.deviceId).toBe(iosDevice.deviceId);
+    expect(manager.getCurrentDevice()?.deviceId).toBe(iosDevice.deviceId);
+  });
+
   test("should resolve ios device by providedDeviceId when no active device set", async () => {
     const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 

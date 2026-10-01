@@ -7,14 +7,12 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
-import { DeviceSessionManager, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import {
-  ActionableError,
-  BootedDevice,
-  SomePlatform,
-  type Platform,
-  type ViewHierarchyResult,
-} from "../models";
+  DeviceSessionManager,
+  type ConnectedPlatformScan,
+  type DeviceReadinessLevel,
+} from "../utils/DeviceSessionManager";
+import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -630,9 +628,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
     const { name, args, options, deviceSessionManager, signal } = input;
     signal?.throwIfAborted();
-    let connectedPlatformsPromise: Promise<BootedDevice[]> | undefined;
-    const getConnectedPlatforms = (): Promise<BootedDevice[]> => {
-      connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatforms(signal);
+    let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
+    const getConnectedPlatforms = (): Promise<ConnectedPlatformScan> => {
+      connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatformsWithStatus(signal);
       return connectedPlatformsPromise;
     };
     const shouldResolveDevice = options.shouldEnsureDevice
@@ -918,20 +916,19 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     providedDeviceId: string | undefined,
     deviceSessionManager: DeviceSessionManager,
     signal: AbortSignal | undefined,
-    getConnectedPlatforms: () => Promise<BootedDevice[]>,
+    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
   ): Promise<void> {
     if (sessionUuid || providedDeviceId) {
       return;
     }
 
-    const currentDevice = deviceSessionManager.getCurrentDevice();
-    const currentPlatform = deviceSessionManager.getCurrentPlatform();
-    if (this.hasActiveDeviceForNamedPlatform(platform, currentDevice, currentPlatform)) {
+    signal?.throwIfAborted();
+    const scan = await getConnectedPlatforms();
+    const connectedPlatforms = scan.devices;
+    const explicitPin = this.getValidExplicitPin(deviceSessionManager, scan);
+    if (this.hasActiveDeviceForNamedPlatform(platform, explicitPin)) {
       return;
     }
-
-    signal?.throwIfAborted();
-    const connectedPlatforms = await getConnectedPlatforms();
     const detectedPlatforms = new Set(connectedPlatforms.map((device) => device.platform));
     // Mixed-platform ambiguity belongs to ensureDeviceReady, including its
     // intentional setActiveDevice/current-device bypass (#5870).
@@ -960,10 +957,32 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
   private hasActiveDeviceForNamedPlatform(
     platform: SomePlatform,
-    currentDevice: BootedDevice | undefined,
-    currentPlatform: Platform | undefined,
+    explicitPin: BootedDevice | undefined,
   ): boolean {
-    return Boolean(currentDevice && platform !== "either" && currentPlatform === platform);
+    return Boolean(explicitPin && platform !== "either" && explicitPin.platform === platform);
+  }
+
+  private getValidExplicitPin(
+    deviceSessionManager: DeviceSessionManager,
+    scan: ConnectedPlatformScan,
+  ): BootedDevice | undefined {
+    const explicitPin = deviceSessionManager.getExplicitDevicePin();
+    if (!explicitPin) {
+      return undefined;
+    }
+    if (
+      scan.devices.some(
+        (device) =>
+          device.deviceId === explicitPin.deviceId && device.platform === explicitPin.platform,
+      )
+    ) {
+      return explicitPin;
+    }
+    if (scan.scanned[explicitPin.platform]) {
+      deviceSessionManager.clearExplicitDevicePin(explicitPin.deviceId);
+      return undefined;
+    }
+    return explicitPin;
   }
 
   private resolveImplicitAutolockSession(
@@ -1007,7 +1026,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     providedDeviceId: string | undefined,
     deviceSessionManager: DeviceSessionManager,
     signal: AbortSignal | undefined,
-    getConnectedPlatforms: () => Promise<BootedDevice[]>,
+    getConnectedPlatforms: () => Promise<ConnectedPlatformScan>,
   ): Promise<void> {
     if (!isDevicePoolAutolockEnabled()) {
       return;
@@ -1016,14 +1035,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return;
     }
 
-    const currentDevice = deviceSessionManager.getCurrentDevice();
-    const currentPlatform = deviceSessionManager.getCurrentPlatform();
-    if (currentDevice && (platform === "either" || platform === currentPlatform)) {
+    signal?.throwIfAborted();
+    const scan = await getConnectedPlatforms();
+    const connectedPlatforms = scan.devices;
+    const explicitPin = this.getValidExplicitPin(deviceSessionManager, scan);
+    if (explicitPin && (platform === "either" || platform === explicitPin.platform)) {
       return;
     }
-
-    signal?.throwIfAborted();
-    const connectedPlatforms = await getConnectedPlatforms();
     const candidates =
       platform === "either"
         ? connectedPlatforms

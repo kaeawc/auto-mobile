@@ -244,6 +244,11 @@ export interface DeviceSessionManager {
    */
   setCurrentDevice(device: BootedDevice, platform: Platform): void;
 
+  /** Explicit selection made by the legacy setActiveDevice tool. */
+  getExplicitDevicePin(): BootedDevice | undefined;
+  setExplicitDevicePin(device: BootedDevice): void;
+  clearExplicitDevicePin(deviceId: string): void;
+
   /**
    * Ensure a device is ready for the specified platform and return its ID
    * Throws an error if both Android and iOS devices are connected when auto-detecting platform
@@ -258,6 +263,7 @@ export interface DeviceSessionManager {
    * Detect the platform of connected devices
    */
   detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]>;
+  detectConnectedPlatformsWithStatus(signal?: AbortSignal): Promise<ConnectedPlatformScan>;
 
   /**
    * Verify a specific device is connected and ready for the given platform.
@@ -297,6 +303,11 @@ export interface DeviceSessionManager {
   findOrStartIosDevice(options?: DeviceReadyOptions): Promise<BootedDevice>;
 }
 
+export interface ConnectedPlatformScan {
+  devices: BootedDevice[];
+  scanned: Record<Platform, boolean>;
+}
+
 export type DeviceReadinessLevel = "booted" | "automationReady";
 
 /**
@@ -322,7 +333,7 @@ export interface DeviceReadyOptions {
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
-  getConnectedPlatforms?: () => Promise<BootedDevice[]>;
+  getConnectedPlatforms?: () => Promise<ConnectedPlatformScan | BootedDevice[]>;
   /**
    * `booted` verifies only that the target is connected and booted.
    * `automationReady` additionally prepares CtrlProxy. Defaults to
@@ -355,6 +366,7 @@ export interface DeviceSessionManagerOptions {
 export class DeviceSessionManager implements DeviceSessionManager {
   private currentDevice: BootedDevice | undefined;
   private currentPlatform: Platform | undefined;
+  private explicitDevicePin: BootedDevice | undefined;
   private static instance: DeviceSessionManager;
   private static defaultProvider: DeviceClientProvider | undefined;
   private readonly provider: DeviceClientProvider;
@@ -467,11 +479,32 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
   }
 
+  public getExplicitDevicePin(): BootedDevice | undefined {
+    return this.explicitDevicePin;
+  }
+
+  public setExplicitDevicePin(device: BootedDevice): void {
+    this.explicitDevicePin = device;
+  }
+
+  public clearExplicitDevicePin(deviceId: string): void {
+    if (this.explicitDevicePin?.deviceId === deviceId) {
+      this.explicitDevicePin = undefined;
+    }
+  }
+
   /**
    * Detect the platform of connected devices
    */
   public async detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]> {
+    return (await this.detectConnectedPlatformsWithStatus(signal)).devices;
+  }
+
+  public async detectConnectedPlatformsWithStatus(
+    signal?: AbortSignal,
+  ): Promise<ConnectedPlatformScan> {
     const devices: BootedDevice[] = [];
+    const scanned = { android: false, ios: false };
     const perf = createGlobalPerformanceTracker();
 
     try {
@@ -480,6 +513,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       const androidDevices = await this.adb.getBootedAndroidDevices({ signal });
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
+      scanned.android = true;
     } catch (error) {
       perf.endOperation("androidDeviceScan");
       signal?.throwIfAborted();
@@ -493,6 +527,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         const iosDevices = await this.simctl.getBootedSimulators(undefined, signal);
         perf.endOperation("iosSimulatorScan");
         devices.push(...iosDevices);
+        scanned.ios = true;
       }
     } catch (error) {
       perf.endOperation("iosSimulatorScan");
@@ -500,7 +535,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       logger.warn(`Failed to detect iOS devices: ${error}`);
     }
 
-    return devices;
+    return { devices, scanned };
   }
 
   /**
@@ -520,9 +555,23 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // Detect all connected devices
-    const connectedPlatforms = await (options?.getConnectedPlatforms
-      ? options.getConnectedPlatforms()
-      : this.detectConnectedPlatforms(options?.signal));
+    const result = options?.getConnectedPlatforms
+      ? await options.getConnectedPlatforms()
+      : await this.detectConnectedPlatformsWithStatus(options?.signal);
+    const { devices: connectedPlatforms, scanned } = Array.isArray(result)
+      ? { devices: result, scanned: { android: true, ios: true } }
+      : result;
+    const pinnedDevice = this.explicitDevicePin;
+    if (
+      pinnedDevice &&
+      scanned[pinnedDevice.platform] &&
+      !connectedPlatforms.some(
+        (device) =>
+          device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,
+      )
+    ) {
+      this.clearExplicitDevicePin(pinnedDevice.deviceId);
+    }
     logger.info(`Found ${connectedPlatforms.length} connectedPlatform devices`);
     const androidDevices = connectedPlatforms.filter((device) => device.platform === "android");
     logger.info(`Found ${androidDevices.length} android devices`);
@@ -558,9 +607,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
             }
           }
           // With no matching deviceId, fall back to the platform setActiveDevice selected.
-          if (this.currentDevice && this.currentPlatform) {
-            platformDevices = this.currentPlatform === "android" ? androidDevices : iosDevices;
-            resolvedPlatform = this.currentPlatform;
+          const selectedPlatform = this.explicitDevicePin?.platform ?? this.currentPlatform;
+          if (selectedPlatform && (this.explicitDevicePin || this.currentDevice)) {
+            platformDevices = selectedPlatform === "android" ? androidDevices : iosDevices;
+            resolvedPlatform = selectedPlatform;
             break;
           }
           throw new ActionableError(
@@ -594,6 +644,15 @@ export class DeviceSessionManager implements DeviceSessionManager {
         );
       }
       selectedDevice = await this.resolveAndroidReadinessIdentity(providedDevice, options?.signal);
+      deviceSource = "provided";
+    }
+
+    // Explicit selection takes precedence over ambient resolution by another call.
+    const selectedPin = platformDevices.find(
+      (device) => device.deviceId === this.explicitDevicePin?.deviceId,
+    );
+    if (!selectedDevice && !providedDeviceId && selectedPin) {
+      selectedDevice = await this.resolveAndroidReadinessIdentity(selectedPin, options?.signal);
       deviceSource = "provided";
     }
 

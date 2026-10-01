@@ -493,6 +493,7 @@ export class Daemon {
     });
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
+      DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
       this.navigationGraphListenerManagers.delete(
         NavigationGraphManager.getInstanceForSession(sessionId),
       );
@@ -511,6 +512,7 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
       const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);
       this.navigationGraphListenerManagers.delete(previousNavigationManager);
@@ -558,6 +560,7 @@ export class Daemon {
       recoveryPolicy: recoveryConfiguration.policy,
       onDeviceRemoved: (deviceId, platform) => {
         defaultDisplayInventoryProvider.invalidate(deviceId);
+        DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
         if (platform === "ios") {
           const manager = IOSCtrlProxyManager.getExistingInstance(deviceId);

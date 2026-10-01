@@ -22,12 +22,12 @@ describe("ToolRegistry iOS session context", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
+    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
   });
 
   afterEach(() => {
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
+    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     ToolRegistry.clearTools();
   });
 
@@ -100,6 +100,7 @@ describe("ToolRegistry iOS session context", () => {
     fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
     // Simulate setActiveDevice having been called
     fakeDeviceSessionManager.setCurrentDevice(iosDeviceA, "ios");
+    fakeDeviceSessionManager.setExplicitDevicePin(iosDeviceA);
 
     ToolRegistry.registerDeviceAware(
       "iosActiveDeviceTool",
@@ -124,6 +125,7 @@ describe("ToolRegistry iOS session context", () => {
     fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
     // Simulate setActiveDevice having been called
     fakeDeviceSessionManager.setCurrentDevice(iosDeviceA, "ios");
+    fakeDeviceSessionManager.setExplicitDevicePin(iosDeviceA);
 
     ToolRegistry.registerDeviceAware(
       "iosActiveDeviceEitherPlatformTool",

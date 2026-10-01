@@ -630,6 +630,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
     const { name, args, options, deviceSessionManager, signal } = input;
     signal?.throwIfAborted();
+    let connectedPlatformsPromise: Promise<BootedDevice[]> | undefined;
+    const getConnectedPlatforms = (): Promise<BootedDevice[]> => {
+      connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatforms(signal);
+      return connectedPlatformsPromise;
+    };
     const shouldResolveDevice = options.shouldEnsureDevice
       ? options.shouldEnsureDevice(args)
       : true;
@@ -725,12 +730,16 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         sessionUuid,
         providedDeviceId,
         deviceSessionManager,
+        signal,
+        getConnectedPlatforms,
       );
       await this.enforceSessionUuidForAutolock(
         platform,
         sessionUuid,
         providedDeviceId,
         deviceSessionManager,
+        signal,
+        getConnectedPlatforms,
       );
     }
 
@@ -862,6 +871,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
               ? options.deviceReadiness(args)
               : options.deviceReadiness,
           signal,
+          getConnectedPlatforms,
         });
         // Discovery re-stamps observedAt; the serial/UDID stays stable until
         // the daemon's removal/release hooks invalidate this device.
@@ -907,6 +917,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
     deviceSessionManager: DeviceSessionManager,
+    signal: AbortSignal | undefined,
+    getConnectedPlatforms: () => Promise<BootedDevice[]>,
   ): Promise<void> {
     if (sessionUuid || providedDeviceId) {
       return;
@@ -918,7 +930,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return;
     }
 
-    const connectedPlatforms = await deviceSessionManager.detectConnectedPlatforms();
+    signal?.throwIfAborted();
+    const connectedPlatforms = await getConnectedPlatforms();
     const detectedPlatforms = new Set(connectedPlatforms.map((device) => device.platform));
     // Mixed-platform ambiguity belongs to ensureDeviceReady, including its
     // intentional setActiveDevice/current-device bypass (#5870).
@@ -993,6 +1006,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     sessionUuid: string | undefined,
     providedDeviceId: string | undefined,
     deviceSessionManager: DeviceSessionManager,
+    signal: AbortSignal | undefined,
+    getConnectedPlatforms: () => Promise<BootedDevice[]>,
   ): Promise<void> {
     if (!isDevicePoolAutolockEnabled()) {
       return;
@@ -1007,7 +1022,8 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return;
     }
 
-    const connectedPlatforms = await deviceSessionManager.detectConnectedPlatforms();
+    signal?.throwIfAborted();
+    const connectedPlatforms = await getConnectedPlatforms();
     const candidates =
       platform === "either"
         ? connectedPlatforms

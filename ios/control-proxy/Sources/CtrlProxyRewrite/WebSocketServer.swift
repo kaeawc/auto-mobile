@@ -486,31 +486,14 @@ final class WebSocketServer: @unchecked Sendable {
 
         if var wsResponse = response as? WebSocketResponse {
             // Inject perfTiming if present and the response doesn't already carry it;
-            // preserve `text` (e.g. clipboard get) during the rebuild.
-            if perfTiming != nil, wsResponse.perfTiming == nil {
-                wsResponse = WebSocketResponse(
-                    type: wsResponse.type,
-                    timestamp: wsResponse.timestamp,
-                    requestId: wsResponse.requestId,
-                    success: wsResponse.success,
-                    totalTimeMs: wsResponse.totalTimeMs ?? totalTimeMs,
-                    error: wsResponse.error,
-                    blockingCommandType: wsResponse.blockingCommandType,
-                    blockingElapsedMs: wsResponse.blockingElapsedMs,
-                    text: wsResponse.text,
-                    perfTiming: perfTiming
-                )
+            // preserve the full response envelope during the copy.
+            if let perfTiming, wsResponse.perfTiming == nil {
+                wsResponse = wsResponse.withPerfTiming(perfTiming, totalTimeMs: totalTimeMs)
             }
             return try encoder.encode(wsResponse)
         } else if var hierarchyResponse = response as? HierarchyUpdateResponse {
-            if perfTiming != nil, hierarchyResponse.perfTiming == nil {
-                hierarchyResponse = HierarchyUpdateResponse(
-                    requestId: hierarchyResponse.requestId,
-                    data: hierarchyResponse.data,
-                    perfTiming: perfTiming,
-                    error: hierarchyResponse.error,
-                    frameContext: hierarchyResponse.frameContext
-                )
+            if let perfTiming, hierarchyResponse.perfTiming == nil {
+                hierarchyResponse = hierarchyResponse.withPerfTiming(perfTiming)
             }
             return try encoder.encode(hierarchyResponse)
         } else {

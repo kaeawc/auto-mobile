@@ -84,4 +84,23 @@ public struct WebSocketResponse: Codable, Sendable {
             error: error
         )
     }
+
+    /// Returns this response with performance timing attached while preserving every
+    /// other wire field. An existing total time takes precedence over the fallback.
+    public func withPerfTiming(_ perfTiming: PerfTiming, totalTimeMs fallbackTotalTimeMs: Int64) -> WebSocketResponse {
+        WebSocketResponse(
+            type: type,
+            timestamp: timestamp,
+            requestId: requestId,
+            success: success,
+            totalTimeMs: totalTimeMs ?? fallbackTotalTimeMs,
+            error: error,
+            blockingCommandType: blockingCommandType,
+            blockingElapsedMs: blockingElapsedMs,
+            text: text,
+            perfTiming: perfTiming,
+            verified: verified,
+            pinchPath: pinchPath
+        )
+    }
 }

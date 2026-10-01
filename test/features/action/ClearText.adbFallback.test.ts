@@ -1,9 +1,105 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { ClearText, clearTextWithKeyEvents } from "../../../src/features/action/ClearText";
+import {
+  ClearText,
+  clearTextWithKeyEvents,
+  DELETE_KEYEVENT_CHUNK_SIZE,
+} from "../../../src/features/action/ClearText";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
+
+const deleteCommand = (count: number): string =>
+  `shell input keyevent ${Array<string>(count).fill("KEYCODE_DEL").join(" ")}`;
+
+const deleteCommands = (count: number): string[] => {
+  const commands: string[] = [];
+  for (let remaining = count; remaining > 0; remaining -= DELETE_KEYEVENT_CHUNK_SIZE) {
+    commands.push(deleteCommand(Math.min(remaining, DELETE_KEYEVENT_CHUNK_SIZE)));
+  }
+  return commands;
+};
+
+describe("clearTextWithKeyEvents", () => {
+  test.each([7, DELETE_KEYEVENT_CHUNK_SIZE, DELETE_KEYEVENT_CHUNK_SIZE + 1])(
+    "batches %i deletes into exact chunks",
+    async (count) => {
+      const adb = new FakeAdbExecutor();
+
+      await clearTextWithKeyEvents(adb, count);
+
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell input keyevent KEYCODE_MOVE_END",
+        ...deleteCommands(count),
+      ]);
+      expect(deleteCommands(count)).toHaveLength(Math.ceil(count / DELETE_KEYEVENT_CHUNK_SIZE));
+    },
+  );
+
+  test("keeps MOVE_END as the only call for zero or negative counts", async () => {
+    const adb = new FakeAdbExecutor();
+
+    await clearTextWithKeyEvents(adb, 0);
+    await clearTextWithKeyEvents(adb, -1);
+
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      "shell input keyevent KEYCODE_MOVE_END",
+    ]);
+  });
+
+  test("stops between chunks when aborted and reports the completed chunk", async () => {
+    const adb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    const executeCommand = adb.executeCommand.bind(adb);
+    const completedChunks: number[] = [];
+    adb.executeCommand = async (command, ...options) => {
+      const result = await executeCommand(command, ...options);
+      if (command !== "shell input keyevent KEYCODE_MOVE_END") {
+        controller.abort();
+      }
+      return result;
+    };
+
+    await expect(
+      clearTextWithKeyEvents(adb, DELETE_KEYEVENT_CHUNK_SIZE + 1, controller.signal, () => {
+        completedChunks.push(1);
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      deleteCommand(DELETE_KEYEVENT_CHUNK_SIZE),
+    ]);
+    expect(completedChunks).toHaveLength(1);
+  });
+
+  test("makes no calls when the signal is already aborted", async () => {
+    const adb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(clearTextWithKeyEvents(adb, 1, controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("calls onDelete once after each successfully completed chunk", async () => {
+    const adb = new FakeAdbExecutor();
+    let completedChunks = 0;
+
+    await clearTextWithKeyEvents(
+      adb,
+      DELETE_KEYEVENT_CHUNK_SIZE * 2 + 1,
+      undefined,
+      () => completedChunks++,
+    );
+
+    expect(completedChunks).toBe(3);
+  });
+});
 
 describe("ClearText Android ADB fallback", () => {
   const device: BootedDevice = {
@@ -134,7 +230,7 @@ describe("ClearText Android ADB fallback", () => {
     ).rejects.toBe(reason);
     expect(fakeAdb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
+      deleteCommand(20),
     ]);
   });
 
@@ -183,11 +279,7 @@ describe("ClearText Android ADB fallback", () => {
     expect(result.success).toBe(true);
     expect(fakeAdb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      deleteCommand(5),
     ]);
   });
 
@@ -241,9 +333,10 @@ describe("ClearText Android ADB fallback", () => {
       );
     });
     expect(result.success).toBe(true);
-    expect(
-      fakeAdb.getExecutedCommands().filter((command) => command.endsWith("KEYCODE_DEL")),
-    ).toHaveLength(200);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      ...deleteCommands(200),
+    ]);
   });
 
   test("preserves the accessibility path when the hierarchy contains an error", async () => {
@@ -263,14 +356,10 @@ describe("ClearText Android ADB fallback", () => {
     const result = await runClearText(focusedFieldObserve("hello"));
 
     expect(result.success).toBe(true);
-    // MOVE_END once, then exactly one KEYCODE_DEL per character (5).
+    // MOVE_END once, then one batched command containing five DEL events.
     expect(fakeAdb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      deleteCommand(5),
     ]);
   });
 
@@ -300,8 +389,7 @@ describe("ClearText Android ADB fallback", () => {
     expect(result.success).toBe(true);
     const commands = fakeAdb.getExecutedCommands();
     expect(commands[0]).toBe("shell input keyevent KEYCODE_MOVE_END");
-    const deletes = commands.filter((cmd) => cmd === "shell input keyevent KEYCODE_DEL");
-    expect(deletes.length).toBe(200);
+    expect(commands).toEqual(["shell input keyevent KEYCODE_MOVE_END", ...deleteCommands(200)]);
   });
 
   test("uses the 200-delete fallback when the hierarchy is errored", async () => {
@@ -309,9 +397,10 @@ describe("ClearText Android ADB fallback", () => {
     const result = await runClearText(hierarchyErrorObserve());
 
     expect(result.success).toBe(true);
-    expect(
-      fakeAdb.getExecutedCommands().filter((cmd) => cmd === "shell input keyevent KEYCODE_DEL"),
-    ).toHaveLength(200);
+    expect(fakeAdb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      ...deleteCommands(200),
+    ]);
   });
   test("unsupported platform result includes the platform name", async () => {
     const unsupportedDevice = { ...device, platform: "tvos" } as unknown as BootedDevice;

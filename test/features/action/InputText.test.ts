@@ -517,9 +517,7 @@ describe("InputText", () => {
     expect(setTextCalls).toEqual([]);
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
       "shell input keyevent KEYCODE_AT",
       "shell input keyevent KEYCODE_A",
       "shell input keyevent KEYCODE_B",
@@ -632,9 +630,7 @@ describe("InputText", () => {
     expect(observeScreen.getExecuteOptions()[0]?.freshness).toBe("fresh");
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
       "shell input keyevent KEYCODE_N",
       "shell input keyevent KEYCODE_E",
       "shell input keyevent KEYCODE_X",
@@ -752,9 +748,7 @@ describe("InputText", () => {
     expect(observeScreen.getExecuteOptions()[0]?.minTimestamp).toBe(1_700_000_000_501);
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
       "shell input keyevent KEYCODE_N",
       "shell input keyevent KEYCODE_E",
       "shell input keyevent KEYCODE_X",
@@ -927,9 +921,7 @@ describe("InputText", () => {
     expect(closeCalls).toEqual(["close"]);
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
       "shell input keyevent KEYCODE_N",
       "shell input keyevent KEYCODE_E",
       "shell input keyevent KEYCODE_X",
@@ -964,9 +956,7 @@ describe("InputText", () => {
     expect(result.warnings).toEqual(["keyboard dismissal failed: Keyboard state unavailable"]);
     expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_MOVE_END",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL",
+      "shell input keyevent KEYCODE_DEL KEYCODE_DEL KEYCODE_DEL",
       "shell input keyevent KEYCODE_N",
       "shell input keyevent KEYCODE_E",
       "shell input keyevent KEYCODE_X",

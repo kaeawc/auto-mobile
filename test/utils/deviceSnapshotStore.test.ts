@@ -228,7 +228,10 @@ describe("DeviceSnapshotStore", () => {
       await fs.writeFile(path.join(dest, "partial.txt"), "partial");
       await fs.writeFile(journal(dest), "pending-existing");
 
-      expect(await store.listSubdirectoryNames(testBasePath)).toEqual([name, `${name}.replacing`]);
+      expect((await store.listSubdirectoryNames(testBasePath))?.sort()).toEqual([
+        name,
+        `${name}.replacing`,
+      ]);
       await new DeviceSnapshotStore(testBasePath).recoverSnapshotData(name);
 
       expect(await fs.readdir(dest)).toEqual(["old.txt"]);

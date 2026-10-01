@@ -1075,9 +1075,11 @@ jobs:
       # Publish both SDK variants to the local Maven repo and prove a Maven
       # consumer's debug build receives the storage-inspection providers that
       # ship in the debug variant only (#5714), while release packages none.
+      # Check the public API here because publishing already compiles SDK release classes.
+      # Update the baseline with: cd android && ./gradlew :auto-mobile-sdk:apiDump
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal"
+          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

@@ -201,6 +201,9 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
       compile_tasks+=("${module_path}:compileKotlin")
     fi
   fi
+  if [[ "${module_path}" == ":auto-mobile-sdk" ]]; then
+    compile_tasks+=("${module_path}:apiCheck")
+  fi
   if [[ -d "${module_dir}/src/test" ]]; then
     test_tasks+=("${module_path}:test")
   fi

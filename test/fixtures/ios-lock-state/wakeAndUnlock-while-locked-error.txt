@@ -1,0 +1,1 @@
+Error: legacy iOS session auto-start automation runner readiness failed: platform=ios requested=[platform=ios deviceId=1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E] resolved=[MT iPhone 18 Pro iOS 27.0 (1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E)] phase=runner-setup attempts=1 remainingBudgetMs=168174 runnerSetupElapsedMs=11825: iOS CtrlProxy runner exited during startup

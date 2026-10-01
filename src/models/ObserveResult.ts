@@ -326,7 +326,7 @@ export interface ObserveResult {
   wakefulnessSource?: "hierarchy" | "adb";
 
   /**
-   * Structured device-lock signal (Android only). Present when the lock state
+   * Structured device-lock signal (Android and iOS simulators). Present when the lock state
    * could be read; absent when it could not. Lets an agent detect it is looking
    * at the keyguard rather than the app, and decide whether to dismiss a swipe
    * lock itself or stop and ask the user for a PIN (issue #4235).

@@ -907,7 +907,7 @@ const observeElementsSchema = z
  * (perf timing, back stack, wakefulness, user id, errors, …) pass through so the
  * advertisement never rejects a real observation.
  */
-/** Android device-lock signal (issue #4235); `secure` omitted when undeterminable. */
+/** Android and iOS simulator device-lock signal; `secure` omitted when undeterminable. */
 export const deviceLockSchema = z.object({
   locked: z.boolean(),
   keyguardShowing: z.boolean(),

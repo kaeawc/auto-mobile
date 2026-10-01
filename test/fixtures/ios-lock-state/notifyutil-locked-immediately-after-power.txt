@@ -1,0 +1,5 @@
+$ xcrun simctl spawn 1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E notifyutil -g com.apple.springboard.lockstate; xcrun simctl spawn 1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E notifyutil -g com.apple.springboard.hasBlankedScreen; xcrun simctl spawn 1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E notifyutil -g com.apple.springboard.lockcomplete
+com.apple.springboard.lockstate 1
+com.apple.springboard.hasBlankedScreen 0
+com.apple.springboard.lockcomplete 1
+[exit 0]

@@ -6,6 +6,7 @@
     "android/**",
     "scratch/**",
     "test/fixtures/ios-sdk-network/*.json",
+    "test/fixtures/ios-lock-state/**",
     "**/*.generated.ts",
     "**/generated/**"
   ]

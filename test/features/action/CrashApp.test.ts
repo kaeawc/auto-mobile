@@ -75,6 +75,7 @@ class FakeSimulatorCommands {
 
 const dependencies = (overrides: Partial<CrashAppDependencies> = {}): CrashAppDependencies => ({
   cacheInvalidator: { invalidate: () => {} },
+  uid: () => 501,
   ...overrides,
 });
 

@@ -1,7 +1,33 @@
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
-import type { BootedDevice, Platform } from "../models";
+import type { BootedDevice, SomePlatform } from "../models";
+import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
+
+function freshDevices(discovery: BootedDeviceDiscovery): BootedDevice[] {
+  return discovery.devices.filter(
+    (device) =>
+      discovery.succeededPlatforms.has(device.platform) &&
+      (!discovery.freshDeviceIds || discovery.freshDeviceIds.has(device.deviceId)),
+  );
+}
+
+async function discoverForResource(
+  platform: SomePlatform,
+  options?: { signal?: AbortSignal; requireFresh?: boolean },
+): Promise<BootedDevice[]> {
+  const manager = PlatformDeviceManagerFactory.getInstance();
+  if (!options?.signal && !options?.requireFresh) {
+    return manager.getBootedDevices(platform);
+  }
+  const discovery = await manager.getBootedDevicesDetailed(platform, {
+    signal: options?.signal,
+    bypassAndroidDeviceListCache: options?.requireFresh,
+    bypassIosDeviceListCache: options?.requireFresh,
+  });
+  options?.signal?.throwIfAborted();
+  return options?.requireFresh ? freshDevices(discovery) : discovery.devices;
+}
 
 /**
  * The one way an MCP resource read turns a caller-supplied serial into a device.
@@ -41,20 +67,12 @@ export async function findBootedDeviceForResource(
  * anything from them. See {@link findBootedDeviceForResource}.
  */
 export async function listBootedDevicesForResource(
-  platform: Platform,
+  platform: SomePlatform,
   source: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; requireFresh?: boolean },
 ): Promise<BootedDevice[]> {
   try {
-    const manager = PlatformDeviceManagerFactory.getInstance();
-    let devices: BootedDevice[];
-    if (options?.signal) {
-      devices = (await manager.getBootedDevicesDetailed(platform, { signal: options.signal }))
-        .devices;
-      options.signal.throwIfAborted();
-    } else {
-      devices = await manager.getBootedDevices(platform);
-    }
+    const devices = await discoverForResource(platform, options);
     // FUNNEL 1. In daemon mode this can await the identity quarantine, which
     // cancels and drains the owning session's executions — so a cancellation
     // that lands here is rechecked AFTER the wait, or a cancelled read would go

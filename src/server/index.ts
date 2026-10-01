@@ -1315,6 +1315,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             // that label from the base map; unlabeled calls retain the derived
             // ambient session.
             routingSessionUuid: handlerRoutingSessionUuid,
+            ownsDeviceSession: (sessionUuid) =>
+              sessionToolBinding.ownsSession(sessionId, sessionUuid),
             execution: {
               executionId: execution.id,
               startTime: execution.startTime,

@@ -56,6 +56,42 @@ describe("listBootedDevicesForResource", () => {
     expect(receivedSignal).toBe(controller.signal);
   });
 
+  test("fresh lookup bypasses caches and excludes retained or failed-platform devices", async () => {
+    const controller = new AbortController();
+    const stale = { ...device, deviceId: "emulator-5556" };
+    const failedPlatform = { ...device, deviceId: "ios-1", platform: "ios" as const };
+    const detailedManager = {
+      getBootedDevicesDetailed: async (
+        platform: string,
+        options?: {
+          signal?: AbortSignal;
+          bypassAndroidDeviceListCache?: boolean;
+          bypassIosDeviceListCache?: boolean;
+        },
+      ) => {
+        expect(platform).toBe("either");
+        expect(options).toMatchObject({
+          signal: controller.signal,
+          bypassAndroidDeviceListCache: true,
+          bypassIosDeviceListCache: true,
+        });
+        return {
+          devices: [device, stale, failedPlatform],
+          succeededPlatforms: new Set(["android"]),
+          freshDeviceIds: new Set([device.deviceId, failedPlatform.deviceId]),
+        };
+      },
+    };
+    PlatformDeviceManagerFactory.setInstance(detailedManager as unknown as PlatformDeviceManager);
+
+    await expect(
+      listBootedDevicesForResource("either", "test", {
+        signal: controller.signal,
+        requireFresh: true,
+      }),
+    ).resolves.toEqual([device]);
+  });
+
   test("propagates an abort swallowed by detailed discovery", async () => {
     const controller = new AbortController();
     const detailedManager = {

@@ -12,6 +12,8 @@ export type ToolSelectionContext = {
     progress?: ProgressCallback;
   };
   routingSessionUuid?: string;
+  /** Connection-bound ownership proof for read-only cross-device checks. */
+  ownsDeviceSession?: (sessionUuid: string) => boolean;
   execution?: {
     executionId: string;
     startTime: number;
@@ -49,6 +51,8 @@ export const runWithToolSelectionContext = async <T>(
   const parent = toolSelectionContext.getStore();
   return toolSelectionContext.run(
     {
+      ...parent,
+      ...context,
       planRequest: context.planRequest ?? parent?.planRequest,
       routingSessionUuid: context.routingSessionUuid ?? parent?.routingSessionUuid,
       execution: context.execution ?? parent?.execution,

@@ -469,6 +469,33 @@
     }
   },
   {
+    "name": "captureDeviceScreenshot",
+    "description": "Capture a fresh raw screenshot of one booted device, with a clearly labeled cached observation screenshot if capture fails. Does not acquire a device session.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "format": {
+          "default": "png",
+          "type": "string",
+          "enum": ["png", "jpeg", "webp"]
+        },
+        "timeoutMs": {
+          "default": 30000,
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60000
+        }
+      },
+      "required": ["deviceId"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "changeLocalization",
     "description": "Change locale, time zone, text direction, time format, and calendar system",
     "inputSchema": {
@@ -1718,6 +1745,7 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
+              "captureDeviceScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -1842,6 +1870,7 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
+              "captureDeviceScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -9272,6 +9301,7 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
+              "captureDeviceScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",
@@ -11727,6 +11757,7 @@
             "accessibility",
             "accessibilityFocus",
             "biometricAuth",
+            "captureDeviceScreenshot",
             "changeLocalization",
             "clearKeyValueFile",
             "clearMockNetwork",
@@ -11817,6 +11848,7 @@
               "accessibility",
               "accessibilityFocus",
               "biometricAuth",
+              "captureDeviceScreenshot",
               "changeLocalization",
               "clearKeyValueFile",
               "clearMockNetwork",

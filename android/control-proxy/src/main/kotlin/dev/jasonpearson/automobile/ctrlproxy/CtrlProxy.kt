@@ -1695,7 +1695,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.d(TAG, "WebSocket server stopped")
     }
 
-    gestureStreamRouter.close { gestureHandlerThread.quitSafely() }
+    runCatching { gestureStreamRouter.close { gestureHandlerThread.quitSafely() } }
+      .onFailure { Log.w(TAG, "Failed to close streamed gestures", it) }
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
     serviceScope.cancel()
   }

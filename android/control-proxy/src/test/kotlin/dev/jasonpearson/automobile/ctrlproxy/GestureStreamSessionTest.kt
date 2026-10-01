@@ -80,11 +80,15 @@ class GestureStreamSessionTest {
 
   private class RouterHarness {
     private val gestureQueue = ArrayDeque<() -> Unit>()
+    var acceptPosts = true
     val dispatchers = mutableListOf<FakeStrokeDispatcher>()
     val acks = mutableListOf<Ack>()
     val router =
       GestureStreamRouter(
-        runOnGestureThread = { gestureQueue.addLast(it) },
+        runOnGestureThread = {
+          if (acceptPosts) gestureQueue.addLast(it)
+          acceptPosts
+        },
         newSession = { onFinished ->
           val dispatcher = FakeStrokeDispatcher()
           dispatchers.add(dispatcher)
@@ -304,17 +308,77 @@ class GestureStreamSessionTest {
   }
 
   @Test
-  fun `teardown clears pending ends without retaining session state`() {
+  fun `close lifts every active stroke before its callback and clears state`() {
     val h = RouterHarness()
     h.router.start("start", "g1", 1f, 2f)
+    h.router.start("other-start", "g2", 5f, 6f)
     h.drain()
     h.router.end("end", "g1", 3f, 4f, cancel = false)
     h.drain()
     assertEquals(1, h.pendingEndCount())
 
-    h.router.close()
+    // Retain an unrelated terminal failure to verify teardown removes it.
+    h.router.start("failed-start", "failed", 1f, 2f)
     h.drain()
+    h.dispatchers.last().failLast("dispatch refused")
+    assertEquals(1, h.terminalFailureCount())
+
+    var cancelledBeforeClosed = false
+    h.router.close {
+      cancelledBeforeClosed =
+        h.dispatchers.take(2).all { dispatcher ->
+          dispatcher.dispatched.last().let { !it.willContinue && it.from == it.to }
+        }
+    }
+    h.drain()
+    assertTrue(cancelledBeforeClosed)
+    assertEquals(2, h.dispatchers[0].dispatched.size)
+    assertEquals(2, h.dispatchers[1].dispatched.size)
+    assertEquals(
+      listOf(Ack("end", false, "Gesture stream closed")),
+      h.acks.filter { it.requestId == "end" },
+    )
     assertEquals(0, h.pendingEndCount())
     assertEquals(0, h.terminalFailureCount())
+  }
+
+  @Test
+  fun `close answers each pending end once and ignores later requests`() {
+    val h = RouterHarness()
+    h.router.start("start", "g1", 1f, 2f)
+    h.router.end("end-1", "g1", 3f, 4f, cancel = false)
+    h.router.end("end-2", "g1", 3f, 4f, cancel = false)
+    h.drain()
+
+    var closeCount = 0
+    h.router.close { closeCount++ }
+    h.drain()
+    h.dispatchers.single().completeLast() // late lift callback cannot ack either end again
+    h.router.close { closeCount++ }
+    h.router.start("late-start", "g2", 1f, 2f)
+    h.router.move("late-move", "g1", 2f, 3f)
+    h.router.end("late-end", "g1", 2f, 3f, cancel = true)
+    h.drain()
+
+    assertEquals(2, closeCount)
+    assertEquals(1, h.acks.count { it.requestId == "end-1" })
+    assertEquals(1, h.acks.count { it.requestId == "end-2" })
+    assertEquals(false, h.acks.last { it.requestId == "end-1" }.success)
+    assertEquals(false, h.acks.last { it.requestId == "end-2" }.success)
+    assertEquals(1, h.dispatchers.size)
+    assertFalse(h.acks.any { it.requestId?.startsWith("late-") == true })
+  }
+
+  @Test
+  fun `rejected close post still invokes its callback`() {
+    val h = RouterHarness()
+    h.router.close()
+    h.drain()
+    h.acceptPosts = false
+    var closeCount = 0
+
+    h.router.close { closeCount++ }
+
+    assertEquals(1, closeCount)
   }
 }

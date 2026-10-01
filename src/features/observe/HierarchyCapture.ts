@@ -8,6 +8,8 @@ import { SearchableHierarchy, type SearchableEntry } from "../utility/Searchable
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 
 export interface HierarchyCaptureRequest {
+  /** Suppress all owner-visible effects of a session-free hierarchy request. */
+  observerMode?: boolean;
   freshness: "cached-ok" | "fresh" | "settled";
   searchRaw?: boolean;
   minTimestamp?: number;

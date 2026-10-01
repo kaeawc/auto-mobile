@@ -240,6 +240,8 @@ interface SendCommandBaseOptions {
   perf?: PerformanceTracker;
   /** Defaults to true. Set false for endpoints that should not interrupt screenshot backoff. */
   cancelScreenshotBackoff?: boolean;
+  /** Observer requests reuse an open socket without reconnecting it. */
+  requireExistingConnection?: boolean;
   /** Overrides the default "Not connected" message. Ignored when `notConnectedError` is set. */
   notConnectedMessage?: string;
   /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
@@ -278,9 +280,11 @@ export async function sendCommand<T>(
     context.cancelScreenshotBackoff();
   }
 
-  const connected = options.perf
-    ? await options.perf.track("ensureConnected", () => context.ensureConnected(options.perf))
-    : await context.ensureConnected();
+  const connected = options.requireExistingConnection
+    ? context.getWebSocket()?.readyState === WebSocket.OPEN
+    : options.perf
+      ? await options.perf.track("ensureConnected", () => context.ensureConnected(options.perf))
+      : await context.ensureConnected();
 
   if (!connected) {
     if (options.notConnectedError) {

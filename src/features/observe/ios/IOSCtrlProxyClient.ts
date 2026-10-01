@@ -55,6 +55,7 @@ import {
 import { AccessibilityHierarchy } from "../../navigation/ScreenFingerprint";
 import {
   DeviceServiceClient,
+  ObserverPendingRequestTimeoutError,
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
@@ -601,6 +602,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // a stale CAPTURE age past maxObservationAgeMs still forces re-verification.
   private static readonly CACHE_FRESH_TTL_MS = 2000;
   private readonly hierarchyObservationStreamSuppressions: Map<string, NodeJS.Timeout> = new Map();
+  private readonly observerHierarchyRequestIds = new Set<string>();
+  private readonly transientObserver: boolean;
 
   // Push update callbacks
   private onPushUpdateCallbacks: Set<(hierarchy: XCTestHierarchy) => void> = new Set();
@@ -721,6 +724,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier,
     sdkEventIngestor?: IosSdkEventIngestor,
     retryExecutor: RetryExecutor = defaultRetryExecutor,
+    transientObserver = false,
   ) {
     super(
       timer,
@@ -729,6 +733,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       retryExecutor,
     );
     this.device = device;
+    this.transientObserver = transientObserver;
+    if (transientObserver) {
+      this.autoReconnectEnabled = false;
+    }
     this.port = port;
     this.serviceManagerFactory = serviceManagerFactory;
     this.bootedDeviceLister = bootedDeviceLister;
@@ -899,6 +907,35 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return new IOSCtrlProxyClient(device, port);
   }
 
+  /** Connect only to an already-running runner for one observation. */
+  public static createForObservationRead(device: BootedDevice): IOSCtrlProxyClient {
+    requireBootedDevice(device, "IOSCtrlProxyClient.createForObservationRead");
+    const ownsPortAllocation = PortManager.getPort(device.deviceId) === undefined;
+    const port = PortManager.allocate(device.deviceId, {
+      reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
+    });
+    const client = new IOSCtrlProxyClient(
+      device,
+      port,
+      defaultWebSocketFactory,
+      defaultTimer,
+      defaultServiceManagerFactory,
+      defaultBootedDeviceLister,
+      observationStreamDeviceConnectionLostNotifier,
+      undefined,
+      defaultRetryExecutor,
+      true,
+    );
+    if (ownsPortAllocation) {
+      client.allocatedPort = port;
+    }
+    return client;
+  }
+
+  public connectForObservationRead(): Promise<boolean> {
+    return super.ensureConnected();
+  }
+
   /**
    * Diagnostic accessor for doctor: reports the host port this client will use
    * for the runner WebSocket without opening any additional connection.
@@ -965,6 +1002,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: IosSdkEventIngestor,
     retryExecutor?: RetryExecutor,
+    transientObserver = false,
   ): IOSCtrlProxyClient {
     // Default test lister always reports the device as booted so existing tests
     // are unaffected. Tests that verify boot-check behavior supply their own lister.
@@ -979,6 +1017,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       deviceConnectionLostNotifier,
       sdkEventIngestor,
       retryExecutor,
+      transientObserver,
     );
   }
 
@@ -1270,6 +1309,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       },
       suppressHierarchyObservationStreamPush: (requestId, timeoutMs) =>
         this.suppressHierarchyObservationStreamPush(requestId, timeoutMs),
+      markObserverHierarchyRequest: (requestId) => {
+        this.observerHierarchyRequestIds.add(requestId);
+      },
+      unmarkObserverHierarchyRequest: (requestId) => {
+        this.observerHierarchyRequestIds.delete(requestId);
+      },
     };
   }
 
@@ -1425,6 +1470,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private sdkEventPollTimer: ReturnType<typeof setTimeout> | null = null;
 
   protected onConnectionEstablished(): void {
+    if (this.transientObserver) {
+      this.connectedSocketPort = this.port;
+      return;
+    }
     // Reset failure counter on successful connection
     this.consecutiveConnectionFailures = 0;
     this.connectedSocketPort = this.port;
@@ -1755,10 +1804,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cancelScreenshotBackoff();
     this.onClientClosedWithoutConnection();
     this.cachedHierarchy = null;
+    this.observerHierarchyRequestIds.clear();
     this.clearSdkScreenIdentity();
     this.supportedCommands = null;
     this.rejectedCommands.clear();
     this.supportedFeatures = null;
+    if (this.transientObserver) {
+      return;
+    }
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
@@ -2487,9 +2540,18 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private processMessage(message: WebSocketMessage): void {
     const { type, requestId } = message;
+    if (
+      this.transientObserver &&
+      !["connected", "hierarchy_update", "screenshot", "error"].includes(type)
+    ) {
+      return;
+    }
 
     // Handle push messages (no requestId)
     if (type === "connected") {
+      if (this.transientObserver) {
+        return;
+      }
       this.rejectedCommands.clear();
       this.supportedCommands = Array.isArray(message.supportedCommands)
         ? new Set(message.supportedCommands)
@@ -2519,23 +2581,36 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
 
     if (type === "hierarchy_update" && message.data) {
+      if (
+        this.transientObserver &&
+        (!requestId || !this.observerHierarchyRequestIds.has(requestId))
+      ) {
+        return;
+      }
       // Retain the additive #4548 scale metadata on RECEIPT — the moment the hierarchy first
       // arrives — independent of whether it is later pushed to the observation stream. The push
       // is skipped entirely when there is no device-data server, and suppressed for explicit
       // initial-frame requests, so retaining inside pushHierarchyToObservationStream would leave
       // getScreenScaleMetadata() null on exactly the paths #4549 must still be able to read.
-      this.retainScaleMetadataFrom(message.data as XCTestHierarchy);
-      this.handleHierarchyUpdateForNavigation(message.data, message.perfTiming);
+      const observerResponse = requestId
+        ? this.observerHierarchyRequestIds.delete(requestId)
+        : false;
+      if (!observerResponse) {
+        this.retainScaleMetadataFrom(message.data as XCTestHierarchy);
+        this.handleHierarchyUpdateForNavigation(message.data, message.perfTiming);
+      }
       // Record layout telemetry event using converted hierarchy (same format as observation stream)
       const converted = this.convertToViewHierarchyResult(message.data);
-      this.sdkEventIngestor.recordLayoutTelemetryEvent(converted);
+      if (!observerResponse) {
+        this.sdkEventIngestor.recordLayoutTelemetryEvent(converted);
+      }
       // Only push to observation stream for request-response updates (with requestId).
       // Push messages (no requestId) are handled in the dedicated push-message branch below
       // to avoid duplicate hierarchy events.
       if (requestId) {
         const suppressObservationStreamPush =
           this.consumeHierarchyObservationStreamSuppression(requestId);
-        if (!suppressObservationStreamPush) {
+        if (!suppressObservationStreamPush && !observerResponse) {
           this.pushHierarchyToObservationStream(
             converted,
             message.data as XCTestHierarchy,
@@ -2829,6 +2904,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     frameContext?: string;
   } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
+  }
+
+  async requestHierarchySyncForObserver(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    disableAllFiltering = false,
+    signal?: AbortSignal,
+    timeoutMs = 10000,
+  ): Promise<{ hierarchy: XCTestHierarchy; frameContext?: string } | null> {
+    const deadline = this.timer.now() + timeoutMs;
+    await this.waitForPendingRequests(timeoutMs, signal);
+    const remaining = deadline - this.timer.now();
+    if (remaining <= 0) {
+      throw new ObserverPendingRequestTimeoutError();
+    }
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, remaining, true, {
+      forceCapture: true,
+      observerMode: true,
+    });
   }
 
   convertToViewHierarchyResult(hierarchy: XCTestHierarchy): ViewHierarchyResult {
@@ -3185,6 +3278,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       signal,
       currentPanel?.key,
     );
+  }
+
+  async requestScreenshotForObserver(
+    timeoutMs = 10000,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyScreenshotResult> {
+    const deadline = this.timer.now() + timeoutMs;
+    await this.waitForPendingRequests(timeoutMs, signal);
+    const remaining = deadline - this.timer.now();
+    if (remaining <= 0) {
+      throw new ObserverPendingRequestTimeoutError();
+    }
+    return this.screenshot.requestScreenshot(remaining, undefined, signal, true);
   }
 
   async requestScreenshotWithoutObservationStreamPush(

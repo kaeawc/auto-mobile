@@ -8,6 +8,7 @@ import { linkWindowRoots } from "../linkWindowRoots";
 
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
+import { ActionableError } from "../../../models/ActionableError";
 import { combineWithAmbientAbort } from "../../../utils/AbortContext";
 import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -72,6 +73,7 @@ type HierarchySyncResult = {
 } | null;
 
 interface HierarchySyncFlight {
+  observerMode: boolean;
   disableAllFiltering: boolean;
   displayId?: number;
   minReceivedAt: number;
@@ -151,7 +153,11 @@ export class CtrlProxyHierarchy {
     requestId?: string,
     staleRequestId?: string | null,
     allowStaleResponse = true,
+    observerMode = false,
   ): boolean {
+    if (observerMode && requestId) {
+      return hierarchy.requestId === requestId;
+    }
     return (
       !requestId ||
       (!hierarchy.requestId && !this.correlatedFramesSeen) ||
@@ -164,13 +170,22 @@ export class CtrlProxyHierarchy {
     hierarchy: CachedHierarchy,
     minTimestamp: number,
     useDeviceTimestamp: boolean,
-    requestId?: string,
-    staleRequestId?: string | null,
-    allowStaleResponse = true,
+    request: {
+      requestId?: string;
+      staleRequestId?: string | null;
+      allowStaleResponse: boolean;
+      observerMode?: boolean;
+    },
   ): boolean {
     return (
       this.evaluateMinTimestamp(hierarchy, minTimestamp, useDeviceTimestamp).isFresh &&
-      this.matchesHierarchyRequest(hierarchy, requestId, staleRequestId, allowStaleResponse)
+      this.matchesHierarchyRequest(
+        hierarchy,
+        request.requestId,
+        request.staleRequestId,
+        request.allowStaleResponse,
+        request.observerMode,
+      )
     );
   }
 
@@ -181,6 +196,12 @@ export class CtrlProxyHierarchy {
         dispatchSocket.readyState === WebSocket.OPEN &&
         this.context.getWebSocket() === dispatchSocket)
     );
+  }
+
+  private unmarkObserverRequest(observerMode: boolean, requestId?: string): void {
+    if (observerMode && requestId) {
+      this.context.unmarkObserverHierarchyRequest?.(requestId);
+    }
   }
 
   /**
@@ -671,6 +692,45 @@ export class CtrlProxyHierarchy {
     diagnostics?: HierarchySyncDiagnostics,
     displayId?: number,
   ): Promise<HierarchySyncResult> {
+    return this.requestHierarchySyncWithOptions({
+      perf,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+      diagnostics,
+      displayId,
+      observerMode: false,
+    });
+  }
+
+  requestHierarchySyncForObserver(
+    perf: PerformanceTracker,
+    disableAllFiltering: boolean,
+    signal: AbortSignal | undefined,
+    timeoutMs: number,
+    displayId?: number,
+  ): Promise<HierarchySyncResult> {
+    return this.requestHierarchySyncWithOptions({
+      perf,
+      disableAllFiltering,
+      signal,
+      timeoutMs,
+      displayId,
+      observerMode: true,
+    });
+  }
+
+  private async requestHierarchySyncWithOptions(options: {
+    perf: PerformanceTracker;
+    disableAllFiltering: boolean;
+    signal?: AbortSignal;
+    timeoutMs: number;
+    diagnostics?: HierarchySyncDiagnostics;
+    displayId?: number;
+    observerMode: boolean;
+  }): Promise<HierarchySyncResult> {
+    const { perf, disableAllFiltering, signal, timeoutMs, diagnostics, displayId, observerMode } =
+      options;
     const startTime = this.context.timer.now();
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
 
@@ -682,6 +742,7 @@ export class CtrlProxyHierarchy {
       let flight = [...this.hierarchySyncFlights].find(
         (candidate) =>
           candidate.disableAllFiltering === disableAllFiltering &&
+          candidate.observerMode === observerMode &&
           candidate.displayId === displayId &&
           candidate.minReceivedAt >= startTime &&
           candidate.timeoutMs === effectiveTimeoutMs,
@@ -691,6 +752,7 @@ export class CtrlProxyHierarchy {
         const sharedDiagnostics: HierarchySyncDiagnostics = {};
         flight = {
           disableAllFiltering,
+          observerMode,
           displayId,
           minReceivedAt: startTime,
           timeoutMs: effectiveTimeoutMs,
@@ -703,7 +765,7 @@ export class CtrlProxyHierarchy {
             controller.signal,
             effectiveTimeoutMs,
             sharedDiagnostics,
-            { startTime, displayId },
+            { startTime, displayId, observerMode },
           ),
         };
         const createdFlight = flight;
@@ -740,9 +802,9 @@ export class CtrlProxyHierarchy {
     signal: AbortSignal,
     effectiveTimeoutMs: number,
     diagnostics: HierarchySyncDiagnostics,
-    request: { startTime: number; displayId?: number },
+    request: { startTime: number; displayId?: number; observerMode: boolean },
   ): Promise<HierarchySyncResult> {
-    const { startTime, displayId } = request;
+    const { startTime, displayId, observerMode } = request;
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
@@ -750,7 +812,7 @@ export class CtrlProxyHierarchy {
       // reason as `getLatestHierarchy` above: an uninterruptible 5000ms
       // handshake must not outlive the caller's deadline, and a sync
       // extraction must never be dispatched after it expired (#6890 review).
-      const connected = await awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal);
+      const connected = await this.connectForHierarchySync(perf, signal, observerMode);
       throwIfAborted(signal);
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection");
@@ -761,7 +823,7 @@ export class CtrlProxyHierarchy {
       // runner type:"error" frame for this hierarchy request can reject the wait fast (issue #3032).
       const dispatchSocket = this.context.getWebSocket();
       const hierarchyRequestId = await perf.track("sendWsRequest", async () => {
-        return this.sendHierarchyRequest(disableAllFiltering, displayId);
+        return this.sendHierarchyRequest(disableAllFiltering, displayId, observerMode);
       });
 
       // Fall back to ADB broadcast if WebSocket failed. The broadcast mints its own `sync_` uuid and
@@ -771,6 +833,11 @@ export class CtrlProxyHierarchy {
       // its own `req_` id).
       let broadcastRequestId: string | null = null;
       if (hierarchyRequestId === null) {
+        if (observerMode) {
+          throw new ActionableError(
+            "Observer hierarchy read requires a connected CtrlProxy socket",
+          );
+        }
         if (displayId !== undefined) {
           throw new Error(
             `Unable to request hierarchy for Android display ${displayId}: CtrlProxy WebSocket is unavailable`,
@@ -799,12 +866,25 @@ export class CtrlProxyHierarchy {
       // so the caller keeps its stale-cache fallback (see
       // getAccessibilityHierarchy) — nothing is discarded here.
       const correlationRequestId = hierarchyRequestId ?? broadcastRequestId ?? undefined;
-      const freshData = await perf.track("waitForPush", () =>
-        this.waitForFreshData(effectiveTimeoutMs, startTime, false, signal, correlationRequestId, {
-          dispatchSocket,
-          allowStaleResponse: !disableAllFiltering && displayId === undefined,
-        }),
-      );
+      let freshData: CachedHierarchy | null;
+      try {
+        freshData = await perf.track("waitForPush", () =>
+          this.waitForFreshData(
+            effectiveTimeoutMs,
+            startTime,
+            false,
+            signal,
+            correlationRequestId,
+            {
+              dispatchSocket,
+              allowStaleResponse: !observerMode && !disableAllFiltering && displayId === undefined,
+              observerMode,
+            },
+          ),
+        );
+      } finally {
+        this.unmarkObserverRequest(observerMode, correlationRequestId);
+      }
 
       if (freshData) {
         const duration = this.context.timer.now() - startTime;
@@ -831,6 +911,17 @@ export class CtrlProxyHierarchy {
       logger.warn(`[CTRL_PROXY] Sync hierarchy request failed after ${duration}ms: ${error}`);
       return null;
     }
+  }
+
+  private async connectForHierarchySync(
+    perf: PerformanceTracker,
+    signal: AbortSignal,
+    observerMode: boolean,
+  ): Promise<boolean> {
+    if (observerMode) {
+      return this.context.getWebSocket()?.readyState === WebSocket.OPEN;
+    }
+    return await awaitWhileRequestIsLive(this.context.ensureConnected(perf), signal);
   }
 
   /**
@@ -1056,11 +1147,15 @@ export class CtrlProxyHierarchy {
     useDeviceTimestamp: boolean,
     signal?: AbortSignal,
     requestId?: string,
-    options: { dispatchSocket?: WebSocket | null; allowStaleResponse: boolean } = {
+    options: {
+      dispatchSocket?: WebSocket | null;
+      allowStaleResponse: boolean;
+      observerMode?: boolean;
+    } = {
       allowStaleResponse: true,
     },
   ): Promise<CachedHierarchy | null> {
-    const { dispatchSocket, allowStaleResponse } = options;
+    const { dispatchSocket, allowStaleResponse, observerMode } = options;
     const combinedSignal = combineWithAmbientAbort(signal);
     // Reject dispatch on a socket that closed or was replaced during ADB fallback.
     if (!this.isDispatchSocketValid(dispatchSocket)) {
@@ -1075,14 +1170,12 @@ export class CtrlProxyHierarchy {
     let screenCheckInProgress = false;
     let staleCheckSent = false;
     const isMatchingFresh = (hierarchy: CachedHierarchy, staleRequestId: string | null): boolean =>
-      this.matchesFreshHierarchy(
-        hierarchy,
-        minTimestamp,
-        useDeviceTimestamp,
+      this.matchesFreshHierarchy(hierarchy, minTimestamp, useDeviceTimestamp, {
         requestId,
         staleRequestId,
         allowStaleResponse,
-      );
+        observerMode,
+      });
 
     return new Promise<CachedHierarchy | null>((resolve, reject) => {
       let settled = false;
@@ -1154,17 +1247,15 @@ export class CtrlProxyHierarchy {
         const elapsed = this.context.timer.now() - startTime;
 
         const cachedHierarchy = this.context.getCachedHierarchy();
-        if (cachedHierarchy) {
-          if (isMatchingFresh(cachedHierarchy, staleRequestId)) {
-            logger.debug(
-              `[CTRL_PROXY] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, elapsed=${elapsed}ms`,
-            );
-            settleResolve(cachedHierarchy);
-            return;
-          }
+        if (cachedHierarchy && isMatchingFresh(cachedHierarchy, staleRequestId)) {
+          logger.debug(
+            `[CTRL_PROXY] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, elapsed=${elapsed}ms`,
+          );
+          settleResolve(cachedHierarchy);
+          return;
         }
 
-        if (!staleCheckSent && elapsed >= staleCheckDelay) {
+        if (!observerMode && !staleCheckSent && elapsed >= staleCheckDelay) {
           staleCheckSent = true;
           logger.debug(
             `[CTRL_PROXY] No push received after ${staleCheckDelay}ms, sending stale check request (sinceTimestamp: ${minTimestamp})`,
@@ -1203,15 +1294,11 @@ export class CtrlProxyHierarchy {
         // Check if timeout exceeded
         if (elapsed >= timeout) {
           const cached = this.context.getCachedHierarchy();
-          if (cached) {
-            logger.debug(
-              `[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: cached receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, useDeviceTimestamp=${useDeviceTimestamp}`,
-            );
-          } else {
-            logger.debug(
-              `[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: no cached data, minTimestamp=${minTimestamp}`,
-            );
-          }
+          logger.debug(
+            cached
+              ? `[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: cached receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, useDeviceTimestamp=${useDeviceTimestamp}`
+              : `[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: no cached data, minTimestamp=${minTimestamp}`,
+          );
           settleResolve(null);
         }
       }, checkInterval);
@@ -1227,6 +1314,7 @@ export class CtrlProxyHierarchy {
   private sendHierarchyRequest(
     disableAllFiltering: boolean = false,
     displayId?: number,
+    observerMode = false,
   ): string | null {
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -1234,8 +1322,11 @@ export class CtrlProxyHierarchy {
       return null;
     }
 
+    const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
     try {
-      const requestId = `req_${this.context.timer.now()}_${generateSecureId()}`;
+      if (observerMode) {
+        this.context.markObserverHierarchyRequest?.(requestId);
+      }
       const message = serializeCtrlProxyRequest(
         ctrlProxyRequests.requestHierarchy({ requestId, disableAllFiltering, displayId }),
       );
@@ -1246,6 +1337,10 @@ export class CtrlProxyHierarchy {
       return requestId;
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to send WebSocket request: ${error}`);
+      if (observerMode) {
+        // A failed send cannot produce a correlated frame.
+        this.context.unmarkObserverHierarchyRequest?.(requestId);
+      }
       return null;
     }
   }

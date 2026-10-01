@@ -6,6 +6,8 @@ import type { ScreenshotMode } from "../automaticScreenshotPolicy";
 import type { ScreenshotEncodingOptions } from "../screenshot/screenshotOptions";
 
 export interface ObserveScreenExecuteOptions {
+  /** A session-free read: collect the normal result without advancing owner-visible state. */
+  observerMode?: boolean;
   queryOptions?: ViewHierarchyQueryOptions;
   perf?: PerformanceTracker;
   /** Explicit internal capture policy, including the collector fallback wait. */

@@ -1,21 +1,6 @@
 import type { BootedDevice } from "../models";
 import { ActionableError } from "../models/ActionableError";
-import { DaemonState } from "../daemon/daemonState";
-import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
-import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { listBootedDevicesForResource } from "./resourceDeviceResolver";
-
-/** An owned device requires a binding to the caller's MCP connection. */
-export function hasObservationReadAccess(
-  ownerSessionUuid: string | undefined,
-  callerSessionUuid: string | undefined,
-  ownsSession: ((sessionUuid: string) => boolean) | undefined,
-): boolean {
-  return Boolean(
-    !ownerSessionUuid ||
-    (ownerSessionUuid === callerSessionUuid && ownsSession?.(ownerSessionUuid)),
-  );
-}
 
 export interface DeviceObservationAccess {
   listBooted(signal: AbortSignal | undefined): Promise<BootedDevice[]>;
@@ -25,19 +10,8 @@ export interface DeviceObservationAccess {
 export const defaultDeviceObservationAccess: DeviceObservationAccess = {
   listBooted: (signal) =>
     listBootedDevicesForResource("either", "observe", { signal, requireFresh: true }),
-  isAuthorized: (device) => {
-    const daemon = DaemonState.getInstance();
-    if (!daemon.isInitialized()) {
-      return true;
-    }
-    const owner = daemon.getDevicePool().getDevice(device.deviceId)?.sessionId;
-    const context = getToolSelectionContext();
-    const caller = resolveToolSelectionBaseSessionUuid(
-      context?.routingSessionUuid,
-      daemon.getSessionManager(),
-    );
-    return hasObservationReadAccess(owner ?? undefined, caller, context?.ownsDeviceSession);
-  },
+  // The local daemon socket admits observation reads regardless of pool ownership.
+  isAuthorized: () => true,
 };
 
 /** Resolve a read-only target without session creation or device-pool ownership changes. */

@@ -7,6 +7,7 @@
 
 import type { SemanticLink, ViewHierarchyResult } from "../../../models";
 import { ActionableError } from "../../../models/ActionableError";
+import WebSocket from "ws";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes } from "../../../models/ViewHierarchyResult";
 import { isDeepStrictEqual } from "node:util";
@@ -414,6 +415,7 @@ export class CtrlProxyHierarchy {
     requestOptions?: {
       failureSink?: { value?: HierarchyRequestFailure };
       forceCapture?: boolean;
+      observerMode?: boolean;
     },
   ): Promise<{
     hierarchy: XCTestHierarchy;
@@ -427,7 +429,11 @@ export class CtrlProxyHierarchy {
     };
     const deadlineMs = this.context.timer.now() + Math.max(0, timeoutMs);
     throwIfAborted(signal);
-    const connection = await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal);
+    const connection = requestOptions?.observerMode
+      ? this.context.getWebSocket()?.readyState === WebSocket.OPEN
+        ? { status: "connected" as const }
+        : { status: "failed" as const, failure: { reason: "connection_lost" as const } }
+      : await this.ensureConnectedBeforeDeadline(deadlineMs, perf, signal);
     if (connection.status !== "connected") {
       recordFailure(
         connection.status === "timeout"
@@ -449,6 +455,9 @@ export class CtrlProxyHierarchy {
     }
 
     const requestId = this.context.requestManager.generateId("hierarchy");
+    if (requestOptions?.observerMode) {
+      this.context.markObserverHierarchyRequest?.(requestId);
+    }
     if (suppressObservationStreamPush) {
       this.context.suppressHierarchyObservationStreamPush?.(requestId, remainingTimeoutMs);
     }
@@ -516,6 +525,13 @@ export class CtrlProxyHierarchy {
       throwIfAborted(signal);
 
       if (result.hierarchy) {
+        if (requestOptions?.observerMode) {
+          return {
+            hierarchy: result.hierarchy,
+            perfTiming: result.perfTiming,
+            frameContext: result.frameContext,
+          };
+        }
         // Update cache
         const now = this.context.timer.now();
         const previous = this.context.getCachedHierarchy();
@@ -543,6 +559,9 @@ export class CtrlProxyHierarchy {
       );
       return null;
     } finally {
+      if (requestOptions?.observerMode) {
+        this.context.unmarkObserverHierarchyRequest?.(requestId);
+      }
       signal?.removeEventListener("abort", rejectOnAbort);
     }
   }

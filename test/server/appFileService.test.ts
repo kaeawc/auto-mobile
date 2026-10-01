@@ -15,6 +15,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import {
   createSharedStorageServiceForTesting,
   type StageSharedStorageRequest,
@@ -757,6 +758,180 @@ describe("AppFileService", () => {
     await expect(
       fileSystem.readText(join(dataRoot, "Library", "Support", "config.txt")),
     ).resolves.toBe("hello ios");
+  });
+
+  test("stages an iOS app file beside its destination before replacing it", async () => {
+    const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+    const writes: string[] = [];
+    class TrackingFileSystem extends TestAppFileFileSystem {
+      override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+        writes.push(`copy:${destinationPath}`.replaceAll("\\", "/"));
+        await super.copyFile(sourcePath, destinationPath);
+      }
+
+      override async rename(oldPath: string, newPath: string): Promise<void> {
+        writes.push(`rename:${oldPath}:${newPath}`.replaceAll("\\", "/"));
+        await super.rename(oldPath, newPath);
+      }
+    }
+    const fileSystem = new TrackingFileSystem();
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      "/simulators/SIM-1/data",
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as unknown as SimCtlClient,
+      fileSystem,
+    });
+
+    await service.putFile({
+      device: iosSimulatorDevice,
+      appId: "com.example.app",
+      container: "documents",
+      contentText: "complete",
+      destinationPath: "fixtures/value.txt",
+    });
+
+    expect(await fileSystem.readText(target)).toBe("complete");
+    expect(writes).toHaveLength(2);
+    expect(writes[0]).toStartWith(`copy:${dirname(target)}/.value.txt.`);
+    expect(writes[0]).toEndWith(".tmp");
+    expect(writes[1]).toBe(`rename:${writes[0]!.slice(5)}:${target}`);
+    expect(await fileSystem.readdir(dirname(target))).toEqual([{ name: "value.txt" }]);
+  });
+
+  for (const destinationExists of [true, false]) {
+    test(`preserves ${destinationExists ? "existing" : "absent"} iOS destination after a partial copy`, async () => {
+      const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+      const failure = new Error("copy failed");
+      class FailingCopyFileSystem extends TestAppFileFileSystem {
+        override async copyFile(_sourcePath: string, destinationPath: string): Promise<void> {
+          await this.writeFileBuffer(destinationPath, Buffer.from("partial"));
+          throw failure;
+        }
+      }
+      const fileSystem = new FailingCopyFileSystem();
+      if (destinationExists) {
+        await fileSystem.writeFileBuffer(target, Buffer.from("original"));
+      }
+      const simctl = new FakeSimCtlClient();
+      simctl.setCommandResult(
+        `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+        "/simulators/SIM-1/data",
+      );
+      const service = createAppFileServiceForTesting({
+        simctlFactory: () => simctl as unknown as SimCtlClient,
+        fileSystem,
+      });
+
+      await expect(
+        service.putFile({
+          device: iosSimulatorDevice,
+          appId: "com.example.app",
+          container: "documents",
+          contentText: "replacement",
+          destinationPath: "fixtures/value.txt",
+        }),
+      ).rejects.toBe(failure);
+
+      if (destinationExists) {
+        expect(await fileSystem.readText(target)).toBe("original");
+      } else {
+        await expect(fileSystem.readText(target)).rejects.toThrow();
+      }
+      expect(await fileSystem.readdir(dirname(target))).toEqual(
+        destinationExists ? [{ name: "value.txt" }] : [],
+      );
+      expect(fileSystem.removedPaths.filter((path) => path.includes(".value.txt."))).toHaveLength(
+        1,
+      );
+    });
+  }
+
+  test("removes the iOS temporary file when rename fails", async () => {
+    const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+    const failure = new Error("rename failed");
+    class FailingRenameFileSystem extends TestAppFileFileSystem {
+      override async rename(): Promise<void> {
+        throw failure;
+      }
+    }
+    const fileSystem = new FailingRenameFileSystem();
+    await fileSystem.writeFileBuffer(target, Buffer.from("original"));
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      "/simulators/SIM-1/data",
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as unknown as SimCtlClient,
+      fileSystem,
+    });
+
+    await expect(
+      service.putFile({
+        device: iosSimulatorDevice,
+        appId: "com.example.app",
+        container: "documents",
+        contentText: "replacement",
+        destinationPath: "fixtures/value.txt",
+      }),
+    ).rejects.toBe(failure);
+
+    expect(await fileSystem.readText(target)).toBe("original");
+    expect(await fileSystem.readdir(dirname(target))).toEqual([{ name: "value.txt" }]);
+    expect(fileSystem.removedPaths.filter((path) => path.includes(".value.txt."))).toHaveLength(1);
+  });
+
+  test("serializes concurrent iOS puts to the same destination", async () => {
+    const target = "/simulators/SIM-1/data/Documents/fixtures/value.txt";
+    const writes: string[] = [];
+    class TrackingFileSystem extends TestAppFileFileSystem {
+      override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
+        writes.push(`copy:start:${destinationPath}`.replaceAll("\\", "/"));
+        await Promise.resolve();
+        await super.copyFile(sourcePath, destinationPath);
+        writes.push(`copy:end:${destinationPath}`.replaceAll("\\", "/"));
+      }
+
+      override async rename(oldPath: string, newPath: string): Promise<void> {
+        writes.push(`rename:${oldPath}:${newPath}`.replaceAll("\\", "/"));
+        await super.rename(oldPath, newPath);
+      }
+    }
+    const fileSystem = new TrackingFileSystem();
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+      "/simulators/SIM-1/data",
+    );
+    const service = createAppFileServiceForTesting({
+      simctlFactory: () => simctl as unknown as SimCtlClient,
+      fileSystem,
+    });
+    const put = (contentText: string) =>
+      service.putFile({
+        device: iosSimulatorDevice,
+        appId: "com.example.app",
+        container: "documents",
+        contentText,
+        destinationPath: "fixtures/value.txt",
+      });
+
+    await Promise.all([put("first complete payload"), put("second complete payload")]);
+
+    expect(writes).toHaveLength(6);
+    expect(writes[0]).toStartWith("copy:start:");
+    expect(writes[1]).toBe(writes[0]!.replace("copy:start:", "copy:end:"));
+    expect(writes[2]).toStartWith("rename:");
+    expect(writes[3]).toStartWith("copy:start:");
+    expect(writes[4]).toBe(writes[3]!.replace("copy:start:", "copy:end:"));
+    expect(writes[5]).toStartWith("rename:");
+    expect(["first complete payload", "second complete payload"]).toContain(
+      await fileSystem.readText(target),
+    );
+    expect(await fileSystem.readdir(dirname(target))).toEqual([{ name: "value.txt" }]);
   });
 
   test("maps iOS logical containers to simulator data container folders", async () => {
@@ -1505,6 +1680,16 @@ class TestAppFileFileSystem implements AppFileFileSystem {
   async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
     const source = await this.readFileBuffer(sourcePath);
     await this.writeFileBuffer(destinationPath, source);
+  }
+
+  async rename(oldPath: string, newPath: string): Promise<void> {
+    const source = this.normalize(oldPath);
+    const data = this.files.get(source);
+    if (data === undefined) {
+      throw this.notFound(oldPath);
+    }
+    this.files.set(this.normalize(newPath), data);
+    this.files.delete(source);
   }
 
   async readFileBuffer(path: string): Promise<Buffer> {

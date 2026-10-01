@@ -9,6 +9,7 @@ import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { Element, ElementBounds } from "../../../../src/models";
+import type { ViewHierarchyResult } from "../../../../src/models";
 import { OverlayDetector } from "../../../../src/features/action/swipeon/OverlayDetector";
 import { FakeElementFinder } from "../../../fakes/FakeElementFinder";
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
@@ -59,6 +60,29 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
 
     const overlays = detector().collectOverlayCandidates(
       hierarchy as any,
+      { elementId: "list" },
+      listElement,
+    );
+
+    expect(overlays).toEqual([]);
+  });
+
+  test("a nested same-selector node does not end the container before a later child", () => {
+    const nestedListBounds = b(100, 100, 900, 500);
+    const listNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }, [
+      node(nestedListBounds, { "resource-id": "list" }, [
+        node(b(100, 100, 900, 200), { "resource-id": "leaf" }),
+      ]),
+      node(b(0, 1900, 1000, 2000), { "resource-id": "row", clickable: "true" }),
+    ]);
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: listNode,
+      },
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy,
       { elementId: "list" },
       listElement,
     );

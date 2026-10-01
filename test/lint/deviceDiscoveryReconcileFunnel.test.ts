@@ -295,10 +295,11 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
     }
     const counts = new Map<string, number>();
     for (const file of walk(SRC)) {
-      if (!readFileSync(file).includes(DISCOVERY_PREFIX)) {
+      const source = readFileSync(file, "utf8");
+      if (!source.includes(DISCOVERY_PREFIX)) {
         continue;
       }
-      const matches = blankComments(readFileSync(file, "utf8")).match(DISCOVERY_CALL);
+      const matches = blankComments(source).match(DISCOVERY_CALL);
       if (matches && matches.length > 0) {
         counts.set(relative(ROOT, file).split(sep).join("/"), matches.length);
       }

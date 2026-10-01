@@ -204,6 +204,12 @@ function isDevicectlExecution(
 }
 
 function findOffenders(source: string, file = "fixture.ts"): BoundaryOffender[] {
+  // The execution analyzer can form strings through + and template expressions;
+  // escapes can also hide literal characters. Otherwise a devicectl command or
+  // the special terminateApp owner call must be spelled in the source bytes.
+  if (!/(?:devicectl|terminateApp|\\|\+|\$\{)/i.test(source)) {
+    return [];
+  }
   const ast = executionBoundaryAst(source);
   return ast.calls.flatMap((call) => {
     const values = commandValues(ast, call);

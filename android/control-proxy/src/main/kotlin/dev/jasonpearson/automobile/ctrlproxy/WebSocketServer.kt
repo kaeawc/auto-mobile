@@ -652,6 +652,9 @@ class WebSocketServer(
     synchronized(connections) { requestConnections[requestId] = connection }
   }
 
+  internal fun hasRequestOwner(requestId: String): Boolean =
+    synchronized(connections) { requestConnections.containsKey(requestId) }
+
   /**
    * Sends a correlated response only to its originating client.
    *
@@ -807,15 +810,21 @@ class WebSocketServer(
 
   /**
    * True when [request]'s normal completion echoes its `requestId` back over the wire so the owner
-   * mapping recorded for it can later be cleared. Hierarchy requests are uncorrelated on success
-   * (no requestId reaches the action layer or the `hierarchy_update` frame, and the stale-skip path
-   * emits nothing), so recording them would leak until disconnect — see [handleClientMessage]
-   * and #3190.
+   * mapping recorded for it can later be cleared. Hierarchy requests and fire-and-forget settings /
+   * recording commands are uncorrelated on success, so recording them would leak until disconnect.
+   * See [handleClientMessage], #3190, and #6621.
    */
   private fun recordsRequestOwner(request: ProtocolRequest): Boolean =
     when (request) {
       is RequestHierarchy,
-      is RequestHierarchyIfStale -> false
+      is RequestHierarchyIfStale,
+      is SetHierarchyInterval,
+      is SetRecompositionTracking,
+      is SetAccessibilityFlags,
+      is SetNetworkMockRules,
+      is SetNetworkErrorSimulation,
+      is StartRecording,
+      is StopRecording -> false
       else -> true
     }
 
@@ -872,7 +881,7 @@ class WebSocketServer(
   }
 
   /** Handle an incoming client message by decoding it and dispatching via [messageHandler]. */
-  private suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
+  internal suspend fun handleClientMessage(message: String, connection: ConnectedClient) {
     val handler = messageHandler
     if (handler == null) {
       Log.w(TAG, "No message handler configured; ignoring inbound message: $message")
@@ -905,13 +914,10 @@ class WebSocketServer(
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
     // Only record owner mappings for request types whose normal completion carries the same
     // requestId back over the wire (raw or typed responses route to and clear the entry).
-    // Hierarchy requests are the exception: the action layer never
-    // receives their requestId, the success `hierarchy_update` frame has no requestId, and the
-    // stale-skip path emits no frame at all — so a recorded owner would never be cleared until the
-    // WebSocket disconnects, recreating the long-lived-session leak and leaving a stale id
-    // available
-    // for later same-id error misrouting (#3190, follow-up to #3159). Their correlated error path
-    // (a handler throw) still targets the originating connection directly via `sendErrorResponse`,
+    // Hierarchy requests and the fire-and-forget settings / recording commands do not echo it, so
+    // their entries would remain until disconnect and leave a stale id available for later
+    // same-id error misrouting (#3190, #6621; follow-up to #3159). Their correlated error path (a
+    // handler throw) still targets the originating connection directly via `sendErrorResponse`,
     // not this map, so skipping the record preserves PR #3159's targeted delivery.
     if (recordsRequestOwner(request)) {
       request.requestId?.let { requestId ->
@@ -933,7 +939,13 @@ class WebSocketServer(
       }
     } catch (e: CancellationException) {
       // Never convert cooperative cancellation into an error frame — it means the read loop /
-      // server scope is shutting down. Let it propagate so the coroutine unwinds cleanly.
+      // server scope is shutting down. Let it propagate so the coroutine unwinds cleanly, after
+      // releasing ownership for a handler that never completed (for example, an expired request).
+      request.requestId?.let { requestId ->
+        synchronized(connections) {
+          if (requestConnections[requestId] == connection) requestConnections.remove(requestId)
+        }
+      }
       throw e
     } catch (e: Exception) {
       // Surface a structured error correlated by the decoded requestId instead of only logging, so

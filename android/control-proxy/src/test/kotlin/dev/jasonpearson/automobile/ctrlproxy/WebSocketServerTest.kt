@@ -5,9 +5,14 @@ import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.HierarchyUpdateEvent
 import dev.jasonpearson.automobile.protocol.SetKeyboardProfileResult
 import dev.jasonpearson.automobile.protocol.SwipeResult
+import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
+import dev.jasonpearson.automobile.protocol.WebSocketRequest
+import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.websocket.CloseReason
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -412,6 +417,114 @@ class WebSocketServerTest {
 
     override suspend fun close(reason: CloseReason) = Unit
   }
+
+  private fun serverWithHandler(
+    handle: suspend (WebSocketRequest) -> WebSocketResponse?
+  ): WebSocketServer =
+    WebSocketServer(
+      port = 0,
+      scope = testScope,
+      messageHandler =
+        object : WebSocketMessageHandler {
+          override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? =
+            handle(request)
+        },
+    )
+
+  @Test
+  fun `successful non-null response clears request owner`() =
+    runTest(testScope.testScheduler) {
+      server =
+        serverWithHandler { request ->
+          SwipeResult(
+            timestamp = 0L,
+            requestId = request.requestId,
+            success = true,
+            totalTimeMs = 1L,
+          )
+        }
+      val owner = server.registerClient(1, RecordingTransport())
+
+      server.handleClientMessage(
+        """{"type":"request_screenshot","requestId":"success"}""",
+        owner,
+      )
+      runCurrent()
+
+      assertFalse(server.hasRequestOwner("success"))
+    }
+
+  @Test
+  fun `handler error clears request owner`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { throw IllegalStateException("expected failure") }
+      val owner = server.registerClient(1, RecordingTransport())
+
+      server.handleClientMessage(
+        """{"type":"request_screenshot","requestId":"error"}""",
+        owner,
+      )
+
+      assertFalse(server.hasRequestOwner("error"))
+    }
+
+  @Test
+  fun `fire and forget commands do not retain request owners`() =
+    runTest(testScope.testScheduler) {
+      server = serverWithHandler { null }
+      val owner = server.registerClient(1, RecordingTransport())
+      val commands =
+        listOf(
+          """{"type":"set_hierarchy_interval","requestId":"interval"}""",
+          """{"type":"set_recomposition_tracking","requestId":"recomposition","enabled":true}""",
+          """{"type":"set_accessibility_flags","requestId":"accessibility"}""",
+          """{"type":"set_network_mock_rules","requestId":"mock-rules","rules":[]}""",
+          """{"type":"set_network_error_simulation","requestId":"network-error","enabled":true}""",
+          """{"type":"start_recording","requestId":"record-start"}""",
+          """{"type":"stop_recording","requestId":"record-stop"}""",
+        )
+
+      commands.forEach { command ->
+        server.handleClientMessage(command, owner)
+        val requestId = WebSocketServer.extractRequestId(command)!!
+        assertFalse("$requestId should not have an owner", server.hasRequestOwner(requestId))
+      }
+    }
+
+  @Test
+  fun `cancelled never completing handler releases request owner`() =
+    runTest(testScope.testScheduler) {
+      server =
+        serverWithHandler {
+          kotlinx.coroutines.awaitCancellation()
+        }
+      val owner = server.registerClient(1, RecordingTransport())
+      val handling =
+        launch {
+          server.handleClientMessage(
+            """{"type":"request_screenshot","requestId":"never-completes"}""",
+            owner,
+          )
+        }
+      runCurrent()
+      assertTrue(server.hasRequestOwner("never-completes"))
+
+      handling.cancelAndJoin()
+
+      assertFalse(server.hasRequestOwner("never-completes"))
+    }
+
+  @Test
+  fun `disconnect clears request owners for session`() =
+    runTest(testScope.testScheduler) {
+      val owner = server.registerClient(1, RecordingTransport())
+      server.registerRequestOwner("disconnect", owner)
+      assertTrue(server.hasRequestOwner("disconnect"))
+
+      server.unregisterClient(owner)
+
+      assertFalse(server.hasRequestOwner("disconnect"))
+    }
 
   @Test
   fun `parsed log event keeps the exact wire frame for every client`() =

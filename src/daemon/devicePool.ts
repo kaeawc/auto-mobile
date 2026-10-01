@@ -5281,6 +5281,11 @@ export class DevicePool {
     let entry: PooledDevice | undefined = pooled;
     let runtimeReplaced = false;
     let replacementDeferred = false;
+    // A newer funnel observation may have confirmed this entry while the refresh was in flight.
+    // Check before replacement, since eviction cannot be undone by later identity reconciliation.
+    if (this.runtimeIdentity.comparePooledIdentityEvidence(pooled, device) === "stale") {
+      return false;
+    }
     if (!this.runtimeIdentity.matchesRuntimeIdentity(pooled, device)) {
       runtimeReplaced = await this.replacePooledDeviceForRuntimeIdentity(pooled, device);
       entry = this.devices.get(device.deviceId);

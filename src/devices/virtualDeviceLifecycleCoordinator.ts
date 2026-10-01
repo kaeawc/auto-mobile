@@ -1,4 +1,5 @@
 import { ActionableError, type Platform } from "../models";
+import { toActionableError } from "../models/ActionableError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 export type VirtualDeviceLifecycleOperation =
@@ -32,7 +33,10 @@ export interface VirtualDeviceLifecycleReservationOptions {
 export interface VirtualDeviceLifecycleLease {
   readonly signal: AbortSignal;
   readonly identity: VirtualDeviceLifecycleIdentity;
-  bindCanonicalIdentity(identity: StableVirtualDeviceIdentity): Promise<void>;
+  bindCanonicalIdentity(
+    identity: StableVirtualDeviceIdentity,
+    revalidate?: () => Promise<StableVirtualDeviceIdentity>,
+  ): Promise<void>;
   transitionToTeardown(): void;
   release(): void;
 }
@@ -119,24 +123,57 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
       get identity() {
         return currentIdentity;
       },
-      bindCanonicalIdentity: async (canonical) => {
+      bindCanonicalIdentity: async (canonical, revalidate) => {
         if (released) {
           throw new ActionableError("Cannot bind a released device lifecycle reservation");
         }
         const nextIdentity = stableIdentity(canonical);
-        const previousKeys = [...ownerByKey.keys()];
-        await this.acquire(
+        const nextKey = lifecycleIdentityKey(nextIdentity);
+        if (ownerByKey.has(nextKey)) {
+          currentIdentity = nextIdentity;
+          return;
+        }
+        const mustRevalidate = this.states.get(nextKey)?.owner !== undefined;
+        // Never park on another identity while owning this one. A waiter must
+        // check its earlier resolution again after the canonical owner exits.
+        for (const owner of ownerByKey.values()) {
+          owner.release();
+        }
+        ownerByKey.clear();
+        const owner = await this.waitForOwner(
+          nextKey,
           nextIdentity,
           { ...options, operation: currentOperation, signal: reservationSignal },
           controller,
-          ownerByKey,
         );
+        if (released) {
+          owner.release();
+          throw new ActionableError("Cannot bind a released device lifecycle reservation");
+        }
+        ownerByKey.set(nextKey, owner);
         currentIdentity = nextIdentity;
-        const nextKey = lifecycleIdentityKey(nextIdentity);
-        for (const key of previousKeys) {
-          if (key !== nextKey) {
-            ownerByKey.get(key)?.release();
-            ownerByKey.delete(key);
+        if (mustRevalidate && currentOperation !== "teardown") {
+          if (!revalidate) {
+            throw new ActionableError(
+              `Device identity '${canonical.stableId}' must be revalidated after waiting for its lifecycle reservation`,
+            );
+          }
+          let resolved: StableVirtualDeviceIdentity;
+          try {
+            resolved = await revalidate();
+          } catch (error) {
+            throw toActionableError(
+              error,
+              `Failed to revalidate device '${canonical.stableId}' after lifecycle wait`,
+            );
+          }
+          if (
+            resolved.platform !== canonical.platform ||
+            resolved.stableId !== canonical.stableId
+          ) {
+            throw new ActionableError(
+              `Device identity changed while waiting for '${canonical.stableId}'; retry device selection`,
+            );
           }
         }
       },

@@ -1269,10 +1269,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
                   `Created iOS simulator '${device.name}' has no lifecycle identity.`,
                 );
               }
-              await lifecycleLease.bindCanonicalIdentity({
-                platform: "ios",
-                stableId: device.deviceId,
-              });
+              const stableId = device.deviceId;
+              await lifecycleLease.bindCanonicalIdentity({ platform: "ios", stableId }, async () =>
+                this.revalidateCreatedIosDevice(stableId),
+              );
             },
           });
           const provisioned = await provisioner.provision({ platform: "ios" }, options?.signal);
@@ -1392,6 +1392,17 @@ export class DeviceSessionManager implements DeviceSessionManager {
         return bootedDevice;
       },
     );
+  }
+
+  private async revalidateCreatedIosDevice(deviceId: string): Promise<StableVirtualDeviceIdentity> {
+    const images = await this.simctl!.listSimulatorImages();
+    const current = images.find((image) => image.deviceId === deviceId);
+    if (!current) {
+      throw new ActionableError(
+        `Created iOS simulator '${deviceId}' disappeared during lifecycle wait`,
+      );
+    }
+    return { platform: "ios", stableId: deviceId };
   }
 
   private async withLifecycleStart<T>(

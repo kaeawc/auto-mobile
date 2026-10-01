@@ -3,6 +3,16 @@ import {
   DisplayTransitionTracker,
   displayTransitions,
 } from "../../../src/features/observe/DisplayTransition";
+import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
+import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
+import { normalizeIosHierarchy } from "../../../src/features/observe/HierarchyNormalization";
+import { issue8379Hierarchy, issue8379SyntheticOutlier } from "../../fixtures/issue8379Hierarchy";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
+import {
+  parseSimulatorDisplays,
+  simulatorDeviceDisplays,
+} from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
+import { FakeWindow } from "../../fakes/FakeWindow";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
@@ -190,6 +200,105 @@ describe("display transitions", () => {
         displayTransitions.reset(rotatingDevice.deviceId);
         resetObserveCacheStore();
       }
+    }
+  });
+
+  test("observe then tapOn-style preparation of the captured Duo hierarchy preserves screenSize and panel identity", async () => {
+    const duo: BootedDevice = {
+      deviceId: "captured-duo-8379",
+      name: "iPhone Duo",
+      platform: "ios",
+      displays: simulatorDeviceDisplays(
+        parseSimulatorDisplays(loadDuoEnumerate()),
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+      ),
+    };
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1000);
+    const adbFactory = new FakeAdbClientFactory(new FakeAdbExecutor());
+    const hierarchy = new FakeViewHierarchy();
+    const captured = {
+      ...normalizeIosHierarchy(issue8379Hierarchy([issue8379SyntheticOutlier])),
+      updatedAt: timer.now(),
+      packageName: "test.duo",
+      fresh: true,
+    };
+    hierarchy.configureHierarchy(captured);
+    const cacheStore = new FakeObserveCacheStore(timer);
+    setObserveCacheStore(cacheStore);
+    const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      getLatestHierarchy: async () => ({ hierarchy: null }),
+    } as unknown as IOSCtrlProxyClient);
+    const screen = new RealObserveScreen(
+      duo,
+      adbFactory,
+      {
+        viewHierarchy: hierarchy,
+        cacheStore,
+        hierarchyCapture: createDeviceHierarchyCapture(duo, {
+          viewHierarchy: hierarchy,
+          timer,
+          syncClientFactory: () => ({
+            requestHierarchySync: async () => ({ hierarchy: captured }),
+            convertToViewHierarchyResult: () => captured,
+          }),
+        }),
+      },
+      timer,
+    );
+    // Action calls still execute the real observe pipeline, with host work disabled.
+    const execute = screen.execute.bind(screen);
+    const executeSpy = spyOn(screen, "execute").mockImplementation((request) =>
+      execute({ ...options, ...request }),
+    );
+    const cachedSpy = spyOn(screen, "getMostRecentCachedObserveResult").mockResolvedValue(null);
+    try {
+      const before = displayTransitions.identityRevision(duo.deviceId);
+      const observed = await screen.execute(options);
+      const afterObserve = displayTransitions.identityRevision(duo.deviceId);
+      const prepared = await screen.execute({ ...options, freshness: "cached-ok" });
+      // values reported in issue #8379's 2026-10-01 device verification
+      const expectedSize = { width: 951, height: 669, units: "points" };
+      expect(observed.screenSize).toEqual(expectedSize);
+      expect(prepared.screenSize).toEqual(expectedSize);
+      for (const result of [observed, prepared]) {
+        expect(result.display).toMatchObject({
+          key: "primary-1",
+          role: "inner",
+          posture: "opened",
+        });
+      }
+      expect(prepared.display).toEqual(observed.display);
+      expect(afterObserve).toBe(before);
+      expect(displayTransitions.identityRevision(duo.deviceId)).toBe(before);
+      executeSpy.mockClear();
+      const action = new BaseVisualChange(duo, adbFactory, timer, () => undefined);
+      action.observeScreen = screen;
+      action.window = new FakeWindow();
+      const result = await action.observedInteraction(
+        async (previous) => {
+          expect(previous.screenSize).toEqual(expectedSize);
+          return { success: true };
+        },
+        {
+          changeExpected: false,
+          skipUiStability: true,
+          deferPredictionOutcome: true,
+          deferPostActionScreenshot: true,
+          predictionContext: { toolName: "tapOn", toolArgs: {} },
+        },
+      );
+      expect(result.success).toBe(true);
+      expect(executeSpy.mock.calls.some(([request]) => request?.freshness === "cached-ok")).toBe(
+        true,
+      );
+      expect(displayTransitions.identityRevision(duo.deviceId)).toBe(before);
+    } finally {
+      cachedSpy.mockRestore();
+      executeSpy.mockRestore();
+      client.mockRestore();
+      displayTransitions.reset(duo.deviceId);
+      resetObserveCacheStore();
     }
   });
 

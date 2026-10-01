@@ -14,6 +14,7 @@ import { observedIosDisplay } from "../ObservationDisplay";
 import { readImageHeaderDimensions } from "../../../utils/screenshot/imageHeaderDimensions";
 import { logger } from "../../../utils/logger";
 import type { DisplayPanel } from "../../../models/DisplayPanel";
+import { errorMessage } from "../../../utils/describeUnknownError";
 
 function matchesPanelPixels(
   dimensions: { width: number; height: number } | null,
@@ -54,7 +55,7 @@ async function captureSelectedPanel(
     logger.warn(unexpectedDimensionsMessage(panel, dimensions, hierarchy));
   } catch (error) {
     logger.warn(
-      `[SCREENSHOT] iOS panel ${panel.key} capture failed; using runner capture: ${error}`,
+      `[SCREENSHOT] iOS panel ${panel.key} capture failed; using runner capture: ${errorMessage(error)} (caller signal aborted: ${signal?.aborted === true})`,
     );
   }
   return runnerCapture();

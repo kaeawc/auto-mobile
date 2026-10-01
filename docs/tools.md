@@ -60,6 +60,18 @@ origin is the top-left of the complete current screen, including system UI:
 - A point already in the platform-native space is not density-, inset-,
   Retina-scale-, canonical-pixel-, or rotation-transformed.
 
+`tapAt({ x, y })` performs one tap in those native units. Set
+`coordinateSpace: "normalized"` for values from 0 to 1, or `"percent"` for
+values from 0 to 100. Both axes resolve against the same observed `screenSize`;
+the right and bottom endpoints resolve to the last in-bounds native point.
+Values outside those ranges and non-finite values are rejected. The result
+includes the resolved native `x` and `y`.
+
+Set `action: "longPress"` or `"doubleTap"` for another coordinate gesture.
+Long press defaults to 1000 ms and accepts `durationMs` from 500 to 10000;
+`durationMs` is valid only for long press. Double tap uses two native taps
+200 ms apart. The result includes `action`. All variants accept `display`.
+
 This is separate from the daemon observation-stream's
 [canonical-pixel mapping](design-docs/mcp/daemon/screen-control-mapping.md).
 That stream contract is intentional and does not transform MCP `observe` or

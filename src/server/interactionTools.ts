@@ -506,25 +506,85 @@ const coordinatePointInputSchema = () =>
           ),
         x: z
           .number()
-          .describe("Absolute screen x coordinate in the native observe coordinate space"),
+          .describe("Screen x coordinate in the selected coordinateSpace (native by default)"),
         y: z
           .number()
-          .describe("Absolute screen y coordinate in the native observe coordinate space"),
+          .describe("Screen y coordinate in the selected coordinateSpace (native by default)"),
+        coordinateSpace: z
+          .enum(["absolute", "normalized", "percent"])
+          .optional()
+          .describe(
+            "Coordinate units: native absolute (default), normalized 0–1, or percent 0–100",
+          ),
         ...responseShapeControlFields,
       })
       .strict(),
   );
 
-export const tapAtSchema = withJsonSchemaOverride(coordinatePointInputSchema(), (js) => {
-  js.description =
-    "Tap one absolute point in the platform-native coordinate space returned by observe.";
-});
+type CoordinatePointInput = z.infer<ReturnType<typeof coordinatePointInputSchema>>;
+
+function validateCoordinateRange(value: CoordinatePointInput, context: z.RefinementCtx): void {
+  const max =
+    value.coordinateSpace === "normalized"
+      ? 1
+      : value.coordinateSpace === "percent"
+        ? 100
+        : undefined;
+  if (max === undefined) {
+    return;
+  }
+  for (const axis of ["x", "y"] as const) {
+    if (!Number.isFinite(value[axis]) || value[axis] < 0 || value[axis] > max) {
+      context.addIssue({
+        code: "custom",
+        message: `${axis} must be between 0 and ${max}`,
+        path: [axis],
+      });
+    }
+  }
+}
+
+export const tapAtSchema = withJsonSchemaOverride(
+  coordinatePointInputSchema()
+    .extend({
+      action: z
+        .enum(["tap", "longPress", "doubleTap"])
+        .optional()
+        .describe("Coordinate gesture (default: tap)"),
+      durationMs: z
+        .number()
+        .int()
+        .min(500)
+        .max(10000)
+        .optional()
+        .describe(
+          "Long-press duration in milliseconds (500–10000; default 1000); only with longPress",
+        ),
+    })
+    .superRefine((value, context) => {
+      if (value.durationMs !== undefined && value.action !== "longPress") {
+        context.addIssue({
+          code: "custom",
+          message: "durationMs is only valid with action longPress",
+          path: ["durationMs"],
+        });
+      }
+      validateCoordinateRange(value, context);
+    }),
+  (js) => {
+    js.description =
+      "Tap, long press, or double tap a screen point. Bare x/y use the platform-native coordinate space returned by observe.";
+  },
+);
 
 /** The preview takes the same coordinate target as tapAt without dispatching input. */
-export const hitTestSchema = withJsonSchemaOverride(coordinatePointInputSchema(), (js) => {
-  js.description =
-    "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.";
-});
+export const hitTestSchema = withJsonSchemaOverride(
+  coordinatePointInputSchema().superRefine(validateCoordinateRange),
+  (js) => {
+    js.description =
+      "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.";
+  },
+);
 
 export const tapAnySchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
@@ -1852,11 +1912,19 @@ export async function tapAtHandler(
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const result = await tapAtElementFactory(device).execute(
-    { x: args.x, y: args.y, display: args.display, snapshotId: args.snapshotId },
+    {
+      x: args.x,
+      y: args.y,
+      display: args.display,
+      snapshotId: args.snapshotId,
+      coordinateSpace: args.coordinateSpace,
+      action: args.action,
+      durationMs: args.durationMs,
+    },
     progress,
   );
   const message = result.success
-    ? `Tapped at (${result.x}, ${result.y})`
+    ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
     : `Failed to tap at (${result.x}, ${result.y}): ${result.error || "unknown error"}`;
   const payload = {
     message,
@@ -2976,7 +3044,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "tapAt",
-    "Tap one absolute platform-native screen coordinate visible through observe.",
+    "Tap, long press, or double tap at screen coordinates in native, normalized, or percent units.",
     tapAtSchema,
     tapAtHandler,
     { defaultEnabled: true, supportsProgress: true },

@@ -189,10 +189,26 @@ describe("TapAnyElement", () => {
       const adb = new FakeAdbClient();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
+      const accessibilityDetector = new FakeAccessibilityDetector();
+      accessibilityDetector.setTalkBackEnabled(false);
       const tapAny = new TapAnyElement(
         { name: "test-device", platform: "android", deviceId: "emulator-5554" },
         adb,
-        { timer, elementSelector: new FakeElementSelector(element) },
+        {
+          timer,
+          elementSelector: new FakeElementSelector(element),
+          accessibilityDetector,
+          accessibilityService: {
+            requestTapCoordinates: async () => ({
+              success: false,
+              totalTimeMs: 1,
+              error: "Not connected",
+            }),
+            requestAction: async (action) => ({ success: true, action, totalTimeMs: 1 }),
+            requestNodeAction: async (action) => ({ success: true, action, totalTimeMs: 1 }),
+            supportsNodeActionSelectors: async () => true,
+          },
+        },
       );
       const viewHierarchy = { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100 };
       tapAny.observedInteraction = (action) =>

@@ -101,6 +101,9 @@ export interface TapAtArgs {
   snapshotId?: string;
   x: number;
   y: number;
+  coordinateSpace?: "absolute" | "normalized" | "percent";
+  action?: "tap" | "longPress" | "doubleTap";
+  durationMs?: number;
   platform?: Platform;
   raw?: boolean;
   project?: "full" | "skeleton";

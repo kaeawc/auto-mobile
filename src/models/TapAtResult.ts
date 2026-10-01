@@ -5,4 +5,6 @@ export interface TapAtResult extends BaseActionResult {
   /** Coordinates actually dispatched (Android physical pixels; iOS XCTest points). */
   x: number;
   y: number;
+  /** Gesture requested, including on a failed dispatch. */
+  action?: "tap" | "longPress" | "doubleTap";
 }

@@ -153,7 +153,7 @@ describe("explicit action display", () => {
       expect(manager.getLastRenderedObservation(sessionId)).toBeUndefined();
       const after = await action.execute({ x: 40, y: 50, display: "external" });
       expect(after.success).toBe(true);
-      expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 40 50");
+      expect(executor.getExecutedCommands()).toContain("shell input touchscreen -d 2 tap 40 50");
     } finally {
       serverConfig.setActionsDiffObserveEnabled(originalDiff);
       serverConfig.setActionsNoObserveEnabled(originalNoObserve);
@@ -243,7 +243,7 @@ describe("explicit action display", () => {
     action.observeScreen = observe;
     const result = await action.execute({ x: 40, y: 50, display: "external" });
     expect(result.success).toBe(true);
-    expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 40 50");
+    expect(executor.getExecutedCommands()).toContain("shell input touchscreen -d 2 tap 40 50");
     expect(observe.getExecuteOptions()[0]?.display).toBe("external");
   });
 
@@ -451,7 +451,50 @@ describe("explicit action display", () => {
     action.observeScreen = observe;
     const result = await action.execute({ text: "Settings", action: "tap", display: "external" });
     expect(result.success).toBe(true);
-    expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 50 60");
+    expect(executor.getExecutedCommands()).toContain("shell input touchscreen -d 2 tap 50 60");
+  });
+
+  test("tapOn reports input usage output as a failed display tap", async () => {
+    const executor = adb();
+    const observation = screen("external");
+    executor.setCommandResponse("shell input touchscreen -d 2 tap 50 60", {
+      stdout: "Unknown command: touchscreen",
+      stderr: "",
+    });
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation);
+    const action = new TapOnElement(android, executor, {
+      timer: new FakeTimer(),
+      lastRenderedObservation: () => observation,
+    });
+    action.observeScreen = observe;
+
+    const result = await action.execute({ text: "Settings", action: "tap", display: "external" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("input touchscreen -d 2 tap 50 60");
+    expect(result.error).toContain("Unknown command: touchscreen");
+  });
+
+  test("swipeOn reports input usage output as a failed display swipe", async () => {
+    const executor = adb();
+    const observation = screen("external");
+    executor.setCommandResponse("shell input touchscreen -d 2 swipe", {
+      stdout: "Unknown command: touchscreen",
+      stderr: "",
+    });
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(observation);
+    const action = new SwipeOn(android, executor as unknown as AdbClient, {
+      observeScreen: observe,
+      lastRenderedObservation: () => observation,
+    });
+
+    const result = await action.execute({ direction: "up", display: "external" });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("input touchscreen -d 2 swipe");
+    expect(result.error).toContain("Unknown command: touchscreen");
   });
 
   test("tapOn display taps the matched label within a promoted panel and reports the match", async () => {
@@ -476,7 +519,7 @@ describe("explicit action display", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 50 40");
+    expect(executor.getExecutedCommands()).toContain("shell input touchscreen -d 2 tap 50 40");
     expect(result.selectedElement?.totalMatches).toBe(1);
   });
 
@@ -502,7 +545,7 @@ describe("explicit action display", () => {
     });
 
     expect(result.success).toBe(true);
-    expect(executor.getExecutedCommands()).toContain("shell input -d 2 touchscreen tap 160 250");
+    expect(executor.getExecutedCommands()).toContain("shell input touchscreen -d 2 tap 160 250");
   });
 
   test("dragAndDrop display uses the matched source and target rather than their promoted panel", async () => {
@@ -551,7 +594,7 @@ describe("explicit action display", () => {
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getAllCommands()).toContain(
-      "shell input -d 2 touchscreen draganddrop 50 40 150 140 600",
+      "shell input touchscreen -d 2 draganddrop 50 40 150 140 600",
     );
   });
 
@@ -581,7 +624,7 @@ describe("explicit action display", () => {
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getAllCommands()).toContain(
-      "shell input -d 2 touchscreen swipe 50 78 50 42 300",
+      "shell input touchscreen -d 2 swipe 50 78 50 42 300",
     );
 
     const defaultCoordinates: number[] = [];
@@ -607,8 +650,8 @@ describe("explicit action display", () => {
   });
 
   for (const [actionName, command] of [
-    ["longPress", "shell input -d 2 touchscreen swipe 50 40 50 40 800"],
-    ["doubleTap", "shell input -d 2 touchscreen tap 50 40"],
+    ["longPress", "shell input touchscreen -d 2 swipe 50 40 50 40 800"],
+    ["doubleTap", "shell input touchscreen -d 2 tap 50 40"],
   ] as const) {
     test(`tapOn display ${actionName} uses the matched visible centre`, async () => {
       const executor = adb();
@@ -671,7 +714,7 @@ describe("explicit action display", () => {
         ).toEqual([]);
       } else {
         expect(executor.getExecutedCommands()).toContain(
-          "shell input -d 2 touchscreen tap 100 100",
+          "shell input touchscreen -d 2 tap 100 100",
         );
       }
 

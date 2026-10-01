@@ -21,6 +21,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { displayTransitions } from "../observe/DisplayTransition";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
+import { executeTouchscreenInput } from "./touchscreenInput";
 import {
   BaseVisualChange,
   STALE_DISPLAY_COORDINATES_ERROR,
@@ -203,13 +204,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
     assertCurrent();
     if (this.device.platform === "android") {
-      await this.adb.executeCommand(
-        `shell input -d ${displayId} touchscreen tap ${resolved.x} ${resolved.y}`,
-        undefined,
-        undefined,
-        undefined,
-        signal,
-      );
+      await executeTouchscreenInput(this.adb, `tap ${resolved.x} ${resolved.y}`, displayId, signal);
     } else {
       await this.iosCoordinateTap(
         this.iosClient,

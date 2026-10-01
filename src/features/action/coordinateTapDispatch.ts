@@ -2,6 +2,7 @@ import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { executeTouchscreenInput } from "./touchscreenInput";
 
 /** The coordinate-tap subset shared by Android and iOS CtrlProxy clients. */
 export interface CoordinateTapClient<Dispatch = never> {
@@ -81,13 +82,7 @@ export async function dispatchAndroidCoordinateTap(
   logger.warn(
     `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`,
   );
-  await adb.executeCommand(
-    `shell input touchscreen tap ${x} ${y}`,
-    undefined,
-    undefined,
-    undefined,
-    signal,
-  );
+  await executeTouchscreenInput(adb, `tap ${x} ${y}`, undefined, signal);
 }
 
 /** Dispatch one iOS coordinate tap and preserve CtrlProxy's actionable failure. */

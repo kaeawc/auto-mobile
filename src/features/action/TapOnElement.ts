@@ -99,6 +99,7 @@ import type {
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
+import { executeTouchscreenInput } from "./touchscreenInput";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   checkAndroidTapHierarchyChange,
@@ -2800,20 +2801,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throw new ActionableError("Matched element has no visible tap area on selected display");
     }
     const { x, y } = point;
-    const tap = `shell input -d ${target.displayId} touchscreen tap ${x} ${y}`;
+    const tap = `tap ${x} ${y}`;
     target.assertCurrent();
     if (options.action === "longPress") {
-      await this.adb.executeCommand(
-        `shell input -d ${target.displayId} touchscreen swipe ${x} ${y} ${x} ${y} ${options.duration ?? 800}`,
-        undefined,
-        undefined,
-        undefined,
+      await executeTouchscreenInput(
+        this.adb,
+        `swipe ${x} ${y} ${x} ${y} ${options.duration ?? 800}`,
+        target.displayId,
         signal,
       );
     } else {
-      await this.adb.executeCommand(tap, undefined, undefined, undefined, signal);
+      await executeTouchscreenInput(this.adb, tap, target.displayId, signal);
       if (options.action === "doubleTap") {
-        await this.adb.executeCommand(tap, undefined, undefined, undefined, signal);
+        await executeTouchscreenInput(this.adb, tap, target.displayId, signal);
       }
     }
     const after = await this.observeScreen.execute({
@@ -3524,13 +3524,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return;
     }
     logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
-    await this.adb.executeCommand(
-      `shell input touchscreen tap ${x} ${y}`,
-      undefined,
-      undefined,
-      undefined,
-      signal,
-    );
+    await executeTouchscreenInput(this.adb, `tap ${x} ${y}`, undefined, signal);
   }
 
   /**

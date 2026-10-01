@@ -83,7 +83,7 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     expect(discoveryCalls).toHaveLength(1);
   });
 
-  test("forwards cancellation to Android catalog enrichment", async () => {
+  test("cancels the caller through the shared catalog flight signal", async () => {
     const controller = new AbortController();
     let capturedSignal: AbortSignal | undefined;
     setListInstalledAppsFactoryForTests(() => ({
@@ -101,7 +101,8 @@ describe("queryInstalledApps honest-failure contract (#6155)", () => {
     await expect(
       queryInstalledApps({ deviceId: device.deviceId }, controller.signal),
     ).rejects.toThrow(/abort/i);
-    expect(capturedSignal).toBe(controller.signal);
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(true);
   });
 
   test("forwards cancellation to initial device discovery", async () => {

@@ -18,6 +18,8 @@
 import { type DbWriteBarrier, getDbWriteBarrier } from "./dbWriteBarrier";
 
 export interface InstalledAppsCacheWriteCoordinator {
+  /** Reads the current rebuild generation without creating device state. */
+  currentGeneration(deviceId: string): number;
   /**
    * Captures the incarnation a request starts under. Call it BEFORE the
    * request's first await (device discovery included) and pass the token to
@@ -77,6 +79,10 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
 
   captureIncarnation(deviceId: string): number {
     return this.liveState(deviceId).incarnation;
+  }
+
+  currentGeneration(deviceId: string): number {
+    return this.states.get(deviceId)?.generation ?? 0;
   }
 
   beginRebuild(deviceId: string): number;

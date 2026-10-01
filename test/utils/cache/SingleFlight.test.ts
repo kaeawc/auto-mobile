@@ -84,4 +84,80 @@ describe("SingleFlight", () => {
     ).rejects.toBe(cancellation);
     expect(calls).toBe(0);
   });
+
+  test("cancels opt-in shared work only after the last waiter aborts", async () => {
+    const pending = Promise.withResolvers<string>();
+    const firstCaller = new AbortController();
+    const secondCaller = new AbortController();
+    let flightSignal: AbortSignal | undefined;
+    let calls = 0;
+    const singleFlight = new SingleFlight<string, string>();
+    const task = (signal?: AbortSignal) => {
+      calls += 1;
+      flightSignal = signal;
+      return pending.promise;
+    };
+
+    const first = singleFlight.run("inventory", task, firstCaller.signal, {
+      cancelWhenAllWaitersAbort: true,
+    });
+    const second = singleFlight.run("inventory", task, secondCaller.signal, {
+      cancelWhenAllWaitersAbort: true,
+    });
+    await Promise.resolve();
+    firstCaller.abort();
+    await expect(first).rejects.toThrow(/abort/i);
+    expect(flightSignal?.aborted).toBe(false);
+
+    secondCaller.abort();
+    await expect(second).rejects.toThrow(/abort/i);
+    expect(flightSignal?.aborted).toBe(true);
+
+    const retry = Promise.withResolvers<string>();
+    const retried = singleFlight.run(
+      "inventory",
+      async () => {
+        calls += 1;
+        return await retry.promise;
+      },
+      undefined,
+      { cancelWhenAllWaitersAbort: true },
+    );
+    await Promise.resolve();
+    expect(calls).toBe(2);
+    retry.resolve("fresh flight");
+    await expect(retried).resolves.toBe("fresh flight");
+    pending.resolve("abandoned flight");
+  });
+
+  test("a new waiter keeps opt-in work alive after another waiter aborts", async () => {
+    const pending = Promise.withResolvers<string>();
+    const firstCaller = new AbortController();
+    const secondCaller = new AbortController();
+    const lateCaller = new AbortController();
+    let flightSignal: AbortSignal | undefined;
+    const singleFlight = new SingleFlight<string, string>();
+    const task = (signal?: AbortSignal) => {
+      flightSignal = signal;
+      return pending.promise;
+    };
+
+    const first = singleFlight.run("inventory", task, firstCaller.signal, {
+      cancelWhenAllWaitersAbort: true,
+    });
+    const second = singleFlight.run("inventory", task, secondCaller.signal, {
+      cancelWhenAllWaitersAbort: true,
+    });
+    firstCaller.abort();
+    await expect(first).rejects.toThrow(/abort/i);
+    const late = singleFlight.run("inventory", task, lateCaller.signal, {
+      cancelWhenAllWaitersAbort: true,
+    });
+    await Promise.resolve();
+    secondCaller.abort();
+    await expect(second).rejects.toThrow(/abort/i);
+    expect(flightSignal?.aborted).toBe(false);
+    pending.resolve("still running");
+    await expect(late).resolves.toBe("still running");
+  });
 });

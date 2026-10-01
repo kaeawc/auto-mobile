@@ -20,8 +20,18 @@ describe("Fast Validation independence from XCTestRunner", () => {
   test("retains the dedicated XCTestRunner simulator job", () => {
     const job = loadWorkflow(WORKFLOW).jobs?.["ios-xctest-runner-simulator-tests"];
     expect(job).toBeDefined();
-    expect(job?.if).toContain("ios_integration_should_run");
+    expect(job?.needs).toEqual(["detect-changes", "fast-validation"]);
+    expect(job?.if).toBe("${{ false }}");
     expect(loadJobSteps(WORKFLOW, "ios-xctest-runner-simulator-tests").length).toBeGreaterThan(0);
+  });
+
+  test("keeps the disabled XCTestRunner job out of every job's needs", () => {
+    const jobs = loadWorkflow(WORKFLOW).jobs ?? {};
+    for (const [jobId, job] of Object.entries(jobs)) {
+      if (jobId === "ios-xctest-runner-simulator-tests") continue;
+      const needs = Array.isArray(job?.needs) ? job.needs : [job?.needs];
+      expect(needs).not.toContain("ios-xctest-runner-simulator-tests");
+    }
   });
 
   test("runs XCTestRunner when its recording session cleanup helpers change", () => {

@@ -6,13 +6,15 @@ description: "Use this workflow skill to triage an AutoMobile iOS or Swift CI fa
 # iOS/Swift CI Triage
 
 Use this for `SwiftLint`, `Swift Code Coverage`, `iOS Build`, Swift package,
-WHEP, or `XCTestRunner Simulator Tests` failures.
+WHEP, or `XCTestRunner Simulator Tests` failures. The XCTestRunner simulator
+lane is disabled by #8584, so a missing check is expected until it is re-enabled.
 
 1. Resolve the exact PR head and current main base. Do not trust a prior green
    head after a rebase or merge queue update.
-2. Identify whether the check is required. `XCTestRunner Simulator Tests` and
-   the `iOS` roll-up are advisory; the required iOS checks are `SwiftLint`,
-   `Swift Code Coverage`, and `iOS Build`.
+2. Identify whether the check is required. `XCTestRunner Simulator Tests` is
+   currently disabled, so a missing check is expected; when enabled it and the
+   `iOS` roll-up are advisory. The required iOS checks are SwiftLint, Swift
+   Code Coverage, and iOS Build.
 3. Read the failed job by run and job ID with
    `gh run view <run-id> --job <job-id> --log-failed`. If it is incomplete,
    retrieve the job log or failure artifact before assigning a cause.

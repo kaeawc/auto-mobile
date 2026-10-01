@@ -201,6 +201,8 @@ function pixelsMatchClaimedGeometry(
  * Per-push options for {@link DeviceDataStreamSocketServer.pushScreenshotUpdate}.
  */
 interface PushScreenshotOptions {
+  /** Caller already holds the decoded bytes of `screenshotBase64`; reuse them to measure geometry. */
+  decodedImage?: Buffer;
   /**
    * The capture identity this frame belongs to, bound by the caller when it INITIATED the
    * screenshot request — not looked up here at delivery time.
@@ -607,7 +609,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // So measure the frame instead of trusting the claim. CtrlProxy never downscales (Android
     // compresses at fixed quality, iOS returns the native-scale PNG), so the header dimensions are
     // the frame's true geometry.
-    const measured = readImageHeaderDimensions(Buffer.from(screenshotBase64, "base64"));
+    const measured = readImageHeaderDimensions(
+      options.decodedImage ?? Buffer.from(screenshotBase64, "base64"),
+    );
     const claimMatchesPixels = pixelsMatchClaimedGeometry(measured, screenWidth, screenHeight);
 
     const message: DeviceDataStreamMessage = {

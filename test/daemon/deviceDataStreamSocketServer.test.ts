@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { Socket } from "node:net";
 import {
   DeviceDataStreamSocketServer,
@@ -954,6 +954,38 @@ describe("DeviceDataStreamSocketServer", () => {
   });
 
   describe("screenshot updates", () => {
+    it("reuses decoded image bytes without changing the pushed message", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      const screenshotBase64 = pngFrame(1080, 2340);
+      const decodedImage = Buffer.from(screenshotBase64, "base64");
+      const fromSpy = spyOn(Buffer, "from");
+      const payloadDecodes = () =>
+        fromSpy.mock.calls.filter(
+          ([value, encoding]) => value === screenshotBase64 && encoding === "base64",
+        ).length;
+
+      try {
+        server.pushScreenshotUpdate("device-1", screenshotBase64, 1080, 2340);
+        expect(payloadDecodes()).toBe(1);
+        const [defaultMessage] = socket.getWrittenMessages<Record<string, unknown>>();
+
+        socket.resetWrittenData();
+        fromSpy.mockClear();
+        server.pushScreenshotUpdate("device-1", screenshotBase64, 1080, 2340, {}, { decodedImage });
+        expect(payloadDecodes()).toBe(0);
+        const [decodedMessage] = socket.getWrittenMessages<Record<string, unknown>>();
+
+        expect(decodedMessage).toEqual(defaultMessage);
+        expect(decodedMessage).toMatchObject({
+          screenshotBase64,
+          screenWidth: 1080,
+          screenHeight: 2340,
+        });
+      } finally {
+        fromSpy.mockRestore();
+      }
+    });
+
     it("includes optional screenshot metadata when pushing updates", () => {
       const { socket } = server.simulateSubscription({ deviceId: "device-1" });
 

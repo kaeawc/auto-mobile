@@ -55,7 +55,7 @@
 // all), and the active-row lookup is a relational max-join, never a per-row OR
 // chain. See the per-helper notes below.
 
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import type { Database } from "./types";
 import { logger as defaultLogger, type Logger } from "../utils/logger";
 
@@ -66,6 +66,7 @@ import { logger as defaultLogger, type Logger } from "../utils/logger";
 export type RetentionBatchYield = () => Promise<void>;
 
 const yieldToIo: RetentionBatchYield = () => new Promise((resolve) => setImmediate(resolve));
+const MAX_CONSECUTIVE_REVALIDATIONS = 3;
 
 /** Injectable protected-set query used to make concurrency and query scope observable in tests. */
 export type ProtectedBuildKeyResolver = typeof computeProtectedBuildKeyIds;
@@ -308,6 +309,32 @@ export class NavigationRetention {
     }
   }
 
+  private async retryAfterProtectionChange(tier: string, consecutive: number): Promise<boolean> {
+    if (consecutive >= MAX_CONSECUTIVE_REVALIDATIONS) {
+      this.logger.debug(`nav retention: ${tier} protection kept changing; defer remaining rows`);
+      return false;
+    }
+    await this.yieldBetweenBatches();
+    return true;
+  }
+
+  private async revalidateEmptyProtection(
+    protectedIds: number[],
+    tier: string,
+    consecutive: number,
+  ): Promise<{ ids: number[]; retry: boolean }> {
+    const ids = await this.resolveProtectedBuildKeyIds(this.db);
+    const changed = !containSameIds(ids, protectedIds);
+    return {
+      ids,
+      retry: changed && (await this.retryAfterProtectionChange(tier, consecutive)),
+    };
+  }
+
+  private async refreshChangedProtection(ids: number[], changed: boolean): Promise<number[]> {
+    return changed ? this.resolveProtectedBuildKeyIds(this.db) : ids;
+  }
+
   /**
    * SHORT tier: clear `screenshot_path` on nodes last seen before the cutoff,
    * unless the node is still observed under the active (protected) build.
@@ -329,6 +356,7 @@ export class NavigationRetention {
     // snapshot for ordinary batches, then revalidate only each selected batch's
     // apps under its transaction before clearing pointers.
     let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
+    let consecutiveRevalidations = 0;
 
     for (;;) {
       const batchResult = await this.db.transaction().execute(async (trx) => {
@@ -399,10 +427,22 @@ export class NavigationRetention {
       });
 
       if (batchResult === null) {
+        const revalidation = await this.revalidateEmptyProtection(
+          protectedIds,
+          "screenshots",
+          ++consecutiveRevalidations,
+        );
+        protectedIds = revalidation.ids;
+        if (revalidation.retry) {
+          continue;
+        }
         break;
       }
 
       summary.screenshotsCleared += batchResult.clearedCount;
+      if (batchResult.clearedCount > 0) {
+        consecutiveRevalidations = 0;
+      }
       // Unlink this batch's files now that its clear-transaction has committed,
       // before the next batch or any later tier runs (#6650).
       await this.removeFiles(batchResult.clearedPaths);
@@ -414,9 +454,15 @@ export class NavigationRetention {
       // A changed active build can make every row in the selected snapshot
       // ineligible while exposing rows hidden by the prior snapshot. Re-select
       // once against the refreshed protection set before deciding the tier is done.
-      if (batchResult.clearedCount === 0 && batchResult.activeBuildChanged) {
-        await this.yieldBetweenBatches();
+      const retryChanged = batchResult.clearedCount === 0 && batchResult.activeBuildChanged;
+      if (
+        retryChanged &&
+        (await this.retryAfterProtectionChange("screenshots", ++consecutiveRevalidations))
+      ) {
         continue;
+      }
+      if (retryChanged) {
+        break;
       }
       if (!batchResult.isFullBatch || batchResult.clearedCount === 0) {
         break;
@@ -446,6 +492,7 @@ export class NavigationRetention {
 
   private async pruneNodeObservationsByTtl(cutoff: number): Promise<number> {
     let deletedTotal = 0;
+    let consecutiveRevalidations = 0;
     let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
     for (;;) {
       const batchResult = await this.db.transaction().execute(async (trx) => {
@@ -491,15 +538,34 @@ export class NavigationRetention {
         };
       });
       if (batchResult === null) {
+        const revalidation = await this.revalidateEmptyProtection(
+          protectedIds,
+          "node TTL",
+          ++consecutiveRevalidations,
+        );
+        protectedIds = revalidation.ids;
+        if (revalidation.retry) {
+          continue;
+        }
         return deletedTotal;
       }
       deletedTotal += batchResult.deletedCount;
-      if (batchResult.protectionChanged) {
-        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
-        if (batchResult.deletedCount === 0) {
-          await this.yieldBetweenBatches();
-          continue;
-        }
+      if (batchResult.deletedCount > 0) {
+        consecutiveRevalidations = 0;
+      }
+      protectedIds = await this.refreshChangedProtection(
+        protectedIds,
+        batchResult.protectionChanged,
+      );
+      const retryChanged = batchResult.protectionChanged && batchResult.deletedCount === 0;
+      if (
+        retryChanged &&
+        (await this.retryAfterProtectionChange("node TTL", ++consecutiveRevalidations))
+      ) {
+        continue;
+      }
+      if (retryChanged) {
+        return deletedTotal;
       }
       if (
         (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
@@ -513,6 +579,7 @@ export class NavigationRetention {
 
   private async pruneEdgeObservationsByTtl(cutoff: number): Promise<number> {
     let deletedTotal = 0;
+    let consecutiveRevalidations = 0;
     let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
     for (;;) {
       const batchResult = await this.db.transaction().execute(async (trx) => {
@@ -558,15 +625,34 @@ export class NavigationRetention {
         };
       });
       if (batchResult === null) {
+        const revalidation = await this.revalidateEmptyProtection(
+          protectedIds,
+          "edge TTL",
+          ++consecutiveRevalidations,
+        );
+        protectedIds = revalidation.ids;
+        if (revalidation.retry) {
+          continue;
+        }
         return deletedTotal;
       }
       deletedTotal += batchResult.deletedCount;
-      if (batchResult.protectionChanged) {
-        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
-        if (batchResult.deletedCount === 0) {
-          await this.yieldBetweenBatches();
-          continue;
-        }
+      if (batchResult.deletedCount > 0) {
+        consecutiveRevalidations = 0;
+      }
+      protectedIds = await this.refreshChangedProtection(
+        protectedIds,
+        batchResult.protectionChanged,
+      );
+      const retryChanged = batchResult.protectionChanged && batchResult.deletedCount === 0;
+      if (
+        retryChanged &&
+        (await this.retryAfterProtectionChange("edge TTL", ++consecutiveRevalidations))
+      ) {
+        continue;
+      }
+      if (retryChanged) {
+        return deletedTotal;
       }
       if (
         (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
@@ -580,6 +666,7 @@ export class NavigationRetention {
 
   private async pruneSuggestionObservationsByTtl(cutoff: number): Promise<number> {
     let deletedTotal = 0;
+    let consecutiveRevalidations = 0;
     let protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
     for (;;) {
       const batchResult = await this.db.transaction().execute(async (trx) => {
@@ -625,15 +712,34 @@ export class NavigationRetention {
         };
       });
       if (batchResult === null) {
+        const revalidation = await this.revalidateEmptyProtection(
+          protectedIds,
+          "suggestion TTL",
+          ++consecutiveRevalidations,
+        );
+        protectedIds = revalidation.ids;
+        if (revalidation.retry) {
+          continue;
+        }
         return deletedTotal;
       }
       deletedTotal += batchResult.deletedCount;
-      if (batchResult.protectionChanged) {
-        protectedIds = await this.resolveProtectedBuildKeyIds(this.db);
-        if (batchResult.deletedCount === 0) {
-          await this.yieldBetweenBatches();
-          continue;
-        }
+      if (batchResult.deletedCount > 0) {
+        consecutiveRevalidations = 0;
+      }
+      protectedIds = await this.refreshChangedProtection(
+        protectedIds,
+        batchResult.protectionChanged,
+      );
+      const retryChanged = batchResult.protectionChanged && batchResult.deletedCount === 0;
+      if (
+        retryChanged &&
+        (await this.retryAfterProtectionChange("suggestion TTL", ++consecutiveRevalidations))
+      ) {
+        continue;
+      }
+      if (retryChanged) {
+        return deletedTotal;
       }
       if (
         (!batchResult.isFullBatch && !batchResult.protectionChanged) ||
@@ -657,10 +763,9 @@ export class NavigationRetention {
    *
    * The app-id enumeration and the overflow counts below are plain (untransacted)
    * reads, not part of any atomic unit: `evictOldest` (#6650) re-derives its own
-   * victim set and protected set fresh inside each batch's own short
-   * transaction, so a stale/approximate count here only changes how many batches
-   * run, never which rows are safe to delete (self-correcting, same as the
-   * existing `collectOldestEvictable` re-query per batch).
+   * victim set and protected set inside each batch's short transaction. After
+   * each yield it recounts the scope, including writes that arrived since the
+   * previous batch.
    */
   private async enforceCaps(summary: NavigationRetentionSummary): Promise<void> {
     const buildKeys = await loadBuildKeys(this.db);
@@ -669,7 +774,7 @@ export class NavigationRetention {
       const count = await countObservations(this.db, appId);
       const overflow = count - this.config.perAppMaxObservations;
       if (overflow > 0) {
-        await this.evictOldest(appId, overflow, summary);
+        await this.evictOldest(appId, overflow, this.config.perAppMaxObservations, summary);
       }
       // Counting an under-cap app and a one-batch eviction are both entirely
       // synchronous SQLite work. Give arrivals a turn before scanning the next app.
@@ -679,7 +784,7 @@ export class NavigationRetention {
     const globalCount = await countObservations(this.db, null);
     const globalOverflow = globalCount - this.config.globalMaxObservations;
     if (globalOverflow > 0) {
-      await this.evictOldest(null, globalOverflow, summary);
+      await this.evictOldest(null, globalOverflow, this.config.globalMaxObservations, summary);
     }
   }
 
@@ -705,14 +810,24 @@ export class NavigationRetention {
   private async evictOldest(
     appId: string | null,
     count: number,
+    maxObservations: number,
     summary: NavigationRetentionSummary,
   ): Promise<void> {
     let remaining = count;
+    let consecutiveRevalidations = 0;
+    let recountAfterYield = false;
     // Per-app enforcement never needs another app's grouped-MAX scan. Global
     // oldest-first enforcement must snapshot and revalidate every app.
     const protectedScope = appId === null ? undefined : [appId];
     let protectedIds = await this.resolveProtectedBuildKeyIds(this.db, undefined, protectedScope);
     while (remaining > 0) {
+      if (recountAfterYield) {
+        remaining = Math.max(0, (await countObservations(this.db, appId)) - maxObservations);
+        recountAfterYield = false;
+        if (remaining === 0) {
+          return;
+        }
+      }
       const batch = Math.min(remaining, this.config.evictionChunkSize);
       const batchResult = await this.db.transaction().execute(async (trx) => {
         const victims = await collectOldestEvictable(trx, appId, protectedIds, batch);
@@ -783,14 +898,21 @@ export class NavigationRetention {
       if (batchResult.evictedCount === 0) {
         if (batchResult.protectionChanged) {
           protectedIds = await this.resolveProtectedBuildKeyIds(this.db, undefined, protectedScope);
-          await this.yieldBetweenBatches();
+        }
+        if (
+          batchResult.protectionChanged &&
+          (await this.retryAfterProtectionChange("cap eviction", ++consecutiveRevalidations))
+        ) {
+          recountAfterYield = true;
           continue;
         }
         return;
       }
+      consecutiveRevalidations = 0;
       remaining -= batchResult.evictedCount;
       if (remaining > 0) {
         await this.yieldBetweenBatches();
+        recountAfterYield = true;
       }
     }
   }
@@ -802,17 +924,27 @@ export class NavigationRetention {
    * still-referenced build key would cascade-wipe its rows). The "no
    * observations" test is a correlated subquery (binds O(1)); only the
    * per-app-bounded protected id list is bound directly. Runs in its own short
-   * transaction (#6650) with the protected set read fresh inside it.
+   * transaction (#6650). A pass-level protected snapshot avoids a global scan
+   * per chunk; each selected chunk checks its cached app anchor by primary key
+   * inside the transaction.
+   * An empty selection rechecks the full set before ending the pass.
    */
   private async pruneOrphanBuildKeys(summary: NavigationRetentionSummary): Promise<void> {
     const chunk = this.config.evictionChunkSize;
+    const readProtection = async (database: Kysely<Database>) => {
+      const buildKeys = await loadBuildKeys(database);
+      const ids = await this.resolveProtectedBuildKeyIds(database, buildKeys);
+      const appById = new Map(buildKeys.map((key) => [key.id, key.appId]));
+      const byApp = new Map(ids.map((id) => [appById.get(id), id]));
+      return { ids, byApp };
+    };
+    let protection = await readProtection(this.db);
+    let consecutiveRevalidations = 0;
     for (;;) {
-      const deleted = await this.db.transaction().execute(async (trx) => {
-        const protectedIds = await this.resolveProtectedBuildKeyIds(trx);
-
+      const batchResult = await this.db.transaction().execute(async (trx) => {
         let query = trx
           .selectFrom("navigation_build_keys")
-          .select("id")
+          .select(["id", "app_id"])
           .where("id", "not in", (eb) =>
             eb.selectFrom("navigation_node_observations").select("build_key_id"),
           )
@@ -823,13 +955,52 @@ export class NavigationRetention {
             eb.selectFrom("navigation_suggestion_observations").select("build_key_id"),
           );
 
-        if (protectedIds.length > 0) {
-          query = query.where("id", "not in", protectedIds);
+        if (protection.ids.length > 0) {
+          query = query.where("id", "not in", protection.ids);
         }
 
         const rows = await query.limit(chunk).execute();
         if (rows.length === 0) {
-          return 0;
+          return { deleted: 0, protectionChanged: false };
+        }
+        if (rows.some((row) => !protection.byApp.has(row.app_id))) {
+          return {
+            deleted: 0,
+            protectionChanged: true,
+            currentProtection: await readProtection(trx),
+          };
+        }
+        // An orphan can be active only when it is the newest key of an app
+        // with no observations. Check that cached keys still exist, then check
+        // observation presence only for candidates newer than their anchor.
+        // These lookups are bounded by the selected rows.
+        const anchorIds = Array.from(
+          new Set(
+            rows
+              .map((row) => protection.byApp.get(row.app_id))
+              .filter((id): id is number => id !== undefined),
+          ),
+        );
+        const anchors = await trx
+          .selectFrom("navigation_build_keys")
+          .select("id")
+          .where("id", "in", anchorIds)
+          .execute();
+        const existingIds = new Set(anchors.map((row) => row.id));
+        if (anchorIds.some((id) => !existingIds.has(id))) {
+          return { deleted: 0, protectionChanged: true };
+        }
+        const newerAnchorIds = Array.from(
+          new Set(
+            rows
+              .filter((row) => row.id > (protection.byApp.get(row.app_id) ?? 0))
+              .map((row) => protection.byApp.get(row.app_id))
+              .filter((id): id is number => id !== undefined),
+          ),
+        );
+        const observedAnchors = await loadMaxSeenByBuildKeyIds(trx, newerAnchorIds);
+        if (newerAnchorIds.some((id) => !observedAnchors.has(id))) {
+          return { deleted: 0, protectionChanged: true };
         }
         const result = await trx
           .deleteFrom("navigation_build_keys")
@@ -839,10 +1010,31 @@ export class NavigationRetention {
             rows.map((row) => row.id),
           )
           .executeTakeFirst();
-        return Number(result.numDeletedRows ?? 0);
+        return {
+          deleted: Number(result.numDeletedRows ?? 0),
+          protectionChanged: false,
+        };
       });
-      summary.buildKeysDeleted += deleted;
-      if (deleted < chunk) {
+      summary.buildKeysDeleted += batchResult.deleted;
+      if (batchResult.deleted > 0) {
+        consecutiveRevalidations = 0;
+      }
+      let changed = batchResult.protectionChanged;
+      if (changed || batchResult.deleted === 0) {
+        const currentProtection = batchResult.currentProtection ?? (await readProtection(this.db));
+        changed ||= !containSameIds(currentProtection.ids, protection.ids);
+        protection = currentProtection;
+      }
+      if (
+        changed &&
+        (await this.retryAfterProtectionChange("orphan sweep", ++consecutiveRevalidations))
+      ) {
+        continue;
+      }
+      if (changed) {
+        return;
+      }
+      if (batchResult.deleted < chunk) {
         return;
       }
       await this.yieldBetweenBatches();
@@ -1030,41 +1222,30 @@ async function countObservations(trx: Kysely<Database>, appId: string | null): P
 }
 
 async function countGlobalObservations(trx: Kysely<Database>): Promise<number> {
-  const nodeRow = await trx
-    .selectFrom("navigation_node_observations")
-    .select((eb) => eb.fn.countAll<number>().as("c"))
-    .executeTakeFirst();
-  const edgeRow = await trx
-    .selectFrom("navigation_edge_observations")
-    .select((eb) => eb.fn.countAll<number>().as("c"))
-    .executeTakeFirst();
-  const suggestionRow = await trx
-    .selectFrom("navigation_suggestion_observations")
-    .select((eb) => eb.fn.countAll<number>().as("c"))
-    .executeTakeFirst();
-  return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0) + Number(suggestionRow?.c ?? 0);
+  const row = await trx
+    .selectNoFrom(
+      sql<number>`(SELECT COUNT(*) FROM navigation_node_observations)
+        + (SELECT COUNT(*) FROM navigation_edge_observations)
+        + (SELECT COUNT(*) FROM navigation_suggestion_observations)`.as("c"),
+    )
+    .executeTakeFirstOrThrow();
+  return Number(row.c);
 }
 
 async function countAppObservations(trx: Kysely<Database>, appId: string): Promise<number> {
-  const nodeRow = await trx
-    .selectFrom("navigation_node_observations as o")
-    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
-    .select((eb) => eb.fn.countAll<number>().as("c"))
-    .where("bk.app_id", "=", appId)
-    .executeTakeFirst();
-  const edgeRow = await trx
-    .selectFrom("navigation_edge_observations as o")
-    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
-    .select((eb) => eb.fn.countAll<number>().as("c"))
-    .where("bk.app_id", "=", appId)
-    .executeTakeFirst();
-  const suggestionRow = await trx
-    .selectFrom("navigation_suggestion_observations as o")
-    .innerJoin("navigation_build_keys as bk", "bk.id", "o.build_key_id")
-    .select((eb) => eb.fn.countAll<number>().as("c"))
-    .where("bk.app_id", "=", appId)
-    .executeTakeFirst();
-  return Number(nodeRow?.c ?? 0) + Number(edgeRow?.c ?? 0) + Number(suggestionRow?.c ?? 0);
+  const row = await trx
+    .selectNoFrom(
+      sql<number>`(SELECT COUNT(*) FROM navigation_node_observations AS o
+        JOIN navigation_build_keys AS bk ON bk.id = o.build_key_id WHERE bk.app_id = ${appId})
+        + (SELECT COUNT(*) FROM navigation_edge_observations AS o
+        JOIN navigation_build_keys AS bk ON bk.id = o.build_key_id WHERE bk.app_id = ${appId})
+        + (SELECT COUNT(*) FROM navigation_suggestion_observations AS o
+        JOIN navigation_build_keys AS bk ON bk.id = o.build_key_id WHERE bk.app_id = ${appId})`.as(
+        "c",
+      ),
+    )
+    .executeTakeFirstOrThrow();
+  return Number(row.c);
 }
 
 /**

@@ -1,6 +1,29 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import { registerDeepLinkTools } from "../../src/server/deepLinkTools";
+import {
+  createGetDeepLinksHandler,
+  registerDeepLinkTools,
+  type GetDeepLinksExecutor,
+} from "../../src/server/deepLinkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import type { BootedDevice, DeepLinkResult } from "../../src/models";
+
+const emptyDeepLinks = {
+  schemes: [],
+  hosts: [],
+  intentFilters: [],
+  supportedMimeTypes: [],
+};
+
+async function invokeHandler(result: DeepLinkResult) {
+  const executor: GetDeepLinksExecutor = { execute: async () => result };
+  const handler = createGetDeepLinksHandler(() => executor);
+  const response = await handler({} as BootedDevice, { appId: result.appId });
+  const content = response.content[0];
+  if (!content || content.type !== "text") {
+    throw new Error("Expected a text tool response");
+  }
+  return { response, payload: JSON.parse(content.text) as Record<string, unknown> };
+}
 
 describe("Deep Link Tools Registration", function () {
   beforeEach(() => {
@@ -46,6 +69,77 @@ describe("Deep Link Tools Registration", function () {
     });
 
     describe("getDeepLinks handler", () => {
+      test("reports a discovery failure as an error", async () => {
+        const error = "Package not installed; use listApps to find installed packages";
+        const { response, payload } = await invokeHandler({
+          success: false,
+          appId: "com.example.missing",
+          deepLinks: emptyDeepLinks,
+          error,
+        });
+
+        expect(payload).toEqual({
+          message: error,
+          success: false,
+          appId: "com.example.missing",
+          schemes: [],
+          hosts: [],
+          intentFilters: [],
+          supportedMimeTypes: [],
+          error,
+        });
+        expect(payload.message).not.toContain("Discovered");
+        expect(response).toHaveProperty("isError", true);
+      });
+
+      test("preserves the success response when links are found", async () => {
+        const result: DeepLinkResult = {
+          success: true,
+          appId: "com.example.app",
+          deepLinks: {
+            schemes: ["example"],
+            hosts: ["example.com"],
+            intentFilters: [],
+            supportedMimeTypes: ["text/plain"],
+          },
+          note: "Found app links",
+          rawOutput: "package dump",
+        };
+        const { response, payload } = await invokeHandler(result);
+
+        expect(payload).toEqual({
+          message: "Discovered deep links for app com.example.app",
+          success: true,
+          appId: "com.example.app",
+          schemes: ["example"],
+          hosts: ["example.com"],
+          intentFilters: [],
+          supportedMimeTypes: ["text/plain"],
+          note: "Found app links",
+          rawOutput: "package dump",
+        });
+        expect(response).not.toHaveProperty("isError");
+      });
+
+      test("keeps the success wording when no links are configured", async () => {
+        const { response, payload } = await invokeHandler({
+          success: true,
+          appId: "com.example.no-links",
+          deepLinks: emptyDeepLinks,
+        });
+
+        expect(payload).toEqual({
+          message: "Discovered deep links for app com.example.no-links",
+          success: true,
+          appId: "com.example.no-links",
+          schemes: [],
+          hosts: [],
+          intentFilters: [],
+          supportedMimeTypes: [],
+        });
+        expect(response).not.toHaveProperty("isError");
+      });
+
       test("should validate app ID parameter and fail gracefully", async function () {
         const tool = ToolRegistry.getTool("getDeepLinks");
         expect(tool).toBeDefined();

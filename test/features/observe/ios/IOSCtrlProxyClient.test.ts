@@ -27,6 +27,10 @@ import {
   type CtrlProxyIosManager,
 } from "../../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudget";
+import {
+  DeviceDataStreamSocketServer,
+  installDeviceDataStreamSocketServerForTesting,
+} from "../../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
@@ -294,6 +298,119 @@ describe("IOSCtrlProxyClient", function () {
     }
     throw new Error(`${type} was not sent`);
   };
+
+  describe("hierarchy cadence handshake sync", () => {
+    let streamServer: DeviceDataStreamSocketServer;
+
+    beforeEach(() => {
+      streamServer = new DeviceDataStreamSocketServer("/fake/ios-cadence.sock", fakeTimer, {
+        authorize: () => {},
+      });
+      installDeviceDataStreamSocketServerForTesting(streamServer);
+    });
+
+    afterEach(() => {
+      installDeviceDataStreamSocketServerForTesting(null);
+    });
+
+    const cadenceMessages = (socket: CapturingWebSocket): Record<string, unknown>[] =>
+      socket.sentMessages
+        .map((message) => JSON.parse(message) as Record<string, unknown>)
+        .filter((message) => message.type === "set_hierarchy_poll_interval");
+
+    const connectCapturingClient = async (): Promise<{
+      client: IOSCtrlProxyClient;
+      socket: CapturingWebSocket;
+    }> => {
+      const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      expect(socket).not.toBeNull();
+      await waitForSocketOpen(socket);
+      return { client, socket: socket as CapturingWebSocket };
+    };
+
+    test("does not sync cadence when the socket opens without a runner handshake", async () => {
+      const { client, socket } = await connectCapturingClient();
+      try {
+        expect(cadenceMessages(socket)).toEqual([]);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("syncs cadence once after a runner advertises the command", async () => {
+      const { client, socket } = await connectCapturingClient();
+      try {
+        expect(cadenceMessages(socket)).toEqual([]);
+        socket.simulateMessage(
+          JSON.stringify({ type: "connected", supportedCommands: ["set_hierarchy_poll_interval"] }),
+        );
+        expect(cadenceMessages(socket)).toEqual([
+          {
+            type: "set_hierarchy_poll_interval",
+            intervalMs: streamServer.getHierarchyIntervalMsForDevice(testDevice.deviceId),
+          },
+        ]);
+      } finally {
+        await client.close();
+      }
+    });
+
+    test("skips cadence when the runner does not advertise the command", async () => {
+      const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+      const { client, socket } = await connectCapturingClient();
+      try {
+        socket.simulateMessage(
+          JSON.stringify({ type: "connected", supportedCommands: ["request_hierarchy"] }),
+        );
+        expect(cadenceMessages(socket)).toEqual([]);
+        expect(infoSpy).toHaveBeenCalledWith(
+          "[IOSCtrlProxyClient] Skipping hierarchy cadence sync; runner does not advertise set_hierarchy_poll_interval",
+        );
+      } finally {
+        infoSpy.mockRestore();
+        await client.close();
+      }
+    });
+
+    test("logs a throwing cadence sync and finishes connected handling", async () => {
+      const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+      const cadenceSpy = spyOn(streamServer, "getHierarchyIntervalMsForDevice").mockImplementation(
+        () => {
+          throw new Error("cadence unavailable");
+        },
+      );
+      const { client, socket } = await connectCapturingClient();
+      try {
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            supportedCommands: ["set_hierarchy_poll_interval", "get_sdk_capabilities"],
+          }),
+        );
+        expect(warnSpy).toHaveBeenCalledWith(
+          "[IOSCtrlProxyClient] Hierarchy cadence sync failed: cadence unavailable",
+          expect.any(Error),
+        );
+        expect(client.getCachedSupportedCommands()).toEqual([
+          "get_sdk_capabilities",
+          "set_hierarchy_poll_interval",
+        ]);
+        await waitForMessageType(socket, "get_sdk_capabilities");
+      } finally {
+        cadenceSpy.mockRestore();
+        warnSpy.mockRestore();
+        await client.close();
+      }
+    });
+  });
 
   describe("connection lifecycle", function () {
     test.each([

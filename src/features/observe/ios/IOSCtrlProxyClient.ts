@@ -1418,8 +1418,6 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }, IOSCtrlProxyClient.RESTART_REARM_STABILITY_MS);
     logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
-    this.syncHierarchyCadenceToDevice();
-
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
     this.startSdkEventPolling();
 
@@ -2473,6 +2471,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.supportedFeatures = Array.isArray(message.supportedFeatures)
         ? new Set(message.supportedFeatures)
         : null;
+      try {
+        this.syncHierarchyCadenceToDevice();
+      } catch (error) {
+        logger.warn(
+          `[IOSCtrlProxyClient] Hierarchy cadence sync failed: ${errorMessage(error)}`,
+          error,
+        );
+      }
       this.invalidateSdkCapabilities();
       void this.refreshSdkCapabilitiesAndSync().catch((error) => {
         // SDK absence/version skew is expected; this trace is diagnostic only.

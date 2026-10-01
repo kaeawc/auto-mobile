@@ -1,3 +1,4 @@
+import os from "node:os";
 import type { BootedDevice, CrashAppEvidence, CrashAppResult, ExecResult } from "../../models";
 import {
   defaultAdbClientFactory,
@@ -62,6 +63,7 @@ export interface CrashAppDependencies {
   adb?: AdbExecutor;
   adbFactory?: AdbClientFactory;
   simctl?: SimulatorCrashCommandRunner;
+  uid?: () => number;
   timer?: Timer;
   cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
@@ -69,6 +71,7 @@ export interface CrashAppDependencies {
 export class CrashApp {
   private readonly adb: AdbExecutor;
   private readonly simctl: SimulatorCrashCommandRunner;
+  private readonly uid: () => number;
   private readonly timer: Timer;
   private readonly cacheInvalidator: DeviceWindowCacheInvalidator;
 
@@ -79,6 +82,7 @@ export class CrashApp {
     const adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.adb = dependencies.adb ?? adbFactory.create(device);
     this.simctl = dependencies.simctl ?? new SimCtlClient(device);
+    this.uid = dependencies.uid ?? (() => os.userInfo().uid);
     this.timer = dependencies.timer ?? defaultTimer;
     this.cacheInvalidator =
       dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
@@ -361,7 +365,7 @@ export class CrashApp {
           "launchctl",
           "kill",
           "SIGABRT",
-          `user/501/${appProcess.serviceLabel}`,
+          `user/${this.uid()}/${appProcess.serviceLabel}`,
         ],
         CRASH_COMMAND_TIMEOUT_MS,
         signal,

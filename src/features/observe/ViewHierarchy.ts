@@ -29,6 +29,11 @@ import {
 import { HOST_OUTPUT_CHILD_CAP_REASON_PREFIX } from "./truncationReasons";
 import type { CtrlProxyHierarchyResponse } from "./ios/types";
 import { nodeAttributes, type Hierarchy } from "../../models/ViewHierarchyResult";
+import {
+  defaultObserveAccessibilityManagerFactory,
+  recoverRootlessAccessibilityService,
+  type ObserveAccessibilityManagerFactory,
+} from "./android/ObserveAccessibilityRecovery";
 
 function iosHierarchyUnavailable(result: CtrlProxyHierarchyResponse | null): Hierarchy {
   const reason = result?.unavailableReason ?? "unknown";
@@ -67,6 +72,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   private accessibilityServiceClient: AndroidCtrlProxyClient;
   private adbFactory: AdbClientFactory;
   private timer: Timer;
+  private observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory;
 
   /**
    * Create a ViewHierarchy instance
@@ -79,6 +85,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     accessibilityServiceClient: AndroidCtrlProxyClient | null = null,
     timer: Timer = defaultTimer,
+    observeAccessibilityManagerFactory: ObserveAccessibilityManagerFactory = defaultObserveAccessibilityManagerFactory,
   ) {
     this.device = device;
     this.parser = new DefaultElementParser();
@@ -88,6 +95,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       accessibilityServiceClient || AndroidCtrlProxyClient.getInstance(device, adbFactory);
     this.adbFactory = adbFactory;
     this.timer = timer;
+    this.observeAccessibilityManagerFactory = observeAccessibilityManagerFactory;
   }
 
   async configureRecompositionTracking(
@@ -249,6 +257,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     result: ViewHierarchyResult,
     context: RecoveryReadContext,
   ): Promise<ViewHierarchyResult> {
+    const recoveredRootless = await this.retryRootlessAndroidCapture(result, context);
+    if (recoveredRootless) {
+      return recoveredRootless;
+    }
     if (result.hierarchy.transportFailure !== true) {
       return result;
     }
@@ -279,6 +291,36 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       context.signal,
       this.remainingRecoveryBudget(context),
     );
+  }
+
+  private async retryRootlessAndroidCapture(
+    result: ViewHierarchyResult,
+    context: RecoveryReadContext,
+  ): Promise<ViewHierarchyResult | null> {
+    if (
+      result.hierarchy.transportFailure !== true &&
+      !result.hierarchy.node &&
+      !result.windows?.length &&
+      result.hierarchy.unavailableReason !== "device_locked" &&
+      this.hasRecoveryRefetchBudget(context) &&
+      (await recoverRootlessAccessibilityService(
+        this.observeAccessibilityManagerFactory(this.device),
+        this.timer,
+        this.recoveryWaitBudget(context, AndroidCtrlProxyClient.OBSERVE_RECOVERY_WAIT_MS),
+        context.signal,
+      )) &&
+      this.hasRecoveryRefetchBudget(context)
+    ) {
+      return this.getAndroidViewHierarchy(
+        context.queryOptions,
+        context.perf,
+        context.skipWaitForFresh,
+        context.minTimestamp,
+        context.signal,
+        this.remainingRecoveryBudget(context),
+      );
+    }
+    return null;
   }
 
   /**

@@ -10,6 +10,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { logger, LogLevel } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { recoverRootlessAccessibilityService } from "../../../src/features/observe/android/ObserveAccessibilityRecovery";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -1813,6 +1814,90 @@ describe("Offscreen Node Filtering", function () {
       const result = await vh.getViewHierarchy();
       expect(result.hierarchy.transportFailure).toBeUndefined();
       expect(starts).toBe(0);
+    });
+
+    test("rebinds a crashed service after a rootless capture and refetches once", async function () {
+      const timer = new FakeTimer();
+      let reads = 0;
+      let healthChecks = 0;
+      let rebinds = 0;
+      const client = {
+        getAccessibilityHierarchy: async () =>
+          ++reads === 1
+            ? { hierarchy: { error: "No windows or root node" } }
+            : { hierarchy: { node: { $: { text: "Recovered" } } } },
+        isConnected: () => true,
+      } as unknown as AndroidCtrlProxyClient;
+      const manager = {
+        isAccessibilityServiceHealthy: async () => ++healthChecks === 2,
+        rebindIfUnhealthy: async () => {
+          rebinds++;
+          return true;
+        },
+        waitForAccessibilityServiceBinding: async () => "unhealthy" as const,
+      };
+      const vh = new ViewHierarchy(
+        device,
+        new FakeAdbClientFactory(),
+        client,
+        timer,
+        () => manager,
+      );
+      const result = await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      expect(result.hierarchy.node).toBeDefined();
+      expect(reads).toBe(2);
+      expect(healthChecks).toBe(2);
+      expect(rebinds).toBe(1);
+    });
+
+    test("leaves a rootless capture alone when the service is bound", async function () {
+      const timer = new FakeTimer();
+      let rebinds = 0;
+      const client = {
+        getAccessibilityHierarchy: async () => null,
+        isConnected: () => true,
+      } as unknown as AndroidCtrlProxyClient;
+      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), client, timer, () => ({
+        isAccessibilityServiceHealthy: async () => true,
+        rebindIfUnhealthy: async () => {
+          rebinds++;
+          return true;
+        },
+        waitForAccessibilityServiceBinding: async () => "already-bound",
+      }));
+      const result = await vh.getViewHierarchy(undefined, undefined, false, 0, undefined, 1000);
+      expect(result.hierarchy.error).toBeDefined();
+      expect(rebinds).toBe(0);
+    });
+
+    test("bounds a stalled rootless health probe with the observe clock", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const result = await recoverRootlessAccessibilityService(
+        {
+          isAccessibilityServiceHealthy: async () => new Promise<boolean>(() => {}),
+          rebindIfUnhealthy: async () => true,
+          waitForAccessibilityServiceBinding: async () => "unhealthy",
+        },
+        timer,
+        50,
+      );
+      expect(result).toBe(false);
+      expect(timer.now()).toBe(50);
+    });
+
+    test("refetches when another caller completes the bind during a no-op rebind", async function () {
+      const timer = new FakeTimer();
+      const result = await recoverRootlessAccessibilityService(
+        {
+          isAccessibilityServiceHealthy: async () => false,
+          rebindIfUnhealthy: async () => false,
+          waitForAccessibilityServiceBinding: async () => "already-bound",
+        },
+        timer,
+        100,
+      );
+      expect(result).toBe(true);
     });
 
     test("waits once and refetches Android after a confirmed recovery", async function () {

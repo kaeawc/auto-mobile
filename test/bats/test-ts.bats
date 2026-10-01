@@ -61,13 +61,21 @@ setup() {
   export STUB_RECHECK_INDEX
   cat > "$STUB_BIN/nproc" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${STUB_NPROC_FAIL:-}" == "1" ]]; then
+  exit 1
+fi
 printf '%s\n' "${STUB_NPROC_CORES:-8}"
+EOF
+  cat > "$STUB_BIN/sysctl" <<'EOF'
+#!/usr/bin/env bash
+[[ "$1" == "-n" && "$2" == "hw.ncpu" ]] || exit 1
+printf '%s\n' "${STUB_SYSCTL_CORES:-8}"
 EOF
   cat > "$STUB_BIN/uname" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "${UNAME_S:-Linux}"
 EOF
-  chmod +x "$STUB_BIN/nproc" "$STUB_BIN/uname"
+  chmod +x "$STUB_BIN/nproc" "$STUB_BIN/sysctl" "$STUB_BIN/uname"
   cat > "$STUB_BIN/git" <<'EOF'
 #!/usr/bin/env bash
 printf '%b' "${TIMING_CHANGED_FILES:-}"
@@ -239,6 +247,7 @@ run_lane() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"--isolate"* ]]
   [[ "$output" != *"--parallel="* ]]
+  [[ "$output" != *"test-ts: unit lane cores="* ]]
 }
 
 @test "integration lane isolates test files to prevent shared suite state" {
@@ -480,11 +489,37 @@ EOF
   [[ "$output" == *"--shards=2"* ]]
 }
 
-@test "Linux keeps one unit shard on three cores" {
+@test "Linux uses two unit shards on three cores" {
   run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     UNAME_S=Linux STUB_NPROC_CORES=3 bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--shards=1"* ]]
+  [[ "$output" == *"test-ts: unit lane cores=3 workers=2"* ]]
+  [[ "$output" == *"--shards=2"* ]]
+}
+
+@test "unit lane worker selection covers small and larger hosts through nproc and sysctl" {
+  local core_count worker_count probe
+  for probe in nproc sysctl; do
+    for core_count in 2 3 4 8 12; do
+      case "$core_count" in
+        2 | 3) worker_count=2 ;;
+        4) worker_count=3 ;;
+        8) worker_count=6 ;;
+        12) worker_count=10 ;;
+      esac
+      if [[ "$probe" == sysctl ]]; then
+        run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+          STUB_NPROC_FAIL=1 STUB_SYSCTL_CORES="$core_count" UNAME_S=Darwin bash "$SCRIPT" unit
+      else
+        run env -u RUNNER_OS PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+          STUB_NPROC_CORES="$core_count" UNAME_S=Linux bash "$SCRIPT" unit
+      fi
+      [ "$status" -eq 0 ]
+      [[ "$output" == *"test-ts: unit lane cores=$core_count workers=$worker_count"* ]]
+      [[ "$output" == *"--shards=$worker_count"* ]]
+      [ "$(grep -c 'test-ts: unit lane cores=' <<< "$output")" -eq 1 ]
+    done
+  done
 }
 
 @test "explicit unit worker count bypasses the macOS floor" {
@@ -492,6 +527,7 @@ EOF
     UNAME_S=Darwin STUB_NPROC_CORES=3 AUTOMOBILE_UNIT_TEST_WORKERS=1 \
     bash "$SCRIPT" unit
   [ "$status" -eq 0 ]
+  [[ "$output" == *"test-ts: unit lane cores=3 workers=1"* ]]
   [[ "$output" == *"--shards=1"* ]]
 }
 
@@ -516,6 +552,7 @@ EOF
   run env PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
     AUTOMOBILE_UNIT_TEST_WORKERS=3 bash "$SCRIPT" changed
   [ "$status" -eq 0 ]
+  [[ "$output" != *"test-ts: unit lane cores="* ]]
   [ "$(printf '%s\n' "$output" | grep -c -- '--changed=origin/main')" -eq 3 ]
   for shard in 1 2 3; do
     [[ "$output" == *"--shard=$shard/3"* ]]

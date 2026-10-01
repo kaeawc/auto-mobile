@@ -23,11 +23,44 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const android: BootedDevice = { name: "Pixel", platform: "android", deviceId: "emulator-5554" };
 const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "simulator" };
 
 describe("observation display stamp", () => {
+  test("Android posture uses committed state when the base state differs", async () => {
+    const fixture = (name: string): string =>
+      readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", {
+      stdout: fixture("foldpf-print-states.txt"),
+      stderr: "",
+    });
+    adb.setCommandResponse("shell cmd device_state state", {
+      stdout: fixture("foldpf-6-fold-from-closed-base-while-override-state.txt"),
+      stderr: "",
+    });
+    const device: BootedDevice = {
+      ...android,
+      deviceId: "foldpf-committed-posture",
+      displays: {
+        panels: [
+          { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } },
+          { key: "cover", role: "cover", sizePx: { width: 100, height: 100 } },
+        ],
+        postures: ["closed", "opened", "rear_display"],
+      },
+    };
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    try {
+      expect(await cache.posture(device, adb)).toBe("rear_display");
+    } finally {
+      ObservedAndroidDisplayCache.release(device.deviceId);
+    }
+  });
+
   test("Android observe carries the forwarded raw capture through the real converter", async () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();

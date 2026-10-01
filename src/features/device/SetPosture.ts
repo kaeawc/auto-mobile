@@ -1,4 +1,4 @@
-import { ActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice, DisplayRef, Posture } from "../../models";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
@@ -6,12 +6,18 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+import {
+  parseAndroidCommittedStateIdentifier,
+  parseAndroidDeviceStates,
+  type AndroidDeviceState,
+} from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import { IOSCtrlProxyClient, type IOSCtrlProxy } from "../observe/ios/IOSCtrlProxyClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { DisplayPanel } from "../../models/DisplayPanel";
 import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { logger } from "../../utils/logger";
 
 export type RequestedPosture = Exclude<Posture, "unknown">;
 export type DisplayPreset = "phone" | "unfolded" | "tablet";
@@ -39,6 +45,8 @@ export interface SetPostureDependencies {
 
 const IOS_POSTURE_POLL_INTERVAL_MS = 250;
 const IOS_POSTURE_TIMEOUT_MS = 3000;
+const ANDROID_POSTURE_POLL_INTERVAL_MS = 250;
+const ANDROID_POSTURE_TIMEOUT_MS = 3000;
 
 type IosPanelMatch = "expected" | "old" | "indeterminate";
 
@@ -139,7 +147,7 @@ async function setEmulatorPosture(
   displayPreset?: DisplayPreset,
   supportsRearDisplay = false,
 ): Promise<void> {
-  if (requested === "opened" && supportsRearDisplay) {
+  if ((requested === "closed" || requested === "opened") && supportsRearDisplay) {
     await adb.executeCommand("shell cmd device_state state reset");
   }
   const command =
@@ -157,23 +165,72 @@ async function setEmulatorPosture(
 async function setPhysicalPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
+  states: AndroidDeviceState[],
 ): Promise<void> {
-  const { stdout } = await adb.executeCommand("shell cmd device_state print-states");
-  const states = parseAndroidDeviceStates(stdout);
   const match = states.find((state) => state.posture === requested);
   if (!match && requested !== "opened") {
     const supported = [...new Set(states.map((state) => state.posture))];
     throw new ActionableError(
-      `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ")}.`,
+      `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ") || "none"}.`,
     );
   }
   const command = match
     ? `shell cmd device_state state ${match.identifier}`
     : "shell cmd device_state state reset";
-  if (requested === "opened" && match && states.some((state) => state.posture === "rear_display")) {
+  if (
+    (requested === "closed" || requested === "opened") &&
+    match &&
+    states.some((state) => state.posture === "rear_display")
+  ) {
     await adb.executeCommand("shell cmd device_state state reset");
   }
   await adb.executeCommand(command);
+}
+
+async function observeAndroidPosture(
+  adb: ReturnType<AdbClientFactory["create"]>,
+  requested: RequestedPosture,
+  states: AndroidDeviceState[],
+  timer: Timer,
+): Promise<void> {
+  if (states.length === 0 || !states.some((state) => state.posture === requested)) {
+    return;
+  }
+  const startedAt = timer.now();
+  let actual: AndroidDeviceState | undefined;
+  do {
+    const { stdout } = await adb.executeCommand("shell cmd device_state state");
+    const identifier = parseAndroidCommittedStateIdentifier(stdout);
+    actual = states.find((state) => state.identifier === identifier);
+    if (actual?.posture === requested) {
+      return;
+    }
+    const elapsed = timer.now() - startedAt;
+    if (elapsed >= ANDROID_POSTURE_TIMEOUT_MS) {
+      break;
+    }
+    await timer.sleep(
+      Math.min(ANDROID_POSTURE_POLL_INTERVAL_MS, ANDROID_POSTURE_TIMEOUT_MS - elapsed),
+    );
+  } while (true);
+  throw new ActionableError(
+    `Android posture did not reach '${requested}' after ${ANDROID_POSTURE_TIMEOUT_MS} ms; committed state is ${actual ? `'${actual.posture}' (${actual.name}, ${actual.identifier})` : "unknown"}. Check whether a device_state override is still active.`,
+  );
+}
+
+async function readAndroidStates(
+  adb: ReturnType<AdbClientFactory["create"]>,
+): Promise<AndroidDeviceState[]> {
+  try {
+    const { stdout } = await adb.executeCommand("shell cmd device_state print-states");
+    return parseAndroidDeviceStates(stdout);
+  } catch (error) {
+    if (/can't find service: device_state/i.test(errorMessage(error))) {
+      logger.warn(`Android device_state service is unavailable: ${errorMessage(error)}`);
+      return [];
+    }
+    throw toActionableError(error, "Could not read Android device states");
+  }
 }
 
 export class SetPosture {
@@ -214,18 +271,23 @@ export class SetPosture {
       );
     }
 
+    const states = await readAndroidStates(adb);
+
     if (requested === "rear_display") {
-      await setPhysicalPosture(adb, requested);
+      await setPhysicalPosture(adb, requested, states);
     } else if (emulator) {
       await setEmulatorPosture(
         adb,
         requested,
         displayPreset,
-        this.device.displays?.postures.includes("rear_display") ?? false,
+        states.some((state) => state.posture === "rear_display") ||
+          (this.device.displays?.postures.includes("rear_display") ?? false),
       );
     } else {
-      await setPhysicalPosture(adb, requested);
+      await setPhysicalPosture(adb, requested, states);
     }
+
+    await observeAndroidPosture(adb, requested, states, this.timer);
 
     const observation = await this.observeFactory(this.device).execute({});
     return {

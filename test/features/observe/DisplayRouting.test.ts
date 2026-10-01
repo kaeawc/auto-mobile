@@ -16,6 +16,11 @@ import { CachingDisplayInventoryProvider } from "../../../src/devices/DisplayInv
 import { FakeDisplayInventorySource } from "../../fakes/FakeDisplayInventoryProvider";
 import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCapture";
 import type { ObserveScreenshotRecorder } from "../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const deviceStateFixture = (name: string): string =>
+  readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
 
 const panels = [
   { key: "cover", role: "cover" as const, sizePx: { width: 100, height: 100 } },
@@ -67,9 +72,12 @@ describe("display read routing", () => {
         'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
       stderr: "",
     });
-    adb.setCommandResponse("shell cmd device_state state", { stdout: "State: 0", stderr: "" });
+    adb.setCommandResponse("shell cmd device_state state", {
+      stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"),
+      stderr: "",
+    });
     adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout: "DeviceState{identifier=0, name='CLOSED'}",
+      stdout: deviceStateFixture("foldpf-print-states.txt"),
       stderr: "",
     });
     const hierarchy = new FakeViewHierarchy();
@@ -417,12 +425,11 @@ describe("display read routing", () => {
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell cmd device_state state", [
-      { stdout: "State: 0", stderr: "" },
-      { stdout: "State: 1", stderr: "" },
+      { stdout: deviceStateFixture("foldpf-5-after-reset-state.txt"), stderr: "" },
+      { stdout: deviceStateFixture("foldpf-1-default-state.txt"), stderr: "" },
     ]);
     adb.setCommandResponse("shell cmd device_state print-states", {
-      stdout:
-        "DeviceState{identifier=0, name='CLOSED'}\nDeviceState{identifier=1, name='HALF_OPENED'}",
+      stdout: deviceStateFixture("foldpf-print-states.txt"),
       stderr: "",
     });
     const cache = new ObservedAndroidDisplayCache(timer);
@@ -432,7 +439,7 @@ describe("display read routing", () => {
       adb.getExecutedCommands().filter((command) => command === "shell cmd device_state state"),
     ).toHaveLength(1);
     timer.advanceTime(2_000);
-    expect(await cache.posture(device, adb)).toBe("half_opened");
+    expect(await cache.posture(device, adb)).toBe("opened");
     ObservedAndroidDisplayCache.release(device.deviceId);
   });
 

@@ -1,7 +1,10 @@
 import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
 import type { Posture } from "../../models/DisplayPanel";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { parseAndroidDeviceStates } from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
+import {
+  parseAndroidCommittedStateIdentifier,
+  parseAndroidDeviceStates,
+} from "../../utils/android-cmdline-tools/AndroidDisplayInventory";
 import {
   logicalDisplayIdForPanel,
   parseAndroidDisplayInfos,
@@ -60,13 +63,10 @@ function physicalPanelKey(uniqueId: string): string {
 }
 
 function postureForState(current: string, supported: string): Posture {
-  const stateId =
-    /(?:^|\b)(?:current\s+)?state\s*[:=]\s*(\d+)\b/i.exec(current)?.[1] ??
-    /^\s*(\d+)\s*$/m.exec(current)?.[1] ??
-    parseAndroidDeviceStates(current)[0]?.identifier;
+  const stateId = parseAndroidCommittedStateIdentifier(current);
   return (
-    parseAndroidDeviceStates(supported).find((state) => state.identifier === Number(stateId))
-      ?.posture ?? "unknown"
+    parseAndroidDeviceStates(supported).find((state) => state.identifier === stateId)?.posture ??
+    "unknown"
   );
 }
 

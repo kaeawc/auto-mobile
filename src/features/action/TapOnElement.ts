@@ -712,10 +712,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!this.hasCompleteActiveWindow(previous) || !this.hasCompleteActiveWindow(current)) {
       return undefined;
     }
+    // layoutSeqSum comes from dumpsys, while hierarchy-derived windows use 0.
+    // Even two non-zero samples do not establish a visible change on their own;
+    // the hierarchy comparison below supplies that evidence for the same activity.
     const changed =
-      previous.appId !== current.appId ||
-      previous.activityName !== current.activityName ||
-      previous.layoutSeqSum !== current.layoutSeqSum;
+      previous.appId !== current.appId || previous.activityName !== current.activityName;
     return {
       screenChanged: changed,
       basis: changed ? "activeWindow changed" : "activeWindow unchanged",
@@ -768,11 +769,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!previousObservation || !currentObservation) {
       return undefined;
     }
+    const hierarchyResult = this.compareViewHierarchy(previousObservation, currentObservation);
     const results = [
       this.compareScreenIdentity(previousObservation, currentObservation),
       this.compareActiveWindow(previousObservation, currentObservation),
-      this.compareViewHierarchy(previousObservation, currentObservation),
+      hierarchyResult,
     ].filter((result): result is NonNullable<typeof result> => result !== undefined);
+
+    // A matching pair of device trees rules out a visible screen change even
+    // when side-channel identity metadata was sampled from different moments.
+    if (hierarchyResult && !hierarchyResult.screenChanged) {
+      return results.find((result) => !result.screenChanged) ?? hierarchyResult;
+    }
 
     const changedResult = results.find((result) => result.screenChanged);
     if (changedResult) {

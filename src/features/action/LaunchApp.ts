@@ -45,6 +45,7 @@ import {
   getLaunchObservationPackageNames,
   isLaunchPermissionDialogObservation,
 } from "./launchObservationPackages";
+import { hierarchyFingerprint } from "../../utils/hierarchyFingerprint";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -52,6 +53,8 @@ const ANDROID_LAUNCH_OBSERVATION_TIMEOUT_MS = 15_000;
 const SHADE_COLLAPSE_RETRY_INTERVAL_MS = 1_000;
 const ANDROID_PREFLIGHT_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS = 1_000;
+const ANDROID_COLD_FRAME_TIMEOUT_MS = 2_500;
+const ANDROID_COLD_FRAME_POLL_MS = 150;
 
 export interface TargetUserDetector {
   detectTargetUserId(packageName: string, userId?: number, signal?: AbortSignal): Promise<number>;
@@ -1051,6 +1054,9 @@ export class LaunchApp extends BaseVisualChange {
         coldBoot,
         targetUserId,
       );
+      if (clearAppData && settledLaunchResult.success && settledLaunchResult.observation) {
+        await this.waitForAndroidColdStableFrame(settledLaunchResult, packageName, signal);
+      }
       await this.captureTerminalObservationScreenshot(
         settledLaunchResult.observation,
         perf,
@@ -1099,6 +1105,63 @@ export class LaunchApp extends BaseVisualChange {
 
       return settledLaunchResult;
     });
+  }
+
+  private async waitForAndroidColdStableFrame(
+    result: LaunchAppResult,
+    packageName: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const deadline = this.timer.now() + ANDROID_COLD_FRAME_TIMEOUT_MS;
+    const timeout = new Error("Android cold frame readiness timed out");
+    let previousHash: string | null = null;
+
+    while (this.timer.now() < deadline) {
+      signal?.throwIfAborted();
+      try {
+        const remainingMs = deadline - this.timer.now();
+        const observation = await raceWithDeadline(
+          () =>
+            this.observeScreen.execute({
+              freshness: "fresh",
+              timeoutMs: remainingMs,
+              signal,
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
+              skipPerformanceAudit: true,
+            }),
+          {
+            timer: this.timer,
+            timeoutMs: remainingMs,
+            signal,
+            label: "Android cold frame readiness",
+            timeoutError: () => timeout,
+          },
+        );
+        const matchesPackage = this.launchObservationMatchesPackage(observation, packageName);
+        const hash = matchesPackage ? hierarchyFingerprint(observation.viewHierarchy) : null;
+        if (matchesPackage) {
+          result.observation = observation;
+        }
+        if (hash !== null && hash === previousHash) {
+          return;
+        }
+        previousHash = hash;
+      } catch (error) {
+        signal?.throwIfAborted();
+        logger.warn(
+          `[LaunchApp] Android cold frame readiness failed: ${errorMessage(error)}`,
+          error,
+        );
+        return;
+      }
+
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs > 0) {
+        await this.timer.sleep(Math.min(ANDROID_COLD_FRAME_POLL_MS, remainingMs));
+      }
+    }
+    logger.warn(`[LaunchApp] Android cold frame readiness timed out for ${packageName}`);
   }
 
   private async waitForAndroidPreflight<T>(

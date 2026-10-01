@@ -1,5 +1,5 @@
-import XCTest
 @testable import ScreenCaptureCore
+import XCTest
 
 final class CommandLineOptionsTests: XCTestCase {
     func testHelpTextDescribesFrameHeader() {
@@ -13,7 +13,7 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testParsesAudioForSimulatorCapture() throws {
         let options = try CommandLineOptions.parse([
-            "screen-capture-helper", "--simulator-window", "42", "--audio"
+            "screen-capture-helper", "--simulator-window", "42", "--audio",
         ])
 
         XCTAssertEqual(options.mode, .captureSimulator(windowID: 42, fps: 5, audio: true, encode: nil))
@@ -26,28 +26,28 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testParsesDeviceID() throws {
         let opts = try CommandLineOptions.parse([
-            "screen-capture-helper", "--device-id", "ABC123"
+            "screen-capture-helper", "--device-id", "ABC123",
         ])
         XCTAssertEqual(opts.mode, .capture(deviceID: "ABC123", encode: nil))
     }
 
     func testParsesListDevices() throws {
         let opts = try CommandLineOptions.parse([
-            "screen-capture-helper", "--list-devices"
+            "screen-capture-helper", "--list-devices",
         ])
         XCTAssertEqual(opts.mode, .listDevices)
     }
 
     func testParsesHelpFlag() throws {
         let opts = try CommandLineOptions.parse([
-            "screen-capture-helper", "--help"
+            "screen-capture-helper", "--help",
         ])
         XCTAssertEqual(opts.mode, .help)
     }
 
     func testMissingDeviceIDValueThrows() {
         XCTAssertThrowsError(try CommandLineOptions.parse([
-            "screen-capture-helper", "--device-id"
+            "screen-capture-helper", "--device-id",
         ])) { error in
             XCTAssertEqual(
                 error as? CommandLineOptions.ParseError,
@@ -58,7 +58,7 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testUnknownArgumentThrows() {
         XCTAssertThrowsError(try CommandLineOptions.parse([
-            "screen-capture-helper", "--bogus"
+            "screen-capture-helper", "--bogus",
         ])) { error in
             XCTAssertEqual(
                 error as? CommandLineOptions.ParseError,
@@ -69,14 +69,14 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testParsesListSimulators() throws {
         let opts = try CommandLineOptions.parse([
-            "screen-capture-helper", "--list-simulators"
+            "screen-capture-helper", "--list-simulators",
         ])
         XCTAssertEqual(opts.mode, .listSimulators)
     }
 
     func testParsesSimulatorWindowWithDefaultFPS() throws {
         let opts = try CommandLineOptions.parse([
-            "screen-capture-helper", "--simulator-window", "98765"
+            "screen-capture-helper", "--simulator-window", "98765",
         ])
         XCTAssertEqual(
             opts.mode,
@@ -143,7 +143,7 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testInvalidSimulatorWindowValueThrows() {
         XCTAssertThrowsError(try CommandLineOptions.parse([
-            "screen-capture-helper", "--simulator-window", "not-a-number"
+            "screen-capture-helper", "--simulator-window", "not-a-number",
         ])) { error in
             XCTAssertEqual(
                 error as? CommandLineOptions.ParseError,
@@ -154,7 +154,7 @@ final class CommandLineOptionsTests: XCTestCase {
 
     func testMissingSimulatorWindowValueThrows() {
         XCTAssertThrowsError(try CommandLineOptions.parse([
-            "screen-capture-helper", "--simulator-window"
+            "screen-capture-helper", "--simulator-window",
         ])) { error in
             XCTAssertEqual(
                 error as? CommandLineOptions.ParseError,

@@ -1,13 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
 
 describe("ToolRegistry tool call duration recording", () => {
   let originalTimer: unknown;
   let originalToolCallRepository: unknown;
   let timer: FakeTimer;
   let records: any[];
+  let restoreWarnSpy: (() => void) | undefined;
 
   beforeEach(() => {
     ToolRegistry.clearTools();
@@ -16,14 +18,16 @@ describe("ToolRegistry tool call duration recording", () => {
     originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
     (ToolRegistry as any).timer = timer;
     records = [];
-    (ToolRegistry as any).toolCallRepository = {
+    ToolRegistry.setToolCallRepositoryForTesting({
       async recordToolCall(record: any): Promise<void> {
         records.push(record);
       },
-    };
+    });
   });
 
   afterEach(() => {
+    restoreWarnSpy?.();
+    restoreWarnSpy = undefined;
     (ToolRegistry as any).timer = originalTimer;
     (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
     ToolRegistry.clearTools();
@@ -88,11 +92,8 @@ describe("ToolRegistry tool call duration recording", () => {
     ]);
   });
 
-  test("waits for duration recording before resolving the tool call", async () => {
-    let finishRecord!: () => void;
-    const recordGate = new Promise<void>((resolve) => {
-      finishRecord = resolve;
-    });
+  test("does not wait for duration recording before resolving the tool call", async () => {
+    const recordGate = new Promise<void>(() => {});
     let recordStarted = false;
     (ToolRegistry as any).toolCallRepository = {
       async recordToolCall(record: any): Promise<void> {
@@ -119,16 +120,8 @@ describe("ToolRegistry tool call duration recording", () => {
     const tool = ToolRegistry.getTool("durationAwaitProbe");
     expect(tool).toBeDefined();
 
-    let settled = false;
-    const handlerPromise = tool!.handler({}).then((result) => {
-      settled = true;
-      return result;
-    });
-
-    for (let i = 0; i < 10 && !recordStarted; i++) {
-      await Promise.resolve();
-    }
-
+    await expect(tool!.handler({})).resolves.toEqual({ success: true });
+    await Promise.resolve();
     expect(recordStarted).toBe(true);
     expect(records).toEqual([
       expect.objectContaining({
@@ -136,11 +129,36 @@ describe("ToolRegistry tool call duration recording", () => {
         durationMs: 11,
       }),
     ]);
-    expect(settled).toBe(false);
+  });
 
-    finishRecord();
+  test("logs duration recording failures without rejecting the tool call", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    restoreWarnSpy = () => warnSpy.mockRestore();
+    (ToolRegistry as any).toolCallRepository = {
+      async recordToolCall(): Promise<void> {
+        throw new Error("recording unavailable");
+      },
+    };
 
-    await expect(handlerPromise).resolves.toEqual({ success: true });
-    expect(settled).toBe(true);
+    ToolRegistry.registerDeviceAware(
+      "durationRejectProbe",
+      "Handles duration recording failure",
+      z.object({}),
+      async () => ({ success: true }),
+      {
+        shouldEnsureDevice: () => false,
+        nonDeviceHandler: async () => ({ success: true }),
+      },
+    );
+
+    const response = await ToolRegistry.getTool("durationRejectProbe")!.handler({});
+    for (let turn = 0; turn < 8 && warnSpy.mock.calls.length === 0; turn++) {
+      await Promise.resolve();
+    }
+
+    expect(response).toEqual({ success: true });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[ToolRegistry] Failed to record tool call for durationRejectProbe: Error: recording unavailable",
+    );
   });
 });

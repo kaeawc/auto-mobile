@@ -25,7 +25,13 @@ import {
   normalizeAppFileRelativePath,
   normalizePutAppFileTarget,
 } from "./appFileContract";
-import { ActionableError, BootedDevice, Platform, type ExecResult } from "../models";
+import {
+  ActionableError,
+  toActionableError,
+  BootedDevice,
+  Platform,
+  type ExecResult,
+} from "../models";
 import {
   defaultAdbClientFactory,
   type AdbClientFactory,
@@ -35,6 +41,7 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { shellQuote } from "../utils/shellQuote";
+import { isPackageInstalledForUser } from "../utils/android-cmdline-tools/isPackageInstalledForUser";
 import { AndroidUserTargetResolver } from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { logger } from "../utils/logger";
 import { prepareFileSource } from "./fileSourcePreparation";
@@ -411,6 +418,7 @@ class DefaultAppFileService implements AppFileService {
                   deviceId: request.device.deviceId,
                   appId: target.appId,
                   container: target.container,
+                  userId: request.userId || undefined,
                   path: file.destinationPath,
                 }),
               }
@@ -536,19 +544,61 @@ class DefaultAppFileService implements AppFileService {
   }
 }
 
-async function androidRunAsPrefix(
+async function resolveAndroidAppFileUser(
   adb: AdbExecutor,
+  device: BootedDevice,
   appId: string,
-  userId: number | undefined,
-): Promise<string> {
-  if (userId !== undefined && (!Number.isSafeInteger(userId) || userId < 0)) {
-    throw new ActionableError("Android userId must be a non-negative safe integer.");
+  userId?: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  const resolver = new AndroidUserTargetResolver(adb);
+  if (userId !== undefined) {
+    if (!Number.isSafeInteger(userId) || userId < 0) {
+      throw new ActionableError("Android userId must be a non-negative safe integer.");
+    }
+    return (await resolver.resolve({ explicitUserId: userId, signal })).userId;
   }
-  const resolvedUserId =
-    userId === undefined
-      ? undefined
-      : (await new AndroidUserTargetResolver(adb).resolve({ explicitUserId: userId })).userId;
-  return `shell run-as ${shellQuote(appId)}${resolvedUserId ? ` --user ${resolvedUserId}` : ""}`;
+
+  try {
+    // Once per operation/batch: listUsers + one pm list per user. A user-0-only
+    // device needs just those two reads; get-current-user is only for ambiguity.
+    const users = await adb.listUsers(signal);
+    if (users.length === 0) {
+      throw new ActionableError(
+        `Android user resolution failed for ${appId} on ${device.deviceId}: no users could be determined. Pass userId explicitly (resource query ?userId=N).`,
+      );
+    }
+    const candidates: number[] = [];
+    for (const user of users) {
+      if (await isPackageInstalledForUser(adb, appId, user.userId, undefined, signal)) {
+        candidates.push(user.userId);
+      }
+    }
+    if (candidates.length === 1) {
+      return candidates[0]!;
+    }
+    if (candidates.length === 0) {
+      throw new ActionableError(
+        `Android app ${appId} is not installed for any user on ${device.deviceId}. Install the app for the intended user.`,
+      );
+    }
+    const current = await resolver.resolve({ currentUser: true, signal });
+    if (current.source === "currentUser" && candidates.includes(current.userId)) {
+      return current.userId;
+    }
+    throw new ActionableError(
+      `Android app ${appId} on ${device.deviceId} is installed for candidate users ${candidates.join(", ")}, but no installed foreground user could be selected. Pass userId explicitly (resource query ?userId=N).`,
+    );
+  } catch (error) {
+    throw toActionableError(
+      error,
+      `Android user resolution failed for ${appId} on ${device.deviceId}. Pass userId explicitly (resource query ?userId=N)`,
+    );
+  }
+}
+
+function androidRunAsPrefix(appId: string, userId: number): string {
+  return `shell run-as ${shellQuote(appId)}${userId ? ` --user ${userId}` : ""}`;
 }
 
 class AndroidAppFileProvider
@@ -563,12 +613,55 @@ class AndroidAppFileProvider
   ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<void> {
+    await this.putFiles([request]);
+  }
+
+  async putFiles(requests: PutAppFileProviderRequest[]): Promise<void[]> {
+    if (requests.length === 0) {
+      return [];
+    }
+    const request = requests[0]!;
     const appTarget = requireAppContainersTarget(request.target);
-    const adb = this.adbFactory.create(request.device);
     const target = resolveAndroidTarget(
       appTarget.appId,
       appTarget.container,
       request.destinationPath,
+    );
+    if (target.kind === "unsupported") {
+      throw unsupportedAppFileOperation(
+        "putFile",
+        request.device.platform,
+        appTarget.appId,
+        appTarget.container,
+        target.message,
+      );
+    }
+    const adb = this.adbFactory.create(request.device);
+    const userId = await resolveAndroidAppFileUser(
+      adb,
+      request.device,
+      appTarget.appId,
+      request.userId,
+      request.signal,
+    );
+    const results: void[] = [];
+    for (const file of requests) {
+      results.push(await this.writeFile(file, adb, userId));
+    }
+    return results;
+  }
+
+  private async writeFile(
+    request: PutAppFileProviderRequest,
+    adb: AdbExecutor,
+    userId: number,
+  ): Promise<void> {
+    const appTarget = requireAppContainersTarget(request.target);
+    const target = resolveAndroidTarget(
+      appTarget.appId,
+      appTarget.container,
+      request.destinationPath,
+      userId,
     );
     if (target.kind === "unsupported") {
       throw unsupportedAppFileOperation(
@@ -589,6 +682,7 @@ class AndroidAppFileProvider
           appId: appTarget.appId,
           container: appTarget.container,
           operation: "write",
+          userId,
           access: "externalFiles",
         },
         { noRetry: true, signal: request.signal },
@@ -601,6 +695,7 @@ class AndroidAppFileProvider
           appId: appTarget.appId,
           container: appTarget.container,
           operation: "write",
+          userId,
           access: "externalFiles",
         },
         { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
@@ -608,7 +703,7 @@ class AndroidAppFileProvider
       return;
     }
 
-    const runAs = await androidRunAsPrefix(adb, appTarget.appId, request.userId);
+    const runAs = androidRunAsPrefix(appTarget.appId, userId);
     const tempDevicePath = `/data/local/tmp/automobile-${this.idGenerator.next()}-${posix.basename(request.destinationPath)}`;
     await executeAndroidAppFileCommand(
       adb,
@@ -618,6 +713,7 @@ class AndroidAppFileProvider
         appId: appTarget.appId,
         container: appTarget.container,
         operation: "write",
+        userId,
         access: "run-as",
       },
       { noRetry: true, signal: request.signal, timeoutMs: APP_FILE_PUSH_TIMEOUT_MS },
@@ -635,6 +731,7 @@ class AndroidAppFileProvider
           appId: appTarget.appId,
           container: appTarget.container,
           operation: "write",
+          userId,
           access: "run-as",
         },
         { noRetry: true, signal: request.signal },
@@ -648,13 +745,16 @@ class AndroidAppFileProvider
           true,
           request.signal,
         )
-        .catch(() => {});
+        .catch((error) => {
+          // A leftover staging file does not invalidate a completed write or mask its failure.
+          logger.debug("Android app-file staging cleanup failed", error);
+        });
     }
   }
 
   async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {
     const adb = this.adbFactory.create(request.device);
-    const base = resolveAndroidTarget(request.appId, request.container, "placeholder");
+    let base = resolveAndroidTarget(request.appId, request.container, "placeholder");
     if (base.kind === "unsupported") {
       throw unsupportedAppFileOperation(
         "listFiles",
@@ -665,15 +765,30 @@ class AndroidAppFileProvider
       );
     }
 
+    const userId = await resolveAndroidAppFileUser(
+      adb,
+      request.device,
+      request.appId,
+      request.userId,
+    );
+    if (base.kind === "external" && userId !== 0) {
+      const resolved = resolveAndroidTarget(
+        request.appId,
+        request.container,
+        "placeholder",
+        userId,
+      );
+      if (resolved.kind === "external") {
+        base = resolved;
+      }
+    }
+
     const root =
       base.kind === "external"
         ? posix.dirname(base.absolutePath)
         : posix.dirname(base.relativePath);
     const script = `if [ -d ${shellQuote(root)} ]; then find ${shellQuote(root)} -exec stat -c '%F|%s|%Y|%n' {} \\; ; fi`;
-    const runAs =
-      base.kind === "external"
-        ? undefined
-        : await androidRunAsPrefix(adb, request.appId, request.userId);
+    const runAs = base.kind === "external" ? undefined : androidRunAsPrefix(request.appId, userId);
     const stdout =
       base.kind === "external"
         ? (
@@ -685,6 +800,7 @@ class AndroidAppFileProvider
                 appId: request.appId,
                 container: request.container,
                 operation: "list",
+                userId,
                 access: "externalFiles",
               },
               {
@@ -703,6 +819,7 @@ class AndroidAppFileProvider
                 appId: request.appId,
                 container: request.container,
                 operation: "list",
+                userId,
                 access: "run-as",
               },
               {
@@ -726,13 +843,22 @@ class AndroidAppFileProvider
       platform: request.device.platform,
       appId: request.appId,
       container: request.container,
-      files,
+      files: files.map((file) => ({
+        ...file,
+        resourceUri: buildAppFileResourceUri({
+          deviceId: request.device.deviceId,
+          appId: request.appId,
+          container: request.container,
+          path: file.path,
+          userId: userId || undefined,
+        }),
+      })),
     };
   }
 
   async readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult> {
     const adb = this.adbFactory.create(request.device);
-    const target = resolveAndroidTarget(request.appId, request.container, request.path);
+    let target = resolveAndroidTarget(request.appId, request.container, request.path);
     if (target.kind === "unsupported") {
       throw unsupportedAppFileOperation(
         "readFile",
@@ -743,10 +869,21 @@ class AndroidAppFileProvider
       );
     }
 
+    const userId = await resolveAndroidAppFileUser(
+      adb,
+      request.device,
+      request.appId,
+      request.userId,
+    );
+    if (target.kind === "external" && userId !== 0) {
+      const resolved = resolveAndroidTarget(request.appId, request.container, request.path, userId);
+      if (resolved.kind === "external") {
+        target = resolved;
+      }
+    }
+
     const runAs =
-      target.kind === "external"
-        ? undefined
-        : await androidRunAsPrefix(adb, request.appId, request.userId);
+      target.kind === "external" ? undefined : androidRunAsPrefix(request.appId, userId);
     const stdout =
       target.kind === "external"
         ? (
@@ -758,6 +895,7 @@ class AndroidAppFileProvider
                 appId: request.appId,
                 container: request.container,
                 operation: "read",
+                userId,
                 access: "externalFiles",
               },
               {
@@ -776,6 +914,7 @@ class AndroidAppFileProvider
                 appId: request.appId,
                 container: request.container,
                 operation: "read",
+                userId,
                 access: "run-as",
               },
               {
@@ -1187,6 +1326,7 @@ export function resolveAndroidTarget(
   appId: string,
   container: AppFileContainer,
   path: string,
+  userId = 0,
 ): AndroidTarget {
   const safePath = normalizeAppFileRelativePath(path);
   switch (container) {
@@ -1197,7 +1337,14 @@ export function resolveAndroidTarget(
     case "tmp":
       return { kind: "runAs", relativePath: posix.join("cache", "tmp", safePath) };
     case "externalFiles":
-      return { kind: "external", absolutePath: `/sdcard/Android/data/${appId}/files/${safePath}` };
+      // Preserve verified user-0 argv. Unverified, from Android scoped-storage
+      // documentation: on API 30+, shell read/list access to other apps' Android/data
+      // directories is not guaranteed and push can be denied. This corrects the
+      // user path only; plain adb shell/push does not bypass scoped storage.
+      return {
+        kind: "external",
+        absolutePath: `${userId === 0 ? "/sdcard" : `/storage/emulated/${userId}`}/Android/data/${appId}/files/${safePath}`,
+      };
     case "library":
       return {
         kind: "unsupported",
@@ -1392,6 +1539,7 @@ function parseAndroidStatLine(
 }
 
 interface AndroidAppFileCommandContext {
+  userId?: number;
   device: BootedDevice;
   appId: string;
   container: AppFileContainer;
@@ -1421,18 +1569,29 @@ export async function executeAndroidAppFileCommand(
       options.signal,
     );
   } catch (error) {
-    throw mapAndroidAppFileError(error, context);
+    throw mapAndroidAppFileError(error, context, command);
   }
 }
 
 function mapAndroidAppFileError(
   error: unknown,
   context: AndroidAppFileCommandContext,
+  command: string,
 ): ActionableError {
   const message = errorMessage(error);
+  const user = context.userId ? ` for user ${context.userId}` : "";
+  if (
+    context.access === "run-as" &&
+    command.includes(" --user ") &&
+    /unknown option|invalid option|unrecognized option|Usage: run-as/i.test(message)
+  ) {
+    return new ActionableError(
+      `run-as --user appears unsupported on ${context.device.deviceId}'s Android version (unverified which API level)${user}. Omit userId only if the app is installed for the device's primary user, or use a debuggable build via an adb-user-0 session. Original error: ${message}`,
+    );
+  }
   if (/not debuggable/i.test(message)) {
     return new ActionableError(
-      `Android ${context.container} app file ${context.operation} for ${context.appId} on ${context.device.deviceId} ` +
+      `Android ${context.container} app file ${context.operation} for ${context.appId}${user} on ${context.device.deviceId} ` +
         "requires a debuggable app build because it uses run-as. Install a debuggable build or use externalFiles. " +
         `Original error: ${message}`,
     );
@@ -1442,14 +1601,14 @@ function mapAndroidAppFileError(
     /package .* (unknown|not found)|unknown package|not installed|does not exist/i.test(message)
   ) {
     return new ActionableError(
-      `Android app ${context.appId} is not installed on ${context.device.deviceId}; ` +
+      `Android app ${context.appId} is not installed${user} on ${context.device.deviceId}; ` +
         `cannot ${context.operation} ${context.container} app files. Original error: ${message}`,
     );
   }
 
   if (/permission denied|operation not permitted/i.test(message)) {
     return new ActionableError(
-      `Android ${context.container} app file ${context.operation} for ${context.appId} on ${context.device.deviceId} ` +
+      `Android ${context.container} app file ${context.operation} for ${context.appId}${user} on ${context.device.deviceId} ` +
         `was denied by the device. ${context.access === "run-as" ? "Use a debuggable build for private storage or choose externalFiles." : "Check app install state and external storage access."} ` +
         `Original error: ${message}`,
     );

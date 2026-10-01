@@ -1,4 +1,4 @@
-import { packageListingContains } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { isPackageInstalledForUser } from "../../utils/android-cmdline-tools/isPackageInstalledForUser";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -449,14 +449,7 @@ export class UninstallApp {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<boolean> {
-    const result = await this.adb.executeCommand(
-      `shell pm list packages --user ${userId}`,
-      timeoutMs,
-      undefined,
-      true,
-      signal,
-    );
-    return packageListingContains(result.stdout, packageName);
+    return isPackageInstalledForUser(this.adb, packageName, userId, timeoutMs, signal);
   }
 
   private async markInstalledAppsCacheStale(): Promise<void> {

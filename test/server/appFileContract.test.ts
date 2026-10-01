@@ -71,6 +71,60 @@ describe("App file resource contract", () => {
   });
 });
 
+describe("App file resource userId", () => {
+  afterEach(() => ResourceRegistry.clearResources());
+  test.each([undefined, 0, 10, Number.MAX_SAFE_INTEGER])(
+    "round trips userId %p on both templates",
+    (userId) => {
+      for (const path of [undefined, "fixtures/welcome image.txt"]) {
+        const parts = {
+          deviceId: "device 1",
+          appId: "com.example.app",
+          container: "documents" as const,
+          path,
+          userId,
+        };
+        const uri = buildAppFileResourceUri(parts);
+        ResourceRegistry.registerTemplate(
+          path === undefined
+            ? APP_FILE_RESOURCE_TEMPLATES.CONTAINER
+            : APP_FILE_RESOURCE_TEMPLATES.FILE,
+          "Files",
+          "Files",
+          "application/json",
+          async () => ({ uri, mimeType: "application/json", text: "{}" }),
+        );
+        const match = ResourceRegistry.matchTemplate(uri);
+        expect(match).toBeDefined();
+        expect(parseAppFileResourceParams(match!.params)).toEqual(parts);
+        expect(
+          uri.endsWith(
+            userId === undefined
+              ? path === undefined
+                ? "documents"
+                : "welcome%20image.txt"
+              : `?userId=${userId}`,
+          ),
+        ).toBe(true);
+        ResourceRegistry.clearResources();
+      }
+    },
+  );
+  test.each(["", "-1", "1.5", "NaN", "Infinity", "9007199254740992", "1e1", " 10 ", "abc"])(
+    "rejects invalid resource userId %p",
+    (userId) => {
+      expect(() =>
+        parseAppFileResourceParams({
+          deviceId: "device",
+          appId: "com.example.app",
+          container: "documents",
+          userId,
+        }),
+      ).toThrow("userId must be a non-negative safe integer");
+    },
+  );
+});
+
 describe("putAppFileSchema contentBase64 guard (#4183 A4)", () => {
   const base = {
     target: {

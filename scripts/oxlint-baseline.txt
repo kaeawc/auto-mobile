@@ -187,7 +187,6 @@
 1	src/server/accessibilityTools.ts	eslint(complexity)
 1	src/server/accessibilityTools.ts	eslint(max-depth)
 1	src/server/appFileContract.ts	auto-mobile(catch-convention)
-1	src/server/appFileService.ts	auto-mobile(catch-convention)
 1	src/server/appTools.ts	eslint(max-lines-per-function)
 1	src/server/bootedDeviceResources.ts	eslint(complexity)
 1	src/server/deviceDescription.ts	eslint(max-params)

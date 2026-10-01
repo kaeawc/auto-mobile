@@ -140,11 +140,15 @@ function compileUriTemplate(template: string): {
   const escapedTemplate = tokenizedTemplate.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
   // Use [^/&]+ so regular query-string params stop at the & delimiter; trailing
   // {path} and {params} params are greedy for nested paths and raw query strings.
+  // RFC 6570 query templates keep ? out of path captures so the suffix can parse it.
   const regexPattern = escapedTemplate.replace(/__PARAM_(\d+)__/g, (_placeholder, indexText) => {
     const index = Number(indexText);
     const isGreedyTrailingParam =
       (paramNames[index] === "path" || paramNames[index] === "params") &&
       escapedTemplate.endsWith(`__PARAM_${index}__`);
+    if (queryParamNames.length > 0) {
+      return isGreedyTrailingParam ? "([^?#]+)" : "([^/?&#]+)";
+    }
     return isGreedyTrailingParam ? "(.+)" : "([^/&]+)";
   });
 

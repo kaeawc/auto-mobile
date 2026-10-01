@@ -47,10 +47,10 @@ describe("App file resources", () => {
 
     const templates = ResourceRegistry.getTemplateDefinitions();
     expect(templates.map((template) => template.uriTemplate)).toContain(
-      "automobile:devices/{deviceId}/apps/{appId}/files/{container}",
+      "automobile:devices/{deviceId}/apps/{appId}/files/{container}{?userId}",
     );
     expect(templates.map((template) => template.uriTemplate)).toContain(
-      "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}",
+      "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}{?userId}",
     );
   });
 
@@ -123,5 +123,25 @@ describe("App file resources", () => {
     expect(content.mimeType).toBe("text/plain; charset=utf-8");
     expect(content.text).toBe('{"enabled":true}\n');
     expect(content.blob).toBeUndefined();
+  });
+  test.each(["list", "read"])("passes the query userId to %s handler", async (operation) => {
+    const calls: Array<number | undefined> = [];
+    registerAppFileResources({
+      ...fakeService,
+      listFiles: async (request) => {
+        calls.push(request.userId);
+        return fakeService.listFiles(request);
+      },
+      readFile: async (request) => {
+        calls.push(request.userId);
+        return fakeService.readFile(request);
+      },
+    });
+    const uri = `automobile:devices/device/apps/com.example.app/files/documents${operation === "read" ? "/welcome.txt" : ""}?userId=10`;
+    const match = ResourceRegistry.matchTemplate(uri);
+    expect(match).toBeDefined();
+    const content = await match!.template.handler(match!.params);
+    expect(calls).toEqual([10]);
+    expect(content.uri).toBe(uri);
   });
 });

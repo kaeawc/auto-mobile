@@ -394,10 +394,45 @@ merely command dispatch or process disappearance.
 <details class="note" markdown="1">
 <summary>File containers</summary>
 
-Android <code>externalFiles</code> maps to <code>/sdcard/Android/data/{appId}/files</code>.
-Private containers (<code>documents</code>, <code>cache</code>, and <code>tmp</code>) use
-<code>run-as</code> and require a debuggable app. iOS simulator containers include
+Android app containers accept optional <code>userId</code>, a non-negative safe
+integer. Explicit IDs skip user discovery. When omitted, AutoMobile lists users
+and checks <code>pm list packages --user N</code> for each one. A sole installed
+user wins; for multiple installations, the current foreground user wins only if
+the app is installed for that user. Otherwise the error lists candidate IDs and
+asks for <code>userId</code>. No installation reports the app and device; failed
+user discovery asks for an explicit ID. Resolution happens once per operation,
+including once for a multi-file batch. A single-user device needs one user-list
+read and one package-list read, with no foreground-user probe.
+
+Android <code>externalFiles</code> uses the same user resolution and maps user 0
+to <code>/sdcard/Android/data/{appId}/files</code>, preserving the verified argv;
+nonzero users map to <code>/storage/emulated/{userId}/Android/data/{appId}/files</code>.
+It continues to use plain <code>adb shell</code> and <code>adb push</code>.
+**Unverified, from Android scoped-storage documentation:** on Android 11+
+(API 30+), shell read/list access to other apps' <code>Android/data</code>
+directories is not guaranteed and push may fail with permission denied. This is
+an inference about shell access from the
+[Android storage restrictions](https://developer.android.com/about/versions/11/privacy/storage#other-apps-data),
+not a device verification or an access bypass.
+
+Private containers (<code>documents</code>, <code>cache</code>, and <code>tmp</code>)
+use <code>run-as</code> and require a debuggable app. Nonzero users add
+<code>--user N</code>; user 0 keeps the plain command. Missing-package and
+non-debuggable errors name the nonzero user. If the output indicates an unsupported
+<code>run-as --user</code> option, the error says it appears unsupported on this
+Android version (**unverified which API level**). Omit <code>userId</code> only
+if the app is installed for the primary user, or use a debuggable build through
+an adb-user-0 session. Omission still follows the resolution rule above.
+Shared-storage <code>user_files</code> and <code>media_library</code> retain their
+existing user-resolution behavior. iOS simulator containers include
 <code>documents</code>, <code>library</code>, <code>cache</code>, and <code>tmp</code>.
+
+List/read app-file MCP resources use
+<code>automobile:devices/{deviceId}/apps/{appId}/files/{container}{?userId}</code>
+and <code>automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}{?userId}</code>.
+Append <code>?userId=10</code> to select a work profile; omit it for the same
+Android app-installation resolution as <code>putAppFile</code>. Invalid IDs are
+rejected. File links from a nonzero-user listing retain that user's query.
 
 </details>
 

@@ -4409,7 +4409,7 @@
   },
   {
     "name": "observe",
-    "description": "Get screen view hierarchy and screenshot. An explicit deviceId reads without acquiring a session or changing ownership; deviceId and sessionUuid are mutually exclusive.",
+    "description": "Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

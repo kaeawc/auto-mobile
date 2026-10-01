@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { BootedDevice, ObserveResult } from "../../src/models";
+import { ActionableError } from "../../src/models/ActionableError";
 import {
   hasObservationReadAccess,
   defaultDeviceObservationAccess,
@@ -28,7 +29,14 @@ import { resetObserveCacheStore } from "../../src/features/observe/cache/Observe
 import { resetScreenshotStateStore } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import type { Plan } from "../../src/models/Plan";
-import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  getToolSelectionContext,
+  runWithToolSelectionContext,
+} from "../../src/features/toolSelection/toolSelectionContext";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/server/directSessionDeviceRegistry";
 import { getStructuredField } from "../../src/utils/toolUtils";
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
@@ -44,6 +52,7 @@ afterEach(() => {
   ToolRegistry.clearTools();
   resetObserveCacheStore();
   resetScreenshotStateStore();
+  clearDirectSessionDevices();
 });
 
 describe("session-free observe device read", () => {
@@ -193,7 +202,7 @@ describe("session-free observe device read", () => {
     ).rejects.toThrow("Observation access denied.");
   });
 
-  test("published observe alone exposes deviceId and rejects mixed routing", async () => {
+  test("published observe alone exposes deviceId", () => {
     registerObserveTools();
     const live = ToolRegistry.getToolDefinitions();
     const observe = live.find((entry) => entry.name === "observe")!;
@@ -210,9 +219,84 @@ describe("session-free observe device read", () => {
         .filter((entry) => entry.name !== "observe")
         .every((entry) => !Object.hasOwn(entry.inputSchema.properties ?? {}, "deviceId")),
     ).toBe(true);
-    await expect(
-      callDeviceRead({ deviceId: device.deviceId, sessionUuid: "owner" }),
-    ).rejects.toThrow("mutually exclusive");
+  });
+
+  test("matching deviceId and sessionUuid use the session observe pipeline", async () => {
+    const sessionUuid = "observe-session";
+    const manager = new FakeDeviceSessionManager();
+    manager.setConnectedDevices([device]);
+    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
+    registerDirectSessionDevice(sessionUuid, device);
+    const reads: string[] = [];
+    const events: string[] = [];
+    const navigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+    const record = spyOn(navigationRecorder, "record").mockImplementation(
+      (_name, _args, _device, routedSessionUuid) => {
+        expect(routedSessionUuid).toBe(sessionUuid);
+        events.push("navigation");
+      },
+    );
+    const restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
+      auditRunner: {
+        run: async (input) => {
+          events.push("audit");
+          return input.handler(input.device, input.args, input.progress, input.signal);
+        },
+      },
+    });
+    try {
+      registerObserveTools({
+        deviceReadAccess: {
+          listBooted: async () => {
+            reads.push("resolve");
+            return [device];
+          },
+          isAuthorized: () => {
+            reads.push("authorize");
+            return true;
+          },
+        },
+        createScreen: () => ({
+          execute: async () => {
+            expect(getToolSelectionContext()?.routingSessionUuid).toBe(sessionUuid);
+            expect(getToolSelectionContext()?.explicitObserveDeviceRead).toBe(false);
+            events.push("session-observe");
+            return { ...loadAndroidHomeObserve().observe, backStack: undefined };
+          },
+          executeDeviceRead: async () => {
+            throw new Error("entered sessionless device read");
+          },
+          appendRawViewHierarchy: async () => {},
+          getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
+        }),
+      });
+      const response = await callDeviceRead({ deviceId: device.deviceId, sessionUuid });
+      expect(response.isError).not.toBe(true);
+      expect(events).toEqual(["navigation", "audit", "session-observe"]);
+      expect(reads).toEqual([]);
+      expect(manager.getLastEnsureDeviceReadyDeviceId()).toBe(device.deviceId);
+    } finally {
+      restorePipeline();
+      record.mockRestore();
+    }
+  });
+
+  test("mismatching session deviceId identifies the supplied and bound devices", async () => {
+    const sessionUuid = "observe-session";
+    const suppliedDeviceId = "emulator-5556";
+    registerDirectSessionDevice(sessionUuid, device);
+    registerObserveTools();
+    let rejection: unknown;
+    try {
+      await callDeviceRead({ deviceId: suppliedDeviceId, sessionUuid });
+    } catch (error) {
+      rejection = error;
+    }
+    expect(rejection).toBeInstanceOf(ActionableError);
+    expect((rejection as ActionableError).message).toContain(
+      `observe deviceId '${suppliedDeviceId}' does not match session '${sessionUuid}' device '${device.deviceId}'`,
+    );
   });
 
   test("a plan observe step with injected deviceId keeps normal readiness and screenshot mode", async () => {

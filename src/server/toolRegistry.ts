@@ -803,6 +803,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         sessionUuid,
         execution,
       );
+      assertDeviceReadRouting(args, options, admittedSession?.assignedDevice);
       const context = await createToolExecutionContext(
         sessionUuid,
         sessionManager,
@@ -836,6 +837,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         true,
         signal,
       );
+      assertDeviceReadRouting(args, options, context.deviceId);
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
@@ -851,6 +853,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // (now optional) with both platforms connected falls through to
       // ensureDeviceReady("either", undefined) and hits an ambiguity error.
       const directSession = resolveDirectSessionDevice(sessionUuid);
+      assertDeviceReadRouting(args, options, directSession?.device.deviceId);
       if (!directSession) {
         logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
       } else if (!providedDeviceId) {
@@ -1490,14 +1493,18 @@ function deviceAwareHandlerArgs(
 function assertDeviceReadRouting(
   args: Record<string, unknown>,
   options: DeviceAwareToolOptions,
+  sessionDeviceId: string | undefined,
 ): void {
   if (
     options.sessionlessDeviceRead &&
-    getToolSelectionContext()?.explicitObserveDeviceRead &&
-    args.deviceId &&
-    args.sessionUuid
+    typeof args.deviceId === "string" &&
+    typeof args.sessionUuid === "string" &&
+    sessionDeviceId &&
+    args.deviceId !== sessionDeviceId
   ) {
-    throw new ActionableError("observe deviceId and sessionUuid are mutually exclusive.");
+    throw new ActionableError(
+      `observe deviceId '${args.deviceId}' does not match session '${args.sessionUuid}' device '${sessionDeviceId}'.`,
+    );
   }
 }
 
@@ -1532,7 +1539,11 @@ async function invokeResolvedDeviceHandler(input: {
   navigationRecorder: NavigationToolCallRecorder;
 }): Promise<any> {
   const { options, selectionContext, target, name, args, handler, progress, signal } = input;
-  if (options.sessionlessDeviceRead && selectionContext?.explicitObserveDeviceRead) {
+  if (
+    options.sessionlessDeviceRead &&
+    selectionContext?.explicitObserveDeviceRead &&
+    !args.sessionUuid
+  ) {
     return handler(target.device, args, progress, signal);
   }
   input.navigationRecorder.record(name, args, target.device, target.sessionUuid);
@@ -1693,7 +1704,6 @@ export class ToolRegistryClass {
       signal?: AbortSignal,
     ) => {
       const selectionContext = getToolSelectionContext();
-      assertDeviceReadRouting(args, options);
       // Re-inject the ambient ROUTING session (issue #4611 Gap C) so a nested
       // device-aware call keeps the outer call's derived/label routing identity
       // rather than reverting to the base session.
@@ -1726,6 +1736,8 @@ export class ToolRegistryClass {
           {
             routingSessionUuid: resolvedTarget.sessionUuid,
             toolSelectionProfileUuid: selectionContext?.toolSelectionProfileUuid,
+            explicitObserveDeviceRead:
+              selectionContext?.explicitObserveDeviceRead === true && !handlerArgs.sessionUuid,
           },
           async () => {
             try {

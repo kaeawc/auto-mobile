@@ -43,7 +43,7 @@ import type { ProxySetupResult } from "../../../utils/interfaces/ProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
-import { fixedBackoff } from "../../../utils/Backoff";
+import { exponentialBackoff, fixedBackoff } from "../../../utils/Backoff";
 import { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
 import {
   NavigationGraphManager,
@@ -4381,24 +4381,32 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   private async removeCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {
     try {
-      const result = await this.adb.execute(["forward", "--list"], { signal });
       const expectedLocal = `tcp:${port}`;
-      const expectedRemote = `tcp:${PortManager.DEVICE_PORT}`;
-      const matchingForward = result.stdout.split(/\r?\n/).some((line) => {
-        const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
-        return (
-          extra.length === 0 &&
-          serial === this.device.deviceId &&
-          local === expectedLocal &&
-          remote === expectedRemote
-        );
-      });
-      if (!matchingForward) {
+      if (!(await this.hasCtrlProxyPortForward(port, signal))) {
+        PortManager.clearQuarantine(port);
         return true;
       }
 
       await this.adb.execute(["forward", "--remove", expectedLocal], { signal });
-      return true;
+      const startedAt = this.timer.now();
+      const confirmationDeadlineMs = 2_000;
+      const backoff = exponentialBackoff({ initialDelayMs: 100, maxDelayMs: 800 });
+      for (let attempt = 1; ; attempt++) {
+        if (!(await this.hasCtrlProxyPortForward(port, signal))) {
+          PortManager.clearQuarantine(port);
+          return true;
+        }
+        const remainingMs = confirmationDeadlineMs - (this.timer.now() - startedAt);
+        if (remainingMs <= 0) {
+          break;
+        }
+        await this.timer.sleep(Math.min(backoff.delayForAttempt(attempt), remainingMs));
+      }
+      logger.warn(
+        `[CTRL_PROXY] CtrlProxy forward on ${this.device.deviceId} tcp:${port} remained after removal confirmation`,
+      );
+      PortManager.quarantine(port);
+      return false;
     } catch (error) {
       logger.warn(
         `[CTRL_PROXY] Failed to remove CtrlProxy forward on ${this.device.deviceId} tcp:${port}: ${error}`,
@@ -4406,6 +4414,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
       return false;
     }
+  }
+
+  private async hasCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {
+    const result = await this.adb.execute(["forward", "--list"], { signal });
+    const expectedLocal = `tcp:${port}`;
+    const expectedRemote = `tcp:${PortManager.DEVICE_PORT}`;
+    return result.stdout.split(/\r?\n/).some((line) => {
+      const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+      return (
+        extra.length === 0 &&
+        serial === this.device.deviceId &&
+        local === expectedLocal &&
+        remote === expectedRemote
+      );
+    });
   }
 
   private localPortFromForward(value: string | undefined): number | null {

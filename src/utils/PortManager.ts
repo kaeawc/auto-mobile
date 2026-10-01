@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { defaultTimer, type Timer } from "./SystemTimer";
 
 export const IOS_SDK_HIERARCHY_SERVER_PORT = 8766;
 export const IOS_CTRL_PROXY_RESERVED_PORTS = new Set<number>([
@@ -181,6 +182,9 @@ export class BunPortAvailabilityChecker implements PortAvailabilityChecker {
 export class PortManager {
   private static allocatedPorts: Map<string, number> = new Map();
   private static cleanupHeldPorts: Set<number> = new Set();
+  private static quarantinedPorts: Map<number, number> = new Map();
+  private static clock: Pick<Timer, "now"> = defaultTimer;
+  private static readonly QUARANTINE_MS = 60_000;
   private static readonly DEFAULT_BASE_PORT = 8765;
   private static readonly DEFAULT_MAX_DEVICES = 100;
   private static readonly basePort = PortManager.resolveBasePort();
@@ -203,6 +207,7 @@ export class PortManager {
    * @throws Error if no ports are available
    */
   public static allocate(deviceId: string, options: PortAllocationOptions = {}): number {
+    this.purgeExpiredQuarantines();
     // Return existing allocation
     if (this.allocatedPorts.has(deviceId)) {
       return this.allocatedPorts.get(deviceId)!;
@@ -216,7 +221,11 @@ export class PortManager {
     }
 
     // Find next available port
-    const usedPorts = new Set([...this.allocatedPorts.values(), ...this.cleanupHeldPorts]);
+    const usedPorts = new Set([
+      ...this.allocatedPorts.values(),
+      ...this.cleanupHeldPorts,
+      ...this.quarantinedPorts.keys(),
+    ]);
     const reservedPorts = new Set(options.reservedPorts ?? []);
     const availabilityChecker = options.availabilityChecker ?? this.portAvailabilityChecker;
     const scanEnd = Math.min(65535, this.configuredScanEnd ?? 65535);
@@ -245,7 +254,8 @@ export class PortManager {
     port: number,
     checker: PortAvailabilityChecker = this.portAvailabilityChecker,
   ): boolean {
-    return checker.isPortAvailable(port);
+    this.purgeExpiredQuarantines();
+    return !this.quarantinedPorts.has(port) && checker.isPortAvailable(port);
   }
 
   /**
@@ -272,6 +282,27 @@ export class PortManager {
   /** Release a port held by a completed invalidated-observer cleanup. */
   public static releaseCleanupHold(port: number): void {
     this.cleanupHeldPorts.delete(port);
+  }
+
+  /** Keep an unconfirmed ADB forward out of allocations for a bounded period. */
+  public static quarantine(port: number): void {
+    this.quarantinedPorts.set(port, this.clock.now() + this.QUARANTINE_MS);
+  }
+
+  public static clearQuarantine(port: number): void {
+    if (this.quarantinedPorts.delete(port)) {
+      logger.debug(`[PortManager] Cleared quarantine for port ${port}`);
+    }
+  }
+
+  private static purgeExpiredQuarantines(): void {
+    const now = this.clock.now();
+    for (const [port, expiresAt] of this.quarantinedPorts) {
+      if (now >= expiresAt) {
+        this.quarantinedPorts.delete(port);
+        logger.debug(`[PortManager] Quarantine expired for port ${port}`);
+      }
+    }
   }
 
   /** Release only when this caller still owns the device's allocated port. */
@@ -341,6 +372,8 @@ export class PortManager {
     const count = this.allocatedPorts.size;
     this.allocatedPorts.clear();
     this.cleanupHeldPorts.clear();
+    this.quarantinedPorts.clear();
+    this.clock = defaultTimer;
     logger.info(`[PortManager] Reset all port allocations (cleared ${count} allocations)`);
   }
 
@@ -352,6 +385,10 @@ export class PortManager {
     checker: PortAvailabilityChecker | null,
   ): void {
     this.portAvailabilityChecker = checker ?? new BunPortAvailabilityChecker();
+  }
+
+  public static setClockForTesting(clock: Pick<Timer, "now"> | null): void {
+    this.clock = clock ?? defaultTimer;
   }
 
   /**

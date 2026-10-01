@@ -31,6 +31,7 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
 import { PortManager } from "../../../src/utils/PortManager";
+import { logger } from "../../../src/utils/logger";
 import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
@@ -94,6 +95,7 @@ describe("AndroidCtrlProxyClient", function () {
     // Create fake timer with auto-advance for async event flushing
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    PortManager.setClockForTesting(fakeTimer);
 
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
@@ -230,8 +232,12 @@ describe("AndroidCtrlProxyClient", function () {
     getForwardListOutput: () => string,
     shouldFailRemove: () => boolean = () => false,
     shouldFailList: () => boolean = () => false,
-  ): void => {
+    listingsAfterRemove: number | (() => boolean) = 0,
+  ): { getLastListOutput: () => string } => {
     const executeCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    let removed = false;
+    let remainingListings = listingsAfterRemove;
+    let lastListOutput = "";
     fakeAdb.executeCommand = async (
       command: string,
       timeoutMs?: number,
@@ -243,7 +249,11 @@ describe("AndroidCtrlProxyClient", function () {
         if (shouldFailList()) {
           throw new Error("adb forward listing failed");
         }
-        const stdout = getForwardListOutput();
+        const stillListed =
+          !removed ||
+          (typeof remainingListings === "function" ? remainingListings() : remainingListings-- > 0);
+        const stdout = stillListed ? getForwardListOutput() : "";
+        lastListOutput = stdout;
         return {
           stdout,
           stderr: "",
@@ -255,8 +265,15 @@ describe("AndroidCtrlProxyClient", function () {
       if (command.startsWith("forward --remove") && shouldFailRemove()) {
         throw new Error("adb forward removal failed");
       }
+      if (command.startsWith("forward --remove")) {
+        removed = true;
+      }
+      if (command.startsWith("forward tcp:")) {
+        removed = false;
+      }
       return executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
     };
+    return { getLastListOutput: () => lastListOutput };
   };
 
   const registerTestSingleton = (client: AndroidCtrlProxyClient): void => {
@@ -1147,6 +1164,182 @@ describe("AndroidCtrlProxyClient", function () {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
   });
+
+  test("confirms removal immediately without sleeping before probing the host port", async function () {
+    await accessibilityServiceClient.close();
+    PortManager.reset();
+    PortManager.setClockForTesting(fakeTimer);
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(accessibilityServiceClient);
+    const forwardState = stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
+      () => false,
+      () => false,
+      0,
+    );
+    const checkedPorts: number[] = [];
+    PortManager.setPortAvailabilityCheckerForTesting({
+      isPortAvailable: (port) => {
+        checkedPorts.push(port);
+        // The listener is reusable once ADB confirms the mapping is absent.
+        return port !== 8765 || forwardState.getLastListOutput() === "";
+      },
+    });
+
+    await accessibilityServiceClient.setupPortForwarding();
+
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
+    expect(checkedPorts).toEqual([8765]);
+    expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
+    expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
+  });
+
+  test("keeps the same port when removal settles after 500ms of fake time", async function () {
+    await accessibilityServiceClient.close();
+    PortManager.reset();
+    PortManager.setClockForTesting(fakeTimer);
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
+      () => false,
+      () => false,
+      () => fakeTimer.now() < 500,
+    );
+
+    await accessibilityServiceClient.setupPortForwarding();
+
+    expect(fakeTimer.now()).toBeGreaterThanOrEqual(500);
+    expect(fakeTimer.now()).toBeLessThan(2_000);
+    expect(fakeTimer.getSleepHistory()).toEqual([100, 200, 400]);
+    expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
+    expect(PortManager.isPortAvailable(8765)).toBe(true);
+    expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8767 tcp:8765");
+  });
+
+  test("quarantines a forward that remains listed after bounded removal polling", async function () {
+    await accessibilityServiceClient.close();
+    PortManager.reset();
+    PortManager.setClockForTesting(fakeTimer);
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(accessibilityServiceClient);
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
+      () => false,
+      () => false,
+      Number.POSITIVE_INFINITY,
+    );
+    const warning = spyOn(logger, "warn");
+    try {
+      await expect(accessibilityServiceClient.setupPortForwarding()).rejects.toThrow(
+        "Failed to remove existing CtrlProxy forward on tcp:8765",
+      );
+      expect(fakeTimer.now()).toBe(2_000);
+      expect(fakeTimer.getSleepHistory()).toEqual([100, 200, 400, 800, 500]);
+      expect(
+        warning.mock.calls.some(([message]) =>
+          String(message).includes("remained after removal confirmation"),
+        ),
+      ).toBe(true);
+      await accessibilityServiceClient.close();
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      expect(PortManager.allocate("replacement-device")).not.toBe(8765);
+    } finally {
+      warning.mockRestore();
+      PortManager.release("replacement-device");
+      PortManager.reset();
+    }
+  });
+
+  test("close quarantines an unconfirmed forward before releasing its allocation", async function () {
+    await accessibilityServiceClient.close();
+    PortManager.reset();
+    PortManager.setClockForTesting(fakeTimer);
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    await accessibilityServiceClient.setupPortForwarding();
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
+      () => false,
+      () => false,
+      Number.POSITIVE_INFINITY,
+    );
+    const warning = spyOn(logger, "warn");
+    try {
+      await accessibilityServiceClient.close();
+      expect(
+        warning.mock.calls.some(([message]) =>
+          String(message).includes("remained after removal confirmation"),
+        ),
+      ).toBe(true);
+      expect(PortManager.getPort(testDevice.deviceId)).toBeUndefined();
+      expect(PortManager.allocate("replacement-device")).not.toBe(8765);
+    } finally {
+      warning.mockRestore();
+      PortManager.release("replacement-device");
+      PortManager.reset();
+    }
+  });
+
+  test("clears quarantine when a later listing no longer shows the forward", async function () {
+    PortManager.quarantine(8765);
+    stubForwardLifecycleCommands(() => "");
+    const debug = spyOn(logger, "debug");
+    try {
+      const client = accessibilityServiceClient as unknown as {
+        removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
+      };
+      expect(await client.removeCtrlProxyPortForward(8765)).toBe(true);
+      expect(PortManager.isPortAvailable(8765)).toBe(true);
+      expect(
+        debug.mock.calls.some(([message]) => String(message).includes("Cleared quarantine")),
+      ).toBe(true);
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
+  for (const failure of ["list", "remove"] as const) {
+    test(`does not quarantine when adb forward --${failure} throws`, async function () {
+      stubForwardLifecycleCommands(
+        () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
+        () => failure === "remove",
+        () => failure === "list",
+      );
+      const warning = spyOn(logger, "warn");
+      try {
+        const client = accessibilityServiceClient as unknown as {
+          removeCtrlProxyPortForward: (port: number) => Promise<boolean>;
+        };
+        expect(await client.removeCtrlProxyPortForward(8765)).toBe(false);
+        expect(PortManager.isPortAvailable(8765)).toBe(true);
+        expect(
+          warning.mock.calls.some(([message]) => String(message).includes("Failed to remove")),
+        ).toBe(true);
+      } finally {
+        warning.mockRestore();
+      }
+    });
+  }
 
   test("sweeps a CtrlProxy forward orphaned by a simulated daemon SIGKILL", async function () {
     await accessibilityServiceClient.close();

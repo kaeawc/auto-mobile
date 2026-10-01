@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   buildTapOnResultMessage,
   hitTestHandler,
@@ -25,6 +26,7 @@ import type {
   TapOnSelectedElement,
 } from "../../src/models";
 import { tapOnResultSchema } from "../../src/server/toolOutputSchemas";
+import { ActionableError } from "../../src/models/ActionableError";
 
 const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElement => ({
   text: "",
@@ -393,13 +395,27 @@ describe("hitTestHandler", () => {
     ToolRegistry.clearTools();
   });
 
-  test("registers an opt-in preview with exactly the tapAt input schema", () => {
+  test("registers an opt-in preview with the same strict coordinate inputs as tapAt", () => {
     registerInteractionTools();
     const tool = ToolRegistry.getTool("hitTest");
     expect(tool?.deviceAwareHandler).toBe(hitTestHandler);
     expect(tool?.defaultEnabled).toBe(false);
-    expect(hitTestSchema).toBe(tapAtSchema);
+    const validInput = { x: 1, y: 2, snapshotId: "ref-1" };
+    expect(hitTestSchema.safeParse(validInput).success).toBe(true);
+    expect(tapAtSchema.safeParse(validInput).success).toBe(true);
+    expect(hitTestSchema.safeParse({ ...validInput, unexpected: true }).success).toBe(false);
+    expect(tapAtSchema.safeParse({ ...validInput, unexpected: true }).success).toBe(false);
     expect(hitTestSchema.safeParse({ x: 1, y: 2, selector: "wrong" }).success).toBe(false);
+    const definitions = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
+      name: string;
+      inputSchema?: { description?: string };
+    }>;
+    const description = definitions.find((definition) => definition.name === "hitTest")?.inputSchema
+      ?.description;
+    expect(description).toBe(
+      "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.",
+    );
+    expect(description).not.toContain("Tap one absolute point");
   });
 
   test("observes without screenshot or input and returns an estimate", async () => {
@@ -418,5 +434,24 @@ describe("hitTestHandler", () => {
     expect(getStructuredField(response, "method")).toBe("hierarchy-bounds");
     expect(getStructuredField(response, "dispatchGuaranteed")).toBe(false);
     expect(getStructuredField(response, "deviceId")).toBe("fake");
+  });
+
+  test("rejects an unknown snapshot reference before producing a preview", async () => {
+    const device = { deviceId: "fake-unknown-reference", platform: "android" } as BootedDevice;
+    const observation = loadAndroidHomeObserve().observe;
+    setHitTestObservationFactory(() => ({ execute: async () => observation }));
+
+    const result = await hitTestHandler(device, {
+      x: -1,
+      y: 2,
+      snapshotId: "ref-unknown",
+    }).then(
+      (response) => response,
+      (error: unknown) => error,
+    );
+    expect(result).toBeInstanceOf(ActionableError);
+    expect(result).toMatchObject({
+      message: "Snapshot reference is unknown or evicted; re-observe.",
+    });
   });
 });

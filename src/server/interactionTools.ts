@@ -5,6 +5,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
+import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import { TapAnyElement } from "../features/action/TapAnyElement";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../features/action/DeviceLockStore";
@@ -491,7 +492,7 @@ export const tapOnSchema = withJsonSchemaOverride(
   },
 );
 
-export const tapAtSchema = withJsonSchemaOverride(
+const coordinatePointInputSchema = () =>
   addDeviceTargetingToSchema(
     z
       .object({
@@ -512,15 +513,18 @@ export const tapAtSchema = withJsonSchemaOverride(
         ...responseShapeControlFields,
       })
       .strict(),
-  ),
-  (js) => {
-    js.description =
-      "Tap one absolute point in the platform-native coordinate space returned by observe.";
-  },
-);
+  );
 
-/** The preview takes exactly the same coordinate target as tapAt. */
-export const hitTestSchema = tapAtSchema;
+export const tapAtSchema = withJsonSchemaOverride(coordinatePointInputSchema(), (js) => {
+  js.description =
+    "Tap one absolute point in the platform-native coordinate space returned by observe.";
+});
+
+/** The preview takes the same coordinate target as tapAt without dispatching input. */
+export const hitTestSchema = withJsonSchemaOverride(coordinatePointInputSchema(), (js) => {
+  js.description =
+    "Preview which hierarchy nodes sit beneath one absolute point without dispatching input.";
+});
 
 export const tapAnySchema = withJsonSchemaOverride(
   addDeviceTargetingToSchema(
@@ -1875,6 +1879,16 @@ export async function hitTestHandler(device: BootedDevice, args: TapAtArgs) {
     skipPerformanceAudit: true,
     skipRecompositionTracking: true,
   });
+  if (args.snapshotId) {
+    const staleReason = snapshotReferences.staleReason(
+      args.snapshotId,
+      device.deviceId,
+      observation,
+    );
+    if (staleReason) {
+      throw new ActionableError(staleReason);
+    }
+  }
   const preview = previewHierarchyHitTest(args, observation, device.platform);
   return createStructuredToolResponse({ ...preview, deviceId: device.deviceId });
 }

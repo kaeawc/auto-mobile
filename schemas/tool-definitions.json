@@ -2501,7 +2501,7 @@
       },
       "required": ["x", "y"],
       "additionalProperties": false,
-      "description": "Tap one absolute point in the platform-native coordinate space returned by observe."
+      "description": "Preview which hierarchy nodes sit beneath one absolute point without dispatching input."
     }
   },
   {

@@ -262,10 +262,9 @@ describe("TalkBackTapStrategy", () => {
       expect(result.error).toContain("both failed");
     });
 
-    // Regression for #3918: activation must double-tap the node TalkBack
-    // actually focused (live bounds), not the caller's stored element whose
-    // bounds may be stale.
-    test("activates at the live focused node's coordinates, not the passed element's stale bounds", async () => {
+    // Regression for #3918: activation follows the live focused node even when
+    // its bounds changed after the caller captured the target.
+    test("activates at the live focused node's coordinates after bounds move", async () => {
       // The caller's element carries stale bounds (center 5,5)...
       const staleElement = {
         "resource-id": "test:id/button",
@@ -285,7 +284,6 @@ describe("TalkBackTapStrategy", () => {
       expect(result.success).toBe(true);
       expect(result.method).toBe("focus-navigation");
       expect(driver.getTapCount()).toBe(2);
-      // Both taps land on the live focused node, not (5,5).
       expect(driver.tapHistory[0]).toMatchObject({ x: 600, y: 700 });
       expect(driver.tapHistory[1]).toMatchObject({ x: 600, y: 700 });
     });

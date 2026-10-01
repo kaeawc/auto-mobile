@@ -20,31 +20,7 @@ export class FocusElementMatcher {
     selector: FocusElementSelector,
     options: TextMatchOptions = {},
   ): number | null {
-    if (!elements.length) {
-      return null;
-    }
-
-    const matches = elements
-      .map((element, index) => ({ element, index }))
-      .filter(({ element }) => this.matchesSelector(element, selector, options));
-
-    if (matches.length === 0) {
-      return null;
-    }
-
-    // If bounds are provided in selector and there are multiple matches,
-    // prefer the element with matching bounds (for disambiguation in lists)
-    if (selector.bounds && matches.length > 1) {
-      const boundsMatch = matches.find(({ element }) =>
-        this.boundsMatch(element, selector.bounds!),
-      );
-      if (boundsMatch) {
-        return boundsMatch.index;
-      }
-    }
-
-    const visibleMatch = matches.find(({ element }) => this.isVisible(element));
-    return (visibleMatch ?? matches[0]).index;
+    return this.resolveTargetCandidate(elements, selector, options)?.index ?? null;
   }
 
   findCurrentFocusIndex(currentFocus: Element | null, elements: Element[]): number | null {
@@ -129,10 +105,109 @@ export class FocusElementMatcher {
     return true;
   }
 
+  matchesFocusedTarget(
+    focused: Element,
+    elements: Element[],
+    selector: FocusElementSelector,
+  ): boolean {
+    const candidate = this.resolveTargetCandidate(elements, selector);
+    if (!candidate) {
+      return false;
+    }
+
+    const options = { partialMatch: candidate.partialMatch };
+    if (!this.matchesSelector(focused, selector, options)) {
+      return false;
+    }
+
+    if (candidate.matchCount === 1) {
+      return true;
+    }
+
+    return (
+      focused === candidate.element ||
+      (candidate.element.bounds !== undefined &&
+        this.boundsMatch(focused, candidate.element.bounds))
+    );
+  }
+
   private createTextMatcher(text: string, options: TextMatchOptions): (input?: string) => boolean {
-    const partialMatch = options.partialMatch ?? true;
+    const partialMatch = options.partialMatch ?? false;
     const caseSensitive = options.caseSensitive ?? false;
     return this.textMatcher.createTextMatcher(text, partialMatch, caseSensitive);
+  }
+
+  private findMatches(
+    elements: Element[],
+    selector: FocusElementSelector,
+    options: TextMatchOptions,
+  ): { element: Element; index: number }[] {
+    return elements.flatMap((element, index) =>
+      this.matchesSelector(element, selector, options) ? [{ element, index }] : [],
+    );
+  }
+
+  private resolveTargetCandidate(
+    elements: Element[],
+    selector: FocusElementSelector,
+    options: TextMatchOptions = {},
+  ): { element: Element; index: number; matchCount: number; partialMatch: boolean } | null {
+    const exactMatches = this.findMatches(elements, selector, { ...options, partialMatch: false });
+    const partialMatch = exactMatches.length === 0 && options.partialMatch !== false;
+    const matches = partialMatch
+      ? this.findMatches(elements, selector, { ...options, partialMatch: true })
+      : exactMatches;
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    const selected = this.selectTargetCandidate(matches, selector);
+
+    return { ...selected, matchCount: matches.length, partialMatch };
+  }
+
+  private selectTargetCandidate(
+    matches: { element: Element; index: number }[],
+    selector: FocusElementSelector,
+  ): { element: Element; index: number } {
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    if (!selector.bounds) {
+      return this.firstVisibleOrFirst(matches);
+    }
+
+    const exactBoundsMatch = matches.find(({ element }) =>
+      this.boundsMatch(element, selector.bounds!),
+    );
+    return exactBoundsMatch ?? this.nearestBoundsMatch(matches, selector.bounds);
+  }
+
+  private firstVisibleOrFirst(matches: { element: Element; index: number }[]): {
+    element: Element;
+    index: number;
+  } {
+    return matches.find(({ element }) => this.isVisible(element)) ?? matches[0];
+  }
+
+  private nearestBoundsMatch(
+    matches: { element: Element; index: number }[],
+    bounds: NonNullable<FocusElementSelector["bounds"]>,
+  ): { element: Element; index: number } {
+    let closest: { element: Element; index: number } | undefined;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const match of matches) {
+      if (!match.element.bounds) {
+        continue;
+      }
+      const distance = this.boundsDistance(match.element.bounds, bounds);
+      if (distance < closestDistance) {
+        closest = match;
+        closestDistance = distance;
+      }
+    }
+    return closest ?? this.firstVisibleOrFirst(matches);
   }
 
   private findIndexByValue(
@@ -198,5 +273,16 @@ export class FocusElementMatcher {
       element.bounds.right === bounds.right &&
       element.bounds.bottom === bounds.bottom
     );
+  }
+
+  private boundsDistance(
+    left: { left: number; top: number; right: number; bottom: number },
+    right: { left: number; top: number; right: number; bottom: number },
+  ): number {
+    const leftCenterX = (left.left + left.right) / 2;
+    const leftCenterY = (left.top + left.bottom) / 2;
+    const rightCenterX = (right.left + right.right) / 2;
+    const rightCenterY = (right.top + right.bottom) / 2;
+    return (leftCenterX - rightCenterX) ** 2 + (leftCenterY - rightCenterY) ** 2;
   }
 }

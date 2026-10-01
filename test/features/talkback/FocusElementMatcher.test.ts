@@ -85,3 +85,89 @@ describe("FocusElementMatcher.findCurrentFocusIndex", () => {
     );
   });
 });
+
+describe("FocusElementMatcher.matchesSelector", () => {
+  const matcher = new FocusElementMatcher();
+  const boundsA = { left: 0, top: 0, right: 5, bottom: 5 };
+  const boundsB = { left: 10, top: 10, right: 15, bottom: 15 };
+
+  test("matches text exactly by default", () => {
+    expect(matcher.matchesSelector({ text: "Save as draft" }, { text: "Save" })).toBe(false);
+    expect(matcher.matchesSelector({ text: "Save" }, { text: "Save" })).toBe(true);
+  });
+
+  test("allows substring text matching only when requested", () => {
+    expect(
+      matcher.matchesSelector({ text: "Save as draft" }, { text: "Save" }, { partialMatch: true }),
+    ).toBe(true);
+  });
+
+  test("does not require bounds to match when identifying a target", () => {
+    expect(
+      matcher.matchesSelector({ text: "Save", bounds: boundsA }, { text: "Save", bounds: boundsB }),
+    ).toBe(true);
+    expect(matcher.matchesSelector({ text: "Save" }, { text: "Save", bounds: boundsB })).toBe(true);
+    expect(
+      matcher.matchesSelector({ text: "Save", bounds: boundsB }, { text: "Save", bounds: boundsB }),
+    ).toBe(true);
+  });
+});
+
+describe("FocusElementMatcher.findTargetIndex", () => {
+  const boundsA = { left: 0, top: 0, right: 5, bottom: 5 };
+  const boundsB = { left: 10, top: 10, right: 15, bottom: 15 };
+
+  test("prefers an exact text match over an earlier substring match", () => {
+    const matcher = new FocusElementMatcher();
+    const elements = [
+      { text: "Save as draft", bounds: { left: 0, top: 0, right: 5, bottom: 5 } },
+      { text: "Save", bounds: { left: 10, top: 10, right: 15, bottom: 15 } },
+    ];
+
+    expect(matcher.findTargetIndex(elements, { text: "Save" })).toBe(1);
+  });
+
+  test("prefers the bounds match among duplicate exact text matches", () => {
+    const matcher = new FocusElementMatcher();
+    const elements = [
+      { text: "Save", bounds: boundsA },
+      { text: "Save", bounds: boundsB },
+    ];
+
+    expect(matcher.findTargetIndex(elements, { text: "Save", bounds: boundsB })).toBe(1);
+  });
+
+  test("uses the nearest duplicate for discovery and arrival when selector bounds are stale", () => {
+    const matcher = new FocusElementMatcher();
+    const first: Element = { text: "Save", bounds: boundsA };
+    const nearest: Element = { text: "Save", bounds: boundsB };
+    const elements = [first, nearest];
+    const selector = { text: "Save", bounds: { left: 8, top: 8, right: 13, bottom: 13 } };
+
+    expect(matcher.findTargetIndex(elements, selector)).toBe(1);
+    expect(matcher.matchesFocusedTarget(first, elements, selector)).toBe(false);
+    expect(matcher.matchesFocusedTarget(nearest, elements, selector)).toBe(true);
+  });
+
+  test("uses the first duplicate for discovery and arrival when selector bounds are absent", () => {
+    const matcher = new FocusElementMatcher();
+    const first: Element = { text: "Save" };
+    const second: Element = { text: "Save" };
+    const elements = [first, second];
+
+    expect(matcher.findTargetIndex(elements, { text: "Save" })).toBe(0);
+    expect(matcher.matchesFocusedTarget(first, elements, { text: "Save" })).toBe(true);
+    expect(matcher.matchesFocusedTarget(second, elements, { text: "Save" })).toBe(false);
+  });
+
+  test("accepts a unique text match when its bounds moved", () => {
+    const matcher = new FocusElementMatcher();
+
+    expect(
+      matcher.findTargetIndex([{ text: "Save", bounds: boundsB }], {
+        text: "Save",
+        bounds: boundsA,
+      }),
+    ).toBe(0);
+  });
+});

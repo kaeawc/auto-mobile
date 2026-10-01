@@ -376,7 +376,7 @@ export class FocusNavigationExecutor {
     }
 
     const reachedTarget = currentFocus
-      ? this.matcher.matchesSelector(currentFocus, targetSelector)
+      ? this.matcher.matchesFocusedTarget(currentFocus, orderedElements, targetSelector)
       : false;
 
     return {

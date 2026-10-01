@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import java.util.Random
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -922,6 +923,79 @@ class ViewHierarchyExtractorTest {
           "OcclusionInfo(coverage=0.5, occludedBy=system-ui, occludedByViewId=system-ui-id)",
         "NodeKey(windowKey=1, path=0)" to
           "OcclusionInfo(coverage=0.5, occludedBy=system-ui, occludedByViewId=system-ui-id)",
+      ),
+      info.mapKeys { it.key.toString() }.mapValues { it.value.toString() },
+    )
+  }
+
+  @Test
+  fun `union area matches original sweep for synthetic and seeded rectangles`() {
+    val fixtures =
+      listOf(
+        emptyList(),
+        listOf(bounds(0, 0, 10, 10), bounds(5, 5, 15, 15)), // overlapping
+        listOf(bounds(0, 0, 20, 20), bounds(5, 5, 10, 10)), // nested
+        listOf(bounds(0, 0, 10, 10), bounds(20, 20, 30, 30)), // disjoint
+        listOf(bounds(0, 0, 10, 10), bounds(10, 0, 20, 10)), // touching edges
+        listOf(bounds(0, 0, 10, 10), bounds(0, 0, 10, 10)), // identical duplicates
+        listOf(bounds(0, 0, 10, 5), bounds(0, 0, 10, 10), bounds(0, 0, 10, 5)),
+      )
+    val random = Random(6623L)
+    val randomFixtures =
+      (0 until 40).map {
+        (0 until random.nextInt(9)).map {
+          val left = random.nextInt(21) - 10
+          val top = random.nextInt(21) - 10
+          bounds(left, top, left + random.nextInt(11), top + random.nextInt(11))
+        }
+      }
+
+    for (rectangles in fixtures + randomFixtures) {
+      for (maxArea in listOf(null, 0, 1, 25, 95, 1000)) {
+        assertEquals(
+          "rectangles=$rectangles maxArea=$maxArea",
+          originalCalculateUnionArea(rectangles, maxArea),
+          extractor.calculateUnionArea(rectangles, maxArea),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `multi-window overlapping nested and disjoint nodes retain coverage`() {
+    val app =
+      elementWithBounds(
+        resourceId = "app",
+        bounds = bounds(0, 0, 100, 100),
+        children =
+          listOf(
+            elementWithBounds(resourceId = "nested-target", bounds = bounds(0, 0, 50, 100)),
+            elementWithBounds(resourceId = "disjoint-target", bounds = bounds(80, 0, 100, 100)),
+          ),
+      )
+    val overlapping =
+      elementWithBounds(
+        resourceId = "overlapping",
+        bounds = bounds(0, 0, 40, 100),
+        children =
+          listOf(elementWithBounds(resourceId = "nested-cover", bounds = bounds(10, 0, 20, 100))),
+      )
+    val disjoint = elementWithBounds(resourceId = "disjoint", bounds = bounds(60, 0, 80, 100))
+    val info =
+      extractor.buildOcclusionInfoForTest(
+        listOf(
+          extractor.createWindowEntry(1, 0, app),
+          extractor.createWindowEntry(2, 1, overlapping),
+          extractor.createWindowEntry(3, 2, disjoint),
+        )
+      )
+
+    assertEquals(
+      mapOf(
+        "NodeKey(windowKey=1, path=)" to
+          "OcclusionInfo(coverage=0.6, occludedBy=overlapping, occludedByViewId=overlapping)",
+        "NodeKey(windowKey=1, path=0)" to
+          "OcclusionInfo(coverage=0.8, occludedBy=overlapping, occludedByViewId=overlapping)",
       ),
       info.mapKeys { it.key.toString() }.mapValues { it.value.toString() },
     )
@@ -2554,6 +2628,74 @@ class ViewHierarchyExtractorTest {
 
   private fun bounds(left: Int, top: Int, right: Int, bottom: Int): ElementBounds {
     return ElementBounds(left, top, right, bottom)
+  }
+
+  private fun originalCalculateUnionArea(
+    rectangles: List<ElementBounds>,
+    maxArea: Int? = null,
+  ): Int {
+    data class Event(val x: Int, val y1: Int, val y2: Int, val delta: Int)
+
+    val events =
+      rectangles
+        .flatMap { rect ->
+          listOf(
+            Event(rect.left, rect.top, rect.bottom, 1),
+            Event(rect.right, rect.top, rect.bottom, -1),
+          )
+        }
+        .sortedBy { it.x }
+
+    if (events.isEmpty()) return 0
+
+    val activeIntervals = mutableListOf<Pair<Int, Int>>()
+    var previousX = events.first().x
+    var area = 0
+
+    fun activeUnionLength(): Int {
+      if (activeIntervals.isEmpty()) return 0
+      val sorted = activeIntervals.sortedBy { it.first }
+      var total = 0
+      var currentStart = sorted[0].first
+      var currentEnd = sorted[0].second
+
+      for (i in 1 until sorted.size) {
+        val (start, end) = sorted[i]
+        if (start > currentEnd) {
+          total += currentEnd - currentStart
+          currentStart = start
+          currentEnd = end
+        } else {
+          currentEnd = maxOf(currentEnd, end)
+        }
+      }
+      total += currentEnd - currentStart
+      return total
+    }
+
+    for (event in events) {
+      val dx = event.x - previousX
+      if (dx > 0 && activeIntervals.isNotEmpty()) {
+        val unionLength = activeUnionLength()
+        area += unionLength * dx
+        if (maxArea != null && area >= maxArea) {
+          return area
+        }
+      }
+
+      if (event.delta > 0) {
+        activeIntervals.add(event.y1 to event.y2)
+      } else {
+        val index = activeIntervals.indexOfFirst { it.first == event.y1 && it.second == event.y2 }
+        if (index >= 0) {
+          activeIntervals.removeAt(index)
+        }
+      }
+
+      previousX = event.x
+    }
+
+    return area
   }
 
   private fun composeRootWithHiddenBoundary(boundaryBounds: ElementBounds): UIElementInfo {

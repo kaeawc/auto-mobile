@@ -55,6 +55,7 @@ function observation(
 function createAndroidTapAtWithClient(
   observations: ObserveResult[],
   androidClient: CoordinateTapClient,
+  snapshotReferences?: SnapshotReferenceStore,
 ) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveSequence(observations);
@@ -63,6 +64,7 @@ function createAndroidTapAtWithClient(
     timer: new FakeTimer(),
     androidClient,
     iosClient: androidClient,
+    snapshotReferences,
   });
   tapAt.observeScreen = observeScreen;
   return { tapAt, observeScreen, adb };
@@ -327,12 +329,46 @@ describe("TapAtCoordinate", () => {
     expect(timer.now() - start).toBeGreaterThanOrEqual(200);
   });
 
-  test("rejects changed snapshot frame context and geometry before dispatch", async () => {
+  test("reuses a snapshot after a tap when only the event frame token advances", async () => {
     const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
     const captured = {
       ...observation(100, 100),
       display: { key: "main", role: "unknown" as const },
       displayRevision: 0,
+      activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+    } as ObserveResult;
+    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(
+      androidDevice,
+      100,
+      100,
+      undefined,
+      undefined,
+      references,
+    );
+    observeScreen.setObserveResult(captured);
+    expect(await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId })).toMatchObject({
+      success: true,
+    });
+    observeScreen.setObserveResult({
+      ...captured,
+      displayRevision: 0,
+      activeWindow: { ...captured.activeWindow!, layoutSeqSum: 2 },
+      viewHierarchy: { ...captured.viewHierarchy!, frameContext: "frame-124", captureSequence: 2 },
+    });
+    expect(await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId })).toMatchObject({
+      success: true,
+    });
+    expect(androidDispatches).toHaveLength(2);
+  });
+
+  test("rejects changed snapshot activity and geometry before dispatch", async () => {
+    const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const captured = {
+      ...observation(100, 100),
+      display: { key: "main", role: "unknown" as const },
+      displayRevision: 0,
+      activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
     } as ObserveResult;
     const reference = references.capture(androidDevice.deviceId, captured)!;
     const { tapAt, observeScreen, androidDispatches } = createTapAt(
@@ -345,17 +381,84 @@ describe("TapAtCoordinate", () => {
     );
     observeScreen.setObserveResult({
       ...captured,
-      viewHierarchy: { ...captured.viewHierarchy!, frameContext: "next" },
+      activeWindow: { ...captured.activeWindow!, activityName: ".Settings" },
     });
     const staleFrame = await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId });
     expect(staleFrame).toMatchObject({
       success: false,
-      error: expect.stringContaining("frameContext"),
+      error: expect.stringContaining("activityName"),
     });
     observeScreen.setObserveResult({ ...captured, screenSize: { width: 20, height: 100 } });
     const resized = await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId });
     expect(resized).toMatchObject({ success: false, error: expect.stringContaining("width") });
     expect(androidDispatches).toEqual([]);
+  });
+
+  test("retries a snapshot tap once with a freshly validated Android token", async () => {
+    const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const initial = {
+      ...observation(100, 200, "epoch:1"),
+      display: { key: "main", role: "unknown" as const },
+      activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+    } as ObserveResult;
+    const refreshed = {
+      ...initial,
+      viewHierarchy: { ...initial.viewHierarchy!, frameContext: "epoch:2" },
+    };
+    const reference = references.capture(androidDevice.deviceId, initial)!;
+    const dispatches: string[] = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push(frameContext ?? "missing");
+        return dispatches.length === 1
+          ? { success: false, error: "Stale frame context for input/tap" }
+          : { success: true };
+      },
+    };
+    const { tapAt, observeScreen } = createAndroidTapAtWithClient(
+      [initial, refreshed],
+      client,
+      references,
+    );
+    expect(await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId })).toMatchObject({
+      success: true,
+    });
+    expect(dispatches).toEqual(["epoch:1", "epoch:2"]);
+    expect(
+      observeScreen
+        .getExecuteOptions()
+        .slice(0, 2)
+        .map((item) => item.freshness),
+    ).toEqual(["cached-ok", "fresh"]);
+  });
+
+  test("does not redispatch a snapshot tap after fresh observation changes activity", async () => {
+    const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const initial = {
+      ...observation(100, 200, "epoch:1"),
+      display: { key: "main", role: "unknown" as const },
+      activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
+    } as ObserveResult;
+    const refreshed = {
+      ...initial,
+      activeWindow: { ...initial.activeWindow!, activityName: ".Settings" },
+      viewHierarchy: { ...initial.viewHierarchy!, frameContext: "epoch:2" },
+    };
+    const reference = references.capture(androidDevice.deviceId, initial)!;
+    const dispatches: string[] = [];
+    const client: CoordinateTapClient = {
+      requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
+        dispatches.push(frameContext ?? "missing");
+        return { success: false, error: "Stale frame context for input/tap" };
+      },
+    };
+    const { tapAt } = createAndroidTapAtWithClient([initial, refreshed], client, references);
+    const result = await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId });
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("activityName changed"),
+    });
+    expect(dispatches).toEqual(["epoch:1"]);
   });
 
   test("rejects the caller's old coordinates when another path detected the fold first", async () => {

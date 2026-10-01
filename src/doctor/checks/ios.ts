@@ -31,6 +31,13 @@ import {
 } from "../../utils/ios-cmdline-tools/SecurityClient";
 import type { DoctorProbeOptions } from "../types";
 import { awaitDoctorProbe, remainingDoctorProbe } from "../deadline";
+import { checkDevicectlAvailability } from "../../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import {
+  formatCoreDeviceVersion,
+  parseCoreDeviceVersion,
+  REQUIRED_SIMULATOR_COREDEVICE_VERSION,
+} from "../../utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
+import { compareSimctlVersions } from "../../utils/ios-cmdline-tools/simctlVersion";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -724,6 +731,97 @@ export async function checkSimctlAvailable(
   }
 }
 
+export type CoreDeviceDiagnostic =
+  | { status: "meets-requirement"; version: string }
+  | { status: "below-required"; version: string }
+  | { status: "non-darwin"; reason: string }
+  | { status: "missing"; reason: string }
+  | { status: "unparsable"; reason: string };
+
+/** Read only the version; the simulator boot and downgrade-guard seams are not wired. */
+export async function probeCoreDeviceVersion(
+  dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
+): Promise<CoreDeviceDiagnostic> {
+  if (dependencies.platform() !== "darwin") {
+    return { status: "non-darwin", reason: "iOS development requires macOS" };
+  }
+  const availability = await checkDevicectlAvailability({
+    platform: dependencies.platform,
+    invoke: dependencies.execFile,
+    logger: dependencies.logger,
+    probe: remainingDoctorProbe(probe),
+  });
+  if (availability.status !== "pass") {
+    return { status: "missing", reason: availability.message };
+  }
+  const version = parseCoreDeviceVersion(String(availability.value ?? ""));
+  if (!version) {
+    const reason = "devicectl returned an unrecognized CoreDevice version";
+    dependencies.logger.warn(`CoreDevice version check failed: ${reason}`);
+    return { status: "unparsable", reason };
+  }
+  return {
+    status:
+      compareSimctlVersions(version, REQUIRED_SIMULATOR_COREDEVICE_VERSION) >= 0
+        ? "meets-requirement"
+        : "below-required",
+    version: formatCoreDeviceVersion(version),
+  };
+}
+
+export async function checkCoreDeviceVersion(
+  dependencies = createIosDoctorDependencies(),
+  probe: DoctorProbeOptions = {},
+): Promise<CheckResult> {
+  const name = "CoreDevice";
+  const required = formatCoreDeviceVersion(REQUIRED_SIMULATOR_COREDEVICE_VERSION);
+  const unchecked = "simulator boot state and downgrade guard not checked";
+  const unavailable =
+    "devicectl-only simulator features will be unavailable; simctl-based features are unaffected";
+  try {
+    const result = await probeCoreDeviceVersion(dependencies, probe);
+    if (result.status === "non-darwin") {
+      return { name, status: "skip", message: `${result.reason}; ${unchecked}` };
+    }
+    if (result.status === "missing") {
+      return {
+        name,
+        status: "warn",
+        message: `devicectl missing: ${result.reason}; ${unavailable}; ${unchecked}`,
+      };
+    }
+    if (result.status === "unparsable") {
+      return {
+        name,
+        status: "warn",
+        message: `CoreDevice version unreadable: ${result.reason}; ${unavailable}; ${unchecked}`,
+      };
+    }
+    if (result.status === "below-required") {
+      return {
+        name,
+        status: "warn",
+        message: `CoreDevice ${result.version} installed (below required); requires CoreDevice >= ${required}; ${unavailable}; ${unchecked}`,
+        value: result.version,
+      };
+    }
+    return {
+      name,
+      status: "pass",
+      message: `CoreDevice ${result.version} installed (requires CoreDevice >= ${required}); ${unchecked}`,
+      value: result.version,
+    };
+  } catch (error) {
+    dependencies.logger.warn(`CoreDevice version check failed: ${errorMessage(error)}`, error);
+    return {
+      name,
+      status: "warn",
+      message: `CoreDevice version unreadable: ${errorMessage(error)}; ${unavailable}; ${unchecked}`,
+    };
+  }
+}
+
 /**
  * Check available iOS simulator runtimes
  */
@@ -1329,6 +1427,7 @@ export async function runIosChecks(
   await run(() => checkXcodeCommandLineTools(options, dependencies));
   await run(() => checkXcrunAvailable(dependencies, options));
   await run(() => checkSimctlAvailable(dependencies, options));
+  await run(() => checkCoreDeviceVersion(dependencies, options));
   await run(() => checkSimulatorRuntimes(dependencies, options));
   await run(() => checkSecurityCli(dependencies, options));
   await run(() => checkCodeSigning(dependencies, options));
@@ -1357,6 +1456,7 @@ export async function runPostRepairIosChecks(
   await run(() => checkXcodeCommandLineTools(options, dependencies));
   await run(() => checkXcrunAvailable(dependencies, options));
   await run(() => checkSimctlAvailable(dependencies, options));
+  await run(() => checkCoreDeviceVersion(dependencies, options));
   await run(() => checkSimulatorRuntimes(dependencies, options));
   return results;
 }

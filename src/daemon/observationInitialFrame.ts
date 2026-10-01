@@ -19,6 +19,9 @@ import {
 } from "../features/observe/ScreenshotMetadata";
 import { readScreenScaleMetadata } from "../models/ScreenScaleMetadata";
 import { COORDINATE_SPACE_PX } from "./canonicalPixels";
+import type { PassiveWorkPolicy } from "./PassiveWorkPolicy";
+
+export type ObservationStreamPolicy = Pick<PassiveWorkPolicy, "allows">;
 
 const INITIAL_FRAME_HIERARCHY_TIMEOUT_MS = 3_000;
 const INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS = 3_000;
@@ -32,6 +35,21 @@ export interface ObservationStreamDevice {
   id: string;
   name: string;
   platform: Platform;
+}
+
+/** Select devices whose initial observation stream connection is passive-work eligible. */
+export function selectObservationStreamDevices(
+  devices: readonly ObservationStreamDevice[],
+  policy: ObservationStreamPolicy,
+  onSkipped?: (device: ObservationStreamDevice) => void,
+): ObservationStreamDevice[] {
+  return devices.filter((device) => {
+    if (policy.allows(device.platform, "observation-stream", device.id)) {
+      return true;
+    }
+    onSkipped?.(device);
+    return false;
+  });
 }
 
 export interface ObservationStreamAndroidClient {

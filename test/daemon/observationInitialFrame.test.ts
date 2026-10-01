@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   pushInitialObservationFramesForSubscriber,
+  selectObservationStreamDevices,
   type ObservationStreamAndroidClient,
   type ObservationStreamDevice,
   type ObservationStreamIosClient,
@@ -17,6 +18,7 @@ import type {
   CtrlProxyScreenshotResult,
 } from "../../src/features/observe/ios/types";
 import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
+import { PassiveWorkPolicy, parsePassiveWorkSettings } from "../../src/daemon/PassiveWorkPolicy";
 
 class FakeObservationStreamServer {
   constructor(private readonly captureSequence: number | null = null) {}
@@ -308,6 +310,50 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     name: "iPhone",
     platform: "ios",
   };
+
+  it("selects only owned or allowlisted devices for the observation stream", () => {
+    const allowlisted: ObservationStreamDevice = {
+      id: "ios-sim-2",
+      name: "Allowlisted iPhone",
+      platform: "ios",
+    };
+    const unowned: ObservationStreamDevice = {
+      id: "ios-sim-3",
+      name: "Unowned iPhone",
+      platform: "ios",
+    };
+    const devices = [iosDevice, allowlisted, unowned];
+    const skipped: ObservationStreamDevice[] = [];
+    const policyFor = (env: NodeJS.ProcessEnv) =>
+      new PassiveWorkPolicy(
+        parsePassiveWorkSettings(env, "AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET"),
+        (id) => id === iosDevice.id,
+      );
+    const select = (policy: PassiveWorkPolicy) =>
+      selectObservationStreamDevices(devices, policy, (device) => skipped.push(device));
+
+    expect(select(policyFor({})).map((device) => device.id)).toEqual([iosDevice.id]);
+    expect(skipped.map((device) => device.id)).toEqual([allowlisted.id, unowned.id]);
+
+    skipped.length = 0;
+    expect(
+      select(policyFor({ AUTOMOBILE_IOS_WARMUP_DEVICES: allowlisted.id })).map(
+        (device) => device.id,
+      ),
+    ).toEqual([iosDevice.id, allowlisted.id]);
+    expect(skipped.map((device) => device.id)).toEqual([unowned.id]);
+
+    skipped.length = 0;
+    expect(
+      select(
+        policyFor({
+          AUTOMOBILE_IOS_WARMUP_DEVICES: allowlisted.id,
+          AUTOMOBILE_DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET: "acceptance-secret",
+        }),
+      ),
+    ).toEqual([]);
+    expect(skipped.map((device) => device.id)).toEqual(devices.map((device) => device.id));
+  });
 
   it("pushes current Android hierarchy and screenshot after subscriber connects", async () => {
     const streamServer = new FakeObservationStreamServer();

@@ -22,6 +22,7 @@ import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
+import { executeTouchscreenInput } from "./touchscreenInput";
 import { logger } from "../../utils/logger";
 import { serverConfig } from "../../utils/ServerConfig";
 import {
@@ -103,11 +104,10 @@ export class DragAndDrop extends BaseVisualChange {
     const end = this.geometry.getElementCenter(destination);
     const duration = options.dragDurationMs ?? 600;
     target.assertCurrent();
-    await this.adb.executeCommand(
-      `shell input -d ${target.displayId} touchscreen draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
-      undefined,
-      undefined,
-      undefined,
+    await executeTouchscreenInput(
+      this.adb,
+      `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
+      target.displayId,
       signal,
     );
     const after = await this.observeScreen.execute({

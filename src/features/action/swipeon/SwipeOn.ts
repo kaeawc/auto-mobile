@@ -60,6 +60,7 @@ import { buildContainerFromElement } from "../../../utils/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
+import { executeTouchscreenInput } from "../touchscreenInput";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -261,11 +262,10 @@ export class SwipeOn extends BaseVisualChange {
     const duration = options.duration ?? 300;
     target.assertCurrent();
     throwIfAborted(signal);
-    await this.adb.executeCommand(
-      `shell input -d ${target.displayId} touchscreen swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
-      undefined,
-      undefined,
-      undefined,
+    await executeTouchscreenInput(
+      this.adb,
+      `swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+      target.displayId,
       signal,
     );
     const after = await this.observeScreen.execute({

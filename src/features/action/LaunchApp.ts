@@ -21,6 +21,7 @@ import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
+import { resolveIosLaunchBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
@@ -470,6 +471,10 @@ export class LaunchApp extends BaseVisualChange {
           // Simulators launch/terminate via simctl; physical devices via devicectl
           // (parity with installApp/uninstallApp). Resolve once so cold and warm
           // paths agree on the transport.
+          const backend = resolveIosLaunchBackend(this.device.deviceId, {
+            simctl: this.simctl,
+            deviceAppLauncher: this.deviceAppLauncher,
+          });
           const simulator = this.isSimulator();
 
           if (needsColdStart) {
@@ -527,26 +532,14 @@ export class LaunchApp extends BaseVisualChange {
               bundleId,
             );
             launchResult = await perf.track("launch", () =>
-              simulator
-                ? this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
-                : // devicectl has no foreground-if-running verb; --terminate-existing
-                  // gives cold-boot relaunch semantics (a fresh process foregrounds).
-                  this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, {
-                    terminateExisting: true,
-                  }),
+              backend.launchApp(bundleId, { foregroundIfRunning: false }),
             );
             this.assertLaunchNotAborted(signal);
           } else {
             // Warm launch. Simulator: simctl launch foregrounds a backgrounded app
             // and is faster than the CtrlProxy WebSocket round-trip (~4-5s). Device:
             // devicectl has no foreground verb, so relaunch via --terminate-existing.
-            launchResult = await perf.track("launch", () =>
-              simulator
-                ? this.simctl.launchApp(bundleId)
-                : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, {
-                    terminateExisting: true,
-                  }),
-            );
+            launchResult = await perf.track("launch", () => backend.launchApp(bundleId));
             this.assertLaunchNotAborted(signal);
 
             if (!launchResult.success) {

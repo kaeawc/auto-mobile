@@ -1955,7 +1955,11 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(ack?.success).toBe(true);
     });
 
-    it("acknowledges update_cadence even when the socket has no active subscription", async () => {
+    it("rejects update_cadence when the socket has no active subscription", async () => {
+      const changedScreenshot: Array<string | null> = [];
+      const changedHierarchy: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged((deviceId) => changedScreenshot.push(deviceId));
+      server.setOnHierarchyCadenceChanged((deviceId) => changedHierarchy.push(deviceId));
       const socket = new FakeSocket();
 
       await server.processLineForTest(
@@ -1969,12 +1973,99 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      const ack = socket
-        .getWrittenMessages<{ id?: string; type: string; success?: boolean }>()
-        .find((message) => message.id === "upd-no-sub");
-      expect(ack?.type).toBe("subscription_response");
-      expect(ack?.success).toBe(true);
-      expect((server as any).subscribers.size).toBe(0);
+      const response = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(response).toHaveLength(1);
+      expect(response[0]).toMatchObject({
+        id: "upd-no-sub",
+        type: "error",
+        success: false,
+      });
+      expect(response[0].error).toContain("devicedatastream-missing");
+      expect(response[0].error).toContain("resubscribe");
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(changedScreenshot).toEqual([]);
+      expect(changedHierarchy).toEqual([]);
+    });
+
+    it("rejects update_cadence after its subscription has been unsubscribed", async () => {
+      const changedScreenshot: Array<string | null> = [];
+      const changedHierarchy: Array<string | null> = [];
+      server.setOnScreenshotCadenceChanged((deviceId) => changedScreenshot.push(deviceId));
+      server.setOnHierarchyCadenceChanged((deviceId) => changedHierarchy.push(deviceId));
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "sub", command: "subscribe", deviceId: "device-1" }),
+      );
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "unsub",
+          command: "unsubscribe",
+          subscriptionId: "devicedatastream-1",
+        }),
+      );
+      changedScreenshot.length = 0;
+      changedHierarchy.length = 0;
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "upd-reaped",
+          command: "update_cadence",
+          subscriptionId: "devicedatastream-1",
+          screenshotIntervalMs: 500,
+        }),
+      );
+
+      expect(
+        socket.getWrittenMessages<{
+          id?: string;
+          type: string;
+          success?: boolean;
+          error?: string;
+        }>(),
+      ).toContainEqual({
+        id: "upd-reaped",
+        type: "error",
+        success: false,
+        error:
+          "subscriptionId 'devicedatastream-1' is not active; resubscribe before updating cadence",
+      });
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(changedScreenshot).toEqual([]);
+      expect(changedHierarchy).toEqual([]);
+    });
+
+    it("rejects update_cadence when subscriptionId is omitted", async () => {
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({ id: "upd-no-id", command: "update_cadence", screenshotIntervalMs: 500 }),
+      );
+
+      expect(
+        socket.getWrittenMessages<{
+          id?: string;
+          type: string;
+          success?: boolean;
+          error?: string;
+        }>(),
+      ).toEqual([
+        {
+          id: "upd-no-id",
+          type: "error",
+          success: false,
+          error: "subscriptionId is required; resubscribe before updating cadence",
+        },
+      ]);
+      expect(server.getSubscriberCount()).toBe(0);
     });
   });
 

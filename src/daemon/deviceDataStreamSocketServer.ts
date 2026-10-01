@@ -1063,24 +1063,33 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     // Update the requested cadence for an existing subscription in place, without a
     // resubscribe (which would leak a duplicate subscriber and re-trigger backfill). Lets a
     // subscriber raise the cadence while it is actively viewing the device and relax it when
-    // backgrounded. Unknown to older daemons, which reply with a benign "unknown command" error.
+    // backgrounded. Older daemons reply with a benign "unknown command" error.
     if (request.command === "update_cadence") {
       const filter = request.subscriptionId
         ? this.findSubscriber(socket, request.subscriptionId)?.filter
         : undefined;
-      if (filter) {
-        filter.screenshotIntervalMs = this.parseScreenshotIntervalMs(request.screenshotIntervalMs);
-        filter.hierarchyIntervalMs = this.parseHierarchyIntervalMs(request.hierarchyIntervalMs);
+      if (!filter) {
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: request.subscriptionId
+            ? `subscriptionId '${request.subscriptionId}' is not active; resubscribe before updating cadence`
+            : "subscriptionId is required; resubscribe before updating cadence",
+        };
+        this.sendJson(socket, errorResponse);
+        return;
       }
+
+      filter.screenshotIntervalMs = this.parseScreenshotIntervalMs(request.screenshotIntervalMs);
+      filter.hierarchyIntervalMs = this.parseHierarchyIntervalMs(request.hierarchyIntervalMs);
       const response: SubscriptionResponse = {
         id: request.id,
         type: "subscription_response",
         success: true,
       };
       this.sendJson(socket, response);
-      if (filter) {
-        this.notifyCadenceChangedForFilter(filter);
-      }
+      this.notifyCadenceChangedForFilter(filter);
       return;
     }
 

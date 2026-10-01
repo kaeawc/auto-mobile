@@ -112,8 +112,10 @@ export class OverlayDetector implements OverlayAnalyzer {
               containerBounds,
             )
           ) {
-            insideContainer = true;
-            containerDepth = depth;
+            if (!insideContainer) {
+              insideContainer = true;
+              containerDepth = depth;
+            }
             return;
           }
 

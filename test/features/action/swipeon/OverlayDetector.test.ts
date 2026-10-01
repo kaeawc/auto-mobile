@@ -66,6 +66,29 @@ describe("OverlayDetector.collectOverlayCandidates container ancestors (#6128)",
     expect(overlays).toEqual([]);
   });
 
+  test("a nested same-selector node does not end the container before a later child", () => {
+    const nestedListBounds = b(100, 100, 900, 500);
+    const listNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" }, [
+      node(nestedListBounds, { "resource-id": "list" }, [
+        node(b(100, 100, 900, 200), { "resource-id": "leaf" }),
+      ]),
+      node(b(0, 1900, 1000, 2000), { "resource-id": "row", clickable: "true" }),
+    ]);
+    const hierarchy = {
+      hierarchy: {
+        node: [listNode],
+      },
+    };
+
+    const overlays = detector().collectOverlayCandidates(
+      hierarchy as any,
+      { elementId: "list" },
+      listElement,
+    );
+
+    expect(overlays).toEqual([]);
+  });
+
   test("a genuine clickable sibling under a clickable root is still an overlay, and only it", () => {
     const fabBounds = b(800, 1700, 1000, 1900);
     const listNode = node(LIST_BOUNDS, { "resource-id": "list", scrollable: "true" });

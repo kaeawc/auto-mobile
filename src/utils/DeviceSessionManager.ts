@@ -263,6 +263,7 @@ export interface DeviceSessionManager {
    * Detect the platform of connected devices
    */
   detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]>;
+  detectConnectedPlatformsWithStatus(signal?: AbortSignal): Promise<ConnectedPlatformScan>;
 
   /**
    * Verify a specific device is connected and ready for the given platform.
@@ -302,6 +303,11 @@ export interface DeviceSessionManager {
   findOrStartIosDevice(options?: DeviceReadyOptions): Promise<BootedDevice>;
 }
 
+export interface ConnectedPlatformScan {
+  devices: BootedDevice[];
+  scanned: Record<Platform, boolean>;
+}
+
 export type DeviceReadinessLevel = "booted" | "automationReady";
 
 /**
@@ -327,7 +333,7 @@ export interface DeviceReadyOptions {
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
-  getConnectedPlatforms?: () => Promise<BootedDevice[]>;
+  getConnectedPlatforms?: () => Promise<ConnectedPlatformScan | BootedDevice[]>;
   /**
    * `booted` verifies only that the target is connected and booted.
    * `automationReady` additionally prepares CtrlProxy. Defaults to
@@ -491,7 +497,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * Detect the platform of connected devices
    */
   public async detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]> {
+    return (await this.detectConnectedPlatformsWithStatus(signal)).devices;
+  }
+
+  public async detectConnectedPlatformsWithStatus(
+    signal?: AbortSignal,
+  ): Promise<ConnectedPlatformScan> {
     const devices: BootedDevice[] = [];
+    const scanned = { android: false, ios: false };
     const perf = createGlobalPerformanceTracker();
 
     try {
@@ -500,6 +513,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       const androidDevices = await this.adb.getBootedAndroidDevices({ signal });
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
+      scanned.android = true;
     } catch (error) {
       perf.endOperation("androidDeviceScan");
       signal?.throwIfAborted();
@@ -513,6 +527,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         const iosDevices = await this.simctl.getBootedSimulators(undefined, signal);
         perf.endOperation("iosSimulatorScan");
         devices.push(...iosDevices);
+        scanned.ios = true;
       }
     } catch (error) {
       perf.endOperation("iosSimulatorScan");
@@ -520,7 +535,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       logger.warn(`Failed to detect iOS devices: ${error}`);
     }
 
-    return devices;
+    return { devices, scanned };
   }
 
   /**
@@ -540,12 +555,16 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // Detect all connected devices
-    const connectedPlatforms = await (options?.getConnectedPlatforms
-      ? options.getConnectedPlatforms()
-      : this.detectConnectedPlatforms(options?.signal));
+    const result = options?.getConnectedPlatforms
+      ? await options.getConnectedPlatforms()
+      : await this.detectConnectedPlatformsWithStatus(options?.signal);
+    const { devices: connectedPlatforms, scanned } = Array.isArray(result)
+      ? { devices: result, scanned: { android: true, ios: true } }
+      : result;
     const pinnedDevice = this.explicitDevicePin;
     if (
       pinnedDevice &&
+      scanned[pinnedDevice.platform] &&
       !connectedPlatforms.some(
         (device) =>
           device.deviceId === pinnedDevice.deviceId && device.platform === pinnedDevice.platform,

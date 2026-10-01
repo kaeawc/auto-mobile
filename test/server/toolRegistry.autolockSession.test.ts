@@ -276,6 +276,19 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
+  test("keeps an iOS pin when simctl scan fails during autolock enforcement", async () => {
+    setAutolock(true);
+    fakeDeviceSessionManager.setConnectedDevices([androidA, iosA]);
+    fakeDeviceSessionManager.setCurrentDevice(iosA, "ios");
+    fakeDeviceSessionManager.setExplicitDevicePin(iosA);
+    fakeDeviceSessionManager.setPlatformScanFailure("ios", true);
+    const tool = registerTool("autolockFailedIosScanPin");
+
+    await tool.handler({ platform: "ios" });
+
+    expect(fakeDeviceSessionManager.getExplicitDevicePin()).toEqual(iosA);
+  });
+
   test("resolves the autolock session from the MCP session when sessionUuid is omitted", async () => {
     setAutolock(true);
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);

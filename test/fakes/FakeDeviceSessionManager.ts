@@ -1,4 +1,8 @@
-import { DeviceReadyOptions, DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
+import {
+  type ConnectedPlatformScan,
+  DeviceReadyOptions,
+  DeviceSessionManager,
+} from "../../src/utils/DeviceSessionManager";
 import { BootedDevice, Platform, SomePlatform, ActionableError } from "../../src/models";
 
 /**
@@ -20,6 +24,7 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   private accessibilityServiceFailure: boolean = false;
   private windowVerificationFailure: boolean = false;
   private simulateDisconnection: boolean = false;
+  private failedPlatformScans: Record<Platform, boolean> = { android: false, ios: false };
 
   // Call tracking for assertions
   private setCurrentDeviceCalls: BootedDevice[] = [];
@@ -104,6 +109,10 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
    */
   simulateDeviceDisconnection(shouldDisconnect: boolean): void {
     this.simulateDisconnection = shouldDisconnect;
+  }
+
+  setPlatformScanFailure(platform: Platform, shouldFail: boolean): void {
+    this.failedPlatformScans[platform] = shouldFail;
   }
 
   /**
@@ -322,19 +331,28 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   }
 
   async detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]> {
+    return (await this.detectConnectedPlatformsWithStatus(signal)).devices;
+  }
+
+  async detectConnectedPlatformsWithStatus(signal?: AbortSignal): Promise<ConnectedPlatformScan> {
     this.detectConnectedPlatformsCalls++;
     this.detectConnectedPlatformsSignals.push(signal);
     signal?.throwIfAborted();
-
+    const scanned = {
+      android: !this.failedPlatformScans.android,
+      ios: !this.failedPlatformScans.ios,
+    };
     if (this.simulateDisconnection) {
-      return [];
+      return { devices: [], scanned };
     }
-
     const devices = this.detectConnectedPlatformsHook
       ? await this.detectConnectedPlatformsHook(signal)
       : [...this.connectedPlatforms];
     signal?.throwIfAborted();
-    return devices;
+    return {
+      devices: devices.filter((device) => scanned[device.platform]),
+      scanned,
+    };
   }
 
   async verifyDevice(

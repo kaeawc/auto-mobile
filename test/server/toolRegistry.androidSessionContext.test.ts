@@ -111,6 +111,18 @@ describe("ToolRegistry Android session context", () => {
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
+  test("keeps an Android pin when its scan fails", async () => {
+    fakeDeviceSessionManager.setConnectedDevices([androidDeviceA, androidDeviceB, iosDeviceA]);
+    fakeDeviceSessionManager.setCurrentDevice(androidDeviceB, "android");
+    fakeDeviceSessionManager.setExplicitDevicePin(androidDeviceB);
+    fakeDeviceSessionManager.setPlatformScanFailure("android", true);
+    const tool = registerTool("androidFailedScanPinTool");
+
+    await tool.handler({ platform: "android" });
+
+    expect(fakeDeviceSessionManager.getExplicitDevicePin()).toEqual(androidDeviceB);
+  });
+
   test("allows a single Android device without an explicit target", async () => {
     fakeDeviceSessionManager.setConnectedDevices([androidDeviceA]);
     const tool = registerTool("androidSingleDeviceTool");

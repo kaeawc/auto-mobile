@@ -36,6 +36,11 @@ import {
   type VirtualDeviceLifecycleLease,
 } from "./virtualDeviceLifecycleCoordinator";
 import { stableStringify } from "../utils/stableStringify";
+import {
+  defaultDisplayInventoryProvider,
+  hydrateRequiredDisplayInventories,
+  type DisplayInventoryProvider,
+} from "./DisplayInventoryProvider";
 
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
 
@@ -356,6 +361,7 @@ export interface DeviceBootResult {
 export interface DeviceBootServiceDependencies {
   deviceManager: PlatformDeviceManager;
   deviceMatcher: DeviceMatcher;
+  displayInventory?: DisplayInventoryProvider;
   deviceCreationGate: DeviceCreationGate;
   deviceProvisioner: DeviceProvisioner;
   matchingStrategy: MatchingStrategy;
@@ -603,10 +609,15 @@ export class DeviceBootService {
       hasExplicitConstraints,
       context,
     );
-    const resolvedRunning = enriched.device;
+    const [resolvedRunning] = await hydrateRequiredDisplayInventories(
+      [enriched.device],
+      criteria.requires,
+      this.dependencies.displayInventory ?? defaultDisplayInventoryProvider,
+      context.signal,
+    );
     if (hasExplicitConstraints && !matchesDeviceCriteria(resolvedRunning, criteria)) {
       throw new ActionableError(
-        `Device '${request.deviceId}' does not satisfy the requested constraints. ${describeDisplayRequirements(criteria, [resolvedRunning])}`,
+        `Device '${request.deviceId}' does not satisfy the requested constraints. ${describeDisplayRequirements(criteria, [{ ...resolvedRunning, booted: true }])}`,
       );
     }
     const result = await this.waitForRunningDevice(resolvedRunning, context, progress);
@@ -787,7 +798,12 @@ export class DeviceBootService {
               !excludedDeviceNames?.has(device.name) && !excludedDeviceIds?.has(device.deviceId),
           )
         : booted;
-    const enriched = enrichBootedDevicesFromImages(matchingBooted, images);
+    const enriched = await hydrateRequiredDisplayInventories(
+      enrichBootedDevicesFromImages(matchingBooted, images),
+      criteria.requires,
+      this.dependencies.displayInventory ?? defaultDisplayInventoryProvider,
+      context.signal,
+    );
     candidates?.push(...enriched);
     const match =
       request.matchExactName && request.name
@@ -890,18 +906,22 @@ export class DeviceBootService {
     progress?: DeviceBootProgress,
     candidates: readonly (BootedDevice | DeviceInfo)[] = images,
   ): Promise<DeviceBootResult> {
+    const describedCandidates = candidates.map((candidate) => ({
+      ...candidate,
+      booted: "isRunning" in candidate ? candidate.isRunning : true,
+    }));
     if (!this.dependencies.deviceCreationGate.isCreationAllowed(request.createIfMissing)) {
       throw new ActionableError(
         `No ${request.platform} device matching criteria found. ` +
           `${request.minOsVersion ? `minOsVersion>=${request.minOsVersion} ` : ""}` +
           `${request.maxOsVersion ? `maxOsVersion<=${request.maxOsVersion} ` : ""}` +
           `${request.name ? `name=${request.name} ` : ""}` +
-          `${describeDisplayRequirements(criteria, candidates)} ` +
+          `${describeDisplayRequirements(criteria, describedCandidates)} ` +
           `Available images: ${images.map((device) => `${device.name}${device.osVersion ? ` (v${device.osVersion})` : ""}`).join(", ") || "none"}.`,
       );
     }
     if (criteria.requires?.panels !== undefined || criteria.requires?.posture !== undefined) {
-      throw new ActionableError(describeDisplayRequirements(criteria, candidates));
+      throw new ActionableError(describeDisplayRequirements(criteria, describedCandidates));
     }
     const identityHooks: DeviceProvisioningIdentityHooks = {
       reserveBeforeCreate: async (identity) => {

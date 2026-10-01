@@ -193,6 +193,7 @@ export function matchesDeviceCriteria(
     displays?: DeviceDisplays;
     screenWidth?: number;
     screenHeight?: number;
+    isRunning?: boolean;
   },
   criteria: DeviceMatchCriteria,
 ): boolean {
@@ -207,20 +208,53 @@ export function matchesDeviceCriteria(
 }
 
 function matchesRequiredDisplays(
-  item: { displays?: DeviceDisplays },
+  item: {
+    displays?: DeviceDisplays;
+    screenWidth?: number;
+    screenHeight?: number;
+    isRunning?: boolean;
+  },
   criteria: DeviceMatchCriteria,
 ): boolean {
   const { panels, posture } = criteria.requires ?? {};
+  const support = matchingDisplays(item, item.isRunning !== false);
   return (
-    (panels === undefined || (item.displays?.panels.length ?? 0) >= panels) &&
-    (posture === undefined || item.displays?.postures.includes(posture) === true)
+    (panels === undefined || (support?.panels.length ?? 0) >= panels) &&
+    (posture === undefined || support?.postures.includes(posture) === true)
   );
+}
+
+function matchingDisplays(
+  item: { displays?: DeviceDisplays; screenWidth?: number; screenHeight?: number },
+  booted: boolean,
+):
+  | {
+      panels: readonly { role: string; sizePx: { width: number; height: number } }[];
+      postures: readonly string[];
+    }
+  | undefined {
+  if (item.displays) {
+    return item.displays;
+  }
+  if (!booted || item.screenWidth === undefined || item.screenHeight === undefined) {
+    return undefined;
+  }
+  return {
+    panels: [{ role: "inner", sizePx: { width: item.screenWidth, height: item.screenHeight } }],
+    postures: ["default"],
+  };
 }
 
 /** Explain capability failures without inferring panels or postures from form factor. */
 export function describeDisplayRequirements(
   criteria: DeviceMatchCriteria,
-  candidates: readonly { name: string; displays?: DeviceDisplays }[],
+  candidates: readonly {
+    name: string;
+    displays?: DeviceDisplays;
+    screenWidth?: number;
+    screenHeight?: number;
+    booted?: boolean;
+  }[],
 ): string {
   const { panels, posture } = criteria.requires ?? {};
   const requested = [
@@ -231,8 +265,8 @@ export function describeDisplayRequirements(
     return "";
   }
   const support = candidates.map((candidate) => {
-    const displays = candidate.displays;
-    return `${candidate.name}: ${displays ? `${displays.panels.length} panel(s), postures=${displays.postures.join("|") || "none"}` : "panels and postures unknown until booted"}`;
+    const displays = matchingDisplays(candidate, candidate.booted === true);
+    return `${candidate.name}: ${displays ? `${displays.panels.length} panel(s), postures=${displays.postures.join("|") || "none"}` : candidate.booted ? "panels and postures could not be read" : "panels and postures unknown until booted"}`;
   });
   return `unsupported: requires ${requested.join(", ")}. Candidate support: ${support.join("; ") || "none"}.`;
 }

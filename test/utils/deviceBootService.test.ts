@@ -20,6 +20,7 @@ import type { DeviceMatchCriteria } from "../../src/models/DeviceMatchCriteria";
 import type { DeviceBootRecovery } from "../../src/devices/deviceBootRecovery";
 import type { Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
@@ -47,6 +48,7 @@ function service(
     | "onAndroidColdBootTrackingChanged"
     | "onIdentityResolved"
   >,
+  displayInventory?: FakeDisplayInventoryProvider,
 ): DeviceBootService {
   return new DeviceBootService({
     deviceManager,
@@ -61,11 +63,67 @@ function service(
     bootRecovery,
     timer: timer ?? new FakeTimer(),
     lifecycleCoordinator,
+    displayInventory,
     ...lifecycleOptions,
   });
 }
 
 describe("DeviceBootService", () => {
+  it("hydrates a running foldable before matching panel requirements", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = { name: "Fold", platform: "android", deviceId: "emulator-5554" };
+    devices.setBootedDevices("android", [running]);
+    const inventory = new FakeDisplayInventoryProvider({
+      panels: [
+        { key: "cover", role: "cover", sizePx: { width: 100, height: 200 } },
+        { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } },
+      ],
+      postures: ["opened"],
+    });
+    const boot = service(
+      devices,
+      new DefaultDeviceMatcher(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      inventory,
+    );
+
+    const result = await boot.boot({ platform: "android", requires: { panels: 2 } });
+    expect(result.device.deviceId).toBe(running.deviceId);
+    expect(inventory.tokens).toEqual([running.deviceId]);
+  });
+
+  it("describes an exact booted phone's single panel after inventory hydration fails", async () => {
+    const devices = new FakeDeviceUtils();
+    const running: BootedDevice = {
+      name: "Phone",
+      platform: "android",
+      deviceId: "emulator-5554",
+      screenWidth: 1080,
+      screenHeight: 2400,
+    };
+    devices.setBootedDevices("android", [running]);
+    const inventory = new FakeDisplayInventoryProvider();
+    inventory.hydrate = async () => {
+      throw new Error("inventory unavailable");
+    };
+    const boot = service(
+      devices,
+      new DefaultDeviceMatcher(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      inventory,
+    );
+
+    await expect(
+      boot.boot({ platform: "android", deviceId: running.deviceId, requires: { panels: 2 } }),
+    ).rejects.toThrow(/Phone: 1 panel\(s\), postures=default/);
+  });
+
   it("reports unmet panel requirements and candidate support", async () => {
     const devices = new FakeDeviceUtils();
     devices.setDeviceImages("android", [

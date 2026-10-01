@@ -2104,6 +2104,7 @@ export function createProvisionDeviceHandler(hooks: ProvisioningHooks) {
     const bootService = new DeviceBootService({
       deviceManager,
       deviceMatcher: deps.deviceMatcherFactory(),
+      displayInventory: deps.displayInventory,
       deviceCreationGate,
       deviceProvisioner: deps.deviceProvisionerFactory(),
       matchingStrategy: DEVICE_POOL_MATCHING,

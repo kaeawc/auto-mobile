@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { DefaultDeviceMatcher, compareVersions } from "../../src/server/deviceMatcher";
+import { describeDisplayRequirements } from "../../src/utils/deviceMatcher";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
 import {
   canonicalReleaseVersionsByApiLevel,
@@ -529,6 +530,52 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       matcher.matchDeviceImage(
         { platform: "android", requires: { posture: "rear_display" } },
         images,
+        "LATEST",
+      ),
+    ).toBeNull();
+  });
+
+  it("matches a booted phone from legacy screen size without changing its inventory", () => {
+    const phone = bootedDevice({ deviceId: "phone", screenWidth: 1080, screenHeight: 2400 });
+
+    expect(
+      matcher.matchBootedDevice({ platform: "android", requires: { panels: 1 } }, [phone], "LATEST")
+        ?.deviceId,
+    ).toBe("phone");
+    expect(
+      matcher.matchBootedDevice(
+        { platform: "android", requires: { panels: 2 } },
+        [phone],
+        "LATEST",
+      ),
+    ).toBeNull();
+    expect(
+      matcher.matchBootedDevice(
+        { platform: "android", requires: { posture: "opened" } },
+        [phone],
+        "LATEST",
+      ),
+    ).toBeNull();
+    expect(
+      describeDisplayRequirements({ platform: "android", requires: { panels: 2 } }, [
+        { ...phone, booted: true },
+      ]),
+    ).toContain("Test Device: 1 panel(s), postures=default");
+    expect(phone.displays).toBeUndefined();
+    expect(
+      describeDisplayRequirements({ platform: "android", requires: { panels: 2 } }, [
+        { ...bootedDevice({ deviceId: "unreadable" }), booted: true },
+      ]),
+    ).toContain("Test Device: panels and postures could not be read");
+    expect(
+      describeDisplayRequirements({ platform: "android", requires: { panels: 1 } }, [
+        deviceImage({ name: "Unbooted", screenWidth: 1080, screenHeight: 2400 }),
+      ]),
+    ).toContain("Unbooted: panels and postures unknown until booted");
+    expect(
+      matcher.matchDeviceImage(
+        { platform: "android", requires: { panels: 1 } },
+        [deviceImage({ name: "Unbooted", screenWidth: 1080, screenHeight: 2400 })],
         "LATEST",
       ),
     ).toBeNull();

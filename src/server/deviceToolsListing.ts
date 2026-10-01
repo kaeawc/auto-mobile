@@ -11,6 +11,7 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { describeDisplayRequirements, matchesDeviceCriteria } from "../utils/deviceMatcher";
+import { hydrateRequiredDisplayInventories } from "../devices/DisplayInventoryProvider";
 import {
   acceptancePresentationOrder,
   androidProvenanceByAvdName,
@@ -38,7 +39,7 @@ function selectBootedDevices(
     throw new ActionableError(
       describeDisplayRequirements(
         { platform: args.platform ?? "android", requires: args.requires },
-        booted,
+        booted.map((device) => ({ ...device, booted: true })),
       ),
     );
   }
@@ -143,7 +144,12 @@ export function createListingHandlers() {
         : {}),
     };
 
-    const matchingBooted = selectBootedDevices(booted, args, discovery.complete);
+    const resolvedBooted = await hydrateRequiredDisplayInventories(
+      booted,
+      args.requires,
+      deps.displayInventory,
+    );
+    const matchingBooted = selectBootedDevices(resolvedBooted, args, discovery.complete);
     const configuredImages = await configuredImagesForBootedDevices(
       deviceManager,
       deps.avdManagerFactory(),

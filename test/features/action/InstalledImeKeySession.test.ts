@@ -141,6 +141,7 @@ function fixture(
   });
   return {
     session,
+    timer,
     deviceId,
     events,
     setKeyboardGate: (gate: Promise<void>) => {
@@ -209,10 +210,14 @@ test("does not tap an app control when no real IME window contains the key", asy
     hierarchy: { node: { $: { text: "a" } } },
     windows: [{ type: 1, bounds: { left: 0, top: 0, right: 400, bottom: 600 } }],
   };
-  const { session, events } = fixture(fakeWindow);
-  await expect(session.tapKey(target, "a")).rejects.toThrow("Visible key");
+  const { session, events, timer } = fixture(fakeWindow);
+  await expect(session.tapKey(target, "a")).rejects.toThrow(
+    "Selected IME window did not appear within 2000 ms.",
+  );
   expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
   expect(events.at(-1)).toBe(`restoreSubtype:${original}:7`);
+  expect(timer.now()).toBe(2_000);
+  expect(timer.getSleepCallCount()).toBe(20);
 });
 
 test("does not tap a key from another IME package", async () => {
@@ -234,7 +239,9 @@ test("does not tap a key from another IME package", async () => {
     },
   };
   const { session, events } = fixture(wrongPackage);
-  await expect(session.tapKey(target, "a")).rejects.toThrow("Visible key");
+  await expect(session.tapKey(target, "a")).rejects.toThrow(
+    'Visible key "a" was not found in the selected IME window.',
+  );
   expect(events.some((event) => event.startsWith("tap:"))).toBe(false);
 });
 

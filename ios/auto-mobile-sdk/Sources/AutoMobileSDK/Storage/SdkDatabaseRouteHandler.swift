@@ -10,11 +10,13 @@
         let databasePath: String
         let query: String
         let sessionId: String?
+        let mutationToken: String?
 
-        init(databasePath: String, query: String, sessionId: String? = nil) {
+        init(databasePath: String, query: String, sessionId: String? = nil, mutationToken: String? = nil) {
             self.databasePath = databasePath
             self.query = query
             self.sessionId = sessionId
+            self.mutationToken = mutationToken
         }
 
         init(from decoder: Decoder) throws {
@@ -22,6 +24,7 @@
             databasePath = try container.decode(String.self, forKey: .databasePath)
             query = try container.decode(String.self, forKey: .query)
             sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
+            mutationToken = try container.decodeIfPresent(String.self, forKey: .mutationToken)
         }
     }
 
@@ -235,7 +238,8 @@
             if classification.requiresWriteConnection
                 && !DatabaseInspector.shared.canMutate(
                     sessionId: request.sessionId,
-                    currentSessionId: currentSessionId()
+                    currentSessionId: currentSessionId(),
+                    mutationToken: request.mutationToken
                 )
             {
                 return error(statusCode: 403, code: "mutation_not_authorized")

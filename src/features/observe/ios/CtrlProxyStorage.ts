@@ -30,8 +30,18 @@ export class CtrlProxyStorage {
   constructor(
     context: DelegateContext,
     private readonly sessionId?: () => string | null,
+    private readonly mutationToken?: (appId: string) => string | undefined,
   ) {
     this.context = context;
+  }
+
+  private mutationError(error: string | undefined, fallback: string): ActionableError {
+    if (error?.includes("mutation_not_authorized")) {
+      return new ActionableError(
+        "iOS key-value storage mutation is not authorized: in a DEBUG build, configure StorageInspectionConfiguration(allowMutations: true), call DatabaseInspector.shared.authorizeHostMutations(true), and require a launch-scoped mutation token or authorize the current SDK session with DatabaseInspector.shared.authorizeSessionMutations(sessionId:).",
+      );
+    }
+    return new ActionableError(error || fallback);
   }
 
   /**
@@ -213,6 +223,8 @@ export class CtrlProxyStorage {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
+    const sessionId = this.sessionId?.();
+    const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("set_preference");
     const promise = this.context.requestManager.register<SetPreferenceResult>(
       requestId,
@@ -225,7 +237,6 @@ export class CtrlProxyStorage {
       }),
     );
 
-    const sessionId = this.sessionId?.();
     const message = JSON.stringify({
       type: "set_preference",
       requestId,
@@ -235,6 +246,7 @@ export class CtrlProxyStorage {
       value,
       valueType: type,
       ...(sessionId ? { sessionId } : {}),
+      ...(mutationToken ? { mutationToken } : {}),
     });
 
     const ws = this.context.getWebSocket();
@@ -245,7 +257,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new ActionableError(result.error || "Failed to set preference");
+      throw this.mutationError(result.error, "Failed to set preference");
     }
   }
 
@@ -269,6 +281,8 @@ export class CtrlProxyStorage {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
+    const sessionId = this.sessionId?.();
+    const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("remove_preference");
     const promise = this.context.requestManager.register<RemovePreferenceResult>(
       requestId,
@@ -281,7 +295,6 @@ export class CtrlProxyStorage {
       }),
     );
 
-    const sessionId = this.sessionId?.();
     const message = JSON.stringify({
       type: "remove_preference",
       requestId,
@@ -289,6 +302,7 @@ export class CtrlProxyStorage {
       fileName,
       key,
       ...(sessionId ? { sessionId } : {}),
+      ...(mutationToken ? { mutationToken } : {}),
     });
 
     const ws = this.context.getWebSocket();
@@ -299,7 +313,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new ActionableError(result.error || "Failed to remove preference");
+      throw this.mutationError(result.error, "Failed to remove preference");
     }
   }
 
@@ -321,6 +335,8 @@ export class CtrlProxyStorage {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
+    const sessionId = this.sessionId?.();
+    const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("clear_preferences");
     const promise = this.context.requestManager.register<ClearPreferencesResult>(
       requestId,
@@ -333,13 +349,13 @@ export class CtrlProxyStorage {
       }),
     );
 
-    const sessionId = this.sessionId?.();
     const message = JSON.stringify({
       type: "clear_preferences",
       requestId,
       appId: packageName,
       fileName,
       ...(sessionId ? { sessionId } : {}),
+      ...(mutationToken ? { mutationToken } : {}),
     });
 
     const ws = this.context.getWebSocket();
@@ -350,7 +366,7 @@ export class CtrlProxyStorage {
 
     const result = await promise;
     if (!result.success) {
-      throw new ActionableError(result.error || "Failed to clear preferences");
+      throw this.mutationError(result.error, "Failed to clear preferences");
     }
   }
 }

@@ -25,7 +25,9 @@ final class SdkDatabaseClientTests: XCTestCase {
         _ message: String,
         file: StaticString = #filePath,
         line: UInt = #line
-    ) async {
+    )
+        async
+    {
         do {
             try await operation()
             XCTFail("expected SdkDatabaseError: \(message)", file: file, line: line)
@@ -43,7 +45,12 @@ final class SdkDatabaseClientTests: XCTestCase {
             status: 200,
             body: Data(#"{"queryType":"SELECT","columns":["id"],"rows":[["1"]],"rowsAffected":0}"#.utf8)
         )
-        let result = try await makeClient(stub).executeSQL(databasePath: "/db", query: "SELECT 1", sessionId: "s1")
+        let result = try await makeClient(stub).executeSQL(
+            databasePath: "/db",
+            query: "SELECT 1",
+            sessionId: "s1",
+            mutationToken: "launch-token"
+        )
         XCTAssertEqual(result.queryType, "SELECT")
         XCTAssertEqual(result.columns, ["id"])
         XCTAssertEqual(result.rows, [["1"]])
@@ -56,6 +63,7 @@ final class SdkDatabaseClientTests: XCTestCase {
         XCTAssertEqual(json["databasePath"] as? String, "/db")
         XCTAssertEqual(json["query"] as? String, "SELECT 1")
         XCTAssertEqual(json["sessionId"] as? String, "s1")
+        XCTAssertEqual(json["mutationToken"] as? String, "launch-token")
     }
 
     // MARK: - executeSQL error mapping
@@ -141,7 +149,10 @@ final class SdkDatabaseClientTests: XCTestCase {
         let data = try await makeClient(stub).getTableData(databasePath: "/db", table: "t", limit: 50, offset: 100)
         XCTAssertEqual(data.total, 2)
         XCTAssertEqual(data.rows.count, 2)
-        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(stub.recordedRequests.first?.httpBody)) as? [String: Any])
+        let json = try XCTUnwrap(
+            JSONSerialization
+                .jsonObject(with: XCTUnwrap(stub.recordedRequests.first?.httpBody)) as? [String: Any]
+        )
         XCTAssertEqual(json["limit"] as? Int, 50)
         XCTAssertEqual(json["offset"] as? Int, 100)
         XCTAssertEqual(json["table"] as? String, "t")

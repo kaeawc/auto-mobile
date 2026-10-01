@@ -3,6 +3,7 @@ import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { iosMutationTokens } from "../../../../src/features/storage/IosMutationTokens";
 
 describe("CtrlProxyDatabase (iOS)", function () {
   let testDevice: BootedDevice;
@@ -137,6 +138,7 @@ describe("CtrlProxyDatabase (iOS)", function () {
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
     try {
+      iosMutationTokens.set(testDevice.deviceId, "com.example.app", "launch-secret");
       const resultPromise = client.executeSQLForIos(
         "com.example.app",
         "/app/Documents/app.db",
@@ -146,6 +148,7 @@ describe("CtrlProxyDatabase (iOS)", function () {
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
       const sentMessage = commandPayloads(socket!)[0];
+      expect(sentMessage.mutationToken).toBe("launch-secret");
 
       socket!.simulateMessage(
         JSON.stringify({
@@ -163,6 +166,7 @@ describe("CtrlProxyDatabase (iOS)", function () {
         rowsAffected: 2,
       });
     } finally {
+      iosMutationTokens.clear(testDevice.deviceId, "com.example.app");
       await client.close();
     }
   });

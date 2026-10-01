@@ -11,6 +11,9 @@ public final class DatabaseInspector: @unchecked Sendable {
     private var _configuration = StorageInspectionConfiguration()
     private var _hostMutationAuthorization = false
     private var _sessionMutationAuthorization: String?
+    #if DEBUG
+        private var _mutationToken: String?
+    #endif
 
     private init() {}
 
@@ -70,18 +73,40 @@ public final class DatabaseInspector: @unchecked Sendable {
         lock.unlock()
     }
 
+    #if DEBUG
+        /// Require a launch-scoped mutation token for host-authorized writes.
+        public func authorizeMutationToken(_ token: String) {
+            lock.lock()
+            _mutationToken = token.isEmpty ? nil : token
+            lock.unlock()
+        }
+    #endif
+
     var inspectionConfiguration: StorageInspectionConfiguration {
         lock.lock()
         defer { lock.unlock() }
         return _configuration
     }
 
-    func canMutate(sessionId: String?, currentSessionId: String?) -> Bool {
+    func canMutate(sessionId: String?, currentSessionId: String?, mutationToken: String? = nil) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return _configuration.allowMutations
-            && _hostMutationAuthorization
-            && sessionId != nil
+        guard _configuration.allowMutations && _hostMutationAuthorization else { return false }
+        #if DEBUG
+            if let mutationToken, let registered = _mutationToken,
+               !mutationToken.isEmpty, !registered.isEmpty
+            {
+                let supplied = Array(mutationToken.utf8)
+                let expected = Array(registered.utf8)
+                var difference = supplied.count ^ expected.count
+                for index in 0 ..< max(supplied.count, expected.count) {
+                    difference |= Int(supplied.indices.contains(index) ? supplied[index] : 0)
+                        ^ Int(expected.indices.contains(index) ? expected[index] : 0)
+                }
+                if difference == 0 { return true }
+            }
+        #endif
+        return sessionId != nil
             && sessionId == currentSessionId
             && sessionId == _sessionMutationAuthorization
     }
@@ -96,19 +121,22 @@ public final class DatabaseInspector: @unchecked Sendable {
 
     // MARK: - Testing Support
 
-    internal func setDriver(_ driver: DatabaseDriver) {
+    func setDriver(_ driver: DatabaseDriver) {
         lock.lock()
         _driver = driver
         lock.unlock()
     }
 
-    internal func reset() {
+    func reset() {
         lock.lock()
         _isEnabled = false
         _driver = nil
         _configuration = StorageInspectionConfiguration()
         _hostMutationAuthorization = false
         _sessionMutationAuthorization = nil
+        #if DEBUG
+            _mutationToken = nil
+        #endif
         lock.unlock()
     }
 }
@@ -255,21 +283,26 @@ final class DefaultDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         return databases
     }
 
-    func getTables(databasePath: String) -> [String] {
+    func getTables(databasePath _: String) -> [String] {
         // SQLite operations would require importing sqlite3 directly.
         // This is a minimal implementation that apps can override.
         return []
     }
 
-    func getTableData(databasePath: String, table: String, limit: Int, offset: Int) -> TableDataResult {
+    func getTableData(databasePath _: String, table _: String, limit _: Int, offset _: Int) -> TableDataResult {
         return TableDataResult(columns: [], rows: [], totalRows: 0)
     }
 
-    func getTableStructure(databasePath: String, table: String) -> TableStructureResult {
+    func getTableStructure(databasePath _: String, table _: String) -> TableStructureResult {
         return TableStructureResult(columns: [])
     }
 
-    func executeSQL(databasePath: String, query: String) -> SQLExecutionResult {
-        return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: "Not implemented. Provide a custom DatabaseDriver.")
+    func executeSQL(databasePath _: String, query _: String) -> SQLExecutionResult {
+        return SQLExecutionResult(
+            columns: nil,
+            rows: nil,
+            rowsAffected: 0,
+            error: "Not implemented. Provide a custom DatabaseDriver."
+        )
     }
 }

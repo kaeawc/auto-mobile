@@ -15,8 +15,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     private let transport: any HTTPRequesting
 
     public convenience init(port: UInt16 = 8766) {
-        // Hardcoded localhost URL with an integer port always parses.
-        let baseURL = URL(string: "http://localhost:\(port)")!  // swiftlint:disable:this force_unwrapping
+        let baseURL = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5
@@ -30,8 +29,23 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
         self.transport = transport
     }
 
-    public func executeSQL(databasePath: String, query: String, sessionId: String? = nil) async throws -> SdkExecuteSqlResult {
-        try await post(path: "/db/execute", body: ExecuteSqlRequest(databasePath: databasePath, query: query, sessionId: sessionId))
+    public func executeSQL(
+        databasePath: String,
+        query: String,
+        sessionId: String? = nil,
+        mutationToken: String? = nil
+    )
+        async throws -> SdkExecuteSqlResult
+    {
+        try await post(
+            path: "/db/execute",
+            body: ExecuteSqlRequest(
+                databasePath: databasePath,
+                query: query,
+                sessionId: sessionId,
+                mutationToken: mutationToken
+            )
+        )
     }
 
     public func listDatabases() async throws -> [SdkDatabaseInfo] {
@@ -51,11 +65,21 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     }
 
     public func listTables(databasePath: String) async throws -> [String] {
-        let payload: ListTablesPayload = try await post(path: "/db/tables", body: DatabasePathRequest(databasePath: databasePath))
+        let payload: ListTablesPayload = try await post(
+            path: "/db/tables",
+            body: DatabasePathRequest(databasePath: databasePath)
+        )
         return payload.tables
     }
 
-    public func getTableData(databasePath: String, table: String, limit: Int, offset: Int) async throws -> SdkTableDataResult {
+    public func getTableData(
+        databasePath: String,
+        table: String,
+        limit: Int,
+        offset: Int
+    )
+        async throws -> SdkTableDataResult
+    {
         try await post(
             path: "/db/table-data",
             body: TableDataRequest(databasePath: databasePath, table: table, limit: limit, offset: offset)
@@ -63,7 +87,10 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     }
 
     public func getTableStructure(databasePath: String, table: String) async throws -> SdkTableStructureResult {
-        try await post(path: "/db/table-structure", body: TableStructureRequest(databasePath: databasePath, table: table))
+        try await post(
+            path: "/db/table-structure",
+            body: TableStructureRequest(databasePath: databasePath, table: table)
+        )
     }
 
     // MARK: - Private
@@ -71,7 +98,9 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     private func post<RequestBody: Encodable, ResponseBody: Decodable>(
         path: String,
         body: RequestBody
-    ) async throws -> ResponseBody {
+    )
+        async throws -> ResponseBody
+    {
         let data = try await requestData(path: path, body: JSONEncoder().encode(body))
         return try JSONDecoder().decode(ResponseBody.self, from: data)
     }
@@ -100,7 +129,8 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
         }
     }
 
-    private static let unavailableMessage = "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
+    private static let unavailableMessage =
+        "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
 }
 
 private struct SdkDatabaseErrorPayload: Codable {
@@ -111,6 +141,7 @@ private struct ExecuteSqlRequest: Codable {
     let databasePath: String
     let query: String
     let sessionId: String?
+    let mutationToken: String?
 }
 
 private struct DatabasePathRequest: Codable {

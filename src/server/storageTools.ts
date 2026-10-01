@@ -79,7 +79,7 @@ function getStorageToolsDependencies(): StorageToolsDependencies {
 function actionableStorageWriteError(error: unknown, context: string): ActionableError {
   if (errorMessage(error).includes("mutation_not_authorized")) {
     return new ActionableError(
-      `${context}: the app must opt in with StorageInspectionPolicy(allowMutations: true), in DEBUG builds only.`,
+      `${context}: in a DEBUG build, configure StorageInspectionConfiguration(allowMutations: true), call DatabaseInspector.shared.authorizeHostMutations(true), and require a launch-scoped mutation token or authorize the current SDK session with DatabaseInspector.shared.authorizeSessionMutations(sessionId:).`,
       { cause: error },
     );
   }

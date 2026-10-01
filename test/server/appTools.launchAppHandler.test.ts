@@ -2,11 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerAppTools,
   resetLaunchAppToolDependencies,
+  resetTerminateAppToolDependencies,
   setLaunchAppToolDependencies,
+  setTerminateAppToolDependencies,
 } from "../../src/server/appTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, LaunchAppResult, ObserveResult } from "../../src/models";
 import { ActionableError } from "../../src/models";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { iosMutationTokens } from "../../src/features/storage/IosMutationTokens";
 
 // #6868: exercise the REGISTERED launchApp handler (not just the response
 // builder) through an injected fake, so an already-foreground launch can never
@@ -48,12 +52,14 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     resetLaunchAppToolDependencies();
+    resetTerminateAppToolDependencies();
     registerAppTools();
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
     resetLaunchAppToolDependencies();
+    resetTerminateAppToolDependencies();
   });
 
   test("an already-foreground app is a success with alreadyForeground, not an error", async () => {
@@ -124,6 +130,98 @@ describe("launchApp handler (registered handler wiring, #6868)", () => {
     const payload = parsePayload(response);
     expect(payload.alreadyForeground).toBeUndefined();
     expect(payload.message).toBe(`Launched app ${appId} (foreground verified)`);
+  });
+
+  test("passes launch arguments to the launch action", async () => {
+    let received: string[] | undefined;
+    setLaunchAppToolDependencies({
+      createLaunchApp: () => ({
+        execute: async (_appId, _clear, _cold, _activity, _user, _stability, _signal, args) => {
+          received = args;
+          return { success: true, packageName: appId, observation: observationForApp(appId) };
+        },
+      }),
+    });
+    await ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(device, {
+      appId,
+      launchArguments: ["--allow-storage-mutations"],
+    });
+    expect(received).toEqual(["--allow-storage-mutations"]);
+  });
+
+  test("iOS launch token stays in memory and out of tool responses", async () => {
+    const iosDevice = { ...device, deviceId: "ios-device", platform: "ios" as const };
+    const launches: Array<string[] | undefined> = [];
+    setLaunchAppToolDependencies({
+      idGenerator: new CountingIdGenerator("secret"),
+      createLaunchApp: () => ({
+        execute: async (_appId, _clear, _cold, _activity, _user, _stability, _signal, args) => {
+          launches.push(args);
+          return { success: true, packageName: appId };
+        },
+      }),
+    });
+    try {
+      const response = await ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(iosDevice, {
+        appId,
+        launchArguments: ["--allow-storage-mutations"],
+      });
+      expect(launches[0]).toEqual([
+        "--allow-storage-mutations",
+        "--automobile-mutation-token",
+        "secret-1",
+      ]);
+      expect(iosMutationTokens.get(iosDevice.deviceId, appId)).toBe("secret-1");
+      expect(JSON.stringify(response)).not.toContain("secret-1");
+
+      await ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(iosDevice, { appId });
+      expect(iosMutationTokens.get(iosDevice.deviceId, appId)).toBeUndefined();
+      expect(launches[1]).toBeUndefined();
+    } finally {
+      iosMutationTokens.clear(iosDevice.deviceId, appId);
+    }
+  });
+
+  test("iOS launch errors redact and clear the token", async () => {
+    const iosDevice = { ...device, deviceId: "ios-device", platform: "ios" as const };
+    setLaunchAppToolDependencies({
+      idGenerator: new CountingIdGenerator("secret"),
+      createLaunchApp: () => ({
+        execute: async () => {
+          throw new Error("launch failed: secret-1");
+        },
+      }),
+    });
+    try {
+      await ToolRegistry.getTool("launchApp")!.deviceAwareHandler!(iosDevice, {
+        appId,
+        launchArguments: ["--allow-storage-mutations"],
+      });
+      throw new Error("Expected launch failure");
+    } catch (error) {
+      expect(String(error)).toContain("[REDACTED]");
+      expect(String(error)).not.toContain("secret-1");
+    }
+    expect(iosMutationTokens.get(iosDevice.deviceId, appId)).toBeUndefined();
+  });
+
+  test("iOS termination clears the launch token", async () => {
+    const iosDevice = { ...device, deviceId: "ios-device", platform: "ios" as const };
+    iosMutationTokens.set(iosDevice.deviceId, appId, "secret");
+    setTerminateAppToolDependencies({
+      createTerminateApp: () => ({
+        execute: async () => ({ success: true, packageName: appId }),
+      }),
+    });
+    try {
+      const response = await ToolRegistry.getTool("terminateApp")!.deviceAwareHandler!(iosDevice, {
+        appId,
+      });
+      expect(JSON.stringify(response)).not.toContain("secret");
+      expect(iosMutationTokens.get(iosDevice.deviceId, appId)).toBeUndefined();
+    } finally {
+      iosMutationTokens.clear(iosDevice.deviceId, appId);
+    }
   });
 
   // The `alreadyForeground` marker is produced by the ANDROID path only — the iOS

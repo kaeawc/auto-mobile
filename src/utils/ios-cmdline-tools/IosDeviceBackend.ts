@@ -53,17 +53,18 @@ export function resolveIosDeviceBackend(
 }
 
 type LaunchResult = { success: boolean; pid?: number; error?: string };
+type LaunchOptions = Parameters<SimCtlClient["launchApp"]>[1];
 
 export interface DeviceAppLauncher {
   launchApp(
     deviceUdid: string,
     bundleId: string,
-    options?: { terminateExisting?: boolean },
+    options?: { terminateExisting?: boolean; launchArguments?: string[] },
   ): Promise<LaunchResult>;
 }
 
 export interface IosLaunchBackend {
-  launchApp(bundleId: string, options?: { foregroundIfRunning?: boolean }): Promise<LaunchResult>;
+  launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult>;
 }
 
 export interface IosLaunchBackendDeps {
@@ -74,7 +75,7 @@ export interface IosLaunchBackendDeps {
 export class SimulatorIosLaunchBackend implements IosLaunchBackend {
   constructor(private readonly simctl: Pick<SimCtlClient, "launchApp">) {}
 
-  launchApp(bundleId: string, options?: { foregroundIfRunning?: boolean }): Promise<LaunchResult> {
+  launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult> {
     return this.simctl.launchApp(bundleId, options);
   }
 }
@@ -85,8 +86,13 @@ export class PhysicalIosLaunchBackend implements IosLaunchBackend {
     private readonly deviceAppLauncher: DeviceAppLauncher,
   ) {}
 
-  launchApp(bundleId: string): Promise<LaunchResult> {
-    return this.deviceAppLauncher.launchApp(this.deviceId, bundleId, { terminateExisting: true });
+  launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult> {
+    return this.deviceAppLauncher.launchApp(this.deviceId, bundleId, {
+      terminateExisting: true,
+      ...(options?.launchArguments === undefined
+        ? {}
+        : { launchArguments: options.launchArguments }),
+    });
   }
 }
 

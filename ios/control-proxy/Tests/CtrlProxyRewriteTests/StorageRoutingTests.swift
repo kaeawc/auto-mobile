@@ -21,7 +21,9 @@ private struct PreferenceHierarchyServer: SdkHierarchyFetching {
 
 private actor RecordingPreferenceClient: SdkPreferenceFetching {
     private var operations: [String] = []
+    private var mutationTokens: [String?] = []
     func recorded() -> [String] { operations }
+    func recordedTokens() -> [String?] { mutationTokens }
     func list(appId: String) async throws -> [StorageSuiteInfo] {
         operations.append("list:\(appId)")
         return []
@@ -43,18 +45,30 @@ private actor RecordingPreferenceClient: SdkPreferenceFetching {
         key: String,
         value: String,
         type: String,
-        sessionId: String?
+        sessionId: String?,
+        mutationToken: String?
     )
         async throws
     {
+        mutationTokens.append(mutationToken)
         operations.append("set:\(appId):\(suiteName):\(key):\(value):\(type):\(sessionId ?? "nil")")
     }
 
-    func remove(appId: String, suiteName: String, key: String, sessionId: String?) async throws {
+    func remove(
+        appId: String,
+        suiteName: String,
+        key: String,
+        sessionId: String?,
+        mutationToken: String?
+    )
+        async throws
+    {
+        mutationTokens.append(mutationToken)
         operations.append("remove:\(appId):\(suiteName):\(key):\(sessionId ?? "nil")")
     }
 
-    func clear(appId: String, suiteName: String, sessionId: String?) async throws {
+    func clear(appId: String, suiteName: String, sessionId: String?, mutationToken: String?) async throws {
+        mutationTokens.append(mutationToken)
         operations.append("clear:\(appId):\(suiteName):\(sessionId ?? "nil")")
     }
 }
@@ -110,20 +124,26 @@ final class StorageRoutingTests: XCTestCase {
         let fields: [String: Any] = ["fileName": suite, "key": "kvDuo"]
         let set = try await handler.handle(request(
             "set_preference",
-            fields: fields.merging(["value": "42", "valueType": "INT", "sessionId": "session-1"]) { _, new in new }
+            fields: fields.merging([
+                "value": "42",
+                "valueType": "INT",
+                "sessionId": "session-1",
+                "mutationToken": "launch-token",
+            ]) { _, new in new }
         ))
         XCTAssertEqual((set as? WebSocketResponse)?.success, true)
         let get = try await handler.handle(request("get_preference", fields: fields))
         XCTAssertEqual((get as? StorageEntryResponse)?.value, "42")
         _ = try await handler.handle(request("get_preferences", fields: ["fileName": suite]))
-        _ = try await handler.handle(request("list_preference_files"))
+        let listing = try await handler.handle(request("list_preference_files")) as? StorageFilesResponse
+        XCTAssertEqual(listing?.files?.count, 0)
         _ = try await handler.handle(request(
             "remove_preference",
-            fields: fields.merging(["sessionId": "session-1"]) { _, new in new }
+            fields: fields.merging(["sessionId": "session-1", "mutationToken": "launch-token"]) { _, new in new }
         ))
         _ = try await handler.handle(request(
             "clear_preferences",
-            fields: ["fileName": suite, "sessionId": "session-1"]
+            fields: ["fileName": suite, "sessionId": "session-1", "mutationToken": "launch-token"]
         ))
         let calls = await client.recorded()
         XCTAssertEqual(calls, [
@@ -134,6 +154,8 @@ final class StorageRoutingTests: XCTestCase {
             "remove:com.example.app:duoStore:kvDuo:session-1",
             "clear:com.example.app:duoStore:session-1",
         ])
+        let tokens = await client.recordedTokens()
+        XCTAssertEqual(tokens, ["launch-token", "launch-token", "launch-token"])
         XCTAssertEqual(runner.calls, 0)
     }
 

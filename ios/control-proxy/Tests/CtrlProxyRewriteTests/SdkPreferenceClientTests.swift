@@ -3,6 +3,19 @@ import Foundation
 import XCTest
 
 final class SdkPreferenceClientTests: XCTestCase {
+    func testListDoesNotExposeSdkSession() async throws {
+        let transport = StubHTTPTransport(
+            status: 200,
+            body: Data("{\"files\":[],\"sessionId\":\"sdk-session\"}".utf8)
+        )
+        let client = try SdkPreferenceClient(
+            baseURL: XCTUnwrap(URL(string: "http://localhost:8766")),
+            transport: transport
+        )
+        let listing = try await client.list(appId: "com.example.app")
+        XCTAssertTrue(listing.isEmpty)
+    }
+
     func testPostsAppIdSuiteAndTypedValueToInAppServer() async throws {
         let transport = StubHTTPTransport(status: 200, body: Data("{}".utf8))
         let client = try SdkPreferenceClient(
@@ -15,7 +28,8 @@ final class SdkPreferenceClientTests: XCTestCase {
             key: "kvDuo",
             value: "42",
             type: "INT",
-            sessionId: "session-1"
+            sessionId: "session-1",
+            mutationToken: "token-1"
         )
         let request = try XCTUnwrap(transport.recordedRequests.first)
         XCTAssertEqual(request.url?.path, "/preferences")
@@ -27,6 +41,7 @@ final class SdkPreferenceClientTests: XCTestCase {
         XCTAssertEqual(body["value"], "42")
         XCTAssertEqual(body["valueType"], "INT")
         XCTAssertEqual(body["sessionId"], "session-1")
+        XCTAssertEqual(body["mutationToken"], "token-1")
     }
 
     func testAbsentSdkReturnsActionableGuidance() async throws {
@@ -36,7 +51,7 @@ final class SdkPreferenceClientTests: XCTestCase {
             transport: transport
         )
         do {
-            try await client.clear(appId: "com.example.app", suiteName: "duoStore", sessionId: nil)
+            try await client.clear(appId: "com.example.app", suiteName: "duoStore", sessionId: nil, mutationToken: nil)
             XCTFail("Expected missing SDK to fail")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("embed the AutoMobile SDK"))
@@ -55,7 +70,12 @@ final class SdkPreferenceClientTests: XCTestCase {
                 transport: StubHTTPTransport(status: 409, body: body)
             )
             do {
-                try await client.clear(appId: "com.example.app", suiteName: "Standard", sessionId: "session-1")
+                try await client.clear(
+                    appId: "com.example.app",
+                    suiteName: "Standard",
+                    sessionId: "session-1",
+                    mutationToken: nil
+                )
                 XCTFail("Expected conflict")
             } catch {
                 XCTAssertTrue(error.localizedDescription.contains(expected))
@@ -70,7 +90,7 @@ final class SdkPreferenceClientTests: XCTestCase {
             transport: StubHTTPTransport(status: 404, body: Data("{}".utf8))
         )
         do {
-            try await client.clear(appId: "com.example.app", suiteName: "Standard", sessionId: nil)
+            try await client.clear(appId: "com.example.app", suiteName: "Standard", sessionId: nil, mutationToken: nil)
             XCTFail("Expected missing route")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("embed or upgrade the AutoMobile SDK"))

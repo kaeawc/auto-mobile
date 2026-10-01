@@ -1,6 +1,11 @@
 import { DeviceAppLauncher } from "../../src/features/action/LaunchApp";
 
-type LaunchCall = { deviceUdid: string; bundleId: string; terminateExisting: boolean };
+type LaunchCall = {
+  deviceUdid: string;
+  bundleId: string;
+  terminateExisting: boolean;
+  launchArguments?: string[];
+};
 
 type FakeDeviceAppLauncherOptions = {
   launchResult?: { success: boolean; pid?: number; error?: string };
@@ -26,12 +31,13 @@ export class FakeDeviceAppLauncher implements DeviceAppLauncher {
   async launchApp(
     deviceUdid: string,
     bundleId: string,
-    options: { terminateExisting?: boolean } = {},
+    options: { terminateExisting?: boolean; launchArguments?: string[] } = {},
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
     this.launchCalls.push({
       deviceUdid,
       bundleId,
       terminateExisting: options.terminateExisting ?? false,
+      ...(options.launchArguments ? { launchArguments: options.launchArguments } : {}),
     });
     return this.launchResult;
   }

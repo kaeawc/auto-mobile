@@ -837,7 +837,10 @@ describe("DeviceAppManager launch (devicectl)", () => {
     };
 
     const inspector = createInspector({ exec });
-    const result = await inspector.launchApp("device-udid", bundleId, { terminateExisting: true });
+    const result = await inspector.launchApp("device-udid", bundleId, {
+      terminateExisting: true,
+      launchArguments: ["--allow-storage-mutations"],
+    });
 
     expect(result.success).toBe(true);
     expect(result.pid).toBe(4321);
@@ -847,8 +850,30 @@ describe("DeviceAppManager launch (devicectl)", () => {
     expect(launchCommand).toContain("--terminate-existing");
     expect(launchCommand).toContain("--json-output");
     expect(launchCommand).toContain(bundleId);
+    expect(launchCommand).toContain(`${bundleId} -- --allow-storage-mutations`);
     // Simulator tool must never be invoked for a physical launch.
     expect(commands.every((c) => !c.includes("simctl"))).toBe(true);
+  });
+
+  test("launchApp redacts the token from devicectl failures", async () => {
+    const inspector = createInspector({
+      exec: async (command) => {
+        if (command.includes("device process launch")) {
+          throw new Error("launch failed: private-token");
+        }
+        return makeExecResult();
+      },
+    });
+    const result = await inspector.launchApp("device-udid", bundleId, {
+      launchArguments: [
+        "--allow-storage-mutations",
+        "--automobile-mutation-token",
+        "private-token",
+      ],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("[REDACTED]");
+    expect(JSON.stringify(result)).not.toContain("private-token");
   });
 
   test("launchApp omits --terminate-existing when not requested", async () => {

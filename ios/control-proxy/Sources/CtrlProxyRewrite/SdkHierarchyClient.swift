@@ -19,8 +19,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     private let healthTransport: any HTTPRequesting
 
     public convenience init(port: UInt16 = 8766) {
-        // Hardcoded localhost URL with an integer port always parses.
-        let baseURL = URL(string: "http://localhost:\(port)")!  // swiftlint:disable:this force_unwrapping
+        let baseURL = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
 
         let dataConfig = URLSessionConfiguration.default
         dataConfig.timeoutIntervalForRequest = 2

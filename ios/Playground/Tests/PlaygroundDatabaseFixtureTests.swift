@@ -23,6 +23,7 @@ final class PlaygroundDatabaseFixtureTests: XCTestCase {
         )
         XCTAssertTrue(inspector.isEnabled)
         XCTAssertFalse(inspector.configuration.allowMutations)
+        XCTAssertFalse(inspector.hostMutationsAuthorized)
         XCTAssertEqual(fileSystem.createdDirectories.map(\.path), [databaseURL.deletingLastPathComponent().path])
         XCTAssertEqual(driver.executedQueries.count, 4)
         XCTAssertEqual(driver.executedQueries[0], "BEGIN IMMEDIATE TRANSACTION")
@@ -43,6 +44,7 @@ final class PlaygroundDatabaseFixtureTests: XCTestCase {
         _ = try fixture.install(allowMutations: true)
 
         XCTAssertTrue(inspector.configuration.allowMutations)
+        XCTAssertTrue(inspector.hostMutationsAuthorized)
     }
 
     func testInstallFailureRollsBackWithoutEnablingInspectionAndCanRetry() throws {
@@ -150,6 +152,7 @@ private struct RealPlaygroundFileSystem: PlaygroundFileSystem {
 private final class FakePlaygroundDatabaseInspector: PlaygroundDatabaseInspecting {
     private(set) var configuration = StorageInspectionConfiguration()
     private(set) var isEnabled = false
+    private(set) var hostMutationsAuthorized = false
 
     func configure(_ configuration: StorageInspectionConfiguration) {
         self.configuration = configuration
@@ -157,6 +160,10 @@ private final class FakePlaygroundDatabaseInspector: PlaygroundDatabaseInspectin
 
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
+    }
+
+    func authorizeHostMutations(_ authorized: Bool) {
+        hostMutationsAuthorized = authorized
     }
 }
 

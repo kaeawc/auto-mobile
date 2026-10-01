@@ -44,7 +44,8 @@ private actor RejectingSdkDatabaseClient: SdkDatabaseFetching {
     func executeSQL(
         databasePath _: String,
         query _: String,
-        sessionId _: String?
+        sessionId _: String?,
+        mutationToken _: String?
     )
         async throws -> SdkExecuteSqlResult
     {

@@ -22,6 +22,7 @@ import {
   type DeviceIncarnationListener,
 } from "../utils/deviceIncarnation";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { SingleFlight } from "../utils/cache/SingleFlight";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
   getIosInstalledAppBundleId,
@@ -204,6 +205,9 @@ interface AppsCacheEntry {
 const APPS_CACHE_TTL_MS = 60000;
 const APPS_QUERY_URI_TTL_MS = 300000;
 const appCacheByDeviceId = new Map<string, AppsCacheEntry>();
+const appsCacheEntrySingleFlight = new SingleFlight<string, AppsCacheEntry | null>();
+const appsCacheEntryFlightKey = (deviceId: string, generation: number): string =>
+  JSON.stringify([deviceId, generation]);
 const registeredDeviceResources = new Map<string, string>();
 const appsQueryUrisByDeviceId = new Map<string, Map<string, number>>();
 // Discovery is best-effort and may overlap a committed boot with a
@@ -708,34 +712,38 @@ async function ensureAppsCacheEntry(
     return cached;
   }
 
-  // Captured before discovery awaits: a request that resumes after the device
-  // was retired must be fenced, not promoted onto a reused id (#6894).
-  const incarnation = getInstalledAppsCacheWriteCoordinator().captureIncarnation(deviceId);
-  const device = typeof deviceOrId === "string" ? await findBootedDevice(deviceOrId) : deviceOrId;
-  if (!device) {
-    return null;
-  }
+  const coordinator = getInstalledAppsCacheWriteCoordinator();
+  // Capture the incarnation before any asynchronous work (including a flight
+  // task's scheduling) so retirement cannot promote this request to a reused id.
+  const incarnation = coordinator.captureIncarnation(deviceId);
+  const generation = coordinator.currentGeneration(deviceId);
+  return await appsCacheEntrySingleFlight.run(
+    appsCacheEntryFlightKey(deviceId, generation),
+    async (flightSignal) => {
+      const device =
+        typeof deviceOrId === "string" ? await findBootedDevice(deviceOrId) : deviceOrId;
+      if (!device) {
+        return null;
+      }
 
-  signal?.throwIfAborted();
-  const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(
-    deviceId,
-    incarnation,
+      flightSignal?.throwIfAborted();
+      const cacheGeneration = coordinator.beginRebuild(deviceId, incarnation);
+      const result = await fetchAppsForDevice(device, timer, flightSignal);
+      if (
+        result.cacheable &&
+        cacheGeneration === generation &&
+        coordinator.currentGeneration(deviceId) === generation &&
+        (device.platform !== "android" || !coordinator.isDirty(deviceId))
+      ) {
+        await coordinator.commitRebuild(deviceId, cacheGeneration, async () => {
+          appCacheByDeviceId.set(deviceId, result.entry);
+        });
+      }
+      return result.entry;
+    },
+    signal,
+    { cancelWhenAllWaitersAbort: true },
   );
-  const result = await fetchAppsForDevice(device, timer, signal);
-  if (
-    result.cacheable &&
-    cacheGeneration !== undefined &&
-    (device.platform !== "android" || !getInstalledAppsCacheWriteCoordinator().isDirty(deviceId))
-  ) {
-    await getInstalledAppsCacheWriteCoordinator().commitRebuild(
-      deviceId,
-      cacheGeneration,
-      async () => {
-        appCacheByDeviceId.set(deviceId, result.entry);
-      },
-    );
-  }
-  return result.entry;
 }
 
 function decodeQueryParam(value: string | undefined): string | undefined {
@@ -1217,6 +1225,8 @@ function registerDeviceAppResource(device: BootedDevice): void {
 }
 
 function unregisterDeviceAppResource(deviceId: string): void {
+  const generation = getInstalledAppsCacheWriteCoordinator().currentGeneration(deviceId);
+  appsCacheEntrySingleFlight.delete(appsCacheEntryFlightKey(deviceId, generation));
   const uri = registeredDeviceResources.get(deviceId);
   if (!uri) {
     return;
@@ -1372,10 +1382,13 @@ registerDeviceIncarnationListener(createInstalledAppsDeviceIncarnationListener()
 
 export function invalidateInstalledAppResourceCache(deviceId?: string): void {
   if (deviceId) {
+    const generation = getInstalledAppsCacheWriteCoordinator().currentGeneration(deviceId);
+    appsCacheEntrySingleFlight.delete(appsCacheEntryFlightKey(deviceId, generation));
     appCacheByDeviceId.delete(deviceId);
     invalidateMetadataCacheForDevice(deviceId);
     return;
   }
+  appsCacheEntrySingleFlight.clear();
   appCacheByDeviceId.clear();
   appMetadataCacheByKey.clear();
 }

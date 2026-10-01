@@ -296,6 +296,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     Socket,
     { timeout: NodeJS.Timeout; onDrain: () => void }
   >();
+  private readonly subscribing = new Set<Socket>();
   private closed = false;
 
   private readonly authenticator: StreamSocketAuthenticator;
@@ -344,11 +345,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     await Promise.all(this.pendingStops.values());
     this.socketDeviceIds.clear();
     this.socketSessionUuids.clear();
+    this.subscribing.clear();
     await super.close();
   }
 
   protected async processLine(socket: Socket, line: string): Promise<void> {
-    if (this.socketDeviceIds.has(socket)) {
+    if (this.socketDeviceIds.has(socket) || this.subscribing.has(socket)) {
       // Already streaming; clients send nothing else, so ignore stray input rather than
       // interrupting the stream.
       return;
@@ -392,6 +394,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return;
     }
 
+    this.subscribing.add(socket);
     try {
       // Authenticate before starting or attaching to any capture (issue #4751):
       // an unauthenticated or cross-session subscribe is rejected here so it can
@@ -453,14 +456,18 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.detach(socket);
       this.sendJson(socket, subscribeFailureResponse(request.id, error));
       socket.end();
+    } finally {
+      this.subscribing.delete(socket);
     }
   }
 
   protected override onConnectionClose(socket: Socket): void {
+    this.subscribing.delete(socket);
     this.detach(socket);
   }
 
   protected override onConnectionError(socket: Socket, _error: Error): void {
+    this.subscribing.delete(socket);
     this.detach(socket);
   }
 

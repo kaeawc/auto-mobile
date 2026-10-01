@@ -532,6 +532,8 @@ export interface DevicePoolDependencies {
   idGenerator?: IdGenerator;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
+  /** Shared with the daemon monitor so refresh and monitor count one streak. */
+  missingDeviceMisses?: Map<string, number>;
   adbServerResetQuarantineFactory?: (
     pool: AdbServerResetQuarantinePoolPort,
   ) => AdbServerResetQuarantine;
@@ -566,6 +568,10 @@ function createMissingDeviceLiveness(
   factory?: DevicePoolDependencies["missingDeviceLivenessFactory"],
 ): MissingDeviceLiveness {
   return factory ? factory(port) : new MissingDeviceLiveness(port);
+}
+
+function resolveMissingDeviceMisses(shared?: Map<string, number>): Map<string, number> {
+  return shared ?? new Map();
 }
 
 function createDevicePoolRefresh(
@@ -608,7 +614,7 @@ export class DevicePool {
    */
   private readonly mcpSessionAcquiredDeviceSessions = new Map<string, Set<string>>();
   private readonly mcpSessionRecoveryDevices: Map<string, McpSessionRecoveryLease> = new Map();
-  private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
+  private readonly refreshMissingDeviceMisses: Map<string, number>;
   private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
   private readonly suppressedAutoStartImageKeyByDeviceId: Map<string, string> = new Map();
   private daemonSessionId: string;
@@ -750,6 +756,7 @@ export class DevicePool {
     idGenerator = defaultIdGenerator,
     lifecycleCoordinator,
     consoleBusyRegistry,
+    missingDeviceMisses,
     adbServerResetQuarantineFactory,
     emulatorProcessLifecycleFactory,
     missingDeviceLivenessFactory,
@@ -761,6 +768,7 @@ export class DevicePool {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
+    this.refreshMissingDeviceMisses = resolveMissingDeviceMisses(missingDeviceMisses);
     this.idGenerator = idGenerator;
     this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();

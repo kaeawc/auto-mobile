@@ -146,7 +146,6 @@ describe("disconnect monitor miss counting", () => {
       candidatePlatforms: candidatePlatforms as Map<string, "android" | "ios">,
       candidateIncarnations,
       deviceDisconnectMissIncarnations,
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
   };
 
@@ -288,7 +287,7 @@ describe("disconnect monitor miss counting", () => {
 
     expect(result.skippedAllDiscoveryFailed).toBe(true);
     expect(result.disconnected).toEqual([]);
-    expect(misses.get("device-1")).toBe(2);
+    expect(misses.has("device-1")).toBe(false);
   });
 
   test("miss-counts only candidates whose platform discovery succeeds", () => {
@@ -322,7 +321,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map(),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     };
 
     for (let count = 1; count <= DEVICE_DISCONNECT_MISS_THRESHOLD; count++) {
@@ -348,13 +346,12 @@ describe("disconnect monitor miss counting", () => {
       succeededPlatforms: new Set(),
       succeededSources: new Set(),
       candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
     expect(result.skippedAllDiscoveryFailed).toBe(true);
     expect(result.disconnected).toEqual([]);
     expect(result.missed).toEqual([]);
-    expect(misses.get("emulator-5554")).toBe(1);
+    expect(misses.has("emulator-5554")).toBe(false);
   });
 
   test("fresh booted scan clears a stale forced missing flag", () => {
@@ -367,7 +364,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["emulator-5554"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map([["emulator-5554", "android" as const]]),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
     expect(result.skippedAllDiscoveryFailed).toBe(false);
@@ -518,7 +514,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map(),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
     expect(misses.has("sim-1")).toBe(false);
@@ -535,7 +530,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map(),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
     expect(confirmedDisconnectedDeviceIds.has("sim-1")).toBe(false);
@@ -553,7 +547,6 @@ describe("disconnect monitor miss counting", () => {
       succeededPlatforms: new Set(["android" as const, "ios" as const]),
       candidatePlatforms: new Map([["sim-1", "ios" as const]]),
       candidateIncarnations: new Map([["sim-1", 2]]),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
     expect(confirmedDisconnectedDeviceIds.has("sim-1")).toBe(false);
@@ -570,7 +563,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["device-1"]),
       succeededPlatforms: new Set(["android" as const, "ios" as const]),
       candidatePlatforms: new Map([["device-1", "android" as const]]),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     };
 
     expect(evaluateDeviceDisconnects(input).disconnected).toEqual([]);
@@ -599,7 +591,6 @@ describe("disconnect monitor miss counting", () => {
       candidateDeviceIds: new Set(["device-1"]),
       succeededPlatforms: new Set(["android" as const]),
       candidatePlatforms: new Map([["device-1", "android" as const]]),
-      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
     });
 
     expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(false);

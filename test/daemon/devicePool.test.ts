@@ -2796,6 +2796,10 @@ describe("DevicePool", () => {
       const added = await devicePool.refreshDevices();
 
       expect(added).toBe(1);
+      expect(devicePool.getDevice("sim-old")).not.toBeNull();
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice("sim-old")).not.toBeNull();
+      await devicePool.refreshDevices();
       expect(devicePool.getDevice("sim-old")).toBeNull();
       expect(devicePool.getDevice("sim-new")).not.toBeNull();
       expect(devicePool.getTotalDeviceCount()).toBe(1);
@@ -2853,6 +2857,8 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [];
 
       await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice("sim-old")).not.toBeNull();
       await devicePool.refreshDevices();
 
       expect(devicePool.getDevice("sim-old")).toBeNull();
@@ -3636,7 +3642,9 @@ describe("DevicePool", () => {
       fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
       fakeDeviceManager.failedPlatforms = new Set<Platform>();
 
-      // Genuine empties are tolerated for one refresh, then removed.
+      // Genuine empties are tolerated for two refreshes, then removed.
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
       await devicePool.refreshDevices();
       expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
       await devicePool.refreshDevices();
@@ -3653,6 +3661,8 @@ describe("DevicePool", () => {
       }
       fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
 
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
       await devicePool.refreshDevices();
       await expect(devicePool.assignDeviceToSession("session-1", "ios")).rejects.toThrow(
         /No devices in pool/,

@@ -6,13 +6,48 @@ import Foundation
 /// Physical-device VoiceOver toggle by automating Settings → Accessibility.
 ///
 /// Deep-links straight to the Accessibility pane (`App-Prefs:root=ACCESSIBILITY`) to
-/// avoid locale-fragile navigation, then taps the VoiceOver switch. English locale
-/// only for initial support; the switch is matched by label with an identifier
-/// fallback. Stateless → genuinely `Sendable` (the reference was a `final class`).
+/// avoid locale-fragile navigation. Prefer a stable element identifier, then the
+/// known English label; on the VoiceOver sub-page its sole switch also works
+/// with an unknown locale. Stateless → genuinely `Sendable`.
 struct DefaultVoiceOverToggle: VoiceOverToggling {
     private static let settingsBundleId = "com.apple.Preferences"
     private static let accessibilityDeepLink = "App-Prefs:root=ACCESSIBILITY"
     private static let switchExistenceTimeout: TimeInterval = 5
+
+    struct Candidate: Equatable {
+        let identifier: String
+        let label: String
+    }
+
+    enum Location {
+        case accessibilityRow
+        case directSwitch
+        case subpageSwitch
+    }
+
+    /// Returns an unambiguous candidate. The first row is the structural fallback
+    /// for an unlabelled Accessibility pane; a switch is structural only after
+    /// opening that row, so another switch on the root cannot be toggled blindly.
+    static func matchingIndex(in candidates: [Candidate], at location: Location) -> Int? {
+        let identifiers = candidates.indices.filter { candidates[$0].identifier == "VoiceOver" }
+        guard identifiers.count <= 1 else { return nil }
+        if let index = identifiers.first {
+            return index
+        }
+        let labels = candidates.indices.filter { candidates[$0].label == "VoiceOver" }
+        guard labels.count <= 1 else { return nil }
+        if let index = labels.first {
+            return index
+        }
+        switch location {
+        case .accessibilityRow:
+            return candidates.isEmpty ? nil : 0
+        case .directSwitch:
+            return nil
+        case .subpageSwitch:
+            return candidates.count == 1 ? 0 : nil
+        }
+    }
 
     @MainActor
     func setVoiceOver(enabled: Bool) throws {
@@ -22,20 +57,38 @@ struct DefaultVoiceOverToggle: VoiceOverToggling {
             if let url = URL(string: Self.accessibilityDeepLink) {
                 XCUIDevice.shared.system.open(url)
             }
-            // The Accessibility root pane lists "VoiceOver" as a navigation row that
-            // pushes a sub-page; the on/off switch lives on that sub-page, not at the
-            // root. If no VoiceOver switch is present at the current level, drill into
-            // the VoiceOver row first, then match the switch on the sub-page. Guarding
-            // on the switch's presence (rather than assuming the level) keeps this
-            // working if a future iOS surfaces the switch higher.
-            if !settings.switches["VoiceOver"].firstMatch.waitForExistence(timeout: Self.switchExistenceTimeout) {
-                let voRow = settings.cells["VoiceOver"].firstMatch
-                guard voRow.waitForExistence(timeout: Self.switchExistenceTimeout) else {
+            let directSwitches = settings.switches.allElementsBoundByIndex
+            let directIndex = Self.matchingIndex(
+                in: directSwitches.map { Candidate(identifier: $0.identifier, label: $0.label) },
+                at: .directSwitch
+            )
+            let voSwitch: XCUIElement
+            if let directIndex {
+                voSwitch = directSwitches[directIndex]
+            } else {
+                guard settings.cells.firstMatch.waitForExistence(timeout: Self.switchExistenceTimeout) else {
                     throw VoiceOverToggleError.switchNotFound
                 }
-                voRow.tap()
+                let rows = settings.cells.allElementsBoundByIndex
+                guard let rowIndex = Self.matchingIndex(
+                    in: rows.map { Candidate(identifier: $0.identifier, label: $0.label) },
+                    at: .accessibilityRow
+                ) else {
+                    throw VoiceOverToggleError.switchNotFound
+                }
+                rows[rowIndex].tap()
+                guard settings.switches.firstMatch.waitForExistence(timeout: Self.switchExistenceTimeout) else {
+                    throw VoiceOverToggleError.switchNotFound
+                }
+                let subpageSwitches = settings.switches.allElementsBoundByIndex
+                guard let switchIndex = Self.matchingIndex(
+                    in: subpageSwitches.map { Candidate(identifier: $0.identifier, label: $0.label) },
+                    at: .subpageSwitch
+                ) else {
+                    throw VoiceOverToggleError.switchNotFound
+                }
+                voSwitch = subpageSwitches[switchIndex]
             }
-            let voSwitch = settings.switches["VoiceOver"].firstMatch
             guard voSwitch.waitForExistence(timeout: Self.switchExistenceTimeout) else {
                 throw VoiceOverToggleError.switchNotFound
             }

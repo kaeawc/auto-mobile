@@ -32,6 +32,15 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    proposed here; see [STATUS.md](STATUS.md) §6 for the (approved) rationale.
 4. `@MainActor` UI domain (ElementLocator, GesturePerformer, HierarchyDebouncer,
    DisplayLinkFPSMonitor, VoiceOver) ✅
+
+   Physical-device VoiceOver Settings lookup now prefers a stable `VoiceOver`
+   accessibility identifier, then the sourced English label. If neither is
+   exposed, it opens the first Accessibility navigation cell and accepts the
+   sole switch on that sub-page. An unmatched switch on the Accessibility root
+   is never tapped, nor is an ambiguous sub-page with multiple switches.
+   Apple Settings translations are not bundled in this repo, so there is no
+   verified localized label table; a reordered first cell or a changed sub-page
+   structure still needs physical-device validation.
 5. PerfProvider (TaskLocal call-tree + confined pool) ✅
 6. CommandHandler (Sendable POD router, async) + async serial dispatch + CtrlProxy coordinator ✅
 7. Cutover — ✅ **complete** (`CtrlProxyRewrite` is the sole implementation):

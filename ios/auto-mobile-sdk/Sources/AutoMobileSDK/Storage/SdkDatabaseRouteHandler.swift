@@ -99,13 +99,19 @@
     }
 
     final class SdkDatabaseRouteHandler {
+        private let currentSessionId: () -> String?
+
+        init(currentSessionId: @escaping () -> String? = { AutoMobileSDK.shared.currentSessionId() }) {
+            self.currentSessionId = currentSessionId
+        }
+
         func handleCapabilities() -> SdkRouteResponse {
             let configuration = DatabaseInspector.shared.inspectionConfiguration
             return encode(SdkStorageCapabilitiesPayload(
                 readOnly: !configuration.allowMutations,
                 mutationAuthorized: DatabaseInspector.shared.canMutate(
-                    sessionId: AutoMobileSDK.shared.currentSessionId(),
-                    currentSessionId: AutoMobileSDK.shared.currentSessionId()
+                    sessionId: currentSessionId(),
+                    currentSessionId: currentSessionId()
                 ),
                 registeredAppGroupSuites: configuration.registeredAppGroupSuites.sorted(),
                 coreDataStores: configuration.coreDataStores,
@@ -226,10 +232,10 @@
             if classification.hasMultipleStatements {
                 return error(statusCode: 400, code: "multiple_statements_not_supported")
             }
-            if !classification.readOnly
+            if classification.requiresWriteConnection
                 && !DatabaseInspector.shared.canMutate(
                     sessionId: request.sessionId,
-                    currentSessionId: AutoMobileSDK.shared.currentSessionId()
+                    currentSessionId: currentSessionId()
                 )
             {
                 return error(statusCode: 403, code: "mutation_not_authorized")

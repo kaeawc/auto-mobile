@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { BootedDevice, PlanStep } from "../../src/models";
+import { ActionableError, type BootedDevice, type PlanStep } from "../../src/models";
 import {
   getTestRecordingStatus,
   startTestRecording,
@@ -21,6 +21,9 @@ class FakeRecorder {
   startCount = 0;
   stopCount = 0;
   startGate = new Deferred<void>();
+  stopGate: Deferred<{ steps: PlanStep[]; stepCount: number }> | null = null;
+  stopError: Error | null = null;
+  steps: PlanStep[] = [];
 
   get stepCount(): number {
     return 0;
@@ -33,9 +36,29 @@ class FakeRecorder {
 
   async stop(): Promise<{ steps: PlanStep[]; stepCount: number }> {
     this.stopCount++;
-    return { steps: [], stepCount: 0 };
+    if (this.stopError) {
+      throw this.stopError;
+    }
+    if (this.stopGate) {
+      return this.stopGate.promise;
+    }
+    return { steps: this.steps, stepCount: this.steps.length };
   }
 }
+
+const capturedStep: PlanStep = { tool: "tapOn", params: { text: "OK" } };
+
+const start = async (
+  timer: FakeTimer,
+  recorder: FakeRecorder,
+  ids = new CountingIdGenerator("recording"),
+  factory: (device: BootedDevice) => FakeRecorder = () => recorder,
+) => {
+  const pending = startTestRecording(device, timer, ids, factory);
+  await Promise.resolve();
+  recorder.startGate.resolve();
+  return { result: await pending, ids };
+};
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const otherDevice: BootedDevice = { ...device, deviceId: "emulator-5556" };
@@ -99,6 +122,154 @@ describe("testRecordingManager startup reservation", () => {
     const retry = startTestRecording(otherDevice, timer, ids, () => next);
     next.startGate.resolve();
     expect((await retry).deviceId).toBe(otherDevice.deviceId);
+    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+      "No recorded interactions",
+    );
+  });
+});
+
+describe("testRecordingManager stopping reservation", () => {
+  test("successful stop releases the active recording and returns its result", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    recorder.steps = [capturedStep];
+    const { result: started } = await start(timer, recorder);
+
+    const result = await stopTestRecording(started.recordingId, undefined, timer);
+
+    expect(result.recordingId).toBe(started.recordingId);
+    expect(result.stepCount).toBe(1);
+    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(recorder.stopCount).toBe(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("rejected stop releases the session and a new start constructs a new recorder", async () => {
+    const timer = new FakeTimer();
+    const ids = new CountingIdGenerator("recording");
+    const failed = new FakeRecorder();
+    failed.stopError = new Error("device disconnected");
+    const { result: started } = await start(timer, failed, ids);
+
+    const stopError = await stopTestRecording(started.recordingId, undefined, timer).catch(
+      (error: unknown) => error,
+    );
+    expect(stopError).toBeInstanceOf(ActionableError);
+    expect(stopError).toHaveProperty(
+      "message",
+      "Failed to stop test recording: device disconnected",
+    );
+    expect(getTestRecordingStatus(timer)).toBeNull();
+
+    const replacement = new FakeRecorder();
+    let factoryCalls = 0;
+    const next = startTestRecording(device, timer, ids, () => {
+      factoryCalls++;
+      return replacement;
+    });
+    await Promise.resolve();
+    replacement.startGate.resolve();
+    const nextStarted = await next;
+    expect(nextStarted.recordingId).not.toBe(started.recordingId);
+    expect(factoryCalls).toBe(1);
+    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+      "No recorded interactions",
+    );
+  });
+
+  test("timed out stop releases the session and allows a fresh start", async () => {
+    const timer = new FakeTimer();
+    const ids = new CountingIdGenerator("recording");
+    const hung = new FakeRecorder();
+    hung.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    const { result: started } = await start(timer, hung, ids);
+
+    const stopping = stopTestRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    timer.advanceTime(10_000);
+    const timeoutError = await stopping.catch((error: unknown) => error);
+    expect(timeoutError).toBeInstanceOf(ActionableError);
+    expect(timeoutError).toHaveProperty(
+      "message",
+      "Failed to stop test recording: Test recording stop timed out after 10000 ms",
+    );
+    expect(getTestRecordingStatus(timer)).toBeNull();
+
+    const replacement = new FakeRecorder();
+    const next = startTestRecording(device, timer, ids, () => replacement);
+    await Promise.resolve();
+    replacement.startGate.resolve();
+    expect((await next).recordingId).not.toBe(started.recordingId);
+    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+      "No recorded interactions",
+    );
+  });
+
+  test("concurrent stops share the successful stop result", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    recorder.steps = [capturedStep];
+    recorder.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    const { result: started } = await start(timer, recorder);
+
+    const first = stopTestRecording(started.recordingId, undefined, timer);
+    const second = stopTestRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    expect(recorder.stopCount).toBe(1);
+    recorder.stopGate.resolve({ steps: [capturedStep], stepCount: 1 });
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult).toBe(secondResult);
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
+  test("concurrent stops share the same failure", async () => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    recorder.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    const { result: started } = await start(timer, recorder);
+
+    const first = stopTestRecording(started.recordingId, undefined, timer);
+    const second = stopTestRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    expect(recorder.stopCount).toBe(1);
+    recorder.stopGate.reject(new Error("stop failed"));
+    const outcomes = await Promise.allSettled([first, second]);
+    expect(outcomes[0]?.status).toBe("rejected");
+    expect(outcomes[1]?.status).toBe("rejected");
+    if (outcomes[0]?.status === "rejected" && outcomes[1]?.status === "rejected") {
+      expect(outcomes[0].reason).toBe(outcomes[1].reason);
+      expect(outcomes[0].reason.message).toContain("stop failed");
+    }
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
+  test("start during an in-flight stop waits, then creates a fresh recording", async () => {
+    const timer = new FakeTimer();
+    const ids = new CountingIdGenerator("recording");
+    const firstRecorder = new FakeRecorder();
+    firstRecorder.steps = [capturedStep];
+    firstRecorder.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
+    const { result: started } = await start(timer, firstRecorder, ids);
+
+    const stopping = stopTestRecording(started.recordingId, undefined, timer);
+    await Promise.resolve();
+    expect(getTestRecordingStatus(timer)).toBeNull();
+    const nextRecorder = new FakeRecorder();
+    let factoryCalls = 0;
+    const starting = startTestRecording(device, timer, ids, () => {
+      factoryCalls++;
+      return nextRecorder;
+    });
+    await Promise.resolve();
+    expect(factoryCalls).toBe(0);
+
+    firstRecorder.stopGate.resolve({ steps: [capturedStep], stepCount: 1 });
+    await stopping;
+    await Promise.resolve();
+    expect(factoryCalls).toBe(1);
+    nextRecorder.startGate.resolve();
+    const nextStarted = await starting;
+    expect(nextStarted.recordingId).not.toBe(started.recordingId);
     await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
     );

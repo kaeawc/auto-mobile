@@ -6,6 +6,7 @@ import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { DualTrackRecorder } from "../features/record/android";
 
 interface TestRecordingStartResult {
@@ -44,6 +45,8 @@ interface RecordingSession {
   recorder: TestRecorder;
 }
 
+const STOP_RECORDING_TIMEOUT_MS = 10_000;
+
 type TestRecorder = Pick<DualTrackRecorder, "start" | "stop" | "stepCount">;
 type RecorderFactory = (device: BootedDevice) => TestRecorder;
 
@@ -51,6 +54,10 @@ let activeRecording: RecordingSession | null = null;
 let startingRecording: {
   session: RecordingSession;
   promise: Promise<TestRecordingStartResult>;
+} | null = null;
+let stoppingRecording: {
+  session: RecordingSession;
+  promise: Promise<TestRecordingStopResult>;
 } | null = null;
 
 export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordingStatus | null {
@@ -124,6 +131,11 @@ export async function startTestRecording(
   idGenerator: IdGenerator = defaultIdGenerator,
   recorderFactory: RecorderFactory = (target) => new DualTrackRecorder(target),
 ): Promise<TestRecordingStartResult> {
+  if (stoppingRecording) {
+    await stoppingRecording.promise.catch(() => undefined);
+    return startTestRecording(device, timer, idGenerator, recorderFactory);
+  }
+
   if (activeRecording) {
     if (activeRecording.deviceId !== device.deviceId) {
       throw new Error(
@@ -208,7 +220,7 @@ export async function stopTestRecording(
   if (startingRecording) {
     await startingRecording.promise;
   }
-  const session = activeRecording;
+  const session = activeRecording ?? stoppingRecording?.session ?? null;
   if (!session) {
     throw new Error("No active recording. Start a recording before stopping.");
   }
@@ -219,8 +231,38 @@ export async function stopTestRecording(
     );
   }
 
-  const { steps } = await session.recorder.stop();
+  if (stoppingRecording?.session === session) {
+    return stoppingRecording.promise;
+  }
+
   activeRecording = null;
+  const promise = stopAndBuildResult(session, planName, timer).finally(() => {
+    if (stoppingRecording?.session === session) {
+      stoppingRecording = null;
+    }
+  });
+  stoppingRecording = { session, promise };
+  return promise;
+}
+
+async function stopAndBuildResult(
+  session: RecordingSession,
+  planName: string | undefined,
+  timer: Timer,
+): Promise<TestRecordingStopResult> {
+  let steps: PlanStep[];
+  try {
+    ({ steps } = await raceWithDeadline(() => session.recorder.stop(), {
+      timer,
+      timeoutMs: STOP_RECORDING_TIMEOUT_MS,
+      label: "Stopping test recording",
+      timeoutError: () =>
+        new Error(`Test recording stop timed out after ${STOP_RECORDING_TIMEOUT_MS} ms`),
+    }));
+  } catch (error) {
+    logger.warn(`[TestRecording] Failed to stop recording ${session.recordingId}`, error);
+    throw toActionableError(error, "Failed to stop test recording");
+  }
 
   const stoppedAt = timer.now();
   const resolvedPlanName = formatPlanName(planName);

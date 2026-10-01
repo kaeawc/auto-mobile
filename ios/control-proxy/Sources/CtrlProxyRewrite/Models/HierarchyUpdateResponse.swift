@@ -12,6 +12,7 @@ public struct HierarchyUpdateResponse: Codable, Sendable {
     public let frameContext: String?
 
     public init(
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         requestId: String? = nil,
         data: ViewHierarchy? = nil,
         perfTiming: PerfTiming? = nil,
@@ -19,11 +20,24 @@ public struct HierarchyUpdateResponse: Codable, Sendable {
         frameContext: String? = nil
     ) {
         type = "hierarchy_update"
-        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.timestamp = timestamp
         self.requestId = requestId
         self.data = data
         self.perfTiming = perfTiming
         self.error = error
         self.frameContext = frameContext
+    }
+
+    /// Returns this response with performance timing attached without changing its
+    /// original capture timestamp or any other wire field.
+    public func withPerfTiming(_ perfTiming: PerfTiming) -> HierarchyUpdateResponse {
+        HierarchyUpdateResponse(
+            timestamp: timestamp,
+            requestId: requestId,
+            data: data,
+            perfTiming: perfTiming,
+            error: error,
+            frameContext: frameContext
+        )
     }
 }

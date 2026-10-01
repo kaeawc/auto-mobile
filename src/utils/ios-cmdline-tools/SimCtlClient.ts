@@ -2703,6 +2703,7 @@ export class SimCtlClient implements SimCtl {
 
   /** Capture the selected physical framebuffer as binary PNG stdout. */
   async screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+    const startedAt = this.timer.now();
     const args = ["simctl", "io", deviceId, "screenshot", `--display=${display}`, "-"];
     const timeout = new AbortController();
     const handle = this.timer.setTimeout(
@@ -2725,7 +2726,19 @@ export class SimCtlClient implements SimCtl {
       child.stderr?.on("data", (chunk: Buffer) => errors.push(chunk));
       child.once("error", (error) => {
         this.timer.clearTimeout(handle);
-        reject(error);
+        const elapsed = this.timer.now() - startedAt;
+        if (timeout.signal.aborted) {
+          reject(new Error(`simctl screenshot timed out after ${elapsed}ms`, { cause: error }));
+        } else if (signal?.aborted) {
+          reject(
+            new Error(
+              `simctl screenshot cancelled by the caller after ${elapsed}ms: ${errorMessage(signal.reason)}`,
+              { cause: error },
+            ),
+          );
+        } else {
+          reject(error);
+        }
       });
       child.once("close", (code) => {
         this.timer.clearTimeout(handle);

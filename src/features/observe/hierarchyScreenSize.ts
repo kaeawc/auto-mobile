@@ -2,6 +2,41 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { nodeBounds } from "../../models/ViewHierarchyResult";
 import { parseBounds } from "../../utils/bounds";
 
+const PIXEL_ORIENTATION_TOLERANCE_POINTS = 1;
+
+/** The runner reports its own orientation as pixels; the root frame can lag it (#8379). */
+function pixelsProveSwappedOrientation(
+  hierarchy: Pick<
+    ViewHierarchyResult,
+    "pixelWidth" | "pixelHeight" | "nativeScale" | "screenScale"
+  >,
+  width: number,
+  height: number,
+): boolean {
+  if (typeof hierarchy.screenScale !== "number" || !Number.isFinite(hierarchy.screenScale)) {
+    return false;
+  }
+  const scale =
+    typeof hierarchy.nativeScale === "number" &&
+    Number.isFinite(hierarchy.nativeScale) &&
+    hierarchy.nativeScale > 0
+      ? hierarchy.nativeScale
+      : hierarchy.screenScale;
+  const { pixelWidth, pixelHeight } = hierarchy;
+  if (
+    ![scale, pixelWidth, pixelHeight].every(
+      (value) => typeof value === "number" && Number.isFinite(value) && value > 0,
+    )
+  ) {
+    return false;
+  }
+  return (
+    Math.abs(width - height) > PIXEL_ORIENTATION_TOLERANCE_POINTS &&
+    Math.abs(pixelWidth! / scale - height) <= PIXEL_ORIENTATION_TOLERANCE_POINTS &&
+    Math.abs(pixelHeight! / scale - width) <= PIXEL_ORIENTATION_TOLERANCE_POINTS
+  );
+}
+
 function sameBounds(
   first: ReturnType<typeof parseBounds>,
   second: NonNullable<ReturnType<typeof parseBounds>>,
@@ -69,7 +104,7 @@ function landscapeExtentFitsSwappedRoot(
   return fitsSwappedBounds(bounds, maxRight, maxBottom, fullLandscapeFrame, iosMultiPanel);
 }
 
-/** Root dimensions remain authoritative over legacy runner screen metadata. */
+/** Runner pixels determine orientation; root bounds take precedence over legacy point metadata. */
 export function extractHierarchyScreenSize(
   viewHierarchy: ViewHierarchyResult | undefined,
   iosMultiPanel = false,
@@ -90,8 +125,11 @@ export function extractHierarchyScreenSize(
     const width = bounds.right - bounds.left;
     const height = bounds.bottom - bounds.top;
     if (width > 0 && height > 0) {
-      // An XCUIApplication root can retain its portrait frame after the inner
-      // panel rotates. A full-frame child proves landscape on every device;
+      if (pixelsProveSwappedOrientation(viewHierarchy!, width, height)) {
+        return { width: height, height: width };
+      }
+      // Runner pixels are the primary orientation evidence for a stale root.
+      // Without that proof, a full-frame child proves landscape on every device;
       // bounded overflow is evidence only for an iOS multi-panel device.
       return landscapeExtentFitsSwappedRoot(rootNode, bounds, iosMultiPanel)
         ? { width: height, height: width }

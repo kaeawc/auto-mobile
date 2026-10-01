@@ -1,8 +1,9 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import type { ChildProcess } from "node:child_process";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { logger } from "../../../src/utils/logger";
 import { captureIosPanelScreenshot } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
 import type { BootedDevice } from "../../../src/models";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
@@ -127,4 +128,72 @@ test("inner panel rejects a cover-sized PNG despite matching hierarchy points at
     "primary-1",
   );
   expect(result.data).toBe("runner");
+});
+
+function abortingSpawn(
+  _file: string,
+  _args: readonly string[],
+  options?: SpawnOptions,
+): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  Object.assign(child, { stdout: new PassThrough(), stderr: new PassThrough() });
+  options?.signal?.addEventListener(
+    "abort",
+    () => {
+      child.emit(
+        "error",
+        Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+      );
+    },
+    { once: true },
+  );
+  return child;
+}
+
+test("simctl screenshot reports its 10s timeout, not a bare AbortError", async () => {
+  const timer = new FakeTimer();
+  const simctl = new SimCtlClient(device, null, timer, "darwin", abortingSpawn);
+  const screenshot = simctl.screenshot(udid, "primary-1");
+  timer.advanceTime(10_000);
+  await expect(screenshot).rejects.toThrow("simctl screenshot timed out after 10000ms");
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("simctl screenshot reports a caller cancellation", async () => {
+  const timer = new FakeTimer();
+  const caller = new AbortController();
+  const simctl = new SimCtlClient(device, null, timer, "darwin", abortingSpawn);
+  const screenshot = simctl.screenshot(udid, "primary-1", caller.signal);
+  timer.advanceTime(25);
+  caller.abort(new Error("distinct caller reason"));
+  await expect(screenshot).rejects.toThrow(
+    "simctl screenshot cancelled by the caller after 25ms: distinct caller reason",
+  );
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("panel capture failure falls back to the runner and the warning names the caller-signal state", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const caller = new AbortController();
+  const runnerResult = { success: true, data: "runner" };
+  try {
+    const result = await captureIosPanelScreenshot(
+      device,
+      // values reported in issue #8379's 2026-10-01 device verification
+      { updatedAt: 0, packageName: "app", hierarchy: {}, pixelWidth: 2853, pixelHeight: 2007 },
+      {
+        screenshot: async () => {
+          throw new Error("simctl screenshot timed out after 10000ms");
+        },
+      },
+      async () => runnerResult,
+      caller.signal,
+    );
+    expect(result).toBe(runnerResult);
+    expect(warn.mock.calls).toHaveLength(1);
+    expect(warn.mock.calls[0]?.[0]).toContain("caller signal aborted: false");
+    expect(warn.mock.calls[0]?.[0]).toContain("simctl screenshot timed out after 10000ms");
+  } finally {
+    warn.mockRestore();
+  }
 });

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { issue8379Hierarchy, issue8379SyntheticOutlier } from "../../fixtures/issue8379Hierarchy";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
@@ -134,6 +135,20 @@ describe("TapAtCoordinate", () => {
       const result = await tapAt.execute(coordinates);
       expect(result.success).toBe(false);
       expect(result.error).toContain("outside screen bounds [0, 951) x [0, 669)");
+    }
+    expect(iosDispatches).toHaveLength(1);
+  });
+
+  test("captured Duo hierarchy yields a screenSize in which tapAt {700,48} dispatches", async () => {
+    const screenSize = extractHierarchyScreenSize(issue8379Hierarchy([issue8379SyntheticOutlier]))!;
+    const { tapAt, observeScreen, iosDispatches } = createTapAt(iosDevice);
+    observeScreen.setObserveResult(observation(screenSize.width, screenSize.height));
+    expect((await tapAt.execute({ x: 700, y: 48 })).success).toBe(true);
+    for (const coordinates of [
+      { x: 951, y: 0 },
+      { x: 0, y: 669 },
+    ]) {
+      expect((await tapAt.execute(coordinates)).success).toBe(false);
     }
     expect(iosDispatches).toHaveLength(1);
   });

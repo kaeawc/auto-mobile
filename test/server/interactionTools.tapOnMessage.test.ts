@@ -1,15 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   buildTapOnResultMessage,
+  hitTestHandler,
+  hitTestSchema,
   registerInteractionTools,
+  resetHitTestObservationFactory,
   resetTapAtElementFactory,
   resetTapOnElementFactory,
   setTapAtElementFactory,
+  setHitTestObservationFactory,
   setTapOnElementFactory,
   tapAtHandler,
   tapAtSchema,
   tapOnHandler,
 } from "../../src/server/interactionTools";
+import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { TapAtArgs, TapOnArgs } from "../../src/server/interactionToolTypes";
 import { getStructuredField } from "../../src/utils/toolUtils";
@@ -379,5 +384,39 @@ describe("tapAtHandler (registered handler wiring)", () => {
     );
     expect(getStructuredField(response, "deviceId")).toBe(fakeDevice.deviceId);
     expect(getStructuredField(response, "platform")).toBe(fakeDevice.platform);
+  });
+});
+
+describe("hitTestHandler", () => {
+  afterEach(() => {
+    resetHitTestObservationFactory();
+    ToolRegistry.clearTools();
+  });
+
+  test("registers an opt-in preview with exactly the tapAt input schema", () => {
+    registerInteractionTools();
+    const tool = ToolRegistry.getTool("hitTest");
+    expect(tool?.deviceAwareHandler).toBe(hitTestHandler);
+    expect(tool?.defaultEnabled).toBe(false);
+    expect(hitTestSchema).toBe(tapAtSchema);
+    expect(hitTestSchema.safeParse({ x: 1, y: 2, selector: "wrong" }).success).toBe(false);
+  });
+
+  test("observes without screenshot or input and returns an estimate", async () => {
+    const device = { deviceId: "fake", platform: "android" } as BootedDevice;
+    const calls: unknown[] = [];
+    const observation = loadAndroidHomeObserve().observe;
+    setHitTestObservationFactory(() => ({
+      execute: async (options) => {
+        calls.push(options);
+        return observation;
+      },
+    }));
+    const response = await hitTestHandler(device, { x: 1, y: 2, display: "active" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ display: "active", skipScreenshot: true });
+    expect(getStructuredField(response, "method")).toBe("hierarchy-bounds");
+    expect(getStructuredField(response, "dispatchGuaranteed")).toBe(false);
+    expect(getStructuredField(response, "deviceId")).toBe("fake");
   });
 });

@@ -95,15 +95,29 @@ into native coordinates or account for a crop. Unchanged geometry and frame
 context do not prove unchanged visual content. Recapture after navigation,
 scrolling, animation, or any other UI change.
 
-| Tool                                 | What it does                                               |
-| ------------------------------------ | ---------------------------------------------------------- |
-| 👀 <code>observe</code>              | Gets the current screen view hierarchy.                    |
-| 🔍 <code>explore</code>              | Explores an app to build a navigation graph.               |
-| 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.              |
-| 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.              |
-| 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                              |
-| 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.              |
-| 🔍 <code>debugSearch</code>          | Shows selector matches, the chosen match, and near-misses. |
+`hitTest` previews the same `{"x":120,"y":240}` native screen target accepted
+by `tapAt`, including its optional `display` selector. It is opt-in. Its
+`point`, `screenSize`, and `reference` report the resolved screen geometry;
+`firstCandidate` is `null` when no accessible bounds contain the point.
+`candidates` contains at most 25 hierarchy nodes, ordered by reported window
+layer, then interactive status, smaller containing bounds, and depth. The
+response always says `"method":"hierarchy-bounds"` and
+`"dispatchGuaranteed":false`. It sends no input. Gesture interception,
+transformed hit regions, custom drawing inside a canvas, and screen-reader
+behavior can all make the actual native event recipient differ from this
+estimate. Re-observe after navigation, scrolling, or animation before using the
+point with `tapAt`.
+
+| Tool                                 | What it does                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------- |
+| 👀 <code>observe</code>              | Gets the current screen view hierarchy.                                   |
+| 🎯 <code>hitTest</code>              | Estimates hierarchy nodes beneath a coordinate without dispatching input. |
+| 🔍 <code>explore</code>              | Explores an app to build a navigation graph.                              |
+| 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
+| 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
+| 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
+| 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
+| 🔍 <code>debugSearch</code>          | Shows selector matches, the chosen match, and near-misses.                |
 
 ## Interact with the UI
 

@@ -325,6 +325,11 @@ export class CtrlProxyHierarchy {
         fresh: false,
         reconnectStatus,
         reconnectMessage: this.buildReconnectMessage(reconnectStatus.retryAfterSeconds),
+        unavailableReason:
+          requestFailure.value?.reason && requestFailure.value.reason !== "unknown"
+            ? requestFailure.value.reason
+            : "connection_lost",
+        unavailableDetail: requestFailure.value?.detail,
       };
     }
 

@@ -39,6 +39,13 @@ export interface IosScreenUnlocker {
   wakeAndDismiss(): Promise<{ success: boolean; error?: string }>;
 }
 
+/** The same runner recovery operations used by iOS observe. */
+export interface IosRunnerRecovery {
+  isConnected(): boolean;
+  ensureRecoveryStarted(): void;
+  awaitRecovery(budgetMs: number): Promise<"recovered" | "not_recovering" | "failed" | "timed_out">;
+}
+
 export interface WakeAndUnlockResult {
   success: boolean;
   platform: "android" | "ios";
@@ -59,6 +66,7 @@ export interface WakeAndUnlockOptions {
   timer?: Timer;
   credentialStore?: LockCredentialStore;
   iosUnlocker?: IosScreenUnlocker;
+  iosRunnerRecovery?: IosRunnerRecovery;
 }
 
 // Timings. WAKE/BOUNCER settle let the display and bouncer animate before the
@@ -69,6 +77,8 @@ const WAKE_SETTLE_MS = 500;
 const BOUNCER_SETTLE_MS = 900;
 const UNLOCK_POLL_INTERVAL_MS = 250;
 const UNLOCK_POLL_MAX_MS = 2500;
+// Leave room in the ordinary 30s MCP request for the wake/swipe attempt.
+const IOS_RECOVERY_WAIT_MS = 20_000;
 
 /**
  * Wake and (if needed) unlock a device — the cross-platform capability behind the
@@ -89,6 +99,7 @@ export class WakeAndUnlock {
   private readonly timer: Timer;
   private readonly credentialStore?: LockCredentialStore;
   private readonly iosUnlocker?: IosScreenUnlocker;
+  private readonly iosRunnerRecovery?: IosRunnerRecovery;
   private keyCombinationSupported: boolean | undefined;
 
   constructor(
@@ -110,6 +121,7 @@ export class WakeAndUnlock {
     this.timer = options.timer ?? defaultTimer;
     this.credentialStore = options.credentialStore;
     this.iosUnlocker = options.iosUnlocker;
+    this.iosRunnerRecovery = options.iosRunnerRecovery;
   }
 
   /**
@@ -306,16 +318,52 @@ export class WakeAndUnlock {
     if (!this.iosUnlocker) {
       throw new ActionableError("wakeAndUnlock: iOS unlocker is not configured");
     }
-    const result = await this.iosUnlocker.wakeAndDismiss();
+    const recoveryDeadline = this.timer.now() + IOS_RECOVERY_WAIT_MS;
+    const recovery = this.iosRunnerRecovery;
+    if (recovery) {
+      const ready = await this.waitForIosRunner(recovery, recoveryDeadline);
+      if (!ready) {
+        return this.iosResult(false, "iOS runner did not recover before unlock");
+      }
+    }
+    let result = await this.iosUnlocker.wakeAndDismiss();
+    // A lock can interrupt the runner after the preflight. Join that recovery
+    // once, then repeat the wake/swipe only if the runner actually recovered.
+    if (!result.success && recovery && this.timer.now() < recoveryDeadline) {
+      const recovered = await this.waitForIosRunner(recovery, recoveryDeadline, false);
+      if (recovered && this.timer.now() < recoveryDeadline) {
+        result = await this.iosUnlocker.wakeAndDismiss();
+      }
+    }
+    return this.iosResult(result.success, result.error);
+  }
+
+  private async waitForIosRunner(
+    recovery: IosRunnerRecovery,
+    deadline: number,
+    allowIdle = true,
+  ): Promise<boolean> {
+    if (!recovery.isConnected()) {
+      recovery.ensureRecoveryStarted();
+    }
+    const remaining = Math.max(0, deadline - this.timer.now());
+    const outcome = await recovery.awaitRecovery(remaining);
+    return (
+      (outcome === "recovered" || (allowIdle && outcome === "not_recovering")) &&
+      recovery.isConnected()
+    );
+  }
+
+  private iosResult(success: boolean, error?: string): WakeAndUnlockResult {
     return {
-      success: result.success,
+      success,
       platform: "ios",
       // iOS exposes no lock/wakefulness read equivalent to Android's dumpsys, so
       // these are left conservative rather than guessed.
       wasAsleep: false,
       wasLocked: false,
-      unlocked: result.success,
-      error: result.error,
+      unlocked: success,
+      error,
     };
   }
 

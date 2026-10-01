@@ -29,6 +29,27 @@ function context(
 }
 
 describe("CtrlProxyHierarchy synchronous deadline", () => {
+  test("reports connection_lost during a runner reconnect cooldown", async () => {
+    const timer = new FakeTimer();
+    const harness = context(
+      timer,
+      async () => false,
+      () => {},
+    );
+    harness.context.getReconnectStatus = () => ({
+      state: "cooldown",
+      retryAfterMs: 1000,
+      retryAfterSeconds: 1,
+      connectionAttempts: 3,
+      maxConnectionAttempts: 3,
+    });
+
+    const response = await new CtrlProxyHierarchy(harness.context).getLatestHierarchy(false, 100);
+
+    expect(response.unavailableReason).toBe("connection_lost");
+    expect(response.reconnectStatus?.state).toBe("cooldown");
+  });
+
   test.each([
     ["simulator_not_booted", undefined],
     ["auto_setup_failed", "runner install failed"],

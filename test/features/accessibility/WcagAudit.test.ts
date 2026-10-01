@@ -7,7 +7,10 @@ import { expect, describe, it, beforeEach } from "bun:test";
 import { WcagAudit, type WcagBaselineStore } from "../../../src/features/accessibility/WcagAudit";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { Element } from "../../../src/models/Element";
-import type { ViewHierarchyNode } from "../../../src/models/ViewHierarchyResult";
+import type {
+  ViewHierarchyNode,
+  ViewHierarchyWindowInfo,
+} from "../../../src/models/ViewHierarchyResult";
 import type {
   AccessibilityAuditConfig,
   WcagViolation,
@@ -740,6 +743,102 @@ describe("WcagAudit", function () {
       async saveBaseline(): Promise<void> {}
       async clearBaseline(): Promise<void> {}
     }
+
+    const config: AccessibilityAuditConfig = {
+      level: "AA",
+      failureMode: "report",
+      useBaseline: true,
+    };
+
+    async function screenId(
+      roots: ViewHierarchyNode[],
+      windows?: ViewHierarchyWindowInfo[],
+    ): Promise<string | undefined> {
+      const recorder = new RecordingBaselineManager();
+      await new WcagAudit(new FakeTimer(), recorder).audit(
+        [],
+        { node: roots },
+        undefined,
+        "com.test",
+        config,
+        { windows },
+      );
+      return recorder.lastScreenId;
+    }
+
+    const app = { windowId: 1, class: "MainActivity", "resource-id": "main" };
+    const ime = { windowId: 2, class: "InputMethod", "resource-id": "keyboard" };
+    const overlay = { windowId: 3, class: "SystemOverlay", "resource-id": "shade" };
+
+    it("keeps the app screen id when an IME window is present", async function () {
+      const appWindow = { id: 1, type: 1, isActive: true, windowLayer: 0 };
+      expect(
+        await screenId(
+          [app, ime],
+          [appWindow, { id: 2, type: 2, isFocused: true, windowLayer: 2 }],
+        ),
+      ).toBe(await screenId([app]));
+    });
+
+    it("ignores a higher system overlay", async function () {
+      expect(
+        await screenId(
+          [app, overlay],
+          [
+            { id: 1, type: 1, isActive: true, windowLayer: 0 },
+            { id: 3, type: 3, isFocused: true, windowLayer: 100 },
+          ],
+        ),
+      ).toBe("com.test:MainActivity:main");
+    });
+
+    it("selects the upper app dialog by layer when no app window is focused", async function () {
+      const dialog = { windowId: 4, class: "Dialog", "resource-id": "confirm" };
+      expect(
+        await screenId(
+          [app, dialog],
+          [
+            {
+              id: 1,
+              type: 1,
+              windowLayer: 0,
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            },
+            {
+              id: 4,
+              type: 1,
+              windowLayer: 10,
+              bounds: { left: 20, top: 20, right: 80, bottom: 80 },
+            },
+          ],
+        ),
+      ).toBe("com.test:Dialog:confirm");
+    });
+
+    it("resolves a promoted dialog child through its window owner marker", async function () {
+      const dialog = {
+        windowId: 4,
+        node: [
+          { class: "android.widget.TextView", text: "Title" },
+          { class: "DialogContent", "resource-id": "confirm" },
+        ],
+      };
+      expect(
+        await screenId(
+          [app, dialog],
+          [
+            { id: 1, type: 1, windowLayer: 0 },
+            { id: 4, type: 1, isFocused: true, windowLayer: 10 },
+          ],
+        ),
+      ).toBe("com.test:DialogContent:confirm");
+    });
+
+    it("retains the legacy single-window root selection", async function () {
+      expect(await screenId([app], [{ id: 1, type: 1, isFocused: true }])).toBe(
+        await screenId([app]),
+      );
+    });
 
     it("derives the screen id from nested iOS CtrlProxy attributes", async function () {
       const hierarchy: ViewHierarchyNode = {

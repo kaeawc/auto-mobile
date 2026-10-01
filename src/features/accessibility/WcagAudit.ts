@@ -9,6 +9,7 @@ import { ElementBounds } from "../../models/ElementBounds";
 import {
   type Hierarchy,
   type ViewHierarchyNode,
+  type ViewHierarchyWindowInfo,
   nodeAttributes,
 } from "../../models/ViewHierarchyResult";
 import {
@@ -21,6 +22,7 @@ import {
 import { ContrastChecker } from "./ContrastChecker";
 import { BaselineManager } from "./BaselineManager";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { linkWindowRoots } from "../observe/linkWindowRoots";
 
 export interface WcagBaselineStore {
   getBaseline(
@@ -28,6 +30,50 @@ export interface WcagBaselineStore {
   ): Promise<{ violations: Pick<WcagViolation, "fingerprint">[] } | null>;
   saveBaseline(screenId: string, violations: WcagViolation[]): Promise<void>;
   clearBaseline(screenId: string): Promise<void>;
+}
+
+type AuditHierarchyOptions = {
+  density?: number;
+  windows?: ViewHierarchyWindowInfo[];
+};
+
+function promotedWindowRoot(owned: ViewHierarchyNode): ViewHierarchyNode {
+  if (nodeAttributes(owned).class || !owned.node) {
+    return owned;
+  }
+  // The Android converter collapses a one-child node array to an object.
+  // For several promoted children, use the first child with a stable view ID.
+  const children = Array.isArray(owned.node) ? owned.node : [owned.node];
+  return (
+    children.find((child) => nodeAttributes(child)["resource-id"]) ??
+    children.find((child) => nodeAttributes(child).class) ??
+    owned
+  );
+}
+
+function selectAppWindowRoot(
+  hierarchy: Hierarchy | ViewHierarchyNode,
+  packageName: string,
+  windows: ViewHierarchyWindowInfo[],
+): ViewHierarchyNode | undefined {
+  const candidates = linkWindowRoots(hierarchy, windows)?.filter(
+    (window) =>
+      window.type === 1 &&
+      (window.packageName === undefined || window.packageName === packageName) &&
+      window.hierarchy,
+  );
+  const selected =
+    candidates?.find((window) => window.isFocused) ??
+    candidates?.find((window) => window.isActive) ??
+    candidates?.reduce<ViewHierarchyWindowInfo | undefined>(
+      (top, window) =>
+        !top || (window.windowLayer ?? -Infinity) > (top.windowLayer ?? -Infinity) ? window : top,
+      undefined,
+    );
+  if (!selected?.hierarchy) {
+    return undefined;
+  }
+  return promotedWindowRoot(selected.hierarchy);
 }
 
 export class WcagAudit {
@@ -53,8 +99,11 @@ export class WcagAudit {
     screenshotPath: string | undefined,
     packageName: string,
     config: AccessibilityAuditConfig,
-    density?: number,
+    densityOrOptions?: number | AuditHierarchyOptions,
   ): Promise<AccessibilityAuditResult> {
+    const density =
+      typeof densityOrOptions === "number" ? densityOrOptions : densityOrOptions?.density;
+    const windows = typeof densityOrOptions === "number" ? undefined : densityOrOptions?.windows;
     const violations: WcagViolation[] = [];
 
     // Check for missing content descriptions
@@ -78,7 +127,7 @@ export class WcagAudit {
     violations.push(...this.checkFormInputLabels(elements, viewHierarchy, density));
 
     // Generate screen ID for baseline tracking
-    const screenId = this.generateScreenId(packageName, viewHierarchy);
+    const screenId = this.generateScreenId(packageName, viewHierarchy, windows);
 
     // Filter violations based on baseline if enabled
     let filteredViolations = violations;
@@ -423,12 +472,16 @@ export class WcagAudit {
   /**
    * Generate screen identifier for baseline tracking
    */
-  private generateScreenId(packageName: string, hierarchy: Hierarchy | ViewHierarchyNode): string {
+  private generateScreenId(
+    packageName: string,
+    hierarchy: Hierarchy | ViewHierarchyNode,
+    windows?: ViewHierarchyWindowInfo[],
+  ): string {
     // Use package name + root activity/fragment identifier
     // This is a simplified approach - could be enhanced with more specific identifiers
     //
     // iOS CtrlProxy attributes are nested; Android and cleaned iOS attributes are flat.
-    const rootNode = this.resolveRootNode(hierarchy);
+    const rootNode = this.resolveRootNode(hierarchy, packageName, windows);
     const attrs = nodeAttributes(rootNode as ViewHierarchyNode);
     const rootClass = (attrs.class as string | undefined) || "unknown";
     const rootId = (attrs["resource-id"] as string | undefined) || "";
@@ -436,7 +489,17 @@ export class WcagAudit {
     return `${packageName}:${rootClass}:${rootId}`;
   }
 
-  private resolveRootNode(hierarchy: Hierarchy | ViewHierarchyNode): Hierarchy | ViewHierarchyNode {
+  private resolveRootNode(
+    hierarchy: Hierarchy | ViewHierarchyNode,
+    packageName: string,
+    windows?: ViewHierarchyWindowInfo[],
+  ): Hierarchy | ViewHierarchyNode {
+    if (windows && windows.length > 1) {
+      const appRoot = selectAppWindowRoot(hierarchy, packageName, windows);
+      if (appRoot) {
+        return appRoot;
+      }
+    }
     const node = hierarchy.node;
     if (Array.isArray(node) && node.length > 0) {
       return node[node.length - 1] as ViewHierarchyNode;

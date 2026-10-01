@@ -153,7 +153,7 @@ export class AccessibilityAuditor {
           screenshotPath,
           result.activeWindow!.appId,
           auditConfig,
-          result.viewHierarchy!.density,
+          { density: result.viewHierarchy!.density, windows: result.viewHierarchy!.windows },
         );
 
         // Attach audit result to observe result

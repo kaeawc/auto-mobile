@@ -159,6 +159,21 @@ test("resetDeviceReadinessForDevice drops restored automation readiness", async 
   expect(manager.getDeviceReadiness("restore-session")).toBe("booted");
 });
 
+test("device ownership listeners observe assignment, rebind, release, and removal", async () => {
+  const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
+  const changed: string[] = [];
+  const unsubscribe = manager.onDeviceOwnershipChange((deviceId) => changed.push(deviceId));
+  await manager.createSession("owner", "emulator-5554", "android");
+  expect(changed).toEqual(["emulator-5554"]);
+  await manager.rebindSession("owner", "emulator-5556", "android");
+  expect(changed).toEqual(["emulator-5554", "emulator-5554", "emulator-5556"]);
+  await manager.releaseSession("owner", "explicit-release");
+  expect(changed.at(-1)).toBe("emulator-5556");
+  unsubscribe();
+  await manager.createSession("next", "emulator-5554", "android");
+  expect(changed).toHaveLength(4);
+});
+
 test("invalidateAutomationReadiness downgrades a session and ignores unknown ids", async () => {
   const manager = new SessionManager(new FakeTimer(), new FakeDeviceSessionPersistence());
   await manager.createSession("lost-service", "emulator-5554", "android");

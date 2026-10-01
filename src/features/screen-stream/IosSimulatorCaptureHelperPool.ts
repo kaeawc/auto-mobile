@@ -20,7 +20,7 @@ import type {
 } from "./frameProtocol";
 
 export const IOS_SIMULATOR_HELPER_IDLE_TTL_MS = 45_000;
-/** Ceiling for a helper stop while holding the pool's serialized transition. */
+/** Ceiling for a helper stop while holding a target's serialized transition. */
 export const IOS_SIMULATOR_HELPER_STOP_TIMEOUT_MS = 5_000;
 
 export interface IosSimulatorCaptureHelperLease {
@@ -71,6 +71,7 @@ export interface SimulatorCaptureHelperPoolOptions {
 
 interface HelperEntry {
   key: string;
+  windowID: number;
   helper: SimulatorHelper;
   capabilities: Set<string>;
   leases: Set<PooledSimulatorCaptureHelperLease>;
@@ -107,7 +108,8 @@ export class IosSimulatorCaptureHelperPool {
   private readonly timer: Timer;
   private readonly createHelper: SimulatorHelperFactory;
   private readonly entries = new Map<string, HelperEntry>();
-  private transition: Promise<void> = Promise.resolve();
+  private readonly transitions = new Map<number, Promise<void>>();
+  private shutdownTransition: Promise<void> = Promise.resolve();
 
   constructor(options: SimulatorCaptureHelperPoolOptions = {}) {
     this.idleTtlMs = options.idleTtlMs ?? IOS_SIMULATOR_HELPER_IDLE_TTL_MS;
@@ -124,7 +126,9 @@ export class IosSimulatorCaptureHelperPool {
   }
 
   async shutdown(): Promise<void> {
-    await this.enqueue(async () => {
+    const pending = [...this.transitions.values()];
+    const shutdown = this.shutdownTransition.then(async () => {
+      await Promise.all(pending);
       const entries = [...this.entries.values()];
       this.entries.clear();
       for (const entry of entries) {
@@ -134,10 +138,12 @@ export class IosSimulatorCaptureHelperPool {
         });
       }
     });
+    this.shutdownTransition = shutdown.catch(() => undefined);
+    await shutdown;
   }
 
   async attach(lease: PooledSimulatorCaptureHelperLease): Promise<void> {
-    await this.enqueue(async () => {
+    await this.enqueue(simulatorWindowID(lease.options.target), async () => {
       if (!lease.isStarted) {
         return;
       }
@@ -174,9 +180,18 @@ export class IosSimulatorCaptureHelperPool {
     // A new CGWindowID proves a reboot/window recreation. Evict any idle session
     // now rather than letting it occupy ScreenCaptureKit resources through its
     // TTL, but never disrupt a different active simulator stream.
+    const attachingWindowID = simulatorWindowID(lease.options.target);
     for (const candidate of this.entries.values()) {
       if (candidate.key !== targetKey && candidate.leases.size === 0) {
-        await this.stopEntry(candidate);
+        if (candidate.windowID === attachingWindowID) {
+          await this.stopIdleEntry(candidate);
+        } else {
+          this.enqueueBestEffort(
+            candidate.windowID,
+            () => this.stopIdleEntry(candidate),
+            "idle helper eviction failed",
+          );
+        }
       }
     }
     if (!lease.isStarted) {
@@ -184,6 +199,7 @@ export class IosSimulatorCaptureHelperPool {
     }
     const created: HelperEntry = {
       key: targetKey,
+      windowID: simulatorWindowID(lease.options.target),
       helper: this.createHelper(lease.options),
       capabilities: new Set(),
       leases: new Set(),
@@ -239,8 +255,8 @@ export class IosSimulatorCaptureHelperPool {
   /**
    * Relay a lease's keyframe request to its warm helper's STDIN control channel
    * (issue #4789). Synchronous best-effort: it reads the current entry directly
-   * rather than serializing through the transition chain, because a PLI-driven IDR
-   * must not queue behind a slow helper stop on an unrelated target. Returns false
+   * rather than serializing through a transition chain, because a PLI-driven IDR
+   * must not queue behind a slow helper stop. Returns false
    * when the lease is detached or its helper is raw / not running.
    */
   requestKeyFrame(lease: PooledSimulatorCaptureHelperLease): boolean {
@@ -272,7 +288,11 @@ export class IosSimulatorCaptureHelperPool {
     this.clearEntryIdleTimer(entry);
     entry.idleTimer = this.timer.setTimeout(() => {
       entry.idleTimer = null;
-      this.enqueueBestEffort(() => this.stopIdleEntry(entry), "idle helper stop failed");
+      this.enqueueBestEffort(
+        entry.windowID,
+        () => this.stopIdleEntry(entry),
+        "idle helper stop failed",
+      );
     }, this.idleTtlMs);
   }
 
@@ -282,7 +302,7 @@ export class IosSimulatorCaptureHelperPool {
     if (!entryKey) {
       return;
     }
-    await this.enqueue(async () => {
+    await this.enqueue(simulatorWindowID(lease.options.target), async () => {
       const entry = this.entries.get(entryKey);
       if (!entry || !entry.leases.has(lease)) {
         return;
@@ -321,7 +341,11 @@ export class IosSimulatorCaptureHelperPool {
       // Keeping that process warm would hand the next reconnect a frozen session.
       if (isFatalHelperStderr(line) && this.entries.get(entry.key) === entry) {
         entry.failed = true;
-        this.enqueueBestEffort(() => this.stopFailedEntry(entry), "failed helper stop failed");
+        this.enqueueBestEffort(
+          entry.windowID,
+          () => this.stopFailedEntry(entry),
+          "failed helper stop failed",
+        );
       }
       this.broadcast(entry, "stderr", line);
     });
@@ -329,7 +353,11 @@ export class IosSimulatorCaptureHelperPool {
     entry.helper.on("error", (error) => {
       if (this.entries.get(entry.key) === entry) {
         entry.failed = true;
-        this.enqueueBestEffort(() => this.stopFailedEntry(entry), "failed helper stop failed");
+        this.enqueueBestEffort(
+          entry.windowID,
+          () => this.stopFailedEntry(entry),
+          "failed helper stop failed",
+        );
       }
       this.broadcast(entry, "error", error);
     });
@@ -397,7 +425,7 @@ export class IosSimulatorCaptureHelperPool {
     const stop = entry.helper.stop();
     let didTimeOut = false;
     // The helper owns process escalation. A late stop failure is only background
-    // cleanup after the pool has released its serialized transition.
+    // cleanup after the pool has released its target's serialized transition.
     void stop.catch((error) => {
       if (didTimeOut) {
         logger.debug(`[IOSSimulatorCaptureHelperPool] helper stop failed after timeout: ${error}`);
@@ -424,23 +452,25 @@ export class IosSimulatorCaptureHelperPool {
     }
   }
 
-  // All pool mutations serialize through one global chain rather than a
-  // per-target queue. attach() mutates cross-target state — it evicts idle
-  // entries belonging to *other* window keys before creating a new helper — so
-  // a per-key queue could stop an entry that a concurrent attach on that key is
-  // adopting. A slow helper.stop() therefore does delay an attach on an
-  // unrelated simulator; that is an accepted trade for the eviction invariant,
-  // since concurrent multi-simulator streaming is rare and the stops are
-  // TTL-bounded best-effort work. Revisit with per-key serialization only after
-  // decoupling the cross-target eviction from attach.
-  private enqueue(action: () => Promise<void>): Promise<void> {
-    const next = this.transition.then(action, action);
-    this.transition = next.catch(() => undefined);
+  private enqueue(windowID: number, action: () => Promise<void>): Promise<void> {
+    const previous = this.transitions.get(windowID) ?? Promise.resolve();
+    const next = Promise.all([previous, this.shutdownTransition]).then(action);
+    const settled = next.catch(() => undefined);
+    this.transitions.set(windowID, settled);
+    void settled.then(() => {
+      if (this.transitions.get(windowID) === settled) {
+        this.transitions.delete(windowID);
+      }
+    });
     return next;
   }
 
-  private enqueueBestEffort(action: () => Promise<void>, failureMessage: string): void {
-    void this.enqueue(action).catch((error) => {
+  private enqueueBestEffort(
+    windowID: number,
+    action: () => Promise<void>,
+    failureMessage: string,
+  ): void {
+    void this.enqueue(windowID, action).catch((error) => {
       logger.warn(`[IOSSimulatorCaptureHelperPool] ${failureMessage}: ${error}`);
     });
   }
@@ -542,6 +572,13 @@ function helperTargetKey(target: CaptureTarget, binaryPath: string): string {
     audio: target.audio === true,
     encode: target.encode ?? null,
   });
+}
+
+function simulatorWindowID(target: CaptureTarget): number {
+  if (target.kind !== "simulator") {
+    throw new Error("Simulator helper pool received a non-simulator target.");
+  }
+  return target.windowID;
 }
 
 function isEncodedTarget(target: CaptureTarget): boolean {

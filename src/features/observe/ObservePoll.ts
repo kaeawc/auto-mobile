@@ -261,6 +261,8 @@ export async function pollObserveUntil(
         options.timeoutMs - (timer.now() - start),
         options.signal,
       );
+    } else {
+      await observeScreen.cacheObserveResult?.(outcome.observation, generation, cachedAt);
     }
     return outcome;
   };
@@ -300,6 +302,7 @@ export async function pollObserveUntil(
       // Polls are intermediate state only. Public callers that opt into
       // automatic evidence capture it once after this loop completes.
       skipScreenshot: true,
+      skipCache: true,
       skipAccessibilityAudit: true,
       skipPerformanceAudit: options.skipPerformanceAudit,
       skipRecompositionTracking: options.skipRecompositionTracking,

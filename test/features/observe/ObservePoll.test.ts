@@ -157,6 +157,7 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
     expect(outcome.stopped).toBe(false);
     expect((outcome.observation.viewHierarchy!.hierarchy.node as any).marker).toBe("newest");
     expect(outcome.observation.updatedAt).toBe(30);
+    expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
     expect(fake.getExecuteMinTimestamps()).toEqual([0, 11, 30]);
   });
 
@@ -376,6 +377,80 @@ describe("pollObserveUntil minTimestamp floor (#6284)", () => {
   });
 });
 
+describe("pollObserveUntil cache writes", () => {
+  test("writes only the matched observation after three polls without changing the result", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const baseline = obs(10, "baseline");
+    const intermediate = obs(20, "intermediate");
+    const matched = obs(30, "matched");
+    fake.setObserveSequence([baseline, intermediate, matched]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 1000, pollMs: 150 },
+      (observation) => observation === matched,
+    );
+
+    expect(outcome.observation).toBe(matched);
+    expect(outcome.observation).toEqual(matched);
+    expect(outcome).toMatchObject({ polls: 3, stopped: true, terminalReason: "matched" });
+    expect(fake.getExecuteOptions().map((options) => options.skipCache)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect(fake.getExecuteOptions().every((options) => options.skipBackStack === undefined)).toBe(
+      true,
+    );
+    expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
+  });
+
+  test("writes the last returned observation on timeout", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const last = obs(20, "last");
+    fake.setObserveSequence([obs(10, "baseline"), last]);
+
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 60 },
+      () => false,
+    );
+
+    expect(outcome).toMatchObject({ polls: 2, stopped: false, terminalReason: "timeout" });
+    expect(outcome.observation).toBe(last);
+    expect(outcome.observation).toEqual(last);
+    expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
+  });
+
+  test("does not write when aborted between polls", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs(10, "baseline"));
+    const controller = new AbortController();
+
+    await expect(
+      pollObserveUntil(
+        fake,
+        timer,
+        { timeoutMs: 100, pollMs: 10, signal: controller.signal },
+        () => {
+          controller.abort();
+          return false;
+        },
+      ),
+    ).rejects.toThrow();
+
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+  });
+});
+
 describe("pollObserveUntil recomposition tracking (#6932)", () => {
   test("returns the terminal observation when cache finalization exceeds the remaining poll budget", async () => {
     const timer = new FakeTimer();
@@ -428,7 +503,7 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
     expect(fake.getProcessRecompositionCallCount()).toBe(1);
   });
 
-  test("does not process or cache a stale independently sampled Asleep hierarchy", async () => {
+  test("does not process a stale independently sampled Asleep hierarchy but caches its return", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
@@ -449,7 +524,7 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
 
     expect(outcome.terminalReason).toBe("screen_off");
     expect(fake.getProcessRecompositionCallCount()).toBe(0);
-    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+    expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
   });
 
   test("persists the terminal observation with its captured cache generation", async () => {
@@ -512,7 +587,7 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
     expect(fake.getCacheObserveResultObservations()).toEqual([terminal]);
   });
 
-  test("does not process or cache an all-stale timeout fallback", async () => {
+  test("does not process an all-stale timeout fallback but caches its return", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
@@ -532,6 +607,6 @@ describe("pollObserveUntil recomposition tracking (#6932)", () => {
     expect(outcome.terminalReason).toBe("timeout");
     expect(outcome.observation).toBe(stale);
     expect(fake.getProcessRecompositionCallCount()).toBe(0);
-    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+    expect(fake.getCacheObserveResultObservations()).toEqual([outcome.observation]);
   });
 });

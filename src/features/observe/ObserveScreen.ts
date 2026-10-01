@@ -1191,9 +1191,8 @@ export class RealObserveScreen implements ObserveScreen {
       }
       this.identifyCapture(result, options?.freshness ?? "cached-ok");
 
-      // Intermediate settle polls are read-only. Their adopted terminal result
-      // is enriched and cached once by ObservePoll.finalize().
-      if (!options?.skipRecompositionTracking) {
+      // Polls defer their cache write until ObservePoll selects the returned result.
+      if (!options?.skipCache && !options?.skipRecompositionTracking) {
         await perf.track("cacheResult", () =>
           getObserveCacheStore().put(this.device.deviceId, result, cacheGeneration),
         );
@@ -1461,18 +1460,12 @@ export class RealObserveScreen implements ObserveScreen {
     };
   }
 
-  /**
-   * Capture the current device cache generation before a deferred observation
-   * write so #5884 invalidation fences apply after #6932 async work.
-   */
+  /** Capture the current generation before a poll so deferred writes respect invalidation. */
   captureCacheGeneration(): number {
     return getObserveCacheStore().currentGeneration(this.device.deviceId);
   }
 
-  /**
-   * Cache an observe result. Public for back-compat with tests. The optional
-   * generation preserves the #5884 stale-write fence for #6932 deferred writes.
-   */
+  /** Cache a selected poll result with its observation-start generation and host time. */
   async cacheObserveResult(
     observeResult: ObserveResult,
     generation?: number,

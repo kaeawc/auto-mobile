@@ -51,13 +51,14 @@ function createObserveScreen(
   const fakeTimer = new FakeTimer();
   const fakeScreenshotRecorder = new FakeScreenshotRecorder();
   const fakeDeviceStateCollector = new FakeDeviceStateCollector();
+  const cacheStore = new FakeObserveCacheStore(fakeTimer);
 
   const observeScreen = new RealObserveScreen(
     device,
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     {
       hierarchyCapture,
-      cacheStore: new FakeObserveCacheStore(fakeTimer),
+      cacheStore,
       screenshotStateStore: new FakeScreenshotStateStore(fakeTimer),
       screenshotRecorder: fakeScreenshotRecorder,
       hierarchyCollector:
@@ -74,7 +75,7 @@ function createObserveScreen(
     fakeTimer,
   );
 
-  return { observeScreen, fakeScreenshotRecorder, fakeDeviceStateCollector };
+  return { observeScreen, fakeScreenshotRecorder, fakeDeviceStateCollector, cacheStore };
 }
 
 describe("ObserveScreen skip options", () => {
@@ -103,6 +104,20 @@ describe("ObserveScreen skip options", () => {
       (result as ObserveResult & { screenshotCaptureAttempted?: boolean })
         .screenshotCaptureAttempted,
     ).toBe(false);
+  });
+
+  test("skipCache defers the write without skipping back-stack collection; default observe still writes", async () => {
+    const created = createObserveScreen();
+    const skipped = await created.observeScreen.execute({ skipCache: true, skipScreenshot: true });
+
+    expect(created.cacheStore.getPutCallCount()).toBe(0);
+    expect(created.fakeDeviceStateCollector.backStackCalls).toBe(1);
+    expect(skipped).toBeDefined();
+
+    const ordinary = await created.observeScreen.execute({ skipScreenshot: true });
+    expect(created.cacheStore.getPutCallCount()).toBe(1);
+    expect(created.cacheStore.getRecentInMemoryForDevice(device.deviceId)).toEqual(ordinary);
+    expect(created.fakeDeviceStateCollector.backStackCalls).toBe(2);
   });
 
   test("deferred capture marks a skipped terminal observation so its screenshot URI is emitted", async () => {

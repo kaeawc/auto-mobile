@@ -1,6 +1,10 @@
 [test]
 # Installs test defaults before any test file imports production singletons.
 # Keep the Android port checker setup separate from the existing preload.
-preload = ["./test/setup/testPreload.ts", "./test/setup/portAvailabilityPreload.ts"]
+preload = [
+  "./test/setup/testPreload.ts",
+  "./test/setup/portAvailabilityPreload.ts",
+  "./test/setup/realDeviceToolSpawnGuardPreload.ts",
+]
 coverageReporter = ["text", "lcov"]
 coverageDir = "./coverage"

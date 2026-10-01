@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
+  MAX_CTRL_PROXY_DOCTOR_DEVICES,
+  checkWorkProfileAccessibility,
   checkImageBackend,
   checkCtrlProxy,
   checkCtrlProxyVersion,
@@ -21,10 +23,6 @@ import { getMcpServerVersion } from "../../src/utils/mcpVersion";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
-import * as fs from "fs/promises";
-import * as path from "path";
-import AdmZip from "adm-zip";
-import crypto from "crypto";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { createDoctorDeadline } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -168,6 +166,29 @@ describe("checkImageBackend", () => {
     expect(result.recommendation).toContain("AUTOMOBILE_CWEBP_PATH");
     expect(warnings).toEqual(["Image backend doctor check failed: Unable to resolve cwebp"]);
   });
+});
+
+test("daemon diagnostics disable identity recovery and metadata republishing", async () => {
+  const argumentsReceived: Array<boolean | undefined> = [];
+  const daemonManager = {
+    status: async (recoverIdentity?: boolean) => {
+      argumentsReceived.push(recoverIdentity);
+      return { running: false };
+    },
+  };
+  const getDaemonHealthReport = async () => ({
+    timestamp: "",
+    daemonRunning: false,
+    socketExists: false,
+    socketAccessible: false,
+    pidFileExists: false,
+    pidFileValid: false,
+    socketConnectable: false,
+    recommendations: [],
+  });
+  await checkDaemonStatus({ daemonManager, getDaemonHealthReport });
+  await checkDaemonBuildIdentity({ daemonManager });
+  expect(argumentsReceived).toEqual([false, false]);
 });
 
 describe("checkDaemonStatus", () => {
@@ -607,103 +628,187 @@ describe("checkCtrlProxy", () => {
     }
   });
 
-  test("fails (not warns) when a known pinned CtrlProxy APK download fails checksum verification (#2815)", async () => {
-    const prevVersion = process.env.AUTOMOBILE_VERSION;
-    const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
-    process.env.AUTOMOBILE_VERSION = "0.0.18";
+  function configureInstalled(adb: FakeAdbExecutor, sha = "different-sha", enabled = true) {
+    adb.setCommandResponse("shell pm list packages", {
+      stdout: AndroidCtrlProxyManager.PACKAGE,
+      stderr: "",
+    });
+    adb.setCommandResponse("shell pm path", { stdout: "package:/data/app/base.apk", stderr: "" });
+    adb.setCommandResponse("shell sha256sum", { stdout: `${sha} /data/app/base.apk`, stderr: "" });
+    adb.setCommandResponse("settings get secure", {
+      stdout: enabled ? AndroidCtrlProxyManager.PACKAGE : "",
+      stderr: "",
+    });
+  }
+
+  const device = (deviceId: string) => ({
+    deviceId,
+    platform: "android" as const,
+    isEmulator: true,
+    name: "Pixel",
+  });
+
+  test("reports mismatch without provisioning or mutating adb commands", async () => {
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    fakeAdb.setDevices([device("one")]);
+    configureInstalled(fakeAdb);
+    const spies = [
+      spyOn(AndroidCtrlProxyManager.prototype, "downloadApk"),
+      spyOn(AndroidCtrlProxyManager.prototype, "install"),
+      spyOn(AndroidCtrlProxyManager.prototype, "enable"),
+      spyOn(AndroidCtrlProxyManager.prototype, "ensureCompatibleVersion"),
+    ];
     try {
-      (AndroidCtrlProxyManager as any).defaultFileDownloader = {
-        download: async (_url: string, destination: string) => {
-          const zip = new AdmZip();
-          zip.addFile(
-            "AndroidManifest.xml",
-            Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"),
-          );
-          zip.addFile("classes.dex", crypto.randomBytes(15000));
-          await fs.mkdir(path.dirname(destination), { recursive: true });
-          zip.writeZip(destination);
-        },
-      };
-      fakeAdb.setDevices([
-        {
-          deviceId: "emulator-5554",
-          platform: "android",
-          isEmulator: true,
-          name: "Pixel",
-        },
-      ]);
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: "",
-          stderr: "",
-        },
-      );
-
       const result = await checkCtrlProxy(fakeFactory);
-
-      expect(result.status).toBe("fail");
-      expect(result.message).toContain("versionStatus=failed");
-      expect(result.message).toContain("APK checksum verification failed");
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("versionStatus=mismatch");
+      expect(result.recommendation).toContain("doctor does not install");
+      expect(result.recommendation).toContain("observe) against one");
+      for (const spy of spies) {
+        expect(spy).not.toHaveBeenCalled();
+      }
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((cmd) => /(?:^|\s)install\b|settings.*put|pm uninstall/.test(cmd)),
+      ).toEqual([]);
     } finally {
-      (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
-      if (prevVersion === undefined) {
-        delete process.env.AUTOMOBILE_VERSION;
-      } else {
-        process.env.AUTOMOBILE_VERSION = prevVersion;
+      for (const spy of spies) {
+        spy.mockRestore();
       }
     }
   });
 
-  test("warns when installed and enabled CtrlProxy is stale but accepted for readiness", async () => {
-    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
-    const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
-    (AndroidCtrlProxyManager as any).defaultFileDownloader = {
-      download: async () => {
-        throw new Error("network is unreachable");
-      },
-    };
-
+  test("warns for missing APK without installing, including a known pin", async () => {
+    const previous = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    fakeAdb.setDevices([device("one")]);
     try {
-      fakeAdb.setDevices([
-        {
-          deviceId: "emulator-5554",
-          platform: "android",
-          isEmulator: true,
-          name: "Pixel",
-        },
-      ]);
-      fakeAdb.setCommandResponse(
-        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
-        {
-          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-          stderr: "",
-        },
-      );
-      fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("shell sha256sum", {
-        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: "",
-      });
-      fakeAdb.setCommandResponse("settings get secure", {
-        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: "",
-      });
-
       const result = await checkCtrlProxy(fakeFactory);
-
       expect(result.status).toBe("warn");
-      expect(result.message).toContain("versionStatus=skipped");
-      expect(result.message).toContain("acceptedPreinstalled=true");
-      expect(result.recommendation).toBe(
-        "CtrlProxy is installed and enabled, but its APK SHA differs from the expected release. Re-run doctor after the background APK refresh completes or update CtrlProxy from the latest release.",
-      );
+      expect(result.message).toContain("versionStatus=not_installed");
+      expect(result.recommendation).toContain("readiness installs/updates");
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .every((cmd) => cmd.startsWith("shell pm list") || cmd.startsWith("shell settings get")),
+      ).toBe(true);
     } finally {
-      (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+      if (previous === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = previous;
+      }
     }
+  });
+
+  test("preserves live manager registry and memoized reads", async () => {
+    const liveAdb = new FakeAdbExecutor();
+    configureInstalled(liveAdb, "expected-sha");
+    const liveFactory = { create: () => liveAdb };
+    const live = AndroidCtrlProxyManager.getInstance(device("one"), liveFactory);
+    await live.isInstalled();
+    await live.isEnabled();
+    const commands = liveAdb.getExecutedCommands().length;
+    fakeAdb.setDevices([device("one")]);
+    configureInstalled(fakeAdb);
+    await checkCtrlProxy(fakeFactory);
+    expect(AndroidCtrlProxyManager.getExistingInstance("one")).toBe(live);
+    expect(Reflect.get(AndroidCtrlProxyManager, "adbFactory")).toBe(liveFactory);
+    expect(await live.isInstalled()).toBe(true);
+    expect(await live.isEnabled()).toBe(true);
+    expect(liveAdb.getExecutedCommands()).toHaveLength(commands);
+    expect(fakeAdb.getExecutedCommands().length).toBeGreaterThan(0);
+  });
+
+  test("checks each device using its factory, aggregates worst status and targets", async () => {
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    fakeAdb.setDevices([device("one"), device("two")]);
+    const one = new FakeAdbExecutor();
+    const two = new FakeAdbExecutor();
+    configureInstalled(one, "expected-sha");
+    configureInstalled(two);
+    const factory: AdbClientFactory = {
+      create: (target) => (target ? (target.deviceId === "one" ? one : two) : fakeAdb),
+    };
+    const result = await checkCtrlProxy(factory);
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("device=one");
+    expect(result.message).toContain(" | platform=android; device=two");
+    expect(one.getExecutedCommands().length).toBeGreaterThan(0);
+    expect(two.getExecutedCommands().length).toBeGreaterThan(0);
+    expect((await checkCtrlProxy(factory, {}, {}, "one")).status).toBe("pass");
+    expect((await checkCtrlProxy(factory, {}, {}, "one")).message).not.toContain("device=two");
+    expect((await checkCtrlProxy(factory, {}, {}, "missing")).message).toBe(
+      "Requested device is not booted: missing",
+    );
+  });
+
+  test("warns when installed SHA cannot be read or accessibility is disabled", async () => {
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    fakeAdb.setDevices([device("one")]);
+    configureInstalled(fakeAdb, "expected-sha", false);
+    const disabled = await checkCtrlProxy(fakeFactory);
+    expect(disabled.status).toBe("warn");
+    expect(disabled.recommendation).toContain("Enable CtrlProxy in device settings");
+    configureInstalled(fakeAdb);
+    fakeAdb.setCommandResponse("shell pm path", { stdout: "", stderr: "" });
+    const unknown = await checkCtrlProxy(fakeFactory);
+    expect(unknown.status).toBe("warn");
+    expect(unknown.message).toContain("versionStatus=unverifiable");
+  });
+
+  test("abort after the first status read stops before accessibility reads", async () => {
+    fakeAdb.setDevices([device("one"), device("two")]);
+    const controller = new AbortController();
+    fakeAdb.abortAfterCommand("shell pm list packages", controller);
+    await checkCtrlProxy(fakeFactory, {}, { signal: controller.signal });
+    expect(fakeAdb.getExecutedCommands()).toHaveLength(1);
+  });
+
+  test("caps unselected devices and reports omitted count", async () => {
+    fakeAdb.setDevices(
+      Array.from({ length: MAX_CTRL_PROXY_DOCTOR_DEVICES + 2 }, (_, i) => device(String(i))),
+    );
+    const result = await checkCtrlProxy(fakeFactory);
+    expect(result.message).toContain("2 Android devices not checked (limit=8)");
+    expect(result.message).not.toContain("device=8;");
+  });
+
+  test("aborts before reads and between devices", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    fakeAdb.setDevices([device("one"), device("two")]);
+    await checkCtrlProxy(fakeFactory, {}, { signal: controller.signal });
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    const midway = new AbortController();
+    const inspect = spyOn(
+      AndroidCtrlProxyManager.prototype,
+      "inspectCompatibility",
+    ).mockImplementation(async () => {
+      midway.abort();
+      return {
+        status: "compatible",
+        expectedSha256: "sha",
+        installedSha256: "sha",
+        installedShaSource: "device",
+        knownPinMismatch: false,
+      };
+    });
+    try {
+      await checkCtrlProxy(fakeFactory, {}, { signal: midway.signal });
+      expect(inspect).toHaveBeenCalledTimes(1);
+      expect(fakeAdb.getExecutedCommands()).toHaveLength(2);
+    } finally {
+      inspect.mockRestore();
+    }
+  });
+
+  test("work profile recommendation does not claim doctor enables services", async () => {
+    fakeAdb.setDevices([device("one")]);
+    fakeAdb.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
+    const result = await checkWorkProfileAccessibility(fakeFactory);
+    expect(result.recommendation).toContain("doctor only reports status");
   });
 
   test("passes skip-env checks without reporting a stale CtrlProxy warning", async () => {

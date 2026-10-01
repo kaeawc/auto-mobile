@@ -77,13 +77,13 @@ export class AndroidPhysicalDisplayIdResolver {
     private readonly ttlMs: number = PHYSICAL_DISPLAY_ID_CACHE_TTL_MS,
   ) {}
 
-  async resolve(adb: AdbExecutor, deviceId: string): Promise<string | null> {
+  async resolve(adb: AdbExecutor, deviceId: string, signal?: AbortSignal): Promise<string | null> {
     const cached = this.cache.get(deviceId);
     if (cached && cached.expiresAt > this.timer.now()) {
       return cached.displayId;
     }
     this.cache.delete(deviceId);
-    const result = await resolvePhysicalDisplay(adb);
+    const result = await resolvePhysicalDisplay(adb, signal);
     if (result.kind === "single" || result.kind === "display") {
       const displayId = result.kind === "display" ? result.id : null;
       this.cache.set(deviceId, { displayId, expiresAt: this.timer.now() + this.ttlMs });
@@ -104,11 +104,20 @@ type PhysicalDisplayResolution =
   | { kind: "display"; id: string }
   | { kind: "unresolved" };
 
-async function resolvePhysicalDisplay(adb: AdbExecutor): Promise<PhysicalDisplayResolution> {
+async function resolvePhysicalDisplay(
+  adb: AdbExecutor,
+  signal?: AbortSignal,
+): Promise<PhysicalDisplayResolution> {
   try {
     const [surfaceFlinger, displayInfo] = await Promise.all([
-      adb.executeCommand(SURFACE_FLINGER_DISPLAY_IDS_COMMAND),
-      adb.executeCommand(DEFAULT_DISPLAY_INFO_COMMAND),
+      adb.executeCommand(
+        SURFACE_FLINGER_DISPLAY_IDS_COMMAND,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      ),
+      adb.executeCommand(DEFAULT_DISPLAY_INFO_COMMAND, undefined, undefined, undefined, signal),
     ]);
     const physicalIds = parseSurfaceFlingerDisplayIds(surfaceFlinger.stdout);
 
@@ -126,6 +135,7 @@ async function resolvePhysicalDisplay(adb: AdbExecutor): Promise<PhysicalDisplay
       ? { kind: "display", id: defaultPhysicalId }
       : { kind: "unresolved" };
   } catch (error) {
+    signal?.throwIfAborted();
     // Display discovery is optional; preserve the legacy capture path when a
     // device does not support either diagnostic command.
     logger.debug(`[AndroidPhysicalDisplayId] Display discovery failed: ${error}`);

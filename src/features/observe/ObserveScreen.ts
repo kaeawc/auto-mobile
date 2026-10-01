@@ -1404,6 +1404,9 @@ export class RealObserveScreen implements ObserveScreen {
         ),
       });
 
+      if (observerMode && result.freshness.unavailableDetail) {
+        result.freshness.warning += ` ${result.freshness.unavailableDetail}`;
+      }
       // The forwarded sequence belongs to this exact hierarchy, not a new counter.
       if (this.device.platform === "android") {
         // Zero means no forwarded captureSequence was assigned, not a second counter.

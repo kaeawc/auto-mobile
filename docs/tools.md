@@ -178,12 +178,24 @@ including hierarchy or skeleton, active window, screen size, display, device loc
 and a screenshot path with its fresh or cached label. It does not acquire a
 session or change device ownership, and it works while another session owns the
 device. An observer read does not update that session's observation baseline,
-snapshot references, navigation graph, or observation stream. When an owned
-device has no connected hierarchy service, the read returns a screenshot with a
-specific unavailable reason. An unowned device returns a full observation when
-its hierarchy service is already running and reachable; otherwise it returns a
-screenshot with the unavailable reason. Observer reads never install, enable, or
-restart the service. `deviceId` and `sessionUuid` cannot be combined.
+snapshot references, navigation graph, or observation stream. The read only
+connects to an already-running hierarchy service; it never starts, installs,
+enables, or restarts one. `deviceId` and `sessionUuid` cannot be combined.
+
+- If the owning session's hierarchy client is disconnected, hierarchy freshness
+  reports `connection_lost`; `unavailableDetail` and the warning tell the owner
+  to run a session observe to reconnect. The read does not create a second client.
+- Hierarchy reads wait behind requests tracked by the service client, with a
+  deadline. ADB-driven owner actions run independently: an observer may capture
+  their intermediate UI but does not cancel or reorder their commands. Android
+  ADB screenshots share a capture lock; the observer waits at most 10 seconds
+  before reporting a screenshot failure, without cancelling the owner's capture.
+- An unowned device with an unreachable service reports an unavailable hierarchy.
+  Android can still capture via ADB, and iOS simulators via `simctl`. A physical
+  iOS device without a reachable runner has no host-side screenshot path. If no
+  cached screenshot is available, `screenshotPath` is absent,
+  `screenshotSettled` is false, and `screenshotSettledError` explains why no
+  screenshot could be captured. Otherwise a cached screenshot is labelled as such.
 
 ## Interact with the UI
 

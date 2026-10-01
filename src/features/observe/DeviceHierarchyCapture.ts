@@ -144,7 +144,7 @@ function resolveHierarchyClient(
     : false;
   if (owned && !existing?.isConnected()) {
     throw new ActionableError(
-      `Device ${device.deviceId} is session-owned and has no connected hierarchy service`,
+      `Device ${device.deviceId} is session-owned and has no connected hierarchy service: the owning session's hierarchy client is disconnected. Run a session observe as the owner to reconnect it; a deviceId read only connects to an already-running service.`,
     );
   }
   if (existing?.isConnected()) {

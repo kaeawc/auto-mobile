@@ -247,9 +247,11 @@ export class InstalledImeKeySession {
   private async waitForVisibleKey(imeId: string, key: string, signal?: AbortSignal) {
     const { hierarchy, timer } = this.dependencies;
     const deadline = timer.now() + READY_TIMEOUT_MS;
+    let sawImeWindow = false;
     do {
       signal?.throwIfAborted();
       const current = await hierarchy.read(signal);
+      sawImeWindow ||= current ? matchingImeWindows(current, imeId).length > 0 : false;
       const point = current ? findVisibleImeKey(current, imeId, key) : null;
       if (point) {
         if (!current?.frameContext?.trim()) {
@@ -265,6 +267,9 @@ export class InstalledImeKeySession {
       }
       await timer.sleep(Math.min(READY_POLL_MS, remaining));
     } while (timer.now() < deadline);
+    if (!sawImeWindow) {
+      throw new Error(`Selected IME window did not appear within ${READY_TIMEOUT_MS} ms.`);
+    }
     throw new Error(`Visible key ${JSON.stringify(key)} was not found in the selected IME window.`);
   }
 }
@@ -297,12 +302,7 @@ function findVisibleImeKey(
 ): { x: number; y: number } | null {
   const parser = new DefaultElementParser();
   const packageName = imeId.slice(0, imeId.indexOf("/"));
-  const imeWindows = (hierarchy.windows ?? []).filter(
-    (window) =>
-      window.type === 2 &&
-      window.bounds &&
-      (!window.packageName || window.packageName === packageName),
-  );
+  const imeWindows = matchingImeWindows(hierarchy, imeId);
   if (imeWindows.length === 0) {
     return null;
   }
@@ -332,6 +332,16 @@ function findVisibleImeKey(
     });
   }
   return matches.length === 1 ? matches[0] : null;
+}
+
+function matchingImeWindows(hierarchy: ViewHierarchyResult, imeId: string) {
+  const packageName = imeId.slice(0, imeId.indexOf("/"));
+  return (hierarchy.windows ?? []).filter(
+    (window) =>
+      window.type === 2 &&
+      window.bounds &&
+      (!window.packageName || window.packageName === packageName),
+  );
 }
 
 function matchingImeKeyCenter(

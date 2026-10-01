@@ -3766,13 +3766,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     // Fallback to coordinate-based taps via accessibility service dispatchGesture
     const fallbackAction = action as "tap" | "doubleTap" | "longPress";
-    const fallbackResult = await this.talkBackStrategy.executeCoordinateFallback(
-      x,
-      y,
-      fallbackAction,
-      durationMs,
-      driver,
-    );
+    const fallbackResult =
+      fallbackAction === "tap"
+        ? await this.talkBackStrategy.executePreciseTap(x, y, driver)
+        : await this.talkBackStrategy.executeCoordinateFallback(
+            x,
+            y,
+            fallbackAction,
+            durationMs,
+            driver,
+          );
 
     if (!fallbackResult.success) {
       logger.warn(

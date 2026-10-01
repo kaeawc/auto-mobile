@@ -75,7 +75,10 @@ interface TapAnyElementDependencies {
   accessibilityDetector?: AccessibilityDetector;
   talkBackStrategy?: Pick<
     TalkBackTapStrategy,
-    "executeDirectActivation" | "executeCoordinateFallback" | "executeLongPress"
+    | "executeDirectActivation"
+    | "executeCoordinateFallback"
+    | "executeLongPress"
+    | "executePreciseTap"
   >;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   accessibilityService?: Pick<
@@ -397,7 +400,10 @@ export class TapAnyElement extends BaseVisualChange {
   private accessibilityDetector: AccessibilityDetector;
   private talkBackStrategy: Pick<
     TalkBackTapStrategy,
-    "executeDirectActivation" | "executeCoordinateFallback" | "executeLongPress"
+    | "executeDirectActivation"
+    | "executeCoordinateFallback"
+    | "executeLongPress"
+    | "executePreciseTap"
   >;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private refreshViewHierarchyOverrideForTesting?: (
@@ -633,13 +639,10 @@ export class TapAnyElement extends BaseVisualChange {
         `[TapAnyElement] Direct accessibility activation failed (${direct.error}); trying coordinate fallback`,
       );
     }
-    const fallback = await this.talkBackStrategy.executeCoordinateFallback(
-      x,
-      y,
-      action,
-      durationMs,
-      driver,
-    );
+    const fallback =
+      action === "tap"
+        ? await this.talkBackStrategy.executePreciseTap(x, y, driver)
+        : await this.talkBackStrategy.executeCoordinateFallback(x, y, action, durationMs, driver);
     return fallback.success;
   }
 

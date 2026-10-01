@@ -327,7 +327,7 @@ describe("TapAnyElement Android gesture dispatch", () => {
     ).toBe(false);
   });
 
-  test("failed TalkBack activation tries its coordinate fallback before ADB", async () => {
+  test("failed TalkBack activation uses a precise coordinate tap before ADB", async () => {
     const { tapAny, adb, strategy } = setup({ success: true }, true);
     strategy.setDirectActivationResult({
       success: false,
@@ -337,7 +337,8 @@ describe("TapAnyElement Android gesture dispatch", () => {
     const result = await tapAny.execute({ action: "tap" });
     expect(result.success).toBe(true);
     expect(strategy.directActivationCalls).toHaveLength(1);
-    expect(strategy.fallbackCalls).toHaveLength(1);
+    expect(strategy.preciseTapCalls).toHaveLength(1);
+    expect(strategy.fallbackCalls).toHaveLength(0);
     expect(
       adb.getCommandCalls().some((call) => call.command.includes("input touchscreen tap")),
     ).toBe(false);

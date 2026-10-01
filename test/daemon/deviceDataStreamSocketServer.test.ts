@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, beforeEach, spyOn } from "bun:test";
 import { Socket } from "node:net";
 import {
   DeviceDataStreamSocketServer,
+  type InitialFrameSubscriber,
   type NavigationGraphStreamData,
   type RequestedObservation,
 } from "../../src/daemon/deviceDataStreamSocketServer";
@@ -127,6 +128,134 @@ describe("DeviceDataStreamSocketServer", () => {
     timer = new FakeTimer();
     server = new TestableDeviceDataStreamSocketServer(timer);
     await server.startFake();
+  });
+
+  it("targets initial frames to exactly one registered subscriber with live session checks", async () => {
+    const targets: InitialFrameSubscriber[] = [];
+    server.setOnSubscriberConnected((_deviceId, subscriber) => targets.push(subscriber));
+    server.sessionResolver.bind("device-1", sessionUuidFor("device-1"));
+    server.sessionResolver.bind("device-2", sessionUuidFor("device-2"));
+    const all = new FakeSocket();
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    await server.processLineForTest(all, JSON.stringify({ command: "subscribe" }));
+    await server.processLineForTest(
+      first,
+      JSON.stringify({ command: "subscribe", deviceSessionUuid: sessionUuidFor("device-1") }),
+    );
+    await server.processLineForTest(
+      second,
+      JSON.stringify({ command: "subscribe", deviceSessionUuid: sessionUuidFor("device-1") }),
+    );
+    const hierarchy = { hierarchy: { node: {} }, updatedAt: 123, packageName: "app" };
+    const sequence = server.pushHierarchyUpdate("device-1", hierarchy, "frame-a", targets[1]);
+    server.pushScreenshotUpdate(
+      "device-1",
+      "shot",
+      100,
+      200,
+      {},
+      { initialFrameSubscriber: targets[1] },
+    );
+    expect(sequence).not.toBeNull();
+    expect(
+      first
+        .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
+        .filter((message) => message.type === "hierarchy_update"),
+    ).toHaveLength(1);
+    expect(
+      first
+        .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
+        .filter((message) => message.type === "screenshot_update"),
+    ).toHaveLength(1);
+    expect(
+      all
+        .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
+        .filter((message) => message.type === "hierarchy_update"),
+    ).toHaveLength(0);
+    expect(
+      second
+        .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
+        .filter((message) => message.type === "screenshot_update"),
+    ).toHaveLength(0);
+    expect(server.pushHierarchyUpdate("device-2", hierarchy, "foreign", targets[1])).toBeNull();
+    server.pushScreenshotUpdate(
+      "device-2",
+      "shot",
+      100,
+      200,
+      {},
+      { initialFrameSubscriber: targets[1] },
+    );
+    expect(
+      first
+        .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
+        .filter((message) => message.deviceId === "device-2"),
+    ).toHaveLength(0);
+    server.pushHierarchyUpdate("device-1", hierarchy, "live-frame");
+    server.pushHierarchyUpdate("device-1", hierarchy, "frame-a", { ...targets[1], replay: true });
+    expect(server.getCurrentFrameContext("device-1")).toBe("live-frame");
+    const sameSequence = server.pushHierarchyUpdate("device-1", hierarchy, "frame-a", {
+      ...targets[2],
+      replay: true,
+      captureSequence: sequence ?? undefined,
+    });
+    expect(sameSequence).toBe(sequence);
+    const generation = server.getCurrentFrameContextGeneration("device-1");
+    server.pushHierarchyUpdate("device-1", hierarchy, "newer-live-frame");
+    server.pushHierarchyUpdate("device-1", hierarchy, "delayed-initial-frame", {
+      ...targets[2],
+      frameContextGeneration: generation,
+    });
+    expect(server.getCurrentFrameContext("device-1")).toBe("newer-live-frame");
+    // Rebinding the serial to a new session cannot give the old pane an initial frame.
+    server.sessionResolver.bind("device-1", "new-epoch");
+    expect(server.pushHierarchyUpdate("device-1", hierarchy, "new", targets[1])).toBeNull();
+    server.pushScreenshotUpdate(
+      "device-1",
+      "shot",
+      100,
+      200,
+      {},
+      { initialFrameSubscriber: targets[1] },
+    );
+    expect(
+      first
+        .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
+        .filter((message) => message.type === "screenshot_update"),
+    ).toHaveLength(1);
+  });
+
+  it("aborts only removed initial-frame waiters on unsubscribe and socket disconnect", async () => {
+    const targets: InitialFrameSubscriber[] = [];
+    server.setOnSubscriberConnected((_deviceId, subscriber) => targets.push(subscriber));
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    await server.processLineForTest(first, JSON.stringify({ command: "subscribe" }));
+    await server.processLineForTest(second, JSON.stringify({ command: "subscribe" }));
+    await server.processLineForTest(
+      first,
+      JSON.stringify({ command: "unsubscribe", subscriptionId: targets[0].subscriptionId }),
+    );
+    expect(targets[0].signal.aborted).toBe(true);
+    expect(targets[1].signal.aborted).toBe(false);
+    const hierarchy = { hierarchy: { node: {} }, updatedAt: 123, packageName: "app" };
+    expect(server.pushHierarchyUpdate("device", hierarchy, undefined, targets[0])).toBeNull();
+    server.closeConnectionForTest(second);
+    expect(targets[1].signal.aborted).toBe(true);
+    server.pushScreenshotUpdate(
+      "device",
+      "shot",
+      100,
+      200,
+      {},
+      { initialFrameSubscriber: targets[1] },
+    );
+    expect(
+      second
+        .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
+        .filter((message) => message.type === "screenshot_update"),
+    ).toHaveLength(0);
   });
 
   it("records a device-authored frame context even without an IDE subscriber", () => {

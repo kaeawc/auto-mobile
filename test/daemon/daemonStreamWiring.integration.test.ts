@@ -32,6 +32,7 @@ import * as appearanceSyncScheduler from "../../src/utils/appearance/AppearanceS
 import type {
   OnNavigationGraphRequestedCallback,
   OnObservationRequestedCallback,
+  OnSubscriberConnectedCallback,
 } from "../../src/daemon/deviceDataStreamSocketServer";
 
 interface RoutingTarget {
@@ -124,9 +125,14 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.navigationUpdates.push({ appId: streamData.appId, deviceId });
   }
 
-  setOnSubscriberConnected(handler: (deviceId: string | null) => void): void {
+  setOnSubscriberConnected(handler: OnSubscriberConnectedCallback): void {
     this.subscriberCallbackInstalled = true;
-    this.subscriberConnected = handler;
+    let subscriptions = 0;
+    this.subscriberConnected = (deviceId) =>
+      handler(deviceId, {
+        subscriptionId: `fake-pane-${subscriptions++}`,
+        signal: new AbortController().signal,
+      });
   }
 
   setOnScreenshotCadenceChanged(handler: (deviceId: string | null) => void): void {
@@ -362,11 +368,11 @@ describe("Daemon stream wiring", () => {
           await Promise.resolve();
 
           expect(connectedDevices).toEqual(
-            environment.secret === undefined ? ["sim-a", "sim-a", "sim-a", "sim-a"] : [],
+            environment.secret === undefined ? ["sim-a", "sim-a", "sim-a"] : [],
           );
           expect(managerA.getCallCount("forceRestart")).toBe(1);
           expect(managerB.getCallCount("setup")).toBe(0);
-          expect(getInstance).toHaveBeenCalledTimes(environment.secret === undefined ? 2 : 0);
+          expect(getInstance).toHaveBeenCalledTimes(environment.secret === undefined ? 1 : 0);
           if (environment.secret === undefined) {
             expect(getExistingInstance).toHaveBeenCalledWith("sim-a");
           }

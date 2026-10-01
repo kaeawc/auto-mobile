@@ -1,3 +1,4 @@
+import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
 import {
   createServer as createHttpServer,
@@ -381,6 +382,10 @@ export class Daemon {
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
   private readonly stopManagedAdbServer: ManagedAdbServerShutdown;
   private observationStreamHealth: ObservationStreamHealth;
+  private readonly initialFrameCoordinators = new WeakMap<
+    NonNullable<ReturnType<typeof getDeviceDataStreamServer>>,
+    DefaultObservationInitialFrameCoordinator
+  >();
   private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
   private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
@@ -1654,6 +1659,17 @@ export class Daemon {
     );
   }
 
+  private getInitialFrameCoordinator(
+    server: NonNullable<ReturnType<typeof getDeviceDataStreamServer>>,
+  ) {
+    let coordinator = this.initialFrameCoordinators.get(server);
+    if (!coordinator) {
+      coordinator = new DefaultObservationInitialFrameCoordinator(this.timer);
+      this.initialFrameCoordinators.set(server, coordinator);
+    }
+    return coordinator;
+  }
+
   private setupDeviceDataStreamCallback(): void {
     const server = this.deviceDataStreamServer ?? getDeviceDataStreamServer();
     if (!server) {
@@ -1661,7 +1677,8 @@ export class Daemon {
       return;
     }
 
-    server.setOnSubscriberConnected((deviceId: string | null) => {
+    const coordinator = this.getInitialFrameCoordinator(server);
+    server.setOnSubscriberConnected((deviceId: string | null, subscriber) => {
       logger.info(
         `[Daemon] IDE plugin subscribed to observation stream (device: ${deviceId ?? "all"}), ensuring WebSocket connections...`,
       );
@@ -1677,6 +1694,14 @@ export class Daemon {
 
       pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
         streamServer: server,
+        coordinator,
+        subscriber,
+        isDeviceAllowed: (id) => {
+          const device = this.devicePool.getAllDevices().find((candidate) => candidate.id === id);
+          return (
+            !!device && this.passiveWorkPolicy.allows(device.platform, "observation-stream", id)
+          );
+        },
         androidClientFactory: (device) =>
           AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
         iosClientFactory: (device) => this.createObservationStreamIosClient(device),

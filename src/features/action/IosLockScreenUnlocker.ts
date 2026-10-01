@@ -5,6 +5,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { ActionableError } from "../../models";
 import { PressButton } from "./PressButton";
+import type { SwipeOnDependencies } from "./swipeon/types";
 import { SwipeOn } from "./swipeon/SwipeOn";
 import type { IosScreenUnlocker } from "./WakeAndUnlock";
 
@@ -30,6 +31,10 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     device: BootedDevice,
     actions?: IosUnlockActions,
     private readonly timer: Timer = defaultTimer,
+    createSwipe: (
+      device: BootedDevice,
+      dependencies: SwipeOnDependencies,
+    ) => Pick<SwipeOn, "execute"> = (d, deps) => new SwipeOn(d, null, deps),
   ) {
     this.actions = actions ?? {
       // press() skips execute()'s observedInteraction, but simulator Home still
@@ -37,7 +42,8 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       pressHome: (timeoutMs) => new PressButton(device).press("home", timeoutMs),
       swipeUp: (timeoutMs, signal) => {
         const deadline = this.timer.now() + timeoutMs;
-        return new SwipeOn(device, null, {
+        return createSwipe(device, {
+          skipCallerDisplayFence: true,
           stopAfterIosGestureFailure: true,
           iosGestureTimeoutMs: () => deadline - this.timer.now(),
         }).execute({ direction: "up", autoTarget: false }, undefined, signal);

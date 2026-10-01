@@ -92,6 +92,10 @@ interface ObservedChangeOptions {
   tolerancePercent?: number;
   queryOptions?: ViewHierarchyQueryOptions;
   perf?: PerformanceTracker;
+  /** Internal gesture coordinates come from the current observation inside the block.
+   * Skips only the caller-revision fence; preparing and dispatch fences remain.
+   */
+  skipCallerDisplayFence?: boolean;
   skipPreviousObserve?: boolean;
   skipUiStability?: boolean;
   observationTimestampProvider?: () => number | undefined;
@@ -191,6 +195,7 @@ export class BaseVisualChange {
     const displayRevision = actionDisplayRevision();
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
     if (
+      !options.skipCallerDisplayFence &&
       COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
       callerDisplayRevision !== undefined &&
       (this.device.platform === "ios"

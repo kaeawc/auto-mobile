@@ -4,6 +4,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
+import { iosSqlErrorMessage } from "./storageSdkErrors";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { notifyDatabaseChanged } from "./databaseResources";
@@ -283,10 +284,7 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
         args.query,
       );
     } catch (error) {
-      throw new ActionableError(
-        "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build " +
-          `and calls DatabaseInspector.shared.setEnabled(true): ${error}`,
-      );
+      throw new ActionableError(iosSqlErrorMessage(error, args.databasePath), { cause: error });
     }
   }
 

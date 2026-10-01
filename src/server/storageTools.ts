@@ -17,6 +17,7 @@ import {
 } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { ResourceRegistry } from "./resourceRegistry";
 import type { KeyValueType } from "../features/storage/storageTypes";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "./storageSdkErrors";
 import {
   clearAndroidKeyValueFileDirect,
   dataStoreInspectionDisabledReason,
@@ -78,10 +79,9 @@ function getStorageToolsDependencies(): StorageToolsDependencies {
 
 function actionableStorageWriteError(error: unknown, context: string): ActionableError {
   if (errorMessage(error).includes("mutation_not_authorized")) {
-    return new ActionableError(
-      `${context}: in a DEBUG build, configure StorageInspectionConfiguration(allowMutations: true), call DatabaseInspector.shared.authorizeHostMutations(true), and require a launch-scoped mutation token or authorize the current SDK session with DatabaseInspector.shared.authorizeSessionMutations(sessionId:).`,
-      { cause: error },
-    );
+    return new ActionableError(`${context}: ${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT}`, {
+      cause: error,
+    });
   }
   return toActionableError(error, context);
 }

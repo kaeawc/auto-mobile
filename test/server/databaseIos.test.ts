@@ -104,6 +104,109 @@ describe("iOS database inspection server integration", function () {
     }
   });
 
+  const SDK_UNAVAILABLE_PREFIX =
+    "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)";
+  const sdkErrorCases = [
+    [
+      "mutation_not_authorized",
+      "The database is read-only for the inspector. Writes and transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) require mutation authorization. (in a DEBUG build, configure StorageInspectionConfiguration(allowMutations: true), call DatabaseInspector.shared.authorizeHostMutations(true), and require a launch-scoped mutation token or authorize the current SDK session with DatabaseInspector.shared.authorizeSessionMutations(sessionId:).)",
+      false,
+    ],
+    [
+      "unknown_database_path",
+      'No registered database at "sessions.sqlite". Use the absolute path reported by the app. List registered paths with the App Databases resource (automobile:devices/{deviceId}/databases?appId={appId}).',
+      false,
+    ],
+    ["multiple_statements_not_supported", "The iOS SDK accepts one SQL statement per call.", false],
+    [
+      "db_inspection_disabled",
+      "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build and calls DatabaseInspector.shared.setEnabled(true).",
+      true,
+    ],
+    [
+      "bad_request",
+      "The iOS SDK rejected the SQL request as bad_request. Check the database path and SQL query.",
+      false,
+    ],
+    ["unknown_table", "The requested database table was not found (unknown_table).", false],
+    [
+      "encode_failed",
+      "The iOS SDK could not encode the database inspection response (encode_failed).",
+      false,
+    ],
+    [
+      "response_too_large",
+      "The database inspection response exceeded the SDK size limit (response_too_large).",
+      false,
+    ],
+    [
+      "future_sdk_code",
+      "The iOS SDK rejected the SQL request with an unrecognized error code: future_sdk_code.",
+      false,
+    ],
+  ] as const;
+
+  test.each(sdkErrorCases)(
+    "sqlQuery maps the SDK %s refusal without double-wrapping",
+    async (code, expectedMessage, includesSetupAdvice) => {
+      IOSCtrlProxyClient.getInstance = mock(() => ({
+        executeSQLForIos: mock(async () => {
+          // SdkDatabaseRouteHandler.error encodes {error: code}; SdkDatabaseClient.requestData
+          // prefixes that field with its unavailableMessage when CtrlProxy returns non-2xx.
+          throw new Error(`${SDK_UNAVAILABLE_PREFIX}: ${code}`);
+        }),
+      })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+
+      registerDatabaseTools();
+      const tool = ToolRegistry.getTool("sqlQuery");
+      const thrown = tool!.deviceAwareHandler!(iosDevice, {
+        appId: "com.example.app",
+        databasePath: "sessions.sqlite",
+        query: "BEGIN",
+      });
+      const error = await thrown.catch((caught: unknown) => caught as Error);
+      expect(error.message).toBe(expectedMessage);
+      expect(error.message.includes("setEnabled(true)")).toBe(includesSetupAdvice);
+      expect(error.message).not.toContain("database inspection unavailable");
+      if (!includesSetupAdvice) {
+        expect(error.message).not.toContain("embed the AutoMobile SDK");
+        expect(error.message).not.toContain("database inspection unavailable");
+      }
+    },
+  );
+
+  test.each([
+    [
+      "transport failure",
+      `${SDK_UNAVAILABLE_PREFIX}: The operation couldn’t be completed. (NSURLErrorDomain error -1004.)`,
+    ],
+    ["HTTP status without route code", `${SDK_UNAVAILABLE_PREFIX}: HTTP 503`],
+    ["CtrlProxy connection failure", "Failed to connect to CtrlProxy"],
+    [
+      "unverified SDK capability",
+      "The foreground iOS app does not expose the AutoMobile SDK capability database.",
+    ],
+  ] as const)("sqlQuery keeps setup advice for %s", async (_label, detail) => {
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      executeSQLForIos: mock(async () => {
+        throw new Error(detail);
+      }),
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+
+    registerDatabaseTools();
+    const tool = ToolRegistry.getTool("sqlQuery");
+    await expect(
+      tool!.deviceAwareHandler!(iosDevice, {
+        appId: "com.example.app",
+        databasePath: "/app/Documents/app.db",
+        query: "SELECT 1",
+      }),
+    ).rejects.toMatchObject({
+      message:
+        "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build and calls DatabaseInspector.shared.setEnabled(true).",
+    });
+  });
+
   test.each([
     ["REPLACE INTO main.\"notes\" (title) VALUES ('new')", "mutation", true],
     [

@@ -165,7 +165,7 @@ describe("sanitizeObserveResult", () => {
 
       expect(full.screenSize).toEqual({ width: 393, height: 852 });
       expect(skeleton.screenSize).toEqual(full.screenSize);
-      expect(root.bounds).toEqual({ left: 0, top: 0, right: 393, bottom: 851.6666666666666 });
+      expect(root.bounds).toEqual({ left: 0, top: 0, right: 393, bottom: 852 });
       expect((root.node as ViewHierarchyNode[])[0].bounds).toEqual({
         left: 0,
         top: 59.333333333333336,

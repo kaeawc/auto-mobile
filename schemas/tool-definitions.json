@@ -107,7 +107,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -4674,7 +4674,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -4858,6 +4858,7 @@
           "const": "image/png"
         },
         "screenSize": {
+          "description": "Current-orientation native screen size for observe bounds and absolute tapAt input: Android physical pixels or iOS XCTest logical points. Valid points satisfy 0 <= x < width and 0 <= y < height. No density, inset, Retina, canonical-pixel, or rotation transform applies to an already-native point.",
           "type": "object",
           "properties": {
             "width": {
@@ -5236,7 +5237,7 @@
                         "type": "string"
                       },
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -5412,7 +5413,7 @@
                     "type": "object",
                     "properties": {
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -5479,7 +5480,7 @@
                     "type": "object",
                     "properties": {
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -5925,7 +5926,7 @@
                 }
               },
               "bounds": {
-                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries.",
+                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
                 "type": "array",
                 "prefixItems": [
                   {
@@ -6016,7 +6017,7 @@
                 }
               },
               "bounds": {
-                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries.",
+                "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
                 "type": "array",
                 "prefixItems": [
                   {
@@ -6164,7 +6165,7 @@
                 "type": "object",
                 "properties": {
                   "bounds": {
-                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                     "anyOf": [
                       {
                         "type": "object",
@@ -6237,7 +6238,7 @@
                 "type": "string"
               },
               "bounds": {
-                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                 "anyOf": [
                   {
                     "type": "object",
@@ -6322,7 +6323,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -6568,7 +6569,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -6814,7 +6815,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -7083,7 +7084,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -7331,7 +7332,7 @@
             "type": "object",
             "properties": {
               "bounds": {
-                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                 "anyOf": [
                   {
                     "type": "object",
@@ -8097,7 +8098,7 @@
               "maximum": 9007199254740991
             },
             "regionPx": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -13019,7 +13020,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -13485,7 +13486,7 @@
                         }
                       },
                       "bounds": {
-                        "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries.",
+                        "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
                         "type": "array",
                         "prefixItems": [
                           {
@@ -13576,7 +13577,7 @@
                         }
                       },
                       "bounds": {
-                        "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries.",
+                        "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
                         "type": "array",
                         "prefixItems": [
                           {
@@ -13892,7 +13893,7 @@
                                       "type": "string"
                                     },
                                     "bounds": {
-                                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                                       "anyOf": [
                                         {
                                           "type": "object",
@@ -14063,7 +14064,7 @@
                                       "type": "string"
                                     },
                                     "bounds": {
-                                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                                       "anyOf": [
                                         {
                                           "type": "object",
@@ -14367,7 +14368,7 @@
                         "type": "string"
                       },
                       "bounds": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -14452,7 +14453,7 @@
                   "type": "object",
                   "properties": {
                     "bounds": {
-                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                       "anyOf": [
                         {
                           "type": "object",
@@ -14698,7 +14699,7 @@
                   "type": "object",
                   "properties": {
                     "bounds": {
-                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                      "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                       "anyOf": [
                         {
                           "type": "object",
@@ -15116,7 +15117,7 @@
                             "type": "object",
                             "properties": {
                               "bounds": {
-                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                                 "anyOf": [
                                   {
                                     "type": "object",
@@ -15183,7 +15184,7 @@
                             "type": "object",
                             "properties": {
                               "bounds": {
-                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                                 "anyOf": [
                                   {
                                     "type": "object",
@@ -15868,7 +15869,7 @@
               "type": "string"
             },
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",
@@ -15982,7 +15983,7 @@
                 "type": "string"
               },
               "bounds": {
-                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                 "anyOf": [
                   {
                     "type": "object",
@@ -16115,7 +16116,7 @@
                 "type": "object",
                 "properties": {
                   "bounds": {
-                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
                     "anyOf": [
                       {
                         "type": "object",
@@ -16375,7 +16376,7 @@
           "type": "object",
           "properties": {
             "bounds": {
-              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
               "anyOf": [
                 {
                   "type": "object",

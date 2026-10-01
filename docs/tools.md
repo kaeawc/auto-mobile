@@ -44,8 +44,9 @@ events use `input -d` directly.
 origin is the top-left of the complete current screen, including system UI:
 
 - Android uses physical pixels; iOS uses XCTest logical points.
-- `screenSize`, skeleton bounds, full-hierarchy bounds, and future absolute
-  coordinate input use that same platform-native coordinate space.
+- `screenSize`, skeleton bounds, full-hierarchy bounds, and absolute `tapAt`
+  input use that same platform-native coordinate space. An embedded action
+  observation carries the same `screenSize` in full, skeleton, and diff output.
 - Valid coordinates are half-open: `0 <= x < width` and `0 <= y < height`.
 - A point already in the platform-native space is not density-, inset-,
   Retina-scale-, canonical-pixel-, or rotation-transformed.

@@ -126,7 +126,8 @@ export const elementBoundsSchema = z
   .describe(
     "Element bounds. Default: positional tuple [left, top, right, bottom]; the " +
       "object {left, top, right, bottom} (+ optional centerX/centerY) is also " +
-      "schema-valid.",
+      "schema-valid. Coordinates share screenSize's current-orientation native space " +
+      "and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
   );
 
 export const elementSchema = z
@@ -293,11 +294,18 @@ const tapEffectSchema = z
  * Current-orientation MCP screen dimensions: Android physical pixels or iOS
  * XCTest logical points, in the same native space as hierarchy/skeleton bounds.
  */
-export const screenSizeSchema = z.object({
-  width: z.number().int(),
-  height: z.number().int(),
-  units: z.enum(["physical-pixels", "points", "unknown"]).optional(),
-});
+export const screenSizeSchema = z
+  .object({
+    width: z.number().int(),
+    height: z.number().int(),
+    units: z.enum(["physical-pixels", "points", "unknown"]).optional(),
+  })
+  .describe(
+    "Current-orientation native screen size for observe bounds and absolute tapAt input: " +
+      "Android physical pixels or iOS XCTest logical points. Valid points satisfy " +
+      "0 <= x < width and 0 <= y < height. No density, inset, Retina, canonical-pixel, " +
+      "or rotation transform applies to an already-native point.",
+  );
 
 export const systemInsetsSchema = z.object({
   top: z.number(),
@@ -922,7 +930,7 @@ export const skeletonElementSchema = z
     semanticLinks: z.array(semanticLinkSchema).optional(),
     bounds: compactBoundsTupleSchema.describe(
       "Bounds as the compact [left, top, right, bottom] tuple — always this shape " +
-        "for skeleton entries.",
+        "for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
     ),
     affordances: z.array(z.enum(["tap", "long-press", "input", "scroll", "toggle"])),
     occluded: z

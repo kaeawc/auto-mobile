@@ -9,7 +9,7 @@
     "hierarchy": {
       "bounds": {
         "right": 393,
-        "bottom": 851.6666666666666
+        "bottom": 852
       },
       "node": {
         "class": "XCUIElementTypeApplication",
@@ -18,7 +18,7 @@
           "left": 0,
           "top": 0,
           "right": 393,
-          "bottom": 851.6666666666666
+          "bottom": 852
         },
         "node": [
           {

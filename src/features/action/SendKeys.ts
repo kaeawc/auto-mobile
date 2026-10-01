@@ -10,6 +10,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { imeCommitSegmentCount } from "../observe/android/CtrlProxyText";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { clearTextWithKeyEvents, getFocusedTextLength, hasFocusedTextInput } from "./ClearText";
 import { InputKey, type InputKeyModifier, type InputKeyName } from "./InputKey";
@@ -18,6 +19,7 @@ import { TapOnElement } from "./TapOnElement";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { toSearchable } from "../utility/SearchableNode";
 import { quarantineAndroidIme, withAndroidImeLock } from "./androidImeLock";
 import {
   AndroidImeCatalog,
@@ -764,6 +766,21 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
       safeToRestore = this.canRestoreAfterImeCommit(result);
+      if (result.success && mode === "ime" && imeCommitSegmentCount(text) > 1) {
+        const observation = await this.observer.execute({ signal, freshness: "fresh" });
+        const committedText = this.readFocusedText(observation);
+        if (committedText !== undefined && !committedText.endsWith(text)) {
+          return {
+            outcome: {
+              success: false,
+              partialApplication: true,
+              error: "IME partial commit: the focused field does not end with the requested text",
+              resolvedMode: mode,
+            },
+            safeToRestore,
+          };
+        }
+      }
       return {
         outcome: {
           ...(operation === "replace" ? markPartialAfterMutation(result) : result),
@@ -774,6 +791,49 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     } catch (error) {
       return { failure: error, safeToRestore };
     }
+  }
+
+  private readFocusedText(observation: ObserveResult): string | undefined {
+    const detector = new FieldTypeDetector();
+    const focused = observation.focusedElement;
+    if (
+      (focused?.focused === true || focused?.focused === "true") &&
+      detector.detect(focused) === "text"
+    ) {
+      if (detector.isPasswordField(focused)) {
+        return undefined;
+      }
+      return this.searchableText(focused);
+    }
+    if (!observation.viewHierarchy || !hasFocusedTextInput(observation.viewHierarchy)) {
+      return undefined;
+    }
+    const parser = new DefaultElementParser();
+    for (const root of parser.extractRootNodes(observation.viewHierarchy)) {
+      let found: string | undefined;
+      parser.traverseNode(root, (node) => {
+        const element = parser.extractNodeProperties(node);
+        if (element.focused === true || element.focused === "true") {
+          if (detector.isPasswordField(element)) {
+            return;
+          }
+          found = this.searchableText(element);
+        }
+      });
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+
+  private searchableText(element: Parameters<typeof toSearchable>[0]): string | undefined {
+    const searchable = toSearchable(element);
+    return (
+      searchable.textSources.value ??
+      searchable.textSources.text ??
+      (searchable.capturedTextLength === 0 ? "" : undefined)
+    );
   }
 
   private async restoreAfterImeCommit(

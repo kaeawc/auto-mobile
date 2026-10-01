@@ -29,6 +29,25 @@ export interface ImeCommitActionResult extends BaseResult {
   sessionUnsafe?: boolean;
 }
 
+// Match ImeCommitDriver's inline span boundaries. Only non-terminal spans incur
+// its conversion polling; each can wait 12 x 40ms plus editor read round trips.
+const INLINE_FORMAT_SPAN =
+  /```|`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|_[^_\n]+_|~[^~\n]+~/g;
+
+export function imeCommitSegmentCount(text: string): number {
+  const matches = Array.from(text.matchAll(INLINE_FORMAT_SPAN));
+  if (matches.length === 0) {
+    return 1;
+  }
+  const last = matches[matches.length - 1]!;
+  return matches.length + (last.index + last[0].length < text.length ? 1 : 0);
+}
+
+export function imeCommitTimeoutMs(text: string): number {
+  // Reserve 5s of the 30s tool budget for cancellation, IME restoration, and observation.
+  return Math.min(25_000, 10_000 + 750 * (imeCommitSegmentCount(text) - 1) + 20 * text.length);
+}
+
 export class CtrlProxyText extends SharedTextDelegate {
   constructor(context: DelegateContext) {
     super(context);
@@ -53,7 +72,7 @@ export class CtrlProxyText extends SharedTextDelegate {
   async commitViaIme(
     text: string,
     priorImeId?: string,
-    timeoutMs: number = 10000,
+    timeoutMs: number = imeCommitTimeoutMs(text),
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     delivery?: "commit" | "keyEvents",

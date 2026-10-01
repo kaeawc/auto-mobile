@@ -27,7 +27,7 @@ The tool capability claims below are per #8347. “Current code status” descri
 
 ### Current deviations
 
-The proposed simulator pasteboard owner is `simctl`, but current iOS clipboard actions use CtrlProxy (`Clipboard.ts`). They do not call devicectl. No simulator path calling devicectl for a simctl-owned concern was found in the inspected files. A source-scan test to guard this boundary is Planned (#8353).
+The proposed simulator pasteboard owner is `simctl`, but current iOS clipboard actions use CtrlProxy (`Clipboard.ts`). They do not call devicectl. No simulator path calling devicectl for a simctl-owned concern was found in the inspected files. The source-scan test in `test/lint/simctlDevicectlBoundary.test.ts` guards direct devicectl commands by parsing TypeScript calls and treating simulator-named code, simulator-specific files, explicit simulator branches, and simulator-UDID arguments as simulator scope. It covers pasteboard, lifecycle verbs, privacy, keychain reset, push, addmedia, spawn, app-container commands, and process termination; it also recognizes the app-termination owner API in simulator scope. The scan does not infer simulator scope from arbitrary runtime values or follow dynamically assembled commands and unrelated wrappers. Those cases remain Planned (#8353).
 
 ## Ownership rules
 
@@ -65,7 +65,7 @@ On older installed CoreDevice versions, continue simulator operations through `s
 
 ## Guardrails
 
-A source-scan test that fails when simulator code paths call devicectl for a simctl-owned concern, starting with pasteboard, is Planned (#8353). It should catch simulator routing to devicectl for pasteboard, lifecycle, privacy, keychain, push, addmedia, spawn, app-container access, or app termination. It should allow devicectl for explicitly devicectl-only simulator capabilities after the CoreDevice gate exists.
+`test/lint/simctlDevicectlBoundary.test.ts` fails when structurally simulator-scoped TypeScript directly routes a covered simctl-owned concern to devicectl. It recognizes simulator-specific paths and names, explicit simulator branches, and simulator-UDID arguments. Covered concerns are pasteboard, lifecycle verbs, privacy, keychain reset, push, addmedia, spawn, app-container access, and process termination; it also checks the app-termination owner API in simulator scope. It deliberately allows generic physical-device calls, including `device process terminate --pid`, unless simulator scope is clear. Simulator scope inferred only from runtime values, dynamically assembled argv, and arbitrary wrapper/API indirection remain Planned (#8353). The guard allows devicectl for explicitly devicectl-only simulator capabilities after the CoreDevice gate exists (Planned #8354).
 
 ## Out of scope
 

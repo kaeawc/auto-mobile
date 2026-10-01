@@ -740,14 +740,18 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Tap Gestures
 
         public func tap(x: Double, y: Double, duration: TimeInterval = 0) throws {
+            GesturePhaseDiagnostics.current?.begin("targetResolution")
             guard let app = application else {
                 throw GestureError.noApplication
             }
 
             try catchingObjCException {
+                GesturePhaseDiagnostics.current?.begin("coordinateResolution")
                 let coordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: x, dy: y))
 
+                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
                 if duration > 0 {
                     coordinate.press(forDuration: duration)
                 } else {
@@ -783,11 +787,13 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Swipe Gestures
 
         public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
+            GesturePhaseDiagnostics.current?.begin("targetResolution")
             guard let app = application else {
                 throw GestureError.noApplication
             }
 
             try catchingObjCException {
+                GesturePhaseDiagnostics.current?.begin("coordinateResolution")
                 let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: startX, dy: startY))
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
@@ -796,6 +802,8 @@ public final class GesturePerformer: GesturePerforming {
                 let velocity = Self.swipeVelocity(distance: distance, duration: duration)
                     .map(XCUIGestureVelocity.init) ?? .default
 
+                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
                 startCoordinate.press(
                     forDuration: 0.05,
                     thenDragTo: endCoordinate,
@@ -867,11 +875,13 @@ public final class GesturePerformer: GesturePerforming {
         )
             throws
         {
+            GesturePhaseDiagnostics.current?.begin("targetResolution")
             guard let app = application else {
                 throw GestureError.noApplication
             }
 
             try catchingObjCException {
+                GesturePhaseDiagnostics.current?.begin("coordinateResolution")
                 let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: startX, dy: startY))
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
@@ -888,6 +898,8 @@ public final class GesturePerformer: GesturePerforming {
                     : .default
 
                 // Press, drag, and hold
+                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
                 startCoordinate.press(
                     forDuration: pressDuration,
                     thenDragTo: endCoordinate,
@@ -910,14 +922,18 @@ public final class GesturePerformer: GesturePerforming {
         )
             throws -> PinchGesturePath
         {
+            GesturePhaseDiagnostics.current?.begin("targetResolution")
             guard let app = application else {
                 throw GestureError.noApplication
             }
 
             return try catchingObjCException {
+                GesturePhaseDiagnostics.current?.begin("coordinateResolution")
                 let orientation = DeviceRotation.currentGestureInterfaceOrientation()
                 var errorMessage: NSString?
                 var symbolsUnavailable: ObjCBool = false
+                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
                 let succeeded = ObjCExceptionCatcher_synthesizePinch(
                     CGFloat(centerX),
                     CGFloat(centerY),

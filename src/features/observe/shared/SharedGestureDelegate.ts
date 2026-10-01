@@ -76,7 +76,7 @@ export class SharedGestureDelegate {
     frameContext?: string,
     onDispatch?: () => void,
   ): Promise<GestureTimingResult> {
-    return sendCommand<GestureTimingResult>(this.context, {
+    const result = await sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "swipe",
       responseType: "swipe",
       messageType: "request_swipe",
@@ -94,6 +94,10 @@ export class SharedGestureDelegate {
       errorLabel: "Swipe",
       onDispatch,
     });
+    if (this.config.includeSwipeTimeoutMs && result.perfTiming) {
+      perf?.addExternalTiming("iosPerf", result.perfTiming);
+    }
+    return result;
   }
 
   async requestDrag(

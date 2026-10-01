@@ -240,3 +240,92 @@ final class PerfProvider: PerfTracking {
         }
     }
 }
+
+/// Gesture diagnostics use the server's injected monotonic clock, including queue wait.
+/// The only wire representation is the existing optional PerfTiming tree.
+protocol GestureLogSink: Sendable {
+    func warning(_ line: String)
+}
+
+struct SystemGestureLogSink: GestureLogSink {
+    private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "GesturePerformer")
+    func warning(_ line: String) { logger.warning("\(line, privacy: .public)") }
+}
+
+final class GesturePhaseDiagnostics: Sendable {
+    static let slowGestureThresholdMs: Int64 = 2000
+    @TaskLocal static var current: GesturePhaseDiagnostics?
+
+    private struct State {
+        var phase = "queueWait"
+        var phaseStarted: Int64
+        var phases: [PerfTiming] = []
+        var deadlineExceeded = false
+        var finished: PerfTiming?
+    }
+
+    private let state: OSAllocatedUnfairLock<State>
+    private let now: @Sendable () -> Int64
+    private let receivedAtMs: Int64
+    private let command: String
+    private let deadlineMs: Int64?
+    private let sink: any GestureLogSink
+
+    init(
+        command: String,
+        receivedAtMs: Int64,
+        deadlineMs: Int64?,
+        now: @escaping @Sendable () -> Int64,
+        sink: any GestureLogSink
+    ) {
+        self.command = command
+        self.receivedAtMs = receivedAtMs
+        self.deadlineMs = deadlineMs
+        self.now = now
+        self.sink = sink
+        state = OSAllocatedUnfairLock(initialState: State(phaseStarted: receivedAtMs))
+    }
+
+    func begin(_ phase: String, at time: Int64? = nil) {
+        let time = time ?? now()
+        state.withLock {
+            guard $0.finished == nil else { return }
+            $0.phases.append(.timing($0.phase, durationMs: time - $0.phaseStarted))
+            $0.phase = phase
+            $0.phaseStarted = time
+        }
+    }
+
+    func markDeadlineExceeded() { state.withLock { $0.deadlineExceeded = true } }
+
+    @discardableResult
+    func finish() -> PerfTiming {
+        let time = now()
+        let (timing, shouldLog) = state.withLock { value -> (PerfTiming, Bool) in
+            if let finished = value.finished { return (finished, false) }
+            value.phases.append(.timing(value.phase, durationMs: time - value.phaseStarted))
+            let timing = PerfTiming(name: "gesturePhases", durationMs: time - receivedAtMs, children: value.phases)
+            value.finished = timing
+            return (timing, value.deadlineExceeded || timing.durationMs > Self.slowGestureThresholdMs)
+        }
+        if shouldLog {
+            let phases = (timing.children ?? []).map { "\($0.name)Ms=\($0.durationMs)" }.joined(separator: " ")
+            let remaining = deadlineMs.map { String($0 - time) } ?? "none"
+            sink
+                .warning(
+                    "gesture_phases command=\(command) \(phases) totalMs=\(timing.durationMs) deadlineRemainingMs=\(remaining)"
+                )
+        }
+        return timing
+    }
+
+    /// Preserve the no-perf path exactly; add children only to an existing perf response.
+    func attaching(to timing: PerfTiming?) -> PerfTiming? {
+        guard let timing else { return nil }
+        return PerfTiming(
+            name: timing.name,
+            durationMs: timing.durationMs,
+            children: (timing.children ?? []) + [finish()]
+        )
+    }
+}

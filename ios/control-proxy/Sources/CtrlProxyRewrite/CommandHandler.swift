@@ -288,6 +288,9 @@ final class CommandHandler: CommandHandling {
                 return await handleGetTableStructure(payload, startTime: startTime)
             }
         } catch {
+            if case CommandError.deadlineExceeded = error {
+                GesturePhaseDiagnostics.current?.markDeadlineExceeded()
+            }
             return WebSocketResponse.error(
                 type: request.requestType.responseType.rawValue,
                 requestId: request.requestId,

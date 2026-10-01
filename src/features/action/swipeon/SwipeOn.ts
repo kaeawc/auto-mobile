@@ -516,9 +516,11 @@ export class SwipeOn extends BaseVisualChange {
         }
       }
 
+      const timing = this.device.platform === "ios" ? perf.getTimings() : null;
       return {
         success: false,
         error: errorMsg,
+        ...(timing ? { timing } : {}),
         targetType: normalizedOptions.container ? "element" : "screen",
         x1: 0,
         y1: 0,

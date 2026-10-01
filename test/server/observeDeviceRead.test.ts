@@ -12,6 +12,7 @@ import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { observationScreenshotEvidence } from "../../src/features/observe/screenshot/observationScreenshotEvidence";
 import {
   loadAndroidHomeObserve,
@@ -234,6 +235,8 @@ describe("session-free observe device read", () => {
         expect(getStructuredField(response, "screenshotPath")).toBe("/fake/owned.png");
         expect(owner).toEqual({ sessionId: "owner", poolStatus: "assigned" });
         expect(capture).not.toHaveBeenCalled();
+        expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
+        expect(getStructuredField(response, "snapshotReferenceUnavailable")).toBeUndefined();
       } finally {
         capture.mockRestore();
       }
@@ -320,55 +323,81 @@ describe("session-free observe device read", () => {
     }
   });
 
-  test("an iOS session observe captures a reference when runner frame metadata is present", async () => {
-    const iosDevice: BootedDevice = {
-      deviceId: "ios-test-device",
-      name: "iPhone",
-      platform: "ios",
-    };
-    const sessionUuid = "ios-observe-session";
-    const manager = new FakeDeviceSessionManager();
-    manager.setConnectedDevices([iosDevice]);
-    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
-    ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
-    registerDirectSessionDevice(sessionUuid, iosDevice);
-    // The existing iOS fixture predates runner frame metadata; supply the typed fields
-    // emitted by current CtrlProxy without inventing a second hierarchy fixture.
-    const fixture = loadIosFractionalObserve();
-    const observation: ObserveResult = {
-      ...fixture,
-      observationId: "ios-capture",
-      displayRevision: 0,
-      rotation: 0,
-      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 0 },
-      viewHierarchy: {
-        ...fixture.viewHierarchy!,
-        frameContext: "ios-epoch:1:screen",
-        nativeScale: 3,
-        pixelWidth: 1179,
-        pixelHeight: 2556,
-        rotation: 0,
-      },
-    };
-    registerObserveTools({
-      createScreen: () => ({
-        execute: async () => observation,
-        executeDeviceRead: async () => {
-          throw new Error("entered sessionless device read");
+  test.each([true, false])(
+    "iOS session reference diagnostics with rotation present: %s",
+    async (hasRotation) => {
+      const iosDevice: BootedDevice = {
+        deviceId: "ios-test-device",
+        name: "iPhone",
+        platform: "ios",
+      };
+      const sessionUuid = "ios-observe-session";
+      const manager = new FakeDeviceSessionManager();
+      manager.setConnectedDevices([iosDevice]);
+      Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+      ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
+      registerDirectSessionDevice(sessionUuid, iosDevice);
+      // The existing iOS fixture predates runner frame metadata; supply the typed fields
+      // emitted by current CtrlProxy without inventing a second hierarchy fixture.
+      const navigationRecorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+      const record = spyOn(navigationRecorder, "record").mockImplementation(() => {});
+      const restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
+        displayInventory: new FakeDisplayInventoryProvider(),
+        auditRunner: {
+          run: async (input) =>
+            input.handler(input.device, input.args, input.progress, input.signal),
         },
-        appendRawViewHierarchy: async () => {},
-        getMostRecentCachedObserveResult: async () => observation,
-      }),
-    });
-    const response = await ToolRegistry.getTool("observe")!.handler({
-      deviceId: iosDevice.deviceId,
-      sessionUuid,
-    });
-    expect(getStructuredField(response, "snapshotReference")).toMatchObject({
-      snapshotId: expect.any(String),
-      expiresAt: expect.any(Number),
-    });
-  });
+      });
+      try {
+        const fixture = loadIosFractionalObserve();
+        const observation: ObserveResult = {
+          ...fixture,
+          observationId: "ios-capture",
+          displayRevision: 0,
+          rotation: hasRotation ? 0 : undefined,
+          snapshotReferenceUnavailable: ["old-diagnostic"],
+          activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 0 },
+          viewHierarchy: {
+            ...fixture.viewHierarchy!,
+            frameContext: "ios-epoch:1:screen",
+            nativeScale: 3,
+            pixelWidth: 1179,
+            pixelHeight: 2556,
+            rotation: hasRotation ? 0 : undefined,
+          },
+        };
+        registerObserveTools({
+          createScreen: () => ({
+            execute: async () => observation,
+            executeDeviceRead: async () => {
+              throw new Error("entered sessionless device read");
+            },
+            appendRawViewHierarchy: async () => {},
+            getMostRecentCachedObserveResult: async () => observation,
+          }),
+        });
+        const response = await ToolRegistry.getTool("observe")!.handler({
+          deviceId: iosDevice.deviceId,
+          sessionUuid,
+        });
+        if (hasRotation) {
+          expect(getStructuredField(response, "snapshotReference")).toMatchObject({
+            snapshotId: expect.any(String),
+            expiresAt: expect.any(Number),
+          });
+          expect(getStructuredField(response, "snapshotReferenceUnavailable")).toBeUndefined();
+        } else {
+          expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
+          expect(getStructuredField(response, "snapshotReferenceUnavailable")).toEqual([
+            "rotation",
+          ]);
+        }
+      } finally {
+        restorePipeline();
+        record.mockRestore();
+      }
+    },
+  );
 
   test("mismatching session deviceId identifies the supplied and bound devices", async () => {
     const sessionUuid = "observe-session";
@@ -431,7 +460,10 @@ describe("session-free observe device read", () => {
     };
     await cache.put(device.deviceId, ownerObservation);
     const ownerSnapshot = snapshotReferences.capture(device.deviceId, ownerObservation);
-    expect(ownerSnapshot).toBeDefined();
+    expect(ownerSnapshot.status).toBe("captured");
+    if (ownerSnapshot.status !== "captured") {
+      throw new Error("Owner reference unavailable");
+    }
     const priorWrites = cache.getPutCallCount();
     const screenshotState = new FakeScreenshotStateStore(timer);
     const adb = new FakeAdbExecutor();
@@ -503,7 +535,7 @@ describe("session-free observe device read", () => {
       expect(cache.getRecentInMemoryForDevice(device.deviceId)).toEqual(ownerObservation);
       expect(
         snapshotReferences.staleReason(
-          ownerSnapshot!.snapshotId,
+          ownerSnapshot.reference.snapshotId,
           device.deviceId,
           ownerObservation,
         ),

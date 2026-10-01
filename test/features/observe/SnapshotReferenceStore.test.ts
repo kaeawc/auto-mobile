@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
+import {
+  SnapshotReferenceStore,
+  snapshotReferenceUnavailable,
+} from "../../../src/features/observe/SnapshotReferenceStore";
 import type { ObserveResult } from "../../../src/models/ObserveResult";
 import { setDeviceIncarnationResolver } from "../../../src/utils/deviceIncarnation";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
@@ -15,6 +18,19 @@ const captured = {
   viewHierarchy: { frameContext: "frame-1", nativeScale: 2, packageName: "com.example" },
 } as ObserveResult;
 
+function captureReference(
+  store: SnapshotReferenceStore,
+  deviceId: string,
+  observation: ObserveResult,
+) {
+  const result = store.capture(deviceId, observation);
+  expect(result.status).toBe("captured");
+  if (result.status !== "captured") {
+    throw new Error(`Missing: ${result.missing.join(", ")}`);
+  }
+  return result.reference;
+}
+
 const androidEpoch = "123e4567-e89b-42d3-a456-426614174000";
 const nextEpoch = "123e4567-e89b-42d3-a456-426614174001";
 
@@ -25,7 +41,7 @@ describe("SnapshotReferenceStore", () => {
     let incarnation = 1;
     setDeviceIncarnationResolver(() => incarnation);
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator("ref"));
-    const ref = store.capture("device-1", captured)!;
+    const ref = captureReference(store, "device-1", captured);
     expect(store.staleReason(ref.snapshotId, "device-1", captured)).toBeUndefined();
     expect(store.staleReason(ref.snapshotId, "device-2", captured)).toContain("deviceId");
     incarnation = 2;
@@ -83,7 +99,7 @@ describe("SnapshotReferenceStore", () => {
 
   test("reuses a reference when only event and observation counters advance", () => {
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
-    const ref = store.capture("device-1", captured)!;
+    const ref = captureReference(store, "device-1", captured);
     expect(
       store.staleReason(ref.snapshotId, "device-1", {
         ...captured,
@@ -122,8 +138,8 @@ describe("SnapshotReferenceStore", () => {
       viewHierarchy: { ...withWindow.viewHierarchy!, windows: undefined },
     };
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
-    const named = store.capture("device-1", withWindow)!;
-    const bootstrap = store.capture("device-1", unknown)!;
+    const named = captureReference(store, "device-1", withWindow);
+    const bootstrap = captureReference(store, "device-1", unknown);
     expect(store.staleReason(named.snapshotId, "device-1", unknown)).toBeUndefined();
     expect(store.staleReason(bootstrap.snapshotId, "device-1", withWindow)).toBeUndefined();
     expect(
@@ -152,7 +168,7 @@ describe("SnapshotReferenceStore", () => {
       },
     };
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
-    const ref = store.capture("device-1", original)!;
+    const ref = captureReference(store, "device-1", original);
     for (const [field, next] of [
       [
         "focusedWindowId",
@@ -226,7 +242,7 @@ describe("SnapshotReferenceStore", () => {
       viewHierarchy: { ...captured.viewHierarchy!, frameContext: `${androidEpoch}:1` },
     };
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
-    const ref = store.capture("device-1", initial)!;
+    const ref = captureReference(store, "device-1", initial);
     expect(
       store.staleReason(ref.snapshotId, "device-1", {
         ...initial,
@@ -256,7 +272,7 @@ describe("SnapshotReferenceStore", () => {
       },
     };
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
-    const ref = store.capture("ios-device", ios)!;
+    const ref = captureReference(store, "ios-device", ios);
     expect(ref.snapshotId).toBeTruthy();
     expect(store.staleReason(ref.snapshotId, "ios-device", ios)).toBeUndefined();
     expect(
@@ -291,30 +307,98 @@ describe("SnapshotReferenceStore", () => {
   test("expires at the deadline and bounds capacity", () => {
     const timer = new FakeTimer();
     const store = new SnapshotReferenceStore(timer, new CountingIdGenerator());
-    const first = store.capture("device-1", captured)!;
+    const first = captureReference(store, "device-1", captured);
     for (let index = 0; index < 130; index++) {
       store.capture("device-1", captured);
     }
     expect(store.size).toBe(128);
     expect(store.staleReason(first.snapshotId, "device-1", captured)).toContain("evicted");
-    const latest = store.capture("device-1", captured)!;
+    const latest = captureReference(store, "device-1", captured);
     timer.advanceTime(300_000);
     expect(store.staleReason(latest.snapshotId, "device-1", captured)).toContain("expired");
     store.capture("device-1", captured);
     expect(store.size).toBe(1);
   });
 
-  test("does not mint a reference without verifiable geometry or frame context", () => {
+  test.each([
+    ["display", { ...captured, display: { ...captured.display, key: "" } }],
+    ["screenSize", { ...captured, screenSize: { width: 0, height: 200 } }],
+    ["rotation", { ...captured, rotation: undefined }],
+    [
+      "nativeScale",
+      { ...captured, viewHierarchy: { ...captured.viewHierarchy!, nativeScale: undefined } },
+    ],
+    [
+      "frameContext",
+      { ...captured, viewHierarchy: { ...captured.viewHierarchy!, frameContext: undefined } },
+    ],
+  ] as const)("reports missing %s", (field, observation) => {
     const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
-    expect(store.capture("device-1", { ...captured, viewHierarchy: undefined })).toBeUndefined();
+    expect(snapshotReferenceUnavailable(observation)).toEqual([field]);
+    expect(store.capture("device-1", observation)).toEqual({
+      status: "unavailable",
+      missing: [field],
+    });
+    expect(store.size).toBe(0);
+  });
+
+  test("keeps the existing numeric validity and hierarchy rotation fallback rules", () => {
+    for (const screenSize of [
+      { width: Infinity, height: 200 },
+      { width: 100, height: NaN },
+      { width: 100, height: -1 },
+    ]) {
+      expect(snapshotReferenceUnavailable({ ...captured, screenSize })).toEqual(["screenSize"]);
+    }
+    for (const rotation of [NaN, Infinity, 0.5]) {
+      expect(snapshotReferenceUnavailable({ ...captured, rotation })).toEqual(["rotation"]);
+    }
+    for (const nativeScale of [NaN, Infinity, 0, -1]) {
+      expect(
+        snapshotReferenceUnavailable({
+          ...captured,
+          viewHierarchy: { ...captured.viewHierarchy!, nativeScale },
+        }),
+      ).toEqual(["nativeScale"]);
+    }
+    const fallback = {
+      ...captured,
+      rotation: undefined,
+      viewHierarchy: { ...captured.viewHierarchy!, rotation: 0 },
+    };
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    expect(snapshotReferenceUnavailable(fallback)).toEqual([]);
+    const reference = captureReference(store, "device-1", fallback);
     expect(
-      store.capture("device-1", {
+      store.staleReason(reference.snapshotId, "device-1", {
         ...captured,
-        viewHierarchy: { ...captured.viewHierarchy!, nativeScale: undefined },
+        rotation: undefined,
       }),
-    ).toBeUndefined();
-    expect(
-      store.capture("device-1", { ...captured, screenSize: { width: 0, height: 200 } }),
-    ).toBeUndefined();
+    ).toBe("Snapshot geometry or frame context is unavailable; re-observe.");
+  });
+
+  test("lists all missing preconditions in stable order", () => {
+    const observation: ObserveResult = {
+      ...captured,
+      display: { ...captured.display, key: "" },
+      screenSize: { width: NaN, height: 0 },
+      rotation: undefined,
+      viewHierarchy: undefined,
+    };
+    const missing = ["display", "screenSize", "rotation", "nativeScale", "frameContext"];
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    expect(snapshotReferenceUnavailable(observation)).toEqual(missing);
+    expect(store.capture("device-1", observation)).toEqual({ status: "unavailable", missing });
+  });
+
+  test("captures complete geometry without mutating the observation", () => {
+    const observation = { ...captured };
+    const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator("ref"));
+    expect(snapshotReferenceUnavailable(observation)).toEqual([]);
+    expect(store.capture("device-1", observation)).toEqual({
+      status: "captured",
+      reference: { snapshotId: "ref-1", expiresAt: 300_000 },
+    });
+    expect(observation).not.toHaveProperty("snapshotReferenceUnavailable");
   });
 });

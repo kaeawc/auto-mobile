@@ -3,6 +3,7 @@ import { toJSONSchema } from "zod/v4";
 import {
   elementSchema,
   observeDiffSchema,
+  observationSummarySchema,
   observeResultSchema,
   observeToolResultSchema,
   skeletonElementSchema,
@@ -222,6 +223,46 @@ describe("observe.outputSchema: requires usable screenshot-resource join keys on
 });
 
 describe("observeResultSchema: parses real captures (#3025)", () => {
+  test("snapshot reference diagnostics accept only arrays of strings across output shapes", () => {
+    expect(
+      observationSummarySchema.parse({ snapshotReferenceUnavailable: ["rotation"] }),
+    ).toMatchObject({
+      snapshotReferenceUnavailable: ["rotation"],
+    });
+    expect(observationSummarySchema.safeParse({ snapshotReferenceUnavailable: [1] }).success).toBe(
+      false,
+    );
+    for (const schema of [observeResultSchema, observeDiffSchema, observeToolResultSchema]) {
+      const output = {
+        isDiff: true,
+        skeleton: [],
+        added: [],
+        removed: [],
+        changed: [],
+        snapshotReferenceUnavailable: ["rotation"],
+      };
+      expect(schema.parse(output)).toMatchObject({ snapshotReferenceUnavailable: ["rotation"] });
+      expect(schema.safeParse({ ...output, snapshotReferenceUnavailable: [1] }).success).toBe(
+        false,
+      );
+      expect(
+        schema.safeParse({ ...output, snapshotReferenceUnavailable: "rotation" }).success,
+      ).toBe(false);
+    }
+  });
+
+  test("full and skeleton projections preserve snapshot reference diagnostics", () => {
+    const observation = {
+      ...loadIosFractionalObserve(),
+      snapshotReferenceUnavailable: ["rotation"],
+    };
+    for (const project of ["full", "skeleton"] as const) {
+      expect(sanitizeObserveResult(observation, { dropElements: true, project })).toMatchObject({
+        snapshotReferenceUnavailable: ["rotation"],
+      });
+    }
+  });
+
   test("accepts full and per-entry layout-warning diff field shapes but rejects malformed arms", () => {
     const observation = (layoutWarnings?: ObserveResult["layoutWarnings"]): ObserveResult =>
       ({

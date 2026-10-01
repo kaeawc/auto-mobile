@@ -1605,6 +1605,17 @@ function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined 
   return args.includeScreenshotImage ? "settled" : args.screenshot;
 }
 
+function attachSnapshotReference(deviceId: string, result: ObserveResult): void {
+  const capture = snapshotReferences.capture(deviceId, result);
+  if (capture.status === "captured") {
+    result.snapshotReference = capture.reference;
+    delete result.snapshotReferenceUnavailable;
+  } else {
+    result.snapshotReference = undefined;
+    result.snapshotReferenceUnavailable = capture.missing;
+  }
+}
+
 export function registerObserveTools(dependencies: ObserveToolDependencies = {}) {
   // Observe handler
   const observeHandler = async (
@@ -1655,7 +1666,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
             });
 
       if (!deviceRead) {
-        result.snapshotReference = snapshotReferences.capture(device.deviceId, result);
+        attachSnapshotReference(device.deviceId, result);
       }
 
       if (args.raw && !deviceRead) {

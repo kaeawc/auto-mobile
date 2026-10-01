@@ -263,8 +263,13 @@ describe("TapAtCoordinate", () => {
       display: { key: "main", role: "unknown" as const },
       displayRevision: 0,
     } as ObserveResult;
-    const reference = references.capture(androidDevice.deviceId, captured);
-    expect(reference?.snapshotId).toBe("snapshot-1");
+    const capture = references.capture(androidDevice.deviceId, captured);
+    expect(capture.status).toBe("captured");
+    if (capture.status !== "captured") {
+      throw new Error("Snapshot reference unavailable");
+    }
+    const reference = capture.reference;
+    expect(reference.snapshotId).toBe("snapshot-1");
     timer.advanceTime(300_000);
     const { tapAt, observeScreen, androidDispatches } = createTapAt(
       androidDevice,
@@ -275,7 +280,7 @@ describe("TapAtCoordinate", () => {
       references,
     );
     observeScreen.setObserveResult(captured);
-    const result = await tapAt.execute({ x: 30, y: 40, snapshotId: reference!.snapshotId });
+    const result = await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId });
     expect(result).toMatchObject({ success: false, error: expect.stringContaining("expired") });
     expect(androidDispatches).toEqual([]);
   });
@@ -287,7 +292,12 @@ describe("TapAtCoordinate", () => {
       display: { key: "main", role: "unknown" as const },
       displayRevision: 0,
     } as ObserveResult;
-    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const capture = references.capture(androidDevice.deviceId, captured);
+    expect(capture.status).toBe("captured");
+    if (capture.status !== "captured") {
+      throw new Error("Snapshot reference unavailable");
+    }
+    const reference = capture.reference;
     const { tapAt, observeScreen, androidDispatches } = createTapAt(
       androidDevice,
       100,
@@ -312,7 +322,12 @@ describe("TapAtCoordinate", () => {
       display: { key: "main", role: "unknown" as const },
       displayRevision: 0,
     } as ObserveResult;
-    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const capture = references.capture(androidDevice.deviceId, captured);
+    expect(capture.status).toBe("captured");
+    if (capture.status !== "captured") {
+      throw new Error("Snapshot reference unavailable");
+    }
+    const reference = capture.reference;
     const { tapAt, observeScreen, androidDispatches, timer } = createTapAt(
       androidDevice,
       100,
@@ -352,7 +367,12 @@ describe("TapAtCoordinate", () => {
       displayRevision: 0,
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
     } as ObserveResult;
-    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const capture = references.capture(androidDevice.deviceId, captured);
+    expect(capture.status).toBe("captured");
+    if (capture.status !== "captured") {
+      throw new Error("Snapshot reference unavailable");
+    }
+    const reference = capture.reference;
     const { tapAt, observeScreen, androidDispatches } = createTapAt(
       androidDevice,
       100,
@@ -385,7 +405,12 @@ describe("TapAtCoordinate", () => {
       displayRevision: 0,
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
     } as ObserveResult;
-    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const capture = references.capture(androidDevice.deviceId, captured);
+    expect(capture.status).toBe("captured");
+    if (capture.status !== "captured") {
+      throw new Error("Snapshot reference unavailable");
+    }
+    const reference = capture.reference;
     const { tapAt, observeScreen, androidDispatches } = createTapAt(
       androidDevice,
       100,
@@ -420,7 +445,12 @@ describe("TapAtCoordinate", () => {
       ...initial,
       viewHierarchy: { ...initial.viewHierarchy!, frameContext: "epoch:2" },
     };
-    const reference = references.capture(androidDevice.deviceId, initial)!;
+    const capture = references.capture(androidDevice.deviceId, initial);
+    expect(capture.status).toBe("captured");
+    if (capture.status !== "captured") {
+      throw new Error("Snapshot reference unavailable");
+    }
+    const reference = capture.reference;
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
       requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {
@@ -459,7 +489,12 @@ describe("TapAtCoordinate", () => {
       activeWindow: { ...initial.activeWindow!, activityName: ".Settings" },
       viewHierarchy: { ...initial.viewHierarchy!, frameContext: "epoch:2" },
     };
-    const reference = references.capture(androidDevice.deviceId, initial)!;
+    const capture = references.capture(androidDevice.deviceId, initial);
+    expect(capture.status).toBe("captured");
+    if (capture.status !== "captured") {
+      throw new Error("Snapshot reference unavailable");
+    }
+    const reference = capture.reference;
     const dispatches: string[] = [];
     const client: CoordinateTapClient = {
       requestTapCoordinates: async (_x, _y, _duration, _timeout, _perf, frameContext) => {

@@ -109,6 +109,14 @@ activity names; its available app-window metadata (when present) describes the
 application window and does not detect in-app navigation. A display revision or
 runner frame-event counter advancing by itself does not invalidate the reference.
 A rejected tap does not silently recapture or retarget.
+When a session `observe` cannot produce a reference, it returns
+`snapshotReferenceUnavailable`, a `string[]` naming the missing capture
+preconditions: `display`, `screenSize`, `rotation`, `nativeScale`, `frameContext`
+(in that order). This field is absent when a reference is returned and on
+`deviceId` reads, which never return a reference. On iOS, a simulator/device whose
+orientation is unknown reports `rotation` as missing because the runner omits
+`rotation` when device orientation is unknown or unstable.
+
 This reference covers the full screen; it does not convert screenshot pixels
 into native coordinates or account for a crop. Unchanged geometry and window
 context do not prove unchanged visual content — re-observe after UI changes.

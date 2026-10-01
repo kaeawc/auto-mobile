@@ -19,7 +19,7 @@ The tool capability claims below are per #8347. “Current code status” descri
 
 ## Current code map
 
-`SimCtlClient.ts` is the simulator command runner and implements simulator discovery, lifecycle, app operations, push, appearance, and simulator display enumeration. `DevicectlDeviceLister.ts` lists connected physical devices; `DeviceAppManager.ts` implements physical-device app operations. `discoverySource.ts` keeps simulator and physical-device discovery as separate sources, and `DeviceDetection.ts` identifies iOS device IDs for routing.
+`SimCtlClient.ts` is the simulator command runner and implements simulator discovery, lifecycle, app operations, push, appearance, and simulator display enumeration. `DevicectlDeviceLister.ts` classifies simulator records and drops them at the lister boundary; simctl remains the simulator source of truth. It lists connected physical devices; `DeviceAppManager.ts` implements physical-device app operations. `discoverySource.ts` keeps simulator and physical-device discovery as separate sources, and `DeviceDetection.ts` identifies iOS device IDs for routing.
 
 `InstallApp.ts`, `UninstallApp.ts`, `LaunchApp.ts`, `TerminateApp.ts`, `OpenURL.ts`, and `ClearAppData.ts` branch between simulator `simctl` operations and physical-device `devicectl` operations where applicable. Simulator app-container lookup is in `iosAppContainer.ts`. Simulator privacy and keychain operations are in `IosSimulatorPermissions.ts` and `ResetKeychain.ts`.
 

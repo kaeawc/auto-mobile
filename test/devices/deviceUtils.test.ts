@@ -129,6 +129,7 @@ describe("MultiPlatformDeviceManager", () => {
       simulators?: BootedDevice[] | Error;
       physical?: BootedDevice[] | Error;
       physicalComplete?: boolean;
+      physicalError?: { code: "timeout" | "failed"; message: string };
     }): MultiPlatformDeviceManager {
       const resolve = <T>(value: T | Error): Promise<T> =>
         value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
@@ -140,7 +141,15 @@ describe("MultiPlatformDeviceManager", () => {
       const fakeLister: IosPhysicalDeviceLister = {
         listConnectedDevices: async () => ({
           devices: await resolve(options.physical ?? []),
-          complete: options.physicalComplete ?? true,
+          ...(options.physicalComplete === false
+            ? {
+                complete: false as const,
+                error: options.physicalError ?? {
+                  code: "failed" as const,
+                  message: "devicectl could not list physical iOS devices (failed): fake",
+                },
+              }
+            : { complete: true as const }),
         }),
       };
 
@@ -251,7 +260,7 @@ describe("MultiPlatformDeviceManager", () => {
       });
     });
 
-    test("an incomplete physical sweep still leaves simulators authoritative", async () => {
+    test("a failed physical invocation still leaves simulators authoritative", async () => {
       await withProcessPlatform("darwin", async () => {
         // `succeededPlatforms` has no room for "simulators yes, physical no", and
         // clearing it on a devicectl blip would make every idle simulator
@@ -266,6 +275,25 @@ describe("MultiPlatformDeviceManager", () => {
 
         expect(discovery.devices).toEqual([simulator, physicalDevice]);
         expect(discovery.succeededPlatforms.has("ios")).toBe(true);
+        expect(discovery.sourceErrors?.["ios-physical"]?.code).toBe("failed");
+        expect(discovery.discoveryErrors?.ios).toBeUndefined();
+      });
+    });
+
+    test("a devicectl timeout surfaces a typed source error and keeps simulators complete", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const error = {
+          code: "timeout" as const,
+          message: "devicectl could not list physical iOS devices (timeout): timed out",
+        };
+        const discovery = await makeManager({
+          simulators: [simulator],
+          physicalComplete: false,
+          physicalError: error,
+        }).getBootedDevicesDetailed("ios");
+        expect([...discovery.succeededSources!]).toEqual(["ios-simulator"]);
+        expect(discovery.sourceErrors?.["ios-physical"]).toEqual(error);
+        expect(discovery.discoveryErrors?.ios).toBeUndefined();
       });
     });
 

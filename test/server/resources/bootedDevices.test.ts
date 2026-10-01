@@ -303,9 +303,19 @@ describe("MCP Booted Device Resources", () => {
     const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text);
     expect(data.observationComplete).toBe(false);
     expect(data.platformObservations.ios?.observationComplete).toBe(false);
+    expect(data.platformObservations.ios?.discoveryError).toEqual({
+      code: "failed",
+      message: "devicectl could not list physical iOS devices (failed): fake",
+    });
     expect(data.sourceObservations).toEqual({
       "ios-simulator": { observationComplete: true },
-      "ios-physical": { observationComplete: false },
+      "ios-physical": {
+        observationComplete: false,
+        discoveryError: {
+          code: "failed",
+          message: "devicectl could not list physical iOS devices (failed): fake",
+        },
+      },
     });
   });
 
@@ -879,8 +889,8 @@ describe("MCP Booted Device Resources", () => {
               devices: [mockIosDevice1],
               succeededPlatforms: new Set(["ios"]),
               succeededSources: new Set(["ios-simulator"]),
-              discoveryErrors: {
-                ios: { code: "failed", message: "devicectl sweep incomplete" },
+              sourceErrors: {
+                "ios-physical": { code: "failed", message: "devicectl sweep incomplete" },
               },
             };
       const { client } = fixture.getContext();

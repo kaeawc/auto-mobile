@@ -1,7 +1,11 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { type DeviceDiscoveryError, PlatformDeviceManager } from "../devices/deviceUtils";
+import {
+  type BootedDeviceDiscovery,
+  type DeviceDiscoveryError,
+  PlatformDeviceManager,
+} from "../devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   configuredImageForBootedDevice,
@@ -374,6 +378,20 @@ async function probeDeviceLock(
   }
 }
 
+/** Both booted inventory and lock-state observations preserve source diagnostics. */
+function bootedDiscoveryError(
+  discovery: BootedDeviceDiscovery,
+  platform: Platform,
+): DeviceDiscoveryError {
+  return (
+    discovery.discoveryErrors?.[platform] ??
+    (platform === "ios" ? discovery.sourceErrors?.["ios-physical"] : undefined) ?? {
+      code: "failed",
+      message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
+    }
+  );
+}
+
 /**
  * Compute the lightweight [DEVICE_LOCK_STATES_RESOURCE_URI] payload: enumerate booted devices and
  * run ONLY the keyguard probe (no service-status), so the desktop's frequent lock poll doesn't pay
@@ -395,10 +413,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
       if (complete) {
         succeededPlatforms.add(platform);
       } else {
-        discoveryErrors[platform] = discovery.discoveryErrors?.[platform] ?? {
-          code: "failed",
-          message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
-        };
+        discoveryErrors[platform] = bootedDiscoveryError(discovery, platform);
       }
     } catch (error) {
       logger.warn(`[DeviceLockStates] Failed to enumerate ${platform} booted devices: ${error}`);
@@ -777,6 +792,11 @@ async function discoverBootedDevicesForPlatform(
             observationComplete: discovery.succeededSources
               ? discovery.succeededSources.has(source)
               : discovery.succeededPlatforms.has(platform),
+            ...(!(
+              discovery.succeededSources?.has(source) ?? discovery.succeededPlatforms.has(platform)
+            ) && discovery.sourceErrors?.[source]
+              ? { discoveryError: discovery.sourceErrors[source] }
+              : {}),
           },
         ]),
       ),
@@ -784,10 +804,7 @@ async function discoverBootedDevicesForPlatform(
         ? { observationComplete: true }
         : {
             observationComplete: false,
-            discoveryError: discovery.discoveryErrors?.[platform] ?? {
-              code: "failed",
-              message: `${platform === "android" ? "Android" : "iOS"} booted-device discovery did not complete.`,
-            },
+            discoveryError: bootedDiscoveryError(discovery, platform),
           },
     };
   } catch (error) {

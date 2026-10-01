@@ -1,0 +1,1174 @@
+{
+  "info" : {
+    "arguments" : [
+      "devicectl",
+      "list",
+      "devices",
+      "--json-output",
+      "list-devices-omit-deprecated.json",
+      "--omit-deprecated-fields-in-json",
+      "--quiet"
+    ],
+    "commandType" : "devicectl.list.devices",
+    "environment" : {
+
+    },
+    "jsonVersion" : 5,
+    "outcome" : "success",
+    "version" : "651.13.4"
+  },
+  "result" : {
+    "devices" : [
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.applicationcontrol",
+            "name" : "Application Control"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.audioinput",
+            "name" : "Audio Input Device Selection"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.audiooutput",
+            "name" : "Audio Output Device Selection"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.capturescreenshot",
+            "name" : "Capture Screenshot"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.configurationprofiles",
+            "name" : "Configuration Profile Management"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.customizeappearancesettings",
+            "name" : "Customize Appearance Settings"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.customizeuistyle",
+            "name" : "Customize User Interface Style"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.devicecontrol.orientation",
+            "name" : "Device Orientation"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.faceid",
+            "name" : "Face ID"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.fetchappicons",
+            "name" : "Fetch Application Icons"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.getdisplayinfo",
+            "name" : "Get Display Information"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.button",
+            "name" : "HID Button"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.digitizer",
+            "name" : "HID Digitizer"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.keyboard",
+            "name" : "HID Keyboard"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.scroll",
+            "name" : "HID Scroll"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.vendordefined",
+            "name" : "HID Vendor Defined"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.installapp",
+            "name" : "Install Application"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.monitormotion",
+            "name" : "Monitor Motion"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.monitorprocesstermination",
+            "name" : "Monitor Process for Termination"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.pasteboard",
+            "name" : "Pasteboard"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.processcontrol",
+            "name" : "Process Control"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.rebootdevice",
+            "name" : "Reboot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.screenrecording",
+            "name" : "Screen Recording"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.sendmemorywarningtoprocess",
+            "name" : "Send Memory Warning to Process"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.sendsignaltoprocess",
+            "name" : "Send Signal to Process"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.servicexpcpeerconnection",
+            "name" : "Service XPC Peer Connection"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.shutdown",
+            "name" : "Shutdown Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.simulatelocation",
+            "name" : "Simulate Device Location"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.simulatefaceid",
+            "name" : "Simulate Face ID"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.simulateStatusBar",
+            "name" : "Simulate Status Bar"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.standby",
+            "name" : "StandBy"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.streamapplist",
+            "name" : "Stream Application List"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.streamprocesslist",
+            "name" : "Stream Process List"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.uninstallapp",
+            "name" : "Uninstall Application"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.universalhidservice",
+            "name" : "UniversalHIDService"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.voiceover",
+            "name" : "VoiceOver"
+          }
+        ],
+        "identifier" : "4E8A6FF9-36EC-4529-BB2A-5C480EE3C06F",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 812489876,
+            "pairingState" : "paired",
+            "state" : "connected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : true,
+            "marketingName" : "iPhone 17",
+            "platform" : "iOS",
+            "productType" : "iPhone18,3",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "faceID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              },
+              {
+                "subtype" : 3,
+                "type" : 16777223
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "4E8A6FF9-36EC-4529-BB2A-5C480EE3C06F"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "majorLetterComponent" : "F",
+                "majorNumberComponent" : 23,
+                "name" : "23F77",
+                "revisionVersion" : {
+                  "components" : [
+                    23,
+                    6,
+                    77,
+                    0,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "23.6.77.0.0"
+                },
+                "updateNumberComponent" : 77
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                26,
+                5,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "26.5"
+            }
+          },
+          "state" : {
+            "bootState" : "booted",
+            "name" : "Acceptance iPhone 17",
+            "preparednessState" : 15,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      },
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.boot",
+            "name" : "Boot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          }
+        ],
+        "identifier" : "740AB8F7-F5F4-4773-82C7-122269EE2D6E",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 811898178,
+            "pairingState" : "paired",
+            "state" : "disconnected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : true,
+            "marketingName" : "iPhone 17",
+            "platform" : "iOS",
+            "productType" : "iPhone18,3",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "faceID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              },
+              {
+                "subtype" : 3,
+                "type" : 16777223
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "740AB8F7-F5F4-4773-82C7-122269EE2D6E"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "majorLetterComponent" : "F",
+                "majorNumberComponent" : 23,
+                "name" : "23F77",
+                "revisionVersion" : {
+                  "components" : [
+                    23,
+                    6,
+                    77,
+                    0,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "23.6.77.0.0"
+                },
+                "updateNumberComponent" : 77
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                26,
+                5,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "26.5"
+            }
+          },
+          "state" : {
+            "bootState" : "shutdown",
+            "name" : "Acceptance iPhone 17",
+            "preparednessState" : 0,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      },
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.boot",
+            "name" : "Boot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          }
+        ],
+        "identifier" : "BCC31307-1A19-4D67-A7F0-44FC98F78921",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 812484680,
+            "pairingState" : "paired",
+            "state" : "disconnected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : true,
+            "marketingName" : "iPhone 16",
+            "platform" : "iOS",
+            "productType" : "iPhone17,3",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "faceID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              },
+              {
+                "subtype" : 3,
+                "type" : 16777223
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "BCC31307-1A19-4D67-A7F0-44FC98F78921"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "majorLetterComponent" : "G",
+                "majorNumberComponent" : 22,
+                "name" : "22G86",
+                "revisionVersion" : {
+                  "components" : [
+                    22,
+                    7,
+                    86,
+                    0,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "22.7.86.0.0"
+                },
+                "updateNumberComponent" : 86
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                18,
+                6,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "18.6"
+            }
+          },
+          "state" : {
+            "bootState" : "shutdown",
+            "name" : "MT iPhone 16 iOS18.6",
+            "preparednessState" : 0,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      },
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.boot",
+            "name" : "Boot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          }
+        ],
+        "identifier" : "E67F903D-B40A-4829-B8A3-B5EA1007A6E4",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 812497555,
+            "pairingState" : "paired",
+            "state" : "disconnected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : true,
+            "marketingName" : "iPhone 17",
+            "platform" : "iOS",
+            "productType" : "iPhone18,3",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "faceID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              },
+              {
+                "subtype" : 3,
+                "type" : 16777223
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "E67F903D-B40A-4829-B8A3-B5EA1007A6E4"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "majorLetterComponent" : "F",
+                "majorNumberComponent" : 23,
+                "name" : "23F77",
+                "revisionVersion" : {
+                  "components" : [
+                    23,
+                    6,
+                    77,
+                    0,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "23.6.77.0.0"
+                },
+                "updateNumberComponent" : 77
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                26,
+                5,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "26.5"
+            }
+          },
+          "state" : {
+            "bootState" : "shutdown",
+            "name" : "MT iPhone 17",
+            "preparednessState" : 0,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      },
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.boot",
+            "name" : "Boot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          }
+        ],
+        "identifier" : "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 812581810,
+            "pairingState" : "paired",
+            "state" : "disconnected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : true,
+            "marketingName" : "iPhone 18 Pro",
+            "platform" : "iOS",
+            "productType" : "iPhone19,2",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "faceID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "majorLetterComponent" : "A",
+                "majorNumberComponent" : 24,
+                "name" : "24A434",
+                "revisionVersion" : {
+                  "components" : [
+                    24,
+                    1,
+                    434,
+                    0,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "24.1.434.0.0"
+                },
+                "updateNumberComponent" : 434
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                27,
+                0,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "27.0"
+            }
+          },
+          "state" : {
+            "bootState" : "shutdown",
+            "name" : "MT iPhone 18 Pro iOS 27.0",
+            "preparednessState" : 0,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      },
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.applicationcontrol",
+            "name" : "Application Control"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.audioinput",
+            "name" : "Audio Input Device Selection"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.audiooutput",
+            "name" : "Audio Output Device Selection"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.capturescreenshot",
+            "name" : "Capture Screenshot"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.configurationprofiles",
+            "name" : "Configuration Profile Management"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.customizeappearancesettings",
+            "name" : "Customize Appearance Settings"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.customizeliquidglass",
+            "name" : "Customize Liquid Glass"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.customizeuistyle",
+            "name" : "Customize User Interface Style"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.devicecontrol.orientation",
+            "name" : "Device Orientation"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.fetchappicons",
+            "name" : "Fetch Application Icons"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.getdisplayinfo",
+            "name" : "Get Display Information"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.button",
+            "name" : "HID Button"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.digitizer",
+            "name" : "HID Digitizer"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.keyboard",
+            "name" : "HID Keyboard"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.scroll",
+            "name" : "HID Scroll"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.hid.vendordefined",
+            "name" : "HID Vendor Defined"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.installapp",
+            "name" : "Install Application"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.monitormotion",
+            "name" : "Monitor Motion"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.monitorprocesstermination",
+            "name" : "Monitor Process for Termination"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.pasteboard",
+            "name" : "Pasteboard"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.processcontrol",
+            "name" : "Process Control"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.rebootdevice",
+            "name" : "Reboot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resizableappmanagement",
+            "name" : "Resizable App Management"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.screenrecording",
+            "name" : "Screen Recording"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.sendmemorywarningtoprocess",
+            "name" : "Send Memory Warning to Process"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.sendsignaltoprocess",
+            "name" : "Send Signal to Process"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.servicexpcpeerconnection",
+            "name" : "Service XPC Peer Connection"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.shutdown",
+            "name" : "Shutdown Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.simulatelocation",
+            "name" : "Simulate Device Location"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.simulateStatusBar",
+            "name" : "Simulate Status Bar"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.simulatetouchid",
+            "name" : "Simulate Touch ID"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.standby",
+            "name" : "StandBy"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.streamapplist",
+            "name" : "Stream Application List"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.streamprocesslist",
+            "name" : "Stream Process List"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.touchid",
+            "name" : "Touch ID"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.uninstallapp",
+            "name" : "Uninstall Application"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.universalhidservice",
+            "name" : "UniversalHIDService"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.voiceover",
+            "name" : "VoiceOver"
+          }
+        ],
+        "identifier" : "CC665AC6-D46E-48AB-B745-856472FEB7CF",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 812574850,
+            "pairingState" : "paired",
+            "state" : "connected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : false,
+            "marketingName" : "iPhone Duo",
+            "platform" : "iOS",
+            "productType" : "iPhone19,4",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "touchID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "CC665AC6-D46E-48AB-B745-856472FEB7CF"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "factoryIdentifier" : 9,
+                "majorLetterComponent" : "A",
+                "majorNumberComponent" : 24,
+                "name" : "24A94401",
+                "revisionVersion" : {
+                  "components" : [
+                    24,
+                    1,
+                    440,
+                    1,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "24.1.440.1.0"
+                },
+                "updateNumberComponent" : 94401
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                27,
+                1,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "27.1"
+            }
+          },
+          "state" : {
+            "bootState" : "booted",
+            "name" : "MT iPhone Duo 27.1",
+            "preparednessState" : 15,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      },
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.boot",
+            "name" : "Boot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          }
+        ],
+        "identifier" : "DC2298C3-72D3-4E8D-9AD4-BE6036D6F1B2",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 812484956,
+            "pairingState" : "paired",
+            "state" : "disconnected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : true,
+            "marketingName" : "iPhone 17",
+            "platform" : "iOS",
+            "productType" : "iPhone18,3",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "faceID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "DC2298C3-72D3-4E8D-9AD4-BE6036D6F1B2"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "majorLetterComponent" : "A",
+                "majorNumberComponent" : 24,
+                "name" : "24A434",
+                "revisionVersion" : {
+                  "components" : [
+                    24,
+                    1,
+                    434,
+                    0,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "24.1.434.0.0"
+                },
+                "updateNumberComponent" : 434
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                27,
+                0,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "27.0"
+            }
+          },
+          "state" : {
+            "bootState" : "shutdown",
+            "name" : "iPhone 17",
+            "preparednessState" : 0,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      },
+      {
+        "capabilities" : [
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.device.boot",
+            "name" : "Boot Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.companiondevicepairing",
+            "name" : "Companion Device Pairing"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.remote.devicecontrol.orientation",
+            "name" : "Device Orientation"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.default.user.credentials",
+            "name" : "Modify Credentials for Default Users for a Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.tags",
+            "name" : "Modify Tags"
+          },
+          {
+            "featureIdentifier" : "com.apple.dt.coredevice.plugin.removedevice",
+            "name" : "Remove Provisioned Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.renamedevice",
+            "name" : "Rename Device"
+          },
+          {
+            "featureIdentifier" : "com.apple.coredevice.feature.resetContentAndSettings",
+            "name" : "Reset Settings and Content"
+          }
+        ],
+        "identifier" : "490BEBFF-5F82-43CF-B7BC-59AE24229520",
+        "properties" : {
+          "connection" : {
+            "authenticationType" : "implicit",
+            "lastConnectionDate" : 812485059,
+            "pairingState" : "paired",
+            "state" : "disconnected",
+            "transportType" : "sameMachine"
+          },
+          "hardware" : {
+            "cpuType" : {
+              "subtype" : 0,
+              "type" : 16777228
+            },
+            "deviceType" : "iPhone",
+            "hasActionButton" : false,
+            "marketingName" : "iPhone Duo",
+            "platform" : "iOS",
+            "productType" : "iPhone19,4",
+            "reality" : "simulated",
+            "supportedBiometrics" : [
+              "touchID"
+            ],
+            "supportedCPUTypes" : [
+              {
+                "subtype" : 0,
+                "type" : 16777228
+              }
+            ],
+            "supportsSiri" : true,
+            "udid" : "490BEBFF-5F82-43CF-B7BC-59AE24229520"
+          },
+          "software" : {
+            "osBuildVersions" : {
+              "buildVersion" : {
+                "factoryIdentifier" : 9,
+                "majorLetterComponent" : "A",
+                "majorNumberComponent" : 24,
+                "name" : "24A94401",
+                "revisionVersion" : {
+                  "components" : [
+                    24,
+                    1,
+                    440,
+                    1,
+                    0
+                  ],
+                  "originalComponentsCount" : 5,
+                  "stringValue" : "24.1.440.1.0"
+                },
+                "updateNumberComponent" : 94401
+              }
+            },
+            "osVersionNumber" : {
+              "components" : [
+                27,
+                1,
+                0,
+                0,
+                0
+              ],
+              "originalComponentsCount" : 2,
+              "stringValue" : "27.1"
+            }
+          },
+          "state" : {
+            "bootState" : "shutdown",
+            "name" : "iPhone Duo",
+            "preparednessState" : 0,
+            "visibilityClass" : "simulators"
+          }
+        },
+        "propertyDisplayNames" : null,
+        "visibilityClass" : "simulators"
+      }
+    ]
+  }
+}

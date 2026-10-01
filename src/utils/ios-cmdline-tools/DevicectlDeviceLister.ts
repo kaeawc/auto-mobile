@@ -13,7 +13,7 @@ import {
   defaultDiscoveryObservationSequence,
   type DiscoveryObservationSequence,
 } from "../DiscoveryObservationSequence";
-import { inferIosFormFactor, isIosPhysicalUdid } from "./iosDeviceType";
+import { inferIosFormFactor, isIosPhysicalUdid, isIosSimulatorUdid } from "./iosDeviceType";
 
 /** Minimal injected seam for the diagnostic-only devicectl availability probe. */
 export interface DevicectlAvailabilityDependencies {
@@ -70,35 +70,27 @@ export interface IosPhysicalDeviceLister {
   listConnectedDevices(): Promise<PhysicalIosDeviceDiscovery>;
 }
 
-/**
- * Outcome of one physical-device sweep.
- *
- * `complete` is the load-bearing half: it is false ONLY when devicectl was
- * reachable but its listing could not be read in full — the invocation failed, or
- * the payload drifted — so callers can tell "no physical devices are attached"
- * from "we could not find out". The daemon's disconnect monitor prunes
- * on that distinction, and pruning a still-connected iPhone because devicectl
- * blipped would evict a device mid-session.
- *
- * A host that cannot run devicectl at all (non-darwin, no Xcode) reports
- * `complete: true`: no physical device can ever be tracked there, so their
- * absence is authoritative.
- */
-export interface PhysicalIosDeviceDiscovery {
-  devices: BootedDevice[];
-  complete: boolean;
-  /**
-   * Devices in `devices` that came from the retention replay rather than this
-   * sweep, so a caller can tell "still plugged in" from "last seen recently".
-   *
-   * `complete` alone cannot make that call in either direction: a sweep with
-   * one malformed record reports `complete: false` while every listed device
-   * was freshly parsed, and a failed sweep reports `complete: false` while
-   * every listed device is a replay. Liveness decisions need this set; pruning
-   * decisions still want `complete` (#5683).
-   */
-  retainedDeviceIds?: ReadonlySet<string>;
+export type DevicectlListingErrorCode = "unavailable" | "failed" | "timeout";
+export interface DevicectlListingError {
+  code: DevicectlListingErrorCode;
+  message: string;
 }
+
+/** Only invocation/envelope failures are incomplete; their devices are retention replays. */
+export type PhysicalIosDeviceDiscovery =
+  | { devices: BootedDevice[]; complete: true }
+  | { devices: BootedDevice[]; complete: false; error: DevicectlListingError };
+
+type NotAvailableReason = "non-ios" | "unreachable" | "not-booted";
+export type DevicectlListingParse =
+  | {
+      ok: true;
+      physical: BootedDevice[];
+      simulators: BootedDevice[];
+      notAvailable: Array<{ reason: NotAvailableReason }>;
+      unidentified: string[];
+    }
+  | { ok: false; reason: string };
 
 /**
  * `connectionProperties.tunnelState` values that mean "this device is known to
@@ -138,8 +130,7 @@ function asString(value: unknown): string | undefined {
 /**
  * Pull the device array out of a `devicectl list devices --json-output` payload.
  * devicectl nests it under `result.devices`; tolerate a bare `devices` array and
- * a top-level array so a future envelope change degrades to "no devices" rather
- * than a crash.
+ * a top-level array so a recognized alternate envelope remains readable. Unknown envelopes fail.
  */
 function extractDeviceEntries(data: unknown): unknown[] | null {
   if (Array.isArray(data)) {
@@ -149,155 +140,222 @@ function extractDeviceEntries(data: unknown): unknown[] | null {
   if (!root) {
     return null;
   }
-  const outcome = asString(asRecord(root.info)?.outcome)?.toLowerCase();
-  if (outcome && outcome !== "success") {
+  const outcome = asRecord(root.info)?.outcome;
+  if (outcome !== undefined && asString(outcome)?.toLowerCase() !== "success") {
     return null;
   }
   const devices = asRecord(root.result)?.devices ?? root.devices;
   return Array.isArray(devices) ? devices : null;
 }
 
-/**
- * What one devicectl record turned out to be.
- *
- * `filtered` and `malformed` both yield no device, but they mean opposite things
- * for completeness. `filtered` is a record this lister *understands* and does not
- * want — a paired Watch, an unreachable phone — so the sweep still knows exactly
- * which iPhones are attached. `malformed` is a record it cannot identify at all,
- * which means the payload no longer matches what this parser reads and the
- * resulting device list may be missing hardware that is physically present.
- */
-type DeviceEntryOutcome =
-  | { kind: "device"; device: BootedDevice }
-  | { kind: "filtered" }
-  | { kind: "malformed" };
+type DevicectlRecordOutcome =
+  | { kind: "physical" | "simulator"; device: BootedDevice }
+  | { kind: "not-available"; reason: NotAvailableReason }
+  | { kind: "unidentifiable"; reason: string };
 
-const FILTERED: DeviceEntryOutcome = { kind: "filtered" };
-const MALFORMED: DeviceEntryOutcome = { kind: "malformed" };
-
-/**
- * False only when the record names a platform that is not iOS. A missing field
- * passes, per the degrade-toward-inclusion policy on {@link IOS_PLATFORM_VALUES}.
- */
-function isIosPlatform(hardware: Record<string, unknown> | null): boolean {
-  const devicePlatform = asString(hardware?.platform)?.toLowerCase();
-  return !devicePlatform || IOS_PLATFORM_VALUES.has(devicePlatform);
-}
-
-/**
- * False only when devicectl names a tunnel state it documents as unreachable.
- * A missing or unrecognized state passes; see {@link UNREACHABLE_TUNNEL_STATES}.
- */
-function isReachable(connection: Record<string, unknown> | null): boolean {
-  const tunnelState = asString(connection?.tunnelState)?.toLowerCase();
-  return !tunnelState || !UNREACHABLE_TUNNEL_STATES.has(tunnelState);
-}
-
-/**
- * Best available human-readable name for a device record, falling back to the
- * UDID so a device is never surfaced nameless.
- */
-function deviceDisplayName(
-  deviceProperties: Record<string, unknown> | null,
-  hardware: Record<string, unknown> | null,
-  udid: string,
-): string {
+function readSoftwareVersion(
+  properties: Record<string, unknown> | null,
+  legacyState: Record<string, unknown> | null,
+): string | undefined {
+  const version = asRecord(properties?.software)?.osVersionNumber;
   return (
-    asString(deviceProperties?.name) ??
-    asString(hardware?.marketingName) ??
-    asString(hardware?.deviceType) ??
-    udid
+    asString(asRecord(version)?.stringValue) ??
+    asString(version) ??
+    asString(legacyState?.osVersionNumber)
   );
 }
 
-/**
- * Classify one devicectl device record.
- *
- * The order matters: the two *understood* rejections — a non-iOS platform and a
- * documented-unreachable tunnel state — are checked first, so everything that
- * survives them is a record devicectl says is a reachable iOS CoreDevice. Those
- * are physical hardware by definition, so failing to read a physical UDID out of
- * one is schema drift rather than a device we meant to skip, and it must make the
- * whole listing non-authoritative.
- *
- * The UDID is validated with the canonical {@link isIosPhysicalUdid} predicate
- * rather than trusted, so a simulator-shaped entry or a renamed field can never
- * be surfaced as a physical iOS device.
- */
-function classifyDeviceEntry(entry: unknown): DeviceEntryOutcome {
+function readConnectionState(
+  properties: Record<string, unknown> | null,
+  record: Record<string, unknown>,
+): string | undefined {
+  return (
+    asString(asRecord(properties?.connection)?.state) ??
+    asString(asRecord(record.connectionProperties)?.tunnelState)
+  )?.toLowerCase();
+}
+
+/** Shared field reader: modern properties take precedence per field over legacy keys. */
+function readDeviceFields(record: Record<string, unknown>) {
+  const properties = asRecord(record.properties);
+  const hardware = asRecord(properties?.hardware);
+  const legacyHardware = asRecord(record.hardwareProperties);
+  const state = asRecord(properties?.state);
+  const legacyState = asRecord(record.deviceProperties);
+  const hardwareString = (key: string) =>
+    asString(hardware?.[key]) ?? asString(legacyHardware?.[key]);
+  const stateString = (key: string) => asString(state?.[key]) ?? asString(legacyState?.[key]);
+  return {
+    platform: hardwareString("platform")?.toLowerCase(),
+    udid: hardwareString("udid") ?? asString(record.identifier),
+    reality: hardwareString("reality"),
+    productType: hardwareString("productType"),
+    name: stateString("name") ?? hardwareString("marketingName") ?? hardwareString("deviceType"),
+    bootState: stateString("bootState"),
+    connectionState: readConnectionState(properties, record),
+    osVersion: readSoftwareVersion(properties, legacyState),
+  };
+}
+
+function deviceKind(
+  udid: string,
+  reality: string | undefined,
+): "physical" | "simulator" | undefined {
+  const shape = isIosPhysicalUdid(udid)
+    ? "physical"
+    : isIosSimulatorUdid(udid)
+      ? "simulator"
+      : undefined;
+  if (reality === undefined) {
+    return shape;
+  }
+  const kind =
+    reality === "physical" ? "physical" : reality === "simulated" ? "simulator" : undefined;
+  return kind === shape ? kind : undefined;
+}
+
+function unavailableReason(
+  fields: ReturnType<typeof readDeviceFields>,
+): NotAvailableReason | undefined {
+  const simulated =
+    fields.reality === "simulated" ||
+    (fields.reality === undefined && fields.udid && isIosSimulatorUdid(fields.udid));
+  if (simulated) {
+    if (fields.bootState !== "booted") {
+      return "not-booted";
+    }
+    return fields.connectionState === "connected" ? undefined : "unreachable";
+  }
+  // Physical boot-state semantics need hardware evidence; preserve lenient availability.
+  if (fields.connectionState && UNREACHABLE_TUNNEL_STATES.has(fields.connectionState)) {
+    return "unreachable";
+  }
+  return undefined;
+}
+
+/** Total classification never changes the authority of a successful listing. */
+function classifyDeviceEntry(entry: unknown): DevicectlRecordOutcome {
   const record = asRecord(entry);
   if (!record) {
-    // A non-record entry inside a recognized envelope is drift, not a device.
-    return MALFORMED;
+    return { kind: "unidentifiable", reason: "entry is not an object" };
   }
-
-  const hardware = asRecord(record.hardwareProperties);
-  if (!isIosPlatform(hardware) || !isReachable(asRecord(record.connectionProperties))) {
-    return FILTERED;
+  const fields = readDeviceFields(record);
+  if (fields.platform && !IOS_PLATFORM_VALUES.has(fields.platform)) {
+    return { kind: "not-available", reason: "non-ios" };
   }
-
-  const udid = asString(hardware?.udid) ?? asString(record.identifier);
-  if (!udid || !isIosPhysicalUdid(udid)) {
-    return MALFORMED;
+  const reason = unavailableReason(fields);
+  if (reason) {
+    return { kind: "not-available", reason };
   }
-
-  const deviceProperties = asRecord(record.deviceProperties);
-  const osVersion = asString(deviceProperties?.osVersionNumber);
-  const formFactor = inferIosFormFactor(asString(hardware?.productType));
-
+  if (!fields.udid) {
+    return { kind: "unidentifiable", reason: "no udid" };
+  }
+  const kind = deviceKind(fields.udid, fields.reality);
+  if (!kind) {
+    return { kind: "unidentifiable", reason: "reality/udid mismatch or unrecognized udid" };
+  }
+  const formFactor = inferIosFormFactor(fields.productType);
   return {
-    kind: "device",
+    kind,
     device: {
-      name: deviceDisplayName(deviceProperties, hardware, udid),
+      name: fields.name ?? fields.udid,
       platform: "ios",
-      deviceId: udid,
-      ...(osVersion ? { iosVersion: osVersion, osVersion } : {}),
+      deviceId: fields.udid,
+      ...(fields.osVersion ? { iosVersion: fields.osVersion, osVersion: fields.osVersion } : {}),
       ...(formFactor ? { formFactor } : {}),
     },
   };
 }
 
-/**
- * Parse a `devicectl list devices --json-output` payload into the reachable
- * physical iOS devices it reports, sorted by UDID to match
- * SimCtlClient's stable simulator ordering.
- *
- * `complete` separates a *recognized* listing (authoritative — an empty one means
- * "nothing is plugged in") from one this parser could not fully read. That covers
- * both halves of the payload: an envelope it does not understand — a failed
- * `info.outcome`, a missing/non-array `devices`, or a future rename — and an
- * individual entry devicectl calls a reachable iOS device but which yields no
- * physical UDID. Reporting either as authoritative is what would let the
- * disconnect monitor drop a still-connected iPhone.
- *
- * Exported separately from the client so the payload shape can be pinned by
- * fast unit tests with no host tooling involved.
- */
-export function parseDevicectlDeviceList(data: unknown): PhysicalIosDeviceDiscovery {
+/** Parse both record kinds; the physical lister drops simulators at its boundary. */
+export function parseDevicectlDeviceList(data: unknown): DevicectlListingParse {
   const entries = extractDeviceEntries(data);
   if (!entries) {
-    return { devices: [], complete: false };
+    return { ok: false, reason: "devicectl listing has a non-success outcome or no device array" };
   }
-  const outcomes = entries.map(classifyDeviceEntry);
-  const devices = outcomes
-    .filter((outcome) => outcome.kind === "device")
-    .map((outcome) => outcome.device);
-  devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-  // The devices that did resolve are still reported: the caller needs both the
-  // iPhone it found and the signal that something in the payload was unreadable.
-  return { devices, complete: !outcomes.some((outcome) => outcome.kind === "malformed") };
+  const result: Extract<DevicectlListingParse, { ok: true }> = {
+    ok: true,
+    physical: [],
+    simulators: [],
+    notAvailable: [],
+    unidentified: [],
+  };
+  for (const outcome of entries.map(classifyDeviceEntry)) {
+    switch (outcome.kind) {
+      case "physical":
+        result.physical.push(outcome.device);
+        break;
+      case "simulator":
+        result.simulators.push(outcome.device);
+        break;
+      case "not-available":
+        result.notAvailable.push({ reason: outcome.reason });
+        break;
+      case "unidentifiable":
+        result.unidentified.push(outcome.reason);
+        break;
+    }
+  }
+  for (const devices of [result.physical, result.simulators]) {
+    devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+  }
+  return result;
 }
 
-/**
- * Union two device listings by UDID, preferring the first list's record for a
- * device both report, and keeping the UDID ordering `parseDevicectlDeviceList`
- * establishes.
- */
-function mergeById(preferred: BootedDevice[], fallback: BootedDevice[]): BootedDevice[] {
-  const seen = new Set(preferred.map((device) => device.deviceId));
-  const merged = [...preferred, ...fallback.filter((device) => !seen.has(device.deviceId))];
-  merged.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-  return merged;
+export function classifyDevicectlInvocationError(error: unknown): DevicectlListingErrorCode {
+  const cause = asRecord(asRecord(error)?.cause ?? error);
+  const message = commandStderr(cause) ?? errorMessage(error);
+  if (
+    cause?.code === "ENOENT" ||
+    /unable to find utility ["']?devicectl|xcode-select: error|active developer path .* does not exist/i.test(
+      message,
+    )
+  ) {
+    return "unavailable";
+  }
+  if (cause?.killed === true || cause?.code === "ETIMEDOUT") {
+    return "timeout";
+  }
+  return "failed";
+}
+
+function commandStderr(cause: Record<string, unknown> | null): string | undefined {
+  const stderr = cause?.stderr;
+  return Buffer.isBuffer(stderr) ? stderr.toString() : asString(stderr);
+}
+
+function commandExitDetails(cause: Record<string, unknown> | null): string[] {
+  const details: string[] = [];
+  const code = cause?.code;
+  if (typeof code === "number") {
+    details.push(`exit code ${code}`);
+  } else if (typeof code === "string") {
+    details.push(`error code ${code}`);
+  }
+  const signal = asString(cause?.signal);
+  if (signal) {
+    details.push(`signal ${signal}`);
+  }
+  return details;
+}
+
+function invocationFailureDetail(error: unknown, code: DevicectlListingErrorCode): string {
+  if (code === "unavailable") {
+    return "xcrun/devicectl not found";
+  }
+  if (code === "timeout") {
+    return `timed out after ${DEVICE_LIST_TIMEOUT_MS} ms`;
+  }
+  const cause = asRecord(asRecord(error)?.cause ?? error);
+  const details = commandExitDetails(cause);
+  const stderr = commandStderr(cause)
+    ?.split(/\r?\n/)
+    .find((line) => line.trim())
+    ?.trim();
+  if (stderr) {
+    details.push(stderr);
+  }
+  return details.join(": ") || "invocation failed";
 }
 
 /**
@@ -360,8 +418,8 @@ const defaultDependencies: DevicectlDeviceListerDependencies = {
 /**
  * Lists connected physical iOS devices via `xcrun devicectl list devices`.
  *
- * macOS-only and entirely best-effort: every failure path (non-darwin host,
- * missing Xcode, devicectl error, unreadable JSON) logs and returns an empty
+ * macOS-only and best-effort: invocation failures log and replay last-good
+ * physical devices for a bounded window; non-darwin hosts return a complete empty
  * list. Physical-device discovery is additive to the simulator list, so a
  * failure here must degrade iOS discovery to "simulators only" rather than
  * failing the whole sweep.
@@ -375,6 +433,8 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   } | null = null;
   private lastGood: { devices: BootedDevice[]; observedAt: number; staleAfter: number } | null =
     null;
+  private previousFailureCode: DevicectlListingErrorCode | undefined;
+  private previousUnidentifiedKey = "[]";
   private inFlight: Promise<PhysicalIosDeviceDiscovery> | null = null;
 
   constructor(dependencies: Partial<DevicectlDeviceListerDependencies> = {}) {
@@ -400,12 +460,14 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
 
   private async runListing(): Promise<PhysicalIosDeviceDiscovery> {
     let tempDir: string | null = null;
+    let invoking = false;
     try {
       tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-devices-"));
       const jsonPath = join(tempDir, "devices.json");
       // The listing is deduped via `inFlight`, so this span attributes to
       // whichever caller triggered the shared run — one command, one leaf (see
       // PerfContext).
+      invoking = true;
       await trackAmbient("devicectl list devices", () =>
         this.deps.execute(
           "xcrun",
@@ -417,18 +479,25 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
           { timeoutMs: DEVICE_LIST_TIMEOUT_MS },
         ),
       );
+      invoking = false;
       const raw = await this.deps.readFile(jsonPath);
-      return this.remember(parseDevicectlDeviceList(JSON.parse(raw) as unknown));
-    } catch (error) {
-      // A host without Xcode 15+, without paired hardware, or with a devicectl
-      // that failed still has working simulator discovery; degrade to
-      // "no physical devices" rather than breaking the iOS sweep.
+      const parsed = parseDevicectlDeviceList(JSON.parse(raw) as unknown);
+      if (!parsed.ok) {
+        return this.failedListing("failed", parsed.reason);
+      }
+      this.logUnidentified(parsed.unidentified);
       this.deps.logger.debug(
-        `[DevicectlDeviceLister] physical iOS device discovery unavailable: ${errorMessage(error)}`,
+        `[DevicectlDeviceLister] dropped ${parsed.simulators.length} simulator record(s); simctl owns simulator discovery`,
       );
-      // Cache the failure too: a host with no Xcode must not pay for a failing
-      // process spawn on every sweep.
-      return this.remember({ devices: [], complete: false });
+      this.previousFailureCode = undefined;
+      return this.remember({ devices: parsed.physical, complete: true });
+    } catch (error) {
+      const code = invoking ? classifyDevicectlInvocationError(error) : "failed";
+      const detail = invoking ? invocationFailureDetail(error, code) : errorMessage(error);
+      return this.failedListing(
+        code,
+        tempDir ? detail.replaceAll(tempDir, "<temporary directory>") : detail,
+      );
     } finally {
       if (tempDir) {
         try {
@@ -440,6 +509,40 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
         }
       }
     }
+  }
+
+  private logUnidentified(reasons: string[]): void {
+    // Sorted reasons plus occurrence indexes identify changes without retaining record contents.
+    const key = JSON.stringify(reasons.toSorted().map((reason, index) => [reason, index]));
+    if (reasons.length > 0) {
+      const message = `[DevicectlDeviceLister] ${reasons.length} devicectl record(s) could not be identified: ${reasons.join("; ")}`;
+      if (key === this.previousUnidentifiedKey) {
+        // The same unidentified set is expected on recurring discovery sweeps.
+        this.deps.logger.debug(message);
+      } else {
+        this.deps.logger.warn(message);
+      }
+    }
+    this.previousUnidentifiedKey = key;
+  }
+
+  private failedListing(
+    code: DevicectlListingErrorCode,
+    detail: string,
+  ): PhysicalIosDeviceDiscovery {
+    const error = {
+      code,
+      message: `devicectl could not list physical iOS devices (${code}): ${detail.split(/\r?\n/, 1)[0]}`,
+    };
+    const message = `[DevicectlDeviceLister] ${error.message}`;
+    if (this.previousFailureCode === code) {
+      // Repeated host-tool failures are expected until the host configuration changes.
+      this.deps.logger.debug(message);
+    } else {
+      this.deps.logger.warn(message);
+    }
+    this.previousFailureCode = code;
+    return this.remember({ devices: [], complete: false, error });
   }
 
   private remember(discovery: PhysicalIosDeviceDiscovery): PhysicalIosDeviceDiscovery {
@@ -458,23 +561,7 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     if (stamped.complete) {
       resolved = this.recordLastGood(stamped, now);
     } else {
-      // A partial sweep and the retained listing are both incomplete views of
-      // the same hardware, so neither may evict the other's device: union
-      // them. When the sweep failed outright its half is empty and this
-      // degrades to pure retention.
-      const fresh = new Set(stamped.devices.map((device) => device.deviceId));
-      const retained = this.retainedDevices(now);
-      // Only the replayed half is stale. A device this sweep parsed stays fresh
-      // even though a sibling record was unreadable.
-      const retainedDeviceIds = retained
-        .map((device) => device.deviceId)
-        .filter((id) => !fresh.has(id));
-      resolved = {
-        devices: mergeById(stamped.devices, retained),
-        complete: false,
-        // Omitted when empty so a pure-failure sweep keeps its original shape.
-        ...(retainedDeviceIds.length > 0 ? { retainedDeviceIds: new Set(retainedDeviceIds) } : {}),
-      };
+      resolved = { devices: this.retainedDevices(now), complete: false, error: stamped.error };
     }
     this.cache = {
       discovery: resolved,

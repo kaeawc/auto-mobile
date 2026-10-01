@@ -27,11 +27,6 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   // `succeededSources`, so a consumer that mistakes presence for a fresh
   // observation is caught.
   retainedSources: Set<DiscoverySource> = new Set();
-  // Sources that did not complete but whose reported devices were still
-  // observed this sweep — devicectl's partial-parse state, where one malformed
-  // record makes the whole listing incomplete while the devices it did parse
-  // are fresh. Contributes devices AND freshness, but not `succeededSources`.
-  incompleteSources: Set<DiscoverySource> = new Set();
   deviceImageDiscoveryCalls: Array<{
     platform: SomePlatform;
     options: DeviceImageDiscoveryOptions;
@@ -96,8 +91,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       const source = discoverySourceFor(device.platform, device.deviceId);
       return (
         (!this.failedPlatforms.has(device.platform) && !this.failedSources.has(source)) ||
-        this.retainedSources.has(source) ||
-        this.incompleteSources.has(source)
+        this.retainedSources.has(source)
       );
     });
   }
@@ -109,17 +103,21 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     const succeededSources = new Set<DiscoverySource>();
     const freshDeviceIds = new Set<string>();
     const discoveryErrors: BootedDeviceDiscovery["discoveryErrors"] = {};
+    const sourceErrors: BootedDeviceDiscovery["sourceErrors"] = {};
     const sourceFailed = (source: DiscoverySource, p: Platform): boolean =>
-      this.failedPlatforms.has(p) ||
-      this.failedSources.has(source) ||
-      this.incompleteSources.has(source);
+      this.failedPlatforms.has(p) || this.failedSources.has(source);
     for (const p of requested) {
       const platformSources: DiscoverySource[] =
         p === "android" ? ["android"] : ["ios-simulator", "ios-physical"];
       for (const source of platformSources) {
         const failed = sourceFailed(source, p);
-        const reportsDevices =
-          !failed || this.retainedSources.has(source) || this.incompleteSources.has(source);
+        if (failed && source === "ios-physical") {
+          sourceErrors[source] = {
+            code: "failed",
+            message: "devicectl could not list physical iOS devices (failed): fake",
+          };
+        }
+        const reportsDevices = !failed || this.retainedSources.has(source);
         if (!reportsDevices) {
           continue;
         }
@@ -131,9 +129,8 @@ export class FakeDeviceManager implements PlatformDeviceManager {
         );
         devices.push(...fromSource);
         // A retained source replays devices it saw earlier; they are reported
-        // but were not observed this sweep. An incomplete source's devices WERE
-        // observed this sweep, even though the source did not complete.
-        if (!failed || this.incompleteSources.has(source)) {
+        // but were not observed this sweep.
+        if (!failed) {
           for (const device of fromSource) {
             freshDeviceIds.add(device.deviceId);
           }
@@ -151,7 +148,14 @@ export class FakeDeviceManager implements PlatformDeviceManager {
         };
       }
     }
-    return { devices, succeededPlatforms, succeededSources, freshDeviceIds, discoveryErrors };
+    return {
+      devices,
+      succeededPlatforms,
+      succeededSources,
+      freshDeviceIds,
+      discoveryErrors,
+      ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
+    };
   }
 
   async startDevice(

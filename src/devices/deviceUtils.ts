@@ -51,7 +51,7 @@ export function assertAndroidImageRunningStateKnown(image: DeviceInfo): void {
   }
 }
 
-export type DeviceDiscoveryErrorCode = "unavailable" | "failed";
+export type DeviceDiscoveryErrorCode = "unavailable" | "failed" | "timeout";
 
 export interface DeviceDiscoveryError {
   code: DeviceDiscoveryErrorCode;
@@ -82,13 +82,10 @@ export interface BootedDeviceDiscovery {
    * Devices this sweep **freshly** observed, as opposed to replayed from a
    * retained listing (#5683).
    *
-   * Source-level completeness cannot stand in for this. `devicectl` reports
-   * `complete: false` both when every listed device is a stale replay and when
-   * a device was freshly parsed beside one unreadable record — opposite
-   * liveness answers from the same flag. Only membership here proves a device
-   * was seen just now.
+   * Membership proves the device was observed this sweep rather than replayed.
    */
   freshDeviceIds?: Set<string>;
+  sourceErrors?: Partial<Record<DiscoverySource, DeviceDiscoveryError>>;
   /** Platform-specific typed failures for incomplete observations. */
   discoveryErrors?: Partial<Record<Platform, DeviceDiscoveryError>>;
 }
@@ -425,7 +422,14 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       // still not take simulator discovery down with it. `complete: false` so a
       // devicectl blip cannot be read as "the physical device disconnected".
       logger.warn(`[DeviceManager] physical iOS device discovery failed: ${errorMessage(error)}`);
-      return { devices: [], complete: false };
+      return {
+        devices: [],
+        complete: false,
+        error: {
+          code: "failed",
+          message: `devicectl could not list physical iOS devices (failed): ${errorMessage(error).split(/\r?\n/, 1)[0]}`,
+        },
+      };
     }
   }
 
@@ -571,6 +575,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const succeededPlatforms = new Set<Platform>();
     const succeededSources = new Set<DiscoverySource>();
     const freshDeviceIds = new Set<string>();
+    const sourceErrors: Partial<Record<DiscoverySource, DeviceDiscoveryError>> = {};
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
 
     const [android, ios] = await Promise.all([
@@ -589,6 +594,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         succeededSources,
         freshDeviceIds,
         discoveryErrors,
+        sourceErrors,
       });
     }
 
@@ -599,6 +605,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         succeededSources,
         freshDeviceIds,
         discoveryErrors,
+        sourceErrors,
       });
     }
 
@@ -608,6 +615,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       succeededSources,
       freshDeviceIds,
       discoveryErrors,
+      ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
     };
   }
 
@@ -637,9 +645,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     result: BootedDeviceDiscovery & {
       succeededSources: Set<DiscoverySource>;
       freshDeviceIds: Set<string>;
+      sourceErrors: Partial<Record<DiscoverySource, DeviceDiscoveryError>>;
       discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>>;
     },
   ): void {
+    if (ios.physicalError) {
+      result.sourceErrors["ios-physical"] = ios.physicalError;
+    }
     // Physical devices confirmed by devicectl survive simulator discovery failure.
     result.devices.push(...ios.devices);
     for (const source of iosSucceededSources(ios)) {
@@ -809,6 +821,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     /** Ids observed by this sweep, excluding devicectl's retained replay. */
     freshDeviceIds: Set<string>;
     error?: DeviceDiscoveryError;
+    physicalError?: DeviceDiscoveryError;
   }> {
     const signal = combineWithAmbientAbort(options.signal);
     signal?.throwIfAborted();
@@ -837,17 +850,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       relabelDefaultAbort: false,
     });
     if (!physical.complete) {
-      logger.warn(
+      logger.debug(
         "[DeviceManager] iOS physical-device discovery was incomplete; " +
           "reporting last-known physical devices, which cannot prove one disconnected.",
       );
     }
-    // A device devicectl parsed this sweep is fresh even when a sibling record
-    // was unreadable; only the replayed half is stale.
-    const retainedPhysicalIds = physical.retainedDeviceIds ?? new Set<string>();
-    const freshPhysicalIds = physical.devices
-      .map((device) => device.deviceId)
-      .filter((deviceId) => !retainedPhysicalIds.has(deviceId));
+    const freshPhysicalIds = physical.complete
+      ? physical.devices.map((device) => device.deviceId)
+      : [];
+    const physicalError = physical.complete ? undefined : physical.error;
     try {
       const simulators = await this.simctl.getBootedSimulatorsChecked(undefined, signal, {
         bypassCache: options.bypassIosDeviceListCache,
@@ -856,6 +867,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: mergeIosDevices(simulators, physical.devices),
         simulatorsSucceeded: true,
         physicalSucceeded: physical.complete,
+        ...(physicalError ? { physicalError } : {}),
         freshDeviceIds: new Set([
           ...simulators.map((device) => device.deviceId),
           ...freshPhysicalIds,
@@ -872,6 +884,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: physical.devices,
         simulatorsSucceeded: false,
         physicalSucceeded: physical.complete,
+        ...(physicalError ? { physicalError } : {}),
         freshDeviceIds: new Set(freshPhysicalIds),
         error: {
           code: "failed",

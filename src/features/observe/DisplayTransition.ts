@@ -43,6 +43,7 @@ export interface PushedDisplayTransition {
 
 /** Entry points shared by observe-detected and CtrlProxy-pushed transitions. */
 export interface DisplayTransitionSink {
+  identityRevision(deviceId: string): number;
   notifyTransition(deviceId: string, reason: string): void;
   notifyAndroidTransition(deviceId: string, event: PushedDisplayTransition): void;
 }
@@ -98,7 +99,11 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     return this.revisions.get(deviceId) ?? 0;
   }
 
-  /** Action fence; only a correction to one identified observation leaves it stable. */
+  /**
+   * Canonical surfaced generation and action fence. Device removal/session release
+   * resets it via reset() for a fresh session; CtrlProxy restarts never reset it.
+   * A geometry correction within one identified observation leaves it stable.
+   */
   identityRevision(deviceId: string): number {
     return this.identityRevisions.get(deviceId) ?? 0;
   }

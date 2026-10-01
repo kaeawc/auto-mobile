@@ -317,7 +317,10 @@ export class SetPosture {
     const observation = await this.observeFactory(this.device).execute({});
     return {
       posture: requested,
-      display: observation.display,
+      display: {
+        ...observation.display,
+        generation: this.transitionSink.identityRevision(this.device.deviceId),
+      },
       ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
     };
   }
@@ -372,7 +375,10 @@ export class SetPosture {
     );
     return {
       posture: requested,
-      display: observation.display,
+      display: {
+        ...observation.display,
+        generation: this.transitionSink.identityRevision(this.device.deviceId),
+      },
       ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
     };
   }

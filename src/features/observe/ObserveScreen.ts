@@ -990,12 +990,14 @@ export class RealObserveScreen implements ObserveScreen {
         };
       }
       logger.debug(`[OBSERVE_CACHE] No cached observe result available (${duration}ms)`);
+      // No display stamp is available; the placeholder generation remains 0.
       return { ...this.createBaseResult(), error: "No cached observe result available" };
     } catch (error) {
       const duration = this.timer.now() - startTime;
       logger.warn(
         `[OBSERVE_CACHE] Error getting cached observe result after ${duration}ms: ${error}`,
       );
+      // No display stamp is available; the placeholder generation remains 0.
       return { ...this.createBaseResult(), error: "Failed to retrieve cached observe result" };
     }
   }
@@ -1407,11 +1409,6 @@ export class RealObserveScreen implements ObserveScreen {
       if (observerMode && result.freshness.unavailableDetail) {
         result.freshness.warning += ` ${result.freshness.unavailableDetail}`;
       }
-      // The forwarded sequence belongs to this exact hierarchy, not a new counter.
-      if (this.device.platform === "android") {
-        // Zero means no forwarded captureSequence was assigned, not a second counter.
-        result.display.generation = result.viewHierarchy?.captureSequence ?? 0;
-      }
       const geometryTransition =
         !observerMode &&
         !explicitlyRouted &&
@@ -1422,6 +1419,8 @@ export class RealObserveScreen implements ObserveScreen {
             ? "ios"
             : "android",
         );
+      // Canonical host-side generation, read after record; routed/observer reads never bump it.
+      result.display.generation = displayTransitions.identityRevision(this.device.deviceId);
       result.displayRevision = displayTransitions.revision(this.device.deviceId);
       if (geometryTransition) {
         cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
@@ -1485,6 +1484,7 @@ export class RealObserveScreen implements ObserveScreen {
         undefined,
         `Observation failed: ${errorMessage}`,
       );
+      // No display stamp is available; the placeholder generation remains 0.
       const fallback = this.createBaseResult();
       if (iosLockState) {
         fallback.deviceLock = await iosLockState;
@@ -1722,6 +1722,7 @@ export class RealObserveScreen implements ObserveScreen {
       deviceId: this.device.deviceId,
       // Discovery omits single-panel inventory; logical display "0" is the
       // stable fallback until a physical panel can be identified.
+      // No display stamp is available; the placeholder generation remains 0.
       display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
       // Derive the timestamp from the injected timer so the source is pinnable
       // in tests instead of the real wall clock (issue #4172 item 9).

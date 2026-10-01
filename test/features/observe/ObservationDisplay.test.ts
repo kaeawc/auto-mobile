@@ -4,7 +4,10 @@ import {
   observedAndroidDisplay,
   observedIosDisplay,
 } from "../../../src/features/observe/ObservationDisplay";
-import { DisplayTransitionTracker } from "../../../src/features/observe/DisplayTransition";
+import {
+  DisplayTransitionTracker,
+  displayTransitions,
+} from "../../../src/features/observe/DisplayTransition";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { CtrlProxyHierarchy } from "../../../src/features/observe/android/CtrlProxyHierarchy";
@@ -106,8 +109,9 @@ describe("observation display stamp", () => {
         skipAccessibilityAudit: true,
       });
       expect(result.viewHierarchy?.captureSequence).toBe(23);
-      expect(result.display.generation).toBe(23);
+      expect(result.display.generation).toBe(0);
     } finally {
+      displayTransitions.reset(device.deviceId);
       resetObserveCacheStore();
     }
   });
@@ -141,9 +145,10 @@ describe("observation display stamp", () => {
         skipAccessibilityAudit: true,
       });
       expect(result.viewHierarchy?.captureSequence).toBe(31);
-      expect(result.display.generation).toBe(31);
+      expect(result.display.generation).toBe(0);
     } finally {
       getInstance.mockRestore();
+      displayTransitions.reset(device.deviceId);
       resetObserveCacheStore();
     }
   });
@@ -192,6 +197,7 @@ describe("observation display stamp", () => {
         adb.getExecutedCommands().filter((command) => command.includes("cmd display get-displays")),
       ).toHaveLength(1);
     } finally {
+      displayTransitions.reset(device.deviceId);
       resetObserveCacheStore();
     }
   });
@@ -317,12 +323,12 @@ describe("observation display stamp", () => {
     expect(stack.currentActivity?.name).toBe("com.cover.Main");
   });
 
-  test("iOS single display uses stable default and the hierarchy capture sequence", () => {
+  test("iOS single display uses stable default and a neutral generation placeholder", () => {
     expect(observedIosDisplay(ios, { captureSequence: 17 } as ViewHierarchyResult)).toEqual({
       key: "0",
       role: "unknown",
       posture: "unknown",
-      generation: 17,
+      generation: 0,
     });
   });
 
@@ -344,7 +350,7 @@ describe("observation display stamp", () => {
       key: "primary",
       role: "cover",
       posture: "closed",
-      generation: 41,
+      generation: 0,
     });
     expect(observedIosDisplay(device, { pixelWidth: 2007, pixelHeight: 2853 })).toMatchObject({
       key: "primary-1",

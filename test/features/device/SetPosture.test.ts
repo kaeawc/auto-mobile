@@ -2,7 +2,10 @@ import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, Posture } from "../../../src/models";
 import { classifyIosPostureObservation, SetPosture } from "../../../src/features/device/SetPosture";
 import type { DisplayPanel } from "../../../src/models/DisplayPanel";
-import type { DisplayTransitionSink } from "../../../src/features/observe/DisplayTransition";
+import {
+  DisplayTransitionTracker,
+  type DisplayTransitionSink,
+} from "../../../src/features/observe/DisplayTransition";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -55,22 +58,40 @@ function makeDevice(
 function makeFeature(device: BootedDevice, adb: FakeAdbExecutor, timer = new FakeTimer()) {
   timer.enableAutoAdvance();
   const adbFactory: AdbClientFactory = { create: () => adb };
+  const tracker = new DisplayTransitionTracker(() => {});
   let observeCount = 0;
   const observeFactory = () =>
     ({
       execute: async () => {
         observeCount += 1;
+        tracker.notifyTransition(device.deviceId, "fake observed identity change");
         return observation;
       },
     }) as ObserveScreen;
   return {
-    feature: new SetPosture(device, { adbFactory, observeFactory, timer }),
+    feature: new SetPosture(device, {
+      adbFactory,
+      observeFactory,
+      timer,
+      transitionSink: tracker,
+    }),
     getObserveCount: () => observeCount,
+    tracker,
     timer,
   };
 }
 
 describe("SetPosture", () => {
+  test("returns the real tracker generation after the fake observation notifies", async () => {
+    const device = makeDevice();
+    const { feature, tracker } = makeFeature(device, new FakeAdbExecutor());
+    const result = await feature.execute("closed");
+    expect(tracker.identityRevision(device.deviceId)).toBe(1);
+    expect("display" in result && result.display.generation).toBe(
+      tracker.identityRevision(device.deviceId),
+    );
+  });
+
   test("parses only the committed state, even when base and override differ", () => {
     expect(parseAndroidCommittedStateIdentifier(rearState)).toBe(3);
     expect(
@@ -107,7 +128,7 @@ describe("SetPosture", () => {
         ...commands,
       ]);
       expect(getObserveCount()).toBe(1);
-      expect(result).toEqual({ posture, display, locked: true });
+      expect(result).toEqual({ posture, display: { ...display, generation: 1 }, locked: true });
     }
   });
 
@@ -261,7 +282,11 @@ describe("SetPosture", () => {
       "shell cmd device_state state 0",
       "shell cmd device_state state",
     ]);
-    expect(result).toEqual({ posture: "closed", display, locked: true });
+    expect(result).toEqual({
+      posture: "closed",
+      display: { ...display, generation: 1 },
+      locked: true,
+    });
   });
 
   test("sets the matching physical device state for opened posture", async () => {
@@ -320,8 +345,12 @@ describe("SetPosture", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const sequence: string[] = [];
+    const tracker = new DisplayTransitionTracker(() => {});
     const transitionSink: DisplayTransitionSink = {
+      identityRevision: (deviceId) => tracker.identityRevision(deviceId),
+      notifyAndroidTransition: () => {},
       notifyTransition: (deviceId, reason) => {
+        tracker.notifyTransition(deviceId, reason);
         sequence.push(`transition:${deviceId}:${reason}`);
       },
     };
@@ -363,7 +392,7 @@ describe("SetPosture", () => {
       ]);
       expect(await feature.execute(posture)).toEqual({
         posture,
-        display: expectedDisplay,
+        display: { ...expectedDisplay, generation: 2 },
         locked: true,
       });
       expect(client.getHingeAngleHistory()).toEqual([angle]);
@@ -381,7 +410,7 @@ describe("SetPosture", () => {
     ]);
     expect(await feature.execute("closed")).toEqual({
       posture: "closed",
-      display: laterDisplay,
+      display: { ...laterDisplay, generation: 2 },
       locked: true,
     });
     expect(getObserveCount()).toBe(3);
@@ -404,7 +433,9 @@ describe("SetPosture", () => {
       screenSize: { width: 951, height: 669 },
     };
     const { feature, getObserveCount, timer } = makeIosFeature(duo, [cover, swapped, inner]);
-    expect(await feature.execute("opened")).toMatchObject({ display: inner.display });
+    expect(await feature.execute("opened")).toMatchObject({
+      display: { ...inner.display, generation: 2 },
+    });
     expect(getObserveCount()).toBe(2);
     expect(timer.getSleepHistory()).toEqual([250]);
   });
@@ -424,7 +455,7 @@ describe("SetPosture", () => {
       expectedPanelSize,
     ]);
     expect(await feature.execute("closed")).toMatchObject({
-      display: unknownRoleAtOldSize.display,
+      display: { ...unknownRoleAtOldSize.display, generation: 2 },
     });
     expect(getObserveCount()).toBe(2);
     expect(timer.getSleepHistory()).toEqual([250]);
@@ -455,7 +486,7 @@ describe("SetPosture", () => {
       unknownRoleObservation,
     ]);
     expect(await feature.execute("closed")).toMatchObject({
-      display: unknownRoleObservation.display,
+      display: { ...unknownRoleObservation.display, generation: 2 },
     });
     expect(getObserveCount()).toBe(1);
     expect(timer.getSleepHistory()).toEqual([]);
@@ -468,7 +499,7 @@ describe("SetPosture", () => {
     ]);
     expect(await feature.execute("closed")).toEqual({
       posture: "closed",
-      display: expectedDisplay,
+      display: { ...expectedDisplay, generation: 2 },
       locked: true,
     });
     expect(sequence).toEqual([
@@ -489,7 +520,7 @@ describe("SetPosture", () => {
     const warning = spyOn(logger, "warn").mockImplementation(() => undefined);
     try {
       expect(await feature.execute("closed")).toMatchObject({
-        display: unknownObservation.display,
+        display: { ...unknownObservation.display, generation: 2 },
       });
       expect(getObserveCount()).toBe(1);
       expect(timer.getSleepHistory()).toEqual([]);
@@ -593,7 +624,14 @@ describe("SetPosture", () => {
       screenSize: { width: 200, height: 300 },
     } as ObserveResult;
     const observeFactory = () => ({ execute: async () => unlockedObservation }) as ObserveScreen;
-    const feature = new SetPosture(makeDevice(), { adbFactory, observeFactory });
-    expect(await feature.execute("closed")).toEqual({ posture: "closed", display });
+    const feature = new SetPosture(makeDevice(), {
+      adbFactory,
+      observeFactory,
+      transitionSink: new DisplayTransitionTracker(() => {}),
+    });
+    expect(await feature.execute("closed")).toEqual({
+      posture: "closed",
+      display: { ...display, generation: 0 },
+    });
   });
 });

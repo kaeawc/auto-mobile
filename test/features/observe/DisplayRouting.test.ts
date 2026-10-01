@@ -205,6 +205,7 @@ describe("display read routing", () => {
   });
 
   test("explicit Android bootstrap read keeps its routed hierarchy and settled screenshot", async () => {
+    displayTransitions.reset(device.deviceId);
     const timer = new FakeTimer();
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", {
@@ -271,9 +272,11 @@ describe("display read routing", () => {
       expect(hierarchyDisplayId).toBe(2);
       expect(hierarchyCaptures).toBe(1);
       expect(screenshotDisplayId).toBe(2);
-      expect(result.display).toMatchObject({ key: "external", role: "external", generation: 9 });
+      expect(result.display).toMatchObject({ key: "external", role: "external", generation: 0 });
+      expect(result.viewHierarchy?.captureSequence).toBe(9);
       expect(result.screenshotFormat).toBe("png");
     } finally {
+      displayTransitions.reset(device.deviceId);
       resetObserveCacheStore();
     }
   });

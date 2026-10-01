@@ -22,6 +22,8 @@ import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { logger } from "../../../src/utils/logger";
+import AdmZip from "adm-zip";
+import type { IosPhysicalAppLister } from "../../../src/features/observe/ListInstalledApps";
 
 const playgroundBadgingOutput = readFileSync(
   path.join(import.meta.dir, "../../fixtures/android-playground-debug-badging.txt"),
@@ -42,6 +44,8 @@ class InstallApp extends ProductionInstallApp {
       deviceAppInstaller,
       plist,
       repository,
+      physicalAppLister,
+      timer,
     ] = args;
     super(
       device,
@@ -53,6 +57,8 @@ class InstallApp extends ProductionInstallApp {
       deviceAppInstaller,
       plist,
       repository ?? new FakeInstalledAppsRepository(),
+      physicalAppLister,
+      timer,
     );
   }
 }
@@ -162,7 +168,7 @@ class CountingInstalledAppsRepository extends FakeInstalledAppsRepository {
 function fakePlist(bundleId: string): PlistReader {
   return {
     readJsonFile: async () => ({}),
-    readJsonBytes: async () => ({}),
+    readJsonBytes: async () => ({ CFBundleIdentifier: bundleId }),
     readXmlFile: async () => "",
     readXmlBytes: async () => "",
     extractRawFile: async () => bundleId,
@@ -193,6 +199,16 @@ describe("InstallApp", () => {
   let fakeTimer: FakeTimer;
   const tempDirs: string[] = [];
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+
+  function ipaWithBundleId(): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "automobile-install-ipa-"));
+    tempDirs.push(dir);
+    const ipaPath = path.join(dir, "MyApp.ipa");
+    const zip = new AdmZip();
+    zip.addFile("Payload/MyApp.app/Info.plist", Buffer.from("plist fixture"));
+    zip.writeZip(ipaPath);
+    return ipaPath;
+  }
 
   beforeEach(() => {
     fakeAdb = new InstallAppFakeAdbExecutor();
@@ -551,6 +567,194 @@ describe("InstallApp", () => {
     expect(fakeInstaller.calls).toHaveLength(1);
     expect(fakeInstaller.calls[0].deviceUdid).toBe(iosPhysicalDevice.deviceId);
     expect(fakeInstaller.calls[0].artifactPath).toBe(ipaPath);
+  });
+
+  test("verifies an installed bundle on an iOS physical device", async () => {
+    const ipaPath = ipaWithBundleId();
+    const fakeInstaller = new FakeDeviceAppInstaller();
+    const lister: IosPhysicalAppLister = {
+      listInstalledApps: async () => [{ bundleIdentifier: "com.example.app" }],
+    };
+    const installApp = new InstallApp(
+      iosPhysicalDevice,
+      fakeAdbFactory,
+      null,
+      null,
+      () => createPerformanceTracker(true, fakeTimer),
+      undefined,
+      fakeInstaller,
+      fakePlist("com.example.app"),
+      undefined,
+      lister,
+      fakeTimer,
+    );
+
+    const result = await installApp.execute(ipaPath);
+
+    expect(result.success).toBe(true);
+    expect(result.packageName).toBe("com.example.app");
+    expect(result.warning).toBeUndefined();
+  });
+
+  test("rejects a physical install when its bundle is absent", async () => {
+    const ipaPath = ipaWithBundleId();
+    let queries = 0;
+    const lister: IosPhysicalAppLister = {
+      listInstalledApps: async () => {
+        queries += 1;
+        return [];
+      },
+    };
+    const installApp = new InstallApp(
+      iosPhysicalDevice,
+      fakeAdbFactory,
+      null,
+      null,
+      () => createPerformanceTracker(true, fakeTimer),
+      undefined,
+      new FakeDeviceAppInstaller(),
+      fakePlist("com.example.app"),
+      undefined,
+      lister,
+      fakeTimer,
+    );
+
+    await expect(installApp.execute(ipaPath)).rejects.toThrow(
+      "bundle com.example.app was not present",
+    );
+    expect(queries).toBe(3);
+    expect(fakeTimer.getSleepHistory()).toEqual([200, 200]);
+  });
+
+  test("accepts a physical bundle that appears on the second query", async () => {
+    const ipaPath = ipaWithBundleId();
+    let queries = 0;
+    const lister: IosPhysicalAppLister = {
+      listInstalledApps: async () => {
+        queries += 1;
+        return queries === 2 ? [{ bundleIdentifier: "com.example.app" }] : [];
+      },
+    };
+    const installApp = new InstallApp(
+      iosPhysicalDevice,
+      fakeAdbFactory,
+      null,
+      null,
+      () => createPerformanceTracker(true, fakeTimer),
+      undefined,
+      new FakeDeviceAppInstaller(),
+      fakePlist("com.example.app"),
+      undefined,
+      lister,
+      fakeTimer,
+    );
+
+    const result = await installApp.execute(ipaPath);
+
+    expect(result.success).toBe(true);
+    expect(result.packageName).toBe("com.example.app");
+    expect(result.warning).toBeUndefined();
+    expect(queries).toBe(2);
+    expect(fakeTimer.getSleepHistory()).toEqual([200]);
+  });
+
+  test("stops physical verification when the caller aborts between queries", async () => {
+    const ipaPath = ipaWithBundleId();
+    const controller = new AbortController();
+    let queries = 0;
+    const lister: IosPhysicalAppLister = {
+      listInstalledApps: async () => {
+        queries += 1;
+        controller.abort();
+        return [];
+      },
+    };
+    const installApp = new InstallApp(
+      iosPhysicalDevice,
+      fakeAdbFactory,
+      null,
+      null,
+      () => createPerformanceTracker(true, fakeTimer),
+      undefined,
+      new FakeDeviceAppInstaller(),
+      fakePlist("com.example.app"),
+      undefined,
+      lister,
+      fakeTimer,
+    );
+
+    await expect(installApp.execute(ipaPath, undefined, controller.signal)).rejects.toThrow();
+    expect(queries).toBe(1);
+  });
+
+  test("logs and reports a failed physical install verification query", async () => {
+    const ipaPath = ipaWithBundleId();
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const lister: IosPhysicalAppLister = {
+      listInstalledApps: async () => {
+        throw new Error("device disconnected");
+      },
+    };
+    const installApp = new InstallApp(
+      iosPhysicalDevice,
+      fakeAdbFactory,
+      null,
+      null,
+      () => createPerformanceTracker(true, fakeTimer),
+      undefined,
+      new FakeDeviceAppInstaller(),
+      fakePlist("com.example.app"),
+      undefined,
+      lister,
+      fakeTimer,
+    );
+
+    try {
+      const result = await installApp.execute(ipaPath);
+      expect(result).toMatchObject({
+        success: true,
+        upgrade: false,
+        packageName: "com.example.app",
+        warning: "Installed, but could not verify the bundle is present: device disconnected",
+      });
+      expect(warning).toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
+  test("bounds physical install verification with the injected timer", async () => {
+    const ipaPath = ipaWithBundleId();
+    const lister: IosPhysicalAppLister = {
+      listInstalledApps: () => new Promise(() => {}),
+    };
+    const warning = spyOn(logger, "warn").mockImplementation(() => {});
+    const installApp = new InstallApp(
+      iosPhysicalDevice,
+      fakeAdbFactory,
+      null,
+      null,
+      () => createPerformanceTracker(true, fakeTimer),
+      undefined,
+      new FakeDeviceAppInstaller(),
+      fakePlist("com.example.app"),
+      undefined,
+      lister,
+      fakeTimer,
+    );
+
+    try {
+      const result = await installApp.execute(ipaPath);
+      expect(result).toMatchObject({
+        success: true,
+        upgrade: false,
+        packageName: "com.example.app",
+        warning: expect.stringContaining("timed out after 10000ms"),
+      });
+      expect(warning).toHaveBeenCalled();
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   // Issue #4169 item 7: artifact-extension routing as one specification table,
@@ -969,7 +1173,7 @@ describe("InstallApp", () => {
     expect(result.success).toBe(true);
   });
 
-  test("iOS physical device install returns warning about bundle ID detection", async () => {
+  test("iOS physical device install warns when the IPA bundle ID is unavailable", async () => {
     const ipaPath = "/tmp/MyApp.ipa";
     const perf = createPerformanceTracker(true, fakeTimer);
     const fakeInstaller = new FakeDeviceAppInstaller();
@@ -985,7 +1189,7 @@ describe("InstallApp", () => {
     );
     const result = await installApp.execute(ipaPath);
 
-    expect(result.warning).toContain("Bundle ID detection is not available");
+    expect(result.warning).toContain("installation was not verified");
     expect(result.upgrade).toBe(false);
   });
 

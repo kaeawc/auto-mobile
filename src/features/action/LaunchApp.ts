@@ -56,6 +56,13 @@ const IOS_RETARGET_ABORT_SETTLEMENT_GRACE_MS = 1_000;
 const ANDROID_COLD_FRAME_TIMEOUT_MS = 2_500;
 const ANDROID_COLD_FRAME_POLL_MS = 150;
 
+function amStartReportedFailure(stdout: string, stderr: string): boolean {
+  return (
+    /^Error(?::| type \d+)/m.test(`${stdout}\n${stderr}`) ||
+    /does not exist/i.test(`${stdout}\n${stderr}`)
+  );
+}
+
 export interface TargetUserDetector {
   detectTargetUserId(packageName: string, userId?: number, signal?: AbortSignal): Promise<number>;
 }
@@ -1882,8 +1889,14 @@ export class LaunchApp extends BaseVisualChange {
         try {
           const monkeyCmd = `shell monkey -p ${shellQuote(packageName)} --user ${userId} 1`;
           logger.info(`[LaunchApp] Monkey command: ${monkeyCmd}`);
-          await this.adb.executeCommand(monkeyCmd);
+          const result = await this.adb.executeCommand(monkeyCmd);
           this.assertLaunchNotAborted(signal);
+          if (
+            /No activities found to run|monkey aborted/.test(`${result.stdout}\n${result.stderr}`)
+          ) {
+            logger.info(`[LaunchApp] Monkey launch reported no activity`);
+            return { success: false };
+          }
           logger.info(`[LaunchApp] Monkey launch completed successfully`);
           return { success: true };
         } catch (error) {
@@ -1935,10 +1948,14 @@ export class LaunchApp extends BaseVisualChange {
             this.assertLaunchNotAborted(signal);
             try {
               logger.info(`[LaunchApp] Trying common pattern: ${pattern}`);
-              await this.adb.executeCommand(
+              const result = await this.adb.executeCommand(
                 `shell am start --user ${userId} -n ${shellQuote(`${packageName}/${pattern}`)}`,
               );
               this.assertLaunchNotAborted(signal);
+              if (amStartReportedFailure(result.stdout, result.stderr)) {
+                logger.info(`[LaunchApp] Pattern ${pattern} reported an activity error`);
+                continue;
+              }
               logger.info(`[LaunchApp] Successfully launched with pattern: ${pattern}`);
               return { success: true, pattern };
             } catch (error) {
@@ -1979,8 +1996,11 @@ export class LaunchApp extends BaseVisualChange {
         try {
           const launcherCmd = `shell am start --user ${userId} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${shellQuote(packageName)}`;
           logger.info(`[LaunchApp] Launcher intent command: ${launcherCmd}`);
-          await this.adb.executeCommand(launcherCmd);
+          const result = await this.adb.executeCommand(launcherCmd);
           this.assertLaunchNotAborted(signal);
+          if (amStartReportedFailure(result.stdout, result.stderr)) {
+            throw new ActionableError("No launcher activity found and launcher intent failed");
+          }
           logger.info(`[LaunchApp] Launcher intent completed successfully`);
         } catch (error) {
           this.assertLaunchNotAborted(signal);

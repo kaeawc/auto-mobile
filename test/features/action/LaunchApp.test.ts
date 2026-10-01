@@ -5,6 +5,7 @@ import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { buildLaunchAppResponse } from "../../../src/server/appTools";
 import {
+  ActionableError,
   BackStackInfo,
   BootedDevice,
   ExecResult,
@@ -30,6 +31,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { DeviceLostError } from "../../../src/server/deviceLossOutcome";
 import { PortManager } from "../../../src/utils/PortManager";
+import { logger } from "../../../src/utils/logger";
 
 describe("LaunchApp", () => {
   let device: BootedDevice;
@@ -642,6 +644,10 @@ describe("LaunchApp", () => {
     });
 
     fakeAdb.setForegroundApp({ packageName: companionPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("android.intent.category.LAUNCHER", {
+      stdout: "Starting: Intent",
+      stderr: "",
+    });
     fakeAdb.setCommandResponse("shell pm list packages --user 0", {
       stdout: `package:${settingsPackageName}\n`,
       stderr: "",
@@ -1442,6 +1448,240 @@ describe("LaunchApp", () => {
     expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${settingsPackageName}'`)).toBe(false);
   });
 
+  const performFallbackLaunch = () =>
+    (
+      launchApp as unknown as {
+        performLaunch(
+          packageName: string,
+          activityName: undefined,
+          userId: number,
+          perf: DefaultPerformanceTracker,
+          signal?: AbortSignal,
+        ): Promise<{ success: boolean; activityName?: string }>;
+      }
+    ).performLaunch(packageName, undefined, 0, new DefaultPerformanceTracker(fakeTimer));
+
+  const failLauncherResolver = () =>
+    fakeAdb.setCommandResponse("android.intent.category.LAUNCHER", {
+      stdout: "Error: no launcher activity",
+      stderr: "",
+    });
+
+  test("monkey accepted and verified launches without trying later fallbacks", async () => {
+    fakeTimer.enableAutoAdvance();
+    failLauncherResolver();
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result).toMatchObject({ success: true, activityName: "monkey_launch" });
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(true);
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/`)).toBe(false);
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .filter(
+          (command) =>
+            command.startsWith("shell am start") &&
+            command.includes("android.intent.category.LAUNCHER"),
+        ),
+    ).toHaveLength(1);
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test("accepted monkey stops fallbacks and uses the caller warning on unverified foreground", async () => {
+    fakeTimer.enableAutoAdvance();
+    failLauncherResolver();
+    fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+      stdout: "Events injected: 1",
+      stderr: "",
+    });
+    fakeAdb.setForegroundApp({ packageName: "com.example.covering", userId: 0 });
+    fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+    const warnSpy = spyOn(logger, "warn");
+
+    try {
+      const result = await launchApp.execute(packageName, false, false);
+
+      expect(result).toMatchObject({ success: true, activityName: "monkey_launch" });
+      expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(true);
+      expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/`)).toBe(false);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) =>
+              command.startsWith("shell am start") &&
+              command.includes("android.intent.category.LAUNCHER"),
+          ),
+      ).toHaveLength(1);
+      expect(warnSpy).toHaveBeenCalledWith(
+        `[LaunchApp] ${packageName} did not become the foreground app before observation; continuing to validate launch observation`,
+      );
+      expect(fakeTimer.now()).toBe(5000);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  test("monkey failure marker advances to guessed activities without waiting", async () => {
+    failLauncherResolver();
+    fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+      stdout: "** No activities found to run, monkey aborted.",
+      stderr: "",
+    });
+    const result = await performFallbackLaunch();
+
+    expect(result).toMatchObject({ success: true, activityName: `${packageName}.MainActivity` });
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.MainActivity'`)).toBe(
+      true,
+    );
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.ui.MainActivity'`)).toBe(
+      false,
+    );
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test("bare monkey failure marker advances to guessed activities without waiting", async () => {
+    failLauncherResolver();
+    fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+      stdout: "No activities found to run, monkey aborted",
+      stderr: "",
+    });
+    const result = await performFallbackLaunch();
+
+    expect(result).toMatchObject({ success: true, activityName: `${packageName}.MainActivity` });
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.MainActivity'`)).toBe(
+      true,
+    );
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test("pattern failure marker advances to a later accepted pattern with one caller wait", async () => {
+    fakeTimer.enableAutoAdvance();
+    failLauncherResolver();
+    fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+      stdout: "No activities found to run, monkey aborted",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse(`-n '${packageName}/${packageName}.MainActivity'`, {
+      stdout: "Error type 3\nActivity class does not exist.",
+      stderr: "",
+    });
+    fakeAdb.setForegroundApp({ packageName: "com.example.covering", userId: 0 });
+    fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result).toMatchObject({ success: true, activityName: `${packageName}.ui.MainActivity` });
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.MainActivity'`)).toBe(
+      true,
+    );
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.ui.MainActivity'`)).toBe(
+      true,
+    );
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.main.MainActivity'`)).toBe(
+      false,
+    );
+    expect(fakeTimer.now()).toBe(5000);
+  });
+
+  test("throws when every fallback reports a failure marker", async () => {
+    fakeAdb.setCommandResponseSequence("android.intent.category.LAUNCHER", [
+      { stdout: "Error: no launcher activity", stderr: "" },
+      { stdout: "Error: Activity not started, unable to resolve Intent", stderr: "" },
+    ]);
+    fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+      stdout: "No activities found to run, monkey aborted",
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell am start --user 0 -n", {
+      stdout: "Error type 3\nActivity class does not exist.",
+      stderr: "",
+    });
+
+    await expect(performFallbackLaunch()).rejects.toBeInstanceOf(ActionableError);
+    expect(
+      fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.MainLauncherActivity'`),
+    ).toBe(true);
+    expect(
+      fakeAdb
+        .getExecutedCommands()
+        .filter(
+          (command) =>
+            command.startsWith("shell am start") &&
+            command.includes("android.intent.category.LAUNCHER"),
+        ),
+    ).toHaveLength(2);
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test.each([
+    "Starting: Intent { act=android.intent.action.MAIN pkg=com.example.errorreporter }",
+    "Warning: Activity not started, its current task has been brought to the front",
+  ])(
+    "accepted final launcher intent output %s uses the caller wait and observation",
+    async (output) => {
+      fakeTimer.enableAutoAdvance();
+      fakeAdb.setCommandResponseSequence("android.intent.category.LAUNCHER", [
+        { stdout: "Error: no launcher activity", stderr: "" },
+        { stdout: output, stderr: "" },
+      ]);
+      fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+        stdout: "No activities found to run, monkey aborted",
+        stderr: "",
+      });
+      fakeAdb.setCommandResponse("shell am start --user 0 -n", {
+        stdout: "Error type 3\nActivity class does not exist.",
+        stderr: "",
+      });
+      fakeAdb.setForegroundApp({ packageName: "com.example.covering", userId: 0 });
+      fakeObserveScreen.setObserveResult(createObserveResult(packageName));
+
+      const result = await launchApp.execute(packageName, false, false);
+
+      expect(result.success).toBe(true);
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter(
+            (command) =>
+              command.startsWith("shell am start") &&
+              command.includes("android.intent.category.LAUNCHER"),
+          ),
+      ).toHaveLength(2);
+      expect(fakeTimer.now()).toBe(5000);
+    },
+  );
+
+  test("aborts during the caller foreground wait after monkey is accepted", async () => {
+    failLauncherResolver();
+    fakeAdb.setForegroundApp({ packageName: "com.example.covering", userId: 0 });
+    const controller = new AbortController();
+    const cancellation = new Error("launch cancelled");
+    const resultPromise = launchApp.execute(
+      packageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
+
+    for (let i = 0; i < 100 && fakeTimer.getPendingSleepCount() === 0; i += 1) {
+      await Promise.resolve();
+    }
+    expect(fakeAdb.wasCommandExecuted(`shell monkey -p '${packageName}'`)).toBe(true);
+    expect(fakeTimer.getPendingSleepCount()).toBe(1);
+    controller.abort(cancellation);
+    fakeTimer.advanceTime(200);
+
+    await expect(resultPromise).rejects.toBe(cancellation);
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/`)).toBe(false);
+  });
+
   test("clears Android app data through the injected action before relaunch", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
@@ -2027,6 +2267,10 @@ describe("LaunchApp", () => {
     const permissionControllerPackageName = "com.google.android.permissioncontroller";
 
     fakeAdb.setForegroundApp({ packageName: permissionControllerPackageName, userId: 0 });
+    fakeAdb.setCommandResponse("android.intent.category.LAUNCHER", {
+      stdout: "Starting: Intent",
+      stderr: "",
+    });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult({
       ...createObserveResult(permissionControllerPackageName),

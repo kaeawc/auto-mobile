@@ -673,6 +673,11 @@ const observationScreenshotResourceUriSchema = z
     "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
   );
 
+const snapshotReferenceSchema = z
+  .object({ snapshotId: z.string(), expiresAt: z.number() })
+  .optional()
+  .describe("Process-local full-screen coordinate reference; expires after at most five minutes.");
+
 const observationScreenshotOutputFields = {
   screenshotSettled: z.boolean().optional(),
   screenshotSettledError: z.string().optional(),
@@ -828,6 +833,7 @@ export const observationSummarySchema = z
     display: observationDisplaySchema,
     otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
+    snapshotReference: snapshotReferenceSchema,
     ...observationScreenshotOutputFields,
     selectedElements: z.array(selectedElementSchema).optional(),
     focusedElement: elementSchema.optional(),
@@ -1059,6 +1065,7 @@ export const observeDiffSchema = z
       })
       .optional(),
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
+    snapshotReference: snapshotReferenceSchema,
     ...observationScreenshotOutputFields,
     skeleton: z
       .array(skeletonElementSchema)
@@ -1256,6 +1263,7 @@ export const observeResultSchema = z
     display: observationDisplaySchema,
     otherDisplays: otherDisplaysSchema,
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
+    snapshotReference: snapshotReferenceSchema,
     ...observationScreenshotOutputFields,
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),

@@ -98,6 +98,7 @@ export interface TapOnArgs {
 
 export interface TapAtArgs {
   display?: string;
+  snapshotId?: string;
   x: number;
   y: number;
   platform?: Platform;

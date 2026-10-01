@@ -495,6 +495,13 @@ export const tapAtSchema = withJsonSchemaOverride(
     z
       .object({
         display: z.string().optional().describe("Target panel key, role, or active"),
+        snapshotId: z
+          .string()
+          .min(1)
+          .optional()
+          .describe(
+            "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          ),
         x: z
           .number()
           .describe("Absolute screen x coordinate in the native observe coordinate space"),
@@ -1823,7 +1830,7 @@ export async function tapAtHandler(
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const result = await tapAtElementFactory(device).execute(
-    { x: args.x, y: args.y, display: args.display },
+    { x: args.x, y: args.y, display: args.display, snapshotId: args.snapshotId },
     progress,
   );
   const message = result.success

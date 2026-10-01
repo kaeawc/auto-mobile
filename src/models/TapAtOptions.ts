@@ -3,4 +3,5 @@ export interface TapAtOptions {
   x: number;
   y: number;
   display?: string;
+  snapshotId?: string;
 }

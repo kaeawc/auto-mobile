@@ -4867,6 +4867,20 @@
           "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
           "type": "string"
         },
+        "snapshotReference": {
+          "description": "Process-local full-screen coordinate reference; expires after at most five minutes.",
+          "type": "object",
+          "properties": {
+            "snapshotId": {
+              "type": "string"
+            },
+            "expiresAt": {
+              "type": "number"
+            }
+          },
+          "required": ["snapshotId", "expiresAt"],
+          "additionalProperties": false
+        },
         "screenshotSettled": {
           "type": "boolean"
         },
@@ -12899,6 +12913,11 @@
           "description": "Target panel key, role, or active",
           "type": "string"
         },
+        "snapshotId": {
+          "description": "Short-lived reference from observe.snapshotReference; reject stale geometry or frame context",
+          "type": "string",
+          "minLength": 1
+        },
         "x": {
           "description": "Absolute screen x coordinate in the native observe coordinate space",
           "type": "number"
@@ -13539,6 +13558,20 @@
                 "observationScreenshotResourceUri": {
                   "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
                   "type": "string"
+                },
+                "snapshotReference": {
+                  "description": "Process-local full-screen coordinate reference; expires after at most five minutes.",
+                  "type": "object",
+                  "properties": {
+                    "snapshotId": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["snapshotId", "expiresAt"],
+                  "additionalProperties": false
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -14451,6 +14484,20 @@
                 "observationScreenshotResourceUri": {
                   "description": "Fully-encoded automobile:observation/{deviceId}/{observationId}/screenshot resource URI for this observation.",
                   "type": "string"
+                },
+                "snapshotReference": {
+                  "description": "Process-local full-screen coordinate reference; expires after at most five minutes.",
+                  "type": "object",
+                  "properties": {
+                    "snapshotId": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["snapshotId", "expiresAt"],
+                  "additionalProperties": false
                 },
                 "screenshotSettled": {
                   "type": "boolean"

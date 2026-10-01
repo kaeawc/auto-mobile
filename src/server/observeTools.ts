@@ -7,6 +7,7 @@ import { RESOURCE_URIS } from "./observationResources";
 import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
 import { ActionableError } from "../models/ActionableError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import type {
   ObserveScreen,
   ObserveScreenExecuteOptions,
@@ -1540,6 +1541,8 @@ export function registerObserveTools() {
             signal,
             screenshot: args.screenshot,
           });
+
+      result.snapshotReference = snapshotReferences.capture(device.deviceId, result);
 
       if (args.raw) {
         await observeScreen.appendRawViewHierarchy(result, signal);

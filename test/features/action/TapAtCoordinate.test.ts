@@ -4,6 +4,8 @@ import type { CoordinateTapClient } from "../../../src/features/action/coordinat
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
 import { computeFreshness } from "../../../src/features/observe/observationFreshness";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
+import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -41,6 +43,7 @@ function observation(
     viewHierarchy: {
       hierarchy: { node },
       frameContext,
+      nativeScale: 1,
       rotation,
       screenWidth: width,
       screenHeight: height,
@@ -70,6 +73,7 @@ function createTapAt(
   height = 10,
   onIosDispatch?: (timer: FakeTimer) => void,
   renderedDisplayRevision?: () => number | undefined,
+  snapshotReferences?: SnapshotReferenceStore,
 ) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation(width, height));
@@ -84,6 +88,7 @@ function createTapAt(
   const tapAt = new TapAtCoordinate(device, new FakeAdbExecutor(), {
     timer,
     renderedDisplayRevision,
+    snapshotReferences,
     androidClient: unusedClient,
     iosClient: unusedClient,
     dispatchAndroidCoordinateTap: async (_client, _adb, x, y, _duration, frameContext) => {
@@ -117,6 +122,87 @@ describe("TapAtCoordinate", () => {
   afterEach(() => {
     displayTransitions.reset(androidDevice.deviceId);
     displayTransitions.reset(iosDevice.deviceId);
+  });
+
+  test("rejects an expired snapshot before dispatch", async () => {
+    const timer = new FakeTimer();
+    const references = new SnapshotReferenceStore(timer, new CountingIdGenerator("snapshot"));
+    const captured = {
+      ...observation(100, 100),
+      display: { key: "main", role: "unknown" as const },
+      displayRevision: 0,
+    } as ObserveResult;
+    const reference = references.capture(androidDevice.deviceId, captured);
+    expect(reference?.snapshotId).toBe("snapshot-1");
+    timer.advanceTime(300_000);
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(
+      androidDevice,
+      100,
+      100,
+      undefined,
+      undefined,
+      references,
+    );
+    observeScreen.setObserveResult(captured);
+    const result = await tapAt.execute({ x: 30, y: 40, snapshotId: reference!.snapshotId });
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining("expired") });
+    expect(androidDispatches).toEqual([]);
+  });
+
+  test("dispatches a tap bound to an unchanged snapshot frame", async () => {
+    const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const captured = {
+      ...observation(100, 100),
+      display: { key: "main", role: "unknown" as const },
+      displayRevision: 0,
+    } as ObserveResult;
+    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(
+      androidDevice,
+      100,
+      100,
+      undefined,
+      undefined,
+      references,
+    );
+    observeScreen.setObserveResult(captured);
+    expect(await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId })).toMatchObject({
+      success: true,
+      x: 30,
+      y: 40,
+    });
+    expect(androidDispatches).toEqual([{ x: 30, y: 40, frameContext: "frame-123" }]);
+  });
+
+  test("rejects changed snapshot frame context and geometry before dispatch", async () => {
+    const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+    const captured = {
+      ...observation(100, 100),
+      display: { key: "main", role: "unknown" as const },
+      displayRevision: 0,
+    } as ObserveResult;
+    const reference = references.capture(androidDevice.deviceId, captured)!;
+    const { tapAt, observeScreen, androidDispatches } = createTapAt(
+      androidDevice,
+      100,
+      100,
+      undefined,
+      undefined,
+      references,
+    );
+    observeScreen.setObserveResult({
+      ...captured,
+      viewHierarchy: { ...captured.viewHierarchy!, frameContext: "next" },
+    });
+    const staleFrame = await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId });
+    expect(staleFrame).toMatchObject({
+      success: false,
+      error: expect.stringContaining("frameContext"),
+    });
+    observeScreen.setObserveResult({ ...captured, screenSize: { width: 20, height: 100 } });
+    const resized = await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId });
+    expect(resized).toMatchObject({ success: false, error: expect.stringContaining("width") });
+    expect(androidDispatches).toEqual([]);
   });
 
   test("rejects the caller's old coordinates when another path detected the fold first", async () => {

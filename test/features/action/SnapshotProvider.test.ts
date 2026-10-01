@@ -6,6 +6,10 @@ import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { DeviceSnapshotStore } from "../../../src/utils/DeviceSnapshotStore";
+import {
+  noOpSnapshotDirectorySync,
+  noOpSnapshotFileSync,
+} from "../../helpers/deviceSnapshotStoreSync";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import type {
@@ -87,7 +91,8 @@ describe("SnapshotProvider interfaces", () => {
   };
   const iosDevice: BootedDevice = { deviceId: "ios-device-1", name: "iPhone 15", platform: "ios" };
   const fakeAdbFactory: AdbClientFactory = { create: () => new FakeAdbClient() as any };
-  const store = () => new DeviceSnapshotStore("/tmp/no-op");
+  const store = () =>
+    new DeviceSnapshotStore("/tmp/no-op", noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
   const captureCases: ReadonlyArray<[string, () => SnapshotCaptureProvider]> = [
     [

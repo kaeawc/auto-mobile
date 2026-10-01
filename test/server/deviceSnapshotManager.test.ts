@@ -19,6 +19,10 @@ import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotReposit
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
 import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
+import {
+  noOpSnapshotDirectorySync,
+  noOpSnapshotFileSync,
+} from "../helpers/deviceSnapshotStoreSync";
 
 const TEST_DEVICE: BootedDevice = {
   deviceId: "test-device",
@@ -787,7 +791,11 @@ describe("deviceSnapshotManager", () => {
   test("restoreDeviceSnapshot migrates legacy manifest when missing from repository", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-legacy-"));
     try {
-      const legacyStore = new DeviceSnapshotStore(tempRoot);
+      const legacyStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
       await legacyStore.ensureSnapshotsDirectory();
 
       const snapshotName = "legacy-snapshot";
@@ -836,7 +844,11 @@ describe("deviceSnapshotManager", () => {
   test("listDeviceSnapshots imports legacy manifest entries", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-archive-"));
     try {
-      const legacyStore = new DeviceSnapshotStore(tempRoot);
+      const legacyStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
       await legacyStore.ensureSnapshotsDirectory();
 
       const snapshotName = "legacy-archive-snapshot";
@@ -898,7 +910,11 @@ describe("deviceSnapshotManager", () => {
   test("evicting an Android emulator snapshot deletes its AVD-scoped directory (#5707)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-avd-"));
     try {
-      const realStore = new DeviceSnapshotStore(tempRoot);
+      const realStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
       await realStore.ensureSnapshotsDirectory();
       await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -955,7 +971,11 @@ describe("deviceSnapshotManager", () => {
   test("evicting a legacy FLAT Android emulator snapshot reclaims the flat directory (#5707/#5724)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-legacy-flat-"));
     try {
-      const realStore = new DeviceSnapshotStore(tempRoot);
+      const realStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
       await realStore.ensureSnapshotsDirectory();
       await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -1009,7 +1029,11 @@ describe("deviceSnapshotManager", () => {
   test("evicting an iOS snapshot preserves an unrelated legacy flat Android snapshot (#5746)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-ios-evict-"));
     try {
-      const realStore = new DeviceSnapshotStore(tempRoot);
+      const realStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
       await realStore.ensureSnapshotsDirectory();
       await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore });
 
@@ -1109,7 +1133,11 @@ describe("deviceSnapshotManager", () => {
   test("listDeviceSnapshots skips a leftover '.replacing' set-aside directory (#5713)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-replacing-"));
     try {
-      const realStore = new DeviceSnapshotStore(tempRoot);
+      const realStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
       await realStore.ensureSnapshotsDirectory();
       await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -1141,7 +1169,11 @@ describe("deviceSnapshotManager", () => {
   test("legacy flat-path cleanup never deletes a reserved scope root (#5707)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-reserved-"));
     try {
-      const realStore = new DeviceSnapshotStore(tempRoot);
+      const realStore = new DeviceSnapshotStore(
+        tempRoot,
+        noOpSnapshotDirectorySync,
+        noOpSnapshotFileSync,
+      );
       await realStore.ensureSnapshotsDirectory();
       await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -1191,7 +1223,11 @@ describe("deviceSnapshotManager", () => {
     test("listDeviceSnapshots discovers an AVD-scoped Android metadata.json with no DB row", async () => {
       const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-meta-"));
       try {
-        const realStore = new DeviceSnapshotStore(tempRoot);
+        const realStore = new DeviceSnapshotStore(
+          tempRoot,
+          noOpSnapshotDirectorySync,
+          noOpSnapshotFileSync,
+        );
         await realStore.ensureSnapshotsDirectory();
         await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -1237,7 +1273,11 @@ describe("deviceSnapshotManager", () => {
     test("restoreDeviceSnapshot hydrates an AVD-scoped metadata.json snapshot directly, with no prior listDeviceSnapshots call", async () => {
       const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-restore-"));
       try {
-        const realStore = new DeviceSnapshotStore(tempRoot);
+        const realStore = new DeviceSnapshotStore(
+          tempRoot,
+          noOpSnapshotDirectorySync,
+          noOpSnapshotFileSync,
+        );
         await realStore.ensureSnapshotsDirectory();
         await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -1286,7 +1326,11 @@ describe("deviceSnapshotManager", () => {
     test("restoreDeviceSnapshot round-trips a settings-only Android capture's settings.json when the DB row is absent", async () => {
       const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-settings-only-"));
       try {
-        const realStore = new DeviceSnapshotStore(tempRoot);
+        const realStore = new DeviceSnapshotStore(
+          tempRoot,
+          noOpSnapshotDirectorySync,
+          noOpSnapshotFileSync,
+        );
         await realStore.ensureSnapshotsDirectory();
         await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -1335,7 +1379,11 @@ describe("deviceSnapshotManager", () => {
         path.join(os.tmpdir(), "snapshot-manager-scoped-replacing-"),
       );
       try {
-        const realStore = new DeviceSnapshotStore(tempRoot);
+        const realStore = new DeviceSnapshotStore(
+          tempRoot,
+          noOpSnapshotDirectorySync,
+          noOpSnapshotFileSync,
+        );
         await realStore.ensureSnapshotsDirectory();
         await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 
@@ -1367,7 +1415,11 @@ describe("deviceSnapshotManager", () => {
     test("listDeviceSnapshots degrades a malformed scoped metadata.json to a skip, without throwing", async () => {
       const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-scoped-bad-"));
       try {
-        const realStore = new DeviceSnapshotStore(tempRoot);
+        const realStore = new DeviceSnapshotStore(
+          tempRoot,
+          noOpSnapshotDirectorySync,
+          noOpSnapshotFileSync,
+        );
         await realStore.ensureSnapshotsDirectory();
         await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
 

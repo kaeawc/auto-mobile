@@ -9,6 +9,10 @@ import {
 } from "../../src/utils/DeviceSnapshotStore";
 import { assertSafeSnapshotName } from "../../src/utils/snapshotNameValidation";
 import { ActionableError } from "../../src/models";
+import {
+  noOpSnapshotDirectorySync,
+  noOpSnapshotFileSync,
+} from "../helpers/deviceSnapshotStoreSync";
 
 // Property-based tests for the RESOLVED snapshot path (issue #6493).
 //
@@ -34,7 +38,7 @@ import { ActionableError } from "../../src/models";
 const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
 const basePath = path.join(os.tmpdir(), "am-device-snapshot-store-property-test");
-const store = new DeviceSnapshotStore(basePath);
+const store = new DeviceSnapshotStore(basePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
 // Snapshot names accepted by the real name validator. `DeviceSnapshotStore`
 // itself does not re-validate the name (that is the caller's job), so this

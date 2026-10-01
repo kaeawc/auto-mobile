@@ -17,6 +17,10 @@ export const SNAPSHOT_REPLACING_SUFFIX = ".replacing";
 
 type SnapshotJournalState = "pending-existing" | "pending-new" | "committed";
 
+interface SyncableFile {
+  sync(): Promise<void>;
+}
+
 async function syncDirectoryOnDisk(dirPath: string): Promise<void> {
   const handle = await fs.open(dirPath, "r");
   try {
@@ -44,6 +48,7 @@ export class DeviceSnapshotStore {
   constructor(
     customBasePath?: string,
     private readonly syncDirectory: (dirPath: string) => Promise<void> = syncDirectoryOnDisk,
+    private readonly syncFile: (file: SyncableFile) => Promise<void> = (file) => file.sync(),
   ) {
     this.basePath = customBasePath || path.join(os.homedir(), ".auto-mobile", "snapshots");
   }
@@ -256,7 +261,7 @@ export class DeviceSnapshotStore {
     const handle = await fs.open(tempPath, "wx");
     try {
       await handle.writeFile(state);
-      await handle.sync();
+      await this.syncFile(handle);
     } finally {
       await handle.close();
     }

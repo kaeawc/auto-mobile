@@ -11,6 +11,10 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import { logger } from "../../../src/utils/logger";
+import {
+  noOpSnapshotDirectorySync,
+  noOpSnapshotFileSync,
+} from "../../helpers/deviceSnapshotStoreSync";
 
 describe("RestoreSnapshot", () => {
   let device: BootedDevice;
@@ -59,7 +63,7 @@ describe("RestoreSnapshot", () => {
 
     // Create secure temporary directory for tests
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-restore-test-"));
-    store = new DeviceSnapshotStore(testBasePath);
+    store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
 
     // Create RestoreSnapshot instance with fakes
     restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, fakeEmulator, fakeTimer, store);
@@ -805,7 +809,11 @@ describe("RestoreSnapshot (iOS failure reporting)", () => {
     platform: "ios",
   };
   const simctl = new FakeSimCtlClient();
-  const store = new DeviceSnapshotStore("/virtual/snapshot-restore");
+  const store = new DeviceSnapshotStore(
+    "/virtual/snapshot-restore",
+    noOpSnapshotDirectorySync,
+    noOpSnapshotFileSync,
+  );
 
   function makeRestoreWithFileOperations(
     operations: NonNullable<ConstructorParameters<typeof RestoreSnapshot>[7]>,
@@ -932,7 +940,7 @@ describe("RestoreSnapshot (iOS)", () => {
 
     simctl = new FakeSimCtlClient();
     testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-ios-restore-"));
-    store = new DeviceSnapshotStore(testBasePath);
+    store = new DeviceSnapshotStore(testBasePath, noOpSnapshotDirectorySync, noOpSnapshotFileSync);
   });
 
   afterEach(async () => {

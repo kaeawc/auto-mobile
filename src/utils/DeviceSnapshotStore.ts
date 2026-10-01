@@ -17,6 +17,15 @@ export const SNAPSHOT_REPLACING_SUFFIX = ".replacing";
 
 type SnapshotJournalState = "pending-existing" | "pending-new" | "committed";
 
+async function syncDirectoryOnDisk(dirPath: string): Promise<void> {
+  const handle = await fs.open(dirPath, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 export interface SnapshotPathOptions {
   platform?: Platform;
   deviceId?: string;
@@ -32,7 +41,10 @@ export interface SnapshotPathOptions {
 export class DeviceSnapshotStore {
   private basePath: string;
 
-  constructor(customBasePath?: string) {
+  constructor(
+    customBasePath?: string,
+    private readonly syncDirectory: (dirPath: string) => Promise<void> = syncDirectoryOnDisk,
+  ) {
     this.basePath = customBasePath || path.join(os.homedir(), ".auto-mobile", "snapshots");
   }
 
@@ -129,17 +141,17 @@ export class DeviceSnapshotStore {
     await this.recoverSnapshotData(snapshotName, options);
     const hadExisting = await this.pathExists(snapshotPath);
     await this.writeJournal(journalPath, hadExisting ? "pending-existing" : "pending-new");
-    try {
-      if (hadExisting) {
+    if (hadExisting) {
+      try {
         await fs.rename(snapshotPath, asidePath);
-        await this.syncParent(snapshotPath);
+      } catch (error) {
+        // A concurrently removed directory is equivalent to a first capture.
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+        await this.writeJournal(journalPath, "pending-new");
       }
-    } catch (error) {
-      // A concurrently removed directory is equivalent to a first capture.
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-      await this.writeJournal(journalPath, "pending-new");
+      await this.syncParent(snapshotPath);
     }
 
     let result: T;
@@ -253,11 +265,16 @@ export class DeviceSnapshotStore {
   }
 
   private async syncParent(filePath: string): Promise<void> {
-    const handle = await fs.open(path.dirname(filePath), "r");
     try {
-      await handle.sync();
-    } finally {
-      await handle.close();
+      await this.syncDirectory(path.dirname(filePath));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EPERM" || code === "EINVAL" || code === "EISDIR" || code === "ENOTSUP") {
+        // Directory sync is best-effort when the filesystem does not support it.
+        logger.debug(`Skipping unsupported directory sync for '${filePath}': ${error}`);
+        return;
+      }
+      throw error;
     }
   }
 

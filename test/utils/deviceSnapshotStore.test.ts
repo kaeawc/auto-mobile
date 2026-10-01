@@ -161,6 +161,64 @@ describe("DeviceSnapshotStore", () => {
       expect(await fs.readdir(testBasePath)).toEqual([snapshotName]);
     });
 
+    for (const code of ["EPERM", "EINVAL", "EISDIR", "ENOTSUP"]) {
+      it(`replaces a snapshot when directory sync reports ${code}`, async () => {
+        const name = "unsupported-directory-sync";
+        const dest = path.join(testBasePath, name);
+        await fs.mkdir(dest);
+        await fs.writeFile(path.join(dest, "old.txt"), "old");
+        const syncPaths: string[] = [];
+        const syncFailure = Object.assign(new Error("directory sync unsupported"), { code });
+        const storeWithSyncFailure = new DeviceSnapshotStore(testBasePath, async (dirPath) => {
+          syncPaths.push(dirPath);
+          throw syncFailure;
+        });
+
+        await storeWithSyncFailure.replaceSnapshotData(name, undefined, async () => {
+          await fs.mkdir(dest);
+          await fs.writeFile(path.join(dest, "new.txt"), "new");
+        });
+
+        expect(syncPaths.length).toBeGreaterThan(0);
+        expect(syncPaths).toEqual(Array(syncPaths.length).fill(testBasePath));
+        expect(await fs.readdir(dest)).toEqual(["new.txt"]);
+        expect(await fs.readdir(testBasePath)).toEqual([name]);
+      });
+    }
+
+    it("propagates EIO from directory sync", async () => {
+      const syncFailure = Object.assign(new Error("directory sync failed"), { code: "EIO" });
+      const storeWithSyncFailure = new DeviceSnapshotStore(testBasePath, async () => {
+        throw syncFailure;
+      });
+
+      await expect(
+        storeWithSyncFailure.replaceSnapshotData("failed-sync", undefined, async () => {
+          throw new Error("capture should not run");
+        }),
+      ).rejects.toBe(syncFailure);
+    });
+
+    it("propagates ENOENT from directory sync after moving an existing snapshot", async () => {
+      const name = "existing-sync-failure";
+      await fs.mkdir(path.join(testBasePath, name));
+      const syncFailure = Object.assign(new Error("directory sync failed"), { code: "ENOENT" });
+      let syncCalls = 0;
+      const storeWithSyncFailure = new DeviceSnapshotStore(testBasePath, async () => {
+        syncCalls++;
+        if (syncCalls === 2) {
+          throw syncFailure;
+        }
+      });
+
+      await expect(
+        storeWithSyncFailure.replaceSnapshotData(name, undefined, async () => {
+          throw new Error("capture should not run");
+        }),
+      ).rejects.toBe(syncFailure);
+      expect(syncCalls).toBe(2);
+    });
+
     it("restores the prior snapshot when the capture fails", async () => {
       const snapshotName = "keep-on-failure";
       const dest = store.getSnapshotPath(snapshotName);

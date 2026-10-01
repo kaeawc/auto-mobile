@@ -240,8 +240,9 @@ export class HierarchyCollector {
    */
   extractScreenSize(
     viewHierarchy: ObserveResult["viewHierarchy"],
+    iosMultiPanel = false,
   ): { width: number; height: number } | null {
-    return extractHierarchyScreenSize(viewHierarchy);
+    return extractHierarchyScreenSize(viewHierarchy, iosMultiPanel);
   }
 
   /**

@@ -26,9 +26,26 @@ function isFullLandscapeFrame(
   );
 }
 
+function fitsSwappedBounds(
+  bounds: NonNullable<ReturnType<typeof parseBounds>>,
+  maxRight: number,
+  maxBottom: number,
+  fullLandscapeFrame: boolean,
+  iosMultiPanel: boolean,
+): boolean {
+  const width = bounds.right - bounds.left;
+  const height = bounds.bottom - bounds.top;
+  return (
+    (fullLandscapeFrame || (iosMultiPanel && width < height && maxRight > bounds.right)) &&
+    maxRight <= bounds.left + height &&
+    maxBottom <= bounds.top + width
+  );
+}
+
 function landscapeExtentFitsSwappedRoot(
   rootNode: ViewHierarchyNode | undefined,
   bounds: NonNullable<ReturnType<typeof parseBounds>>,
+  iosMultiPanel: boolean,
 ): boolean {
   const root = rootNode ? parseBounds(nodeBounds(rootNode)) : null;
   const rootIsApplicationFrame = sameBounds(root, bounds);
@@ -49,14 +66,13 @@ function landscapeExtentFitsSwappedRoot(
       stack.push(...node.node);
     }
   }
-  const width = bounds.right - bounds.left;
-  const height = bounds.bottom - bounds.top;
-  return fullLandscapeFrame && maxRight <= bounds.left + height && maxBottom <= bounds.top + width;
+  return fitsSwappedBounds(bounds, maxRight, maxBottom, fullLandscapeFrame, iosMultiPanel);
 }
 
 /** Root dimensions remain authoritative over legacy runner screen metadata. */
 export function extractHierarchyScreenSize(
   viewHierarchy: ViewHierarchyResult | undefined,
+  iosMultiPanel = false,
 ): { width: number; height: number } | null {
   const hierarchy = viewHierarchy?.hierarchy;
   if (!hierarchy) {
@@ -75,9 +91,9 @@ export function extractHierarchyScreenSize(
     const height = bounds.bottom - bounds.top;
     if (width > 0 && height > 0) {
       // An XCUIApplication root can retain its portrait frame after the inner
-      // panel rotates. Only swap when a descendant proves the root too narrow
-      // and every descendant fits the swapped frame.
-      return landscapeExtentFitsSwappedRoot(rootNode, bounds)
+      // panel rotates. A full-frame child proves landscape on every device;
+      // bounded overflow is evidence only for an iOS multi-panel device.
+      return landscapeExtentFitsSwappedRoot(rootNode, bounds, iosMultiPanel)
         ? { width: height, height: width }
         : { width, height };
     }

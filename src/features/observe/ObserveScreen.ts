@@ -108,9 +108,14 @@ function reconcileIosDisplayTransition(
   if (explicitlyRouted) {
     return;
   }
-  displayTransitions.checkIdentity(deviceId, result.display);
+  displayTransitions.checkIdentity(deviceId, result.display, "ios");
   if (hasMultiplePanels) {
-    displayTransitions.checkIosGeometry(deviceId, result.screenSize);
+    displayTransitions.checkIosGeometry(
+      deviceId,
+      result.screenSize,
+      result.observationId,
+      result.display,
+    );
   }
 }
 
@@ -1662,7 +1667,10 @@ export class RealObserveScreen implements ObserveScreen {
   extractScreenSizeFromHierarchy(
     viewHierarchy: ObserveResult["viewHierarchy"],
   ): { width: number; height: number } | null {
-    return this.hierarchyCollector.extractScreenSize(viewHierarchy);
+    return this.hierarchyCollector.extractScreenSize(
+      viewHierarchy,
+      this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+    );
   }
 
   createBaseResult(): ObserveResult {
@@ -1913,7 +1921,10 @@ export class RealObserveScreen implements ObserveScreen {
         );
 
         // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.
-        const extractedSize = this.hierarchyCollector.extractScreenSize(result.viewHierarchy);
+        const extractedSize = this.hierarchyCollector.extractScreenSize(
+          result.viewHierarchy,
+          (this.device.displays?.panels.length ?? 0) > 1,
+        );
         if (extractedSize) {
           result.screenSize = extractedSize;
           logger.debug(
@@ -1953,8 +1964,9 @@ export class RealObserveScreen implements ObserveScreen {
           );
 
           const rawHierarchy = result.viewHierarchy;
-          result.viewHierarchy = projectActionableHierarchy("ios", rawHierarchy);
-          inheritHierarchySnapshot(rawHierarchy, result.viewHierarchy);
+          const iosMultiPanel = (this.device.displays?.panels.length ?? 0) > 1;
+          result.viewHierarchy = projectActionableHierarchy("ios", rawHierarchy, iosMultiPanel);
+          inheritHierarchySnapshot(rawHierarchy, result.viewHierarchy, iosMultiPanel);
         }
 
         // Populate activeWindow from view hierarchy packageName if not already set.

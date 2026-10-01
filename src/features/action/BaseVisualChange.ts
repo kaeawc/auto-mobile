@@ -184,12 +184,18 @@ export class BaseVisualChange {
     const timeoutMs = options.timeoutMs || 12000;
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
-    const displayRevision = displayTransitions.revision(this.device.deviceId);
+    const actionDisplayRevision = (): number =>
+      this.device.platform === "ios"
+        ? displayTransitions.identityRevision(this.device.deviceId)
+        : displayTransitions.revision(this.device.deviceId);
+    const displayRevision = actionDisplayRevision();
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
     if (
       COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "") &&
       callerDisplayRevision !== undefined &&
-      callerDisplayRevision !== displayRevision
+      (this.device.platform === "ios"
+        ? !displayTransitions.sameIdentitySince(this.device.deviceId, callerDisplayRevision)
+        : callerDisplayRevision !== displayTransitions.revision(this.device.deviceId))
     ) {
       throw new ActionableError(STALE_DISPLAY_COORDINATES_ERROR);
     }
@@ -238,7 +244,7 @@ export class BaseVisualChange {
     }
 
     const coordinateAction = COORDINATE_ACTIONS.has(options.predictionContext?.toolName ?? "");
-    if (coordinateAction && displayTransitions.revision(this.device.deviceId) !== displayRevision) {
+    if (coordinateAction && actionDisplayRevision() !== displayRevision) {
       throw new ActionableError(
         "Display changed while preparing this action. Re-observe the active panel and choose the target again.",
       );
@@ -257,10 +263,7 @@ export class BaseVisualChange {
 
     const blockResult = await perf.track("executeBlock", async () => {
       throwIfAborted(options.signal);
-      if (
-        coordinateAction &&
-        displayTransitions.revision(this.device.deviceId) !== displayRevision
-      ) {
+      if (coordinateAction && actionDisplayRevision() !== displayRevision) {
         throw new ActionableError(
           "Display changed before dispatch. Re-observe the active panel and choose the target again.",
         );

@@ -81,12 +81,13 @@ export function identifyObservedHierarchy(
 export function inheritHierarchySnapshot(
   source: ViewHierarchyResult | undefined,
   target: ViewHierarchyResult | undefined,
+  iosMultiPanel = false,
 ): void {
   const existing = getHierarchySnapshot(source);
   if (!existing || !target || source === target) {
     return;
   }
-  const hierarchy = projectActionableHierarchy(existing.platform, target);
+  const hierarchy = projectActionableHierarchy(existing.platform, target, iosMultiPanel);
   const snapshot = { ...existing, hierarchy, nodes: observedSearchable.project(hierarchy) };
   capturedHierarchies.set(target, snapshot);
   capturedHierarchies.set(hierarchy, snapshot);

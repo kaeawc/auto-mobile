@@ -51,12 +51,13 @@ export function normalizeIosHierarchy(
 export function projectActionableHierarchy(
   platform: "android" | "ios",
   hierarchy: ViewHierarchyResult,
+  iosMultiPanel = false,
 ): ViewHierarchyResult {
   const source = { ...hierarchy };
   if (platform !== "ios") {
     return source;
   }
-  const size = extractHierarchyScreenSize(source) ?? {
+  const size = extractHierarchyScreenSize(source, iosMultiPanel) ?? {
     width: source.screenWidth ?? 0,
     height: source.screenHeight ?? 0,
   };

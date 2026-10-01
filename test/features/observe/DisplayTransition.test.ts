@@ -54,6 +54,88 @@ afterEach(() => {
 });
 
 describe("display transitions", () => {
+  test("same-observation panel correction preserves the action fence; a later rotation and posture change fence", () => {
+    const tracker = new DisplayTransitionTracker(() => {});
+    const inner = {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    const cover = {
+      key: "primary",
+      role: "cover" as const,
+      posture: "closed" as const,
+      generation: 2,
+    };
+    tracker.record(
+      "synthetic-duo",
+      { observationId: "first", display: inner, screenSize: { width: 669, height: 951 } },
+      "ios",
+    );
+    const before = tracker.identityRevision("synthetic-duo");
+    expect(
+      tracker.checkIosGeometry("synthetic-duo", { width: 951, height: 669 }, "first", inner),
+    ).toBe(true);
+    expect(tracker.sameIdentitySince("synthetic-duo", 0)).toBe(true);
+    tracker.record(
+      "synthetic-duo",
+      { observationId: "first", display: inner, screenSize: { width: 951, height: 669 } },
+      "ios",
+    );
+    expect(tracker.identityRevision("synthetic-duo")).toBe(before);
+    expect(tracker.checkIosGeometry("synthetic-duo", { width: 669, height: 951 }, "second")).toBe(
+      true,
+    );
+    expect(tracker.identityRevision("synthetic-duo")).toBe(before + 1);
+    expect(tracker.sameIdentitySince("synthetic-duo", 0)).toBe(false);
+    tracker.record(
+      "synthetic-duo",
+      { observationId: "second", display: inner, screenSize: { width: 669, height: 951 } },
+      "ios",
+    );
+    expect(tracker.checkIdentity("synthetic-duo", cover, "ios")).toBe(true);
+    expect(tracker.identityRevision("synthetic-duo")).toBe(before + 2);
+    expect(tracker.sameIdentitySince("synthetic-duo", 0)).toBe(false);
+  });
+
+  test("unidentified iOS geometry change advances the action fence", () => {
+    const tracker = new DisplayTransitionTracker(() => {});
+    const unknown = {
+      key: "0",
+      role: "unknown" as const,
+      posture: "unknown" as const,
+      generation: 0,
+    };
+    tracker.record(
+      "unidentified",
+      { observationId: "first", display: unknown, screenSize: { width: 466, height: 678 } },
+      "ios",
+    );
+    const before = tracker.identityRevision("unidentified");
+    expect(tracker.checkIosGeometry("unidentified", { width: 669, height: 951 }, "first")).toBe(
+      true,
+    );
+    expect(tracker.identityRevision("unidentified")).toBe(before + 1);
+    expect(tracker.sameIdentitySince("unidentified", 0)).toBe(false);
+  });
+
+  test("losing panel identification advances the action fence", () => {
+    const tracker = new DisplayTransitionTracker(() => {});
+    const inner = {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    tracker.record(
+      "lost-panel",
+      { display: inner, screenSize: { width: 669, height: 951 } },
+      "ios",
+    );
+    expect(tracker.checkIdentity("lost-panel", { ...inner, role: "unknown" }, "ios")).toBe(true);
+    expect(tracker.identityRevision("lost-panel")).toBe(1);
+  });
   test("single-panel iOS rotation keeps its revision while the same Duo geometry change advances it", async () => {
     for (const multiplePanels of [false, true]) {
       const rotatingDevice: BootedDevice = {

@@ -4,6 +4,7 @@ import type { CoordinateTapClient } from "../../../src/features/action/coordinat
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
 import { computeFreshness } from "../../../src/features/observe/observationFreshness";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
+import { extractHierarchyScreenSize } from "../../../src/features/observe/hierarchyScreenSize";
 import { SnapshotReferenceStore } from "../../../src/features/observe/SnapshotReferenceStore";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
@@ -133,6 +134,21 @@ describe("TapAtCoordinate", () => {
       expect(result.error).toContain("outside screen bounds [0, 951) x [0, 669)");
     }
     expect(iosDispatches).toHaveLength(1);
+  });
+
+  test("single-panel portrait overflow rejects tapAt x=700", async () => {
+    const root = { left: 0, top: 0, right: 393, bottom: 852 };
+    const child = { left: 350, top: 100, right: 620, bottom: 380 };
+    const screenSize = extractHierarchyScreenSize({
+      hierarchy: { bounds: root, node: { bounds: root, node: [{ bounds: child }] } },
+    });
+    expect(screenSize).not.toBeNull();
+    const { tapAt, observeScreen, iosDispatches } = createTapAt(iosDevice);
+    observeScreen.setObserveResult(observation(screenSize!.width, screenSize!.height));
+    const result = await tapAt.execute({ x: 700, y: 48 });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("outside screen bounds [0, 393) x [0, 852)");
+    expect(iosDispatches).toHaveLength(0);
   });
   test.each([androidDevice, iosDevice])("dispatches bounded long press on %s", async (device) => {
     const { tapAt, androidDispatches, iosDispatches } = createTapAt(device, 100, 200);
@@ -643,6 +659,38 @@ describe("TapAtCoordinate", () => {
 
     expect(result).toMatchObject({ success: true, x: 1.25, y: 2.75 });
     expect(iosDispatches).toEqual([{ x: 1.25, y: 2.75, duration: 50, frameContext: "frame-123" }]);
+  });
+
+  test("synthetic unfolded Duo bounds accept tapAt 700,48 after an orientation correction", async () => {
+    const { tapAt, observeScreen, iosDispatches } = createTapAt(iosDevice);
+    const inner = {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    displayTransitions.record(
+      iosDevice.deviceId,
+      {
+        observationId: "test-observation",
+        display: inner,
+        screenSize: { width: 669, height: 951 },
+      },
+      "ios",
+    );
+    observeScreen.setObserveResult(observation(951, 669));
+    const result = await tapAt.execute({ x: 700, y: 48 }, async (step) => {
+      if (step === 10) {
+        displayTransitions.checkIosGeometry(
+          iosDevice.deviceId,
+          { width: 951, height: 669 },
+          "test-observation",
+          inner,
+        );
+      }
+    });
+    expect(result).toMatchObject({ success: true, x: 700, y: 48 });
+    expect(iosDispatches).toEqual([{ x: 700, y: 48, duration: 50, frameContext: "frame-123" }]);
   });
 
   test("iOS tap invalidates the cache and observes from the dispatch time", async () => {

@@ -337,14 +337,14 @@ export class TapAtCoordinate extends BaseVisualChange {
     perf.serial("tapAt");
     let dispatchedCoordinates: { x: number; y: number } | undefined;
     let iosDispatchTimestamp: number | undefined;
-    const transitionRevision = displayTransitions.revision(this.device.deviceId);
+    const transitionRevision = this.currentActionRevision();
 
     try {
       throwIfAborted(signal);
       if (options.display !== undefined) {
         return await this.executeOnDisplay(options, options.display, signal);
       }
-      if (this.hasStaleCallerRevision(transitionRevision)) {
+      if (this.hasStaleCallerRevision(displayTransitions.revision(this.device.deviceId))) {
         return {
           success: false,
           x: options.x,
@@ -361,7 +361,7 @@ export class TapAtCoordinate extends BaseVisualChange {
             signal,
             perf,
           });
-          if (displayTransitions.revision(this.device.deviceId) !== transitionRevision) {
+          if (this.currentActionRevision() !== transitionRevision) {
             return {
               success: false,
               x: options.x,
@@ -536,9 +536,15 @@ export class TapAtCoordinate extends BaseVisualChange {
   }
 
   private assertDisplayRevisionCurrent(revision: number): void {
-    if (displayTransitions.revision(this.device.deviceId) !== revision) {
+    if (this.currentActionRevision() !== revision) {
       throw new ActionableError(STALE_DISPLAY_COORDINATES_ERROR);
     }
+  }
+
+  private currentActionRevision(): number {
+    return this.device.platform === "ios"
+      ? displayTransitions.identityRevision(this.device.deviceId)
+      : displayTransitions.revision(this.device.deviceId);
   }
 
   private staleSnapshotReason(
@@ -552,7 +558,12 @@ export class TapAtCoordinate extends BaseVisualChange {
 
   private hasStaleCallerRevision(revision: number): boolean {
     const callerRevision = this.renderedDisplayRevision(this.device.deviceId);
-    return callerRevision !== undefined && callerRevision !== revision;
+    if (callerRevision === undefined) {
+      return false;
+    }
+    return this.device.platform === "ios"
+      ? !displayTransitions.sameIdentitySince(this.device.deviceId, callerRevision)
+      : callerRevision !== revision;
   }
 
   private async dispatchSecondAndroidTap(

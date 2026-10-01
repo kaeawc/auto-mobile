@@ -42,9 +42,17 @@ describe("BaseVisualChange post-action observation", () => {
       ...overrides,
     }) as unknown as ObserveResult;
 
-  function createVisualChange(platform: "android" | "ios" = "ios"): BaseVisualChange {
+  function createVisualChange(
+    platform: "android" | "ios" = "ios",
+    renderedDisplayRevision?: () => number | undefined,
+  ): BaseVisualChange {
     const device: BootedDevice = { name: "test-device", platform, deviceId: "device-123" };
-    const instance = new BaseVisualChange(device, fakeAdb as unknown as any, fakeTimer);
+    const instance = new BaseVisualChange(
+      device,
+      fakeAdb as unknown as any,
+      fakeTimer,
+      renderedDisplayRevision,
+    );
     (instance as any).awaitIdle = fakeAwaitIdle;
     (instance as any).observeScreen = fakeObserveScreen;
     (instance as any).window = fakeWindow;
@@ -130,6 +138,143 @@ describe("BaseVisualChange post-action observation", () => {
         predictionContext: { toolName: "tapOn", toolArgs: {} },
       }),
     ).rejects.toThrow("Display changed");
+  });
+
+  test("same-observation Duo orientation correction during tapOn preparation does not reject the panel", async () => {
+    const inner = {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    displayTransitions.record(
+      "device-123",
+      {
+        observationId: "same-observation",
+        display: inner,
+        screenSize: { width: 669, height: 951 },
+      },
+      "ios",
+    );
+    fakeObserveScreen.setObserveResult(
+      makeObserve({
+        display: inner,
+        screenSize: { width: 951, height: 669 },
+      }),
+    );
+    let dispatched = false;
+    const result = await createVisualChange("ios").observedInteraction(
+      async () => {
+        dispatched = true;
+        return { success: true };
+      },
+      {
+        changeExpected: false,
+        progress: async (step) => {
+          if (step === 10) {
+            displayTransitions.checkIosGeometry(
+              "device-123",
+              { width: 951, height: 669 },
+              "same-observation",
+              inner,
+            );
+          }
+        },
+        predictionContext: { toolName: "tapOn", toolArgs: {} },
+      },
+    );
+    expect(dispatched).toBe(true);
+    expect(result.success).toBe(true);
+  });
+
+  test("a rendered iOS revision remains valid after a same-panel geometry correction", async () => {
+    const inner = {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    displayTransitions.record(
+      "device-123",
+      {
+        observationId: "same-observation",
+        display: inner,
+        screenSize: { width: 669, height: 951 },
+      },
+      "ios",
+    );
+    displayTransitions.checkIosGeometry(
+      "device-123",
+      { width: 951, height: 669 },
+      "same-observation",
+      inner,
+    );
+    fakeObserveScreen.setObserveResult(makeObserve({ display: inner }));
+    const result = await createVisualChange("ios", () => 0).observedInteraction(
+      async () => ({ success: true }),
+      { changeExpected: false, predictionContext: { toolName: "tapOn", toolArgs: {} } },
+    );
+    expect(result.success).toBe(true);
+  });
+
+  test("unidentified panel geometry change during action preparation rejects coordinates", async () => {
+    const unidentified = {
+      key: "0",
+      role: "unknown" as const,
+      posture: "unknown" as const,
+      generation: 0,
+    };
+    displayTransitions.record(
+      "device-123",
+      { display: unidentified, screenSize: { width: 466, height: 678 } },
+      "ios",
+    );
+    fakeObserveScreen.setObserveResult(
+      makeObserve({ display: unidentified, screenSize: { width: 669, height: 951 } }),
+    );
+    await expect(
+      createVisualChange("ios").observedInteraction(async () => ({ success: true }), {
+        changeExpected: false,
+        progress: async (step) => {
+          if (step === 10) {
+            displayTransitions.checkIosGeometry("device-123", { width: 669, height: 951 });
+          }
+        },
+        predictionContext: { toolName: "tapOn", toolArgs: {} },
+      }),
+    ).rejects.toThrow("Display changed while preparing this action");
+  });
+
+  test("identified panel rotation from a later observation rejects coordinates", async () => {
+    const inner = {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 1,
+    };
+    displayTransitions.record(
+      "device-123",
+      { observationId: "portrait", display: inner, screenSize: { width: 669, height: 951 } },
+      "ios",
+    );
+    fakeObserveScreen.setObserveResult(
+      makeObserve({ display: inner, screenSize: { width: 951, height: 669 } }),
+    );
+    await expect(
+      createVisualChange("ios").observedInteraction(async () => ({ success: true }), {
+        changeExpected: false,
+        progress: async (step) => {
+          if (step === 10) {
+            displayTransitions.checkIosGeometry(
+              "device-123",
+              { width: 951, height: 669 },
+              "landscape",
+            );
+          }
+        },
+        predictionContext: { toolName: "tapOn", toolArgs: {} },
+      }),
+    ).rejects.toThrow("Display changed while preparing this action");
   });
 
   test("rejects coordinates when the display folds during the initial progress callback", async () => {

@@ -96,6 +96,19 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
     return this.findMostRecentEntry(deviceId)?.timestamp;
   }
 
+  async getReferencedScreenshotPaths(): Promise<readonly string[]> {
+    const now = this.timer.now();
+    const paths = new Set<string>();
+    for (const [key, entry] of this.entries.entries()) {
+      if (now - entry.timestamp >= TTL_MS) {
+        this.entries.delete(key);
+      } else if (entry.observeResult.screenshotPath) {
+        paths.add(entry.observeResult.screenshotPath);
+      }
+    }
+    return [...paths];
+  }
+
   clear(deviceId?: string): void {
     if (!deviceId) {
       this.globalGeneration += 1;

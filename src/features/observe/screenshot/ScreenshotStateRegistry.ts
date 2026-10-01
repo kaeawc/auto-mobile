@@ -54,6 +54,8 @@ export interface ScreenshotStateStore {
   getError(deviceId?: string): string | undefined;
   getPathForObservation(deviceId: string, observationId: string): string | undefined;
   getErrorForObservation(deviceId: string, observationId: string): string | undefined;
+  /** Screenshot paths retained by unexpired latest and observation state. */
+  getReferencedScreenshotPaths(): readonly string[];
   clear(deviceId?: string): void;
 }
 
@@ -193,6 +195,31 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
 
   getErrorForObservation(deviceId: string, observationId: string): string | undefined {
     return this.findObservation(deviceId, observationId)?.error ?? undefined;
+  }
+
+  getReferencedScreenshotPaths(): readonly string[] {
+    const now = this.timer.now();
+    const paths = new Set<string>();
+    for (const [deviceId, state] of this.states.entries()) {
+      if (now - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
+        this.states.delete(deviceId);
+      } else if (state.path) {
+        paths.add(state.path);
+      }
+    }
+    for (const [deviceId, states] of this.observationStates.entries()) {
+      for (const [observationId, state] of states.entries()) {
+        if (now - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
+          states.delete(observationId);
+        } else if (state.path) {
+          paths.add(state.path);
+        }
+      }
+      if (states.size === 0) {
+        this.observationStates.delete(deviceId);
+      }
+    }
+    return [...paths];
   }
 
   clear(deviceId?: string): void {

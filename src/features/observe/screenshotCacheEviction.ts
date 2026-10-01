@@ -17,26 +17,36 @@ export interface ScreenshotCacheFile {
  */
 export const SCREENSHOT_MIN_EVICT_AGE_MS = 30_000;
 
+export interface ScreenshotEvictionPlan {
+  /** Oldest-first paths to delete. */
+  toEvict: string[];
+  /** Whether the total size after applying `toEvict` still exceeds the budget. */
+  overBudgetAfterEviction: boolean;
+  /** Age-eligible referenced files encountered while the plan was still over budget. */
+  skippedReferenced: number;
+}
+
 /**
- * Pure selector for size-based screenshot eviction. Returns the paths to delete:
- * oldest-first until under `maxSizeBytes`, but never a file younger than
- * `minAgeMs` (which may be an in-flight capture from another process sharing the
- * cache directory).
+ * Pure selector for size-based screenshot eviction. Plans oldest-first deletion
+ * until under `maxSizeBytes`, but never selects a file younger than `minAgeMs`
+ * or a file still referenced by a live cache entry.
  */
 export function selectScreenshotsToEvict(
   files: ScreenshotCacheFile[],
   maxSizeBytes: number,
   minAgeMs: number,
   nowMs: number,
-): string[] {
+  isReferenced: (path: string) => boolean = () => false,
+): ScreenshotEvictionPlan {
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total <= maxSizeBytes) {
-    return [];
+    return { toEvict: [], overBudgetAfterEviction: false, skippedReferenced: 0 };
   }
 
   const sorted = [...files].sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
   const toDelete: string[] = [];
   let current = total;
+  let skippedReferenced = 0;
 
   for (const file of sorted) {
     if (current <= maxSizeBytes) {
@@ -46,9 +56,17 @@ export function selectScreenshotsToEvict(
       // Too recent to evict — may be another process's in-flight frame.
       continue;
     }
+    if (isReferenced(file.path)) {
+      skippedReferenced += 1;
+      continue;
+    }
     toDelete.push(file.path);
     current -= file.size;
   }
 
-  return toDelete;
+  return {
+    toEvict: toDelete,
+    overBudgetAfterEviction: current > maxSizeBytes,
+    skippedReferenced,
+  };
 }

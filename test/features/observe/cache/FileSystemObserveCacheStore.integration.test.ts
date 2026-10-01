@@ -57,6 +57,34 @@ describe("FileSystemObserveCacheStore", function () {
     expect(store.getRecentInMemoryForDevice("device-1")).toEqual(result);
   });
 
+  test("protects screenshot paths from live memory and disk entries only while they are live", async function () {
+    const result = { ...makeResult("screenshot"), screenshotPath: "/tmp/cached.png" };
+    await store.put("device-1", result);
+    expect(await store.getReferencedScreenshotPaths()).toContain("/tmp/cached.png");
+
+    const diskFile = readdirSync(cacheDir).find((file) => file.endsWith(".json"));
+    if (!diskFile) {
+      throw new Error("Expected an observe cache file");
+    }
+    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir);
+    expect(await reloaded.getReferencedScreenshotPaths()).toContain("/tmp/cached.png");
+
+    timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
+    utimesSync(path.join(cacheDir, diskFile), new Date(0), new Date(0));
+    expect(await store.getReferencedScreenshotPaths()).toEqual([]);
+  });
+
+  test("skips a corrupt disk entry while retaining paths from other live entries", async function () {
+    await store.put("device-1", {
+      ...makeResult("valid"),
+      screenshotPath: "/tmp/valid.png",
+    });
+    writeFileSync(path.join(cacheDir, "observe_corrupt.json"), "{ invalid json");
+
+    const reloaded = new FileSystemObserveCacheStore(timer, cacheDir);
+    expect(await reloaded.getReferencedScreenshotPaths()).toContain("/tmp/valid.png");
+  });
+
   test("put stores a copy separate from the caller's result", async function () {
     const result = makeResult("before mutation");
     await store.put("device-1", result);

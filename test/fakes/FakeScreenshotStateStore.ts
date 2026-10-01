@@ -1,4 +1,7 @@
-import type { ScreenshotStateStore } from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
+import {
+  OBSERVE_RESULT_CACHE_TTL_MS,
+  type ScreenshotStateStore,
+} from "../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import type { Timer } from "../../src/utils/SystemTimer";
 
 interface FakeScreenshotState {
@@ -110,6 +113,30 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
 
   getErrorForObservation(deviceId: string, observationId: string): string | undefined {
     return this.observationStates.get(deviceId)?.get(observationId)?.error ?? undefined;
+  }
+
+  getReferencedScreenshotPaths(): readonly string[] {
+    const paths = new Set<string>();
+    for (const [deviceId, state] of this.states.entries()) {
+      if (this.currentTime - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
+        this.states.delete(deviceId);
+      } else if (state.path) {
+        paths.add(state.path);
+      }
+    }
+    for (const [deviceId, states] of this.observationStates.entries()) {
+      for (const [observationId, state] of states.entries()) {
+        if (this.currentTime - state.timestamp > OBSERVE_RESULT_CACHE_TTL_MS) {
+          states.delete(observationId);
+        } else if (state.path) {
+          paths.add(state.path);
+        }
+      }
+      if (states.size === 0) {
+        this.observationStates.delete(deviceId);
+      }
+    }
+    return [...paths];
   }
 
   clear(deviceId?: string): void {

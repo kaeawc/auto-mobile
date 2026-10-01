@@ -7,6 +7,7 @@ import {
   unlinkAsync,
   writeFileAsync,
 } from "../../../utils/io";
+import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
@@ -227,6 +228,55 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   getRecentCachedAtForDevice(deviceId: string): number | undefined {
     return this.collectLiveMostRecent(deviceId)?.timestamp;
+  }
+
+  async getReferencedScreenshotPaths(): Promise<readonly string[]> {
+    const now = this.timer.now();
+    const paths = new Set<string>();
+    for (const [key, entry] of this.cache.entries()) {
+      if (now - entry.timestamp >= OBSERVE_RESULT_CACHE_TTL_MS) {
+        this.cache.delete(key);
+      } else if (entry.observeResult.screenshotPath) {
+        paths.add(entry.observeResult.screenshotPath);
+      }
+    }
+
+    const files = await readdirAsync(this.cacheDir);
+    for (const file of files) {
+      if (!file.endsWith(".json") || !file.startsWith("observe_")) {
+        continue;
+      }
+      const filePath = path.join(this.cacheDir, file);
+      const screenshotPath = await this.readLiveScreenshotPath(filePath, now);
+      if (screenshotPath) {
+        paths.add(screenshotPath);
+      }
+    }
+    return [...paths];
+  }
+
+  private async readLiveScreenshotPath(filePath: string, now: number): Promise<string | undefined> {
+    try {
+      const stats = await statAsync(filePath);
+      if (now - stats.mtime.getTime() >= OBSERVE_RESULT_CACHE_TTL_MS) {
+        return undefined;
+      }
+      const parsed: unknown = JSON.parse(await readFileAsync(filePath, "utf8"));
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        "screenshotPath" in parsed &&
+        typeof parsed.screenshotPath === "string"
+      ) {
+        return parsed.screenshotPath;
+      }
+      return undefined;
+    } catch (error) {
+      const reason = errorMessage(error).replace(/\s+/g, " ").trim() || "unknown error";
+      // One damaged cache entry cannot invalidate screenshot references from other live entries.
+      logger.debug(`Skipping unreadable observe cache file ${filePath}: ${reason}`);
+      return undefined;
+    }
   }
 
   clear(deviceId?: string): void {

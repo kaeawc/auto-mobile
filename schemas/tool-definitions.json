@@ -8576,27 +8576,8 @@
           "type": "boolean"
         },
         "container": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "elementId": {
-              "description": "Container resource ID",
-              "type": "string"
-            },
-            "text": {
-              "description": "Container text",
-              "type": "string"
-            }
-          },
           "description": "Scope search to a container",
-          "anyOf": [
-            {
-              "required": ["elementId"]
-            },
-            {
-              "required": ["text"]
-            }
-          ]
+          "$ref": "#/$defs/__schema0"
         },
         "autoTarget": {
           "description": "Auto-target pinchable containers",
@@ -8628,7 +8609,61 @@
         }
       },
       "required": ["direction"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Container resource ID",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Container text",
+                  "type": "string",
+                  "minLength": 1
+                },
+                "index": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "selectionStrategy": {
+                  "type": "string",
+                  "enum": ["first", "random", "unique"]
+                },
+                "container": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            }
+          ]
+        }
+      }
     }
   },
   {

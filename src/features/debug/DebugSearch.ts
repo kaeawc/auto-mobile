@@ -7,7 +7,7 @@ import type { BootedDevice, DebugSearchResult, DebugSearchMatch } from "../../mo
 import type { HierarchyCapture } from "../observe/HierarchyCapture";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { normalizeQuotes } from "../utility/TextMatcher";
-import { ElementResolver } from "../utility/ElementResolver";
+import { ElementResolver, isMissingContainerError } from "../utility/ElementResolver";
 import { ActionableError } from "../../models/ActionableError";
 import { serverConfig } from "../../utils/ServerConfig";
 interface DebugSearchOptions {
@@ -92,13 +92,12 @@ export class DebugSearch {
       },
       { action: "tap" },
     );
-    if (resolution.error && resolution.error !== "Container not found") {
+    if (resolution.error && !isMissingContainerError(resolution.error)) {
       throw new ActionableError(resolution.error);
     }
-    const resultMatch =
-      resolution.error === "Container not found"
-        ? (requestedMatch ?? "exact")
-        : resolution.matchMode;
+    const resultMatch = isMissingContainerError(resolution.error)
+      ? (requestedMatch ?? "exact")
+      : resolution.matchMode;
     const normalize = (value: string) =>
       options.caseSensitive
         ? normalizeQuotes(value).trim()

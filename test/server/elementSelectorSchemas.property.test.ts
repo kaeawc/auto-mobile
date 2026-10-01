@@ -1,10 +1,40 @@
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { z } from "zod/v4";
+import { pinchOnSchema } from "../../src/server/interactionTools";
 import {
+  nestedElementContainerSchema,
   resolverSelectorSchema,
   validateElementIdTextSelector,
 } from "../../src/server/elementSelectorSchemas";
+
+test("recursive container schema accepts indexed scopes and rejects malformed levels", () => {
+  const valid = {
+    elementId: "action",
+    container: {
+      text: "row",
+      index: 1,
+      container: { elementId: "cart", selectionStrategy: "unique" },
+    },
+  };
+  expect(nestedElementContainerSchema.safeParse(valid).success).toBe(true);
+  expect(pinchOnSchema.safeParse({ direction: "in", container: valid }).success).toBe(true);
+  expect(
+    nestedElementContainerSchema.safeParse({
+      ...valid,
+      container: { ...valid.container, elementId: "row" },
+    }).success,
+  ).toBe(false);
+  expect(
+    pinchOnSchema.safeParse({ direction: "in", container: { ...valid, bogus: true } }).success,
+  ).toBe(false);
+  expect(
+    nestedElementContainerSchema.safeParse({
+      ...valid,
+      container: { ...valid.container, index: -1 },
+    }).success,
+  ).toBe(false);
+});
 
 test("resolver selector conflict names all mutually exclusive fields", () => {
   const result = resolverSelectorSchema.safeParse({

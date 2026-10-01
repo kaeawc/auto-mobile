@@ -14,6 +14,7 @@ import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
   ElementResolver,
+  isMissingContainerError,
   matchedSourceNode,
   type ResolutionAction,
 } from "../../utility/ElementResolver";
@@ -120,7 +121,7 @@ export class ScrollUntilVisible {
       selector,
       { action },
     );
-    if (result.error === "Container not found") {
+    if (isMissingContainerError(result.error)) {
       return null;
     }
     if (result.error) {

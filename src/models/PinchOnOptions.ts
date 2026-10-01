@@ -1,3 +1,11 @@
+export interface ElementContainerSelector {
+  elementId?: string;
+  text?: string;
+  index?: number;
+  selectionStrategy?: "first" | "random" | "unique";
+  container?: ElementContainerSelector;
+}
+
 export interface PinchOnOptions {
   display?: string;
   direction: "in" | "out";
@@ -15,9 +23,6 @@ export interface PinchOnOptions {
    */
   rotationDegrees?: number;
   includeSystemInsets?: boolean;
-  container?: {
-    elementId?: string;
-    text?: string;
-  };
+  container?: ElementContainerSelector;
   autoTarget?: boolean;
 }

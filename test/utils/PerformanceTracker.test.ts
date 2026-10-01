@@ -162,6 +162,41 @@ describe("PerformanceTracker", function () {
     // concurrent branches, misparents timings when one branch opens a nested
     // block while a sibling branch is still in flight on the same tracker.
     describe("concurrent branches (issue #6706)", function () {
+      test("endOperation records under the block captured by startOperation", async function () {
+        tracker.serial("A");
+        const parkedA = deferred();
+        const branchA = (async () => {
+          tracker.startOperation("op");
+          await parkedA.promise;
+          tracker.end();
+        })();
+
+        tracker.serial("B");
+        fakeTimer.advanceTime(5);
+        tracker.endOperation("op");
+        tracker.end();
+
+        parkedA.resolve();
+        await branchA;
+
+        const timings = tracker.getTimings() as TimingEntry[];
+        expect(timings).toHaveLength(1);
+        expect(timings[0].name).toBe("A");
+        expect(timings[0].children).toEqual([
+          { name: "op", durationMs: 5 },
+          { name: "B", durationMs: 5, children: [] },
+        ]);
+      });
+
+      test("endOperation without a matching start remains a no-op", function () {
+        tracker.serial("A");
+        tracker.endOperation("missing");
+        tracker.end();
+
+        const timings = tracker.getTimings() as TimingEntry[];
+        expect(timings[0].children).toEqual([]);
+      });
+
       test("a branch opening a nested block does not misparent a concurrent sibling's timing", async function () {
         tracker.parallel("root");
 

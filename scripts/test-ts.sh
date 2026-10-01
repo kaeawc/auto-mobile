@@ -34,11 +34,12 @@ if ! [[ "$cores" =~ ^[0-9]+$ ]] || [[ "$cores" -lt 1 ]]; then
   cores=4
 fi
 
-default_workers=$((cores - 2))
-if [[ "$default_workers" -lt 1 ]]; then
-  default_workers=1
+if [[ "$cores" -le 4 ]]; then
+  default_workers=$((cores - 1))
+else
+  default_workers=$((cores - 2))
 fi
-if [[ "$runner_os" == "macOS" && "$cores" -ge 2 && "$default_workers" -lt 2 ]]; then
+if [[ "$default_workers" -lt 2 ]]; then
   default_workers=2
 fi
 
@@ -420,6 +421,7 @@ fi
 
 case "$mode" in
   unit)
+    printf 'test-ts: unit lane cores=%s workers=%s\n' "$cores" "$unit_workers" >&2
     if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
       echo "Unit test targets cannot include other lanes." >&2
       exit 2

@@ -1355,6 +1355,7 @@ export async function pinchOnHandler(
   device: BootedDevice,
   args: PinchOnArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const pinchOn = pinchOnFactory(device);
@@ -1372,6 +1373,7 @@ export async function pinchOnHandler(
       autoTarget: args.autoTarget,
     },
     progress,
+    signal,
   );
 
   const response = createJSONToolResponse({

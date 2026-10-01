@@ -69,6 +69,30 @@ describe("TalkBackSwipeExecutor", () => {
     );
   });
 
+  test("abort after the forward boomerang swipe prevents the return command", async () => {
+    const controller = new AbortController();
+    const originalSwipe = fakeGestureExecutor.swipe.bind(fakeGestureExecutor);
+    fakeGestureExecutor.swipe = async (...args) => {
+      const result = await originalSwipe(...args);
+      controller.abort();
+      return result;
+    };
+    await expect(
+      executor.executeBoomerangGesture(
+        10,
+        100,
+        10,
+        20,
+        { duration: 100 },
+        { apexPauseMs: 50, returnSpeed: 1 },
+        perf,
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(1);
+    expect(fakeTimer.getSleepHistory()).toEqual([]);
+  });
+
   describe("platform detection", () => {
     test("uses standard swipe for iOS regardless of TalkBack state", async () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);

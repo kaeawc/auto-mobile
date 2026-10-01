@@ -41,6 +41,7 @@ import { exponentialBackoff } from "../../../utils/Backoff";
 import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/scrollIdle";
 import type { ProgressCallback } from "../BaseVisualChange";
 import { IOSCtrlProxyClient } from "../../observe/ios";
+import { throwIfAborted } from "../../../utils/toolUtils";
 
 const SCROLL_IDLE_POLL_INTERVAL_MS = 150;
 
@@ -80,6 +81,7 @@ interface ScrollUntilVisibleDependencies {
       timeoutMs?: number;
       progress?: ProgressCallback;
       perf?: PerformanceTracker;
+      signal?: AbortSignal;
       skipPreviousObserve?: boolean;
       queryOptions?: {
         text?: string;
@@ -136,7 +138,9 @@ export class ScrollUntilVisible {
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
+    throwIfAborted(signal);
     logger.info(
       `[SwipeOn] Starting scroll-until-visible: direction=${options.direction}, lookFor=${JSON.stringify(options.lookFor)}`,
     );
@@ -147,8 +151,10 @@ export class ScrollUntilVisible {
         freshness: "cached-ok",
         skipScreenshot: true,
         skipAccessibilityAudit: true,
+        signal,
       }),
     );
+    throwIfAborted(signal);
     if (!lastObservation.viewHierarchy || !lastObservation.screenSize) {
       throw new Error("Failed to get initial observation for scrolling until visible.");
     }
@@ -203,6 +209,7 @@ export class ScrollUntilVisible {
 
     // Check if TalkBack is enabled (not just any accessibility service)
     const isTalkBackEnabled = await perf.track("checkTalkBack", async () => {
+      throwIfAborted(signal);
       if (this.deps.device.platform !== "android") {
         return false;
       }
@@ -241,10 +248,12 @@ export class ScrollUntilVisible {
 
       // Set accessibility focus on found element if requested
       if (isTalkBackEnabled && options.focusTarget) {
+        throwIfAborted(signal);
         await this.setAccessibilityFocusOnElement(foundElement, perf);
       }
 
       perf.end();
+      throwIfAborted(signal);
       await this.deps.captureTerminalObservationScreenshot?.(lastObservation, perf);
       return {
         success: true,
@@ -271,6 +280,7 @@ export class ScrollUntilVisible {
 
     // Scroll until element is found
     while (this.deps.timer.now() - startTime < maxTime) {
+      throwIfAborted(signal);
       scrollIteration++;
       logger.info(
         `[SwipeOn] Iteration ${scrollIteration}: elapsed=${this.deps.timer.now() - startTime}ms, reverseMode=${reverseMode}, unchangedScrollCount=${unchangedScrollCount}/${maxUnchangedScrolls}`,
@@ -310,6 +320,7 @@ export class ScrollUntilVisible {
       let iosDispatchTimestamp: number | undefined;
       const swipeResult = await this.deps.observedInteraction(
         async () => {
+          throwIfAborted(signal);
           const swipeRunner =
             this.deps.device.platform === "ios"
               ? this.deps.voiceOverExecutor
@@ -329,6 +340,7 @@ export class ScrollUntilVisible {
             gestureOptions,
             perf,
             boomerang,
+            signal,
           );
           if (this.deps.device.platform === "ios" && result.success) {
             iosDispatchTimestamp = this.deps.timer.now();
@@ -341,6 +353,7 @@ export class ScrollUntilVisible {
           timeoutMs: 500,
           progress,
           perf,
+          signal,
           skipPreviousObserve: scrollIteration > 1,
           deferPostActionScreenshot: true,
           observationTimestampProvider: () => iosDispatchTimestamp,
@@ -350,6 +363,7 @@ export class ScrollUntilVisible {
           },
         },
       );
+      throwIfAborted(signal);
 
       if (swipeResult.observation?.viewHierarchy) {
         lastObservation = swipeResult.observation;
@@ -357,6 +371,7 @@ export class ScrollUntilVisible {
 
       if (!swipeResult.success && this.deps.device.platform === "ios") {
         perf.end();
+        throwIfAborted(signal);
         await this.deps.captureTerminalObservationScreenshot?.(lastObservation, perf);
         return {
           ...swipeResult,
@@ -393,7 +408,7 @@ export class ScrollUntilVisible {
       const elapsedMs = this.deps.timer.now() - startTime;
       const idleCheckMaxMs = Math.min(1500, Math.max(0, maxTime - elapsedMs - 300));
       if (idleCheckMaxMs > 100) {
-        lastObservation = await this.waitForScrollIdle(lastObservation, idleCheckMaxMs);
+        lastObservation = await this.waitForScrollIdle(lastObservation, idleCheckMaxMs, signal);
       }
 
       // Check if hierarchy changed (detect scroll end)
@@ -406,6 +421,7 @@ export class ScrollUntilVisible {
           freshness: "cached-ok",
           skipScreenshot: true,
           skipAccessibilityAudit: true,
+          signal,
         });
         currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
       }
@@ -478,6 +494,7 @@ export class ScrollUntilVisible {
     }
 
     if (!foundElement) {
+      throwIfAborted(signal);
       perf.end();
       const elapsed = this.deps.timer.now() - startTime;
       throw new ActionableError(
@@ -487,10 +504,12 @@ export class ScrollUntilVisible {
 
     // Set accessibility focus on found element if requested
     if (isTalkBackEnabled && options.focusTarget) {
+      throwIfAborted(signal);
       await this.setAccessibilityFocusOnElement(foundElement, perf);
     }
 
     perf.end();
+    throwIfAborted(signal);
     await this.deps.captureTerminalObservationScreenshot?.(lastObservation, perf);
     return {
       success: true,
@@ -513,7 +532,9 @@ export class ScrollUntilVisible {
     options: SwipeOnOptions,
     viewHierarchy: ViewHierarchyResult,
     attempt: number = 0,
+    signal?: AbortSignal,
   ): Promise<Element> {
+    throwIfAborted(signal);
     let element: Element | null = null;
 
     if (!options.container) {
@@ -537,6 +558,7 @@ export class ScrollUntilVisible {
         maxDelayMs: 1000,
       }).delayForAttempt(attempt + 1);
       await this.deps.timer.sleep(delayNextAttempt);
+      throwIfAborted(signal);
 
       let latestViewHierarchy: ViewHierarchyResult | null = null;
 
@@ -563,6 +585,7 @@ export class ScrollUntilVisible {
               freshness: "cached-ok",
               skipScreenshot: true,
               skipAccessibilityAudit: true,
+              signal,
             })
           ).viewHierarchy;
           break;
@@ -572,7 +595,7 @@ export class ScrollUntilVisible {
 
       if (latestViewHierarchy) {
         logger.info(`Retrying to find element after ${delayNextAttempt}ms delay`);
-        return await this.findTargetElement(options, latestViewHierarchy, attempt + 1);
+        return await this.findTargetElement(options, latestViewHierarchy, attempt + 1, signal);
       }
     }
 
@@ -757,6 +780,7 @@ export class ScrollUntilVisible {
   private async waitForScrollIdle(
     currentObservation: ObserveResult,
     maxWaitMs: number,
+    signal?: AbortSignal,
   ): Promise<ObserveResult> {
     return waitForScrollIdle(currentObservation, {
       observe: () =>
@@ -764,11 +788,13 @@ export class ScrollUntilVisible {
           freshness: "cached-ok",
           skipScreenshot: true,
           skipAccessibilityAudit: true,
+          signal,
         }),
       timer: this.deps.timer,
       maxWaitMs,
       pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
       logPrefix: "[SwipeOn]",
+      signal,
     });
   }
 

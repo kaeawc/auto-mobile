@@ -13,6 +13,7 @@ import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/Adb
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
 import { Timer } from "../../../utils/interfaces/Timer";
+import { throwIfAborted } from "../../../utils/toolUtils";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
 export type AccessibilityScrollAction = "scroll_forward" | "scroll_backward";
@@ -62,7 +63,9 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     gestureOptions?: GestureOptions,
     perf?: PerformanceTracker,
     boomerang?: BoomerangConfig,
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
+    throwIfAborted(signal);
     const boomerangEnabled = Boolean(boomerang);
     logger.info(
       `[SwipeOn] executeSwipeGesture: direction=${direction}, (${x1},${y1})→(${x2},${y2}), duration=${gestureOptions?.duration}ms, boomerang=${boomerangEnabled}, container=${containerElement?.["resource-id"] ?? "none"}`,
@@ -71,9 +74,18 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     // Only check TalkBack for Android platform
     if (this.device.platform !== "android") {
       if (boomerangEnabled) {
-        return this.executeBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang!, perf);
+        return this.executeBoomerangGesture(
+          x1,
+          y1,
+          x2,
+          y2,
+          gestureOptions,
+          boomerang!,
+          perf,
+          signal,
+        );
       }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf);
+      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
     }
 
     // Check if TalkBack is enabled (not just any accessibility service).
@@ -88,13 +100,23 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       this.featureFlags,
     );
     const isTalkBackEnabled = detectedService === "talkback";
+    throwIfAborted(signal);
 
     if (isTalkBackEnabled) {
       if (boomerangEnabled) {
         logger.info(
           "[SwipeOn] TalkBack enabled, boomerang requested; announcing swipeable element",
         );
-        return this.announceSwipeable(x1, y1, x2, y2, containerElement, gestureOptions, perf);
+        return this.announceSwipeable(
+          x1,
+          y1,
+          x2,
+          y2,
+          containerElement,
+          gestureOptions,
+          perf,
+          signal,
+        );
       }
 
       logger.info("[SwipeOn] TalkBack enabled, using accessibility-aware swipe");
@@ -107,16 +129,26 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
         containerElement,
         gestureOptions,
         perf,
+        signal,
       );
     } else {
       if (boomerangEnabled) {
         logger.debug("[SwipeOn] TalkBack disabled, using boomerang swipe");
-        return this.executeBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang!, perf);
+        return this.executeBoomerangGesture(
+          x1,
+          y1,
+          x2,
+          y2,
+          gestureOptions,
+          boomerang!,
+          perf,
+          signal,
+        );
       }
 
       // Standard mode: Use coordinate-based swipes
       logger.debug("[SwipeOn] TalkBack disabled, using standard swipe");
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf);
+      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
     }
   }
 
@@ -128,6 +160,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     gestureOptions: GestureOptions | undefined,
     boomerang: BoomerangConfig,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
     const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
@@ -136,7 +169,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     const forwardOptions = this.buildGestureOptions(gestureOptions, forwardDuration);
     const returnOptions = this.buildGestureOptions(gestureOptions, returnDuration);
 
-    const forwardResult = await this.executeGesture.swipe(x1, y1, x2, y2, forwardOptions, perf);
+    const forwardResult = await this.executeGesture.swipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      forwardOptions,
+      perf,
+      signal,
+    );
+    throwIfAborted(signal);
     if (!forwardResult.success) {
       return forwardResult;
     }
@@ -145,7 +187,16 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       await this.timer.sleep(boomerang.apexPauseMs);
     }
 
-    const returnResult = await this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, perf);
+    throwIfAborted(signal);
+    const returnResult = await this.executeGesture.swipe(
+      x2,
+      y2,
+      x1,
+      y1,
+      returnOptions,
+      perf,
+      signal,
+    );
     if (!returnResult.success) {
       return {
         ...returnResult,
@@ -184,6 +235,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     containerElement: Element | null,
     gestureOptions?: GestureOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const duration = gestureOptions?.duration ?? 0;
     const resourceId = containerElement?.["resource-id"];
@@ -203,7 +255,9 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       };
     }
 
+    throwIfAborted(signal);
     const result = await this.accessibilityService.requestAction("focus", resourceId, 5000, perf);
+    throwIfAborted(signal);
 
     if (!result.success) {
       const error = result.error ?? "Failed to set accessibility focus for boomerang swipe.";
@@ -238,6 +292,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     containerElement: Element | null,
     gestureOptions?: GestureOptions,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     // Try accessibility scroll actions if container is known and has resource-id
     if (containerElement && containerElement["resource-id"]) {
@@ -249,6 +304,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       );
 
       try {
+        throwIfAborted(signal);
         const result = await this.accessibilityService.requestAction(
           scrollAction,
           containerElement["resource-id"],
@@ -272,6 +328,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
           );
         }
       } catch (error) {
+        throwIfAborted(signal);
         logger.warn(`[SwipeOn] ACTION_SCROLL error: ${error}, falling back to two-finger swipe`);
       }
     } else {
@@ -283,6 +340,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     const duration = gestureOptions?.duration || 300;
     const offset = 100; // Fixed offset as per design doc
 
+    throwIfAborted(signal);
     const a11yResult = await this.accessibilityService.requestTwoFingerSwipe(
       x1,
       y1,
@@ -293,6 +351,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
       5000,
       perf || new NoOpPerformanceTracker(),
     );
+    throwIfAborted(signal);
 
     if (a11yResult.success) {
       return {

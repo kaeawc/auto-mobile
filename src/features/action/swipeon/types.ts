@@ -38,6 +38,7 @@ export interface VoiceOverSwipeRunner {
     gestureOptions?: GestureOptions,
     perf?: PerformanceTracker,
     boomerang?: BoomerangConfig,
+    signal?: AbortSignal,
   ): Promise<SwipeResult>;
 }
 
@@ -66,6 +67,7 @@ export interface TalkBackSwipeRunner {
     gestureOptions?: GestureOptions,
     perf?: PerformanceTracker,
     boomerang?: BoomerangConfig,
+    signal?: AbortSignal,
   ): Promise<SwipeResult>;
 }
 
@@ -91,6 +93,7 @@ export interface GestureExecutor {
     y2: number,
     options?: GestureOptions,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<SwipeResult>;
 }
 

@@ -109,4 +109,17 @@ describe("pinchOnHandler (registered handler wiring)", () => {
     expect(parseMessage(response)).toBe("Pinched in");
     expect(response.isError).toBeUndefined();
   });
+
+  test("forwards the registry signal to pinchOn", async () => {
+    const signal = new AbortController().signal;
+    let forwarded: AbortSignal | undefined;
+    setPinchOnFactory(() => ({
+      execute: async (_options, _progress, actionSignal) => {
+        forwarded = actionSignal;
+        return fakeResult({ success: true });
+      },
+    }));
+    await pinchOnHandler(fakeDevice, args, undefined, signal);
+    expect(forwarded).toBe(signal);
+  });
 });

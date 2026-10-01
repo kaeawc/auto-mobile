@@ -91,6 +91,30 @@ describe("SwipeOn TalkBack ACTION_SCROLL direction (#6116)", () => {
     getInstanceSpy?.mockRestore();
   });
 
+  test("already aborted swipe dispatches no gesture", async () => {
+    fakeObserveScreen.setObserveResult(createObserveResult("top"));
+    await expect(
+      createSwipeOn().execute(
+        { direction: "up", autoTarget: false },
+        undefined,
+        AbortSignal.abort(),
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(fakeGesture.getSwipeCalls()).toEqual([]);
+  });
+
+  test("abort during scrollable discovery stops before gesture dispatch", async () => {
+    const controller = new AbortController();
+    fakeObserveScreen.setObserveResult(() => {
+      controller.abort();
+      return createObserveResult("top");
+    });
+    await expect(
+      createSwipeOn().execute({ direction: "up" }, undefined, controller.signal),
+    ).rejects.toThrow("Operation cancelled");
+    expect(fakeGesture.getSwipeCalls()).toEqual([]);
+  });
+
   test("lookFor target below the viewport with finger-up issues scroll_forward and reaches it in one scroll", async () => {
     // The fake device reveals the target only after the list has scrolled
     // forward; the inverted scroll_backward would leave it off screen.

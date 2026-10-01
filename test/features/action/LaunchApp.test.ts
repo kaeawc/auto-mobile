@@ -1558,6 +1558,21 @@ describe("LaunchApp", () => {
     expect(fakeTimer.getSleepCallCount()).toBe(0);
   });
 
+  test("capitalized monkey failure marker advances to guessed activities without waiting", async () => {
+    failLauncherResolver();
+    fakeAdb.setCommandResponse(`shell monkey -p '${packageName}'`, {
+      stdout: "** Monkey aborted due to error.",
+      stderr: "",
+    });
+    const result = await performFallbackLaunch();
+
+    expect(result).toMatchObject({ success: true, activityName: `${packageName}.MainActivity` });
+    expect(fakeAdb.wasCommandExecuted(`-n '${packageName}/${packageName}.MainActivity'`)).toBe(
+      true,
+    );
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
   test("pattern failure marker advances to a later accepted pattern with one caller wait", async () => {
     fakeTimer.enableAutoAdvance();
     failLauncherResolver();

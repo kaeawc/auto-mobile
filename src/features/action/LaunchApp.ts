@@ -1892,7 +1892,9 @@ export class LaunchApp extends BaseVisualChange {
           const result = await this.adb.executeCommand(monkeyCmd);
           this.assertLaunchNotAborted(signal);
           if (
-            /No activities found to run|monkey aborted/.test(`${result.stdout}\n${result.stderr}`)
+            /No activities found to run|[Mm]onkey aborted/.test(
+              `${result.stdout}\n${result.stderr}`,
+            )
           ) {
             logger.info(`[LaunchApp] Monkey launch reported no activity`);
             return { success: false };

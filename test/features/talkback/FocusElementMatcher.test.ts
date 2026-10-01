@@ -137,6 +137,29 @@ describe("FocusElementMatcher.findTargetIndex", () => {
     expect(matcher.findTargetIndex(elements, { text: "Save", bounds: boundsB })).toBe(1);
   });
 
+  test("uses the nearest duplicate for discovery and arrival when selector bounds are stale", () => {
+    const matcher = new FocusElementMatcher();
+    const first: Element = { text: "Save", bounds: boundsA };
+    const nearest: Element = { text: "Save", bounds: boundsB };
+    const elements = [first, nearest];
+    const selector = { text: "Save", bounds: { left: 8, top: 8, right: 13, bottom: 13 } };
+
+    expect(matcher.findTargetIndex(elements, selector)).toBe(1);
+    expect(matcher.matchesFocusedTarget(first, elements, selector)).toBe(false);
+    expect(matcher.matchesFocusedTarget(nearest, elements, selector)).toBe(true);
+  });
+
+  test("uses the first duplicate for discovery and arrival when selector bounds are absent", () => {
+    const matcher = new FocusElementMatcher();
+    const first: Element = { text: "Save" };
+    const second: Element = { text: "Save" };
+    const elements = [first, second];
+
+    expect(matcher.findTargetIndex(elements, { text: "Save" })).toBe(0);
+    expect(matcher.matchesFocusedTarget(first, elements, { text: "Save" })).toBe(true);
+    expect(matcher.matchesFocusedTarget(second, elements, { text: "Save" })).toBe(false);
+  });
+
   test("accepts a unique text match when its bounds moved", () => {
     const matcher = new FocusElementMatcher();
 

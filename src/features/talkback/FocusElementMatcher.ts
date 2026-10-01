@@ -20,30 +20,7 @@ export class FocusElementMatcher {
     selector: FocusElementSelector,
     options: TextMatchOptions = {},
   ): number | null {
-    if (!elements.length) {
-      return null;
-    }
-
-    const exactMatches = this.findMatches(elements, selector, { ...options, partialMatch: false });
-    const matches =
-      exactMatches.length > 0 || options.partialMatch === false
-        ? exactMatches
-        : this.findMatches(elements, selector, { ...options, partialMatch: true });
-
-    if (matches.length === 0) {
-      return null;
-    }
-
-    if (selector.bounds && matches.length > 1) {
-      const bounds = selector.bounds;
-      const boundsMatch = matches.find(({ element }) => this.boundsMatch(element, bounds));
-      if (boundsMatch) {
-        return boundsMatch.index;
-      }
-    }
-
-    const visibleMatch = matches.find(({ element }) => this.isVisible(element));
-    return (visibleMatch ?? matches[0]).index;
+    return this.resolveTargetCandidate(elements, selector, options)?.index ?? null;
   }
 
   findCurrentFocusIndex(currentFocus: Element | null, elements: Element[]): number | null {
@@ -133,26 +110,24 @@ export class FocusElementMatcher {
     elements: Element[],
     selector: FocusElementSelector,
   ): boolean {
-    const exactMatches = elements.filter((element) => this.matchesSelector(element, selector));
-    const partialMatch = exactMatches.length === 0;
-    const matches = partialMatch
-      ? elements.filter((element) =>
-          this.matchesSelector(element, selector, { partialMatch: true }),
-        )
-      : exactMatches;
-
-    if (!this.matchesSelector(focused, selector, { partialMatch })) {
+    const candidate = this.resolveTargetCandidate(elements, selector);
+    if (!candidate) {
       return false;
     }
-    if (matches.length === 1) {
+
+    const options = { partialMatch: candidate.partialMatch };
+    if (!this.matchesSelector(focused, selector, options)) {
+      return false;
+    }
+
+    if (candidate.matchCount === 1) {
       return true;
     }
 
-    const preferred = this.preferredBoundsMatch(matches, selector);
     return (
-      preferred !== null &&
-      preferred.bounds !== undefined &&
-      this.boundsMatch(focused, preferred.bounds)
+      focused === candidate.element ||
+      (candidate.element.bounds !== undefined &&
+        this.boundsMatch(focused, candidate.element.bounds))
     );
   }
 
@@ -170,6 +145,69 @@ export class FocusElementMatcher {
     return elements.flatMap((element, index) =>
       this.matchesSelector(element, selector, options) ? [{ element, index }] : [],
     );
+  }
+
+  private resolveTargetCandidate(
+    elements: Element[],
+    selector: FocusElementSelector,
+    options: TextMatchOptions = {},
+  ): { element: Element; index: number; matchCount: number; partialMatch: boolean } | null {
+    const exactMatches = this.findMatches(elements, selector, { ...options, partialMatch: false });
+    const partialMatch = exactMatches.length === 0 && options.partialMatch !== false;
+    const matches = partialMatch
+      ? this.findMatches(elements, selector, { ...options, partialMatch: true })
+      : exactMatches;
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    const selected = this.selectTargetCandidate(matches, selector);
+
+    return { ...selected, matchCount: matches.length, partialMatch };
+  }
+
+  private selectTargetCandidate(
+    matches: { element: Element; index: number }[],
+    selector: FocusElementSelector,
+  ): { element: Element; index: number } {
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    if (!selector.bounds) {
+      return this.firstVisibleOrFirst(matches);
+    }
+
+    const exactBoundsMatch = matches.find(({ element }) =>
+      this.boundsMatch(element, selector.bounds!),
+    );
+    return exactBoundsMatch ?? this.nearestBoundsMatch(matches, selector.bounds);
+  }
+
+  private firstVisibleOrFirst(matches: { element: Element; index: number }[]): {
+    element: Element;
+    index: number;
+  } {
+    return matches.find(({ element }) => this.isVisible(element)) ?? matches[0];
+  }
+
+  private nearestBoundsMatch(
+    matches: { element: Element; index: number }[],
+    bounds: NonNullable<FocusElementSelector["bounds"]>,
+  ): { element: Element; index: number } {
+    let closest: { element: Element; index: number } | undefined;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const match of matches) {
+      if (!match.element.bounds) {
+        continue;
+      }
+      const distance = this.boundsDistance(match.element.bounds, bounds);
+      if (distance < closestDistance) {
+        closest = match;
+        closestDistance = distance;
+      }
+    }
+    return closest ?? this.firstVisibleOrFirst(matches);
   }
 
   private findIndexByValue(
@@ -235,35 +273,6 @@ export class FocusElementMatcher {
       element.bounds.right === bounds.right &&
       element.bounds.bottom === bounds.bottom
     );
-  }
-
-  private preferredBoundsMatch(
-    elements: Element[],
-    selector: FocusElementSelector,
-  ): Element | null {
-    const bounds = selector.bounds;
-    if (!bounds) {
-      return null;
-    }
-
-    const exactBoundsMatch = elements.find((element) => this.boundsMatch(element, bounds));
-    if (exactBoundsMatch) {
-      return exactBoundsMatch;
-    }
-
-    let closest: Element | null = null;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    for (const element of elements) {
-      if (!element.bounds) {
-        continue;
-      }
-      const distance = this.boundsDistance(element.bounds, bounds);
-      if (distance < closestDistance) {
-        closest = element;
-        closestDistance = distance;
-      }
-    }
-    return closest;
   }
 
   private boundsDistance(

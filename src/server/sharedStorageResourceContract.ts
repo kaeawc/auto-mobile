@@ -29,6 +29,7 @@ export interface SharedStorageFileEntry {
   byteCount?: number;
   mimeType?: string;
   sha256?: string;
+  sha256Unavailable?: string;
   lastModified?: string;
   resourceUri: string;
 }

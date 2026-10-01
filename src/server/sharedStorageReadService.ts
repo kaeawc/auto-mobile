@@ -58,7 +58,31 @@ export interface SharedStorageReadServiceDependencies {
   adbFactory?: AdbClientFactory;
   createUserResolver?: (adb: AdbExecutor) => SharedStorageUserResolver;
   deviceResolver?: (deviceId: string) => Promise<BootedDevice | null>;
+  hashCache?: SharedStorageHashCache;
 }
+
+export interface SharedStorageHashCache {
+  get(
+    deviceId: string,
+    namespace: string,
+    path: string,
+    byteCount: number,
+    modifiedSeconds: number,
+  ): string | undefined;
+  set(
+    deviceId: string,
+    namespace: string,
+    path: string,
+    byteCount: number,
+    modifiedSeconds: number,
+    sha256: string,
+  ): void;
+  retainNamespacePaths(deviceId: string, namespace: string, paths: ReadonlySet<string>): void;
+}
+
+const SHARED_STORAGE_HASH_CACHE_MAX_ENTRIES = 2_048;
+const SHARED_STORAGE_HASH_COMMAND_MAX_LENGTH = 24 * 1024;
+const SHA256_UNAVAILABLE_REASON = "Hash unavailable: file changed or disappeared during listing";
 
 let sharedStorageReadService: SharedStorageReadService | null = null;
 
@@ -76,6 +100,7 @@ export function createSharedStorageReadServiceForTesting(
     dependencies.adbFactory ?? defaultAdbClientFactory,
     dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
     dependencies.deviceResolver ?? findBootedDevice,
+    dependencies.hashCache ?? new BoundedSharedStorageHashCache(),
   );
 }
 
@@ -88,6 +113,7 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
     private readonly adbFactory: AdbClientFactory,
     private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver,
     private readonly deviceResolver: (deviceId: string) => Promise<BootedDevice | null>,
+    private readonly hashCache: SharedStorageHashCache,
   ) {}
 
   async list(request: ListSharedStorageRequest): Promise<SharedStorageNamespaceListing> {
@@ -140,13 +166,27 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
     try {
       const statOutput = await executeShell(adb, listStatScript(directory), request.signal);
       if (statOutput.trim() === NAMESPACE_MISSING_MARKER) {
+        this.hashCache.retainNamespacePaths(request.deviceId, namespace, new Set());
         return { ...resolved, observation: "missing", reason: namespaceMissingReason(directory) };
       }
-      const shaOutput = await executeShell(adb, listShaScript(directory), request.signal);
+      const statEntries = parseStatOutput(statOutput, directory);
+      this.hashCache.retainNamespacePaths(
+        request.deviceId,
+        namespace,
+        new Set(statEntries.map((entry) => entry.absolutePath)),
+      );
+      const hashes = await listHashes(
+        adb,
+        statEntries,
+        request,
+        namespace,
+        directory,
+        this.hashCache,
+      );
       return {
         ...resolved,
         observation: "complete",
-        files: parseListing(statOutput, shaOutput, directory, request.deviceId, namespace),
+        files: parseListing(statEntries, hashes, request.deviceId, namespace),
       };
     } catch (error) {
       // A permission-denied read of a non-primary profile's storage also lands
@@ -244,11 +284,8 @@ function listStatScript(directory: string): string {
   );
 }
 
-function listShaScript(directory: string): string {
-  return (
-    `if [ -d ${shellQuote(directory)} ]; then ` +
-    `find ${shellQuote(directory)} -type f -exec sha256sum {} \\; ; fi`
-  );
+function listShaScript(paths: readonly string[]): string {
+  return `sha256sum ${paths.map((path) => shellQuote(path)).join(" ")}`;
 }
 
 function readScript(file: string): string {
@@ -273,20 +310,20 @@ async function executeShell(
   return result.stdout;
 }
 
-function parseListing(
-  statOutput: string,
-  shaOutput: string,
-  directory: string,
-  deviceId: string,
-  namespace: string,
-): SharedStorageFileEntry[] {
-  const hashes = parseShaOutput(shaOutput);
+interface ParsedStatEntry {
+  path: string;
+  absolutePath: string;
+  byteCount: number;
+  modifiedSeconds: number;
+}
+
+function parseStatOutput(statOutput: string, directory: string): ParsedStatEntry[] {
   const prefix = `${directory}/`;
   return statOutput
     .split(/\n/)
     .map((line) => line.replace(/\r$/, ""))
     .filter((line) => line.length > 0)
-    .map((line): SharedStorageFileEntry | null => {
+    .map((line): ParsedStatEntry | null => {
       const firstBar = line.indexOf("|");
       const secondBar = line.indexOf("|", firstBar + 1);
       if (firstBar < 0 || secondBar < 0) {
@@ -299,33 +336,208 @@ function parseListing(
       const relativePath = absolutePath.slice(prefix.length);
       const byteCount = Number(line.slice(0, firstBar));
       const modifiedSeconds = Number(line.slice(firstBar + 1, secondBar));
-      const mimeType = mimeTypeForPath(relativePath);
-      const sha256 = hashes.get(absolutePath);
-      return {
-        path: relativePath,
-        name: posix.basename(relativePath),
-        ...(Number.isFinite(byteCount) ? { byteCount } : {}),
-        ...(mimeType ? { mimeType } : {}),
-        ...(sha256 ? { sha256 } : {}),
-        ...(Number.isFinite(modifiedSeconds)
-          ? { lastModified: new Date(modifiedSeconds * 1000).toISOString() }
-          : {}),
-        resourceUri: buildSharedStorageResourceUri({ deviceId, namespace, path: relativePath }),
-      };
+      if (!Number.isFinite(byteCount) || !Number.isFinite(modifiedSeconds)) {
+        return null;
+      }
+      return { path: relativePath, absolutePath, byteCount, modifiedSeconds };
     })
-    .filter((entry): entry is SharedStorageFileEntry => entry !== null);
+    .filter((entry): entry is ParsedStatEntry => entry !== null);
+}
+
+function parseListing(
+  statEntries: ParsedStatEntry[],
+  hashes: ReadonlyMap<string, string>,
+  deviceId: string,
+  namespace: string,
+): SharedStorageFileEntry[] {
+  return statEntries.map((entry) => {
+    const mimeType = mimeTypeForPath(entry.path);
+    const sha256 = hashes.get(entry.absolutePath);
+    return {
+      path: entry.path,
+      name: posix.basename(entry.path),
+      byteCount: entry.byteCount,
+      ...(mimeType ? { mimeType } : {}),
+      ...(sha256 ? { sha256 } : { sha256Unavailable: SHA256_UNAVAILABLE_REASON }),
+      lastModified: new Date(entry.modifiedSeconds * 1000).toISOString(),
+      resourceUri: buildSharedStorageResourceUri({ deviceId, namespace, path: entry.path }),
+    };
+  });
 }
 
 function parseShaOutput(shaOutput: string): Map<string, string> {
   const hashes = new Map<string, string>();
   for (const rawLine of shaOutput.split(/\n/)) {
     const line = rawLine.replace(/\r$/, "");
-    const match = line.match(/^([0-9a-fA-F]{64})\s+\*?(.*)$/);
+    const match = line.match(/^([0-9a-f]{64})  (.*)$/);
     if (match) {
       hashes.set(match[2], match[1].toLowerCase());
     }
   }
   return hashes;
+}
+
+async function listHashes(
+  adb: AdbExecutor,
+  entries: readonly ParsedStatEntry[],
+  request: ListSharedStorageRequest,
+  namespace: string,
+  directory: string,
+  cache: SharedStorageHashCache,
+): Promise<Map<string, string>> {
+  const hashes = new Map<string, string>();
+  const pending = entries.filter((entry) => {
+    const cached = cache.get(
+      request.deviceId,
+      namespace,
+      entry.absolutePath,
+      entry.byteCount,
+      entry.modifiedSeconds,
+    );
+    if (cached) {
+      hashes.set(entry.absolutePath, cached);
+    }
+    return !cached;
+  });
+  for (const batch of chunkHashPaths(pending)) {
+    let shaOutput: string;
+    try {
+      shaOutput = await executeShell(
+        adb,
+        listShaScript(batch.map((entry) => entry.absolutePath)),
+        request.signal,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SharedStorageRead] hash files in ${directory} failed: ${errorMessage(error)}`,
+        error,
+      );
+      continue;
+    }
+    const batchHashes = parseShaOutput(shaOutput);
+    for (const entry of batch) {
+      const sha256 = batchHashes.get(entry.absolutePath);
+      if (!sha256) {
+        continue;
+      }
+      hashes.set(entry.absolutePath, sha256);
+      cache.set(
+        request.deviceId,
+        namespace,
+        entry.absolutePath,
+        entry.byteCount,
+        entry.modifiedSeconds,
+        sha256,
+      );
+    }
+    // Hash lines for paths absent from stat output are ignored because only requested paths are read.
+  }
+  return hashes;
+}
+
+class BoundedSharedStorageHashCache implements SharedStorageHashCache {
+  private readonly entries = new Map<
+    string,
+    {
+      deviceId: string;
+      namespace: string;
+      path: string;
+      sha256: string;
+      lastUsed: number;
+    }
+  >();
+  private accessCounter = 0;
+
+  get(
+    deviceId: string,
+    namespace: string,
+    path: string,
+    byteCount: number,
+    modifiedSeconds: number,
+  ): string | undefined {
+    const entry = this.entries.get(
+      hashCacheKey(deviceId, namespace, path, byteCount, modifiedSeconds),
+    );
+    if (!entry) {
+      return undefined;
+    }
+    entry.lastUsed = ++this.accessCounter;
+    return entry.sha256;
+  }
+
+  set(
+    deviceId: string,
+    namespace: string,
+    path: string,
+    byteCount: number,
+    modifiedSeconds: number,
+    sha256: string,
+  ): void {
+    for (const [key, entry] of this.entries) {
+      if (entry.deviceId === deviceId && entry.namespace === namespace && entry.path === path) {
+        this.entries.delete(key);
+      }
+    }
+    this.entries.set(hashCacheKey(deviceId, namespace, path, byteCount, modifiedSeconds), {
+      deviceId,
+      namespace,
+      path,
+      sha256,
+      lastUsed: ++this.accessCounter,
+    });
+    while (this.entries.size > SHARED_STORAGE_HASH_CACHE_MAX_ENTRIES) {
+      let oldestKey: string | undefined;
+      let oldestUsed = Number.POSITIVE_INFINITY;
+      for (const [key, entry] of this.entries) {
+        if (entry.lastUsed < oldestUsed) {
+          oldestKey = key;
+          oldestUsed = entry.lastUsed;
+        }
+      }
+      if (oldestKey === undefined) {
+        break;
+      }
+      this.entries.delete(oldestKey);
+    }
+  }
+
+  retainNamespacePaths(deviceId: string, namespace: string, paths: ReadonlySet<string>): void {
+    for (const [key, entry] of this.entries) {
+      if (entry.deviceId === deviceId && entry.namespace === namespace && !paths.has(entry.path)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+}
+
+function hashCacheKey(
+  deviceId: string,
+  namespace: string,
+  path: string,
+  byteCount: number,
+  modifiedSeconds: number,
+): string {
+  return JSON.stringify([deviceId, namespace, path, byteCount, modifiedSeconds]);
+}
+
+function chunkHashPaths(entries: readonly ParsedStatEntry[]): ParsedStatEntry[][] {
+  const batches: ParsedStatEntry[][] = [];
+  let batch: ParsedStatEntry[] = [];
+  let length = "sha256sum ".length;
+  for (const entry of entries) {
+    const quotedLength = shellQuote(entry.absolutePath).length + (batch.length > 0 ? 1 : 0);
+    if (batch.length > 0 && length + quotedLength > SHARED_STORAGE_HASH_COMMAND_MAX_LENGTH) {
+      batches.push(batch);
+      batch = [];
+      length = "sha256sum ".length;
+    }
+    batch.push(entry);
+    length += quotedLength;
+  }
+  if (batch.length > 0) {
+    batches.push(batch);
+  }
+  return batches;
 }
 
 function decodeUtf8Text(buffer: Buffer): string | undefined {

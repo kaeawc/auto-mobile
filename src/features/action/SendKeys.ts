@@ -60,6 +60,24 @@ function isPrintableAscii(text: string): boolean {
   return true;
 }
 
+export function segmentGraphemes(text: string): string[] {
+  return Array.from(
+    new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text),
+    ({ segment }) => segment,
+  );
+}
+
+function graphemeCodePoints(graphemes: string[]): string {
+  return graphemes
+    .map((grapheme) =>
+      Array.from(
+        grapheme,
+        (char) => `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`,
+      ).join(" "),
+    )
+    .join(", ");
+}
+
 function validateImeKeyEventsText(
   command: SendKeysTypeCommand,
   platform: BootedDevice["platform"],
@@ -138,6 +156,7 @@ export interface SendKeysCommandResult {
   key?: SendKeysKey;
   modifiers?: InputKeyModifier[];
   partialApplication?: boolean;
+  committedGraphemes?: number;
   error?: string;
   retryable?: boolean;
   verified?: boolean;
@@ -214,6 +233,7 @@ export type TextActionResult = {
   success: boolean;
   error?: string;
   partialApplication?: boolean;
+  committedGraphemes?: number;
   sessionUnsafe?: boolean;
 };
 
@@ -324,6 +344,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         success: result.success,
         error: result.error,
         ...(result.partialApplication ? { partialApplication: true } : {}),
+        committedGraphemes: result.committedGraphemes,
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
         ...this.imeResultFields(result.resolvedMode ?? baseResult.resolvedMode),
       };
@@ -1162,12 +1183,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?: AbortSignal,
     focusedInputVerified = false,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
-    const chars = Array.from(text);
-    if (!(await this.hasAndroidKeyEvent(chars))) {
+    const graphemes = segmentGraphemes(text);
+    if (!(await this.hasAndroidKeyEvent(graphemes))) {
       const result =
         operation === "replace"
           ? await this.textClient.replace(text)
-          : await this.textClient.insert(text);
+          : await this.insertGraphemeRun(graphemes, 0, false);
       return { ...result, resolvedMode: "a11y" };
     }
 
@@ -1182,39 +1203,87 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!clearResult.success) {
       return clearResult;
     }
-    return this.executeAndroidEventAllCharacters(chars, operation === "replace", signal);
+    return this.executeAndroidEventAllCharacters(graphemes, operation === "replace", signal);
   }
 
   private async executeAndroidEventAllCharacters(
-    chars: string[],
+    graphemes: string[],
     previouslyMutated: boolean,
     signal?: AbortSignal,
   ): Promise<TextActionResult> {
     let mutated = previouslyMutated;
-    for (let index = 0; index < chars.length; index++) {
+    let committedGraphemes = 0;
+    for (let index = 0; index < graphemes.length; index++) {
       signal?.throwIfAborted();
-      const plan = await this.getKeyEventPlan(chars[index] ?? "");
+      const plan = await this.getEventAllKeyEventPlan(graphemes[index] ?? "");
       if (plan) {
         const eventFailure = await this.executeKeyEventPlanSafely(plan, mutated, signal);
         if (eventFailure) {
-          return eventFailure;
+          return {
+            ...eventFailure,
+            error: `eventAll could not deliver grapheme ${graphemeCodePoints([graphemes[index] ?? ""])}: ${eventFailure.error ?? "unknown error"}`,
+            committedGraphemes,
+          };
         }
         mutated = true;
+        committedGraphemes++;
         continue;
       }
 
-      let unsupportedRun = chars[index] ?? "";
-      while (index + 1 < chars.length && !(await this.getKeyEventPlan(chars[index + 1] ?? ""))) {
+      const runStart = index;
+      while (
+        index + 1 < graphemes.length &&
+        !(await this.getEventAllKeyEventPlan(graphemes[index + 1] ?? ""))
+      ) {
         index++;
-        unsupportedRun += chars[index] ?? "";
       }
-      const insertResult = await this.textClient.insert(unsupportedRun);
+      const run = graphemes.slice(runStart, index + 1);
+      const insertResult = await this.insertGraphemeRun(run, committedGraphemes, mutated);
       if (!insertResult.success) {
-        return markPartialAfterPriorMutation(insertResult, mutated);
+        return insertResult;
       }
       mutated = true;
+      committedGraphemes += run.length;
     }
     return { success: true };
+  }
+
+  private async getEventAllKeyEventPlan(grapheme: string): Promise<KeyEventPlan | null> {
+    return grapheme.length === 1 && isPrintableAscii(grapheme)
+      ? this.getKeyEventPlan(grapheme)
+      : null;
+  }
+
+  private async insertGraphemeRun(
+    run: string[],
+    committedGraphemes: number,
+    previouslyMutated: boolean,
+  ): Promise<TextActionResult> {
+    const text = run.join("");
+    const codePoints = graphemeCodePoints(run);
+    try {
+      const result = await this.textClient.insert(text);
+      if (result.success) {
+        return result;
+      }
+      logger.warn(`[SendKeys] Android text insertion failed: ${result.error ?? "unknown error"}`);
+      return markPartialAfterPriorMutation(
+        {
+          ...result,
+          error: `eventAll could not insert grapheme(s) ${codePoints}: ${result.error ?? "unknown error"}`,
+          committedGraphemes,
+        },
+        previouslyMutated,
+      );
+    } catch (error) {
+      logger.warn("[SendKeys] Android text insertion failed", error);
+      return {
+        success: false,
+        error: `eventAll could not insert grapheme(s) ${codePoints}: ${errorMessage(error)}`,
+        committedGraphemes,
+        partialApplication: true,
+      };
+    }
   }
 
   private async executeKeyEventPlanSafely(
@@ -1237,9 +1306,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return operation === "replace" ? this.textClient.clear() : Promise.resolve({ success: true });
   }
 
-  private async hasAndroidKeyEvent(chars: string[]): Promise<boolean> {
-    for (const char of chars) {
-      if (await this.getKeyEventPlan(char)) {
+  private async hasAndroidKeyEvent(graphemes: string[]): Promise<boolean> {
+    for (const grapheme of graphemes) {
+      if (await this.getEventAllKeyEventPlan(grapheme)) {
         return true;
       }
     }

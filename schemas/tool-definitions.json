@@ -1809,6 +1809,7 @@
               "setPreference",
               "setUIState",
               "shake",
+              "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
               "stageSharedStorage",
@@ -1934,6 +1935,7 @@
               "setPreference",
               "setUIState",
               "shake",
+              "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
               "stageSharedStorage",
@@ -9365,6 +9367,7 @@
               "setPreference",
               "setUIState",
               "shake",
+              "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
               "stageSharedStorage",
@@ -11821,6 +11824,7 @@
             "setPreference",
             "setUIState",
             "shake",
+            "snapshotOf",
             "sqlQuery",
             "stageSessionDownloads",
             "stageSharedStorage",
@@ -11912,6 +11916,7 @@
               "setPreference",
               "setUIState",
               "shake",
+              "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
               "stageSharedStorage",
@@ -12138,6 +12143,57 @@
           "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (elementId/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton elementId/label is directly usable as a tapOn selector, except the collapsed keyboard row `<ime>` (drive it with sendKeys); re-request with raw/project:'full' to disambiguate.",
           "type": "string",
           "enum": ["full", "skeleton"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "snapshotOf",
+    "description": "Save a PNG crop of one exposed element or a platform-native screen rectangle; return path and geometry metadata only.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "elementId": {
+          "description": "Unique exposed element ID",
+          "type": "string",
+          "minLength": 1
+        },
+        "rectangle": {
+          "description": "Platform-native screen rectangle: Android pixels, iOS points",
+          "type": "object",
+          "properties": {
+            "left": {
+              "type": "number"
+            },
+            "top": {
+              "type": "number"
+            },
+            "right": {
+              "type": "number"
+            },
+            "bottom": {
+              "type": "number"
+            }
+          },
+          "required": ["left", "top", "right", "bottom"],
+          "additionalProperties": false
         },
         "sessionUuid": {
           "description": "Session",

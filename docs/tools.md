@@ -40,6 +40,15 @@ events use `input -d` directly.
 
 ### Screen-coordinate contract
 
+`snapshotOf` is an opt-in tool. Enable it with `setToolEnabled`, then pass
+either `elementId` for one uniquely exposed element or `rectangle` with
+`left`, `top`, `right`, and `bottom` in the platform-native screen units below.
+It captures one screen PNG, clips the rectangle to visible bounds, and saves a
+full-resolution PNG crop. The response contains the file path, requested and
+clipped bounds, screen and image sizes, effective pixels per native unit, scale
+provenance, screenshot orientation, and clipping status. It does not return image
+bytes. Missing or ambiguous IDs and empty or off-screen rectangles are errors.
+
 `observe` reports platform-native, current-orientation screen coordinates. The
 origin is the top-left of the complete current screen, including system UI:
 

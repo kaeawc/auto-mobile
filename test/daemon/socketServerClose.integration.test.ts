@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createConnection, createServer, type Server as NetServer, type Socket } from "node:net";
 import { existsSync } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { mkdtemp, rm, unlink } from "node:fs/promises";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
+import type { DaemonResponse } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const isWindows = platform() === "win32";
@@ -25,11 +25,13 @@ function createFakeDaemonState(refreshDevices: () => Promise<number> = async () 
 
 describe("UnixSocketServer close", () => {
   let socketPath: string;
+  let socketDir: string;
   let server: UnixSocketServer;
   let timer: FakeTimer;
 
   beforeEach(async () => {
-    socketPath = join(tmpdir(), `socket-close-${randomUUID()}.sock`);
+    socketDir = await mkdtemp(join(tmpdir(), "socket-close-"));
+    socketPath = join(socketDir, "daemon.sock");
     timer = new FakeTimer();
     server = new UnixSocketServer(
       socketPath,
@@ -42,9 +44,7 @@ describe("UnixSocketServer close", () => {
 
   afterEach(async () => {
     await server.close();
-    if (existsSync(socketPath)) {
-      await unlink(socketPath);
-    }
+    await rm(socketDir, { recursive: true, force: true });
   });
 
   (isWindows ? test.skip : test)("removes its own socket file on close", async () => {
@@ -99,7 +99,7 @@ describe("UnixSocketServer close", () => {
   );
 
   (isWindows ? test.skip : test)(
-    "destroys active clients before waiting for server shutdown",
+    "ends idle clients before waiting for server shutdown",
     async () => {
       const client = await connectClient(socketPath);
       const clientClosed = once(client, "close");
@@ -119,7 +119,7 @@ describe("UnixSocketServer close", () => {
   );
 
   (isWindows ? test.skip : test)(
-    "drains an in-flight request before shutdown completes",
+    "delivers a real response when an in-flight request settles during the drain",
     async () => {
       let releaseRefresh: () => void;
       const refreshComplete = new Promise<number>((resolve) => {
@@ -146,6 +146,7 @@ describe("UnixSocketServer close", () => {
       await server.start();
 
       const client = await connectClient(socketPath);
+      const frames = collectResponses(client);
       const clientClosed = once(client, "close");
       client.write(
         `${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`,
@@ -158,12 +159,19 @@ describe("UnixSocketServer close", () => {
       });
 
       try {
-        await clientClosed;
         await Promise.resolve();
         expect(closeCompleted).toBe(false);
 
         releaseRefresh();
-        await closePromise;
+        await Promise.all([closePromise, clientClosed]);
+        expect(frames()).toEqual([
+          expect.objectContaining({
+            id: "refresh",
+            type: "mcp_response",
+            success: true,
+            result: expect.objectContaining({ addedDevices: 0 }),
+          }),
+        ]);
       } finally {
         releaseRefresh();
         if (!client.destroyed) {
@@ -176,8 +184,9 @@ describe("UnixSocketServer close", () => {
   );
 
   (isWindows ? test.skip : test)(
-    "bounds shutdown while an in-flight request does not settle",
+    "gives a stalled request and its queued successor one shutdown frame each",
     async () => {
+      let refreshStarts = 0;
       let releaseRefresh: () => void;
       const refreshComplete = new Promise<number>((resolve) => {
         releaseRefresh = () => {
@@ -195,6 +204,7 @@ describe("UnixSocketServer close", () => {
         socketPath,
         "http://localhost:0/mcp",
         createFakeDaemonState(async () => {
+          refreshStarts += 1;
           signalRefreshStarted();
           return refreshComplete;
         }),
@@ -203,20 +213,33 @@ describe("UnixSocketServer close", () => {
       await server.start();
 
       const client = await connectClient(socketPath);
+      const frames = collectResponses(client);
       const clientClosed = once(client, "close");
       client.write(
-        `${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n`,
+        `${JSON.stringify({ id: "refresh", type: "mcp_request", method: "daemon/refreshDevices" })}\n${JSON.stringify({ id: "queued", type: "mcp_request", method: "daemon/refreshDevices" })}\n`,
       );
       await requestStarted;
 
       const closePromise = server.close();
       try {
-        await clientClosed;
         await Promise.resolve();
-        expect(timer.getPendingTimeoutCount()).toBe(1);
+        expect(timer.getPendingTimeoutCount()).toBeGreaterThanOrEqual(1);
 
         timer.advanceTime(1_000);
-        await closePromise;
+        await Promise.all([closePromise, clientClosed]);
+        expect(frames()).toEqual([
+          expect.objectContaining({
+            id: "queued",
+            success: false,
+            daemonShuttingDown: expect.objectContaining({ code: "daemon_shutting_down" }),
+          }),
+          expect.objectContaining({
+            id: "refresh",
+            success: false,
+            daemonShuttingDown: expect.objectContaining({ code: "daemon_shutting_down" }),
+          }),
+        ]);
+        expect(refreshStarts).toBe(1);
       } finally {
         releaseRefresh();
         if (!client.destroyed) {
@@ -233,6 +256,22 @@ async function connectClient(socketPath: string): Promise<Socket> {
   const client = createConnection(socketPath);
   await once(client, "connect");
   return client;
+}
+
+function collectResponses(client: Socket): () => DaemonResponse[] {
+  let buffer = "";
+  const frames: DaemonResponse[] = [];
+  client.on("data", (data: Buffer) => {
+    buffer += data.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line) {
+        frames.push(JSON.parse(line) as DaemonResponse);
+      }
+    }
+  });
+  return () => frames;
 }
 
 function listenOnSocket(socketPath: string): Promise<NetServer> {

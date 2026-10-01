@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { ActionableError } from "../../../src/models/ActionableError";
 import type { ExecResult } from "../../../src/models";
@@ -21,10 +23,8 @@ interface Harness {
   commands: string[][];
 }
 
-// Build a DeviceAppManager wired for the URL-launch surface only. The
-// open-URL primitive (isAvailable / launchWithPayloadUrl) touches nothing but
-// `platform` and argv executor, so the file/temp deps are stubbed to throw — any use
-// would be a real regression the test should catch.
+// These command paths touch only `platform` and argv execution, so file/temp
+// dependencies throw if used unexpectedly.
 const makeInspector = (overrides: Overrides = {}): Harness => {
   const commands: string[][] = [];
   const unused = () => {
@@ -48,6 +48,25 @@ const makeInspector = (overrides: Overrides = {}): Harness => {
   });
   return { inspector, commands };
 };
+
+describe("DeviceAppManager.getDevicectlVersion", () => {
+  test("returns command stdout through the injected executor", async () => {
+    const capturedVersion = readFileSync(
+      join(process.cwd(), "test/fixtures/ios-devicectl/version.txt"),
+      "utf8",
+    );
+    const commands: string[][] = [];
+    const { inspector } = makeInspector({
+      execute: async (file, args) => {
+        commands.push([file, ...args]);
+        return execResult(capturedVersion);
+      },
+    });
+
+    expect(await inspector.getDevicectlVersion()).toBe(capturedVersion);
+    expect(commands).toEqual([["xcrun", "devicectl", "--version"]]);
+  });
+});
 
 describe("DeviceAppManager.isUrlLaunchAvailable", () => {
   test("returns false on a non-darwin host without probing", async () => {

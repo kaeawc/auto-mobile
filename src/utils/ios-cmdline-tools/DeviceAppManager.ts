@@ -12,6 +12,7 @@ import { normalizeIosDevicePath as normalizeDevicePath } from "./iosInstalledApp
 import { logger } from "../logger";
 import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
 import type { Logger } from "../logger";
+import type { DevicectlVersionSource } from "./CoreDeviceCapabilityProbe";
 
 interface DeviceAppManagerDependencies {
   platform: () => NodeJS.Platform;
@@ -418,7 +419,7 @@ export interface DeviceUrlLauncher {
   launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void>;
 }
 
-export class DeviceAppManager implements DeviceUrlLauncher {
+export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSource {
   private readonly deps: DeviceAppManagerDependencies;
 
   constructor(deps: DeviceAppManagerDependencies = defaultDependencies) {
@@ -441,6 +442,10 @@ export class DeviceAppManager implements DeviceUrlLauncher {
     return { ok: true };
   }
 
+  async getDevicectlVersion(): Promise<string> {
+    return (await this.execute("xcrun", ["devicectl", "--version"])).stdout;
+  }
+
   /**
    * True when the physical-device open-URL path is usable.
    *
@@ -456,7 +461,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
       return false;
     }
     try {
-      await this.execute("xcrun", ["devicectl", "--version"]);
+      await this.getDevicectlVersion();
       return true;
     } catch (error) {
       // `devicectl --version` fails when Xcode 15+ isn't installed; that just means physical-device URL launch is unavailable.

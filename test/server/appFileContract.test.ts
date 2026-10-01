@@ -106,6 +106,25 @@ describe("putAppFileSchema contentBase64 guard (#4183 A4)", () => {
 describe("putAppFile canonical target contract (#5803)", () => {
   const textFile = { destinationPath: "fixtures/welcome.txt", contentText: "hello" };
 
+  test("accepts safe Android user IDs in canonical and legacy requests", () => {
+    const canonical = {
+      target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+      files: [textFile],
+    };
+    const legacy = {
+      appId: "com.example.app",
+      container: "documents",
+      ...textFile,
+    };
+    for (const userId of [0, 10]) {
+      expect(putAppFileSchema.parse({ ...canonical, userId }).userId).toBe(userId);
+      expect(putAppFileSchema.parse({ ...legacy, userId }).userId).toBe(userId);
+    }
+    for (const userId of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(putAppFileSchema.safeParse({ ...canonical, userId }).success).toBe(false);
+    }
+  });
+
   test("defaults user_files media indexing off and accepts an explicit request", () => {
     const base = { target: { domain: "user_files", namespace: "run-42" }, files: [textFile] };
     expect(putAppFileSchema.parse(base).target).toMatchObject({ indexMedia: false });

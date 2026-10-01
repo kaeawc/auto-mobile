@@ -22,6 +22,7 @@ import {
 } from "../../src/server/sharedStorageService";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { shellQuote } from "../../src/utils/shellQuote";
 
 function execResult(stdout: string, stderr = "") {
   return {
@@ -159,7 +160,8 @@ describe("AppFileService", () => {
     const sharedStorageService = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
-        resolve: async () => {
+        resolve: async (request) => {
+          expect(request?.explicitUserId).toBe(10);
           resolveCalls += 1;
           return { userId: 10, source: "managedProfile" };
         },
@@ -170,6 +172,7 @@ describe("AppFileService", () => {
     const result = await service.putFile({
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
       target: { domain: "user_files", namespace: "picker-run", reset: true },
+      userId: 10,
       files: [
         { contentText: "one", destinationPath: "docs/one.txt" },
         { contentText: "two", destinationPath: "docs/two.txt" },
@@ -254,7 +257,10 @@ describe("AppFileService", () => {
     const sharedStorageService = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
-        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+        resolve: async (request) => {
+          expect(request?.explicitUserId).toBe(12);
+          return { userId: 12, source: "managedProfile" };
+        },
       }),
     });
     const service = createAppFileServiceForTesting({ sharedStorageService });
@@ -262,6 +268,7 @@ describe("AppFileService", () => {
     const result = await service.putFile({
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
       target: { domain: "media_library" },
+      userId: 12,
       files: [
         { contentBase64: Buffer.from([1, 2, 3]).toString("base64"), destinationPath: "photo.png" },
       ],
@@ -622,6 +629,105 @@ describe("AppFileService", () => {
     expect(commands[1]).toContain("/data/local/tmp/automobile-");
     expect(commands[1]).toContain("files/fixtures/welcome file.txt");
     expect(commands[2]).toContain("shell rm -f '/data/local/tmp/automobile-");
+  });
+
+  test("putFile uses the exact run-as command for default, primary, and work-profile users", async () => {
+    for (const userId of [undefined, 0, 10]) {
+      const adbFactory = new FakeAdbClientFactory();
+      const service = createAppFileServiceForTesting({
+        adbFactory,
+        idGenerator: new CountingIdGenerator("tmp"),
+      });
+      await service.putFile({
+        device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+        appId: "com.example.app",
+        container: "documents",
+        contentText: "hello",
+        destinationPath: "fixtures/welcome.txt",
+        userId,
+      });
+      const script =
+        "mkdir -p 'files/fixtures' && " +
+        "cp '/data/local/tmp/automobile-tmp-1-welcome.txt' 'files/fixtures/welcome.txt' && " +
+        "chmod 600 'files/fixtures/welcome.txt'";
+      expect(adbFactory.getFakeClient().getAllCommands()[1]).toBe(
+        `shell run-as 'com.example.app'${userId === 10 ? " --user 10" : ""} sh -c ${shellQuote(script)}`,
+      );
+      expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(3);
+    }
+  });
+
+  test("listFiles uses the exact run-as command for default, primary, and work-profile users", async () => {
+    for (const userId of [undefined, 0, 10]) {
+      const adbFactory = new FakeAdbClientFactory();
+      const service = createAppFileServiceForTesting({
+        adbFactory,
+        deviceResolver: async () => ({
+          deviceId: "emulator-5554",
+          name: "Pixel",
+          platform: "android",
+        }),
+      });
+      await service.listFiles({
+        deviceId: "emulator-5554",
+        appId: "com.example.app",
+        container: "documents",
+        userId,
+      });
+      const script = "if [ -d 'files' ]; then find 'files' -exec stat -c '%F|%s|%Y|%n' {} \\; ; fi";
+      expect(adbFactory.getFakeClient().getLastCommand()).toBe(
+        `shell run-as 'com.example.app'${userId === 10 ? " --user 10" : ""} sh -c ${shellQuote(script)}`,
+      );
+      expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(1);
+    }
+  });
+
+  test("readFile uses the exact run-as command for default, primary, and work-profile users", async () => {
+    for (const userId of [undefined, 0, 10]) {
+      const adbFactory = new FakeAdbClientFactory();
+      const service = createAppFileServiceForTesting({
+        adbFactory,
+        deviceResolver: async () => ({
+          deviceId: "emulator-5554",
+          name: "Pixel",
+          platform: "android",
+        }),
+      });
+      await service.readFile({
+        deviceId: "emulator-5554",
+        appId: "com.example.app",
+        container: "documents",
+        path: "fixtures/welcome.txt",
+        userId,
+      });
+      expect(adbFactory.getFakeClient().getLastCommand()).toBe(
+        `shell run-as 'com.example.app'${userId === 10 ? " --user 10" : ""} base64 'files/fixtures/welcome.txt'`,
+      );
+      expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(1);
+    }
+  });
+
+  test("rejects unsafe Android run-as user IDs before issuing ADB commands", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+      deviceResolver: async () => ({
+        deviceId: "emulator-5554",
+        name: "Pixel",
+        platform: "android",
+      }),
+    });
+    for (const userId of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(
+        service.listFiles({
+          deviceId: "emulator-5554",
+          appId: "com.example.app",
+          container: "documents",
+          userId,
+        }),
+      ).rejects.toThrow("Android userId must be a non-negative safe integer.");
+    }
+    expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(0);
   });
 
   test("uses a transfer budget for Android externalFiles pushes", async () => {

@@ -86,6 +86,13 @@ export interface DeviceOwnershipChanges {
 
 /** One capture shared by every subscriber watching the same device. */
 interface DeviceCapture {
+  device: BootedDevice;
+  /** Latest explicit hint for each field wins; omitted fields retain their current value. */
+  desiredHints: CaptureHints;
+  appliedHints: CaptureHints;
+  generation: number;
+  reconfigureTimer: NodeJS.Timeout | null;
+  reconfiguring: Promise<void> | null;
   source: H264CaptureSource | null;
   /** Resolves only after the shared source has started, so late subscribers share startup failures. */
   startup: Promise<void>;
@@ -138,6 +145,8 @@ interface DeviceCapture {
   lastLivenessProbeMs: number | null;
 }
 
+type CaptureHints = Pick<VideoStreamSocketRequest, "quality" | "fps" | "bitrateKbps">;
+
 const ANNEX_B_START_CODE = Buffer.from([0, 0, 0, 1]);
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
@@ -164,6 +173,7 @@ const KEY_FRAME_RETRY_INTERVAL_MS = 500;
 const KEY_FRAME_RETRY_MAX_ATTEMPTS = 8;
 // Covers brief viewer reconnects without keeping an abandoned encoder alive for long.
 const CAPTURE_IDLE_GRACE_MS = 3_000;
+const RECONFIGURE_DEBOUNCE_MS = 200;
 
 /**
  * Cadence for the relay-originated heartbeat (issue #7549), also advertised to the client in the
@@ -175,18 +185,12 @@ const HEARTBEAT_INTERVAL_MS = 1_000;
 const SOURCE_PROBE_AFTER_MS = 6_000;
 const SOURCE_EVIDENCE_MAX_AGE_MS = 9_000;
 
-/**
- * Captures are shared per device and the FIRST subscriber's hints fixed the encode; a late
- * joiner's differing quality/fps/bitrate hints are silently ignored, so leave a trace for the
- * viewer wondering why its preset didn't apply.
- */
-function logIgnoredLateHints(deviceId: string, request: VideoStreamSocketRequest): void {
-  if (request.quality || request.fps || request.bitrateKbps) {
-    logger.debug(
-      `[VideoStream] ${deviceId} already captured; ignoring late subscriber hints ` +
-        `(quality=${request.quality}, fps=${request.fps}, bitrateKbps=${request.bitrateKbps})`,
-    );
-  }
+function sameHints(left: CaptureHints, right: CaptureHints): boolean {
+  return (
+    left.quality === right.quality &&
+    left.fps === right.fps &&
+    left.bitrateKbps === right.bitrateKbps
+  );
 }
 
 function isIntegerInRange(value: number, min: number, max: number): boolean {
@@ -507,7 +511,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     const existing = this.captures.get(deviceId);
     if (existing) {
       this.clearIdleTimer(existing);
-      logIgnoredLateHints(deviceId, request);
+      this.updateDesiredHints(deviceId, existing, request);
       existing.pendingSubscribers.add(socket);
       if (tracksConsumers(existing.source)) {
         existing.source.setHasConsumers(true);
@@ -516,10 +520,25 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.socketSessionUuids.set(socket, request.sessionUuid);
       await existing.startup;
       this.promoteSubscriber(existing, socket, true);
+      this.scheduleReconfigure(deviceId, existing);
       return existing;
     }
 
     const capture: DeviceCapture = {
+      device,
+      desiredHints: {
+        quality: request.quality,
+        fps: request.fps,
+        bitrateKbps: request.bitrateKbps,
+      },
+      appliedHints: {
+        quality: request.quality,
+        fps: request.fps,
+        bitrateKbps: request.bitrateKbps,
+      },
+      generation: 0,
+      reconfigureTimer: null,
+      reconfiguring: null,
       source: null,
       startup: Promise.resolve(),
       pendingSubscribers: new Set([socket]),
@@ -553,98 +572,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.socketDeviceIds.set(socket, deviceId);
     this.socketSessionUuids.set(socket, request.sessionUuid);
 
-    const attestSource = (): void => {
-      if (this.captures.get(deviceId) !== capture) {
-        return;
-      }
-      capture.lastSourceDataMs = this.timer.now();
-      capture.firstEvidenceMs ??= capture.lastSourceDataMs;
-      capture.sourceFrameSequence++;
-      capture.lastIdleMs = null;
-      capture.encodedSinceSourceFrame = false;
-      if (!capture.heartbeatTimer) {
-        this.startHeartbeat(deviceId, capture);
-      }
-    };
     capture.startup = (async () => {
       try {
-        const source = await this.deps.createCaptureSource({
-          device,
-          onData: (chunk) => {
-            const current = this.captures.get(deviceId);
-            if (current !== capture || chunk.length === 0) {
-              return;
-            }
-            current.lastEncodedDataMs = this.timer.now();
-            current.firstEvidenceMs ??= current.lastEncodedDataMs;
-            current.encodedSinceSourceFrame = true;
-            if (!current.heartbeatTimer) {
-              this.startHeartbeat(deviceId, current);
-            }
-            this.broadcast(deviceId, chunk);
-          },
-          onSourceFrame: attestSource,
-          onSourceIdle: () => {
-            if (this.captures.get(deviceId) !== capture || !capture.encodedSinceSourceFrame) {
-              return;
-            }
-            capture.lastIdleMs = this.timer.now();
-          },
-          onEncodedAccessUnit: () => {
-            if (this.captures.get(deviceId) !== capture) {
-              return;
-            }
-            for (const nal of capture.parser.flush()) {
-              this.broadcastNal(deviceId, capture, nal);
-            }
-            this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
-            capture.keyFrameAuBytes = 0;
-            capture.lastEncodedBoundarySequence = capture.sourceFrameSequence;
-          },
-          onIdleAttestationSupport: (supported) => {
-            if (this.captures.get(deviceId) === capture && device.platform === "ios") {
-              capture.legacySimulatorHelper = !supported;
-            }
-          },
-          // Record the source's attested rotation so the next config packet re-attests it to
-          // subscribers, including a late joiner via replayParameterSets (issue #4786).
-          onRotation: (rotation) => {
-            const current = this.captures.get(deviceId);
-            if (current === capture) {
-              current.rotation = rotation;
-            }
-          },
-          onDroppedFrames: (droppedFrames) => {
-            const current = this.captures.get(deviceId);
-            if (
-              current !== capture ||
-              !Number.isSafeInteger(droppedFrames) ||
-              droppedFrames < 0 ||
-              !this.sourceEvidenceIsRecent(capture, this.timer.now())
-            ) {
-              return;
-            }
-            const packet = encodeDroppedFrames(droppedFrames);
-            for (const subscriber of capture.subscribers) {
-              this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
-            }
-          },
-          onError: (error) => {
-            logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
-            if (this.captures.get(deviceId) === capture) {
-              void this.stopCapture(deviceId);
-            }
-          },
-          bitrateBps: request.bitrateKbps ? request.bitrateKbps * 1000 : undefined,
-          size: request.size,
-          quality: request.quality,
-          // Pin the observation rate explicitly when the client sent no hint. This
-          // relay borrows the WebRTC capture sources, so without this it would
-          // silently inherit whatever the *WebRTC* iOS Simulator default happens
-          // to be — a knob that is tuned for an interactive WHEP feed. A client
-          // hint wins so farm viewers can lower the rate across many streams.
-          fps: request.fps ?? SIMULATOR_FPS_DEFAULT,
-        });
+        const source = await this.createSource(capture, capture.appliedHints, capture.generation);
         // A final disconnect during construction arms the same idle grace as any
         // last-subscriber detach. Only a removed entry or expired grace aborts startup.
         if (
@@ -685,6 +615,228 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     await capture.startup;
     this.promoteSubscriber(capture, socket, true);
     return capture;
+  }
+
+  private async createSource(
+    capture: DeviceCapture,
+    hints: CaptureHints,
+    generation: number,
+  ): Promise<H264CaptureSource> {
+    const { device } = capture;
+    const deviceId = device.deviceId;
+    const attestSource = (): void => {
+      if (this.captures.get(deviceId) !== capture || capture.generation !== generation) {
+        return;
+      }
+      capture.lastSourceDataMs = this.timer.now();
+      capture.firstEvidenceMs ??= capture.lastSourceDataMs;
+      capture.sourceFrameSequence++;
+      capture.lastIdleMs = null;
+      capture.encodedSinceSourceFrame = false;
+      if (!capture.heartbeatTimer) {
+        this.startHeartbeat(deviceId, capture);
+      }
+    };
+    return await this.deps.createCaptureSource({
+      device,
+      onData: (chunk) => {
+        const current = this.captures.get(deviceId);
+        if (current !== capture || capture.generation !== generation || chunk.length === 0) {
+          return;
+        }
+        current.lastEncodedDataMs = this.timer.now();
+        current.firstEvidenceMs ??= current.lastEncodedDataMs;
+        current.encodedSinceSourceFrame = true;
+        if (!current.heartbeatTimer) {
+          this.startHeartbeat(deviceId, current);
+        }
+        this.broadcast(deviceId, chunk);
+      },
+      onSourceFrame: attestSource,
+      onSourceIdle: () => {
+        if (
+          this.captures.get(deviceId) !== capture ||
+          capture.generation !== generation ||
+          !capture.encodedSinceSourceFrame
+        ) {
+          return;
+        }
+        capture.lastIdleMs = this.timer.now();
+      },
+      onEncodedAccessUnit: () => {
+        if (this.captures.get(deviceId) !== capture || capture.generation !== generation) {
+          return;
+        }
+        for (const nal of capture.parser.flush()) {
+          this.broadcastNal(deviceId, capture, nal);
+        }
+        this.cacheCompletedAccessUnits(capture, capture.keyFrameAssembler.flush());
+        capture.keyFrameAuBytes = 0;
+        capture.lastEncodedBoundarySequence = capture.sourceFrameSequence;
+      },
+      onIdleAttestationSupport: (supported) => {
+        if (
+          this.captures.get(deviceId) === capture &&
+          capture.generation === generation &&
+          device.platform === "ios"
+        ) {
+          capture.legacySimulatorHelper = !supported;
+        }
+      },
+      // Record the source's attested rotation so the next config packet re-attests it to
+      // subscribers, including a late joiner via replayParameterSets (issue #4786).
+      onRotation: (rotation) => {
+        const current = this.captures.get(deviceId);
+        if (current === capture && capture.generation === generation) {
+          current.rotation = rotation;
+        }
+      },
+      onDroppedFrames: (droppedFrames) => {
+        const current = this.captures.get(deviceId);
+        if (
+          current !== capture ||
+          capture.generation !== generation ||
+          !Number.isSafeInteger(droppedFrames) ||
+          droppedFrames < 0 ||
+          !this.sourceEvidenceIsRecent(capture, this.timer.now())
+        ) {
+          return;
+        }
+        const packet = encodeDroppedFrames(droppedFrames);
+        for (const subscriber of capture.subscribers) {
+          this.writePacketToSubscriber(deviceId, capture, subscriber, packet, false, false);
+        }
+      },
+      onError: (error) => {
+        if (this.captures.get(deviceId) === capture && capture.generation === generation) {
+          logger.warn(`[VideoStream] capture failed for ${deviceId}: ${error}`);
+          void this.stopCapture(deviceId);
+        }
+      },
+      bitrateBps: hints.bitrateKbps ? hints.bitrateKbps * 1000 : undefined,
+      size: capture.size,
+      quality: hints.quality,
+      // Pin the observation rate explicitly when the client sent no hint. This
+      // relay borrows the WebRTC capture sources, so without this it would
+      // silently inherit whatever the *WebRTC* iOS Simulator default happens
+      // to be — a knob that is tuned for an interactive WHEP feed. A client
+      // hint wins so farm viewers can lower the rate across many streams.
+      fps: hints.fps ?? SIMULATOR_FPS_DEFAULT,
+    });
+  }
+
+  private updateDesiredHints(
+    deviceId: string,
+    capture: DeviceCapture,
+    request: VideoStreamSocketRequest,
+  ): void {
+    const desired = capture.desiredHints;
+    capture.desiredHints = {
+      quality: request.quality ?? desired.quality,
+      fps: request.fps ?? desired.fps,
+      bitrateKbps: request.bitrateKbps ?? desired.bitrateKbps,
+    };
+    if (!sameHints(capture.desiredHints, capture.appliedHints)) {
+      logger.info(`[VideoStream] ${deviceId} scheduling shared capture quality change`);
+    }
+  }
+
+  private scheduleReconfigure(deviceId: string, capture: DeviceCapture): void {
+    if (capture.reconfigureTimer) {
+      this.timer.clearTimeout(capture.reconfigureTimer);
+      capture.reconfigureTimer = null;
+    }
+    if (
+      this.captures.get(deviceId) !== capture ||
+      capture.reconfiguring ||
+      !this.hasSubscribers(capture) ||
+      sameHints(capture.desiredHints, capture.appliedHints)
+    ) {
+      return;
+    }
+    capture.reconfigureTimer = this.timer.setTimeout(() => {
+      capture.reconfigureTimer = null;
+      const running = this.reconfigureCapture(deviceId, capture, { ...capture.desiredHints });
+      capture.reconfiguring = running;
+      void running.finally(() => {
+        capture.reconfiguring = null;
+        this.scheduleReconfigure(deviceId, capture);
+      });
+    }, RECONFIGURE_DEBOUNCE_MS);
+  }
+
+  private resetForNewEncoder(capture: DeviceCapture): void {
+    this.clearHeartbeatTimer(capture);
+    capture.parser = new H264AnnexBParser();
+    capture.keyFrameAssembler = new H264AccessUnitAssembler();
+    capture.keyFrameAuBytes = 0;
+    capture.sps = null;
+    capture.pps = null;
+    capture.latestKeyFrameAu = null;
+    capture.latestInterFrameAus = [];
+    capture.cachedGopBytes = 0;
+    capture.rotation = null;
+    capture.firstEvidenceMs = null;
+    capture.lastSourceDataMs = null;
+    capture.lastEncodedDataMs = null;
+    capture.lastIdleMs = null;
+    capture.lastLivenessProbeMs = null;
+    capture.encodedSinceSourceFrame = false;
+    capture.legacySimulatorHelper = false;
+    capture.sourceFrameSequence = 0;
+    capture.lastEncodedBoundarySequence = null;
+    for (const subscriber of capture.subscribers) {
+      capture.waitingForKeyFrame.add(subscriber);
+    }
+  }
+
+  private async reconfigureCapture(
+    deviceId: string,
+    capture: DeviceCapture,
+    hints: CaptureHints,
+  ): Promise<void> {
+    const outgoing = capture.source;
+    if (!outgoing || this.captures.get(deviceId) !== capture) {
+      return;
+    }
+    // Fence callbacks from the retiring encoder before its asynchronous stop. The socket sets
+    // stay in place; every viewer waits for the replacement's SPS/PPS and IDR.
+    capture.generation++;
+    capture.source = null;
+    this.resetForNewEncoder(capture);
+    try {
+      await outgoing.stop();
+      if (this.captures.get(deviceId) !== capture) {
+        return;
+      }
+      const source = await this.createSource(capture, hints, capture.generation);
+      if (this.captures.get(deviceId) !== capture) {
+        await source.stop();
+        return;
+      }
+      capture.source = source;
+      if (tracksConsumers(source)) {
+        source.setHasConsumers(this.hasSubscribers(capture));
+      }
+      await source.start();
+      if (this.captures.get(deviceId) !== capture) {
+        await source.stop();
+        return;
+      }
+      capture.appliedHints = hints;
+      logger.info(`[VideoStream] ${deviceId} shared capture quality changed`);
+      const waiting = capture.waitingForKeyFrame.values().next().value;
+      if (waiting) {
+        this.requestKeyFrameForWaitingSubscriber(deviceId, waiting);
+      }
+    } catch (error) {
+      logger.warn(`[VideoStream] failed to reconfigure capture for ${deviceId}: ${error}`);
+      if (this.captures.get(deviceId) === capture) {
+        // A failed stop may still own the encoder; teardown gets one final stop attempt.
+        capture.source ??= outgoing;
+        void this.stopCapture(deviceId);
+      }
+    }
   }
 
   private hasSubscribers(capture: DeviceCapture): boolean {
@@ -966,6 +1118,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     capture.backpressuredSubscribers.delete(socket);
     capture.waitingForKeyFrame.delete(socket);
     if (!this.hasSubscribers(capture)) {
+      if (capture.reconfigureTimer) {
+        this.timer.clearTimeout(capture.reconfigureTimer);
+        capture.reconfigureTimer = null;
+      }
       if (tracksConsumers(capture.source)) {
         capture.source.setHasConsumers(false);
       }
@@ -1123,6 +1279,10 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.captures.delete(deviceId);
     this.clearIdleTimer(capture);
     this.clearHeartbeatTimer(capture);
+    if (capture.reconfigureTimer) {
+      this.timer.clearTimeout(capture.reconfigureTimer);
+      capture.reconfigureTimer = null;
+    }
 
     for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
       this.socketDeviceIds.delete(subscriber);
@@ -1152,6 +1312,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           // Attach reports startup failures; teardown only needs to wait for late source cleanup.
           logger.debug(`[VideoStream] startup settled during stop for ${deviceId}: ${error}`);
         }
+        await capture.reconfiguring;
       } finally {
         this.pendingStops.delete(deviceId);
       }

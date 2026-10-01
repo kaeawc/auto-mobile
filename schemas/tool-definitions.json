@@ -546,7 +546,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
-          "description": "Storage name",
+          "description": "Storage name. iOS: empty string, \"standard\" (any case) or the app bundle id select the app's standard UserDefaults; any other value is a UserDefaults suite name (e.g. an app group) and must be a valid suite with no leading or trailing whitespace. Android: SharedPreferences file name without the .xml extension (letters, digits, underscore, dash, dot).",
           "type": "string"
         },
         "fileName": {
@@ -10399,7 +10399,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
-          "description": "Storage name",
+          "description": "Storage name. iOS: empty string, \"standard\" (any case) or the app bundle id select the app's standard UserDefaults; any other value is a UserDefaults suite name (e.g. an app group) and must be a valid suite with no leading or trailing whitespace. Android: SharedPreferences file name without the .xml extension (letters, digits, underscore, dash, dot).",
           "type": "string"
         },
         "fileName": {
@@ -11745,7 +11745,7 @@
           "pattern": "^[A-Za-z0-9._-]+$"
         },
         "name": {
-          "description": "Storage name",
+          "description": "Storage name. iOS: empty string, \"standard\" (any case) or the app bundle id select the app's standard UserDefaults; any other value is a UserDefaults suite name (e.g. an app group) and must be a valid suite with no leading or trailing whitespace. Android: SharedPreferences file name without the .xml extension (letters, digits, underscore, dash, dot).",
           "type": "string"
         },
         "fileName": {

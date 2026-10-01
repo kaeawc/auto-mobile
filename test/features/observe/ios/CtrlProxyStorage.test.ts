@@ -679,6 +679,65 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
     }
   });
 
+  for (const [operation, action] of [
+    ["setPreference", "set"],
+    ["removePreference", "remove"],
+    ["clearPreferenceStore", "clear"],
+  ] as const) {
+    const call = () =>
+      operation === "setPreference"
+        ? storage.setPreference("com.app", "group.x", "key", "value", "STRING")
+        : operation === "removePreference"
+          ? storage.removePreference("com.app", "group.x", "key")
+          : storage.clearPreferenceStore("com.app", "group.x");
+    test.each([
+      { resolvedStore: "group.x", effectiveValueDiffers: true },
+      { resolvedStore: "group.x", effectiveValueDiffers: false },
+      { resolvedStore: "group.x" },
+      { effectiveValueDiffers: true },
+      {},
+    ])(`${operation} preserves optional mutation metadata: %j`, async (metadata) => {
+      const promise = call();
+      await flush();
+      h.resolveLast({ success: true, totalTimeMs: 1, ...metadata });
+      expect(await promise).toEqual(Object.keys(metadata).length ? metadata : undefined);
+    });
+    test(`${operation} maps verification failure with action`, async () => {
+      const promise = call();
+      await flush();
+      h.resolveLast({ success: false, totalTimeMs: 1, error: "write_verification_failed" });
+      await expect(promise).rejects.toThrow(
+        `confirm the ${action} in the store's persistent domain (write_verification_failed)`,
+      );
+    });
+  }
+
+  test("null set maps verification failure as remove", async () => {
+    const promise = storage.setPreference("com.app", "Standard", "key", null, "STRING");
+    await flush();
+    h.resolveLast({ success: false, totalTimeMs: 1, error: "write_verification_failed" });
+    await expect(promise).rejects.toThrow(
+      "confirm the remove in the store's persistent domain (write_verification_failed)",
+    );
+  });
+
+  test.each([
+    ["iOS key-value storage rejected the value: invalid_store_name", "bundle id"],
+    ["iOS key-value storage failed: write_verification_failed", "persistent domain"],
+  ])("maps preference SDK errors: %s", async (message, guidance) => {
+    const promise = storage.setPreference("com.app", "Standard", "key", "value", "STRING");
+    await flush();
+    h.resolveLast({ success: false, totalTimeMs: 1, error: message });
+    try {
+      await promise;
+      throw new Error("Expected mutation failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as ActionableError).message).toContain(message.split(": ").at(-1)!);
+      expect((error as ActionableError).message).toContain(guidance);
+    }
+  });
+
   interface Op {
     op: string;
     wireType: string;

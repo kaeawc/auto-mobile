@@ -20,6 +20,13 @@ private struct PreferenceHierarchyServer: SdkHierarchyFetching {
 }
 
 private actor RecordingPreferenceClient: SdkPreferenceFetching {
+    private let resolvedStore: String?
+    private let effectiveValueDiffers: Bool?
+    init(resolvedStore: String? = "standard", effectiveValueDiffers: Bool? = nil) {
+        self.resolvedStore = resolvedStore
+        self.effectiveValueDiffers = effectiveValueDiffers
+    }
+
     private var operations: [String] = []
     private var mutationTokens: [String?] = []
     func recorded() -> [String] { operations }
@@ -48,10 +55,11 @@ private actor RecordingPreferenceClient: SdkPreferenceFetching {
         sessionId: String?,
         mutationToken: String?
     )
-        async throws
+        async throws -> PreferenceMutationResult
     {
         mutationTokens.append(mutationToken)
         operations.append("set:\(appId):\(suiteName):\(key):\(value):\(type):\(sessionId ?? "nil")")
+        return PreferenceMutationResult(resolvedStore: resolvedStore, effectiveValueDiffers: effectiveValueDiffers)
     }
 
     func remove(
@@ -61,15 +69,24 @@ private actor RecordingPreferenceClient: SdkPreferenceFetching {
         sessionId: String?,
         mutationToken: String?
     )
-        async throws
+        async throws -> PreferenceMutationResult
     {
         mutationTokens.append(mutationToken)
         operations.append("remove:\(appId):\(suiteName):\(key):\(sessionId ?? "nil")")
+        return PreferenceMutationResult(resolvedStore: resolvedStore, effectiveValueDiffers: effectiveValueDiffers)
     }
 
-    func clear(appId: String, suiteName: String, sessionId: String?, mutationToken: String?) async throws {
+    func clear(
+        appId: String,
+        suiteName: String,
+        sessionId: String?,
+        mutationToken: String?
+    )
+        async throws -> PreferenceMutationResult
+    {
         mutationTokens.append(mutationToken)
         operations.append("clear:\(appId):\(suiteName):\(sessionId ?? "nil")")
+        return PreferenceMutationResult(resolvedStore: resolvedStore, effectiveValueDiffers: effectiveValueDiffers)
     }
 }
 
@@ -132,6 +149,7 @@ final class StorageRoutingTests: XCTestCase {
             ]) { _, new in new }
         ))
         XCTAssertEqual((set as? WebSocketResponse)?.success, true)
+        XCTAssertEqual((set as? WebSocketResponse)?.resolvedStore, "standard")
         let get = try await handler.handle(request("get_preference", fields: fields))
         XCTAssertEqual((get as? StorageEntryResponse)?.value, "42")
         _ = try await handler.handle(request("get_preferences", fields: ["fileName": suite]))
@@ -171,5 +189,54 @@ final class StorageRoutingTests: XCTestCase {
         let calls = await client.recorded()
         XCTAssertEqual(calls, [])
         XCTAssertEqual(runner.calls, 0)
+    }
+
+    func testMutationResponsesForwardResolutionAndOmitItForOlderSdk() async throws {
+        for resolvedStore in ["standard", nil] as [String?] {
+            let handler = handler(
+                client: RecordingPreferenceClient(resolvedStore: resolvedStore),
+                runner: RunnerStorageTrap()
+            )
+            for type in ["set_preference", "remove_preference", "clear_preferences"] {
+                let result = try await handler.handle(request(type, fields: [
+                    "fileName": "standard", "key": "key", "value": "42", "valueType": "INT",
+                ]))
+                let response = try XCTUnwrap(result as? WebSocketResponse)
+                XCTAssertEqual(response.success, true)
+                XCTAssertEqual(response.resolvedStore, resolvedStore)
+                let body = try XCTUnwrap(
+                    JSONSerialization
+                        .jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
+                )
+                XCTAssertEqual(body["resolvedStore"] as? String, resolvedStore)
+                if resolvedStore == nil { XCTAssertNil(body["resolvedStore"]) }
+            }
+            let removed = try await handler.handle(request("set_preference", fields: [
+                "fileName": "standard", "key": "key", "valueType": "STRING",
+            ]))
+            XCTAssertEqual((removed as? WebSocketResponse)?.resolvedStore, resolvedStore)
+        }
+    }
+
+    func testOnlySetForwardsEffectiveValueDiffers() async throws {
+        let handler = handler(
+            client: RecordingPreferenceClient(effectiveValueDiffers: true), runner: RunnerStorageTrap()
+        )
+        for type in ["set_preference", "remove_preference", "clear_preferences"] {
+            let result = try await handler.handle(request(type, fields: [
+                "fileName": "standard", "key": "key", "value": "written", "valueType": "STRING",
+            ]))
+            let response = try XCTUnwrap(result as? WebSocketResponse)
+            XCTAssertEqual(response.effectiveValueDiffers, type == "set_preference" ? true : nil)
+            let body = try XCTUnwrap(
+                JSONSerialization
+                    .jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
+            )
+            if type != "set_preference" { XCTAssertNil(body["effectiveValueDiffers"]) }
+        }
+        let removed = try await handler.handle(request("set_preference", fields: [
+            "fileName": "standard", "key": "key", "valueType": "STRING",
+        ]))
+        XCTAssertNil((removed as? WebSocketResponse)?.effectiveValueDiffers)
     }
 }

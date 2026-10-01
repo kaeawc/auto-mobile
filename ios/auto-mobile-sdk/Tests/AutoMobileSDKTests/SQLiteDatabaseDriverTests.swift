@@ -271,6 +271,57 @@ final class SQLiteDatabaseDriverTests: XCTestCase {
         XCTAssertNil(result.rows)
         XCTAssertEqual(result.rowsAffected, 0)
     }
+
+    func testTransactionControlAndDdlReportZeroRowsAffectedAfterInsert() {
+        let statements: [(String, Int)] = [
+            ("INSERT INTO notes (body) VALUES ('d')", 1), ("BEGIN", 0),
+            ("INSERT INTO notes (body) VALUES ('e')", 1), ("ROLLBACK", 0),
+            ("BEGIN", 0), ("COMMIT", 0), ("CREATE TABLE extra (x)", 0), ("PRAGMA user_version = 3", 0),
+        ]
+        for (query, expected) in statements {
+            let result = driver.executeSQL(databasePath: databaseURL.path, query: query)
+            XCTAssertNil(result.error, query)
+            XCTAssertEqual(result.rowsAffected, expected, query)
+        }
+    }
+
+    func testDmlReportsTrueRowCounts() {
+        let statements: [(String, Int)] = [
+            ("UPDATE notes SET body = 'x'", 3), ("UPDATE notes SET body = 'y' WHERE id = 999", 0),
+            ("DELETE FROM notes WHERE id = 1", 1), ("INSERT INTO notes (body) VALUES ('a'),('b')", 2),
+        ]
+        for (query, expected) in statements {
+            let result = driver.executeSQL(databasePath: databaseURL.path, query: query)
+            XCTAssertNil(result.error, query)
+            XCTAssertEqual(result.rowsAffected, expected, query)
+        }
+    }
+
+    func testTriggerRowsAreNotCounted() {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_exec(db, "CREATE TABLE audit(n)", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, """
+        CREATE TRIGGER notes_audit AFTER INSERT ON notes BEGIN INSERT INTO audit(n) VALUES (NEW.id); END
+        """, nil, nil, nil), SQLITE_OK)
+        let result = driver.executeSQL(
+            databasePath: databaseURL.path, query: "INSERT INTO notes (body) VALUES ('p'),('q'),('r')"
+        )
+        XCTAssertNil(result.error)
+        XCTAssertEqual(result.rowsAffected, 3)
+    }
+
+    func testTruncatedInsertReturningReportsFullRowCount() {
+        let result = driver.executeSQL(databasePath: databaseURL.path, query: """
+        WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i < 600)
+        INSERT INTO notes (body) SELECT 'r' FROM c RETURNING id
+        """)
+        XCTAssertNil(result.error)
+        XCTAssertTrue(result.truncated)
+        XCTAssertEqual(result.rowsAffected, 600)
+        XCTAssertEqual(result.rows?.count, 500)
+    }
 }
 
 final class SQLiteDatabaseRouteClassificationTests: XCTestCase {

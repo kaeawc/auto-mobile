@@ -23,6 +23,8 @@ public struct WebSocketResponse: Codable, Sendable {
     /// center) or `"element-anchored"` (public fallback, center-less). Only set on
     /// `pinch_result` responses (issue #2910); nil elsewhere.
     public let pinchPath: String?
+    public let resolvedStore: String?
+    var effectiveValueDiffers: Bool?
 
     public init(
         type: String,
@@ -38,7 +40,8 @@ public struct WebSocketResponse: Codable, Sendable {
         perfTiming: PerfTiming? = nil,
         verified: Bool? = nil,
         warning: String? = nil,
-        pinchPath: String? = nil
+        pinchPath: String? = nil,
+        resolvedStore: String? = nil
     ) {
         self.type = type
         self.timestamp = timestamp
@@ -54,6 +57,7 @@ public struct WebSocketResponse: Codable, Sendable {
         self.verified = verified
         self.warning = warning
         self.pinchPath = pinchPath
+        self.resolvedStore = resolvedStore
     }
 
     public static func success(
@@ -61,7 +65,8 @@ public struct WebSocketResponse: Codable, Sendable {
         requestId: String?,
         totalTimeMs: Int64,
         text: String? = nil,
-        pinchPath: String? = nil
+        pinchPath: String? = nil,
+        resolvedStore: String? = nil
     )
         -> WebSocketResponse
     {
@@ -71,7 +76,8 @@ public struct WebSocketResponse: Codable, Sendable {
             success: true,
             totalTimeMs: totalTimeMs,
             text: text,
-            pinchPath: pinchPath
+            pinchPath: pinchPath,
+            resolvedStore: resolvedStore
         )
     }
 
@@ -95,7 +101,7 @@ public struct WebSocketResponse: Codable, Sendable {
     /// Returns this response with performance timing attached while preserving every
     /// other wire field. An existing total time takes precedence over the fallback.
     public func withPerfTiming(_ perfTiming: PerfTiming, totalTimeMs fallbackTotalTimeMs: Int64) -> WebSocketResponse {
-        WebSocketResponse(
+        var response = WebSocketResponse(
             type: type,
             timestamp: timestamp,
             requestId: requestId,
@@ -109,7 +115,10 @@ public struct WebSocketResponse: Codable, Sendable {
             perfTiming: perfTiming,
             verified: verified,
             warning: warning,
-            pinchPath: pinchPath
+            pinchPath: pinchPath,
+            resolvedStore: resolvedStore
         )
+        response.effectiveValueDiffers = effectiveValueDiffers
+        return response
     }
 }

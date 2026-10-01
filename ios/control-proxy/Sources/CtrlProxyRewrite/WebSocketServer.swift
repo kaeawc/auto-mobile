@@ -452,7 +452,7 @@ final class WebSocketServer: @unchecked Sendable {
                 if let original = response as? WebSocketResponse, existingError != nil {
                     // Decode the already-encoded envelope so injected timing is retained.
                     let encoded = try JSONDecoder().decode(WebSocketResponse.self, from: responseData)
-                    let deflected = WebSocketResponse(
+                    var deflected = WebSocketResponse(
                         type: original.type,
                         timestamp: original.timestamp,
                         requestId: original.requestId,
@@ -464,8 +464,10 @@ final class WebSocketServer: @unchecked Sendable {
                         blockingDeadlineRemainingMs: original.blockingDeadlineRemainingMs,
                         text: original.text,
                         perfTiming: encoded.perfTiming,
-                        pinchPath: original.pinchPath
+                        pinchPath: original.pinchPath,
+                        resolvedStore: original.resolvedStore
                     )
+                    deflected.effectiveValueDiffers = original.effectiveValueDiffers
                     let data = try JSONEncoder().encode(deflected)
                     onCompleted()
                     responder.send(data)

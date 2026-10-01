@@ -4,7 +4,7 @@ import XCTest
 
 final class ResponsePerfTimingCopyTests: XCTestCase {
     func testWebSocketResponsePerfTimingCopyPreservesEveryFieldAndUsesFallbackTotal() throws {
-        let response = WebSocketResponse(
+        var response = WebSocketResponse(
             type: "pinch_result",
             timestamp: 1_730_000_000_000,
             requestId: "request-1",
@@ -17,8 +17,10 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
             text: "result text",
             verified: false,
             warning: "Value did not change",
-            pinchPath: "element-anchored"
+            pinchPath: "element-anchored",
+            resolvedStore: "x"
         )
+        response.effectiveValueDiffers = true
         let timing = PerfTiming(name: "handleRequest", durationMs: 12)
 
         let copied = response.withPerfTiming(timing, totalTimeMs: 99)
@@ -37,6 +39,8 @@ final class ResponsePerfTimingCopyTests: XCTestCase {
         XCTAssertEqual(decoded.verified, false)
         XCTAssertEqual(decoded.warning, "Value did not change")
         XCTAssertEqual(decoded.pinchPath, "element-anchored")
+        XCTAssertEqual(decoded.resolvedStore, "x")
+        XCTAssertEqual(decoded.effectiveValueDiffers, true)
         XCTAssertEqual(decoded.perfTiming?.name, "handleRequest")
         XCTAssertEqual(decoded.perfTiming?.durationMs, 12)
     }

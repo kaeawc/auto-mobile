@@ -133,7 +133,7 @@ import {
 import { canonicalPixelsToPoints } from "./canonicalPixels";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { getDeviceDataStreamServer } from "./deviceDataStreamSocketServer";
-import type { KeyValueType } from "../features/storage/storageTypes";
+import type { KeyValueType, PreferenceStoreResolution } from "../features/storage/storageTypes";
 import type {
   AppendTextFailureSource,
   BootedDevice,
@@ -636,9 +636,16 @@ interface KeyValueMutationClient {
     key: string,
     value: string,
     type: KeyValueType,
-  ): Promise<void>;
-  removePreference(packageName: string, fileName: string, key: string): Promise<void>;
-  clearPreferenceStore(packageName: string, fileName: string): Promise<void>;
+  ): Promise<PreferenceStoreResolution | void>;
+  removePreference(
+    packageName: string,
+    fileName: string,
+    key: string,
+  ): Promise<PreferenceStoreResolution | void>;
+  clearPreferenceStore(
+    packageName: string,
+    fileName: string,
+  ): Promise<PreferenceStoreResolution | void>;
 }
 
 /**
@@ -4483,7 +4490,7 @@ export class UnixSocketServer {
     device: BootedDevice,
     appId: string,
     fileName: string,
-    viaSdk: () => Promise<void>,
+    viaSdk: () => Promise<PreferenceStoreResolution | void>,
     viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
   ): Promise<{ usedDirectFileFallback: boolean }> {
     if (platform !== "android") {
@@ -4494,7 +4501,9 @@ export class UnixSocketServer {
       appId,
       fileName,
       () => this.adbClientFactory.create(device),
-      viaSdk,
+      async () => {
+        await viaSdk();
+      },
       viaDirectFile,
     );
   }

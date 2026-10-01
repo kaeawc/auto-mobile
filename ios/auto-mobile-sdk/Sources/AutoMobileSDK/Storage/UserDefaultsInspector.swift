@@ -304,7 +304,9 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     private static func diff(
         previous: [String: KeyValuePair],
         current: [String: KeyValuePair]
-    ) -> [StorageChange] {
+    )
+        -> [StorageChange]
+    {
         var changes: [StorageChange] = []
 
         for (key, pair) in current {
@@ -338,13 +340,13 @@ public final class UserDefaultsInspector: @unchecked Sendable {
 
     // MARK: - Testing Support
 
-    internal func setDriver(_ driver: UserDefaultsDriver) {
+    func setDriver(_ driver: UserDefaultsDriver) {
         lock.lock()
         _driver = driver
         lock.unlock()
     }
 
-    internal func reset() {
+    func reset() {
         stopListening()
         lock.lock()
         _isEnabled = false
@@ -430,15 +432,39 @@ public enum KeyValueType: String, Sendable {
 
 // MARK: - Default Implementation
 
-final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
+/// Internal verification seam; the public UserDefaultsDriver contract stays unchanged.
+protocol PersistentDomainReading {
+    func persistentValue(domain: String, suiteName: String?, key: String) -> KeyValuePair?
+    func persistentKeys(domain: String, suiteName: String?) -> Set<String>
+}
+
+final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReading, @unchecked Sendable {
+    private let makeDefaults: (String?) -> UserDefaults?
+
+    init(makeDefaults: @escaping (String?) -> UserDefaults? = { name in
+        if let name { return UserDefaults(suiteName: name) }
+        return .standard
+    }) {
+        self.makeDefaults = makeDefaults
+    }
+
+    func persistentValue(domain: String, suiteName: String?, key: String) -> KeyValuePair? {
+        guard let value = resolveDefaults(suiteName: suiteName)?.persistentDomain(forName: domain)?[key]
+        else { return nil }
+        let type = Self.typeOf(value)
+        return KeyValuePair(key: key, value: Self.encode(value, as: type), type: type)
+    }
+
+    func persistentKeys(domain: String, suiteName: String?) -> Set<String> {
+        let values = resolveDefaults(suiteName: suiteName)?.persistentDomain(forName: domain) ?? [:]
+        return Set(values.keys)
+    }
+
     /// Resolve the UserDefaults instance for a suite name.
     /// Returns nil for non-nil suite names that can't be created (e.g., unconfigured app groups).
     /// Returns .standard when suiteName is nil.
     private func resolveDefaults(suiteName: String?) -> UserDefaults? {
-        if let name = suiteName {
-            return UserDefaults(suiteName: name)
-        }
-        return .standard
+        makeDefaults(suiteName)
     }
 
     func getSuites() -> [UserDefaultsSuiteDescriptor] {
@@ -467,26 +493,26 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
         return KeyValuePair(key: key, value: Self.encode(value, as: type), type: type)
     }
 
-    func setValue(suiteName: String?, key: String, value: Any?, type: KeyValueType) {
+    func setValue(suiteName: String?, key: String, value: Any?, type _: KeyValueType) {
         #if DEBUG
-        guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
-        defaults.set(value, forKey: key)
+            guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
+            defaults.set(value, forKey: key)
         #endif
     }
 
     func removeValue(suiteName: String?, key: String) {
         #if DEBUG
-        guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
-        defaults.removeObject(forKey: key)
+            guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
+            defaults.removeObject(forKey: key)
         #endif
     }
 
     func clear(suiteName: String?) {
         #if DEBUG
-        guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
-        for key in defaults.dictionaryRepresentation().keys {
-            defaults.removeObject(forKey: key)
-        }
+            guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
+            for key in defaults.dictionaryRepresentation().keys {
+                defaults.removeObject(forKey: key)
+            }
         #endif
     }
 
@@ -530,7 +556,8 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
             // with unstable key order would otherwise surface as a phantom modify.
             if JSONSerialization.isValidJSONObject(value),
                let json = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
-               let string = String(data: json, encoding: .utf8) {
+               let string = String(data: json, encoding: .utf8)
+            {
                 return string
             }
             return "\(value)"

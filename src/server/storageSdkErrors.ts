@@ -10,6 +10,7 @@ export const IOS_STORAGE_MUTATION_AUTHORIZATION_HINT =
 type StorageSdkErrorContext = {
   operation: "database" | "storage";
   databasePath?: string;
+  action?: "set" | "remove" | "clear";
 };
 
 type StorageSdkErrorCode =
@@ -18,6 +19,8 @@ type StorageSdkErrorCode =
   | "unknown_database_path"
   | "unknown_table"
   | "multiple_statements_not_supported"
+  | "invalid_store_name"
+  | "write_verification_failed"
   | "mutation_not_authorized"
   | "encode_failed"
   | "response_too_large";
@@ -36,11 +39,30 @@ const SDK_ERROR_MESSAGES: Record<StorageSdkErrorCode, (context: StorageSdkErrorC
         ? `The database is read-only for the inspector. Writes and transaction control (BEGIN/COMMIT/ROLLBACK/SAVEPOINT) require mutation authorization. (${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT})`
         : IOS_STORAGE_MUTATION_AUTHORIZATION_HINT;
     },
+    invalid_store_name: () =>
+      "The iOS SDK could not open that key-value store name (invalid_store_name). Use an empty name, \"standard\" (any case) or the app's bundle id for the app's standard UserDefaults; any other name must be a valid UserDefaults suite name with no leading or trailing whitespace (the global domain is not allowed).",
+    write_verification_failed: ({ action }) => {
+      const detail =
+        action === "set"
+          ? "the key was absent or its value or type did not match"
+          : action === "remove"
+            ? "the key was still present"
+            : "one or more prior keys were still present";
+      return action
+        ? `The iOS SDK could not confirm the ${action} in the store's persistent domain (write_verification_failed): ${detail}. Check the store name and key.`
+        : "The iOS SDK could not confirm the requested mutation in the store's persistent domain (write_verification_failed). Check the store name and affected keys.";
+    },
     encode_failed: () =>
       "The iOS SDK could not encode the database inspection response (encode_failed).",
     response_too_large: () =>
       "The database inspection response exceeded the SDK size limit (response_too_large).",
   };
+
+const STORAGE_ERROR_CODES = new Set<StorageSdkErrorCode>([
+  "mutation_not_authorized",
+  "invalid_store_name",
+  "write_verification_failed",
+]);
 
 const SDK_ERROR_CODES = Object.keys(SDK_ERROR_MESSAGES) as StorageSdkErrorCode[];
 const SDK_ERROR_CODE_PATTERN = new RegExp(`(?:^|:\\s*)(${SDK_ERROR_CODES.join("|")})$`);
@@ -62,7 +84,7 @@ export function mapStorageSdkError(error: unknown, context: StorageSdkErrorConte
     context.operation === "storage" && message.includes("mutation_not_authorized")
       ? "mutation_not_authorized"
       : sdkErrorCode(message);
-  if (context.operation === "storage" && code !== "mutation_not_authorized") {
+  if (context.operation === "storage" && (!code || !STORAGE_ERROR_CODES.has(code))) {
     return null;
   }
   return code ? SDK_ERROR_MESSAGES[code](context) : null;

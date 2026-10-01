@@ -75,6 +75,7 @@ class FakeSimulatorCommands {
 
 const dependencies = (overrides: Partial<CrashAppDependencies> = {}): CrashAppDependencies => ({
   cacheInvalidator: { invalidate: () => {} },
+  uid: () => 501,
   ...overrides,
 });
 
@@ -489,7 +490,10 @@ describe("CrashApp (iOS)", () => {
     );
     const timer = new FakeTimer();
     timer.advanceTime(1_700_000_000_000);
-    const action = new CrashApp(iosSimulator, dependencies({ simctl: commands, timer }));
+    const action = new CrashApp(
+      iosSimulator,
+      dependencies({ simctl: commands, timer, uid: () => 501 }),
+    );
 
     const result = await action.execute("com.example.app");
 
@@ -519,6 +523,37 @@ describe("CrashApp (iOS)", () => {
     expect(commands.timeouts.every((timeoutMs) => (timeoutMs ?? 0) > 0)).toBe(true);
   });
 
+  test("uses the host UID when signaling the simulator app process", async () => {
+    const processList = "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]";
+    const commands = new FakeSimulatorCommands(
+      [processList, processList, "PID\tStatus\tLabel\n"],
+      "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
+    );
+    const timer = new FakeTimer();
+    timer.advanceTime(1_700_000_000_000);
+    const action = new CrashApp(
+      iosSimulator,
+      dependencies({ simctl: commands, timer, uid: () => 20_123 }),
+    );
+
+    const result = await action.execute("com.example.app");
+
+    expect(result).toMatchObject({
+      success: true,
+      timestamp: 1_700_000_000_000,
+      confirmed: true,
+    });
+    expect(commands.calls).toContainEqual([
+      "spawn",
+      iosSimulator.deviceId,
+      "launchctl",
+      "kill",
+      "SIGABRT",
+      "user/20123/UIKitApplication:com.example.app[bbbb][rb-legacy]",
+    ]);
+    expect(commands.calls.flat().join(" ")).not.toContain("user/501/");
+  });
+
   test("timestamps induction after simulator process preflight", async () => {
     const process = "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]";
     const timer = new FakeTimer();
@@ -531,7 +566,7 @@ describe("CrashApp (iOS)", () => {
 
     const result = await new CrashApp(
       iosSimulator,
-      dependencies({ simctl: commands, timer }),
+      dependencies({ simctl: commands, timer, uid: () => 501 }),
     ).execute("com.example.app");
 
     expect(result).toMatchObject({ success: true, timestamp: 1_200, confirmed: true });

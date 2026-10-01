@@ -2,6 +2,7 @@ import type { ChildProcess } from "node:child_process";
 import { describe, expect, it } from "bun:test";
 import {
   AndroidAvdIdentityConflictError,
+  AndroidAvdIdentityUnresolvedError,
   AndroidBootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
   DeviceBootTimeoutError,
@@ -830,6 +831,84 @@ describe("DeviceBootService", () => {
       }),
     ).rejects.toThrow(`Device '${requestedUdid}' not found`);
     expect(devices.getExecutedOperations().join("|")).not.toContain("startDevice:");
+  });
+
+  it("reattaches the exact running AVD after a fresh service instance", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [image, { ...image, name: `${image.name}_Copy` }]);
+    devices.setBootedDevices("android", [
+      { name: `${image.name}_Copy`, platform: "android", deviceId: "emulator-5556" },
+      { name: image.name, platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "android",
+      name: image.name,
+      matchExactName: true,
+    });
+
+    expect(result.source).toBe("booted");
+    expect(result.device.deviceId).toBe("emulator-5554");
+    expect(devices.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("starts only the configured exact AVD when it is stopped", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [image, { ...image, name: `${image.name}_Copy` }]);
+
+    const result = await service(devices, new DefaultDeviceMatcher()).boot({
+      platform: "android",
+      name: image.name,
+      matchExactName: true,
+      createIfMissing: true,
+    });
+
+    expect(result.source).toBe("cold-boot");
+    expect(result.device.name).toBe(image.name);
+    expect(
+      devices.getExecutedOperations().filter((operation) => operation.startsWith("startDevice:")),
+    ).toEqual([`startDevice:${image.name}:180000`]);
+  });
+
+  it("never provisions a missing exact AVD even when creation is requested", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [{ ...image, name: `${image.name}_Copy` }]);
+
+    await expect(
+      service(devices, new DefaultDeviceMatcher()).boot({
+        platform: "android",
+        name: image.name,
+        matchExactName: true,
+        createIfMissing: true,
+      }),
+    ).rejects.toThrow(/target_not_found/);
+    expect(devices.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("refuses an exact AVD while a running emulator's name is unresolved", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [image]);
+    devices.setBootedDevices("android", [
+      { name: "Unknown (emulator-5554)", platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    await expect(
+      service(devices).boot({ platform: "android", name: image.name, matchExactName: true }),
+    ).rejects.toBeInstanceOf(AndroidAvdIdentityUnresolvedError);
+    expect(devices.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("refuses a stale image serial occupied by a different AVD", async () => {
+    const devices = new FakeDeviceUtils();
+    devices.setDeviceImages("android", [{ ...image, deviceId: "emulator-5554", isRunning: true }]);
+    devices.setBootedDevices("android", [
+      { name: "Other_AVD", platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    await expect(
+      service(devices).boot({ platform: "android", deviceId: image.name }),
+    ).rejects.toThrow(/target_identity_mismatch/);
+    expect(devices.wasMethodCalled("startDevice")).toBe(false);
   });
 
   it("rejects an ambiguous running Android AVD when reusing an image by name", async () => {

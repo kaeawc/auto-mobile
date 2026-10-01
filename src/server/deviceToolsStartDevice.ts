@@ -243,6 +243,7 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       });
       try {
         state.boot = readinessResult.boot;
+        validateBootIdentity(args, state.boot.device, state.boot.source, state.boot.sourceImage);
         moveDeviceAcquisitionReadiness(
           acquisitionReadinessKey,
           deviceReadinessLockKey(state.boot.device.platform, state.boot.device.deviceId),

@@ -3760,6 +3760,12 @@ export function validateBootIdentity(
         "phase=pool-match: resolved platform differs from requested platform",
     );
   }
+  if (args.platform === "android" && args.avdName && device.name !== args.avdName) {
+    throw new ActionableError(
+      `target_identity_mismatch: Requested Android AVD '${args.avdName}' ` +
+        `resolved to '${device.name}' (${device.deviceId}).`,
+    );
+  }
   if (source === "booted" && isMismatchedBootedDeviceId(args, device, sourceImage)) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requested}] resolved=[${resolved}] ` +

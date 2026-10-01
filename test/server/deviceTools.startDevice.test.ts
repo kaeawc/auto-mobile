@@ -423,6 +423,29 @@ describe("startDevice handler", () => {
     );
   });
 
+  it("fails closed when an exact AVD might already occupy an unresolved emulator serial", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeDeviceUtils.setBootedDevices("android", [
+      { ...androidDevice, name: `Unknown (${androidDevice.deviceId})` },
+    ]);
+
+    await expect(
+      callStartDevice({ platform: "android", avdName: androidImage.name }),
+    ).rejects.toThrow(/target_identity_unresolved/);
+    expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
+  it("does not provision or choose a sibling for a missing exact AVD", async () => {
+    fakeDeviceUtils.setDeviceImages("android", [
+      { ...androidImage, name: `${androidImage.name}_Copy` },
+    ]);
+
+    await expect(
+      callStartDevice({ platform: "android", avdName: androidImage.name, createIfMissing: true }),
+    ).rejects.toThrow(/target_not_found/);
+    expect(fakeDeviceUtils.wasMethodCalled("startDevice")).toBe(false);
+  });
+
   it("enforces Android API and dotted marketing bounds for an exact AVD", async () => {
     const exact = {
       ...androidDevice,

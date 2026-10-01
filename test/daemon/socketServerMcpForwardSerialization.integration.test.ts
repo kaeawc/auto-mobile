@@ -858,6 +858,45 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
+  test("runs a device-free inventory call beside a device call on one socket (#6387)", async () => {
+    await restartWithFakeTimer("mcp-host-inventory-admission");
+    const deviceStarted = Promise.withResolvers<void>();
+    const inventoryStarted = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    server.mcpClientFactory = async () => ({
+      listTools: async () => ({ tools: [] }),
+      callTool: async (params: { name: string }) => {
+        if (params.name === "listDevices") {
+          inventoryStarted.resolve();
+        } else {
+          deviceStarted.resolve();
+        }
+        await release.promise;
+        return { content: [] };
+      },
+      listResources: async () => ({ resources: [] }),
+      readResource: async () => ({ contents: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
+      close: async () => {},
+    });
+    const client = new PersistentSocketClient();
+    await client.connect(socketPath);
+    try {
+      const device = client.request("tools/call", {
+        name: "tapOn",
+        arguments: { deviceId: "device-1" },
+      });
+      const inventory = client.request("tools/call", { name: "listDevices", arguments: {} });
+      await Promise.all([deviceStarted.promise, inventoryStarted.promise]);
+      release.resolve();
+      await expect(device).resolves.toMatchObject({ success: true });
+      await expect(inventory).resolves.toMatchObject({ success: true });
+    } finally {
+      release.resolve();
+      client.close();
+    }
+  });
+
   test("does not charge another device's in-flight call against a queued call's timeout (#6387)", async () => {
     frameTraceEvents.length = 0;
     clientReceiveEvents.length = 0;

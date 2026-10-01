@@ -9,6 +9,7 @@ import {
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
 } from "../../src/daemon/constants";
 import type { DaemonRequest } from "../../src/daemon/types";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 function toolsCall(name: string, args: Record<string, unknown>): DaemonRequest {
   return { id: "1", type: "mcp_request", method: "tools/call", params: { name, arguments: args } };
@@ -98,6 +99,44 @@ describe("SocketRequestAdmissionQueue", () => {
     await expect(failed).rejects.toThrow("boom");
     expect(await next).toBe("next");
   });
+
+  test("expires a queued same-lane request without running it", async () => {
+    const timer = new FakeTimer();
+    const queue = new SocketRequestAdmissionQueue();
+    const started: string[] = [];
+    const first = enqueueBlocked(queue, "device:a", "first", started);
+    const expired = queue.run("device:a", async () => started.push("expired"), {
+      timer,
+      deadlineMs: 500,
+      signal: new AbortController().signal,
+      timeoutError: (sameLaneWait) => new Error(`timed out in queue: ${sameLaneWait}`),
+    });
+    expect(queue.pendingCount).toBe(1);
+    timer.advanceTime(500);
+    await expect(expired).rejects.toThrow("timed out in queue: true");
+    expect(queue.pendingCount).toBe(0);
+    first.release();
+    await first.done;
+    expect(started).toEqual(["first"]);
+  });
+
+  test("cancels a pending request and frees its slot", async () => {
+    const queue = new SocketRequestAdmissionQueue();
+    const timer = new FakeTimer();
+    const first = enqueueBlocked(queue, "device:a", "first", []);
+    const cancellation = new AbortController();
+    const queued = queue.run("device:a", async () => "ran", {
+      timer,
+      deadlineMs: 500,
+      signal: cancellation.signal,
+      timeoutError: () => new Error("timed out"),
+    });
+    cancellation.abort(new Error("cancelled"));
+    await expect(queued).rejects.toThrow("cancelled");
+    expect(queue.pendingCount).toBe(0);
+    first.release();
+    await first.done;
+  });
 });
 
 describe("resolveSocketAdmissionLane", () => {
@@ -110,6 +149,14 @@ describe("resolveSocketAdmissionLane", () => {
         toolsCall("observe", { deviceId: "d1", [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "p" }),
       ),
     ).toBe("device:d1");
+  });
+
+  test("lanes device-free inventory tools separately from device calls", () => {
+    expect(resolveSocketAdmissionLane(toolsCall("listDevices", {}))).toBe("host:inventory");
+    expect(resolveSocketAdmissionLane(toolsCall("listDeviceImages", {}))).toBe("host:inventory");
+    expect(
+      resolveSocketAdmissionLane(toolsCall("listDevices", { sessionUuid: "s1" })),
+    ).toBeUndefined();
   });
 
   test("treats session-routed, acquisition, and non-tool requests as barriers", () => {

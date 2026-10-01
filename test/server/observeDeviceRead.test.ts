@@ -14,7 +14,10 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { observationScreenshotEvidence } from "../../src/features/observe/screenshot/observationScreenshotEvidence";
-import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
+import {
+  loadAndroidHomeObserve,
+  loadIosFractionalObserve,
+} from "../fixtures/observe/observeFixture";
 import toolDefinitions from "../../schemas/tool-definitions.json";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
@@ -280,6 +283,56 @@ describe("session-free observe device read", () => {
       restorePipeline();
       record.mockRestore();
     }
+  });
+
+  test("an iOS session observe captures a reference when runner frame metadata is present", async () => {
+    const iosDevice: BootedDevice = {
+      deviceId: "ios-test-device",
+      name: "iPhone",
+      platform: "ios",
+    };
+    const sessionUuid = "ios-observe-session";
+    const manager = new FakeDeviceSessionManager();
+    manager.setConnectedDevices([iosDevice]);
+    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
+    registerDirectSessionDevice(sessionUuid, iosDevice);
+    // The existing iOS fixture predates runner frame metadata; supply the typed fields
+    // emitted by current CtrlProxy without inventing a second hierarchy fixture.
+    const fixture = loadIosFractionalObserve();
+    const observation: ObserveResult = {
+      ...fixture,
+      observationId: "ios-capture",
+      displayRevision: 0,
+      rotation: 0,
+      activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 0 },
+      viewHierarchy: {
+        ...fixture.viewHierarchy!,
+        frameContext: "ios-epoch:1:screen",
+        nativeScale: 3,
+        pixelWidth: 1179,
+        pixelHeight: 2556,
+        rotation: 0,
+      },
+    };
+    registerObserveTools({
+      createScreen: () => ({
+        execute: async () => observation,
+        executeDeviceRead: async () => {
+          throw new Error("entered sessionless device read");
+        },
+        appendRawViewHierarchy: async () => {},
+        getMostRecentCachedObserveResult: async () => observation,
+      }),
+    });
+    const response = await ToolRegistry.getTool("observe")!.handler({
+      deviceId: iosDevice.deviceId,
+      sessionUuid,
+    });
+    expect(getStructuredField(response, "snapshotReference")).toMatchObject({
+      snapshotId: expect.any(String),
+      expiresAt: expect.any(Number),
+    });
   });
 
   test("mismatching session deviceId identifies the supplied and bound devices", async () => {

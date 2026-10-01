@@ -100,13 +100,20 @@ transform before correlating iOS `observe` or `tapAt` coordinates with
 When `observe` has verifiable geometry and a frame context, it returns
 `snapshotReference: { snapshotId, expiresAt }`. Pass `snapshotId` with native
 screen coordinates to `tapAt` to bind the tap to that observation. References
-are process-local, expire within five minutes, and are rejected after a device
-restart or reassignment, display transition, rotation, resize, scale change, or
-frame-context change. A rejected tap does not silently recapture or retarget.
+are process-local and expire within five minutes. A tap rejects a reference after
+device restart or reassignment, runner restart, or a change to the display panel,
+role, posture, rotation, screen size, native scale, or app id. Android also
+compares a known activity name, window type, and focused window identity and
+bounds when both observations provide them. iOS does not provide Android
+activity names; its available app-window metadata (when present) describes the
+application window and does not detect in-app navigation. A display revision or
+runner frame-event counter advancing by itself does not invalidate the reference.
+A rejected tap does not silently recapture or retarget.
 This reference covers the full screen; it does not convert screenshot pixels
-into native coordinates or account for a crop. Unchanged geometry and frame
-context do not prove unchanged visual content. Recapture after navigation,
-scrolling, animation, or any other UI change.
+into native coordinates or account for a crop. Unchanged geometry and window
+context do not prove unchanged visual content — re-observe after UI changes.
+The comparison deliberately does not detect scrolling, in-layout sheets,
+single-activity navigation, or WebView page changes.
 
 `hitTest` previews the same `{"x":120,"y":240}` native screen target accepted
 by `tapAt`, including its optional `display` selector. It is opt-in. Its

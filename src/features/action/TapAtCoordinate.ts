@@ -383,30 +383,18 @@ export class TapAtCoordinate extends BaseVisualChange {
           this.assertDisplayRevisionCurrent(transitionRevision);
           switch (this.device.platform) {
             case "android":
-              if (options.snapshotId) {
-                await this.androidCoordinateTap(
-                  this.androidClient,
-                  this.adb,
-                  resolved.x,
-                  resolved.y,
-                  tapDurationMs(options, "android"),
-                  frameContext,
-                  signal,
-                );
-              } else {
-                await this.dispatchAndroidTapWithOneFreshRetry(
-                  options,
-                  resolved,
-                  observeResult,
-                  transitionRevision,
-                  perf,
-                  signal,
-                );
-              }
+              const dispatchedFrameContext = await this.dispatchAndroidTapWithOneFreshRetry(
+                options,
+                resolved,
+                observeResult,
+                transitionRevision,
+                perf,
+                signal,
+              );
               await this.dispatchSecondAndroidTap(
                 options,
                 resolved,
-                frameContext,
+                dispatchedFrameContext,
                 transitionRevision,
                 signal,
               );
@@ -480,7 +468,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     transitionRevision: number,
     perf: PerformanceTracker,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const frameContext = observeResult.viewHierarchy?.frameContext;
     try {
       await this.androidCoordinateTap(
@@ -492,7 +480,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         frameContext,
         signal,
       );
-      return;
+      return frameContext;
     } catch (error) {
       const actionable = toActionableError(error, "Failed to dispatch Android coordinate tap");
       if (frameContext === undefined || !isStaleFrameContextRejection(actionable.message)) {
@@ -503,18 +491,19 @@ export class TapAtCoordinate extends BaseVisualChange {
       // advance. Any unprovable or changed targeting state preserves the original fail-closed error.
       throwIfAborted(signal);
       const refreshedObservation = await this.observeScreen.execute({
-        freshness: "cached-ok",
+        freshness: this.retryFreshness(options),
         signal,
         perf,
       });
       this.assertDisplayRevisionCurrent(transitionRevision);
+      this.assertSnapshotCurrent(options, refreshedObservation);
       const refreshed = this.resolveCoordinates(options, refreshedObservation);
       const refreshedFrameContext = refreshedObservation.viewHierarchy?.frameContext;
       if (
         "error" in refreshed ||
         refreshed.x !== resolved.x ||
         refreshed.y !== resolved.y ||
-        !hasSameTapTargetingLayout(observeResult, refreshedObservation) ||
+        !this.hasSafeRetryLayout(options, observeResult, refreshedObservation) ||
         !refreshedFrameContext ||
         refreshedFrameContext === frameContext
       ) {
@@ -532,6 +521,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         refreshedFrameContext,
         signal,
       );
+      return refreshedFrameContext;
     }
   }
 
@@ -554,6 +544,25 @@ export class TapAtCoordinate extends BaseVisualChange {
     return options.snapshotId
       ? this.snapshotReferences.staleReason(options.snapshotId, this.device.deviceId, observation)
       : undefined;
+  }
+
+  private assertSnapshotCurrent(options: TapAtOptions, observation: ObserveResult): void {
+    const stale = this.staleSnapshotReason(options, observation);
+    if (stale) {
+      throw new ActionableError(stale);
+    }
+  }
+
+  private hasSafeRetryLayout(
+    options: TapAtOptions,
+    initial: ObserveResult,
+    refreshed: ObserveResult,
+  ): boolean {
+    return Boolean(options.snapshotId) || hasSameTapTargetingLayout(initial, refreshed);
+  }
+
+  private retryFreshness(options: TapAtOptions): "fresh" | "cached-ok" {
+    return options.snapshotId ? "fresh" : "cached-ok";
   }
 
   private hasStaleCallerRevision(revision: number): boolean {

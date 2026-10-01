@@ -17,12 +17,20 @@ interface SnapshotGeometry {
   displayKey: string;
   displayRole: string;
   displayPosture: string | undefined;
-  displayRevision: number;
   width: number;
   height: number;
   rotation: number;
   nativeScale: number;
-  frameContext: string;
+  runnerEpoch: string | undefined;
+  appId: string | undefined;
+  hierarchyPackage: string | undefined;
+  activityName: string;
+  windowType: string | undefined;
+  focusedWindowPresent: boolean;
+  focusedWindowId: number | undefined;
+  focusedWindowType: number | undefined;
+  focusedWindowPackage: string | undefined;
+  focusedWindowBounds: string | undefined;
 }
 
 function hasPositiveSize(size: ObserveResult["screenSize"]): boolean {
@@ -35,10 +43,19 @@ function hasPositiveScale(scale: number | undefined): scale is number {
   return typeof scale === "number" && Number.isFinite(scale) && scale > 0;
 }
 
+/** Android: UUID:counter; iOS: UUID:generation:semanticHash. */
+function frameContextEpoch(token: string): string | undefined {
+  const match = /^([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}):\d+(?::[0-9a-f]+)?$/i.exec(token);
+  return match?.[1]?.toLowerCase();
+}
+
 function captureFrame(
   observation: ObserveResult,
-): Pick<SnapshotGeometry, "rotation" | "nativeScale" | "frameContext"> | undefined {
+): Pick<SnapshotGeometry, "rotation" | "nativeScale" | "runnerEpoch"> | undefined {
   const rotation = observation.rotation ?? observation.viewHierarchy?.rotation;
+  // The runner token proves this capture has frame provenance. Its generation may advance on
+  // accessibility events without changing the target window or geometry, so it is not an identity
+  // field of the reusable reference. The current token is still sent with each dispatch.
   const frameContext = observation.viewHierarchy?.frameContext;
   const nativeScale = observation.viewHierarchy?.nativeScale;
   if (
@@ -49,17 +66,35 @@ function captureFrame(
   ) {
     return undefined;
   }
-  return { rotation, nativeScale, frameContext };
+  return { rotation, nativeScale, runnerEpoch: frameContextEpoch(frameContext) };
+}
+
+function focusedWindowContext(
+  observation: ObserveResult,
+): Pick<
+  SnapshotGeometry,
+  | "focusedWindowId"
+  | "focusedWindowType"
+  | "focusedWindowPackage"
+  | "focusedWindowBounds"
+  | "focusedWindowPresent"
+> {
+  const focused = observation.viewHierarchy?.windows?.find((window) => window.isFocused);
+  const bounds = focused?.bounds;
+  return {
+    focusedWindowPresent: focused !== undefined,
+    focusedWindowId: focused?.id,
+    focusedWindowType: focused?.type,
+    focusedWindowPackage: focused?.packageName,
+    focusedWindowBounds: bounds
+      ? JSON.stringify([bounds.left, bounds.top, bounds.right, bounds.bottom])
+      : undefined,
+  };
 }
 
 function geometry(deviceId: string, observation: ObserveResult): SnapshotGeometry | undefined {
   const frame = captureFrame(observation);
-  if (
-    !observation.display?.key ||
-    !hasPositiveSize(observation.screenSize) ||
-    observation.displayRevision === undefined ||
-    !frame
-  ) {
+  if (!observation.display?.key || !hasPositiveSize(observation.screenSize) || !frame) {
     return undefined;
   }
   const { width, height } = observation.screenSize;
@@ -69,11 +104,35 @@ function geometry(deviceId: string, observation: ObserveResult): SnapshotGeometr
     displayKey: observation.display.key,
     displayRole: observation.display.role,
     displayPosture: observation.display.posture,
-    displayRevision: observation.displayRevision,
     width,
     height,
     ...frame,
+    appId: observation.activeWindow?.appId || observation.viewHierarchy?.packageName,
+    hierarchyPackage: observation.viewHierarchy?.packageName,
+    activityName: observation.activeWindow?.activityName ?? "",
+    windowType: observation.activeWindow?.type,
+    ...focusedWindowContext(observation),
   };
+}
+
+function hasConflictingField(
+  entry: SnapshotGeometry,
+  current: SnapshotGeometry,
+  key: keyof SnapshotGeometry,
+): boolean {
+  if (key === "runnerEpoch" || key === "focusedWindowPresent") {
+    return false;
+  }
+  if ((key === "activityName" || key === "windowType") && (!entry[key] || !current[key])) {
+    return false;
+  }
+  if (
+    key.startsWith("focusedWindow") &&
+    (!entry.focusedWindowPresent || !current.focusedWindowPresent)
+  ) {
+    return false;
+  }
+  return entry[key] !== current[key];
 }
 
 /** Process-local, bounded references to observed full-screen geometry. */
@@ -116,8 +175,11 @@ export class SnapshotReferenceStore {
     if (!current) {
       return "Snapshot geometry or frame context is unavailable; re-observe.";
     }
+    if (entry.runnerEpoch !== current.runnerEpoch) {
+      return "Snapshot reference is stale (runner restarted); re-observe.";
+    }
     for (const key of Object.keys(current) as Array<keyof SnapshotGeometry>) {
-      if (entry[key] !== current[key]) {
+      if (hasConflictingField(entry, current, key)) {
         return `Snapshot reference is stale (${key} changed); re-observe.`;
       }
     }

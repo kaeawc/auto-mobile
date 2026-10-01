@@ -87,6 +87,12 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   }
 
   function nativePathCandidates(source: string): string[] {
+    // A path needs a literal native root, an escaped character in that root,
+    // or a template interpolation that resolves to one. Join segments still
+    // contain the literal root (or its escape) in one of their arguments.
+    if (!/(?:android|ios|\\|\$\{)/.test(source)) {
+      return [];
+    }
     const paths = new Set<string>();
     const sourceFile = ts.createSourceFile(
       "native-path-scan.ts",

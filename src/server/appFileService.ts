@@ -127,6 +127,7 @@ export interface AppFileFileSystem {
   readdir(path: string): Promise<AppFileDirEntry[]>;
   mkdir(path: string): Promise<void>;
   copyFile(sourcePath: string, destinationPath: string): Promise<void>;
+  rename(oldPath: string, newPath: string): Promise<void>;
   readFileBuffer(path: string): Promise<Buffer>;
   writeFileBuffer(path: string, data: Buffer): Promise<void>;
   mkdtemp(prefix: string): Promise<string>;
@@ -153,6 +154,9 @@ export const nodeAppFileFileSystem: AppFileFileSystem = {
   },
   copyFile: async (sourcePath, destinationPath) => {
     await nodeFs.copyFile(sourcePath, destinationPath);
+  },
+  rename: async (oldPath, newPath) => {
+    await nodeFs.rename(oldPath, newPath);
   },
   readFileBuffer: async (path) => nodeFs.readFile(path),
   writeFileBuffer: async (path, data) => {
@@ -955,6 +959,8 @@ class IosSimulatorAppFileProvider
 {
   readonly platform = "ios" as const;
   readonly domain = "app_containers" as const;
+  private readonly pendingWrites = new Map<string, Promise<void>>();
+  private tempIndex = 0;
 
   constructor(
     private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
@@ -970,8 +976,40 @@ class IosSimulatorAppFileProvider
       request.destinationPath,
       "putFile",
     );
-    await this.fileSystem.mkdir(dirname(target));
-    await this.fileSystem.copyFile(request.sourcePath, target);
+    const previous = this.pendingWrites.get(target);
+    const write = previous
+      ? previous.then(
+          () => this.writeAtomically(request.sourcePath, target),
+          () => this.writeAtomically(request.sourcePath, target),
+        )
+      : this.writeAtomically(request.sourcePath, target);
+    this.pendingWrites.set(target, write);
+    const clear = () => {
+      if (this.pendingWrites.get(target) === write) {
+        this.pendingWrites.delete(target);
+      }
+    };
+    void write.then(clear, clear);
+    await write;
+  }
+
+  private async writeAtomically(sourcePath: string, target: string): Promise<void> {
+    const temporary = join(dirname(target), `.${basename(target)}.${++this.tempIndex}.tmp`);
+    try {
+      await this.fileSystem.mkdir(dirname(target));
+      await this.fileSystem.copyFile(sourcePath, temporary);
+      await this.fileSystem.rename(temporary, target);
+    } catch (error) {
+      try {
+        await this.fileSystem.rm(temporary);
+      } catch (cleanupError) {
+        logger.warn(
+          `Failed to remove partial iOS app file at ${temporary}: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      throw error;
+    }
   }
 
   async listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult> {

@@ -131,6 +131,16 @@ class MemoryFileSystem implements AppFileFileSystem {
 
   async copyFile(): Promise<void> {}
 
+  async rename(oldPath: string, newPath: string): Promise<void> {
+    const source = this.normalize(oldPath);
+    const data = this.files.get(source);
+    if (!data) {
+      throw Object.assign(new Error(`ENOENT: ${source}`), { code: "ENOENT" });
+    }
+    this.files.set(this.normalize(newPath), data);
+    this.files.delete(source);
+  }
+
   async readFileBuffer(rawPath: string): Promise<Buffer> {
     const path = this.normalize(rawPath);
     const file = this.files.get(path);

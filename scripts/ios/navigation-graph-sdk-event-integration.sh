@@ -5,6 +5,10 @@
 
 set -euo pipefail
 
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/session-release.sh disable=SC1091
+source "${script_dir}/../lib/session-release.sh"
+
 device_id="${1:?usage: navigation-graph-sdk-event-integration.sh <simulator-udid>}"
 timestamp_ms="$(($(date +%s) * 1000))"
 bundle_id="com.apple.reminders"
@@ -111,6 +115,7 @@ if ! session_uuid="$(
   echo "error: could not acquire navigation graph session for simulator ${device_id}" >&2
   exit 1
 fi
+install_session_release_trap "${session_uuid}"
 set +e
 ctrl_proxy_port="$(ctrl_proxy_port_from_acquisition <<< "${session_result}")"
 ctrl_proxy_port_status=$?

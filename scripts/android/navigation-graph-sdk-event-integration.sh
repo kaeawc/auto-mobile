@@ -7,6 +7,8 @@ set -euo pipefail
 
 adb_bin="${ADB_BIN:-adb}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/session-release.sh disable=SC1091
+source "${script_dir}/../lib/session-release.sh"
 repo_root="${GITHUB_WORKSPACE:-$(cd -- "${script_dir}/../.." && pwd)}"
 dist_entry="${repo_root}/dist/src/index.js"
 bun_bin_dir="${HOME}/.bun/bin"
@@ -100,6 +102,8 @@ if ! session_uuid="$(
   echo "error: could not acquire navigation graph session for emulator ${device_id}" >&2
   exit 1
 fi
+
+install_session_release_trap "$session_uuid"
 
 # Bind CtrlProxy's SDK-event client and the graph query to the same daemon
 # session before emitting the event. The debug-only Playground receiver invokes

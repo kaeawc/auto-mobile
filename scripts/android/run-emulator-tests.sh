@@ -40,6 +40,19 @@ if [ -z "$TEST_SCRIPT" ]; then
   exit 1
 fi
 
+retry_log_dir="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-emulator-retry.XXXXXX")"
+existing_exit_trap="$(trap -p EXIT)"
+cleanup_retry_logs() {
+  local original_status=$?
+  trap - EXIT
+  rm -rf "$retry_log_dir" || true
+  if [ -n "$existing_exit_trap" ]; then
+    eval "$existing_exit_trap"
+  fi
+  exit "$original_status"
+}
+trap cleanup_retry_logs EXIT
+
 if [ -n "$APK_PATH" ]; then
   export AUTOMOBILE_CTRL_PROXY_APK_PATH="$APK_PATH"
   export AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM=1
@@ -88,6 +101,18 @@ retry_with_backoff() {
   local emulator_errors="device offline|device not found|adb server|AdbHostServer|emulator: ERROR|waiting for device|cannot connect to daemon"
   local transient_pattern="($network_errors|$emulator_errors)"
 
+  print_first_attempt_error() {
+    local first_attempt_log="${retry_log_dir}/attempt-1.log"
+    local first_attempt_errors=""
+    first_attempt_errors="$(grep -iE 'error|fail|exception' "$first_attempt_log" | tail -n 30 || true)"
+    echo "First attempt error:"
+    if [ -n "$first_attempt_errors" ]; then
+      echo "$first_attempt_errors"
+    else
+      tail -n 30 "$first_attempt_log"
+    fi
+  }
+
   while [ "$attempt" -le "$max_attempts" ]; do
     echo ""
     echo -e "${BLUE}[Attempt $attempt/$max_attempts]${NC} Running: $*"
@@ -98,6 +123,8 @@ retry_with_backoff() {
     output=$("$@" 2>&1)
     exit_code=$?
     set -e
+
+    printf '%s\n' "$output" > "${retry_log_dir}/attempt-${attempt}.log"
 
     echo "$output"
 
@@ -116,11 +143,17 @@ retry_with_backoff() {
         attempt=$((attempt + 1))
       else
         print_error "Command failed after $max_attempts attempts (transient errors)"
+        if [ "$attempt" -gt 1 ]; then
+          print_first_attempt_error
+        fi
         return $exit_code
       fi
     else
       # Not a transient error, fail immediately
       print_error "Command failed with non-transient error (exit code: $exit_code)"
+      if [ "$attempt" -gt 1 ]; then
+        print_first_attempt_error
+      fi
       return $exit_code
     fi
   done

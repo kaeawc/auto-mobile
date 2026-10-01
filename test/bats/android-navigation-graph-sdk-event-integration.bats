@@ -42,6 +42,59 @@ make_mock() {
   make_executable "${MOCK_BIN}/$1" "$2"
 }
 
+make_release_fixture() {
+  make_mock adb '
+if [ "$1" = "-s" ] && [ "$2" = "emulator-5554" ]; then
+  case "$3" in
+    root|wait-for-device) exit 0 ;;
+    shell)
+      if [ "$4" = "am" ] && [ "$5" = "start" ]; then exit 0; fi
+      if [ "$4" = "am" ] && [ "$5" = "broadcast" ]; then exit 0; fi
+      ;;
+  esac
+fi
+exit 0
+'
+  make_mock sleep 'exit 0'
+  make_mock jq '
+if [ "$1" = "-er" ]; then exec "$REAL_JQ" "$@"; fi
+exit 0
+'
+  make_mock auto-mobile '
+printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
+if [ "$1" = "--daemon" ] && [ "$2" = "release-session" ]; then
+  [ "$3" = "$ACQUIRED_SESSION_UUID" ] || exit 91
+  [ "${AUTOMOBILE_DAEMON_TIMEOUT_MS:-}" = "2000" ] || exit 92
+  touch "$RELEASE_CALLED_FILE"
+  [ "${RELEASE_FAIL:-0}" = "0" ]
+  exit $?
+fi
+if [ "$4" = "getAndroid" ]; then
+  if [ "${ACQUIRE_FAIL:-0}" = "1" ]; then
+    printf "{\"sessionUuid\":\"\"}\n"
+    exit 0
+  fi
+  printf "{\"sessionUuid\":\"%s\"}\n" "$ACQUIRED_SESSION_UUID"
+  exit 0
+fi
+if [ "$4" = "--session-uuid" ]; then
+  [ "$5" = "$ACQUIRED_SESSION_UUID" ] || exit 93
+  if [ "$6" = "launchApp" ]; then
+    if [ -n "${HOLD_LAUNCH_FILE:-}" ]; then
+      touch "${HOLD_LAUNCH_FILE}.started"
+      while [ ! -f "$HOLD_LAUNCH_FILE" ]; do /bin/sleep 0.02; done
+    fi
+    if [ "${LAUNCH_FAIL:-0}" = "1" ]; then exit 23; fi
+  fi
+  if [ "$6" = "getNavigationGraph" ]; then
+    printf "{\"screens\":[{\"name\":\"placeholder\"}]}\n"
+  fi
+  exit 0
+fi
+exit 94
+'
+}
+
 # Sentinel returned by the getAndroid mock below. It is deliberately distinct
 # from the fabricated UUID removed from the production script by #6104
 # ("52150000-0000-4000-8000-000000000000") so the assertions in this test can
@@ -74,6 +127,77 @@ fi
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"could not acquire navigation graph session"* ]]
+}
+
+@test "releases the acquired Android session once after launch failure and preserves the script status" {
+  export RELEASE_CALLED_FILE="${MOCK_BIN}/released"
+  export LAUNCH_FAIL=1
+  make_release_fixture
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+
+  [ "$status" -eq 1 ]
+  [ "$(grep -c -- '^--daemon release-session ' "$AUTO_MOBILE_LOG")" -eq 1 ]
+  [ -f "$RELEASE_CALLED_FILE" ]
+}
+
+@test "releases the acquired Android session once on success" {
+  export RELEASE_CALLED_FILE="${MOCK_BIN}/released"
+  make_release_fixture
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+
+  [ "$status" -eq 0 ]
+  [ "$(grep -c -- '^--daemon release-session ' "$AUTO_MOBILE_LOG")" -eq 1 ]
+  [ -f "$RELEASE_CALLED_FILE" ]
+}
+
+@test "does not release when Android session acquisition fails" {
+  export RELEASE_CALLED_FILE="${MOCK_BIN}/released"
+  export ACQUIRE_FAIL=1
+  make_release_fixture
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+
+  [ "$status" -eq 1 ]
+  [ ! -f "$RELEASE_CALLED_FILE" ]
+  ! grep -q -- '^--daemon release-session ' "$AUTO_MOBILE_LOG"
+}
+
+@test "release failure warns without changing success or failure status" {
+  export RELEASE_CALLED_FILE="${MOCK_BIN}/released"
+  export RELEASE_FAIL=1
+  make_release_fixture
+
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: could not release session ${ACQUIRED_SESSION_UUID}"* ]]
+
+  export LAUNCH_FAIL=1
+  run env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"warning: could not release session ${ACQUIRED_SESSION_UUID}"* ]]
+}
+
+@test "releases the Android session once on SIGTERM" {
+  export RELEASE_CALLED_FILE="${MOCK_BIN}/released"
+  export HOLD_LAUNCH_FILE="${MOCK_BIN}/continue-launch"
+  make_release_fixture
+
+  env PATH="${MOCK_BIN}:${PATH}" bash "$SCRIPT" "emulator-5554" > "${MOCK_BIN}/signal-output" 2>&1 &
+  script_pid=$!
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    [ -f "${HOLD_LAUNCH_FILE}.started" ] && break
+    /bin/sleep 0.05
+  done
+  [ -f "${HOLD_LAUNCH_FILE}.started" ]
+  kill -TERM "$script_pid"
+  touch "$HOLD_LAUNCH_FILE"
+  wait "$script_pid" || signal_status=$?
+
+  [ "${signal_status:-0}" -eq 143 ]
+  [ -f "$RELEASE_CALLED_FILE" ]
+  [ "$(grep -c -- '^--daemon release-session ' "$AUTO_MOBILE_LOG")" -eq 1 ]
 }
 
 @test "binds the Android graph session before emitting and polling an SDK navigation event" {

@@ -46,7 +46,7 @@ function findForbiddenSchemaKeyword(
 
 describe("Anthropic input_schema subset", () => {
   test("normalizes every advertised tool input schema", () => {
-    expect(ADVERTISED_TOOLS).toHaveLength(86);
+    expect(ADVERTISED_TOOLS).toHaveLength(87);
 
     for (const tool of ADVERTISED_TOOLS) {
       const schema = tool.inputSchema as Record<string, unknown>;

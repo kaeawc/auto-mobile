@@ -60,7 +60,8 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
-import type { SessionReleaseSnapshot } from "./sessionManager";
+import { getDefaultSessionHeartbeatTimeoutMs, type SessionReleaseSnapshot } from "./sessionManager";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import {
   type BuildIdentity,
   buildIdentitiesMatch,
@@ -221,6 +222,10 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   return Math.max(1, interval);
 }
 
+function heartbeatLeashMs(config: DaemonMcpProxyConfig): number {
+  return config.heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs();
+}
+
 /**
  * Raised before connecting when the running daemon and MCP client package
  * versions differ but the proxy cannot safely reconcile them immediately.
@@ -328,7 +333,7 @@ export class DaemonAssetVersionMismatchError extends DaemonUnavailableError {
  * identity is terminal. A fresh transport may create a new session; this bound
  * transport must never silently resurrect its UUID against another device.
  */
-export class DaemonBoundSessionExpiredError extends Error {
+export class DaemonBoundSessionExpiredError extends ActionableError {
   readonly sessionUuid: string;
   readonly reason: string;
   readonly release?: SessionReleaseSnapshot;
@@ -758,6 +763,8 @@ export class DaemonMcpProxy {
   private reconciliationSnapshot?: Promise<DaemonStatus>;
   private readonly timer: Timer;
   private readonly heartbeatKeeper: SingleFlightInterval;
+  private readonly heartbeatLeashMs: number;
+  private readonly heartbeatIntervalMs: number;
   /**
    * Whether the recurring bound-session heartbeat keeper has been started for the
    * current binding. Gates the awaited establishment heartbeat (issue #5637) to
@@ -925,11 +932,13 @@ export class DaemonMcpProxy {
     this.daemonStatusProbe = this.createStatusProbe(config);
     this.daemonAvailabilityProbe = daemonAvailabilityProbe(config);
     this.timer = config.timer ?? defaultTimer;
+    this.heartbeatLeashMs = heartbeatLeashMs(config);
+    this.heartbeatIntervalMs = heartbeatIntervalMs(config);
     this.livenessOwnerToken = (config.idGenerator ?? defaultIdGenerator).next();
     this.heartbeatKeeper = new SingleFlightInterval(
       this.timer,
-      heartbeatIntervalMs(config),
-      () => this.sendBoundSessionHeartbeat(),
+      this.heartbeatIntervalMs,
+      () => this.runBoundSessionHeartbeatTick(),
       {
         stopTimeoutMs: CLI_SESSION_FINALIZATION_TIMEOUT_MS,
         onError: (error) => {
@@ -3239,7 +3248,62 @@ export class DaemonMcpProxy {
     };
   }
 
-  private async sendBoundSessionHeartbeat(): Promise<void> {
+  private async runBoundSessionHeartbeatTick(): Promise<void> {
+    const sessionUuid = this.boundSessionUuid;
+    if (!sessionUuid || this.terminalBoundSession || this.closing) {
+      return;
+    }
+    // A caller that explicitly schedules heartbeats beyond the lease cannot
+    // maintain daemon ownership by cadence. Preserve that opt-out's prior
+    // single-flight behavior (used by replay-lease tests).
+    if (this.heartbeatIntervalMs >= this.heartbeatLeashMs) {
+      await this.sendBoundSessionHeartbeat();
+      return;
+    }
+    const lastSafeAttemptMs =
+      this.heartbeatLeashMs -
+      Math.min(this.heartbeatIntervalMs, Math.floor(this.heartbeatLeashMs / 2));
+    // A reconnect already in progress is shared by ensureConnected(). If it has
+    // consumed the safe retry window, stop claiming ownership before the daemon
+    // can reap it silently while all later ticks wait on the same connection.
+    if (
+      !this.connected &&
+      this.boundSessionUuidAt !== undefined &&
+      this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
+    ) {
+      this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
+      throw this.boundSessionExpiredError();
+    }
+
+    let abandoned = false;
+    const elapsedMs =
+      this.boundSessionUuidAt === undefined ? 0 : this.timer.now() - this.boundSessionUuidAt;
+    const deadlineMs = Math.max(
+      1,
+      Math.min(
+        Math.floor(this.heartbeatLeashMs / 2),
+        this.heartbeatIntervalMs * 2,
+        this.heartbeatLeashMs - elapsedMs - 1,
+      ),
+    );
+    await raceWithDeadline(() => this.sendBoundSessionHeartbeat(() => !abandoned), {
+      timer: this.timer,
+      timeoutMs: deadlineMs,
+      label: "Bound-session heartbeat",
+      onTimeout: () => {
+        abandoned = true;
+        if (
+          this.boundSessionUuid === sessionUuid &&
+          this.boundSessionUuidAt !== undefined &&
+          this.timer.now() - this.boundSessionUuidAt >= lastSafeAttemptMs
+        ) {
+          this.fenceBoundSessionUuid(sessionUuid, "heartbeat-unreachable");
+        }
+      },
+    });
+  }
+
+  private async sendBoundSessionHeartbeat(isCurrent: () => boolean = () => true): Promise<void> {
     const sessionUuid = this.boundSessionUuid;
     if (!sessionUuid || this.terminalBoundSession || this.closing) {
       return;
@@ -3260,13 +3324,7 @@ export class DaemonMcpProxy {
         // responsible for either restoring it or applying the existing fence.
         false,
       );
-      if (
-        claimLivenessOwnership &&
-        this.boundSessionUuid === sessionUuid &&
-        !this.terminalBoundSession
-      ) {
-        this.livenessOwnershipClaimSent = true;
-      }
+      this.recordBoundSessionHeartbeatSuccess(sessionUuid, claimLivenessOwnership, isCurrent);
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
         // Terminal fencing already stopped the keeper; this tick has no further work.
@@ -3275,9 +3333,20 @@ export class DaemonMcpProxy {
       }
       throw error;
     }
-    if (this.boundSessionUuid === sessionUuid && !this.terminalBoundSession) {
-      this.boundSessionUuidAt = this.timer.now();
+  }
+
+  private recordBoundSessionHeartbeatSuccess(
+    sessionUuid: string,
+    claimLivenessOwnership: boolean,
+    isCurrent: () => boolean,
+  ): void {
+    if (!isCurrent() || this.boundSessionUuid !== sessionUuid || this.terminalBoundSession) {
+      return;
     }
+    if (claimLivenessOwnership) {
+      this.livenessOwnershipClaimSent = true;
+    }
+    this.boundSessionUuidAt = this.timer.now();
   }
 
   // Record that the daemon released a specific session UUID, advancing the global

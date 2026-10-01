@@ -3815,11 +3815,11 @@ describe("DaemonMcpProxy", () => {
 
       try {
         await proxy.callTool("observe", { sessionUuid: "session-a" });
-        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await expect(proxy.callTool("tapOn", {})).rejects.toBeInstanceOf(
           DaemonToolOutcomeUnknownError,
         );
-        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await timer.advanceTimeAsync(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
         await proxy.callTool("observe", {});
 
         // The final implicit observe remains bound because heartbeat activity,

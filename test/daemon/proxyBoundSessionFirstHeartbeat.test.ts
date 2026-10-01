@@ -13,6 +13,7 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { ActionableError } from "../../src/models";
 
 // Reproduces issue #5637: a proxy-bound MCP session allocated shortly before the
 // proxy starts up must not be reaped with `missing-first-heartbeat` before its
@@ -803,6 +804,134 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         },
       ]);
       expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("a timed-out reconnect leaves the keeper free to heartbeat inside the leash", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    const firstClient = heartbeatForwardingClient(sessionManager);
+    const recoveredClient = heartbeatForwardingClient(sessionManager);
+    let finishConnect!: () => void;
+    recoveredClient.connect = async () => {
+      await new Promise<void>((resolve) => {
+        finishConnect = resolve;
+      });
+    };
+    const clients: DaemonClientLike[] = [firstClient, recoveredClient];
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => clients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.ensureConnected();
+      firstClient.emitConnectionClosed();
+      await timer.advanceTimeAsync(2_000);
+      await timer.advanceTimeAsync(4_000);
+      // The first tick has expired at t=6s while its shared connect remains pending.
+      finishConnect();
+      for (let i = 0; i < 50; i++) {
+        await Promise.resolve();
+      }
+      await timer.advanceTimeAsync(2_000);
+      expect(
+        recoveredClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat")
+          .length,
+      ).toBeGreaterThanOrEqual(1);
+      await timer.advanceTimeAsync(2_000);
+      await monitor.tick();
+      expect(sessionManager.getSession(BOUND_SESSION)).not.toBeNull();
+      expect(reaped).toEqual([]);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("a reconnect still stuck near the leash fences with an actionable error", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    const firstClient = heartbeatForwardingClient(sessionManager);
+    const unreachableClient = heartbeatForwardingClient(sessionManager);
+    let finishConnect!: () => void;
+    unreachableClient.connect = async () => {
+      await new Promise<void>((resolve) => {
+        finishConnect = resolve;
+      });
+    };
+    const clients: DaemonClientLike[] = [firstClient, unreachableClient];
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => clients.shift()!,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.ensureConnected();
+      firstClient.emitConnectionClosed();
+      await timer.advanceTimeAsync(8_000);
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toBeInstanceOf(
+        ActionableError,
+      );
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
+        reason: "heartbeat-unreachable",
+        message: expect.stringContaining("start a new transport"),
+      });
+      expect(unreachableClient.callDaemonMethodCalls).toEqual([]);
+      finishConnect();
+      await Promise.resolve();
+      expect(unreachableClient.callDaemonMethodCalls).toEqual([]);
+    } finally {
+      finishConnect();
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("a connected socket with unanswered heartbeats fences before the leash", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+    let attempts = 0;
+    const client = new FakeDaemonClient({
+      onCallDaemonMethod: (method, params) => {
+        if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
+          return;
+        }
+        attempts++;
+        if (attempts === 1) {
+          sessionManager.recordHeartbeat(params.sessionId);
+          return;
+        }
+        return new Promise<void>(() => {});
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => client,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.ensureConnected();
+      await timer.advanceTimeAsync(9_999);
+      expect(attempts).toBeGreaterThanOrEqual(3);
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toMatchObject({
+        reason: "heartbeat-unreachable",
+        message: expect.stringContaining("start a new transport"),
+      });
+      await monitor.tick();
+      expect(reaped).toEqual([]);
     } finally {
       isAvailableSpy.mockRestore();
       await proxy.close();

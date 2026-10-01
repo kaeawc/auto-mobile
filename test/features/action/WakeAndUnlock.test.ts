@@ -592,6 +592,40 @@ describe("WakeAndUnlock", () => {
     expect(timer.now()).toBe(25_000);
   });
 
+  test("iOS: queued request uses the transport deadline across recovery, Home, swipe, and poll", async () => {
+    const wallClockStart = 1_800_000_000_000;
+    const transportDeadline = wallClockStart + 12_000;
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = ["recovered"];
+    recovery.recoveryDelayMs = 1_000;
+    recovery.timer = timer;
+    const budgets: number[] = [];
+    const actions: IosUnlockActions = {
+      async pressHome(timeoutMs) {
+        budgets.push(timeoutMs);
+        await timer.sleep(1_000);
+        return { success: true };
+      },
+      async swipeUp(timeoutMs) {
+        budgets.push(timeoutMs);
+        await timer.sleep(timeoutMs);
+        return { success: false, error: "swipe failed" };
+      },
+    };
+    const failure = new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      wallClockNow: () => wallClockStart,
+      iosRunnerRecovery: recovery,
+      iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+      iosLockStateProbe: new FakeIosLockProbe(),
+    }).execute(undefined, transportDeadline);
+    await expect(failure).rejects.toThrow(/still locked.*swipe failed/);
+    expect(budgets).toEqual([2_000, 5_000]);
+    expect(timer.now()).toBe(9_000);
+    expect(wallClockStart + timer.now()).toBe(transportDeadline - 3_000);
+  });
+
   test("iOS: swipe failure and unreadable probe includes the swipe reason", async () => {
     const ios = new FakeIosUnlocker();
     ios.result = { success: false, error: "swipe boom" };

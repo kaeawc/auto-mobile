@@ -1,3 +1,4 @@
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { toActionableError } from "../models/ActionableError";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
 import { z } from "zod/v4";
@@ -2781,7 +2782,13 @@ export function registerInteractionTools() {
       iosRunnerRecovery:
         device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
     });
-    const result = await wakeAndUnlock.execute(args.pin);
+    const transportDeadlineMs = (args as Record<string, unknown>)[
+      INTERNAL_MCP_REQUEST_DEADLINE_PARAM
+    ];
+    const result = await wakeAndUnlock.execute(
+      args.pin,
+      typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
+    );
     const message = result.success
       ? result.wasLocked
         ? "Device unlocked"

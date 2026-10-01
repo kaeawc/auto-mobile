@@ -71,6 +71,8 @@ export interface WakeAndUnlockResult {
 
 export interface WakeAndUnlockOptions {
   timer?: Timer;
+  /** Host wall clock used only to translate the daemon deadline into a timer budget. */
+  wallClockNow?: () => number;
   credentialStore?: LockCredentialStore;
   iosUnlocker?: IosScreenUnlocker;
   iosRunnerRecovery?: IosRunnerRecovery;
@@ -88,6 +90,8 @@ const UNLOCK_POLL_MAX_MS = 2500;
 // The daemon's default MCP request timeout is 30s (src/daemon/mcpRequestTimeout.ts:25).
 // Reserve 5s for result delivery; all iOS phases share this one deadline.
 const IOS_UNLOCK_TOTAL_MS = 25_000;
+// Match SetUIState RESPONSE_HEADROOM_MS for response serialization/delivery.
+const IOS_UNLOCK_RESPONSE_HEADROOM_MS = 3_000;
 const IOS_RECOVERY_WAIT_MS = 20_000;
 const IOS_UNLOCK_POLL_INTERVAL_MS = 250;
 const IOS_UNLOCK_POLL_MAX_MS = 2_500;
@@ -109,6 +113,7 @@ export class WakeAndUnlock {
   private readonly device: BootedDevice;
   private readonly adb: AdbExecutor;
   private readonly timer: Timer;
+  private readonly wallClockNow: () => number;
   private readonly credentialStore?: LockCredentialStore;
   private readonly iosUnlocker?: IosScreenUnlocker;
   private readonly iosRunnerRecovery?: IosRunnerRecovery;
@@ -132,6 +137,7 @@ export class WakeAndUnlock {
       this.adb = defaultAdbClientFactory.create(device);
     }
     this.timer = options.timer ?? defaultTimer;
+    this.wallClockNow = options.wallClockNow ?? (() => defaultTimer.now());
     this.credentialStore = options.credentialStore;
     this.iosUnlocker = options.iosUnlocker;
     this.iosRunnerRecovery = options.iosRunnerRecovery;
@@ -146,13 +152,14 @@ export class WakeAndUnlock {
    *   but logically required to unlock a secure lock: if omitted, a
    *   previously-remembered credential is used, else an ActionableError is
    *   thrown. Ignored on iOS.
+   * @param transportDeadlineMs - Daemon absolute host-clock deadline; bounds simulator unlock.
    */
-  async execute(pin?: string): Promise<WakeAndUnlockResult> {
+  async execute(pin?: string, transportDeadlineMs?: number): Promise<WakeAndUnlockResult> {
     switch (this.device.platform) {
       case "android":
         return this.executeAndroid(pin);
       case "ios":
-        return this.executeIos();
+        return this.executeIos(transportDeadlineMs);
       default:
         throw new ActionableError(`wakeAndUnlock: unsupported platform ${this.device.platform}`);
     }
@@ -331,12 +338,29 @@ export class WakeAndUnlock {
     return commands;
   }
 
-  private async executeIos(): Promise<WakeAndUnlockResult> {
+  private iosUnlockDeadline(transportDeadlineMs?: number): number {
+    const simulator = isIosSimulatorUdid(this.device.deviceId);
+    // Transport deadlines use the host wall clock. Convert once so injected
+    // timers can use their own epoch throughout recovery, gestures, and polling.
+    const budgetMs =
+      simulator && transportDeadlineMs !== undefined && Number.isFinite(transportDeadlineMs)
+        ? Math.max(
+            0,
+            Math.min(
+              IOS_UNLOCK_TOTAL_MS,
+              transportDeadlineMs - this.wallClockNow() - IOS_UNLOCK_RESPONSE_HEADROOM_MS,
+            ),
+          )
+        : IOS_UNLOCK_TOTAL_MS;
+    return this.timer.now() + budgetMs;
+  }
+
+  private async executeIos(transportDeadlineMs?: number): Promise<WakeAndUnlockResult> {
     if (!this.iosUnlocker) {
       throw new ActionableError("wakeAndUnlock: iOS unlocker is not configured");
     }
-    const deadline = this.timer.now() + IOS_UNLOCK_TOTAL_MS;
     const simulator = isIosSimulatorUdid(this.device.deviceId);
+    const deadline = this.iosUnlockDeadline(transportDeadlineMs);
     if (simulator) {
       const initialLock = await this.readIosLockState(deadline);
       if (!initialLock) {

@@ -222,9 +222,13 @@ export class BaseVisualChange {
         }
         previousObserveResult = await perf.track("getPreviousObserve", async () => {
           const cached = await this.observeScreen.getMostRecentCachedObserveResult();
-          if (!cached?.viewHierarchy || cached.viewHierarchy.hierarchy.error) {
+          if (
+            !cached?.viewHierarchy ||
+            cached.viewHierarchy.hierarchy.error ||
+            (options.skipCallerDisplayFence && cached.freshness?.isFresh !== true)
+          ) {
             return this.observeScreen.execute({
-              freshness: "cached-ok",
+              freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
               queryOptions: options.queryOptions,
               perf,
               signal: options.signal,
@@ -235,7 +239,7 @@ export class BaseVisualChange {
       } catch {
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
-            freshness: "cached-ok",
+            freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
             queryOptions: options.queryOptions,
             perf,
             signal: options.signal,

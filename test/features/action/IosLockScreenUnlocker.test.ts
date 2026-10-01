@@ -80,6 +80,86 @@ describe("IosLockScreenUnlocker", () => {
     );
   }
 
+  for (const isFresh of [false, true, undefined]) {
+    test(`unlock swipe refreshes geometry unless cache freshness is true (${isFresh})`, async () => {
+      const observe = new FakeObserveScreen();
+      const cached = {
+        timestamp: 0,
+        screenSize: { width: 1000, height: 2000 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+        freshness: { isFresh },
+      };
+      displayTransitions.notifyTransition(device.deviceId, "Home");
+      observe.setObserveSequence([
+        cached,
+        { ...cached, screenSize: { width: 600, height: 1200 }, freshness: { isFresh: true } },
+      ]);
+      const coordinates: number[][] = [];
+      const swipe = new SwipeOn(device, null, {
+        observeScreen: observe,
+        skipCallerDisplayFence: true,
+        stopAfterIosGestureFailure: true,
+        voiceOverExecutor: {
+          async executeSwipeGesture(x1, y1, x2, y2) {
+            coordinates.push([x1, y1, x2, y2]);
+            return { success: false, x1, y1, x2, y2, duration: 300, error: "swipe failed" };
+          },
+        },
+      });
+      await swipe.execute({ direction: "up", autoTarget: false });
+      expect(coordinates).toEqual([
+        isFresh === true ? [500, 1800, 500, 200] : [300, 1080, 300, 120],
+      ]);
+      expect(observe.getExecuteCallCount()).toBe(isFresh === true ? 0 : 1);
+      if (isFresh !== true) {
+        expect(observe.getExecuteOptions()[0].freshness).toBe("fresh");
+      }
+    });
+  }
+
+  test("fresh geometry read shares the unlock swipe budget and abort signal", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult({
+      timestamp: 0,
+      viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+      freshness: { isFresh: false },
+    });
+    let observeSignal: AbortSignal | undefined;
+    let freshness: string | undefined;
+    observe.execute = async (options) => {
+      observeSignal = options?.signal;
+      freshness = options?.freshness;
+      return new Promise(() => {});
+    };
+    let gestures = 0;
+    const unlocker = new IosLockScreenUnlocker(
+      device,
+      undefined,
+      timer,
+      (d, dependencies) =>
+        new SwipeOn(d, null, {
+          ...dependencies,
+          observeScreen: observe,
+          voiceOverExecutor: {
+            async executeSwipeGesture(x1, y1, x2, y2) {
+              gestures++;
+              return { success: false, x1, y1, x2, y2, duration: 300 };
+            },
+          },
+        }),
+    );
+    let budgetReads = 0;
+    const result = await unlocker.wakeAndDismiss(() => (budgetReads++ === 0 ? 0 : 1_000));
+    expect(result.success).toBe(false);
+    expect(timer.now()).toBe(1_000);
+    expect(freshness).toBe("fresh");
+    expect(observeSignal?.aborted).toBe(true);
+    expect(gestures).toBe(0);
+  });
+
   test("unlocker builds its swipe with the internal flags", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

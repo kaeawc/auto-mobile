@@ -529,13 +529,20 @@ describe("CrashApp (iOS)", () => {
       [processList, processList, "PID\tStatus\tLabel\n"],
       "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
     );
+    const timer = new FakeTimer();
+    timer.advanceTime(1_700_000_000_000);
     const action = new CrashApp(
       iosSimulator,
-      dependencies({ simctl: commands, uid: () => 20_123 }),
+      dependencies({ simctl: commands, timer, uid: () => 20_123 }),
     );
 
-    await action.execute("com.example.app");
+    const result = await action.execute("com.example.app");
 
+    expect(result).toMatchObject({
+      success: true,
+      timestamp: 1_700_000_000_000,
+      confirmed: true,
+    });
     expect(commands.calls).toContainEqual([
       "spawn",
       iosSimulator.deviceId,

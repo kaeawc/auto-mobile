@@ -706,6 +706,11 @@ export interface NetworkEventsTable {
   request_body_size: number | null;
   response_body_size: number | null;
   protocol: string | null;
+  request_id: string | null;
+  connection_id: string | null;
+  direction: string | null;
+  metadata_json: string | null;
+  sequence_number: number | null;
   host: string | null;
   path: string | null;
   error: string | null;

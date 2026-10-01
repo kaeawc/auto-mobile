@@ -5,6 +5,7 @@
     "ios/**",
     "android/**",
     "scratch/**",
+    "test/fixtures/ios-sdk-network/*.json",
     "**/*.generated.ts",
     "**/generated/**"
   ]

@@ -132,13 +132,20 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
       try {
         switch (event.type) {
           case "network_request":
+            // URLSession's adapter emits task metrics in metadata.duration_ms.
+            // Keep the existing top-level duration when present.
+            const metricDuration = Number(
+              (p.metadata as Record<string, string> | undefined)?.duration_ms,
+            );
             await recorder.recordNetworkEvent({
               timestamp: ts,
               applicationId,
               url: (p.url as string) ?? "",
               method: (p.method as string) ?? "GET",
               statusCode: (p.statusCode as number) ?? 0,
-              durationMs: (p.durationMs as number) ?? 0,
+              durationMs:
+                (p.durationMs as number | undefined) ??
+                (Number.isFinite(metricDuration) ? metricDuration : 0),
               requestBodySize: (p.requestBodySize as number) ?? -1,
               responseBodySize: (p.responseBodySize as number) ?? -1,
               protocol: (p.protocolName as string) ?? (p.protocol as string) ?? null,

@@ -66,8 +66,18 @@ export class TalkBackToggle {
     try {
       if (enabled) {
         await this.enableTalkBack(serviceComponent!);
-        // Step 4: Best-effort permission dialog dismissal
-        await this.dismissPermissionDialog();
+        // Step 4: Confirm the permission dialog is gone before reporting success.
+        const dialogResult = await this.dismissPermissionDialog();
+        if (dialogResult === "could-not-confirm") {
+          const reason = "TalkBack permission dialog dismissal could not be confirmed";
+          logger.warn(`[TalkBackToggle] ${reason}`);
+          return {
+            supported: true,
+            applied: false,
+            currentState: talkBackCurrentlyEnabled,
+            reason,
+          };
+        }
       } else {
         await this.disableTalkBack();
       }
@@ -236,38 +246,76 @@ export class TalkBackToggle {
    * only when the TalkBack dialog context is confirmed — android:id/button1
    * is a generic ID reused by many dialogs.
    */
-  private async dismissPermissionDialog(): Promise<void> {
+  private async dismissPermissionDialog(): Promise<
+    "not-found" | "dismissed" | "could-not-confirm"
+  > {
+    let dialogSeen = false;
+    let dumpSucceeded = false;
+    let observedXml: string | null = null;
+
     for (let attempt = 0; attempt < DIALOG_DISMISS_RETRIES; attempt++) {
       if (attempt > 0) {
         await this.timer.sleep(DIALOG_DISMISS_DELAY_MS);
       }
+      let xml: string;
       try {
-        const xml = await this.dumpWindowHierarchy();
+        xml = observedXml ?? (await this.dumpWindowHierarchy());
+        dumpSucceeded = true;
+      } catch (error) {
+        logger.warn(`[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} dump failed:`, error);
+        observedXml = null;
+        continue;
+      }
+      observedXml = null;
 
-        // Guard: only tap when the TalkBack consent dialog is on screen.
-        // "TalkBack" is a brand name that stays untranslated in all locales,
-        // preventing accidental taps on unrelated system dialogs.
-        if (!xml.includes("TalkBack")) {
+      const nodeMatch = this.findTalkBackPermissionButton(xml);
+      if (!nodeMatch) {
+        if (dialogSeen) {
+          logger.debug("[TalkBackToggle] TalkBack permission dialog dismissed");
+          return "dismissed";
+        }
+        continue;
+      }
+
+      dialogSeen = true;
+      const boundsMatch = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodeMatch[0]);
+      if (boundsMatch) {
+        const x = Math.round((parseInt(boundsMatch[1], 10) + parseInt(boundsMatch[3], 10)) / 2);
+        const y = Math.round((parseInt(boundsMatch[2], 10) + parseInt(boundsMatch[4], 10)) / 2);
+        await this.adb.executeCommand(`shell input tap ${x} ${y}`);
+        // Read back immediately after the tap. Reuse a still-matched dump on
+        // the next attempt so the happy path costs just one extra dump.
+        try {
+          observedXml = await this.dumpWindowHierarchy();
+          dumpSucceeded = true;
+        } catch (error) {
+          logger.warn(
+            `[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} read-back dump failed:`,
+            error,
+          );
+          observedXml = null;
           continue;
         }
-
-        // Match by resource-id rather than text to support non-English locales
-        const nodeMatch = /<node[^>]*resource-id="android:id\/button1"[^>]*\/?>/.exec(xml);
-        if (nodeMatch) {
-          const boundsMatch = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodeMatch[0]);
-          if (boundsMatch) {
-            const x = Math.round((parseInt(boundsMatch[1], 10) + parseInt(boundsMatch[3], 10)) / 2);
-            const y = Math.round((parseInt(boundsMatch[2], 10) + parseInt(boundsMatch[4], 10)) / 2);
-            await this.adb.executeCommand(`shell input tap ${x} ${y}`);
-            logger.debug("[TalkBackToggle] Dismissed TalkBack permission dialog");
-            return;
-          }
+        if (!this.findTalkBackPermissionButton(observedXml)) {
+          logger.debug("[TalkBackToggle] TalkBack permission dialog dismissed");
+          return "dismissed";
         }
-      } catch (error) {
-        logger.debug(`[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} failed:`, error);
       }
     }
+
+    if (dialogSeen || !dumpSucceeded) {
+      return "could-not-confirm";
+    }
     logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");
+    return "not-found";
+  }
+
+  /** Match button1 only when the TalkBack dialog context is present. */
+  private findTalkBackPermissionButton(xml: string): RegExpExecArray | null {
+    if (!xml.includes("TalkBack")) {
+      return null;
+    }
+    return /<node[^>]*resource-id="android:id\/button1"[^>]*\/?>/.exec(xml);
   }
 
   /**

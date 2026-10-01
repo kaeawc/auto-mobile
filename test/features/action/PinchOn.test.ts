@@ -113,6 +113,27 @@ describe("PinchOn", () => {
     iosGetInstanceSpy?.mockRestore();
     managerSpy?.mockRestore();
   });
+
+  test("already aborted pinch dispatches no device command", async () => {
+    await expect(
+      pinchOn.execute({ direction: "in" }, undefined, AbortSignal.abort()),
+    ).rejects.toThrow("Operation cancelled");
+    expect(fakeA11yService.getPinchHistory()).toEqual([]);
+  });
+
+  test("abort during target capture stops before pinch dispatch", async () => {
+    const controller = new AbortController();
+    Object.defineProperty(pinchOn, "capture", {
+      value: new FakeHierarchyCapture(() => {
+        controller.abort();
+        return createHierarchy();
+      }),
+    });
+    await expect(
+      pinchOn.execute({ direction: "in", autoTarget: false }, undefined, controller.signal),
+    ).rejects.toThrow("Operation cancelled");
+    expect(fakeA11yService.getPinchHistory()).toEqual([]);
+  });
   test("fresh pinch selector capture requests raw hierarchy when enabled", async () => {
     serverConfig.setRawElementSearchEnabled(true);
     const capture = new FakeHierarchyCapture(createHierarchy);

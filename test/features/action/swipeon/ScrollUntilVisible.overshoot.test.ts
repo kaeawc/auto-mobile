@@ -59,6 +59,7 @@ function makeScrollUntilVisible({
   observedInteractionOptions,
   terminalEvidence,
   resolver,
+  onInteraction,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -72,6 +73,7 @@ function makeScrollUntilVisible({
   observedInteractionOptions?: Array<Record<string, unknown>>;
   terminalEvidence?: ObserveResult[];
   resolver?: ElementResolver;
+  onInteraction?: () => void;
 }): ScrollUntilVisible {
   let callIdx = 0;
 
@@ -92,6 +94,7 @@ function makeScrollUntilVisible({
     observedInteractionOptions?.push(opts);
     const obs = observeResults[Math.min(callIdx, observeResults.length - 1)];
     const result = await action(obs);
+    onInteraction?.();
     callIdx++;
     const nextObs = observeResults[Math.min(callIdx, observeResults.length - 1)];
     return { ...result, observation: nextObs };
@@ -140,6 +143,41 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     timer.enableAutoAdvance();
     accessibilityService = new FakeScrollAccessibilityService();
     talkBackExecutor = new FakeTalkBackSwipeExecutor();
+  });
+
+  test("already aborted scroll observes no device state", async () => {
+    const observeOptions: Array<Record<string, unknown> | undefined> = [];
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult()],
+      talkBackExecutor,
+      observeOptions,
+    });
+    await expect(
+      scroll.execute(BASE_OPTIONS, undefined, undefined, AbortSignal.abort()),
+    ).rejects.toThrow("Operation cancelled");
+    expect(observeOptions).toEqual([]);
+    expect(talkBackExecutor.getSwipeCalls()).toEqual([]);
+  });
+
+  test("abort after a scroll iteration prevents the next poll or gesture", async () => {
+    const controller = new AbortController();
+    const scroll = makeScrollUntilVisible({
+      accessibilityDetector: detector,
+      finder,
+      timer,
+      accessibilityService,
+      observeResults: [makeObserveResult(), makeObserveResult(1)],
+      talkBackExecutor,
+      onInteraction: () => controller.abort(),
+    });
+    await expect(
+      scroll.execute(BASE_OPTIONS, undefined, undefined, controller.signal),
+    ).rejects.toThrow("Operation cancelled");
+    expect(talkBackExecutor.getSwipeCalls()).toHaveLength(1);
   });
 
   test("automatic scrolling keeps the outer scrollable ahead of a nested carousel", async () => {

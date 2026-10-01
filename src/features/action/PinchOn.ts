@@ -1,5 +1,6 @@
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
@@ -115,7 +116,12 @@ export class PinchOn extends BaseVisualChange {
     };
   }
 
-  async execute(options: PinchOnOptions, progress?: ProgressCallback): Promise<PinchOnResult> {
+  async execute(
+    options: PinchOnOptions,
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<PinchOnResult> {
+    throwIfAborted(signal);
     if (options.display !== undefined) {
       try {
         await prepareTargetDisplayAction(
@@ -124,7 +130,9 @@ export class PinchOn extends BaseVisualChange {
           this.observeScreen,
           this.adb,
           this.lastRenderedObservation,
+          signal,
         );
+        throwIfAborted(signal);
         if (this.device.platform === "android") {
           return this.createErrorResult(
             "Android CtrlProxy does not expose per-display pinch dispatch; a targeted two-finger gesture requires CtrlProxy displayId support.",
@@ -132,6 +140,7 @@ export class PinchOn extends BaseVisualChange {
           );
         }
       } catch (error) {
+        throwIfAborted(signal);
         return this.createErrorResult(errorMessage(error), options);
       }
     }
@@ -180,8 +189,10 @@ export class PinchOn extends BaseVisualChange {
     }
 
     if (this.device.platform === "android") {
+      throwIfAborted(signal);
       const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
       const available = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
+      throwIfAborted(signal);
       if (!available) {
         perf.end();
         return this.createErrorResult(
@@ -192,7 +203,7 @@ export class PinchOn extends BaseVisualChange {
     }
 
     try {
-      const target = await perf.track("resolveTarget", () => this.resolveTarget(options));
+      const target = await perf.track("resolveTarget", () => this.resolveTarget(options, signal));
       const { centerX, centerY } = this.getCenter(target.bounds);
       let { distanceStart, distanceEnd, scale } = this.resolveDistances(options, target.bounds);
       if (this.device.platform === "ios") {
@@ -206,6 +217,7 @@ export class PinchOn extends BaseVisualChange {
 
       const pinchResult = await this.observedInteraction(
         async () => {
+          throwIfAborted(signal);
           if (this.device.platform === "ios") {
             const result = await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
               centerX,
@@ -243,6 +255,7 @@ export class PinchOn extends BaseVisualChange {
           timeoutMs: 8000,
           progress,
           perf,
+          signal,
           observationTimestampProvider: () => iosDispatchTimestamp,
           predictionContext: {
             toolName: "pinchOn",
@@ -258,6 +271,7 @@ export class PinchOn extends BaseVisualChange {
           },
         },
       );
+      throwIfAborted(signal);
 
       perf.end();
       if (!pinchResult.success) {
@@ -308,10 +322,12 @@ export class PinchOn extends BaseVisualChange {
       };
     } catch (error) {
       perf.end();
+      throwIfAborted(signal);
       const baseErrorMessage = errorMessage(error);
       let finalErrorMessage = `Failed to perform pinch: ${baseErrorMessage}`;
 
       if (this.visionConfig.enabled && options.container) {
+        throwIfAborted(signal);
         const searchCriteria = {
           text: options.container.text,
           resourceId: options.container.elementId,
@@ -334,15 +350,19 @@ export class PinchOn extends BaseVisualChange {
     }
   }
 
-  private async resolveTarget(options: PinchOnOptions): Promise<PinchTarget> {
+  private async resolveTarget(options: PinchOnOptions, signal?: AbortSignal): Promise<PinchTarget> {
+    throwIfAborted(signal);
     let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
     if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
-      observeResult = await this.observeScreen.execute({ freshness: "cached-ok" });
+      throwIfAborted(signal);
+      observeResult = await this.observeScreen.execute({ freshness: "cached-ok", signal });
     }
 
+    throwIfAborted(signal);
     const snapshot = await this.capture.capture({
       freshness: "fresh",
       searchRaw: serverConfig.isRawElementSearchEnabled(),
+      signal,
     });
     observeResult = this.withCaptureGeometry(observeResult, snapshot);
 

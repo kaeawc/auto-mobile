@@ -6,6 +6,7 @@ import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOve
 import type { IOSCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
+import { throwIfAborted } from "../../../utils/toolUtils";
 
 /**
  * VoiceOverSwipeExecutor handles iOS swipes while VoiceOver is enabled.
@@ -60,12 +61,23 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     gestureOptions?: GestureOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     boomerang?: BoomerangConfig,
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
+    throwIfAborted(signal);
     if (this.device.platform !== "ios") {
       if (boomerang) {
-        return this.executeBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang, perf);
+        return this.executeBoomerangGesture(
+          x1,
+          y1,
+          x2,
+          y2,
+          gestureOptions,
+          boomerang,
+          perf,
+          signal,
+        );
       }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf);
+      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
     }
 
     // Pass featureFlags so `force-accessibility-mode` / `accessibility-auto-detect`
@@ -75,12 +87,22 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       this.iosClient,
       this.featureFlags,
     );
+    throwIfAborted(signal);
 
     if (!isVoiceOverEnabled) {
       if (boomerang) {
-        return this.executeBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang, perf);
+        return this.executeBoomerangGesture(
+          x1,
+          y1,
+          x2,
+          y2,
+          gestureOptions,
+          boomerang,
+          perf,
+          signal,
+        );
       }
-      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf);
+      return this.executeGesture.swipe(x1, y1, x2, y2, gestureOptions, perf, signal);
     }
 
     // VoiceOver is enabled
@@ -117,6 +139,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     gestureOptions: GestureOptions | undefined,
     boomerang: BoomerangConfig,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
     const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
@@ -125,7 +148,16 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     const forwardOptions = this.buildGestureOptions(gestureOptions, forwardDuration);
     const returnOptions = this.buildGestureOptions(gestureOptions, returnDuration);
 
-    const forwardResult = await this.executeGesture.swipe(x1, y1, x2, y2, forwardOptions, perf);
+    const forwardResult = await this.executeGesture.swipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      forwardOptions,
+      perf,
+      signal,
+    );
+    throwIfAborted(signal);
     if (!forwardResult.success) {
       return forwardResult;
     }
@@ -134,7 +166,16 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
       await this.timer.sleep(boomerang.apexPauseMs);
     }
 
-    const returnResult = await this.executeGesture.swipe(x2, y2, x1, y1, returnOptions, perf);
+    throwIfAborted(signal);
+    const returnResult = await this.executeGesture.swipe(
+      x2,
+      y2,
+      x1,
+      y1,
+      returnOptions,
+      perf,
+      signal,
+    );
     if (!returnResult.success) {
       return {
         ...returnResult,

@@ -1,4 +1,5 @@
 import { errorMessage } from "../../../utils/describeUnknownError";
+import { throwIfAborted } from "../../../utils/toolUtils";
 import { BaseVisualChange, ProgressCallback } from "../BaseVisualChange";
 import {
   ActionableError,
@@ -194,14 +195,16 @@ export class SwipeOn extends BaseVisualChange {
     };
   }
 
-  private async getScrollableContext(): Promise<{
+  private async getScrollableContext(signal?: AbortSignal): Promise<{
     scrollables: Element[];
     candidates: ScrollableCandidate[];
     observeResult?: ObserveResult;
   }> {
+    throwIfAborted(signal);
     let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
     if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
-      observeResult = await this.observeScreen.execute({ freshness: "cached-ok" });
+      throwIfAborted(signal);
+      observeResult = await this.observeScreen.execute({ freshness: "cached-ok", signal });
     }
 
     if (!observeResult.viewHierarchy) {
@@ -258,6 +261,7 @@ export class SwipeOn extends BaseVisualChange {
     const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, bounds);
     const duration = options.duration ?? 300;
     target.assertCurrent();
+    throwIfAborted(signal);
     await this.adb.executeCommand(
       `shell input -d ${target.displayId} touchscreen swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
       undefined,
@@ -326,10 +330,12 @@ export class SwipeOn extends BaseVisualChange {
           this.lastRenderedObservation,
           signal,
         );
+        throwIfAborted(signal);
         if (this.device.platform === "android") {
           return await this.executeOnAndroidDisplay(options, target, signal);
         }
       } catch (error) {
+        throwIfAborted(signal);
         logger.warn(`swipeOn display routing failed: ${errorMessage(error)}`, error);
         return this.createErrorResult(errorMessage(error));
       }
@@ -342,16 +348,19 @@ export class SwipeOn extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
+    throwIfAborted(signal);
     const targeted = await this.executeExplicitDisplay(options, signal);
     if (targeted) {
       return targeted;
     }
-    return this.executeLegacy(options, progress);
+    return this.executeLegacy(options, progress, signal);
   }
 
+  // oxlint-disable-next-line max-lines-per-function -- Keep the existing dispatch branches together while threading cancellation.
   private async executeLegacy(
     options: SwipeOnOptions,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("swipeOn");
@@ -369,30 +378,27 @@ export class SwipeOn extends BaseVisualChange {
       ...options,
       direction: resolvedDirection.direction as SwipeDirection,
     };
-
     logger.info(
       `[SwipeOn] execute: direction=${normalizedOptions.direction}, lookFor=${JSON.stringify(normalizedOptions.lookFor)}, container=${JSON.stringify(normalizedOptions.container)}, speed=${normalizedOptions.speed}, autoTarget=${normalizedOptions.autoTarget}`,
     );
-
     try {
       // Determine which mode to use
       if (normalizedOptions.lookFor) {
         // Scroll-until-visible mode
         logger.info(`[SwipeOn] Mode: scroll-until-visible`);
-        return await this.scrollUntilVisible.execute(normalizedOptions, progress, perf);
+        return await this.scrollUntilVisible.execute(normalizedOptions, progress, perf, signal);
       } else if (!normalizedOptions.container) {
         const autoTargetEnabled = normalizedOptions.autoTarget !== false;
         if (!autoTargetEnabled) {
           logger.info(`[SwipeOn] Mode: screen swipe (autoTarget disabled)`);
-          return await this.executeScreenSwipe(normalizedOptions, progress, perf);
+          return await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
         }
 
-        const scrollableContext = await this.getScrollableContext();
+        const scrollableContext = await this.getScrollableContext(signal);
         if (scrollableContext.scrollables.length === 0) {
           logger.info(`[SwipeOn] Mode: screen swipe (no scrollables found)`);
-          return await this.executeScreenSwipe(normalizedOptions, progress, perf);
+          return await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
         }
-
         const screenBounds = scrollableContext.observeResult
           ? this.autoTargetSelector.getScreenBounds(scrollableContext.observeResult)
           : null;
@@ -401,12 +407,11 @@ export class SwipeOn extends BaseVisualChange {
           screenBounds,
           normalizedOptions.direction,
         );
-
         if (!autoTargetElement) {
           logger.info(
             `[SwipeOn] Mode: screen swipe (scrollables found but none matched direction=${normalizedOptions.direction})`,
           );
-          const result = await this.executeScreenSwipe(normalizedOptions, progress, perf);
+          const result = await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
           return {
             ...result,
             warning:
@@ -420,7 +425,7 @@ export class SwipeOn extends BaseVisualChange {
           logger.info(
             `[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`,
           );
-          const result = await this.executeScreenSwipe(normalizedOptions, progress, perf);
+          const result = await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
           return {
             ...result,
             warning:
@@ -436,6 +441,7 @@ export class SwipeOn extends BaseVisualChange {
           { ...normalizedOptions, container: autoTargetContainer },
           progress,
           perf,
+          signal,
         );
 
         return {
@@ -451,10 +457,11 @@ export class SwipeOn extends BaseVisualChange {
         logger.info(
           `[SwipeOn] Mode: element swipe (explicit container=${JSON.stringify(normalizedOptions.container)})`,
         );
-        return await this.executeElementSwipe(normalizedOptions, progress, perf);
+        return await this.executeElementSwipe(normalizedOptions, progress, perf, signal);
       }
     } catch (error) {
       perf.end();
+      throwIfAborted(signal);
 
       // Build debug context if debug mode is enabled and we have search criteria
       const debugContext =
@@ -466,6 +473,7 @@ export class SwipeOn extends BaseVisualChange {
               container: normalizedOptions.container,
             })
           : undefined;
+      throwIfAborted(signal);
 
       // Apply vision fallback for element-related errors
       const baseErrorMessage = errorMessage(error);
@@ -489,6 +497,7 @@ export class SwipeOn extends BaseVisualChange {
         }
 
         if (searchCriteria) {
+          throwIfAborted(signal);
           const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
           const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
           errorMsg = await getVisionEnrichedError(
@@ -582,12 +591,14 @@ export class SwipeOn extends BaseVisualChange {
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
     let iosDispatchTimestamp: number | undefined;
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
+        throwIfAborted(signal);
         if (!observeResult.screenSize) {
           throw new ActionableError("Could not determine screen size");
         }
@@ -610,6 +621,7 @@ export class SwipeOn extends BaseVisualChange {
           scrollMode: options.scrollMode,
         };
 
+        throwIfAborted(signal);
         const swipeResult = await perf.track("executeScreenSwipe", () =>
           this.device.platform === "ios"
             ? this.voiceOverExecutor.executeSwipeGesture(
@@ -622,6 +634,7 @@ export class SwipeOn extends BaseVisualChange {
                 gestureOptions,
                 perf,
                 boomerang,
+                signal,
               )
             : this.talkBackExecutor.executeSwipeGesture(
                 Math.floor(startX),
@@ -633,8 +646,10 @@ export class SwipeOn extends BaseVisualChange {
                 gestureOptions,
                 perf,
                 boomerang,
+                signal,
               ),
         );
+        throwIfAborted(signal);
         if (this.device.platform === "ios" && swipeResult.success) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
@@ -651,6 +666,7 @@ export class SwipeOn extends BaseVisualChange {
         timeoutMs: 500,
         progress,
         perf,
+        signal,
         observationTimestampProvider: () => iosDispatchTimestamp,
         predictionContext: {
           toolName: "swipeOn",
@@ -664,6 +680,7 @@ export class SwipeOn extends BaseVisualChange {
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
     logger.info(
       `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,
@@ -672,6 +689,7 @@ export class SwipeOn extends BaseVisualChange {
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
+        throwIfAborted(signal);
         const viewHierarchy = observeResult.viewHierarchy;
         if (!viewHierarchy) {
           throw new ActionableError("Unable to get view hierarchy, cannot swipe on element");
@@ -679,8 +697,9 @@ export class SwipeOn extends BaseVisualChange {
 
         // Find the container element
         const element = await perf.track("findElement", () =>
-          this.scrollUntilVisible.findTargetElement(options, viewHierarchy),
+          this.scrollUntilVisible.findTargetElement(options, viewHierarchy, 0, signal),
         );
+        throwIfAborted(signal);
 
         const { startX, startY, endX, endY, warning } = this.resolveContainerSwipeCoordinates(
           options,
@@ -696,6 +715,7 @@ export class SwipeOn extends BaseVisualChange {
           scrollMode: options.scrollMode,
         };
 
+        throwIfAborted(signal);
         const swipeResult = await perf.track("executeElementSwipe", () =>
           this.device.platform === "ios"
             ? this.voiceOverExecutor.executeSwipeGesture(
@@ -708,6 +728,7 @@ export class SwipeOn extends BaseVisualChange {
                 gestureOptions,
                 perf,
                 boomerang,
+                signal,
               )
             : this.talkBackExecutor.executeSwipeGesture(
                 Math.floor(startX),
@@ -719,8 +740,10 @@ export class SwipeOn extends BaseVisualChange {
                 gestureOptions,
                 perf,
                 boomerang,
+                signal,
               ),
         );
+        throwIfAborted(signal);
         if (this.device.platform === "ios" && swipeResult.success) {
           iosDispatchTimestamp = this.timer.now();
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
@@ -744,6 +767,7 @@ export class SwipeOn extends BaseVisualChange {
         timeoutMs: 500,
         progress,
         perf,
+        signal,
         observationTimestampProvider: () => iosDispatchTimestamp,
         predictionContext: {
           toolName: "swipeOn",

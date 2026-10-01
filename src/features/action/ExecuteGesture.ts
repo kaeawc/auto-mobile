@@ -10,6 +10,7 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 /**
@@ -33,6 +34,8 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param perf - Optional performance tracker
    * @returns Result of the swipe operation
    */
+  // Cancellation is appended to the existing positional API for compatibility.
+  // oxlint-disable-next-line max-params -- Existing positional API keeps optional cancellation last.
   async swipe(
     x1: number,
     y1: number,
@@ -40,13 +43,15 @@ export class ExecuteGesture extends BaseVisualChange {
     y2: number,
     options: GestureOptions = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
+    throwIfAborted(signal);
     // Platform-specific swipe execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
       case "android":
-        return await this.executeAndroidSwipe(x1, y1, x2, y2, options, perf);
+        return await this.executeAndroidSwipe(x1, y1, x2, y2, options, perf, signal);
       case "ios":
-        return await this.executeiOSSwipe(x1, y1, x2, y2, options, perf);
+        return await this.executeiOSSwipe(x1, y1, x2, y2, options, perf, signal);
       default:
         throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
@@ -62,6 +67,7 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param perf - Performance tracker for timing
    * @returns Result of the swipe operation
    */
+  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeAndroidSwipe(
     x1: number,
     y1: number,
@@ -69,21 +75,31 @@ export class ExecuteGesture extends BaseVisualChange {
     y2: number,
     options: GestureOptions = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const duration = options.duration || 300; // Default duration
     const scrollMode = options.scrollMode || "adb"; // Default to ADB mode
 
     // Use accessibility service swipe if requested
     if (scrollMode === "a11y") {
-      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, perf);
+      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, perf, signal);
     }
 
     // Default ADB mode
     try {
       await perf.track("adbInputSwipe", async () => {
-        await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
+        throwIfAborted(signal);
+        await this.adb.executeCommand(
+          `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+          undefined,
+          undefined,
+          undefined,
+          signal,
+        );
       });
+      throwIfAborted(signal);
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[SWIPE] ADB swipe failed: ${errorMessage(error)}`);
       return { success: false, x1, y1, x2, y2, duration, error: errorMessage(error) };
     }
@@ -109,6 +125,7 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param perf - Performance tracker for timing
    * @returns Result of the swipe operation
    */
+  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeA11ySwipe(
     x1: number,
     y1: number,
@@ -116,6 +133,7 @@ export class ExecuteGesture extends BaseVisualChange {
     y2: number,
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     let dispatched = false;
     const indeterminateResult = (reason: string): SwipeResult => ({
@@ -128,13 +146,16 @@ export class ExecuteGesture extends BaseVisualChange {
       error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
     });
     try {
+      throwIfAborted(signal);
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
       const result = await perf.track("a11ySwipe", async () => {
+        throwIfAborted(signal);
         return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf, undefined, () => {
           dispatched = true;
         });
       });
+      throwIfAborted(signal);
 
       if (result.success) {
         logger.info(
@@ -159,9 +180,18 @@ export class ExecuteGesture extends BaseVisualChange {
         // Fall back to ADB on failure
         try {
           await perf.track("adbInputSwipeFallback", async () => {
-            await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
+            throwIfAborted(signal);
+            await this.adb.executeCommand(
+              `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+              undefined,
+              undefined,
+              undefined,
+              signal,
+            );
           });
+          throwIfAborted(signal);
         } catch (error) {
+          throwIfAborted(signal);
           logger.warn(`[SWIPE] ADB fallback failed after a11y failure: ${errorMessage(error)}`);
           return {
             success: false,
@@ -185,6 +215,7 @@ export class ExecuteGesture extends BaseVisualChange {
         };
       }
     } catch (error) {
+      throwIfAborted(signal);
       if (dispatched) {
         logger.warn(`[SWIPE] A11y swipe outcome indeterminate: ${error}`);
         return indeterminateResult(`${error}`);
@@ -193,9 +224,18 @@ export class ExecuteGesture extends BaseVisualChange {
       // Fall back to ADB on exception
       try {
         await perf.track("adbInputSwipeFallback", async () => {
-          await this.adb.executeCommand(`shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`);
+          throwIfAborted(signal);
+          await this.adb.executeCommand(
+            `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+            undefined,
+            undefined,
+            undefined,
+            signal,
+          );
         });
+        throwIfAborted(signal);
       } catch (fallbackError) {
+        throwIfAborted(signal);
         logger.warn(
           `[SWIPE] ADB fallback failed after a11y exception: ${errorMessage(fallbackError)}`,
         );
@@ -232,6 +272,7 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param perf - Performance tracker for timing
    * @returns Result of the swipe operation
    */
+  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeiOSSwipe(
     x1: number,
     y1: number,
@@ -239,9 +280,10 @@ export class ExecuteGesture extends BaseVisualChange {
     y2: number,
     options: GestureOptions = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const duration = options.duration || 300;
-    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf);
+    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf, signal);
   }
 
   /**
@@ -255,6 +297,7 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param perf - Performance tracker for timing
    * @returns Result of the swipe operation
    */
+  // oxlint-disable-next-line max-params -- Keep the signal adjacent to the dispatch arguments.
   private async executeXCTestSwipe(
     x1: number,
     y1: number,
@@ -262,12 +305,16 @@ export class ExecuteGesture extends BaseVisualChange {
     y2: number,
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<SwipeResult> {
+    throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
     const result = await perf.track("xctestSwipe", async () => {
+      throwIfAborted(signal);
       return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf);
     });
+    throwIfAborted(signal);
 
     if (result.success) {
       logger.info(
@@ -305,13 +352,18 @@ export class ExecuteGesture extends BaseVisualChange {
    * @param duration - Duration in milliseconds
    * @returns Result of the executed gesture
    */
-  async execute(path: Point[] | FingerPath[], duration: number = 300): Promise<any> {
+  async execute(
+    path: Point[] | FingerPath[],
+    duration: number = 300,
+    signal?: AbortSignal,
+  ): Promise<any> {
+    throwIfAborted(signal);
     // Platform-specific gesture execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
       case "android":
-        return await this.executeAndroidGesture(path, duration);
+        return await this.executeAndroidGesture(path, duration, signal);
       case "ios":
-        return await this.executeiOSGesture(path, duration);
+        return await this.executeiOSGesture(path, duration, signal);
       default:
         throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
@@ -323,6 +375,7 @@ export class ExecuteGesture extends BaseVisualChange {
   private async executeAndroidGesture(
     path: Point[] | FingerPath[],
     duration: number,
+    signal?: AbortSignal,
   ): Promise<any> {
     // Generate and execute adb touch events
     if (Array.isArray(path) && path.length > 0) {
@@ -336,9 +389,15 @@ export class ExecuteGesture extends BaseVisualChange {
           const start = points[0];
           const end = points[points.length - 1];
 
+          throwIfAborted(signal);
           await this.adb.executeCommand(
             `shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
+            undefined,
+            undefined,
+            undefined,
+            signal,
           );
+          throwIfAborted(signal);
         }
       }
     }
@@ -353,12 +412,17 @@ export class ExecuteGesture extends BaseVisualChange {
   /**
    * Execute iOS-specific gesture
    */
-  private async executeiOSGesture(path: Point[] | FingerPath[], duration: number): Promise<any> {
+  private async executeiOSGesture(
+    path: Point[] | FingerPath[],
+    duration: number,
+    signal?: AbortSignal,
+  ): Promise<any> {
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
         const fingers = path as FingerPath[];
         const swipe = this.resolveIOSMultiFingerSwipe(fingers);
         if (swipe) {
+          throwIfAborted(signal);
           const client = IOSCtrlProxyClient.getInstance(this.device);
           const result = await client.requestMultiFingerSwipe(
             swipe.start.x,
@@ -371,6 +435,7 @@ export class ExecuteGesture extends BaseVisualChange {
             undefined,
             swipe.fingerSpacing,
           );
+          throwIfAborted(signal);
           if (!result.success) {
             throw new Error(`iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`);
           }
@@ -382,8 +447,10 @@ export class ExecuteGesture extends BaseVisualChange {
           const start = points[0];
           const end = points[points.length - 1];
 
+          throwIfAborted(signal);
           const client = IOSCtrlProxyClient.getInstance(this.device);
           await client.requestSwipe(start.x, start.y, end.x, end.y, duration);
+          throwIfAborted(signal);
         }
       }
     }

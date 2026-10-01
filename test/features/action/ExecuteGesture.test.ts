@@ -4,6 +4,7 @@ import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import type { BootedDevice } from "../../../src/models";
 
@@ -24,6 +25,60 @@ describe("ExecuteGesture", () => {
   afterEach(() => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
+  });
+
+  test("an already aborted gesture dispatches no device command", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const gesture = new ExecuteGesture(androidDevice, adb, timer);
+    await expect(
+      gesture.execute(
+        [
+          { x: 0, y: 0 },
+          { x: 10, y: 10 },
+        ],
+        300,
+        AbortSignal.abort(),
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("an abort during gesture dispatch propagates after the device command", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    adb.abortAfterCommand("shell input swipe", controller);
+    const gesture = new ExecuteGesture(androidDevice, adb, timer);
+    await expect(
+      gesture.execute(
+        [
+          { x: 0, y: 0 },
+          { x: 10, y: 10 },
+        ],
+        300,
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(adb.getExecutedCommands()).toHaveLength(1);
+  });
+
+  test("an abort during swipe dispatch is not converted to a failure result", async () => {
+    const adb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    adb.abortAfterCommand("shell input swipe", controller);
+    await expect(
+      new ExecuteGesture(androidDevice, adb, new FakeTimer()).swipe(
+        0,
+        0,
+        10,
+        10,
+        {},
+        undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow("Operation cancelled");
+    expect(adb.getExecutedCommands()).toHaveLength(1);
   });
 
   // Regression for https://github.com/kaeawc/auto-mobile/issues/2225.

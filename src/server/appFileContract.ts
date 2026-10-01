@@ -99,6 +99,7 @@ export interface UserFilesTarget {
   domain: "user_files";
   namespace: string;
   reset?: boolean;
+  indexMedia?: boolean;
 }
 
 export interface MediaLibraryTarget {
@@ -265,6 +266,7 @@ export function normalizePutAppFileTarget(target: PutAppFileTarget): PutAppFileT
         domain: target.domain,
         namespace: normalizeUserFilesNamespace(target.namespace),
         ...(target.reset === undefined ? {} : { reset: target.reset }),
+        ...(target.indexMedia === undefined ? {} : { indexMedia: target.indexMedia }),
       };
     case "media_library":
       return { domain: target.domain };
@@ -284,6 +286,11 @@ const userFilesTargetSchema = z
     domain: z.literal("user_files"),
     namespace: z.string().describe("One caller-named fixture namespace"),
     reset: z.boolean().optional().describe("Remove only this fixture namespace before writing"),
+    indexMedia: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Request Android media indexing for media files"),
   })
   .strict()
   .superRefine((target, ctx) => {

@@ -15,7 +15,10 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
-import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
+import {
+  createSharedStorageServiceForTesting,
+  type StageSharedStorageRequest,
+} from "../../src/server/sharedStorageService";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -113,7 +116,7 @@ describe("AppFileService", () => {
 
     const result = await service.putFile({
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
-      target: { domain: "user_files", namespace: " run-42 ", reset: true },
+      target: { domain: "user_files", namespace: " run-42 ", reset: true, indexMedia: true },
       files: [
         { contentText: "one", destinationPath: "./one.txt" },
         { contentBase64: Buffer.from("two").toString("base64"), destinationPath: "nested/two.txt" },
@@ -124,7 +127,7 @@ describe("AppFileService", () => {
       success: true,
       deviceId: "emulator-5554",
       platform: "android",
-      target: { domain: "user_files", namespace: "run-42", reset: true },
+      target: { domain: "user_files", namespace: "run-42", reset: true, indexMedia: true },
       files: [
         {
           destinationPath: "one.txt",
@@ -144,8 +147,8 @@ describe("AppFileService", () => {
     ]);
     expect(provider.requests.every((request) => request.target.domain === "user_files")).toBe(true);
     expect(provider.requests.map((request) => request.target)).toEqual([
-      { domain: "user_files", namespace: "run-42", reset: true },
-      { domain: "user_files", namespace: "run-42", reset: false },
+      { domain: "user_files", namespace: "run-42", reset: true, indexMedia: true },
+      { domain: "user_files", namespace: "run-42", reset: false, indexMedia: true },
     ]);
   });
 
@@ -199,6 +202,50 @@ describe("AppFileService", () => {
     ).toBe(true);
     expect(resolveCalls).toBe(1);
   });
+
+  test.each([true, false, undefined])(
+    "passes user_files indexMedia=%p to staging and reports its effect",
+    async (indexMedia) => {
+      const staged: StageSharedStorageRequest[] = [];
+      const service = createAppFileServiceForTesting({
+        fileSystem: new TestAppFileFileSystem(),
+        sharedStorageService: {
+          stage: async (request) => {
+            staged.push(request);
+            return {
+              success: true,
+              deviceId: request.device.deviceId,
+              platform: "android",
+              namespace: request.namespace,
+              userId: 0,
+              userSource: "primary",
+              destinationDirectory: `/storage/emulated/0/Download/${request.namespace}`,
+              reset: request.reset ?? false,
+              files: request.files.map((file) => ({
+                destinationPath: file.destinationPath,
+                byteCount: 3,
+                mediaIndexing: {
+                  status: request.indexMedia ? "completed" : "notRequested",
+                },
+              })),
+            };
+          },
+        },
+      });
+      const result = await service.putFile({
+        device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+        target: { domain: "user_files", namespace: "run-42", indexMedia },
+        files: [{ contentBase64: "AQID", destinationPath: "photo.png" }],
+      });
+
+      expect(staged).toHaveLength(1);
+      expect(staged[0]?.indexMedia).toBe(indexMedia ?? false);
+      expect(result.files[0]?.effects).toContainEqual({
+        type: "media_index",
+        status: indexMedia ? "completed" : "notRequested",
+      });
+    },
+  );
 
   test("stages media_library fixtures through the bounded AutoMobile namespace after MediaStore verification", async () => {
     const executor = new FakeAdbExecutor();

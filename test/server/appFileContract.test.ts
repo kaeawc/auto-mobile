@@ -106,6 +106,26 @@ describe("putAppFileSchema contentBase64 guard (#4183 A4)", () => {
 describe("putAppFile canonical target contract (#5803)", () => {
   const textFile = { destinationPath: "fixtures/welcome.txt", contentText: "hello" };
 
+  test("defaults user_files media indexing off and accepts an explicit request", () => {
+    const base = { target: { domain: "user_files", namespace: "run-42" }, files: [textFile] };
+    expect(putAppFileSchema.parse(base).target).toMatchObject({ indexMedia: false });
+    expect(
+      putAppFileSchema.parse({ ...base, target: { ...base.target, indexMedia: true } }).target,
+    ).toMatchObject({ indexMedia: true });
+  });
+
+  test.each([
+    { domain: "app_containers", appId: "com.example.app", container: "documents" },
+    { domain: "media_library" },
+  ])("rejects indexMedia on the $domain target", (target) => {
+    expect(
+      putAppFileSchema.safeParse({
+        target: { ...target, indexMedia: true },
+        files: [{ contentText: "hello", destinationPath: "photo.png" }],
+      }).success,
+    ).toBe(false);
+  });
+
   test.each([
     {
       target: { domain: "app_containers", appId: "com.example.app", container: "documents" },

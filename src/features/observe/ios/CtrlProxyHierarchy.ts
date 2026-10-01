@@ -17,7 +17,7 @@ import { logger } from "../../../utils/logger";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { hasIosHeaderTrait } from "./semanticRoles";
 import { maxObservationAgeMs } from "../observationFreshness";
-import { assignStableViewIds } from "../android/StableNodeIdentity";
+import { assignStableViewIds, GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
 import type {
   HierarchyDelegateContext,
   CtrlProxyNode,
@@ -33,8 +33,6 @@ interface ConvertedNode {
   extras?: Record<string, string>;
   node?: ConvertedNode[];
 }
-
-const GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Default per-request timeout for fetching the iOS accessibility hierarchy —

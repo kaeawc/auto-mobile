@@ -93,14 +93,14 @@ import {
 /**
  * Shape of the runner's *generated* `view-id` (see
  * `ViewHierarchyExtractor.generateDeterministicUuid`): the first 16 bytes of a
- * SHA-256 formatted as a lowercase hex UUID. A real Android `resource-id`
- * (`package:id/name`) can never match. Only ids matching this shape are
+ * SHA-256 formatted as a UUID whose hex digits are case-insensitive. A real
+ * Android `resource-id` (`package:id/name`) can never match. Only ids matching this shape are
  * rewritten, so resource-id-backed `view-id`s and any future non-UUID formats
  * pass through untouched (which also makes the rewrite idempotent — the
  * emitted `s-…` ids do not match).
  */
 export const GENERATED_VIEW_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Versioned prefix for content-derived ids. The previous `s-<hash>` namespace

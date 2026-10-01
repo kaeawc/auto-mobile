@@ -749,3 +749,38 @@ describe("cleanupIosXCTestHierarchy", () => {
     expect(collectNodes(result.hierarchy).some((node) => node.text === "Google")).toBe(true);
   });
 });
+
+test("cleanup drops redundant labels with generated UUID view-ids in either case", () => {
+  const lowerId = "123e4567-e89b-12d3-a456-426614174000";
+  const cleanup = (viewId: string) =>
+    cleanupIosXCTestHierarchy({
+      updatedAt: 1,
+      hierarchy: {
+        className: "XCUIApplication",
+        node: {
+          className: "UITableViewCell",
+          text: "List",
+          role: "listitem",
+          clickable: "true",
+          bounds: [20, 369, 382, 417],
+          node: {
+            className: "UILabel",
+            text: "List",
+            role: "text",
+            "view-id": viewId,
+            bounds: [85, 383, 249, 403],
+          },
+        },
+      },
+    });
+
+  const lower = cleanup(lowerId);
+  const upper = cleanup(lowerId.toUpperCase());
+  expect(collectNodes(lower.hierarchy).filter((node) => node.className === "UILabel")).toHaveLength(
+    0,
+  );
+  expect(collectNodes(upper.hierarchy).filter((node) => node.className === "UILabel")).toHaveLength(
+    0,
+  );
+  expect(upper).toEqual(lower);
+});

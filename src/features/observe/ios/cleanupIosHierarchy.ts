@@ -1,6 +1,5 @@
+import { GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
 import { hasIosHeaderTrait } from "./semanticRoles";
-
-const GENERATED_VIEW_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type IosHierarchyNode = Record<string, unknown> & {
   node?: IosHierarchyNode | IosHierarchyNode[];

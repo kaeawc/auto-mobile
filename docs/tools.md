@@ -352,7 +352,7 @@ a plain pinch. Android and iOS share this convention.
 | 🧾 <code>resetAppLogs</code>                                                                     | Resets explicitly named app-container log files and their rotated siblings on the session device, with per-path outcomes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📥 <code>stageSharedStorage</code>                                                               | Stages host-file, UTF-8, or base64 fixtures into a bounded Android Downloads namespace for system pickers (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | 📁 <code>stageSessionDownloads</code>                                                            | Stages fixtures into one bounded child directory of the session device's shared Downloads tree, with optional reset and per-file media indexing (Android only).                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults. On iOS, requires `appId` and selects the store with `suite` (not `name`/`fileName`); omitted/`Standard` uses the default store. Uses an already connected embedded SDK, with simulator plist fallback when permitted.                                                                                                                                                                                                                                                                                  |
 | 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file. For iOS, an empty `name`, "standard" (any case), or the app bundle id selects standard UserDefaults; other names select a valid suite. Names must have no leading or trailing whitespace. Android uses a SharedPreferences file name without `.xml`. iOS write results include `resolvedStore` when supported by the SDK and runner. `setKeyValue` returns `effectiveValueDiffers: true` and appends a warning when the write persisted but the app reads a different effective value due to an override; remove/clear never produce this warning. |
 | 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -663,3 +663,53 @@ display change entry.
 For the observe → act → observe behavior behind interaction tools, see the
 [interaction loop](design-docs/mcp/interaction-loop.md). For per-session public
 tool selection, see [Dynamic Tools](using/dynamic-tools.md).
+
+### iOS UserDefaults preferences
+
+`getPreference` and `setPreference` use `scope: "userDefaults"`, `appId` (bundle ID),
+`key`, and optional `suite`. Unlike `setKeyValue`, these tools reject `name` and
+`fileName`; use `suite` to select a custom UserDefaults suite. Omit it, pass an
+empty string, or use `"Standard"` for the app's standard store. For example:
+
+```json
+{ "scope": "userDefaults", "appId": "com.example.app", "suite": "mt8327Suite", "key": "kv8327" }
+```
+
+On simulators, reads and writes use the embedded AutoMobile SDK only when an
+existing runner connection is open, with storage inspection enabled. These tools
+never start a runner. SDK requests are bounded to 2.5 seconds. An SDK missing key
+is authoritative. Reads may fall back after a recognized SDK timeout, transport
+loss, missing route, or inspection-disabled response. Unknown faults, app mismatch,
+and mutation refusals surface as errors.
+
+Writes fall back only when the client is absent or closed before dispatch. Once
+an SDK write is attempted, failures never cause a container write; ambiguous
+failures report that the write may or may not have been applied. Inspection-disabled
+and mutation-refused writes surface errors, preserving the app's opt-in policy.
+Read-back verification uses the successful write route and reports the type read
+back, while comparing according to the requested input type.
+
+The container route reads `Library/Preferences/<suite>.plist` for custom suites
+and `<appId>.plist` for the standard store, preserving the bundle ID's casing.
+Omitted, empty/whitespace, any case of `standard`, and a suite equal to the bundle
+ID (case-insensitive) all select the standard store; the SDK receives `Standard`.
+App-group suites (`group.*`) live in a separate group container and require the
+connected SDK. Without it, reads return not-found with a warning, and writes fail.
+Physical-device access remains unsupported.
+
+Plist reads warn that the on-disk value may lag a running app's cfprefsd state.
+Container writes via `defaults write <absolute path>` bypass the preferences daemon:
+a running app may not see the change, and cfprefsd may overwrite the file with
+cached state until the app restarts. `verified: true` proves file content only.
+
+Canonical types are `string`, `bool`, `int`, `float` (SDK FLOAT/DOUBLE and plist
+real), `date`, `data`, `array`, `dictionary`, and `unknown` for unrecognized SDK
+types. Unsafe integers retain their exact decimal string with type `int`. Date
+and data values are ISO and base64 strings; arrays/dictionaries are JSON strings.
+Android additionally retains `long` and `stringSet`.
+
+The optional iOS `resolvedStore` is a plain name: `standard` or the custom suite.
+The separate optional `storeRoute` is `sdk`, `container-plist`, or `defaults`.
+Simulator-global `defaults` domains remain available to direct internal calls
+without `appId`; their `resolvedStore` is the domain name, which cannot start with
+`-`. The MCP input schema requires `appId`.

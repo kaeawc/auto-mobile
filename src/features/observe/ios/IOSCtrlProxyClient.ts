@@ -3587,6 +3587,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
   }
 
+  /** Existing-socket UserDefaults access: never reconnect or provision a runner. */
+  public getConnectedPreferenceClient(): Pick<
+    IOSCtrlProxyClient,
+    "getPreference" | "setPreference" | "isConnected"
+  > {
+    const storage = new CtrlProxyStorage(
+      {
+        ...this.createDelegateContext(),
+        // The storage delegate's connection probe must only inspect the socket.
+        ensureConnected: async () => this.isConnected(),
+        getWebSocket: () => (this.isConnected() ? this.ws : null),
+      },
+      () => this.boundSessionId,
+      (appId) => iosMutationTokens.get(this.device.deviceId, appId),
+    );
+    return {
+      isConnected: () => this.isConnected(),
+      getPreference: (...args) => storage.getPreference(...args),
+      setPreference: (...args) => storage.setPreference(...args),
+    };
+  }
+
   async getPreference(
     packageName: string,
     fileName: string,

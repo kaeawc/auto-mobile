@@ -30,6 +30,26 @@ describe("preference tools", () => {
     expect(setTool?.requiresDevice).toBe(true);
   });
 
+  test("documents the unchanged iOS suite selector and app storage routes", () => {
+    for (const name of ["getPreference", "setPreference"]) {
+      const description = ToolRegistry.getTool(name)?.description;
+      expect(description).toContain("appId is required");
+      expect(description).toContain("suite (not name or fileName");
+      expect(description).toContain("embedded AutoMobile SDK");
+      expect(description).toContain("simulator data container");
+    }
+    for (const selector of ["name", "fileName"]) {
+      expect(
+        getPreferenceSchema.safeParse({
+          scope: "userDefaults",
+          appId: "com.example.app",
+          key: "k",
+          [selector]: "suite",
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   test("accepts Android system property requests without appId", () => {
     expect(() =>
       getPreferenceSchema.parse({

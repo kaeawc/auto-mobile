@@ -77,7 +77,7 @@ export function resetPreferenceToolsDependencies(): void {
 export function registerPreferenceTools(): void {
   ToolRegistry.registerDeviceAware(
     "getPreference",
-    "Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key.",
+    "Read an Android system property, Android SharedPreferences key, or iOS UserDefaults key. On iOS, appId is required and the store selector is suite (not name or fileName as on setKeyValue); omit suite or use Standard for the default store. Uses an already connected embedded AutoMobile SDK with storage inspection enabled; never starts a runner. Reads can fall back to the simulator data container's on-disk plist, which may lag the running app. Writes use the container only when no SDK connection is open before sending; SDK write failures never trigger a second write. App-group suites require the connected SDK.",
     getPreferenceSchema,
     async (device: BootedDevice, args: GetPreferenceToolArgs) => {
       const result = await getPreferenceToolsDependencies()
@@ -90,7 +90,7 @@ export function registerPreferenceTools(): void {
 
   ToolRegistry.registerDeviceAware(
     "setPreference",
-    "Write an Android system property, Android SharedPreferences key, or iOS UserDefaults key and return read-back verification.",
+    "Write an Android system property, Android SharedPreferences key, or iOS UserDefaults key and return read-back verification. On iOS, appId is required and the store selector is suite (not name or fileName as on setKeyValue); omit suite or use Standard for the default store. Uses an already connected embedded AutoMobile SDK with storage inspection enabled; never starts a runner. Reads can fall back to the simulator data container's on-disk plist, which may lag the running app. Writes use the container only when no SDK connection is open before sending; SDK write failures never trigger a second write. App-group suites require the connected SDK.",
     setPreferenceSchema,
     async (device: BootedDevice, args: SetPreferenceToolArgs) => {
       const result = await getPreferenceToolsDependencies()

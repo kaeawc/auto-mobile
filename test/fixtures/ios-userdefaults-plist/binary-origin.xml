@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>array</key>
+	<array>
+		<integer>1</integer>
+		<string>two</string>
+		<true/>
+	</array>
+	<key>bigInteger</key>
+	<integer>9007199254740993</integer>
+	<key>data</key>
+	<data>
+	aGVsbG8=
+	</data>
+	<key>date</key>
+	<date>2026-10-01T12:34:56Z</date>
+	<key>dictionary</key>
+	<dict>
+		<key>nested</key>
+		<integer>3</integer>
+		<key>text</key>
+		<string>three</string>
+	</dict>
+	<key>integer</key>
+	<integer>42</integer>
+	<key>key.with.dots</key>
+	<string>dotted</string>
+	<key>no</key>
+	<false/>
+	<key>real</key>
+	<real>3</real>
+	<key>string</key>
+	<string>  C:\tmp
+</string>
+	<key>unicode</key>
+	<string>こんにちは 🌈 café</string>
+	<key>yes</key>
+	<true/>
+</dict>
+</plist>

@@ -1,3 +1,11 @@
+import { iosPreferenceType, type IosPreferenceType } from "./IosPreferenceTypes";
+import { parseIosUserDefaultsPlist } from "./IosUserDefaultsPlist";
+import { join } from "node:path";
+import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
+import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { toActionableError } from "../../models/ActionableError";
+import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../server/storageSdkErrors";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   defaultAdbClientFactory,
@@ -28,7 +36,7 @@ import { getAndroidSharedPreferencesMutationCoordinator } from "./AndroidSharedP
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
-export type PreferenceResultType = PreferenceValueType | "long" | "stringSet";
+export type PreferenceResultType = IosPreferenceType | "long" | "stringSet";
 export type PreferenceValue = string | boolean | number;
 export type PreferenceResultValue = PreferenceValue | string[];
 
@@ -57,6 +65,9 @@ export interface PreferenceResult {
   found: boolean;
   verified?: boolean;
   warning?: string;
+  /** iOS userDefaults only: standard, custom suite, or global domain name. */
+  resolvedStore?: string;
+  storeRoute?: "sdk" | "container-plist" | "defaults";
 }
 
 interface IosSimulatorPreferenceClient {
@@ -67,10 +78,26 @@ interface IosSimulatorPreferenceClient {
   ): Promise<{ stdout: string; stderr: string }>;
 }
 
+export type IosPreferenceKeyValueClient = Pick<
+  IOSCtrlProxyClient,
+  "getPreference" | "setPreference" | "isConnected"
+>;
+
+type IosPreferenceStore =
+  | { kind: "sdk"; store: string; client: IosPreferenceKeyValueClient }
+  | {
+      kind: "container-plist" | "defaults";
+      store: string;
+      domain: string;
+      unavailableGroup?: boolean;
+    };
+
 export interface AppPreferencesDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPreferenceClient | null;
   timer?: Timer;
+  iosKeyValueClientProvider?: () => IosPreferenceKeyValueClient | null;
+  plistReader?: Pick<PlistReader, "readXmlFile">;
 }
 
 type AndroidPreferenceTag = "string" | "boolean" | "int" | "float";
@@ -80,6 +107,13 @@ interface AndroidPreferenceEntry {
   type: PreferenceResultType;
 }
 
+const IOS_PREFERENCE_SDK_TIMEOUT_MS = 2_500;
+const IOS_PLIST_READ_WARNING =
+  "This value comes from the on-disk plist and may lag a running app because cfprefsd can hold newer values.";
+const IOS_PLIST_WRITE_WARNING =
+  "defaults write to an absolute path bypasses the preferences daemon. A running app may not see the change, and cfprefsd may later overwrite it with cached state until the app restarts. verified: true proves only file content, not the running app's state.";
+const IOS_GROUP_SUITE_WARNING =
+  "App-group suites live in the group container and are only reachable through the embedded SDK on this preference route.";
 const IOS_DEFAULTS_COMMAND_TIMEOUT_MS = 10_000;
 const IOS_DEFAULTS_OPERATION_TIMEOUT_MS = 30_000;
 const ANDROID_INT_MIN = -2147483648;
@@ -142,6 +176,8 @@ export class AppPreferences {
   private readonly adbFactory: AdbClientFactory;
   private readonly simctl: IosSimulatorPreferenceClient | null | undefined;
   private readonly timer: Timer;
+  private readonly iosKeyValueClientProvider: () => IosPreferenceKeyValueClient | null;
+  private readonly plistReader?: Pick<PlistReader, "readXmlFile">;
 
   constructor(
     private readonly device: BootedDevice,
@@ -150,6 +186,13 @@ export class AppPreferences {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl;
     this.timer = dependencies.timer ?? defaultTimer;
+    this.iosKeyValueClientProvider =
+      dependencies.iosKeyValueClientProvider ??
+      (() =>
+        IOSCtrlProxyClient.getExistingInstance(
+          this.device.deviceId,
+        )?.getConnectedPreferenceClient() ?? null);
+    this.plistReader = dependencies.plistReader;
   }
 
   async getPreference(input: GetPreferenceInput): Promise<PreferenceResult> {
@@ -179,9 +222,17 @@ export class AppPreferences {
       }
     } else {
       const deadlineMs = this.iosDefaultsDeadline();
-      await this.setIosUserDefault({ ...input, value: normalizedValue }, deadlineMs);
-      const readBack = await this.getIosUserDefault(input, deadlineMs);
-      return this.verifiedWriteResult(input, normalizedValue, readBack);
+      const store = await this.setIosUserDefault({ ...input, value: normalizedValue }, deadlineMs);
+      // Pin verification to the successful write route: never verify a different store.
+      try {
+        const readBack = await this.getIosUserDefault(input, deadlineMs, store);
+        return this.verifiedWriteResult(input, normalizedValue, readBack, store);
+      } catch (error) {
+        throw new ActionableError(
+          `iOS UserDefaults write completed but read-back verification failed: ${errorMessage(error)}. The write may have been applied. Read the value on the same route before retrying.`,
+          { cause: error },
+        );
+      }
     }
 
     const readBack = await this.getPreference(input);
@@ -192,14 +243,20 @@ export class AppPreferences {
     input: SetPreferenceInput,
     normalizedValue: PreferenceValue,
     readBack: PreferenceResult,
+    iosStore?: IosPreferenceStore,
   ): PreferenceResult {
     const parsedReadBackValue = readBack.found
       ? parsePreferenceValue(stringValue(readBack.value), input.type)
       : null;
     return {
       ...readBack,
-      type: input.type,
-      value: readBack.found ? parsedReadBackValue : readBack.value,
+      type: this.device.platform === "ios" ? readBack.type : input.type,
+      value:
+        this.device.platform === "ios"
+          ? readBack.value
+          : readBack.found
+            ? parsedReadBackValue
+            : readBack.value,
       verified:
         readBack.found &&
         (this.device.platform === "android" &&
@@ -207,7 +264,7 @@ export class AppPreferences {
         input.type === "float"
           ? Math.fround(parsedReadBackValue as number) === Math.fround(normalizedValue as number)
           : valuesEqual(parsedReadBackValue, normalizedValue, input.type)),
-      warning: preferenceWriteWarning(this.device.platform, input.scope),
+      warning: preferenceWriteWarning(this.device.platform, input.scope, iosStore?.kind),
     };
   }
 
@@ -218,7 +275,11 @@ export class AppPreferences {
     if (this.device.platform === "ios" && input.scope !== "userDefaults") {
       throw new ActionableError(`${input.scope} scope is only supported on Android devices.`);
     }
-    if ((input.scope === "sharedPreferences" || input.scope === "userDefaults") && !input.appId) {
+    if (
+      !input.appId &&
+      (input.scope === "sharedPreferences" ||
+        (input.scope === "userDefaults" && isStandardIosStore(input)))
+    ) {
       throw new ActionableError(`appId is required for ${input.scope}.`);
     }
   }
@@ -281,11 +342,180 @@ export class AppPreferences {
   private async getIosUserDefault(
     input: GetPreferenceInput,
     deadlineMs?: number,
+    store?: IosPreferenceStore,
   ): Promise<PreferenceResult> {
+    if (store) {
+      return this.readIosPreferenceStore(input, store, deadlineMs);
+    }
+    return this.withIosPreferenceStore(
+      input,
+      (resolved) => this.readIosPreferenceStore(input, resolved, deadlineMs),
+      deadlineMs,
+    );
+  }
+
+  /** Reads may retry a capability/transport miss on disk; dispatched writes never do. */
+  private async withIosPreferenceStore<T>(
+    input: GetPreferenceInput,
+    operation: (store: IosPreferenceStore) => Promise<T>,
+    deadlineMs?: number,
+    write = false,
+  ): Promise<T> {
     if (!isIosSimulatorDevice(this.device)) {
       throw unsupportedPhysicalIosUserDefaultsError();
     }
+    const domain = sanitizeIosDefaultsDomain(iosDefaultsDomain(input));
+    if (!input.appId) {
+      if (domain.startsWith("-")) {
+        throw new ActionableError("iOS defaults domain must not start with '-' (a command flag).");
+      }
+      return operation({ kind: "defaults", store: domain, domain });
+    }
+    sanitizeIosDefaultsDomain(input.appId);
+    const standard = isStandardIosStore(input);
+    const store = standard ? "standard" : domain;
+    const client = this.iosKeyValueClientProvider();
+    if (client?.isConnected()) {
+      try {
+        return await operation({ kind: "sdk", store, client });
+      } catch (error) {
+        const detail = errorMessage(error);
+        if (detail.includes("mutation_not_authorized")) {
+          throw new ActionableError(
+            `iOS key-value storage mutation is not authorized: ${IOS_STORAGE_MUTATION_AUTHORIZATION_HINT}`,
+          );
+        }
+        if (write) {
+          throw new ActionableError(
+            `iOS UserDefaults SDK write failed: ${detail}. The write may or may not have been applied. Read the value through the SDK before retrying; no container write was attempted.`,
+            { cause: error },
+          );
+        }
+        if (!isIosPreferenceSdkUnavailable(error)) {
+          throw toActionableError(error, "Failed to access iOS app UserDefaults");
+        }
+        // Reads are safe to retry from disk after an expected SDK capability/transport miss.
+        logger.debug(`iOS preference SDK unavailable: ${detail}`, error);
+      }
+    }
+    return operation(
+      await this.resolveIosContainerPreferenceStore(input, store, domain, deadlineMs, write),
+    );
+  }
 
+  private async resolveIosContainerPreferenceStore(
+    input: GetPreferenceInput,
+    store: string,
+    domain: string,
+    deadlineMs: number | undefined,
+    write: boolean,
+  ): Promise<IosPreferenceStore> {
+    if (store !== "standard" && domain.startsWith("group.")) {
+      if (write) {
+        throw new ActionableError(
+          `${IOS_GROUP_SUITE_WARNING} Connect the app's runner before writing.`,
+        );
+      }
+      return { kind: "container-plist", store, domain, unavailableGroup: true };
+    }
+    let container: string;
+    try {
+      const result = await this.iosPreferenceCommand(
+        (timeoutMs) =>
+          this.getSimctl().executeCommandArgs(
+            ["get_app_container", this.device.deviceId, input.appId!, "data"],
+            timeoutMs,
+          ),
+        deadlineMs,
+      );
+      container = result.stdout.trim();
+      if (!container) {
+        throw new ActionableError("simctl returned an empty data container path.");
+      }
+    } catch (error) {
+      const detail = errorMessage(error);
+      if (
+        /Application not found|No such file or directory|NSPOSIXErrorDomain, code=2/i.test(detail)
+      ) {
+        throw new ActionableError(
+          `App '${input.appId}' is not installed on this simulator: ${detail}. Install the app and retry.`,
+        );
+      }
+      throw new ActionableError(
+        `Failed to resolve the data container for '${input.appId}': ${detail}. Check simulator availability and retry.`,
+        { cause: error },
+      );
+    }
+    return {
+      kind: "container-plist",
+      store,
+      domain: join(container, "Library", "Preferences", domain),
+    };
+  }
+
+  private async readIosPreferenceStore(
+    input: GetPreferenceInput,
+    store: IosPreferenceStore,
+    deadlineMs?: number,
+  ): Promise<PreferenceResult> {
+    let result: PreferenceResult;
+    if (store.kind === "sdk") {
+      const entry = await this.iosPreferenceCommand(
+        (timeoutMs) =>
+          store.client.getPreference(
+            input.appId!,
+            iosSdkStoreName(store.store),
+            input.key,
+            timeoutMs,
+          ),
+        deadlineMs,
+        IOS_PREFERENCE_SDK_TIMEOUT_MS,
+      );
+      const mapped = entry ? iosSdkPreferenceValue(entry) : null;
+      result = this.result(input, entry !== null, mapped?.value ?? null, mapped?.type);
+    } else if (store.kind === "container-plist") {
+      result = store.unavailableGroup
+        ? { ...this.result(input, false, null), warning: IOS_GROUP_SUITE_WARNING }
+        : {
+            ...(await this.readIosPreferencePlist(input, store.domain, deadlineMs)),
+            warning: IOS_PLIST_READ_WARNING,
+          };
+    } else {
+      result = await this.readIosGlobalDefault(input, deadlineMs);
+    }
+    return { ...result, resolvedStore: store.store, storeRoute: store.kind };
+  }
+
+  private async readIosPreferencePlist(
+    input: GetPreferenceInput,
+    domain: string,
+    deadlineMs?: number,
+  ): Promise<PreferenceResult> {
+    let xml: string;
+    try {
+      const reader = this.plistReader ?? new PlistClient(undefined, { timer: this.timer });
+      xml = await this.iosPreferenceCommand(
+        (timeoutMs) => reader.readXmlFile(`${domain}.plist`, { timeoutMs }),
+        deadlineMs,
+      );
+    } catch (error) {
+      if (/No such file|file doesn[’']t exist|file does not exist/i.test(errorMessage(error))) {
+        // An app need not have persisted its defaults yet; missing files are normal misses.
+        logger.debug(`iOS preference plist not present: ${errorMessage(error)}`, error);
+        return this.result(input, false, null);
+      }
+      throw toActionableError(error, "Failed to read iOS app UserDefaults plist");
+    }
+    const entry = (await parseIosUserDefaultsPlist(xml)).get(input.key);
+    return entry
+      ? this.result(input, true, entry.value, entry.type)
+      : this.result(input, false, null);
+  }
+
+  private async readIosGlobalDefault(
+    input: GetPreferenceInput,
+    deadlineMs?: number,
+  ): Promise<PreferenceResult> {
     const domain = iosDefaultsDomain(input);
     try {
       const result = await this.executeIosDefaultsCommand(
@@ -296,38 +526,93 @@ export class AppPreferences {
       return this.result(input, true, parseIosDefaultsValue(result.stdout, type), type ?? "string");
     } catch (error) {
       if (looksLikeMissingIosDefault(error)) {
-        return this.result(input, false, null);
+        // Missing global keys/domains are expected; give app-suite callers the correct route.
+        logger.debug(`iOS global defaults not found: ${errorMessage(error)}`, error);
+        return {
+          ...this.result(input, false, null),
+          warning:
+            "UserDefaults suites written by an app live in that app's data container and require appId. The embedded SDK route also requires the AutoMobile SDK with storage inspection enabled.",
+        };
       }
-      throw new ActionableError(`Failed to read iOS UserDefaults with defaults: ${error}`);
+      throw toActionableError(error, "Failed to read iOS UserDefaults with defaults");
     }
   }
 
-  private async setIosUserDefault(input: SetPreferenceInput, deadlineMs: number): Promise<void> {
-    if (!isIosSimulatorDevice(this.device)) {
-      throw unsupportedPhysicalIosUserDefaultsError();
-    }
-
-    const domain = iosDefaultsDomain(input);
-    const typeFlag = iosDefaultsTypeFlag(input.type);
-    await this.executeIosDefaultsCommand(
-      [
-        "spawn",
-        this.device.deviceId,
-        "defaults",
-        "write",
-        domain,
-        input.key,
-        typeFlag,
-        stringValue(input.value),
-      ],
+  private async setIosUserDefault(
+    input: SetPreferenceInput,
+    deadlineMs: number,
+  ): Promise<IosPreferenceStore> {
+    return this.withIosPreferenceStore(
+      input,
+      async (store) => {
+        if (store.kind === "sdk") {
+          await this.iosPreferenceCommand(
+            (timeoutMs) =>
+              store.client.setPreference(
+                input.appId!,
+                iosSdkStoreName(store.store),
+                input.key,
+                stringValue(input.value),
+                IOS_PREFERENCE_WRITE_TYPES[input.type],
+                timeoutMs,
+              ),
+            deadlineMs,
+            IOS_PREFERENCE_SDK_TIMEOUT_MS,
+          );
+        } else {
+          await this.executeIosDefaultsCommand(
+            [
+              "spawn",
+              this.device.deviceId,
+              "defaults",
+              "write",
+              store.domain,
+              input.key,
+              iosDefaultsTypeFlag(input.type),
+              stringValue(input.value),
+            ],
+            deadlineMs,
+          );
+        }
+        return store;
+      },
       deadlineMs,
+      true,
     );
+  }
+
+  private async iosPreferenceCommand<T>(
+    operation: (timeoutMs: number) => Promise<T>,
+    deadlineMs?: number,
+    commandTimeoutMs = IOS_DEFAULTS_COMMAND_TIMEOUT_MS,
+  ): Promise<T> {
+    const remainingMs = Math.min(
+      commandTimeoutMs,
+      deadlineMs === undefined ? commandTimeoutMs : deadlineMs - this.timer.now(),
+    );
+    if (remainingMs <= 0) {
+      throw iosDefaultsOperationTimeoutError();
+    }
+    const operationDeadlineMs = this.timer.now() + remainingMs;
+    const timeoutError =
+      deadlineMs === undefined || commandTimeoutMs === IOS_PREFERENCE_SDK_TIMEOUT_MS
+        ? () =>
+            new ActionableError(`iOS UserDefaults request timed out after ${commandTimeoutMs}ms.`)
+        : iosDefaultsOperationTimeoutError;
+    const value = await raceWithDeadline(
+      () => operation(Math.min(IOS_DEFAULTS_COMMAND_TIMEOUT_MS, remainingMs)),
+      { timer: this.timer, timeoutMs: remainingMs, label: "iOS UserDefaults", timeoutError },
+    );
+    if (this.timer.now() >= operationDeadlineMs) {
+      throw timeoutError();
+    }
+    return value;
   }
 
   private async readIosDefaultsType(
     input: GetPreferenceInput,
     deadlineMs?: number,
-  ): Promise<PreferenceValueType | undefined> {
+  ): Promise<IosPreferenceType | undefined> {
     const domain = iosDefaultsDomain(input);
     try {
       const result = await this.executeIosDefaultsCommand(
@@ -346,10 +631,10 @@ export class AppPreferences {
         return undefined;
       }
       if (deadlineMs !== undefined && this.timer.now() >= deadlineMs) {
-        throw error;
+        throw toActionableError(error, "iOS defaults type read exceeded the operation deadline");
       }
       if (!isRetryableIosDefaultsError(error)) {
-        throw new ActionableError(`Failed to read iOS UserDefaults type with defaults: ${error}`);
+        throw toActionableError(error, "Failed to read iOS UserDefaults type with defaults");
       }
       logger.warn(
         `src/features/preferences/AppPreferences.ts defaults type read failed; falling back to string: ${error}`,
@@ -387,12 +672,19 @@ export class AppPreferences {
       } catch (error) {
         finalError = error;
         if (attempt === 1 || !isRetryableIosDefaultsError(error)) {
-          throw error;
+          throw toActionableError(
+            error,
+            "Failed to execute iOS defaults command; check simulator availability and retry",
+          );
         }
+        logger.warn(
+          `Retrying iOS defaults command after transient failure: ${errorMessage(error)}`,
+          error,
+        );
       }
     }
 
-    throw finalError;
+    throw toActionableError(finalError, "Failed to execute iOS defaults command");
   }
 
   private getSimctl(): IosSimulatorPreferenceClient {
@@ -537,12 +829,70 @@ function assertAndroidSharedPreferencesInt(value: PreferenceValue): void {
   }
 }
 
+const IOS_PREFERENCE_WRITE_TYPES: Record<PreferenceValueType, KeyValueType> = {
+  string: "STRING",
+  int: "INT",
+  bool: "BOOLEAN",
+  float: "FLOAT",
+};
+
+function iosSdkStoreName(store: string): string {
+  return store === "standard" ? "Standard" : store;
+}
+
+export function isIosPreferenceSdkUnavailable(error: unknown): boolean {
+  const message = errorMessage(error);
+  // Read-only policy: known transport/deadline/capability signals. Never authorize
+  // retries of writes, app mismatch, mutation refusals, or unknown SDK faults.
+  return (
+    message === "Failed to connect to CtrlProxy" ||
+    /^(?:Get preference timeout after \d+ms|iOS UserDefaults request timed out after \d+ms\.)$/.test(
+      message,
+    ) ||
+    /^(?:WebSocket (?:is not open|closed|connection closed)|Connection (?:closed|lost)|connection_lost)$/.test(
+      message,
+    ) ||
+    (/^iOS key-value storage requires the target app to embed the AutoMobile SDK, initialize it, and call UserDefaultsInspector\.shared\.setEnabled\(true\): /.test(
+      message,
+    ) &&
+      /(?:Could not connect to the server|couldn[’']t connect to the server|connection refused|network connection was lost|not connected to the Internet|request timed out)\.?$/i.test(
+        message,
+      )) ||
+    /^iOS key-value storage requires the target app to embed or upgrade the AutoMobile SDK: (?:not_found|HTTP 404)$/.test(
+      message,
+    ) ||
+    /(?:^|: )user_defaults_inspection_disabled$/.test(message)
+  );
+}
+
+function iosSdkPreferenceValue(entry: KeyValueEntry): {
+  value: PreferenceResultValue | null;
+  type: PreferenceResultType;
+} {
+  const type = iosPreferenceType(entry.type);
+  const value = entry.value;
+  return {
+    type,
+    value:
+      value === null
+        ? null
+        : type === "int"
+          ? parseIosInteger(value)
+          : type === "bool"
+            ? parseBool(value)
+            : type === "float"
+              ? parseFloatValue(value)
+              : value,
+  };
+}
+
+function isStandardIosStore(input: GetPreferenceInput): boolean {
+  const suite = input.suite?.trim().toLowerCase();
+  return !suite || suite === "standard" || (!!input.appId && suite === input.appId.toLowerCase());
+}
+
 function iosDefaultsDomain(input: GetPreferenceInput): string {
-  if (!input.suite || input.suite.trim() === "" || input.suite === "Standard") {
-    // The appId path relies on the caller's existing app-identifier validation.
-    return input.appId!;
-  }
-  return sanitizeIosDefaultsDomain(input.suite);
+  return isStandardIosStore(input) ? input.appId! : sanitizeIosDefaultsDomain(input.suite!);
 }
 
 function sanitizeIosDefaultsDomain(suite: string): string {
@@ -587,7 +937,7 @@ function parsePreferenceValue(value: string, type: PreferenceValueType): Prefere
 
 function parseIosDefaultsValue(
   value: string,
-  type: PreferenceValueType | undefined,
+  type: IosPreferenceType | undefined,
 ): PreferenceValue {
   if (type === undefined || type === "string") {
     return removeOneTrailingLineEnding(value);
@@ -595,7 +945,10 @@ function parseIosDefaultsValue(
   if (type === "int") {
     return parseIosInteger(value);
   }
-  return parsePreferenceValue(value, type);
+  if (type === "bool" || type === "float") {
+    return parsePreferenceValue(value, type);
+  }
+  return removeOneTrailingLineEnding(value);
 }
 
 function removeOneTrailingLineEnding(value: string): string {
@@ -608,21 +961,9 @@ function removeOneTrailingLineEnding(value: string): string {
   return value;
 }
 
-function parseIosDefaultsType(value: string): PreferenceValueType | undefined {
-  const normalized = value.trim().toLowerCase();
-  if (normalized.includes("boolean") || normalized.includes("bool")) {
-    return "bool";
-  }
-  if (normalized.includes("integer") || normalized.includes("int")) {
-    return "int";
-  }
-  if (normalized.includes("float") || normalized.includes("double")) {
-    return "float";
-  }
-  if (normalized.includes("string")) {
-    return "string";
-  }
-  return undefined;
+function parseIosDefaultsType(value: string): IosPreferenceType | undefined {
+  const type = iosPreferenceType(value);
+  return type === "unknown" ? undefined : type;
 }
 
 function parseBool(value: string): boolean {
@@ -715,6 +1056,7 @@ function looksLikeMissingIosDefault(error: unknown): boolean {
   return [
     /The domain\/default pair of \([^)]+\) does not exist\.?$/i,
     /Domain [^\n]+ does not exist\.?$/i,
+    /Domain [^\n]+ not found\.?$/i,
     /Domain [^\n]+ does not contain (?:a value for )?[^\n]+\.?$/i,
   ].some((pattern) => pattern.test(message));
 }
@@ -739,8 +1081,15 @@ function iosDefaultsOperationTimeoutError(): ActionableError {
 function preferenceWriteWarning(
   platform: "android" | "ios",
   scope: PreferenceScope,
+  iosRoute?: IosPreferenceStore["kind"],
 ): string | undefined {
   if (platform === "ios" && scope === "userDefaults") {
+    if (iosRoute === "sdk") {
+      return undefined;
+    }
+    if (iosRoute === "container-plist") {
+      return IOS_PLIST_WRITE_WARNING;
+    }
     return "UserDefaults writes go through the preferences daemon; a running app that cached the value may need a cold relaunch to observe the change.";
   }
   if (platform === "android" && scope === "systemProperty") {

@@ -38,7 +38,6 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     navigation: () => import("../../src/server/navigationTools"),
     notification: () => import("../../src/server/notificationTools"),
     highlight: () => import("../../src/server/highlightTools"),
-    debug: () => import("../../src/server/debugTools"),
     deepLink: () => import("../../src/server/deepLinkTools"),
     biometric: () => import("../../src/server/biometricTools"),
     snapshot: () => import("../../src/server/snapshotTools"),
@@ -75,6 +74,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
 
     expect(Array.isArray(schemas)).toBe(true);
     expect(schemas.length).toBeGreaterThan(0);
+    expect(schemas.map((schema: ToolSchemaDefinition) => schema.name)).not.toContain("debugSearch");
 
     // Validate structure of first schema
     if (schemas.length > 0) {

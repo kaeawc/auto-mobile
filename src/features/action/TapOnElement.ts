@@ -45,7 +45,7 @@ import {
   type VisionFallbackConfig,
   type VisionAnalyzer,
 } from "../../vision/index";
-import { buildElementSearchDebugContext } from "../../utils/DebugContextBuilder";
+import { buildElementSearchDebugContext } from "../utility/ElementSearchDebugContext";
 import { throwIfAborted } from "../../utils/toolUtils";
 import {
   SelectionStateTracker,

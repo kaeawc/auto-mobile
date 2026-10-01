@@ -176,7 +176,7 @@ export class FocusNavigationExecutor {
       if (initialVerification.targetIndex === null) {
         throw new ActionableError(
           `Target not found (${this.describeSelector(targetSelector)}). ` +
-            "Try using debugSearch to validate the selector.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
         );
       }
 
@@ -188,7 +188,7 @@ export class FocusNavigationExecutor {
       if (!recalculated) {
         throw new ActionableError(
           `Target not found (${this.describeSelector(targetSelector)}). ` +
-            "Try using debugSearch to validate the selector.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
         );
       }
       if (recalculated.swipeCount > maxSwipes) {
@@ -244,7 +244,7 @@ export class FocusNavigationExecutor {
       if (verification.targetIndex === null) {
         throw new ActionableError(
           `Target element disappeared during navigation (${this.describeSelector(targetSelector)}). ` +
-            "Try using debugSearch to validate the selector.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
         );
       }
 
@@ -256,7 +256,7 @@ export class FocusNavigationExecutor {
       if (!recalculated) {
         throw new ActionableError(
           `Target element disappeared during navigation (${this.describeSelector(targetSelector)}). ` +
-            "Try using debugSearch to validate the selector.",
+            "Use observe to inspect elements and the diagnostics returned by tapOn/waitFor failures.",
         );
       }
 

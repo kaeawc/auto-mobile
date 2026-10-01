@@ -9,6 +9,7 @@ import {
 } from "./toolCallDispatch";
 import { timingSafeEqual } from "node:crypto";
 import { ActionableError } from "../models";
+import { getRemovedToolHint } from "../models/removedTools";
 import { formatToolParamError } from "./toolParamError";
 import { stripUndeclaredSessionUuid } from "../utils/toolParams";
 import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
@@ -285,7 +286,6 @@ import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
-import { registerDebugTools } from "./debugTools";
 import { registerNavigationTools } from "./navigationTools";
 import { registerNotificationTools } from "./notificationTools";
 import { registerPlanTools } from "./planTools";
@@ -608,7 +608,6 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerAccessibilityTools();
   registerAccessibilityFocusTools();
   registerNetworkTools();
-  registerDebugTools();
   registerToolSelectionTools();
   validateConfiguredToolSelectionDefaults(new Set(ToolRegistry.getConfigurableToolNames()));
 }
@@ -896,7 +895,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // Get the registered tool
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
-      throw new ActionableError(`Unknown tool: ${name}`);
+      const hint = getRemovedToolHint(name);
+      throw new ActionableError(`Unknown tool: ${name}${hint ? `. ${hint}` : ""}`);
     }
 
     if (name === SET_TOOL_ENABLED_TOOL_NAME) {

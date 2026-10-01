@@ -5795,10 +5795,34 @@ describe("DaemonMcpProxy", () => {
         const error = caught as Error;
         expect(error.message).toContain('Unknown tool "inputText"');
         expect(error.message).toContain("sendKeys");
-        expect(error.message).toContain("#7457");
+        expect(error.message).toContain("inputText was removed; use sendKeys");
         expect(client.callToolCalls).toHaveLength(1);
         expect(client.closeCallCount).toBe(0);
         expect(clientFactoryCalls).toBe(1);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("reports the removed-tool hint when debugSearch is called", async () => {
+      const client = new ScriptedDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        toolError: new Error("MCP error -32603: Unknown tool: debugSearch"),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+      try {
+        await expect(proxy.callTool("debugSearch", { text: "Save" })).rejects.toThrow(
+          'Unknown tool "debugSearch". debugSearch was removed; use observe to see elements, and the diagnostics returned by tapOn/waitFor failures',
+        );
+        expect(client.callToolCalls).toEqual([
+          { toolName: "debugSearch", params: { text: "Save" } },
+        ]);
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -5837,7 +5861,7 @@ describe("DaemonMcpProxy", () => {
         const error = caught as Error;
         expect(error.message).toContain('Unknown tool "inputText"');
         expect(error.message).toContain("sendKeys");
-        expect(error.message).toContain("#7457");
+        expect(error.message).toContain("inputText was removed; use sendKeys");
         expect(error.message.toLowerCase()).not.toContain("restart");
         expect(error.message.toLowerCase()).not.toContain("skew");
         expect(error.message).not.toContain("wrong-build");

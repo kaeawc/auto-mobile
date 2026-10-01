@@ -864,91 +864,6 @@
     }
   },
   {
-    "name": "debugSearch",
-    "description": "Debug element search operations. Shows all matching elements, which one would be selected, and near-misses that almost matched. Use this to understand why an element isn't being found or why the wrong element is being selected.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios"]
-        },
-        "text": {
-          "description": "Text to search for in elements",
-          "type": "string"
-        },
-        "elementId": {
-          "description": "Element resource ID / accessibility identifier to search for",
-          "type": "string"
-        },
-        "container": {
-          "description": "Container element to scope the search - specify elementId or text to locate it",
-          "anyOf": [
-            {
-              "type": "object",
-              "properties": {
-                "elementId": {
-                  "description": "Container resource ID",
-                  "type": "string"
-                }
-              },
-              "required": ["elementId"],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "text": {
-                  "description": "Container text",
-                  "type": "string"
-                }
-              },
-              "required": ["text"],
-              "additionalProperties": false
-            }
-          ]
-        },
-        "match": {
-          "description": "Explicit matching mode; ID defaults to exact or namespace matching",
-          "type": "string",
-          "enum": ["exact", "contains"]
-        },
-        "partialMatch": {
-          "description": "Legacy explicit text substring flag; omitted text matching tries exact first. IDs require match: contains for substring search.",
-          "type": "boolean"
-        },
-        "caseSensitive": {
-          "description": "Whether to use case-sensitive matching (default: false)",
-          "type": "boolean"
-        },
-        "includeNearMisses": {
-          "description": "Include elements that almost matched (default: true)",
-          "type": "boolean"
-        },
-        "maxNearMisses": {
-          "description": "Maximum number of near-misses to include (default: 10)",
-          "type": "number"
-        },
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label",
-          "type": "string"
-        }
-      },
-      "additionalProperties": false
-    },
-    "_meta": {
-      "automobile/debugOnly": true
-    }
-  },
-  {
     "name": "deleteDevice",
     "description": "Stop and permanently delete a device, with verified platform-inventory absence",
     "inputSchema": {
@@ -1723,7 +1638,6 @@
               "clearMockNetwork",
               "clipboard",
               "crashApp",
-              "debugSearch",
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
@@ -1849,7 +1763,6 @@
               "clearMockNetwork",
               "clipboard",
               "crashApp",
-              "debugSearch",
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
@@ -9505,7 +9418,6 @@
               "clearMockNetwork",
               "clipboard",
               "crashApp",
-              "debugSearch",
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",
@@ -12077,7 +11989,6 @@
             "clearMockNetwork",
             "clipboard",
             "crashApp",
-            "debugSearch",
             "deleteDevice",
             "deviceSnapshot",
             "displayConfig",
@@ -12169,7 +12080,6 @@
               "clearMockNetwork",
               "clipboard",
               "crashApp",
-              "debugSearch",
               "deleteDevice",
               "deviceSnapshot",
               "displayConfig",

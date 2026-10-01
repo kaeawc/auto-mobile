@@ -19,7 +19,6 @@ object ValidTools {
       "clipboard",
       "crashApp",
       "criticalSection",
-      "debugSearch",
       "deleteSnapshot",
       "deviceSnapshot",
       "doctor",

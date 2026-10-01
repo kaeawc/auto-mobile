@@ -251,14 +251,14 @@ describe("exact-tool selection union policy", () => {
     // unlike the IDE-socket channel above — the sessionless form is real remediation here, even
     // for a non-device tool. Device acquisition is not required just to enable the tool.
     await expect(
-      assertToolEnabledForAnySession("debugSearch", false, [undefined], disabled),
+      assertToolEnabledForAnySession("systemTray", false, [undefined], disabled),
     ).rejects.toThrow(
-      "Tool debugSearch is disabled for device session (not yet bound). " +
-        'Enable it with setToolEnabled { toolName: "debugSearch", enabled: true }.',
+      "Tool systemTray is disabled for device session (not yet bound). " +
+        'Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
     );
-    await expect(
-      assertToolEnabledForAnySession("debugSearch", false, [], disabled),
-    ).rejects.toThrow('Enable it with setToolEnabled { toolName: "debugSearch", enabled: true }.');
+    await expect(assertToolEnabledForAnySession("systemTray", false, [], disabled)).rejects.toThrow(
+      'Enable it with setToolEnabled { toolName: "systemTray", enabled: true }.',
+    );
   });
 
   test("assertToolEnabledForAnySession omits sessionUuid across composite connection/base/label profiles when a connection profile is actually rechecked (PRRT_kwDOP-GF5M6fuHM5)", async () => {

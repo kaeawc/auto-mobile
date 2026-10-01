@@ -1,11 +1,9 @@
-import { BootedDevice, Element } from "../models";
-import { DebugSearch } from "../features/debug/DebugSearch";
-import { isDebugModeEnabled } from "./debug";
+import type { Element } from "../models";
 
 /**
  * Debug information about an element search failure
  */
-interface ElementSearchDebugInfo {
+export interface ElementSearchDebugInfo {
   /**
    * What was being searched for
    */
@@ -40,62 +38,6 @@ interface ElementSearchDebugInfo {
     currentActivity?: string;
     focusedWindow?: string;
   };
-}
-
-/**
- * Build debug context for element search failures
- * Only collects information if debug mode is enabled
- */
-export async function buildElementSearchDebugContext(
-  device: BootedDevice | null,
-  searchCriteria: {
-    text?: string;
-    resourceId?: string;
-    container?: {
-      elementId?: string;
-      text?: string;
-    };
-  },
-): Promise<ElementSearchDebugInfo | undefined> {
-  // Only build debug context if debug mode is enabled
-  if (!isDebugModeEnabled()) {
-    return undefined;
-  }
-
-  // Can't build debug context without a device
-  if (!device) {
-    return {
-      searchCriteria,
-      nearMisses: [],
-      totalElementsChecked: 0,
-    };
-  }
-
-  try {
-    const debugSearch = new DebugSearch(device);
-    const result = await debugSearch.execute({
-      text: searchCriteria.text,
-      resourceId: searchCriteria.resourceId,
-      container: searchCriteria.container,
-      includeNearMisses: true,
-      maxNearMisses: 10,
-      partialMatch: true,
-      caseSensitive: false,
-    });
-
-    return {
-      searchCriteria,
-      nearMisses: result.nearMisses,
-      totalElementsChecked: result.totalElements,
-    };
-  } catch (error) {
-    // If we can't build debug context, return basic info
-    return {
-      searchCriteria,
-      nearMisses: [],
-      totalElementsChecked: 0,
-    };
-  }
 }
 
 /**

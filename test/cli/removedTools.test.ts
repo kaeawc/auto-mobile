@@ -1,20 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { formatDaemonToolError, getRemovedToolReplacement } from "../../src/cli/removedTools";
+import { formatDaemonToolError } from "../../src/cli/removedTools";
 
 describe("removed tool registry", () => {
-  test("documents removed tools and their replacements", () => {
-    expect(getRemovedToolReplacement("captureScreenshot")).toBe(
-      'observe {screenshot:"settled"} (returns screenshotPath)',
-    );
-    expect(getRemovedToolReplacement("inputText")).toBe("sendKeys");
-    expect(getRemovedToolReplacement("clearText")).toBe("sendKeys");
-    expect(getRemovedToolReplacement("imeAction")).toBe("sendKeys");
-    expect(getRemovedToolReplacement("missing-tool")).toBeUndefined();
-  });
-
   test("recommends replacements for removed tools without a restart hint", () => {
     expect(formatDaemonToolError("captureScreenshot", 'Unknown tool "captureScreenshot".')).toBe(
       'captureScreenshot was removed; use observe {screenshot:"settled"} (returns screenshotPath)',
+    );
+    expect(formatDaemonToolError("debugSearch", 'Unknown tool "debugSearch".')).toBe(
+      "debugSearch was removed; use observe to see elements, and the diagnostics returned by tapOn/waitFor failures",
     );
   });
 

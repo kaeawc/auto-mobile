@@ -16,7 +16,6 @@ import { registerBarrierTools } from "../server/barrierTools";
 import { registerBiometricTools } from "../server/biometricTools";
 import { registerCriticalSectionTools } from "../server/criticalSectionTools";
 import { registerDatabaseTools } from "../server/databaseTools";
-import { registerDebugTools } from "../server/debugTools";
 import { registerDeepLinkTools } from "../server/deepLinkTools";
 import { registerFormTools } from "../server/formTools";
 import { registerHighlightTools } from "../server/highlightTools";
@@ -50,7 +49,6 @@ export function initializeCliTools(): void {
   registerBiometricTools();
   registerCriticalSectionTools();
   registerDatabaseTools();
-  registerDebugTools();
   registerDeepLinkTools();
   registerFormTools();
   registerHighlightTools();

@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { getRemovedToolHint } from "../models/removedTools";
 import { shellQuote } from "../utils/shellQuote";
 import {
   DaemonBoundSessionLostError,
@@ -370,12 +371,6 @@ export class DaemonConnectionSessionReleasedError extends Error {
     this.reason = reason;
   }
 }
-
-const REMOVED_TOOL_HINTS: Record<string, string> = {
-  inputText: 'inputText was removed in #7457 and folded into "sendKeys".',
-  clearText: 'clearText was removed in #7457 and folded into "sendKeys".',
-  imeAction: 'imeAction was removed in #7457 and folded into "sendKeys".',
-};
 
 /** Raised when a frontend-advertised tool is rejected by the daemon as unknown. */
 export class DaemonToolUnavailableError extends Error {
@@ -3751,7 +3746,7 @@ export class DaemonMcpProxy {
       );
     }
     if (!this.frontendRegistersTool(name)) {
-      const hint = REMOVED_TOOL_HINTS[name];
+      const hint = getRemovedToolHint(name);
       return new Error(`Unknown tool "${name}".${hint ? ` ${hint}` : ""}`);
     }
     return new DaemonToolUnavailableError({

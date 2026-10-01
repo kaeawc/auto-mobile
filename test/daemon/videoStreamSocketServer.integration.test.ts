@@ -96,7 +96,8 @@ interface Harness {
   server: VideoStreamSocketServer;
   socketPath: string;
   sources: FakeCaptureSource[];
-  captureOptions: Array<{ fps?: number; quality?: string }>;
+  captureOptions: Array<{ fps?: number; quality?: string; bitrateBps?: number }>;
+  emitFromSource: (index: number, chunk: Buffer) => void;
   emit: (chunk: Buffer) => void;
   emitUnattested: (chunk: Buffer) => void;
   emitSourceFrame: () => void;
@@ -143,7 +144,9 @@ async function startHarness(
   let onRotation: ((rotation: number) => void) | null = null;
   let onDroppedFrames: ((droppedFrames: number) => void) | null = null;
   let onError: ((error: Error) => void) | null = null;
-  const captureOptions: Array<{ fps?: number; quality?: string }> = [];
+  const captureOptions: Array<{ fps?: number; quality?: string; bitrateBps?: number }> = [];
+  const sourceCallbacks: Array<{ onData: (chunk: Buffer) => void; onSourceFrame?: () => void }> =
+    [];
 
   const server = new VideoStreamSocketServer(
     {
@@ -164,6 +167,7 @@ async function startHarness(
         onDroppedFrames = opts.onDroppedFrames ?? null;
         onError = opts.onError;
         captureOptions.push(opts);
+        sourceCallbacks.push({ onData: opts.onData, onSourceFrame: opts.onSourceFrame });
         const source = new FakeCaptureSource();
         source.startError = options.startError ?? null;
         source.startGate = options.startGate ?? null;
@@ -193,6 +197,10 @@ async function startHarness(
     socketPath,
     sources,
     captureOptions,
+    emitFromSource: (index, chunk) => {
+      sourceCallbacks[index].onSourceFrame?.();
+      sourceCallbacks[index].onData(chunk);
+    },
     emit: (chunk) => {
       onSourceFrame?.();
       onData?.(chunk);
@@ -242,7 +250,7 @@ async function subscribe(
       }
       break;
     }
-    await defaultTimer.sleep(10);
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   return {
@@ -261,6 +269,26 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void
     await defaultTimer.sleep(10);
   }
   throw new Error("Timed out waiting for condition");
+}
+
+async function flushSocketTurn(): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+function framedPackets(binary: Buffer): Array<{ flags: bigint; payload: Buffer }> {
+  const packets: Array<{ flags: bigint; payload: Buffer }> = [];
+  for (let offset = 12; offset + 12 <= binary.length;) {
+    const length = binary.readInt32BE(offset + 8);
+    if (offset + 12 + length > binary.length) {
+      break;
+    }
+    packets.push({
+      flags: binary.readBigInt64BE(offset),
+      payload: binary.subarray(offset + 12, offset + 12 + length),
+    });
+    offset += 12 + length;
+  }
+  return packets;
 }
 
 afterEach(async () => {
@@ -796,6 +824,108 @@ describe("VideoStreamSocketServer", () => {
     await waitFor(() => h.server.subscriberCount(DEVICE.deviceId) === 2);
 
     expect(h.sources).toHaveLength(1);
+  });
+
+  test("a late quality request reconfigures one shared source without disconnecting viewers", async () => {
+    const timer = new FakeTimer();
+    const h = await startHarness({ timer });
+    const first = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      quality: "high",
+      fps: 30,
+      bitrateKbps: 8000,
+    });
+    const second = await subscribe(h.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      quality: "low",
+      fps: 15,
+      bitrateKbps: 2000,
+    });
+    expect(h.sources).toHaveLength(1);
+    timer.advanceTime(199);
+    expect(h.sources).toHaveLength(1);
+    timer.advanceTime(1);
+    await flushSocketTurn();
+    expect(h.sources).toHaveLength(2);
+    expect(h.sources[0].stopped).toBe(true);
+    expect(h.captureOptions[1]).toMatchObject({
+      quality: "low",
+      fps: 15,
+      bitrateBps: 2_000_000,
+    });
+    expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(2);
+    expect(first.socket.destroyed).toBe(false);
+    expect(second.socket.destroyed).toBe(false);
+
+    // A stopped encoder can still deliver a buffered callback; its generation is fenced.
+    const stale = Buffer.from([0, 0, 0, 1, 0x07, 0x11, 0, 0, 0, 1, 0x08, 0x12]);
+    h.emitFromSource(0, stale);
+    const fresh = Buffer.from([
+      0, 0, 0, 1, 0x07, 0x21, 0, 0, 0, 1, 0x08, 0x22, 0, 0, 0, 1, 0x05, 0x23, 0, 0, 0, 1, 0x01,
+      0x24,
+    ]);
+    h.emitFromSource(1, fresh);
+    await flushSocketTurn();
+    for (const viewer of [first, second]) {
+      const packets = framedPackets(viewer.binary());
+      expect(packets.some((packet) => packet.payload.includes(Buffer.from([0x07, 0x21])))).toBe(
+        true,
+      );
+      expect(packets.some((packet) => packet.payload.includes(Buffer.from([0x08, 0x22])))).toBe(
+        true,
+      );
+      expect(packets.some((packet) => (packet.flags & (1n << 62n)) !== 0n)).toBe(true);
+      expect(packets.some((packet) => packet.payload.includes(Buffer.from([0x07, 0x11])))).toBe(
+        false,
+      );
+    }
+    const third = await subscribe(h.socketPath);
+    await flushSocketTurn();
+    const replay = framedPackets(third.binary());
+    expect(replay.some((packet) => packet.payload.includes(Buffer.from([0x07, 0x21])))).toBe(true);
+    expect(h.sources).toHaveLength(2);
+  });
+
+  test("coalesces rapid hints and serializes a newer request during an encoder swap", async () => {
+    const timer = new FakeTimer();
+    const h = await startHarness({ timer });
+    await subscribe(h.socketPath, { action: "subscribe", quality: "high" });
+    let releaseStop: () => void = () => {};
+    h.sources[0].stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    await subscribe(h.socketPath, { action: "subscribe", quality: "medium" });
+    timer.advanceTime(100);
+    await subscribe(h.socketPath, { action: "subscribe", quality: "low", fps: 10 });
+    timer.advanceTime(200);
+    await flushSocketTurn();
+    expect(h.sources).toHaveLength(1);
+    releaseStop();
+    await flushSocketTurn();
+    expect(h.sources).toHaveLength(2);
+    expect(h.captureOptions[1]).toMatchObject({ quality: "low", fps: 10 });
+
+    h.sources[1].stopGate = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    await subscribe(h.socketPath, { action: "subscribe", quality: "medium" });
+    timer.advanceTime(200);
+    await flushSocketTurn();
+    expect(h.sources).toHaveLength(2);
+    await subscribe(h.socketPath, { action: "subscribe", quality: "high", bitrateKbps: 3000 });
+    releaseStop();
+    await flushSocketTurn();
+    expect(h.sources).toHaveLength(3);
+    timer.advanceTime(200);
+    await flushSocketTurn();
+    expect(h.sources).toHaveLength(4);
+    expect(h.captureOptions[3]).toMatchObject({
+      quality: "high",
+      fps: 10,
+      bitrateBps: 3_000_000,
+    });
   });
 
   test("keeps startup media behind every pending subscriber acknowledgement", async () => {

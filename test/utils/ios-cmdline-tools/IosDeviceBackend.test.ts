@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import type { DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
@@ -15,6 +16,7 @@ import {
 const simulatorUdid = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 const physicalUdid = "00008030-001C2D3E1234567A";
 const bundleId = "com.example.app";
+const fakeDevicectlTempDir = "/tmp/fake-devicectl";
 
 type Call =
   | { operation: "terminate"; bundleId: string; deviceId: string }
@@ -146,7 +148,7 @@ describe("resolveIosLaunchBackend", () => {
         path.endsWith("launch.json")
           ? JSON.stringify({ result: { process: { processIdentifier: 4321 } } })
           : "{}",
-      mkdtemp: async () => "/tmp/fake-devicectl",
+      mkdtemp: async () => fakeDevicectlTempDir,
       rm: async () => undefined,
       readdir: async () => [],
       stat: async () => ({ isDirectory: () => false }),
@@ -170,7 +172,7 @@ describe("resolveIosLaunchBackend", () => {
         physicalUdid,
         "--terminate-existing",
         "--json-output",
-        "/tmp/fake-devicectl/launch.json",
+        join(fakeDevicectlTempDir, "launch.json"),
         "--quiet",
         bundleId,
       ],

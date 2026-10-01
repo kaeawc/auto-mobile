@@ -3,10 +3,10 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync, symlinkSync 
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
-import { loadJobSteps, loadJobs, stepNamed } from "../helpers/workflowSteps";
+import { loadJobSteps, loadJobs, loadWorkflow, stepNamed } from "../helpers/workflowSteps";
 
 describe("root SPM toolchain floor workflow", () => {
-  test("keeps every pull-request job off the self-hosted runner", () => {
+  test("permits only four isolated PR jobs on the self-hosted runner", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
     const prohibitedRunners = ["self-hosted", "automobile-mac"];
     const selfHostedJobs = Object.entries(jobs)
@@ -15,25 +15,160 @@ describe("root SPM toolchain floor workflow", () => {
       )
       .map(([name]) => name);
 
-    expect(selfHostedJobs).toEqual([]);
+    expect(selfHostedJobs).toEqual([
+      "build-desktop-app",
+      "installer-minimal",
+      "swiftlint",
+      "swift-code-coverage",
+    ]);
   });
 
-  test("runs swiftlint on hosted macos-26", () => {
+  test("routes only owner-authored same-repository PRs to the Mac", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
-    const runsOn = jobs["swiftlint"]?.["runs-on"];
-
-    expect(runsOn).toBe("macos-26");
-    expect(JSON.stringify(runsOn)).not.toContain("self-hosted");
-    expect(JSON.stringify(runsOn)).not.toContain("automobile-mac");
+    const owner = "github.event.pull_request.user.login == 'kaeawc'";
+    const sameRepo = "github.event.pull_request.head.repo.full_name == github.repository";
+    for (const name of [
+      "build-desktop-app",
+      "installer-minimal",
+      "swiftlint",
+      "swift-code-coverage",
+    ]) {
+      const runsOn = jobs[name]?.["runs-on"];
+      expect(runsOn).toContain(owner);
+      expect(runsOn).toContain(sameRepo);
+      expect(runsOn).toContain('fromJSON(\'["self-hosted","automobile-mac"]\')');
+    }
+    expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("matrix.os == 'macos-latest'");
+    expect(jobs["build-desktop-app"]?.["runs-on"]).toContain("|| matrix.os");
+    expect(jobs["installer-minimal"]?.["runs-on"]).toContain("matrix.os == 'macos-latest'");
+    expect(jobs["installer-minimal"]?.["runs-on"]).toContain("|| matrix.os");
+    for (const name of ["swiftlint", "swift-code-coverage"]) {
+      expect(jobs[name]?.["runs-on"]).toContain("|| 'macos-26'");
+    }
   });
 
-  test("runs both installer-minimal legs on their hosted matrix runners", () => {
+  test("preserves all four rendered check names and matrix values", () => {
     const jobs = loadJobs(".github/workflows/pull_request.yml");
-    const runsOn = jobs["installer-minimal"]?.["runs-on"];
+    expect(jobs["installer-minimal"]?.name).toBe("Installer Minimal (${{ matrix.os }})");
+    expect(jobs["installer-minimal"]?.strategy?.matrix?.os).toEqual([
+      "ubuntu-latest",
+      "macos-latest",
+    ]);
+    expect(jobs["build-desktop-app"]?.name).toBe("Build Desktop App (${{ matrix.os }})");
+    expect(jobs["build-desktop-app"]?.strategy?.matrix?.os).toEqual([
+      "ubuntu-latest",
+      "macos-latest",
+      "windows-latest",
+    ]);
+    expect(jobs["swiftlint"]?.name).toBe("SwiftLint");
+    expect(jobs["swift-code-coverage"]?.name).toBe("Swift Code Coverage");
+  });
 
-    expect(runsOn).toBe("${{ matrix.os }}");
-    expect(JSON.stringify(runsOn)).not.toContain("self-hosted");
-    expect(JSON.stringify(runsOn)).not.toContain("automobile-mac");
+  test("pre-checkout run steps work without a checked-out directory", () => {
+    const jobs = loadJobs(".github/workflows/pull_request.yml");
+    for (const jobId of [
+      "build-desktop-app",
+      "installer-minimal",
+      "swiftlint",
+      "swift-code-coverage",
+    ]) {
+      const job = jobs[jobId];
+      const steps = job?.steps ?? [];
+      const checkoutIndex = steps.findIndex((step) => step.uses?.startsWith("actions/checkout@"));
+      expect(checkoutIndex).toBeGreaterThanOrEqual(0);
+      for (const step of steps.slice(0, checkoutIndex)) {
+        if (step.run !== undefined && job?.defaults?.run?.["working-directory"] !== undefined) {
+          expect(step["working-directory"]).toBe(".");
+        }
+      }
+    }
+  });
+
+  test("isolates the three self-hosted jobs and gates hosted toolchain setup", () => {
+    for (const name of ["build-desktop-app", "swiftlint", "swift-code-coverage"]) {
+      const steps = loadJobSteps(".github/workflows/pull_request.yml", name);
+      const checkout = stepNamed(steps, "Git Checkout");
+      expect(checkout?.uses).toBe("actions/checkout@v6");
+      expect(checkout?.with?.clean ?? true).toBe(true);
+      const isolate = steps.find((step) => step.name?.startsWith("Isolate self-hosted"));
+      const cleanup = steps.find(
+        (step) =>
+          step.name?.startsWith("Remove isolated") || step.name?.startsWith("Stop isolated"),
+      );
+      expect(isolate?.if).toBe("runner.environment == 'self-hosted'");
+      expect(isolate?.run).toContain("$RUNNER_TEMP/");
+      expect(isolate?.run).toContain('echo "HOME=');
+      expect(isolate?.run).toContain('echo "TMPDIR=');
+      expect(isolate?.run).toContain('echo "XDG_CONFIG_HOME=');
+      expect(isolate?.run).toContain('echo "XDG_DATA_HOME=');
+      expect(steps.indexOf(isolate!)).toBeLessThan(steps.indexOf(checkout!));
+      expect(cleanup?.if).toContain("always()");
+      expect(cleanup?.run).toContain("rm -rf --");
+    }
+    const coverage = loadJobSteps(".github/workflows/pull_request.yml", "swift-code-coverage");
+    expect(stepNamed(coverage, "Select Xcode 26.5")?.if).toBe(
+      "runner.environment == 'github-hosted'",
+    );
+    const lint = loadJobSteps(".github/workflows/pull_request.yml", "swiftlint");
+    expect(
+      stepNamed(lint, "Run SwiftLint (fail on error-severity rules)")?.env
+        ?.INSTALL_SWIFTLINT_WHEN_MISSING,
+    ).toContain("runner.environment == 'github-hosted'");
+    const desktop = loadJobSteps(".github/workflows/pull_request.yml", "build-desktop-app");
+    const gradleStep = desktop.find((step) => step.uses === "./.github/actions/gradle-task-run");
+    expect(gradleStep?.with?.["gradle-home-directory"]).toContain("runner.temp");
+    expect(gradleStep?.with?.["gradle-flags"]).toContain(
+      "runner.environment == 'self-hosted' && '[\"-Dorg.gradle.java.installations.auto-download=false\"]' || '[]'",
+    );
+    const selectJdk = stepNamed(desktop, "Select JDK 21");
+    const isolateDesktop = stepNamed(desktop, "Isolate self-hosted desktop build");
+    expect(stepNamed(desktop, "Require ambient JDK 21")).toBeUndefined();
+    expect(selectJdk?.if).toBe("runner.environment == 'self-hosted'");
+    expect(desktop.indexOf(selectJdk!)).toBeLessThan(desktop.indexOf(isolateDesktop!));
+    expect(selectJdk?.run).toContain("/usr/libexec/java_home -v 21");
+    expect(selectJdk?.run).toContain('[[ -z "$jdk_home" ]]');
+    expect(selectJdk?.run).toContain("::error::");
+    expect(selectJdk?.run).toContain('"$jdk_home/bin/javac" -version 2>&1');
+    expect(selectJdk?.run).toContain("grep -Eq '^javac 21([.]|$)'");
+    expect(selectJdk?.run).toContain('echo "JAVA_HOME=$jdk_home" >> "$GITHUB_ENV"');
+    expect(selectJdk?.run).toContain('echo "$jdk_home/bin" >> "$GITHUB_PATH"');
+    expect(stepNamed(desktop, "Isolate self-hosted desktop build")?.run).toContain(
+      "GRADLE_STATE_DIR=",
+    );
+    expect(stepNamed(desktop, "Isolate self-hosted desktop build")?.run).toContain(
+      "GRADLE_RETRY_LOG_DIR=",
+    );
+    const desktopIsolate = stepNamed(desktop, "Isolate self-hosted desktop build")?.run ?? "";
+    expect(stepNamed(desktop, "Isolate self-hosted desktop build")?.["working-directory"]).toBe(
+      ".",
+    );
+    expect(desktopIsolate).toContain(
+      'sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"',
+    );
+    expect(desktopIsolate.indexOf("sdk_root=")).toBeLessThan(desktopIsolate.indexOf('echo "HOME='));
+    expect(desktopIsolate).toContain('[[ ! -d "$sdk_root" ]]');
+    expect(desktopIsolate).toContain('echo "ANDROID_HOME=$sdk_root"');
+    expect(desktopIsolate).toContain('echo "ANDROID_SDK_ROOT=$sdk_root"');
+    expect(desktopIsolate).toContain('echo "GRADLE_USER_HOME=$isolated_home/gradle"');
+    expect(desktopIsolate).toContain('echo "JAVA_TOOL_OPTIONS=-Duser.home=$isolated_home"');
+    const desktopCleanup = stepNamed(
+      desktop,
+      "Stop isolated Gradle daemon and remove desktop home",
+    );
+    expect(desktopCleanup?.["working-directory"]).toBe("android");
+    expect(desktopCleanup?.run).toContain("if ! ./gradlew --stop; then");
+    expect(desktopCleanup?.run).toContain("::warning::Failed to stop");
+    expect(desktopCleanup?.run?.indexOf("./gradlew --stop")).toBeLessThan(
+      desktopCleanup?.run?.indexOf("rm -rf --") ?? 0,
+    );
+  });
+
+  test("cancels superseded PR runs at workflow scope", () => {
+    const concurrency = loadWorkflow(".github/workflows/pull_request.yml").concurrency;
+    expect(concurrency?.group).toBe(
+      "pull-request-${{ github.event.pull_request.number || github.ref }}",
+    );
+    expect(concurrency?.["cancel-in-progress"]).toBe(true);
   });
 
   test("isolates installer side effects on the runner", () => {
@@ -41,8 +176,26 @@ describe("root SPM toolchain floor workflow", () => {
     const steps = loadJobSteps(".github/workflows/pull_request.yml", "installer-minimal");
     const fixture = stepNamed(steps, "Confirm clean installer fixture");
     const cleanup = stepNamed(steps, "Remove generated project MCP configuration");
+    const isolate = stepNamed(steps, "Isolate self-hosted installer home");
+    const homeCleanup = stepNamed(steps, "Remove isolated installer home");
 
     expect(jobs["installer-minimal"]?.env?.AUTOMOBILE_SKIP_STALE_DAEMON_MIGRATION).toBe("true");
+    expect(stepNamed(steps, "Git Checkout")?.with?.clean).toBe(true);
+    expect(isolate?.if).toContain("runner.environment == 'self-hosted'");
+    expect(steps.indexOf(isolate!)).toBeLessThan(steps.indexOf(stepNamed(steps, "Git Checkout")!));
+    expect(steps.indexOf(isolate!)).toBeLessThan(steps.indexOf(fixture!));
+    for (const variable of [
+      "HOME",
+      "TMPDIR",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME",
+      "CFFIXED_USER_HOME",
+    ]) {
+      expect(isolate?.run).toContain(`echo "${variable}=$isolated_home`);
+    }
+    expect(isolate?.run).toContain("$RUNNER_TEMP/installer-home-");
+    expect(homeCleanup?.if).toBe("always() && runner.environment == 'self-hosted'");
+    expect(homeCleanup?.run).toContain('rm -rf -- "$RUNNER_TEMP/installer-home-');
     expect(fixture?.run).toContain('test ! -e "$config"');
     expect(cleanup?.run).toContain(".codex/config.toml .cursor/mcp.json .vscode/mcp.json");
     expect(cleanup?.run).toContain('rm -f -- "$config"');

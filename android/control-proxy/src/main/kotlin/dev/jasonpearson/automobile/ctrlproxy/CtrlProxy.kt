@@ -1703,10 +1703,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       Log.d(TAG, "WebSocket server stopped")
     }
 
-    runCatching { gestureStreamRouter.close { gestureHandlerThread.quitSafely() } }
-      .onFailure { Log.w(TAG, "Failed to close streamed gestures", it) }
+    // close dispatches each cancel lift before this callback quits the gesture thread. The
+    // platform's result callback need not arrive: the router has already closed and resolved
+    // pending end results, and it ignores any late callback.
+    teardownGestures(
+      close = gestureStreamRouter::close,
+      quitThread = { gestureHandlerThread.quitSafely() },
+      cancelScope = { serviceScope.cancel() },
+      onCloseFailure = { Log.w(TAG, "Failed to close streamed gestures", it) },
+    )
     Log.d(TAG, "AutoMobile Accessibility Service destroyed")
-    serviceScope.cancel()
   }
 
   // ===========================================================================

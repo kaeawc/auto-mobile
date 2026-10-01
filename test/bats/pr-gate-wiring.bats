@@ -250,17 +250,13 @@ wiring_requires_yq() {
   [[ "$(job_block bats-integration-tests "$workflow")" == *"scripts/ci/run-bats.sh integration"* ]]
 }
 
-@test "macOS MCP build coverage runs after merge instead of on pull requests" {
+@test "PR MCP build remains on Windows after merge-side removal" {
   wiring_requires_yq
-  local pr_mcp merge_mcp
+  local pr_mcp
   pr_mcp="$(job_block mcp-build-and-test)"
-  merge_mcp="$(job_block mcp-build-and-test .github/workflows/merge.yml)"
 
   [[ "$pr_mcp" == *"windows-latest"* ]]
   [[ "$pr_mcp" != *"macos-latest"* ]]
-  [[ "$merge_mcp" == *"macos-latest"* ]]
-  [[ "$merge_mcp" == *"scripts/ci/install-bun-deps.sh"* ]]
-  [[ "$merge_mcp" == *"bash scripts/test-ts.sh unit"* ]]
 
   run yq -r '.jobs.mcp-build-and-test.strategy.matrix.os[]' "$WF"
   [ "$status" -eq 0 ]
@@ -291,18 +287,18 @@ wiring_requires_yq() {
   [[ -z "$(job_block installer-development ".github/workflows/merge.yml")" ]]
 }
 
-@test "WebRTC device jobs are folded into PR and merge workflows" {
+@test "PR WebRTC device jobs and merge Android device job remain" {
   local workflow android ios
   for workflow in "$WF" ".github/workflows/merge.yml"; do
     android="$(job_block android-device-webrtc "$workflow")"
-    ios="$(job_block ios-device-webrtc "$workflow")"
     [[ -n "$android" ]]
-    [[ -n "$ios" ]]
     [[ "$android" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android"* ]]
     [[ "$android" == *"bun run test:integration:webrtc-device"* ]]
-    [[ "$ios" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios"* ]]
-    [[ "$ios" == *"bun run test:integration:webrtc-device"* ]]
   done
+  ios="$(job_block ios-device-webrtc "$WF")"
+  [[ -n "$ios" ]]
+  [[ "$ios" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios"* ]]
+  [[ "$ios" == *"bun run test:integration:webrtc-device"* ]]
   [[ ! -e ".github/workflows/webrtc-device-integration.yml" ]]
 }
 

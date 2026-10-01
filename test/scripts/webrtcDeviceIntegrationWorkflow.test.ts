@@ -48,7 +48,7 @@ function jobSteps(path: string, jobId: string): WorkflowStep[] {
 }
 
 describe("#4308 device WebRTC integration workflow", () => {
-  test("folds device coverage into PR label triggering and an unconditional merge backstop", () => {
+  test("keeps PR device coverage and the Android merge backstop", () => {
     const pullRequest = workflow(PULL_REQUEST_WORKFLOW);
     const merge = workflow(MERGE_WORKFLOW);
 
@@ -57,8 +57,8 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(pullRequest.permissions?.["pull-requests"]).toBe("write");
     for (const jobId of DEVICE_JOB_IDS) {
       expect(pullRequest.jobs?.[jobId]).toBeDefined();
-      expect(merge.jobs?.[jobId]).toBeDefined();
     }
+    expect(merge.jobs?.["android-device-webrtc"]).toBeDefined();
   });
 
   test("defines the exact WebRTC path set that enables PR device lanes", () => {
@@ -91,7 +91,7 @@ describe("#4308 device WebRTC integration workflow", () => {
     expect(filter?.with?.filters).not.toContain("src/index.ts");
   });
 
-  test("gates both PR device lanes through shared detection while merge runs both unconditionally", () => {
+  test("gates both PR device lanes while merge runs Android unconditionally", () => {
     const pullRequest = workflow(PULL_REQUEST_WORKFLOW);
     const merge = workflow(MERGE_WORKFLOW);
 
@@ -110,11 +110,9 @@ describe("#4308 device WebRTC integration workflow", () => {
     } as const;
     for (const jobId of DEVICE_JOB_IDS) {
       expect(pullRequest.jobs?.[jobId]?.if).toBe(pullRequestConditions[jobId]);
-      expect(merge.jobs?.[jobId]?.needs).toBe(
-        jobId === "android-device-webrtc" ? "build-android-control-proxy" : undefined,
-      );
-      expect(merge.jobs?.[jobId]?.if).toBeUndefined();
     }
+    expect(merge.jobs?.["android-device-webrtc"]?.needs).toBe("build-android-control-proxy");
+    expect(merge.jobs?.["android-device-webrtc"]?.if).toBeUndefined();
   });
 
   test("downloads existing Android products before the emulator composite installs them", () => {
@@ -152,7 +150,9 @@ describe("#4308 device WebRTC integration workflow", () => {
   test("keeps stage-latency artifacts from passing runs without making uploads required", () => {
     for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
       const document = workflow(path);
-      for (const jobId of DEVICE_JOB_IDS) {
+      for (const jobId of path === PULL_REQUEST_WORKFLOW
+        ? DEVICE_JOB_IDS
+        : ["android-device-webrtc"]) {
         const upload = document.jobs?.[jobId]?.steps?.find(
           (step) => step.uses?.startsWith("actions/upload-artifact") === true,
         );
@@ -168,10 +168,14 @@ describe("#4308 device WebRTC integration workflow", () => {
 
   test("prints the result-reading legend in every device lane, even on failure", () => {
     for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
-      for (const [jobId, platform] of [
-        ["android-device-webrtc", "android"],
-        ["ios-device-webrtc", "ios"],
-      ] as const) {
+      const lanes =
+        path === PULL_REQUEST_WORKFLOW
+          ? ([
+              ["android-device-webrtc", "android"],
+              ["ios-device-webrtc", "ios"],
+            ] as const)
+          : ([["android-device-webrtc", "android"]] as const);
+      for (const [jobId, platform] of lanes) {
         const steps = jobSteps(path, jobId);
         const explain = steps.find((step) => step.name === "Explain WebRTC device results");
 
@@ -201,7 +205,7 @@ describe("#4308 device WebRTC integration workflow", () => {
   });
 
   test("uses an explicit checkout helper only for the iOS integration fixture", () => {
-    for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
+    for (const path of [PULL_REQUEST_WORKFLOW]) {
       const runCapture = jobSteps(path, "ios-device-webrtc").find(
         (step) => step.name === "Run iOS device capture integration",
       );
@@ -213,7 +217,7 @@ describe("#4308 device WebRTC integration workflow", () => {
   });
 
   test("waits for the product-booted Simulator window before iOS capture", () => {
-    for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
+    for (const path of [PULL_REQUEST_WORKFLOW]) {
       const steps = jobSteps(path, "ios-device-webrtc");
       const boot = steps.find((step) => step.name === "Boot and activate iOS Simulator");
       const capture = steps.find((step) => step.name === "Run iOS device capture integration");

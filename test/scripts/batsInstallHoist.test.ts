@@ -9,13 +9,10 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 // targets, and `bats test/bats/` is the sole consumer of both.
 //
 // The install is now backgrounded from just after checkout and re-synced at a
-// `wait` barrier before the test step. `BATS Shell Tests (macos-latest)` is a
-// required check, so the barrier placement is pinned here rather than left to
-// review.
+// `wait` barrier before the test step. The BATS check is required, so the
+// barrier placement is pinned here rather than left to review.
 //
-// Scoped by job id, which matters: the `bats-tests` job now runs the suite on
-// both ubuntu-latest and macos-latest (the Ubuntu pass used to run inline inside
-// `fast-validation`), and a whole-file search could conflate jobs.
+// Scoped by job id, because a whole-file search could conflate jobs.
 
 const JOB_ID = "bats-tests";
 const INSTALL_STEP = "Install BATS";

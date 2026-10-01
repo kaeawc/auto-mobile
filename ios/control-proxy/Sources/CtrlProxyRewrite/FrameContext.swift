@@ -30,9 +30,14 @@ private struct MainThreadFrameContextExecutor: FrameContextMainExecuting {
 /// executor, preserving the reference's ordering of a transition against a
 /// `performIfCurrent` validation.
 final class FrameContext: FrameContextRecording {
+    private struct State {
+        var generation: UInt64 = 0
+        var lastHash: String?
+    }
+
     private let epoch: UUID
     private let mainThreadExecutor: any FrameContextMainExecuting
-    private let generation = OSAllocatedUnfairLock<UInt64>(initialState: 0)
+    private let state = OSAllocatedUnfairLock<State>(initialState: State())
 
     init(epoch: UUID = UUID()) {
         self.epoch = epoch
@@ -49,15 +54,19 @@ final class FrameContext: FrameContextRecording {
     func recordTransition(to hierarchy: ViewHierarchy) -> String? {
         try? mainThreadExecutor.perform { [self] in
             let hash = Self.semanticHash(hierarchy)
-            return generation.withLock { current -> String? in
-                current &+= 1
-                return hash.map { "\(self.epoch.uuidString):\(current):\($0)" }
+            return state.withLock { current -> String? in
+                // A missing hash cannot establish equality with the previous transition.
+                if hash == nil || hash != current.lastHash {
+                    current.generation &+= 1
+                    current.lastHash = hash
+                }
+                return hash.map { "\(self.epoch.uuidString):\(current.generation):\($0)" }
             }
         }
     }
 
     func context(for hierarchy: ViewHierarchy) -> String? {
-        let currentGeneration = generation.withLock { $0 }
+        let currentGeneration = state.withLock { $0.generation }
         return Self.semanticHash(hierarchy).map { "\(epoch.uuidString):\(currentGeneration):\($0)" }
     }
 
@@ -66,7 +75,9 @@ final class FrameContext: FrameContextRecording {
         expected: String?,
         hierarchy: ViewHierarchy?,
         operation: () throws -> T
-    ) throws -> T {
+    )
+        throws -> T
+    {
         try mainThreadExecutor.perform { [self] in
             guard let expected else { return try operation() }
             guard let hierarchy else {
@@ -74,8 +85,8 @@ final class FrameContext: FrameContextRecording {
             }
 
             let hash = Self.semanticHash(hierarchy)
-            let isCurrent = generation.withLock { current in
-                hash.map { "\(self.epoch.uuidString):\(current):\($0)" } == expected
+            let isCurrent = state.withLock { current in
+                hash.map { "\(self.epoch.uuidString):\(current.generation):\($0)" } == expected
             }
 
             guard isCurrent else {

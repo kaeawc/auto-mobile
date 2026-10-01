@@ -8,7 +8,7 @@ package dev.jasonpearson.automobile.ctrlproxy
  * gesture.
  */
 internal class GestureStreamRouter(
-  private val runOnGestureThread: (() -> Unit) -> Unit,
+  private val runOnGestureThread: (() -> Unit) -> Boolean,
   private val newSession: ((Boolean, String?) -> Unit) -> GestureStreamSession<*>,
   private val onResult: (String?, Boolean, String?) -> Unit,
 ) {
@@ -85,12 +85,26 @@ internal class GestureStreamRouter(
     onCount(terminalFailures.size)
   }
 
-  /** Clear all routing state on the gesture thread before its handler is stopped. */
-  fun close(onClosed: () -> Unit = {}) = runOnGestureThread {
-    closed = true
-    sessions.clear()
-    pendingEndRequestIds.clear()
-    terminalFailures.clear()
-    onClosed()
+  /** Cancel active strokes and clear routing state on the gesture thread before stopping it. */
+  fun close(onClosed: () -> Unit = {}) {
+    val posted = runOnGestureThread {
+      try {
+        if (!closed) {
+          closed = true
+          // Cancellation can synchronously finish a session; keep the snapshot stable.
+          sessions.values.toList().forEach { it.cancel() }
+          pendingEndRequestIds.values.flatten().forEach {
+            onResult(it, false, "Gesture stream closed")
+          }
+          sessions.clear()
+          pendingEndRequestIds.clear()
+          terminalFailures.clear()
+        }
+      } finally {
+        onClosed()
+      }
+    }
+    // A second destroy can arrive after quitSafely; Handler.post then rejects the task.
+    if (!posted) onClosed()
   }
 }

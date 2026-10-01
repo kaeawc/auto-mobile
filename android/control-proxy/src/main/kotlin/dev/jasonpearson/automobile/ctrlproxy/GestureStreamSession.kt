@@ -79,6 +79,14 @@ internal class GestureStreamSession<S>(
     resumeIfWaiting()
   }
 
+  /** Called by the router on the gesture thread before its handler is stopped. */
+  fun cancel() {
+    if (terminal) return
+    coordinator.cancel()
+    waiting = false
+    pump()
+  }
+
   private fun pump() = drive(coordinator.next())
 
   /** Restart the parked pump loop after a move/end arrived while idle. */

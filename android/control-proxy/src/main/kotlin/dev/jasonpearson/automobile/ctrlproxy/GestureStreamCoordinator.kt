@@ -128,6 +128,12 @@ internal class GestureStreamCoordinator(
     endPoint = GesturePoint(x, y)
   }
 
+  /** Lift in place during service teardown, without requiring a wire endpoint. */
+  fun cancel() {
+    if (finished) return
+    cancelled = true
+  }
+
   /**
    * Produce the next action after the previous segment completed. Returns
    * [GestureStreamAction.Done] once the finger has lifted; otherwise a

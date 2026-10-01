@@ -3,6 +3,7 @@ import {
   UninstallApp as ProductionUninstallApp,
   DeviceAppUninstaller,
 } from "../../../src/features/action/UninstallApp";
+import type { DeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -23,7 +24,15 @@ import { ActionableError } from "../../../src/models/ActionableError";
 // scenario does not need to inspect stale-marker rows explicitly.
 class UninstallApp extends ProductionUninstallApp {
   constructor(...args: ConstructorParameters<typeof ProductionUninstallApp>) {
-    const [device, adbFactory, simctl, deviceAppUninstaller, repository, trackerFactory] = args;
+    const [
+      device,
+      adbFactory,
+      simctl,
+      deviceAppUninstaller,
+      repository,
+      trackerFactory,
+      cacheInvalidator,
+    ] = args;
     super(
       device,
       adbFactory,
@@ -31,7 +40,16 @@ class UninstallApp extends ProductionUninstallApp {
       deviceAppUninstaller,
       repository ?? new FakeInstalledAppsRepository(),
       trackerFactory,
+      cacheInvalidator,
     );
+  }
+}
+
+class FakeDeviceWindowCacheInvalidator implements DeviceWindowCacheInvalidator {
+  public calls: BootedDevice[] = [];
+
+  invalidate(device: BootedDevice): void {
+    this.calls.push(device);
   }
 }
 
@@ -298,6 +316,21 @@ describe("UninstallApp (Android)", () => {
     );
   }
 
+  function uninstallWithInvalidator(
+    adb: FakeAdbClient,
+    cacheInvalidator: DeviceWindowCacheInvalidator,
+  ): UninstallApp {
+    return new UninstallApp(
+      androidDevice,
+      fakeAdbFactory(adb),
+      null,
+      null,
+      undefined,
+      undefined,
+      cacheInvalidator,
+    );
+  }
+
   beforeEach(() => {
     resetDbWriteBarrier();
     fakeAdb = new FakeAdbClient();
@@ -326,6 +359,69 @@ describe("UninstallApp (Android)", () => {
     expect(commands).toContain("shell am force-stop --user 0 'com.example.app'");
     expect(commands).toContain("shell pm uninstall --user 0 'com.example.app'");
     expect(commands).not.toContain("shell pm uninstall --user 0 -k 'com.example.app'");
+  });
+
+  test("invalidates the window cache exactly once after successful uninstall", async () => {
+    fakeAdb.setCommandResultSequence("shell pm list packages --user 0", [
+      "package:com.example.app",
+      "package:com.android.settings",
+    ]);
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+
+    const result = await uninstallWithInvalidator(fakeAdb, cacheInvalidator).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: true, wasInstalled: true });
+    expect(cacheInvalidator.calls).toEqual([androidDevice]);
+  });
+
+  test("does not invalidate the window cache when the app is not installed", async () => {
+    setupNoApp(fakeAdb, 0);
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+
+    const result = await uninstallWithInvalidator(fakeAdb, cacheInvalidator).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: true, wasInstalled: false });
+    expect(cacheInvalidator.calls).toHaveLength(0);
+  });
+
+  test("does not invalidate the window cache when uninstall fails", async () => {
+    class FailedUninstallAdb extends FakeAdbClient {
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal,
+      ) {
+        if (command === "shell pm uninstall --user 0 'com.example.app'") {
+          throw new Error("pm uninstall failed");
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const adb = new FailedUninstallAdb();
+    adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+    const result = await uninstallWithInvalidator(adb, cacheInvalidator).execute("com.example.app");
+
+    expect(result).toMatchObject({ success: false, wasInstalled: true });
+    expect(cacheInvalidator.calls).toHaveLength(0);
+  });
+
+  test("does not invalidate the window cache when verification finds the app installed", async () => {
+    fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
+    const result = await uninstallWithInvalidator(fakeAdb, cacheInvalidator).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: false, wasInstalled: true });
+    expect(cacheInvalidator.calls).toHaveLength(0);
   });
 
   test("marks the Android installed-apps cache stale after a successful uninstall", async () => {
@@ -418,12 +514,12 @@ describe("UninstallApp (Android)", () => {
       "package:com.example.app",
       "package:com.android.settings",
     ]);
+    const cacheInvalidator = new FakeDeviceWindowCacheInvalidator();
 
-    const result = await new UninstallApp(androidDevice, fakeAdbFactory(adb)).execute(
-      "com.example.app",
-    );
+    const result = await uninstallWithInvalidator(adb, cacheInvalidator).execute("com.example.app");
 
     expect(result).toMatchObject({ success: true, wasInstalled: true, userId: 0 });
+    expect(cacheInvalidator.calls).toEqual([androidDevice]);
     expect(
       adb
         .getCommandCalls()

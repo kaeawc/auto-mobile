@@ -1,5 +1,6 @@
 import type { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../models";
 import { DefaultElementParser } from "../features/utility/ElementParser";
+import { nodeBounds } from "../models/ViewHierarchyResult";
 
 const SYSTEM_UI_PACKAGE = "com.android.systemui";
 const SYSTEM_UI_ANR_TITLE = "System UI isn't responding";
@@ -116,10 +117,10 @@ function inspectSystemUiAnrNode(
   signals.alertTitleFound ||= resourceId === ALERT_TITLE_RESOURCE_ID;
   signals.closeAppResourceFound ||= resourceId === CLOSE_APP_BUTTON_RESOURCE_ID;
   if (text === WAIT_ACTION) {
-    signals.waitBounds ??= boundsOfNode(parser, properties, node);
+    signals.waitBounds ??= boundsOfNode(parser, node);
   }
   if (resourceId === WAIT_BUTTON_RESOURCE_ID) {
-    signals.waitBoundsByResourceId ??= boundsOfNode(parser, properties, node);
+    signals.waitBoundsByResourceId ??= boundsOfNode(parser, node);
   }
 }
 
@@ -127,12 +128,8 @@ function coalesceString(primary: unknown, fallback: unknown): string {
   return String(primary ?? fallback ?? "");
 }
 
-function boundsOfNode(
-  parser: AnrDialogParser,
-  properties: { bounds?: unknown },
-  node: ViewHierarchyNode,
-): ElementBounds | undefined {
-  return parser.parseBounds(properties.bounds ?? node.bounds) ?? undefined;
+function boundsOfNode(parser: AnrDialogParser, node: ViewHierarchyNode): ElementBounds | undefined {
+  return parser.parseBounds(nodeBounds(node)) ?? undefined;
 }
 
 function topmostWindowPackageIsSystemUi(viewHierarchy: ViewHierarchyResult): boolean {

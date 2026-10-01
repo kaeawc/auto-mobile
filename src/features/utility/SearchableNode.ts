@@ -11,6 +11,7 @@ import { isTruthy } from "../../models/Element";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { Affordance } from "../../models/ObserveResult";
 import { parseBounds } from "../../utils/bounds";
+import { nodeBounds } from "../../models/ViewHierarchyResult";
 import {
   getToggleContentDescription,
   hasAccessibilityAction,
@@ -198,7 +199,7 @@ export class SearchableHierarchy {
         }
         const properties = this.parser.extractNodeProperties(source);
         const element = this.parser.parseNodeBounds(source) ?? undefined;
-        const raw = toSearchable(properties);
+        const raw = toSearchable({ ...properties, bounds: nodeBounds(source) });
         const entry: SearchableEntry = {
           ...raw,
           bounds: element?.bounds ?? raw.bounds,

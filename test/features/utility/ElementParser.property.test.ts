@@ -33,14 +33,8 @@ function count(node: LogicalNode): number {
 }
 
 describe("DefaultElementParser (property-based)", () => {
-  // Skipped: #6472 known inconsistency. extractNodeProperties on a flat
-  // (Android/cleaned) node exposes structural fields `bounds`/`children`/`node`
-  // in its properties, while `$`-wrapped (iOS) nodes expose only attributes.
-  // Callers (LongPressMetadataDetector, androidSystemUiAnr, SearchableNode)
-  // read `bounds` from flat-node properties, so normalizing in the parser
-  // regresses them. Shrunk counterexample: root with empty attrs and one
-  // empty child ({ attrs: {}, children: [{ attrs: {}, children: [] }] }).
-  test.skip("all supported wire encodings preserve properties, bounds, and traversal order", () => {
+  // Properties contain only attributes for every supported wire shape.
+  test("all supported wire encodings preserve properties, bounds, and traversal order", () => {
     fc.assert(
       fc.property(logicalNodeArb, (tree) => {
         const android: ViewHierarchyResult = { hierarchy: { node: encodeAndroidFlat(tree) } };
@@ -55,11 +49,7 @@ describe("DefaultElementParser (property-based)", () => {
     );
   });
 
-  // Skipped: #6472 same structural-key leak. The flat root's own properties
-  // include `node` (object vs one-element array), so the two child-slot shapes
-  // differ even though traversal is equivalent. Shrunk counterexample:
-  // { attrs: {}, bounds: undefined, children: [] }.
-  test.skip("single and array child slots remain equivalent", () => {
+  test("single and array child slots remain equivalent", () => {
     fc.assert(
       fc.property(logicalNodeArb, (tree) => {
         const child = tree.children[0] ?? { attrs: {}, children: [] };
@@ -76,9 +66,7 @@ describe("DefaultElementParser (property-based)", () => {
     );
   });
 
-  // Skipped: #6472 same flat vs `$`-wrapped structural-key inconsistency;
-  // a flat node with bounds yields properties.bounds, `{ $: {}, bounds }` does not.
-  test.skip("omitted optional attributes remain equivalent across flat and $ shapes", () => {
+  test("omitted optional attributes remain equivalent across flat and $ shapes", () => {
     const roots = (node: ViewHierarchyNode): ViewHierarchyResult => ({ hierarchy: { node } });
     const bounds = { left: 0, top: 0, right: 1, bottom: 1 };
     expect(read(roots({ bounds }))).toEqual(read(roots({ $: {}, bounds })));

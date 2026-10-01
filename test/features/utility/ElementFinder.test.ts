@@ -4,6 +4,7 @@ import { DefaultElementParser } from "../../../src/features/utility/ElementParse
 import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
 import type { ViewHierarchyResult } from "../../../src/models";
 import { innerBounds, nestedClickableHierarchy } from "../../fixtures/nestedClickableHierarchy";
+import containerFixture from "../../fixtures/observe/android-container-scope.json";
 
 // Use real implementations — they're pure and fast
 const parser = new DefaultElementParser();
@@ -28,6 +29,14 @@ function makeHierarchy(nodes: any): ViewHierarchyResult {
 }
 
 describe("DefaultElementFinder", () => {
+  test("findChildElements reads flat captured node bounds for containment", () => {
+    const hierarchy = containerFixture.viewHierarchy as ViewHierarchyResult;
+    const parent = finder.findElementsByText(hierarchy, "Left section")[0];
+    const children = finder.findChildElements(hierarchy, parent);
+    expect(children.some((child) => child.text === "Open" && child.bounds.top === 40)).toBe(true);
+    expect(children.some((child) => child.text === "Right section")).toBe(false);
+  });
+
   test("chooses the nearest nested clickable ancestor for a matching label", () => {
     const matches = finder.findClickableParentsContainingText(nestedClickableHierarchy, "Wi-Fi");
     expect(matches.map((match) => match.bounds)).toEqual([innerBounds]);

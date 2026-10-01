@@ -21,6 +21,7 @@ import {
 import type { ElementParser } from "./interfaces/ElementParser";
 import type { ElementGeometry } from "./interfaces/ElementGeometry";
 import type { Element } from "../models/Element";
+import { nodeBounds } from "../models/ViewHierarchyResult";
 import type { Timer } from "./interfaces/Timer";
 import { defaultTimer } from "./SystemTimer";
 import { DefaultElementParser } from "../features/utility/ElementParser";
@@ -1579,8 +1580,7 @@ export class DeepLinkManager implements DeepLinkManager {
   ): ChooserMatch {
     if (candidates.length > 1) {
       const descriptions = candidates.map((row, index) => {
-        const properties = this.parser.extractNodeProperties(row);
-        return `${index + 1}: ${[...(labelRows.get(row) ?? [])].join(" / ")} bounds=${JSON.stringify(properties.bounds)}`;
+        return `${index + 1}: ${[...(labelRows.get(row) ?? [])].join(" / ")} bounds=${JSON.stringify(nodeBounds(row))}`;
       });
       throw new Error(
         `Ambiguous chooser rows for ${appPackage}: ${descriptions.join("; ")}. Use a chooser with one exact app match.`,

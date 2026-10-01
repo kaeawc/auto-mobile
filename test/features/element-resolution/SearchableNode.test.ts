@@ -21,6 +21,8 @@ describe("searchable node derivation", () => {
     expect(nested?.label).toBe(flat?.label);
     expect(nested?.bounds).toEqual(flat?.bounds);
     expect(nested?.affordances).toEqual(flat?.affordances);
+    expect(flat?.actionable).toBe(true);
+    expect(nested?.actionable).toBe(true);
   });
 
   test("keeps native and synthetic identity distinct", () => {
@@ -186,7 +188,6 @@ test("minimal parsed descriptors retain all raw searchable metadata and normaliz
     text: "Go",
     class: "Button",
     clickable: true,
-    bounds: [1, 2, 3, 4],
   };
   parser.nextParsedNode = { bounds };
   const [entry] = new SearchableHierarchy(parser).project({ hierarchy: { node: { bounds } } });

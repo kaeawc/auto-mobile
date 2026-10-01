@@ -1,6 +1,7 @@
 import { isCollectionElementProperties } from "../../utils/elementProperties";
 import { Element } from "../../models/Element";
 import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
+import { nodeBounds as rawNodeBounds } from "../../models/ViewHierarchyResult";
 import { logger } from "../../utils/logger";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
@@ -1408,8 +1409,7 @@ export class DefaultElementFinder implements ElementFinder {
 
     for (const rootNode of rootNodes) {
       this.parser.traverseNode(rootNode, (node: any) => {
-        const nodeProperties = this.parser.extractNodeProperties(node);
-        const nodeBounds = this.parser.parseBounds(node.bounds ?? nodeProperties.bounds);
+        const nodeBounds = this.parser.parseBounds(rawNodeBounds(node));
 
         if (!nodeBounds) {
           return;

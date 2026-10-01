@@ -18,8 +18,11 @@ export class DefaultElementParser implements ElementParser {
    * @returns The node properties
    */
   extractNodeProperties(node: ViewHierarchyNode): any {
-    // XML parser from xml2js puts properties in $ object
-    return nodeAttributes(node);
+    const properties = { ...nodeAttributes(node) };
+    delete properties.bounds;
+    delete properties.node;
+    delete properties.children;
+    return properties;
   }
 
   /**
@@ -41,16 +44,7 @@ export class DefaultElementParser implements ElementParser {
       return null;
     }
 
-    // Copy the node properties but drop the nested `node` children so each element
-    // stays a flat descriptor (id/text/bounds/etc.), not a subtree. Under the
-    // legacy xml2js format `extractNodeProperties` returned `node.$` (attributes
-    // only, no children), so elements were naturally flat. The current CtrlProxy
-    // JSON format has no `$` wrapper, so without this the whole child subtree gets
-    // copied into every element — a scrollable container then serializes its
-    // entire list (10s of KB per element), bloating `elements` 2-4x and blowing
-    // MCP client size limits. Callers that need the tree already have
-    // `viewHierarchy`. (delete rather than a `_children` rest-omit, which the lint
-    // config rejects as an unused var.)
+    // Keep elements flat; callers needing the tree use the raw viewHierarchy.
     const nodeProperties = { ...this.extractNodeProperties(node) };
     delete nodeProperties.node;
     const parsedNode: ViewHierarchyNode = { ...nodeProperties };

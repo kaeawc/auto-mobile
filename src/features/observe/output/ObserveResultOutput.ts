@@ -8,6 +8,7 @@ import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons } from "../truncationReasons";
 import { parseBounds } from "../../../utils/bounds";
 import { normalizeQuotes } from "../../utility/TextMatcher";
+import { GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
 
 /**
  * Output-only shrinking of a single `ObserveResult` for serialization
@@ -1464,9 +1465,6 @@ function stringAttr(attrs: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-const IOS_GENERATED_VIEW_ID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 function iosStableId(attrs: Record<string, unknown>): string {
   const resourceId = stringAttr(attrs, "resource-id");
   if (resourceId !== "") {
@@ -1477,7 +1475,7 @@ function iosStableId(attrs: Record<string, unknown>): string {
     return accessibilityIdentifier;
   }
   const viewId = stringAttr(attrs, "view-id");
-  if (viewId !== "" && !IOS_GENERATED_VIEW_ID_PATTERN.test(viewId)) {
+  if (viewId !== "" && !GENERATED_VIEW_ID_PATTERN.test(viewId)) {
     return viewId;
   }
   return "";

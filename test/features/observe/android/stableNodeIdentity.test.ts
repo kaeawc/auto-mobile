@@ -710,3 +710,25 @@ test("named toggles retain ids across state text changes but remain distinct (#6
   expect(capture("Off", "")).not.toBe(capture("On", ""));
   expect(capture("Off", "Status", false)).not.toBe(capture("On", "Status", false));
 });
+
+test("generated UUID view-id matching is case-insensitive and stateless", () => {
+  const lower = "123e4567-e89b-12d3-a456-426614174000";
+  const upper = lower.toUpperCase();
+  expect(GENERATED_VIEW_ID_PATTERN.global).toBe(false);
+  expect(GENERATED_VIEW_ID_PATTERN.sticky).toBe(false);
+  expect(GENERATED_VIEW_ID_PATTERN.test(lower)).toBe(true);
+  expect(GENERATED_VIEW_ID_PATTERN.test(upper)).toBe(true);
+  expect(GENERATED_VIEW_ID_PATTERN.test(lower)).toBe(true);
+  expect(GENERATED_VIEW_ID_PATTERN.test(upper)).toBe(true);
+});
+
+test("assignStableViewIds rewrites lower- and upper-case generated UUIDs identically", () => {
+  const lower = node({ "view-id": "123e4567-e89b-12d3-a456-426614174000", text: "Save" });
+  const upper = node({ "view-id": "123E4567-E89B-12D3-A456-426614174000", text: "Save" });
+
+  assignStableViewIds(lower);
+  assignStableViewIds(upper);
+
+  expect(lower["view-id"]).toMatch(/^s2-[0-9a-f]{16}$/);
+  expect(upper["view-id"]).toBe(lower["view-id"]);
+});

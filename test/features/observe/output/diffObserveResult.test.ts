@@ -3020,3 +3020,34 @@ describe("isSameObservationScreen", () => {
     });
   });
 });
+
+test("iOS stable identity ignores lower- and upper-case generated UUID view-ids", () => {
+  const lowerId = "123e4567-e89b-12d3-a456-426614174000";
+  const textEdit = (viewId: string) =>
+    diffObserveResult(
+      iosObs({
+        "view-id": viewId,
+        class: "UITextField",
+        bounds: { left: 16, top: 120, right: 300, bottom: 160 },
+        text: "Old field",
+        value: "Old field",
+      }),
+      iosObs({
+        "view-id": viewId,
+        class: "UITextField",
+        bounds: { left: 16, top: 120, right: 300, bottom: 160 },
+        text: "New field",
+        value: "New field",
+      }),
+    );
+
+  const lower = textEdit(lowerId);
+  const upper = textEdit(lowerId.toUpperCase());
+  for (const diff of [lower, upper]) {
+    expect(diff.changed).toEqual([]);
+    expect(diff.added).toHaveLength(1);
+    expect(diff.removed).toHaveLength(1);
+  }
+  expect(upper.added[0].attributes.text).toBe(lower.added[0].attributes.text);
+  expect(upper.removed[0].attributes.text).toBe(lower.removed[0].attributes.text);
+});

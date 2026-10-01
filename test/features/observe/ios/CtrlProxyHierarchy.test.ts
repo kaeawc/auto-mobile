@@ -772,3 +772,43 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     }
   });
 });
+
+test("CtrlProxy treats upper- and lower-case generated wrapper view-ids identically", () => {
+  const subject = new CtrlProxyHierarchy(stubContext);
+  const convert = (upperCase: boolean) => {
+    const uuid = "5513e3ea-bba6-d754-02c1-c34c7365c6fa";
+    const viewId = upperCase ? uuid.toUpperCase() : uuid;
+    return subject.convertToViewHierarchyResult(
+      makeHierarchy({
+        className: "XCUIApplication",
+        node: [
+          {
+            className: "UIWindow",
+            viewId,
+            bounds: { left: 0, top: 0, right: 402, bottom: 874 },
+            node: [
+              {
+                className: "UIButton",
+                text: "New Reminder",
+                role: "button",
+                clickable: "true",
+                bounds: { left: 16, top: 806, right: 166, bottom: 830 },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+  };
+  const lower = convert(false);
+  const upper = convert(true);
+
+  expect(countNodesWith(lower.hierarchy.node, (attrs) => attrs["class"] === "UIWindow")).toBe(0);
+  expect(countNodesWith(upper.hierarchy.node, (attrs) => attrs["class"] === "UIWindow")).toBe(0);
+  expect(
+    findFirstNodeWith(lower.hierarchy.node, (attrs) => attrs["text"] === "New Reminder"),
+  ).not.toBeNull();
+  expect(
+    findFirstNodeWith(upper.hierarchy.node, (attrs) => attrs["text"] === "New Reminder"),
+  ).not.toBeNull();
+});

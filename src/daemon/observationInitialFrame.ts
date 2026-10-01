@@ -22,6 +22,7 @@ import { COORDINATE_SPACE_PX } from "./canonicalPixels";
 
 const INITIAL_FRAME_HIERARCHY_TIMEOUT_MS = 3_000;
 const INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS = 3_000;
+const INITIAL_FRAME_MAX_CONCURRENCY = 2;
 const ANDROID_DEFAULT_SCREEN_WIDTH = 1080;
 const ANDROID_DEFAULT_SCREEN_HEIGHT = 2340;
 const IOS_DEFAULT_SCREEN_WIDTH = 1170;
@@ -86,6 +87,7 @@ export interface ObservationInitialFrameDependencies {
   streamServer: Pick<DeviceDataStreamSocketServer, "pushHierarchyUpdate" | "pushScreenshotUpdate">;
   androidClientFactory: (device: BootedDevice) => ObservationStreamAndroidClient;
   iosClientFactory: (device: BootedDevice) => ObservationStreamIosClient;
+  maxConcurrency?: number;
 }
 
 export async function pushInitialObservationFramesForSubscriber(
@@ -97,8 +99,23 @@ export async function pushInitialObservationFramesForSubscriber(
     (device) => requestedDeviceId === null || device.id === requestedDeviceId,
   );
 
+  const maxConcurrency = dependencies.maxConcurrency ?? INITIAL_FRAME_MAX_CONCURRENCY;
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+    throw new RangeError("Initial observation frame concurrency must be a positive integer");
+  }
+
+  let nextDeviceIndex = 0;
+  async function captureNextDevices(): Promise<void> {
+    while (nextDeviceIndex < targetDevices.length) {
+      const device = targetDevices[nextDeviceIndex++];
+      await pushInitialObservationFrameForDevice(device, dependencies);
+    }
+  }
+
   await Promise.all(
-    targetDevices.map((device) => pushInitialObservationFrameForDevice(device, dependencies)),
+    Array.from({ length: Math.min(maxConcurrency, targetDevices.length) }, () =>
+      captureNextDevices(),
+    ),
   );
 }
 

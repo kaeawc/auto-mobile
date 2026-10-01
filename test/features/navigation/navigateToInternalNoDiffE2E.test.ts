@@ -6,6 +6,7 @@ import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDisplayInventoryProvider } from "../../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
@@ -46,6 +47,7 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   function sameScreenObserve(): ObserveResult {
     return {
@@ -89,10 +91,15 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();

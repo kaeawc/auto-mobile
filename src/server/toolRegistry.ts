@@ -1574,6 +1574,7 @@ export class ToolRegistryClass {
   private cleanupService: AppCleanupService;
   private toolCallRepository: Pick<ToolCallRepository, "recordToolCall">;
   private timer: Timer;
+  private readonly logger: Logger;
   private executionTargetResolver: ExecutionTargetResolver;
   private auditRunner: AuditRunner;
   private navigationToolCallRecorder: NavigationToolCallRecorder;
@@ -1586,6 +1587,7 @@ export class ToolRegistryClass {
     this.cleanupService = new DefaultAppCleanupService();
     this.toolCallRepository = new ToolCallRepository();
     this.timer = timer;
+    this.logger = loggerInstance;
     this.executionTargetResolver = new DefaultExecutionTargetResolver(loggerInstance);
     this.auditRunner = new DefaultAuditRunner(loggerInstance);
     this.navigationToolCallRecorder = new DefaultNavigationToolCallRecorder();
@@ -2343,7 +2345,7 @@ export class ToolRegistryClass {
       this.executionTargetResolver = overrides.executionTargetResolver;
     } else if (overrides.displayInventory) {
       this.executionTargetResolver = new DefaultExecutionTargetResolver(
-        logger,
+        this.logger,
         overrides.displayInventory,
       );
     }

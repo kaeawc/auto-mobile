@@ -80,7 +80,17 @@ describe("observation display stamp", () => {
     const client = {
       getAccessibilityHierarchy: async () => converter.convertToViewHierarchyResult(raw),
     } as unknown as AndroidCtrlProxyClient;
-    const hierarchy = new ViewHierarchy(device, new FakeAdbClientFactory(adb), client, timer);
+    const hierarchy = new ViewHierarchy(
+      device,
+      new FakeAdbClientFactory(adb),
+      client,
+      timer,
+      () => ({
+        isAccessibilityServiceHealthy: async () => false,
+        rebindIfUnhealthy: async () => false,
+        waitForAccessibilityServiceBinding: async () => "unhealthy",
+      }),
+    );
     try {
       const screen = new RealObserveScreen(
         device,

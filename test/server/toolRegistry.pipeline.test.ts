@@ -32,6 +32,7 @@ import {
 } from "../../src/server/stripToolResultStructuredContent";
 import type { ToolOutputArtifactRetention } from "../../src/server/toolOutputArtifactWriter";
 import { DeviceLostError } from "../../src/server/deviceLossOutcome";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 describe("ToolRegistry device-aware pipeline", () => {
   const device: BootedDevice = {
@@ -41,16 +42,22 @@ describe("ToolRegistry device-aware pipeline", () => {
   };
 
   let restorePipelineOverrides: (() => void) | undefined;
+  let restoreDefaultPipelineOverrides: (() => void) | undefined;
   let originalToolCallRepository: unknown;
 
   beforeEach(() => {
     ToolRegistry.clearTools();
+    restoreDefaultPipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
   });
 
   afterEach(() => {
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
+    restoreDefaultPipelineOverrides?.();
+    restoreDefaultPipelineOverrides = undefined;
     (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
     serverConfig.setToolOutputsDir(undefined);
     ToolRegistry.clearTools();
@@ -302,6 +309,9 @@ describe("ToolRegistry device-aware pipeline", () => {
         throw new Error("bind unavailable");
       },
     });
+    const restorePipelineOverrides = registry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     try {
       registry.registerDeviceAware(
         "bindFailureProbe",
@@ -322,12 +332,16 @@ describe("ToolRegistry device-aware pipeline", () => {
         }),
       );
     } finally {
+      restorePipelineOverrides();
       (AndroidCtrlProxyClient as any).getInstance = originalGetInstance;
     }
   });
 
   test("passes argument-selected readiness and the request signal into device resolution", async () => {
     const registry = new ToolRegistryClass();
+    const restoreRegistryPipelineOverrides = registry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     const controller = new AbortController();
     const fakeManager = new FakeDeviceSessionManager();
     fakeManager.setConnectedDevices([device]);
@@ -346,17 +360,24 @@ describe("ToolRegistry device-aware pipeline", () => {
       },
     );
 
-    const response = await registry
-      .getTool("readinessProbe")!
-      .handler({ platform: "android", quick: true }, undefined, controller.signal);
+    try {
+      const response = await registry
+        .getTool("readinessProbe")!
+        .handler({ platform: "android", quick: true }, undefined, controller.signal);
 
-    expect(response).toEqual({ success: true });
-    expect(fakeManager.getLastOptions()?.readiness).toBe("booted");
-    expect(fakeManager.getLastOptions()?.signal).toBe(controller.signal);
+      expect(response).toEqual({ success: true });
+      expect(fakeManager.getLastOptions()?.readiness).toBe("booted");
+      expect(fakeManager.getLastOptions()?.signal).toBe(controller.signal);
+    } finally {
+      restoreRegistryPipelineOverrides();
+    }
   });
 
   test("abort during target resolution prevents the device handler from starting", async () => {
     const registry = new ToolRegistryClass();
+    const restoreRegistryPipelineOverrides = registry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     const controller = new AbortController();
     let markResolutionStarted: (() => void) | undefined;
     const resolutionStarted = new Promise<void>((resolve) => {
@@ -398,6 +419,7 @@ describe("ToolRegistry device-aware pipeline", () => {
 
     await expect(call).rejects.toThrow();
     expect(handlerCalls).toBe(0);
+    restoreRegistryPipelineOverrides();
   });
 });
 

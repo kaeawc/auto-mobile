@@ -9,6 +9,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 
 for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
   for (const cleanupKind of ["setup", "keep-awake", "biometric", "network"] as const) {
@@ -34,6 +35,7 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
         const utils = new FakeDeviceUtils();
         const device = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
         utils.setBootedDevices("android", [device]);
+        PlatformDeviceManagerFactory.setInstance(utils);
         const pool = new DevicePool(
           createDevicePoolDependencies(manager, "daemon-test", {
             timer: timer,
@@ -114,6 +116,7 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
           await release;
           await manager.getPendingDeviceCleanup(device.deviceId);
           manager.stopCleanupTimer();
+          PlatformDeviceManagerFactory.reset();
           if (route === "setActiveDevice") {
             DaemonState.getInstance().reset();
             ToolRegistry.clearTools();

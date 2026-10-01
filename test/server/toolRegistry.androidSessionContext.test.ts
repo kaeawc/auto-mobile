@@ -4,6 +4,7 @@ import type { BootedDevice } from "../../src/models";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 
 describe("ToolRegistry Android session context", () => {
   const androidDeviceA: BootedDevice = {
@@ -29,6 +30,7 @@ describe("ToolRegistry Android session context", () => {
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   const schema = z.object({
     platform: z.enum(["ios", "android"]).optional(),
@@ -46,12 +48,17 @@ describe("ToolRegistry Android session context", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
     Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     ToolRegistry.clearTools();
   });

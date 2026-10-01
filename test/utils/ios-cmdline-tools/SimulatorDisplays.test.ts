@@ -16,12 +16,27 @@ describe("simctl display discovery", () => {
   test("keeps only the two Integrated screens from the captured Duo output", () => {
     const displays = parseSimulatorDisplays(duoEnumerate);
     expect(displays).toEqual([
-      { id: "1", name: "primary", width: 1398, height: 2034, uiScale: 3 },
-      { id: "3", name: "primary-1", width: 2007, height: 2853, uiScale: 3 },
+      {
+        id: "1",
+        name: "primary",
+        width: 1398,
+        height: 2034,
+        uiScale: 3,
+        uiOrientation: "Portrait",
+      },
+      {
+        id: "3",
+        name: "primary-1",
+        width: 2007,
+        height: 2853,
+        uiScale: 3,
+        uiOrientation: "Portrait",
+      },
     ]);
     expect(selectLiveSimulatorDisplay(displays, 1398, 2034)?.name).toBe("primary");
     expect(selectLiveSimulatorDisplay(displays, 2034, 1398)?.name).toBe("primary");
     expect(selectLiveSimulatorDisplay(displays, 2007, 2853)?.name).toBe("primary-1");
+    expect(selectLiveSimulatorDisplay(displays, 2853, 2007)?.name).toBe("primary-1");
     expect(
       simulatorDeviceDisplays(displays, "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo"),
     ).toEqual({
@@ -40,7 +55,16 @@ describe("simctl display discovery", () => {
   test("parses one Integrated screen when the LCD-1 block is removed", () => {
     expect(singleEnumerate).not.toBe(duoEnumerate);
     const displays = parseSimulatorDisplays(singleEnumerate);
-    expect(displays).toEqual([{ id: "1", name: "primary", width: 1398, height: 2034, uiScale: 3 }]);
+    expect(displays).toEqual([
+      {
+        id: "1",
+        name: "primary",
+        width: 1398,
+        height: 2034,
+        uiScale: 3,
+        uiOrientation: "Portrait",
+      },
+    ]);
     expect(selectLiveSimulatorDisplay(displays, 2007, 2853)).toBeNull();
     expect(simulatorDeviceDisplays(displays)).toBeUndefined();
   });

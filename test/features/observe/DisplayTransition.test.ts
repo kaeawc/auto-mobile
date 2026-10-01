@@ -12,6 +12,7 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { setObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { readFileSync } from "node:fs";
@@ -53,6 +54,92 @@ afterEach(() => {
 });
 
 describe("display transitions", () => {
+  test("single-panel iOS rotation keeps its revision while the same Duo geometry change advances it", async () => {
+    for (const multiplePanels of [false, true]) {
+      const rotatingDevice: BootedDevice = {
+        deviceId: multiplePanels ? "rotating-duo" : "rotating-iphone",
+        name: multiplePanels ? "iPhone Duo" : "iPhone",
+        platform: "ios",
+        displays: {
+          panels: [
+            { key: "cover", role: "cover", sizePx: { width: 393, height: 852 } },
+            ...(multiplePanels
+              ? [{ key: "inner", role: "inner" as const, sizePx: { width: 1000, height: 700 } }]
+              : []),
+          ],
+          postures: multiplePanels ? ["closed", "opened"] : ["unknown"],
+        },
+      };
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      const hierarchy = new FakeViewHierarchy();
+      hierarchy.configureHierarchySequence([
+        {
+          hierarchy: { node: {} },
+          screenWidth: 393,
+          screenHeight: 852,
+          pixelWidth: 393,
+          pixelHeight: 852,
+          updatedAt: 1,
+        },
+        {
+          hierarchy: { node: {} },
+          screenWidth: 852,
+          screenHeight: 393,
+          pixelWidth: 393,
+          pixelHeight: 852,
+          updatedAt: 2,
+        },
+      ]);
+      const client = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+        getLatestHierarchy: async () => ({ hierarchy: null }),
+      } as unknown as IOSCtrlProxyClient);
+      try {
+        const screen = new RealObserveScreen(
+          rotatingDevice,
+          new FakeAdbClientFactory(adb),
+          { viewHierarchy: hierarchy, cacheStore: new FakeObserveCacheStore(timer) },
+          timer,
+        );
+        expect((await screen.execute(options)).displayRevision).toBe(0);
+        expect((await screen.execute(options)).displayRevision).toBe(multiplePanels ? 1 : 0);
+      } finally {
+        client.mockRestore();
+        displayTransitions.reset(rotatingDevice.deviceId);
+        resetObserveCacheStore();
+      }
+    }
+  });
+
+  test("iOS panel and orientation changes invalidate while Android rotations remain tolerated", () => {
+    const invalidations: string[] = [];
+    const tracker = new DisplayTransitionTracker((_id, reason) => invalidations.push(reason));
+    const cover = {
+      key: "primary",
+      role: "cover" as const,
+      posture: "closed" as const,
+      generation: 0,
+    };
+    const inner = {
+      key: "primary-1",
+      role: "inner" as const,
+      posture: "opened" as const,
+      generation: 0,
+    };
+    tracker.record("duo", { display: cover, screenSize: { width: 466, height: 678 } }, "ios");
+    expect(tracker.checkIdentity("duo", inner)).toBe(true);
+    expect(invalidations).toHaveLength(1);
+    tracker.record("duo", { display: inner, screenSize: { width: 669, height: 951 } }, "ios");
+    expect(tracker.checkIosGeometry("duo", { width: 951, height: 669 })).toBe(true);
+    expect(
+      tracker.record("duo", { display: inner, screenSize: { width: 951, height: 669 } }, "ios"),
+    ).toBe(false);
+    expect(invalidations).toHaveLength(2);
+    tracker.record("android", { display: inner, screenSize: { width: 669, height: 951 } });
+    expect(
+      tracker.record("android", { display: inner, screenSize: { width: 951, height: 669 } }),
+    ).toBe(false);
+  });
   test("geometry and identity changes invalidate once; unchanged captures preserve state", () => {
     const invalidations: string[] = [];
     const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, Posture } from "../../../src/models";
 import { classifyIosPostureObservation, SetPosture } from "../../../src/features/device/SetPosture";
 import type { DisplayPanel } from "../../../src/models/DisplayPanel";
@@ -21,6 +21,12 @@ const phoneStates = fixture("phone-states.txt");
 const closedState = fixture("foldpf-5-after-reset-state.txt");
 const openedState = fixture("foldpf-1-default-state.txt");
 const rearState = fixture("foldpf-2-rear-display-override-state.txt");
+import { logger } from "../../../src/utils/logger";
+import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
+import {
+  parseSimulatorDisplays,
+  simulatorDeviceDisplays,
+} from "../../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 
 const display = {
   key: "panel-inner",
@@ -300,13 +306,10 @@ describe("SetPosture", () => {
     platform: "ios",
     deviceId: "34C35F33-224C-4E74-B8C0-668FF03E49F5",
     deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
-    displays: {
-      panels: [
-        { key: "panel-inner", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
-        { key: "panel-cover", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
-      ],
-      postures: ["closed", "half_opened", "opened"],
-    },
+    displays: simulatorDeviceDisplays(
+      parseSimulatorDisplays(loadDuoEnumerate()),
+      "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+    ),
   };
 
   function makeIosFeature(
@@ -345,9 +348,18 @@ describe("SetPosture", () => {
       ["half_opened", 130],
       ["opened", 180],
     ] as const) {
-      const expectedDisplay = { ...display, role: posture === "closed" ? "cover" : "inner" };
+      const expectedDisplay = {
+        ...display,
+        key: posture === "closed" ? "primary" : "primary-1",
+        role: posture === "closed" ? "cover" : "inner",
+      };
       const { feature, client, getObserveCount } = makeIosFeature(duo, [
-        { ...observation, display: expectedDisplay },
+        {
+          ...observation,
+          display: expectedDisplay,
+          screenSize:
+            posture === "closed" ? { width: 466, height: 678 } : { width: 951, height: 669 },
+        },
       ]);
       expect(await feature.execute(posture)).toEqual({
         posture,
@@ -360,11 +372,12 @@ describe("SetPosture", () => {
   });
 
   test("polls until the iPhone Duo active display matches the requested posture", async () => {
-    const laterDisplay = { ...display, key: "panel-cover", role: "cover" };
+    const laterDisplay = { ...display, key: "primary", role: "cover" };
+    const oldObservation = { ...observation, screenSize: { width: 669, height: 951 } };
     const { feature, getObserveCount } = makeIosFeature(duo, [
-      observation,
-      observation,
-      { ...observation, display: laterDisplay },
+      oldObservation,
+      oldObservation,
+      { ...observation, display: laterDisplay, screenSize: { width: 466, height: 678 } },
     ]);
     expect(await feature.execute("closed")).toEqual({
       posture: "closed",
@@ -372,6 +385,28 @@ describe("SetPosture", () => {
       locked: true,
     });
     expect(getObserveCount()).toBe(3);
+  });
+
+  test("opened accepts either orientation of the inner panel geometry", async () => {
+    const cover = {
+      ...observation,
+      display: { ...display, key: "primary", role: "cover" as const },
+      screenSize: { width: 466, height: 678 },
+    };
+    const swapped = {
+      ...observation,
+      display: { ...display, key: "primary-1" },
+      screenSize: { width: 669, height: 951 },
+    };
+    const inner = {
+      ...observation,
+      display: { ...display, key: "primary-1" },
+      screenSize: { width: 951, height: 669 },
+    };
+    const { feature, getObserveCount, timer } = makeIosFeature(duo, [cover, swapped, inner]);
+    expect(await feature.execute("opened")).toMatchObject({ display: inner.display });
+    expect(getObserveCount()).toBe(2);
+    expect(timer.getSleepHistory()).toEqual([250]);
   });
 
   test("polls when an unknown role still has the old panel size, then succeeds at the expected size", async () => {
@@ -426,10 +461,10 @@ describe("SetPosture", () => {
     expect(timer.getSleepHistory()).toEqual([]);
   });
 
-  test("notifies the transition exactly once before observing", async () => {
+  test("notifies before observing and after the new panel settles", async () => {
     const expectedDisplay = { ...display, role: "cover" };
     const { feature, sequence } = makeIosFeature(duo, [
-      { ...observation, display: expectedDisplay },
+      { ...observation, display: expectedDisplay, screenSize: { width: 466, height: 678 } },
     ]);
     expect(await feature.execute("closed")).toEqual({
       posture: "closed",
@@ -439,23 +474,37 @@ describe("SetPosture", () => {
     expect(sequence).toEqual([
       `transition:${duo.deviceId}:setPosture changed the iPhone Duo hinge angle`,
       "observe",
+      `transition:${duo.deviceId}:setPosture settled on the iPhone Duo display`,
     ]);
   });
 
-  test("returns an indeterminate observation without waiting", async () => {
+  test("returns an indeterminate observation with a warning instead of polling or throwing", async () => {
     const unknownObservation = {
       ...observation,
       display: { ...display, role: "unknown" },
-      screenSize: { width: 123, height: 456 },
+      screenSize: { width: 777, height: 888 },
     };
-    const { feature, getObserveCount, timer } = makeIosFeature(duo, [unknownObservation]);
-    expect(await feature.execute("closed")).toMatchObject({ display: unknownObservation.display });
-    expect(getObserveCount()).toBe(1);
-    expect(timer.getSleepHistory()).toEqual([]);
+    const settled = { ...unknownObservation, screenSize: { width: 466, height: 678 } };
+    const { feature, getObserveCount, timer } = makeIosFeature(duo, [unknownObservation, settled]);
+    const warning = spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      expect(await feature.execute("closed")).toMatchObject({
+        display: unknownObservation.display,
+      });
+      expect(getObserveCount()).toBe(1);
+      expect(timer.getSleepHistory()).toEqual([]);
+      expect(warning).toHaveBeenCalledWith(
+        "[SetPosture] Could not determine the active iPhone Duo panel after the hinge event",
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 
   test("throws when the old panel remains after polling to timeout", async () => {
-    const { feature, getObserveCount, timer } = makeIosFeature();
+    const { feature, getObserveCount, timer } = makeIosFeature(duo, [
+      { ...observation, screenSize: { width: 669, height: 951 } },
+    ]);
     await expect(feature.execute("closed")).rejects.toThrow(
       "hinge event was accepted, but the active display is still the inner panel after 3000 ms",
     );
@@ -464,10 +513,10 @@ describe("SetPosture", () => {
     expect(timer.getSleepHistory()).toEqual(Array(12).fill(250));
   });
 
-  test("classifies panel sizes in pixels, points, and swapped orientation", () => {
+  test("classifies Duo panels in either orientation and derives point scale when available", () => {
     const panels: DisplayPanel[] = [
-      { key: "inner", role: "inner", sizePx: { width: 600, height: 900 }, scale: 3 },
-      { key: "cover", role: "cover", sizePx: { width: 401, height: 801 }, scale: 2 },
+      { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 }, scale: 3 },
+      { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 }, scale: 3 },
     ];
     const classifySize = (width: number, height: number) =>
       classifyIosPostureObservation(
@@ -475,9 +524,33 @@ describe("SetPosture", () => {
         panels,
         "cover",
       );
-    expect(classifySize(401, 801)).toBe("expected");
-    expect(classifySize(201, 401)).toBe("expected");
-    expect(classifySize(801, 401)).toBe("expected");
+    expect(classifySize(1398, 2034)).toBe("expected");
+    expect(classifySize(466, 678)).toBe("expected");
+    expect(classifySize(2034, 1398)).toBe("expected");
+    expect(
+      classifyIosPostureObservation(
+        { ...observation, screenSize: { width: 669, height: 951 } },
+        panels,
+        "inner",
+      ),
+    ).toBe("expected");
+    const panelWithoutScale: DisplayPanel = {
+      key: "primary",
+      role: "cover",
+      sizePx: { width: 1398, height: 2034 },
+    };
+    expect(
+      classifyIosPostureObservation(
+        {
+          ...observation,
+          display: { ...display, role: "unknown" },
+          screenSize: { width: 678, height: 466 },
+          viewHierarchy: { hierarchy: {}, pixelWidth: 1398, pixelHeight: 2034 },
+        },
+        [panelWithoutScale, panels[0]!],
+        "cover",
+      ),
+    ).toBe("expected");
   });
 
   test("rejects unsupported Duo postures and display presets", async () => {

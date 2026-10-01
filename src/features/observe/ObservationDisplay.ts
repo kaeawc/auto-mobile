@@ -268,7 +268,7 @@ function displayForAndroidInfos(
 
 function liveIosPanel(
   panels: readonly DisplayPanel[],
-  hierarchy: ViewHierarchyResult | undefined,
+  hierarchy: Pick<ViewHierarchyResult, "pixelWidth" | "pixelHeight"> | undefined,
 ): DisplayPanel | undefined {
   if (!hierarchy?.pixelWidth || !hierarchy.pixelHeight) {
     return panels.length === 1 ? panels[0] : undefined;
@@ -287,17 +287,29 @@ function liveIosPanel(
   return panels.find((candidate) => candidate.key === selected?.name);
 }
 
+function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
+  if (role === "inner") {
+    return "opened";
+  }
+  if (role === "cover") {
+    return "closed";
+  }
+  return "unknown";
+}
+
 /** Match the runner's live pixel size against the enumerated physical panels. */
 export function observedIosDisplay(
   device: BootedDevice,
-  hierarchy: ViewHierarchyResult | undefined,
+  hierarchy:
+    | Pick<ViewHierarchyResult, "pixelWidth" | "pixelHeight" | "captureSequence">
+    | undefined,
 ): DisplayRef {
   const panels = device.displays?.panels ?? [];
   const panel = liveIosPanel(panels, hierarchy);
   return {
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",
-    posture: "unknown",
+    posture: iosPanelPosture(panel?.role),
     // The runner hierarchy carries the forwarded capture identity when one
     // exists. Zero is the explicit no-sequence fallback, not a new counter.
     generation: hierarchy?.captureSequence ?? 0,

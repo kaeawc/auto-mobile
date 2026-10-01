@@ -7,6 +7,7 @@ export interface SimulatorDisplay {
   width: number;
   height: number;
   uiScale: number | null;
+  uiOrientation?: "Portrait" | "Landscape" | null;
 }
 
 function readDisplayField(section: Partial<SimulatorDisplay>, line: string): void {
@@ -35,6 +36,9 @@ function readDisplayField(section: Partial<SimulatorDisplay>, line: string): voi
       section.uiScale = scale;
     }
   }
+  if (key === "UI Orientation" && (value === "Portrait" || value === "Landscape")) {
+    section.uiOrientation = value;
+  }
 }
 
 /** Read Integrated entries in the framebuffer server's Connected Screens block. */
@@ -53,6 +57,7 @@ export function parseSimulatorDisplays(output: string): SimulatorDisplay[] {
         width: section.width,
         height: section.height,
         uiScale: section.uiScale ?? null,
+        ...(section.uiOrientation ? { uiOrientation: section.uiOrientation } : {}),
       });
     }
     section = null;

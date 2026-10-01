@@ -32,13 +32,17 @@ export interface DisplayTransitionSink {
   notifyAndroidTransition(deviceId: string, event: PushedDisplayTransition): void;
 }
 
-function samePanelAndGeometry(current: PanelGeometry, previous: PanelGeometry): boolean {
+function samePanelAndGeometry(
+  current: PanelGeometry,
+  previous: PanelGeometry,
+  orientationAware: boolean,
+): boolean {
   return (
     current.key === previous.key &&
     current.role === previous.role &&
     current.posture === previous.posture &&
     ((current.width === previous.width && current.height === previous.height) ||
-      (current.width === previous.height && current.height === previous.width))
+      (!orientationAware && current.width === previous.height && current.height === previous.width))
   );
 }
 
@@ -61,6 +65,7 @@ function samePushedPanel(event: PushedDisplayTransition, previous: PanelGeometry
 
 export class DisplayTransitionTracker implements DisplayTransitionSink {
   private readonly panels = new Map<string, PanelGeometry>();
+  private readonly panelRevisions = new Map<string, number>();
   private readonly revisions = new Map<string, number>();
   private readonly pendingPushes = new Map<string, number>();
   private readonly deviceStates = new Map<string, number>();
@@ -82,6 +87,13 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     }
     const panel = this.panels.get(deviceId);
     return panel ? { key: panel.key, role: panel.role } : undefined;
+  }
+
+  /** A panel accepted by an observation after the latest transition fence. */
+  currentObservedPanel(deviceId: string): Pick<DisplayRef, "key" | "role"> | undefined {
+    return this.panelRevisions.get(deviceId) === this.revision(deviceId)
+      ? this.observedPanel(deviceId)
+      : undefined;
   }
 
   /** Subscribe to panel changes, including pushes that precede a fresh observation. */
@@ -113,6 +125,16 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     );
   }
 
+  /** Fence an iOS geometry change before the new observation is recorded. */
+  checkIosGeometry(deviceId: string, size: ObserveResult["screenSize"]): boolean {
+    if (!this.geometryChanged(deviceId, size)) {
+      return false;
+    }
+    this.panels.delete(deviceId);
+    this.notifyTransition(deviceId, "iOS display geometry changed");
+    return true;
+  }
+
   /** Compare identity before hierarchy collection, so a new panel cannot hit the old cache. */
   checkIdentity(deviceId: string, display: DisplayRef): boolean {
     const previous = this.panels.get(deviceId);
@@ -136,7 +158,11 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
   }
 
   /** Compare the finalized hierarchy's pixel geometry as well as physical identity. */
-  record(deviceId: string, result: Pick<ObserveResult, "display" | "screenSize">): boolean {
+  record(
+    deviceId: string,
+    result: Pick<ObserveResult, "display" | "screenSize">,
+    platform: "ios" | "android" = "android",
+  ): boolean {
     // The first completed observation after a push consumes its fence, even if
     // the stamp is unchanged or the observation has no usable geometry.
     const pushedRevision = this.pendingPushes.get(deviceId);
@@ -154,7 +180,9 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     };
     const previous = this.panels.get(deviceId);
     this.panels.set(deviceId, current);
-    const unchanged = previous !== undefined && samePanelAndGeometry(current, previous);
+    this.panelRevisions.set(deviceId, this.revision(deviceId));
+    const unchanged =
+      previous !== undefined && samePanelAndGeometry(current, previous, platform === "ios");
     if (pushedRevision === this.revision(deviceId)) {
       this.emitPanel(deviceId, current);
       return false;
@@ -163,6 +191,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
       return false;
     }
     this.notifyTransition(deviceId, "display geometry changed");
+    this.panelRevisions.set(deviceId, this.revision(deviceId));
     if (previous.key !== current.key || previous.role !== current.role) {
       this.emitPanel(deviceId, current);
     }
@@ -204,6 +233,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
 
   reset(deviceId: string): void {
     this.panels.delete(deviceId);
+    this.panelRevisions.delete(deviceId);
     this.revisions.delete(deviceId);
     this.pendingPushes.delete(deviceId);
     this.deviceStates.delete(deviceId);

@@ -1030,6 +1030,37 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(resolved.height, 874)
     }
 
+    func testResolveScreenDimensions_swapsPortraitDuoRootWhenChildProvesLandscape() {
+        let root = ElementBounds(left: 0, top: 0, right: 669, bottom: 951)
+        let child = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 867, bottom: 669))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root,
+            fallbackWidth: 669,
+            fallbackHeight: 951,
+            elements: [child]
+        )
+        XCTAssertEqual(resolved.width, 951)
+        XCTAssertEqual(resolved.height, 669)
+        let pixels = ElementLocator.computePixelDimensions(
+            pointWidth: resolved.width, pointHeight: resolved.height, nativeScale: 3
+        )
+        XCTAssertEqual(pixels?.pixelWidth, 2853)
+        XCTAssertEqual(pixels?.pixelHeight, 2007)
+    }
+
+    func testResolveScreenDimensions_keepsPortraitRootForOffscreenCarouselCell() {
+        let root = ElementBounds(left: 0, top: 0, right: 393, bottom: 852)
+        let carouselCell = UIElementInfo(bounds: ElementBounds(left: 350, top: 180, right: 620, bottom: 440))
+        let resolved = ElementLocator.resolveScreenDimensions(
+            rootBounds: root,
+            fallbackWidth: 393,
+            fallbackHeight: 852,
+            elements: [carouselCell]
+        )
+        XCTAssertEqual(resolved.width, 393)
+        XCTAssertEqual(resolved.height, 852)
+    }
+
     func testResolveScreenDimensions_usesRootBoundsWithNonZeroOrigin() {
         let root = ElementBounds(left: 10, top: 20, right: 410, bottom: 820)
         let resolved = ElementLocator.resolveScreenDimensions(

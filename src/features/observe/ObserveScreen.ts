@@ -89,7 +89,41 @@ import {
 import { DaemonState } from "../../daemon/daemonState";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
 import { displayTransitions } from "./DisplayTransition";
+import { readFile } from "node:fs/promises";
+import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 import { DisplaySelectionError, resolveTargetDisplay } from "./DisplaySelection";
+
+function reconcileIosDisplayTransition(
+  deviceId: string,
+  result: ObserveResult,
+  explicitlyRouted: boolean,
+  hasMultiplePanels: boolean,
+): void {
+  if (explicitlyRouted) {
+    return;
+  }
+  displayTransitions.checkIdentity(deviceId, result.display);
+  if (hasMultiplePanels) {
+    displayTransitions.checkIosGeometry(deviceId, result.screenSize);
+  }
+}
+
+async function iosScreenshotOrientation(
+  screenshotPath: string,
+  screenSize: ObserveResult["screenSize"],
+): Promise<"native" | "display"> {
+  try {
+    const dimensions = readImageHeaderDimensions(await readFile(screenshotPath));
+    if (dimensions) {
+      return dimensions.width > dimensions.height === screenSize.width > screenSize.height
+        ? "display"
+        : "native";
+    }
+  } catch (error) {
+    logger.warn(`[OBSERVE] Could not read iOS screenshot orientation: ${describeError(error)}`);
+  }
+  return "native";
+}
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -955,6 +989,12 @@ export class RealObserveScreen implements ObserveScreen {
       // before screenshot routing or transition fencing observes this result.
       if (this.device.platform === "ios") {
         result.display = observedIosDisplay(this.device, result.viewHierarchy);
+        reconcileIosDisplayTransition(
+          this.device.deviceId,
+          result,
+          explicitlyRouted,
+          (this.device.displays?.panels.length ?? 0) > 1,
+        );
         const panel = resolveTargetDisplay(this.device.displays, displayRequest, {
           focusedPanelKey: result.display.key,
           activePanelKey: result.display.key,
@@ -1185,7 +1225,14 @@ export class RealObserveScreen implements ObserveScreen {
         result.display.generation = result.viewHierarchy?.captureSequence ?? 0;
       }
       const geometryTransition =
-        !explicitlyRouted && displayTransitions.record(this.device.deviceId, result);
+        !explicitlyRouted &&
+        displayTransitions.record(
+          this.device.deviceId,
+          result,
+          this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
+            ? "ios"
+            : "android",
+        );
       result.displayRevision = displayTransitions.revision(this.device.deviceId);
       if (geometryTransition) {
         cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
@@ -1370,6 +1417,12 @@ export class RealObserveScreen implements ObserveScreen {
       observation.screenshotFormat =
         extension === ".jpg" ? "jpeg" : extension === ".webp" ? "webp" : "png";
       observation.screenshotMimeType = `image/${observation.screenshotFormat}`;
+      if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
+        observation.screenshotOrientation = await iosScreenshotOrientation(
+          path,
+          observation.screenSize,
+        );
+      }
     } catch (error) {
       if (strict) {
         throw new StrictSettledScreenshotCaptureError(error, this.device.deviceId);

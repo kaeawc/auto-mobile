@@ -17,6 +17,9 @@ import WebSocket from "ws";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IosHierarchyUnavailableReason } from "../../../models/ViewHierarchyResult";
 import { logger } from "../../../utils/logger";
+import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import { captureIosPanelScreenshot } from "./CtrlProxyScreenshot";
+import { displayTransitions } from "../DisplayTransition";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ForcedRestartBudget } from "../../../ctrlProxy/ForcedRestartBudget";
 import {
@@ -584,6 +587,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    * WebSocket push events and explicit invalidateCache() calls after actions.
    */
   private cachedHierarchy: CtrlProxyCachedHierarchy | null = null;
+  private cachedHierarchyDisplayRevision = -1;
   // Raised from 500ms toward maxObservationAgeMs so cache hits replace device
   // round-trips during multi-step sequences, leaning on unsolicited
   // `hierarchy_update` pushes to keep the cache warm (#5472). Still floored by
@@ -1248,7 +1252,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       cacheFreshTtlMs: IOSCtrlProxyClient.CACHE_FRESH_TTL_MS,
       getCachedHierarchy: () => this.cachedHierarchy,
       setCachedHierarchy: (h) => {
+        const sameCapture =
+          h !== null &&
+          this.cachedHierarchy !== null &&
+          h.hierarchy.updatedAt === this.cachedHierarchy.hierarchy.updatedAt;
+        const previousRevision = this.cachedHierarchyDisplayRevision;
         this.cachedHierarchy = h;
+        this.cachedHierarchyDisplayRevision = sameCapture
+          ? previousRevision
+          : displayTransitions.revision(this.device.deviceId);
       },
       suppressHierarchyObservationStreamPush: (requestId, timeoutMs) =>
         this.suppressHierarchyObservationStreamPush(requestId, timeoutMs),
@@ -2564,6 +2576,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
         frameContext: message.frameContext,
       };
+      this.cachedHierarchyDisplayRevision =
+        previous?.hierarchy.updatedAt === message.data.updatedAt
+          ? this.cachedHierarchyDisplayRevision
+          : displayTransitions.revision(this.device.deviceId);
       logger.info(`[IOSCtrlProxyClient] Received hierarchy push update - UI changed`);
 
       // Convert and push to observation stream for IDE plugins
@@ -3140,7 +3156,24 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<CtrlProxyScreenshotResult> {
-    return this.screenshot.requestScreenshot(timeoutMs, perf, signal);
+    if ((this.device.displays?.panels.length ?? 0) < 2) {
+      return this.screenshot.requestScreenshot(timeoutMs, perf, signal);
+    }
+    const currentPanel = displayTransitions.currentObservedPanel(this.device.deviceId);
+    const hierarchy =
+      !currentPanel &&
+      this.cachedHierarchy?.fresh &&
+      this.cachedHierarchyDisplayRevision === displayTransitions.revision(this.device.deviceId)
+        ? this.cachedHierarchy.hierarchy
+        : null;
+    return captureIosPanelScreenshot(
+      this.device,
+      hierarchy,
+      new SimCtlClient(this.device),
+      () => this.screenshot.requestScreenshot(timeoutMs, perf, signal),
+      signal,
+      currentPanel?.key,
+    );
   }
 
   async requestScreenshotWithoutObservationStreamPush(

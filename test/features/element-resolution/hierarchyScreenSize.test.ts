@@ -34,3 +34,27 @@ test("array-root captures retain fresh screen metadata when no enclosing bounds 
     }),
   ).toEqual({ width: 2400, height: 1080 });
 });
+
+// TODO(#8379): replace with a captured unfolded inner-panel hierarchy fixture.
+test("swaps a stale Duo portrait root only when a child proves landscape", () => {
+  const root = { left: 0, top: 0, right: 669, bottom: 951 };
+  const child = { left: 0, top: 0, right: 867, bottom: 669 };
+  expect(
+    extractHierarchyScreenSize({
+      hierarchy: { bounds: root, node: { bounds: root, node: [{ bounds: child }] } },
+    }),
+  ).toEqual({ width: 951, height: 669 });
+  expect(
+    extractHierarchyScreenSize({ hierarchy: { bounds: root, node: { node: [{ bounds: root }] } } }),
+  ).toEqual({ width: 669, height: 951 });
+});
+
+test("keeps a single-panel portrait root when a carousel cell extends beyond its right edge", () => {
+  const root = { left: 0, top: 0, right: 393, bottom: 852 };
+  const carouselCell = { left: 350, top: 180, right: 620, bottom: 440 };
+  expect(
+    extractHierarchyScreenSize({
+      hierarchy: { bounds: root, node: { bounds: root, node: [{ bounds: carouselCell }] } },
+    }),
+  ).toEqual({ width: 393, height: 852 });
+});

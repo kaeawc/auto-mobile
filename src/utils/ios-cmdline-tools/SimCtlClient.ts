@@ -320,6 +320,7 @@ export interface SimCtl {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<SimulatorDisplay[]>;
+  screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer>;
 
   /**
    * Set the simulator appearance
@@ -2683,6 +2684,43 @@ export class SimCtlClient implements SimCtl {
   ): Promise<SimulatorDisplay[]> {
     const result = await this.executeCommandArgs(["io", deviceId, "enumerate"], timeoutMs, signal);
     return parseSimulatorDisplays(result.stdout);
+  }
+
+  /** Capture the selected physical framebuffer as binary PNG stdout. */
+  async screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
+    const args = ["simctl", "io", deviceId, "screenshot", `--display=${display}`, "-"];
+    const timeout = new AbortController();
+    const handle = this.timer.setTimeout(
+      () => timeout.abort(new Error("simctl screenshot timed out")),
+      10_000,
+    );
+    const captureSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+    return new Promise<Buffer>((resolve, reject) => {
+      let child: ChildProcess;
+      try {
+        child = this.spawnProcess("xcrun", args, { signal: captureSignal });
+      } catch (error) {
+        this.timer.clearTimeout(handle);
+        reject(error);
+        return;
+      }
+      const chunks: Buffer[] = [];
+      const errors: Buffer[] = [];
+      child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr?.on("data", (chunk: Buffer) => errors.push(chunk));
+      child.once("error", (error) => {
+        this.timer.clearTimeout(handle);
+        reject(error);
+      });
+      child.once("close", (code) => {
+        this.timer.clearTimeout(handle);
+        if (code === 0) {
+          resolve(Buffer.concat(chunks));
+        } else {
+          reject(new Error(`simctl screenshot failed: ${Buffer.concat(errors).toString()}`));
+        }
+      });
+    });
   }
 
   async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {

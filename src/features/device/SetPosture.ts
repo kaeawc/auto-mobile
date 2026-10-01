@@ -50,20 +50,38 @@ const ANDROID_POSTURE_TIMEOUT_MS = 3000;
 
 type IosPanelMatch = "expected" | "old" | "indeterminate";
 
-function sizeMatchesPanel(size: { width: number; height: number }, panel: DisplayPanel): boolean {
+function sizeMatchesPanel(
+  size: { width: number; height: number },
+  panel: DisplayPanel,
+  observedScale?: number,
+): boolean {
   const matchesSize = (width: number, height: number): boolean =>
     (size.width === width && size.height === height) ||
     (size.width === height && size.height === width);
   if (matchesSize(panel.sizePx.width, panel.sizePx.height)) {
     return true;
   }
+  const scale = panel.scale ?? observedScale;
   return (
-    panel.scale !== undefined &&
-    matchesSize(
-      Math.round(panel.sizePx.width / panel.scale),
-      Math.round(panel.sizePx.height / panel.scale),
-    )
+    scale !== undefined &&
+    scale > 0 &&
+    matchesSize(Math.round(panel.sizePx.width / scale), Math.round(panel.sizePx.height / scale))
   );
+}
+
+function scaleFromObservation(
+  observation: Awaited<ReturnType<ObserveScreen["execute"]>>,
+): number | undefined {
+  const pixels = observation.viewHierarchy;
+  const points = observation.screenSize;
+  if (!pixels?.pixelWidth || !pixels.pixelHeight || points.width <= 0 || points.height <= 0) {
+    return undefined;
+  }
+  const longScale =
+    Math.max(pixels.pixelWidth, pixels.pixelHeight) / Math.max(points.width, points.height);
+  const shortScale =
+    Math.min(pixels.pixelWidth, pixels.pixelHeight) / Math.min(points.width, points.height);
+  return Math.abs(longScale - shortScale) < 0.01 ? longScale : undefined;
 }
 
 export function classifyIosPostureObservation(
@@ -78,8 +96,10 @@ export function classifyIosPostureObservation(
   if (!expected || !old) {
     return "indeterminate";
   }
+  const observedScale = scaleFromObservation(observation);
   const matchesPanel = (panel: DisplayPanel): boolean =>
-    observation.display.role === panel.role || sizeMatchesPanel(observation.screenSize, panel);
+    sizeMatchesPanel(observation.screenSize, panel, observedScale) &&
+    (observation.display.role === "unknown" || observation.display.role === panel.role);
   if (matchesPanel(expected)) {
     return "expected";
   }
@@ -108,6 +128,11 @@ async function observeIosPosture(
     const oldRole = expectedRole === "cover" ? "inner" : "cover";
     throw new ActionableError(
       `The iPhone Duo hinge event was accepted, but the active display is still the ${oldRole} panel after ${IOS_POSTURE_TIMEOUT_MS} ms. The simulator did not apply the posture.`,
+    );
+  }
+  if (match === "indeterminate") {
+    logger.warn(
+      "[SetPosture] Could not determine the active iPhone Duo panel after the hinge event",
     );
   }
   return observation;
@@ -336,10 +361,14 @@ export class SetPosture {
     );
     const expectedRole = requested === "closed" ? "cover" : "inner";
     const observation = await observeIosPosture(
-      () => this.observeFactory(this.device).execute({}),
+      () => this.observeFactory(this.device).execute({ freshness: "fresh" }),
       this.device.displays?.panels,
       expectedRole,
       this.timer,
+    );
+    this.transitionSink.notifyTransition(
+      this.device.deviceId,
+      "setPosture settled on the iPhone Duo display",
     );
     return {
       posture: requested,

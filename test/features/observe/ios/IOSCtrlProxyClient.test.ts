@@ -31,6 +31,8 @@ import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
 } from "../../../../src/daemon/deviceDataStreamSocketServer";
+import { SimCtlClient } from "../../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { displayTransitions } from "../../../../src/features/observe/DisplayTransition";
 
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
@@ -73,6 +75,65 @@ describe("IOSCtrlProxyClient", function () {
       createSuccessWebSocketFactory(fakeTimer),
       fakeTimer,
     );
+  });
+
+  test("single-panel requestScreenshot uses the runner without invoking simctl", async () => {
+    testDevice.displays = {
+      panels: [{ key: "primary", role: "unknown", sizePx: { width: 1179, height: 2556 } }],
+      postures: ["unknown"],
+    };
+    const runner = spyOn(ctrlProxyClient["screenshot"], "requestScreenshot").mockResolvedValue({
+      success: true,
+      data: "runner",
+    });
+    const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockResolvedValue(Buffer.alloc(0));
+    try {
+      expect((await ctrlProxyClient.requestScreenshot()).data).toBe("runner");
+      expect(runner).toHaveBeenCalledTimes(1);
+      expect(simctl).not.toHaveBeenCalled();
+    } finally {
+      runner.mockRestore();
+      simctl.mockRestore();
+    }
+  });
+
+  test("a hierarchy cached before a Duo transition cannot select its old screenshot panel", async () => {
+    testDevice.displays = {
+      panels: [
+        { key: "primary", role: "cover", sizePx: { width: 1398, height: 2034 } },
+        { key: "primary-1", role: "inner", sizePx: { width: 2007, height: 2853 } },
+      ],
+      postures: ["closed", "opened"],
+    };
+    ctrlProxyClient["cachedHierarchy"] = {
+      hierarchy: {
+        updatedAt: 1,
+        packageName: "com.example.app",
+        hierarchy: {},
+        pixelWidth: 1398,
+        pixelHeight: 2034,
+      },
+      receivedAt: 0,
+      fresh: true,
+    };
+    ctrlProxyClient["cachedHierarchyDisplayRevision"] = displayTransitions.revision(
+      testDevice.deviceId,
+    );
+    displayTransitions.notifyTransition(testDevice.deviceId, "hinge changed");
+    const runner = spyOn(ctrlProxyClient["screenshot"], "requestScreenshot").mockResolvedValue({
+      success: true,
+      data: "runner",
+    });
+    const simctl = spyOn(SimCtlClient.prototype, "screenshot").mockResolvedValue(Buffer.alloc(0));
+    try {
+      expect((await ctrlProxyClient.requestScreenshot()).data).toBe("runner");
+      expect(runner).toHaveBeenCalledTimes(1);
+      expect(simctl).not.toHaveBeenCalled();
+    } finally {
+      runner.mockRestore();
+      simctl.mockRestore();
+      displayTransitions.reset(testDevice.deviceId);
+    }
   });
 
   afterEach(async function () {

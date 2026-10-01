@@ -2,6 +2,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
+import { ActionableError } from "../../../src/models/ActionableError";
+import { logger } from "../../../src/utils/logger";
+import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   installInMemoryNavManager,
   type InMemoryNavManagerHarness,
@@ -118,5 +121,101 @@ describe("NavigationGraphManager navigation write ordering", () => {
     expect(
       edges.some((edge) => edge.from_screen === "Other" && edge.to_screen === "Recovered"),
     ).toBe(true);
+  });
+
+  test("times out a stuck write, warns once, and releases the next write", async () => {
+    const timer = new FakeTimer();
+    const bounded = NavigationGraphManager.createForTesting(
+      repository,
+      new TestCoverageRepository(undefined, harness.db),
+      timer,
+      undefined,
+      50,
+    );
+    await bounded.setCurrentApp(appId);
+    const gate = deferred();
+    const started = deferred();
+    const originalTransaction = repository.runInTransaction.bind(repository);
+    let first = true;
+    spyOn(repository, "runInTransaction").mockImplementation(async (fn) => {
+      if (first) {
+        first = false;
+        started.resolve();
+        await gate.promise;
+      }
+      return originalTransaction(fn);
+    });
+    const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+
+    const stuck = bounded.recordNavigationEvent({ destination: "Stuck", timestamp: 4000 });
+    void stuck.catch(() => undefined);
+    await started.promise;
+    const next = bounded.recordNavigationEvent({ destination: "Recovered", timestamp: 5000 });
+    timer.advanceTime(50);
+    await expect(stuck).rejects.toBeInstanceOf(ActionableError);
+    await expect(stuck).rejects.toThrow("Navigation write recordNavigationEvent timed out");
+    await next;
+    expect(bounded.getCurrentScreen()).toBe("Recovered");
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("late event completion cannot replace a newer screen", async () => {
+    const timer = new FakeTimer();
+    const bounded = NavigationGraphManager.createForTesting(
+      repository,
+      new TestCoverageRepository(undefined, harness.db),
+      timer,
+      undefined,
+      50,
+    );
+    await bounded.setCurrentApp(appId);
+    const gate = deferred();
+    const started = deferred();
+    const completed = deferred();
+    const originalTransaction = repository.runInTransaction.bind(repository);
+    let first = true;
+    spyOn(repository, "runInTransaction").mockImplementation(async (fn) => {
+      const wasFirst = first;
+      if (first) {
+        first = false;
+        started.resolve();
+        await gate.promise;
+      }
+      const result = await originalTransaction(fn);
+      if (wasFirst) {
+        completed.resolve();
+      }
+      return result;
+    });
+    const stale = bounded.recordNavigationEvent({ destination: "A", timestamp: 4000 });
+    void stale.catch(() => undefined);
+    await started.promise;
+    timer.advanceTime(50);
+    await expect(stale).rejects.toThrow("timed out");
+    await bounded.recordNavigationEvent({ destination: "B", timestamp: 5000 });
+    gate.resolve();
+    await completed.promise;
+    await Promise.resolve();
+    expect(bounded.getCurrentScreen()).toBe("B");
+    expect(bounded.getCurrentAppId()).toBe(appId);
+    expect(await repository.getNode(appId, "A")).toBeDefined();
+  });
+
+  test("a settling write clears its deadline without warning", async () => {
+    const timer = new FakeTimer();
+    const bounded = NavigationGraphManager.createForTesting(
+      repository,
+      new TestCoverageRepository(undefined, harness.db),
+      timer,
+      undefined,
+      50,
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+    warn.mockClear();
+    await bounded.setCurrentApp(appId);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    timer.advanceTime(50);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

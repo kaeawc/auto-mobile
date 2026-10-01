@@ -1,6 +1,7 @@
 import { logger } from "../../utils/logger";
 import { buildNavigationNodeScreenshotUri } from "../../utils/navigationResourceUri";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { BackStackInfo } from "../../models";
 import { NavigationRepository } from "../../db/navigationRepository";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
@@ -47,6 +48,15 @@ import type {
 
 // Re-export types for convenience
 export type { NavigationEvent, NavigationEdge, UIState };
+
+/** Above SQLite's 5s busy timeout and normal loaded writes; callers only log failures, while 15s bounds a wedged tracking queue. */
+const NAVIGATION_WRITE_TIMEOUT_MS = 15_000;
+
+function assertNavigationWriteCurrent(epoch: number, state: { epoch: number }): void {
+  if (epoch !== state.epoch) {
+    throw new ActionableError("Navigation write was superseded after its deadline");
+  }
+}
 
 /**
  * Interface for navigation graph management operations.
@@ -302,7 +312,11 @@ export class NavigationGraphManager implements NavigationGraphService {
   private timer: Timer;
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
-  private navigationWriteTail: Promise<void> = Promise.resolve();
+  private navigationWriteState = {
+    tail: Promise.resolve() as Promise<void>,
+    epoch: 0,
+    timeoutMs: NAVIGATION_WRITE_TIMEOUT_MS,
+  };
   private graphUpdateListeners: Array<() => void | Promise<void>> = [];
 
   // Session + build/device provenance (#4984). sessionUuid identifies the owning
@@ -345,11 +359,13 @@ export class NavigationGraphManager implements NavigationGraphService {
     testCoverageRepository?: TestCoverageRepository,
     timer: Timer = defaultTimer,
     sessionUuid: string | null = null,
+    writeTimeoutMs: number = NAVIGATION_WRITE_TIMEOUT_MS,
   ) {
     this.repository = repository ?? new NavigationRepository();
     this.testCoverageRepository = testCoverageRepository ?? new TestCoverageRepository();
     this.timer = timer;
     this.sessionUuid = sessionUuid;
+    this.navigationWriteState.timeoutMs = writeTimeoutMs;
   }
 
   /**
@@ -532,12 +548,14 @@ export class NavigationGraphManager implements NavigationGraphService {
     testCoverageRepository?: TestCoverageRepository,
     timer?: Timer,
     sessionUuid?: string,
+    writeTimeoutMs?: number,
   ): NavigationGraphManager {
     return new NavigationGraphManager(
       repository,
       testCoverageRepository,
       timer,
       sessionUuid ?? null,
+      writeTimeoutMs,
     );
   }
 
@@ -586,20 +604,39 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Creates the app record in the database if it doesn't exist.
    */
   public async setCurrentApp(appId: string): Promise<void> {
-    return this.enqueueNavigationWrite(() => this.setCurrentAppUnlocked(appId));
+    return this.enqueueNavigationWrite("setCurrentApp", (epoch) =>
+      this.setCurrentAppUnlocked(appId, epoch),
+    );
   }
 
-  private enqueueNavigationWrite<T>(write: () => Promise<T>): Promise<T> {
-    const result = this.navigationWriteTail.then(write);
+  private enqueueNavigationWrite<T>(
+    operation: string,
+    write: (epoch: number) => Promise<T>,
+  ): Promise<T> {
+    const result = this.navigationWriteState.tail.then(() => {
+      const epoch = this.navigationWriteState.epoch;
+      return raceWithDeadline(() => write(epoch), {
+        timer: this.timer,
+        timeoutMs: this.navigationWriteState.timeoutMs,
+        unref: true,
+        label: `Navigation write ${operation}`,
+        onTimeout: () => {
+          this.navigationWriteState.epoch++;
+          logger.warn(
+            `[NAVIGATION_GRAPH] Navigation write ${operation} timed out after ${this.navigationWriteState.timeoutMs}ms`,
+          );
+        },
+      });
+    });
     // Keep the tail usable after failure; return result so this caller still sees its rejection.
-    this.navigationWriteTail = result.then(
+    this.navigationWriteState.tail = result.then(
       () => undefined,
       () => undefined,
     );
     return result;
   }
 
-  private async setCurrentAppUnlocked(appId: string): Promise<void> {
+  private async setCurrentAppUnlocked(appId: string, epoch: number): Promise<void> {
     if (this.currentAppId === appId) {
       return;
     }
@@ -609,6 +646,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Ensure app exists in database
     await this.repository.getOrCreateApp(appId);
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
     logger.info(`[NAVIGATION_GRAPH] Set current app: ${appId}`);
     this.notifyGraphUpdated();
   }
@@ -744,17 +782,22 @@ export class NavigationGraphManager implements NavigationGraphService {
     // Capture receipt before any async app switch or DB work. Tool calls use this
     // same host clock; the SDK timestamp remains the graph's persisted event time.
     const receivedAt = this.timer.now();
-    return this.enqueueNavigationWrite(() => this.recordNavigationEventUnlocked(event, receivedAt));
+    return this.enqueueNavigationWrite("recordNavigationEvent", (epoch) =>
+      this.recordNavigationEventUnlocked(event, receivedAt, epoch),
+    );
   }
 
   private async recordNavigationEventUnlocked(
     event: NavigationEvent,
     receivedAt: number,
+    epoch: number,
   ): Promise<void> {
     // Auto-set current app from navigation event if provided
     if (event.applicationId && event.applicationId !== this.currentAppId) {
-      await this.setCurrentAppUnlocked(event.applicationId);
+      await this.setCurrentAppUnlocked(event.applicationId, epoch);
     }
+
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
 
     if (!this.currentAppId) {
       logger.warn(`[NAVIGATION_GRAPH] Cannot record event - no current app set`);
@@ -877,6 +920,8 @@ export class NavigationGraphManager implements NavigationGraphService {
       },
     );
 
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
+
     // ---- Post-commit side effects (never inside the transaction) ----
 
     // Set active navigation state for fingerprint correlation. Fingerprints seen
@@ -979,14 +1024,21 @@ export class NavigationGraphManager implements NavigationGraphService {
    * 4. Does nothing if app has no named nodes (SDK not integrated)
    */
   public async recordHierarchyNavigation(event: HierarchyNavigationEvent): Promise<void> {
-    return this.enqueueNavigationWrite(() => this.recordHierarchyNavigationUnlocked(event));
+    return this.enqueueNavigationWrite("recordHierarchyNavigation", (epoch) =>
+      this.recordHierarchyNavigationUnlocked(event, epoch),
+    );
   }
 
-  private async recordHierarchyNavigationUnlocked(event: HierarchyNavigationEvent): Promise<void> {
+  private async recordHierarchyNavigationUnlocked(
+    event: HierarchyNavigationEvent,
+    epoch: number,
+  ): Promise<void> {
     // Auto-set current app from package name if provided
     if (event.packageName && event.packageName !== this.currentAppId) {
-      await this.setCurrentAppUnlocked(event.packageName);
+      await this.setCurrentAppUnlocked(event.packageName, epoch);
     }
+
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
 
     if (!this.currentAppId) {
       logger.warn(`[NAVIGATION_GRAPH] Cannot record hierarchy navigation - no current app set`);
@@ -1009,6 +1061,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)
     const existingNode = await this.repository.getNodeByFingerprint(appId, fingerprintHash);
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
     if (existingNode) {
       // Persist the counter writes atomically across BOTH repos via the shared helper,
       // which owns the assertSharedConnection() precondition and the bind-both-repos
@@ -1037,6 +1090,8 @@ export class NavigationGraphManager implements NavigationGraphService {
         await repository.touchApp(appId);
       });
 
+      assertNavigationWriteCurrent(epoch, this.navigationWriteState);
+
       // ---- Post-commit side effects (never inside the transaction) ----
       // Update current screen to the named screen
       this.currentScreen = existingNode.screen_name;
@@ -1056,12 +1111,14 @@ export class NavigationGraphManager implements NavigationGraphService {
       if (timeSinceNavigation >= 0 && timeSinceNavigation <= this.ACTIVE_NAVIGATION_WINDOW_MS) {
         // Correlate this fingerprint to the active named node (scoped to this app)
         await this.repository.getOrCreateFingerprint(
-          this.currentAppId,
+          appId,
           this.activeNavigation.nodeId,
           fingerprintHash,
           fingerprintData,
           timestamp,
         );
+
+        assertNavigationWriteCurrent(epoch, this.navigationWriteState);
 
         logger.info(
           `[NAVIGATION_GRAPH] Correlated fingerprint to ${this.activeNavigation.screenName} ` +
@@ -1076,6 +1133,7 @@ export class NavigationGraphManager implements NavigationGraphService {
 
     // Case 3: Check if app has named nodes - create suggestion
     const hasNamedNodes = await this.repository.hasNamedNodes(appId);
+    assertNavigationWriteCurrent(epoch, this.navigationWriteState);
     if (hasNamedNodes) {
       // Keep the reach and its provenance atomic; the snapshot above belongs to
       // this event even if another client's context changes while queries await.
@@ -1692,14 +1750,18 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Clear the graph for the current app.
    */
   public async clearCurrentGraph(): Promise<void> {
-    return this.enqueueNavigationWrite(() => this.clearCurrentGraphUnlocked());
+    return this.enqueueNavigationWrite("clearCurrentGraph", (epoch) =>
+      this.clearCurrentGraphUnlocked(epoch),
+    );
   }
 
-  private async clearCurrentGraphUnlocked(): Promise<void> {
-    if (this.currentAppId) {
-      await this.repository.clearAppGraph(this.currentAppId);
+  private async clearCurrentGraphUnlocked(epoch: number): Promise<void> {
+    const appId = this.currentAppId;
+    if (appId) {
+      await this.repository.clearAppGraph(appId);
+      assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentScreen = null;
-      logger.info(`[NAVIGATION_GRAPH] Cleared graph for app: ${this.currentAppId}`);
+      logger.info(`[NAVIGATION_GRAPH] Cleared graph for app: ${appId}`);
       this.notifyGraphUpdated();
     }
   }
@@ -1709,8 +1771,9 @@ export class NavigationGraphManager implements NavigationGraphService {
    * Note: This only clears the current app's data since we use app-specific storage.
    */
   public async clearAllGraphs(): Promise<void> {
-    return this.enqueueNavigationWrite(async () => {
-      await this.clearCurrentGraphUnlocked();
+    return this.enqueueNavigationWrite("clearAllGraphs", async (epoch) => {
+      await this.clearCurrentGraphUnlocked(epoch);
+      assertNavigationWriteCurrent(epoch, this.navigationWriteState);
       this.currentAppId = null;
       this.currentScreen = null;
       this.toolCallHistory = [];

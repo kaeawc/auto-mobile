@@ -11519,7 +11519,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
+    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -11669,27 +11669,136 @@
           ]
         },
         "location": {
-          "description": "Set one static location on an Android emulator or iOS Simulator.",
-          "type": "object",
-          "properties": {
-            "mode": {
-              "description": "Apply one static coordinate.",
-              "type": "string",
-              "const": "static"
+          "description": "Set a static fix, start a timed route, or stop route playback on an Android emulator or iOS Simulator.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "description": "Apply one static coordinate.",
+                  "type": "string",
+                  "const": "static"
+                },
+                "latitude": {
+                  "type": "number",
+                  "minimum": -90,
+                  "maximum": 90
+                },
+                "longitude": {
+                  "type": "number",
+                  "minimum": -180,
+                  "maximum": 180
+                }
+              },
+              "required": ["mode", "latitude", "longitude"],
+              "additionalProperties": false
             },
-            "latitude": {
-              "type": "number",
-              "minimum": -90,
-              "maximum": 90
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "route"
+                },
+                "waypoints": {
+                  "minItems": 2,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "latitude": {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90
+                      },
+                      "longitude": {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180
+                      },
+                      "altitude": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["latitude", "longitude"],
+                    "additionalProperties": false
+                  }
+                },
+                "loop": {
+                  "type": "boolean"
+                },
+                "updateIntervalMs": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 60000
+                },
+                "speedMetersPerSecond": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": ["mode", "waypoints", "speedMetersPerSecond"],
+              "additionalProperties": false
             },
-            "longitude": {
-              "type": "number",
-              "minimum": -180,
-              "maximum": 180
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "route"
+                },
+                "waypoints": {
+                  "minItems": 2,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "latitude": {
+                        "type": "number",
+                        "minimum": -90,
+                        "maximum": 90
+                      },
+                      "longitude": {
+                        "type": "number",
+                        "minimum": -180,
+                        "maximum": 180
+                      },
+                      "altitude": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["latitude", "longitude"],
+                    "additionalProperties": false
+                  }
+                },
+                "loop": {
+                  "type": "boolean"
+                },
+                "updateIntervalMs": {
+                  "type": "integer",
+                  "minimum": 200,
+                  "maximum": 60000
+                },
+                "durationMs": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": ["mode", "waypoints", "durationMs"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "const": "stop"
+                }
+              },
+              "required": ["mode"],
+              "additionalProperties": false
             }
-          },
-          "required": ["mode", "latitude", "longitude"],
-          "additionalProperties": false
+          ]
         },
         "platform": {
           "type": "string",

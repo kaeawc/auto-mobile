@@ -171,13 +171,33 @@ const connectivityStateInputSchema = z
     { message: "Provide at least one connectivity field to set" },
   );
 
-const locationInputSchema = z
+const staticLocationInputSchema = z
   .object({
     mode: z.literal("static").describe("Apply one static coordinate."),
     latitude: z.number().finite().min(-90).max(90),
     longitude: z.number().finite().min(-180).max(180),
   })
   .strict();
+
+const waypointSchema = z
+  .object({
+    latitude: z.number().finite().min(-90).max(90),
+    longitude: z.number().finite().min(-180).max(180),
+    altitude: z.number().finite().optional(),
+  })
+  .strict();
+const routeBaseSchema = z.object({
+  mode: z.literal("route"),
+  waypoints: z.array(waypointSchema).min(2),
+  loop: z.boolean().optional(),
+  updateIntervalMs: z.number().int().min(200).max(60000).optional(),
+});
+const locationInputSchema = z.union([
+  staticLocationInputSchema,
+  routeBaseSchema.extend({ speedMetersPerSecond: z.number().finite().positive() }).strict(),
+  routeBaseSchema.extend({ durationMs: z.number().finite().positive() }).strict(),
+  z.object({ mode: z.literal("stop") }).strict(),
+]);
 
 // In direct/sessionless mode there is no session lifecycle owner to enforce a
 // networkCondition TTL, so accepting `expiresInSeconds` there would echo a TTL we
@@ -381,7 +401,9 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
           .describe("Device-wide network condition to apply (Android emulator only)."),
         location: locationInputSchema
           .optional()
-          .describe("Set one static location on an Android emulator or iOS Simulator."),
+          .describe(
+            "Set a static fix, start a timed route, or stop route playback on an Android emulator or iOS Simulator.",
+          ),
       })
       .strict(),
   ).refine(
@@ -948,7 +970,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
+    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

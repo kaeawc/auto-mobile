@@ -10,6 +10,14 @@ import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { logger } from "../../utils/logger";
+import { ActionableError } from "../../models/ActionableError";
+import {
+  defaultLocationRouteRegistry,
+  LocationRouteRegistry,
+  routeDistanceMeters,
+  type LocationWaypoint,
+  type EndedLocationRoute,
+} from "./LocationRoutePlayer";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import {
@@ -329,18 +337,31 @@ export interface SetDeviceStateInput {
   location?: SetDeviceLocationInput;
 }
 
-export interface SetDeviceLocationInput {
-  mode: "static";
-  latitude: number;
-  longitude: number;
-}
+export type SetDeviceLocationInput =
+  | { mode: "static"; latitude: number; longitude: number }
+  | {
+      mode: "route";
+      waypoints: LocationWaypoint[];
+      speedMetersPerSecond?: number;
+      durationMs?: number;
+      loop?: boolean;
+      updateIntervalMs?: number;
+    }
+  | { mode: "stop" };
 
 export interface DeviceLocationState {
   supported: boolean;
-  mode?: "static";
+  mode?: "static" | "route" | "stop";
   latitude?: number;
   longitude?: number;
   method?: "android_emulator_console" | "ios_simctl";
+  stopped?: boolean;
+  previousRoute?: EndedLocationRoute;
+  waypointCount?: number;
+  totalDistanceMeters?: number;
+  expectedDurationMs?: number;
+  loop?: boolean;
+  updateIntervalMs?: number;
   /** A successful command is an applied fix, not a device location read-back. */
   verified?: boolean;
   error?: string;
@@ -408,7 +429,11 @@ type SelectedDeviceState = NonNullable<SelectedDeviceStates[keyof SelectedDevice
 
 interface IosSimulatorClient {
   executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
-  executeCommandArgs?(args: string[], timeoutMs?: number): Promise<ExecResult>;
+  executeCommandArgs?(
+    args: string[],
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<ExecResult>;
 }
 
 export interface DeviceStateDependencies {
@@ -416,6 +441,7 @@ export interface DeviceStateDependencies {
   simctl?: IosSimulatorClient | null;
   timer?: Timer;
   consoleFactory?: EmulatorConsoleClientFactory;
+  routeRegistry?: LocationRouteRegistry;
 }
 
 const IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION = "com.apple.BiometricKit.enrollmentChanged";
@@ -1068,9 +1094,72 @@ function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean {
   );
 }
 
+function waypointCoordinateError(point: LocationWaypoint): string | undefined {
+  if (!Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90) {
+    return "location.waypoints latitude must be finite and in [-90, 90]";
+  }
+  if (!Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180) {
+    return "location.waypoints longitude must be finite and in [-180, 180]";
+  }
+  if (point.altitude !== undefined && !Number.isFinite(point.altitude)) {
+    return "location.waypoints altitude must be finite";
+  }
+  return undefined;
+}
+
+function routeWaypointError(waypoints: LocationWaypoint[]): string | undefined {
+  if (!Array.isArray(waypoints) || waypoints.length < 2) {
+    return "location.waypoints must contain at least two points";
+  }
+  for (const point of waypoints) {
+    const invalid = waypointCoordinateError(point);
+    if (invalid) {
+      return invalid;
+    }
+  }
+  for (let index = 1; index < waypoints.length; index++) {
+    const legDistance = routeDistanceMeters(waypoints.slice(index - 1, index + 1));
+    if (legDistance === 0) {
+      return "location.waypoints must contain distinct consecutive points";
+    }
+    if (Math.abs(legDistance - Math.PI * 6_371_000) < 0.001) {
+      return "location.waypoints cannot contain antipodal consecutive points";
+    }
+  }
+  return undefined;
+}
+
+function routeTimingError(
+  input: Extract<SetDeviceLocationInput, { mode: "route" }>,
+): string | undefined {
+  if ((input.speedMetersPerSecond === undefined) === (input.durationMs === undefined)) {
+    return "location.route requires exactly one of speedMetersPerSecond or durationMs";
+  }
+  if (
+    input.speedMetersPerSecond !== undefined &&
+    (!Number.isFinite(input.speedMetersPerSecond) || input.speedMetersPerSecond <= 0)
+  ) {
+    return "location.speedMetersPerSecond must be finite and positive";
+  }
+  if (
+    input.durationMs !== undefined &&
+    (!Number.isFinite(input.durationMs) || input.durationMs <= 0)
+  ) {
+    return "location.durationMs must be finite and positive";
+  }
+  const interval = input.updateIntervalMs ?? 1000;
+  if (!Number.isInteger(interval) || interval < 200 || interval > 60000) {
+    return "location.updateIntervalMs must be an integer in [200, 60000]";
+  }
+  return undefined;
+}
+
 function locationInputError(input: SetDeviceLocationInput | undefined): string | undefined {
-  if (!input) {
+  if (!input || input.mode === "stop") {
     return undefined;
+  }
+  if (input.mode === "route") {
+    return routeWaypointError(input.waypoints) ?? routeTimingError(input);
   }
   if (!Number.isFinite(input.latitude) || input.latitude < -90 || input.latitude > 90) {
     return "location.latitude must be a finite number in [-90, 90]";
@@ -1079,6 +1168,17 @@ function locationInputError(input: SetDeviceLocationInput | undefined): string |
     return "location.longitude must be a finite number in [-180, 180]";
   }
   return undefined;
+}
+
+function routeDurationMs(
+  input: Extract<SetDeviceLocationInput, { mode: "route" }>,
+  distance: number,
+): number {
+  const duration = input.durationMs ?? (distance / input.speedMetersPerSecond!) * 1000;
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new ActionableError("location route duration must be finite and positive");
+  }
+  return duration;
 }
 
 function doNotDisturbInputError(input: SetDeviceStateInput["doNotDisturb"]): string | undefined {
@@ -1121,6 +1221,7 @@ export class DeviceState {
 
   private timer: Timer;
   private consoleFactory: EmulatorConsoleClientFactory;
+  private routeRegistry: LocationRouteRegistry;
 
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
@@ -1128,6 +1229,7 @@ export class DeviceState {
     this.simctl = dependencies.simctl ?? null;
     this.timer = dependencies.timer ?? defaultTimer;
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
+    this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
   }
 
   async getState(
@@ -1196,6 +1298,9 @@ export class DeviceState {
 
     const inputError = setDeviceStateInputError(input);
     if (inputError) {
+      if (input.location?.mode === "route" || input.location?.mode === "stop") {
+        throw new ActionableError(inputError);
+      }
       return {
         success: false,
         deviceId: this.device.deviceId,
@@ -1255,10 +1360,27 @@ export class DeviceState {
   }
 
   private async writeLocation(input: SetDeviceLocationInput): Promise<DeviceLocationState> {
+    if (input.mode === "stop") {
+      const stopped = await this.routeRegistry.stopAndSettle(this.device.deviceId);
+      return {
+        supported: true,
+        mode: "stop",
+        ...stopped,
+      };
+    }
     const invalid = locationInputError(input);
     if (invalid) {
       return { supported: true, error: invalid };
     }
+    if (input.mode === "route") {
+      return this.startLocationRoute(input);
+    }
+    return this.writeStaticLocation(input);
+  }
+
+  private async writeStaticLocation(
+    input: Extract<SetDeviceLocationInput, { mode: "static" }>,
+  ): Promise<DeviceLocationState> {
     if (this.device.platform === "ios") {
       if (!isIosSimulatorDevice(this.device)) {
         return {
@@ -1268,10 +1390,15 @@ export class DeviceState {
         };
       }
       const simctl = this.simctl ?? new SimCtlClient(this.device);
+      let previousRoute: EndedLocationRoute | undefined;
       try {
         if (!simctl.executeCommandArgs) {
           throw new Error("Injected simctl client does not support argv commands");
         }
+        ({ previousRoute } = await this.routeRegistry.stopAndSettle(
+          this.device.deviceId,
+          "replaced",
+        ));
         await simctl.executeCommandArgs([
           "location",
           this.device.deviceId,
@@ -1284,6 +1411,7 @@ export class DeviceState {
           latitude: input.latitude,
           longitude: input.longitude,
           method: "ios_simctl",
+          previousRoute,
         };
       } catch (error) {
         logger.warn(
@@ -1294,6 +1422,7 @@ export class DeviceState {
           supported: true,
           method: "ios_simctl",
           error: `Failed to set iOS Simulator location: ${errorMessage(error)}`,
+          previousRoute,
         };
       }
     }
@@ -1305,6 +1434,7 @@ export class DeviceState {
           "Location simulation is unsupported on physical Android devices. Use an Android emulator.",
       };
     }
+    let previousRoute: EndedLocationRoute | undefined;
     try {
       const adb = this.adbFactory.create(this.device);
       const probe = await adb.executeCommand("shell getprop ro.kernel.qemu");
@@ -1314,6 +1444,10 @@ export class DeviceState {
           error: "Location simulation requires an Android emulator (ro.kernel.qemu=1).",
         };
       }
+      ({ previousRoute } = await this.routeRegistry.stopAndSettle(
+        this.device.deviceId,
+        "replaced",
+      ));
       const consoleClient: EmulatorConsoleClient = this.consoleFactory(port);
       await consoleClient.geoFix(input.longitude, input.latitude);
       return {
@@ -1322,6 +1456,7 @@ export class DeviceState {
         latitude: input.latitude,
         longitude: input.longitude,
         method: "android_emulator_console",
+        previousRoute,
       };
     } catch (error) {
       logger.warn(
@@ -1332,8 +1467,94 @@ export class DeviceState {
         supported: true,
         method: "android_emulator_console",
         error: `Failed to set Android emulator location: ${errorMessage(error)}`,
+        previousRoute,
       };
     }
+  }
+
+  private async startLocationRoute(
+    input: Extract<SetDeviceLocationInput, { mode: "route" }>,
+  ): Promise<DeviceLocationState> {
+    const distance = routeDistanceMeters(input.waypoints);
+    const duration = routeDurationMs(input, distance);
+    const interval = input.updateIntervalMs ?? 1000;
+    const loop = input.loop ?? false;
+    let emit: (
+      point: LocationWaypoint,
+      options: { signal: AbortSignal; timeoutMs: number },
+    ) => Promise<void>;
+    let method: DeviceLocationState["method"];
+    if (this.device.platform === "ios") {
+      if (!isIosSimulatorDevice(this.device)) {
+        return {
+          supported: false,
+          error:
+            "Location simulation is unsupported on physical iOS devices. Use an iOS Simulator.",
+        };
+      }
+      const simctl = this.simctl ?? new SimCtlClient(this.device);
+      if (!simctl.executeCommandArgs) {
+        throw new ActionableError("simctl client does not support argv commands");
+      }
+      emit = async (point, options) => {
+        await simctl.executeCommandArgs!(
+          ["location", this.device.deviceId, "set", `${point.latitude},${point.longitude}`],
+          options.timeoutMs,
+          options.signal,
+        );
+      };
+      method = "ios_simctl";
+    } else {
+      const port = consolePortFromSerial(this.device.deviceId);
+      if (port === null) {
+        return {
+          supported: false,
+          error:
+            "Location simulation is unsupported on physical Android devices. Use an Android emulator.",
+        };
+      }
+      try {
+        const probe = await this.adbFactory
+          .create(this.device)
+          .executeCommand("shell getprop ro.kernel.qemu");
+        if (probe.stdout.trim() !== "1") {
+          return {
+            supported: false,
+            error: "Location simulation requires an Android emulator (ro.kernel.qemu=1).",
+          };
+        }
+      } catch (error) {
+        logger.warn(
+          `Failed to probe Android emulator for location route: ${errorMessage(error)}`,
+          error,
+        );
+        return {
+          supported: true,
+          error: `Failed to probe Android emulator: ${errorMessage(error)}`,
+        };
+      }
+      const client = this.consoleFactory(port);
+      emit = async (point, options) => {
+        await client.geoFix(point.longitude, point.latitude, point.altitude, options.signal);
+      };
+      method = "android_emulator_console";
+    }
+    const { previousRoute } = await this.routeRegistry.stopAndSettle(
+      this.device.deviceId,
+      "replaced",
+    );
+    this.routeRegistry.start(this.device.deviceId, input.waypoints, duration, interval, loop, emit);
+    return {
+      supported: true,
+      mode: "route",
+      waypointCount: input.waypoints.length,
+      totalDistanceMeters: distance,
+      expectedDurationMs: duration,
+      loop,
+      updateIntervalMs: interval,
+      method,
+      ...(previousRoute ? { previousRoute } : {}),
+    };
   }
 
   async getBiometricEnrollmentState(): Promise<BiometricEnrollmentState> {

@@ -3,33 +3,22 @@ import type {
   CoreDeviceVersion,
   DevicectlCommandInvoker,
   DevicectlCommandResult,
+  DevicectlVersionSource,
   SimulatorBootStateProvider,
 } from "../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
-import type { HostCommandExecutor } from "../../src/utils/HostCommandExecutor";
-import type { ExecResult } from "../../src/models";
 
-export class FakeCoreDeviceVersionExecutor implements Pick<HostCommandExecutor, "executeCommand"> {
+export class FakeDevicectlVersionSource implements DevicectlVersionSource {
   calls = 0;
   failure?: Error;
 
   constructor(private readonly capturedOutput: string) {}
 
-  async executeCommand(file: string, args: string[]): Promise<ExecResult> {
+  async getDevicectlVersion(): Promise<string> {
     this.calls += 1;
-    if (file !== "xcrun" || args.join(" ") !== "devicectl --version") {
-      throw new Error("Unexpected version command");
-    }
     if (this.failure) {
       throw this.failure;
     }
-    const stdout = this.capturedOutput;
-    return {
-      stdout,
-      stderr: "",
-      toString: () => stdout,
-      trim: () => stdout.trim(),
-      includes: (value: string) => stdout.includes(value),
-    };
+    return this.capturedOutput;
   }
 }
 

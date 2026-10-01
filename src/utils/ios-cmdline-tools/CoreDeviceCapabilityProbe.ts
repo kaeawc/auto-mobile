@@ -1,7 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import { SingleFlight } from "../cache/SingleFlight";
 import { errorMessage } from "../describeUnknownError";
-import type { HostCommandExecutor } from "../HostCommandExecutor";
 import { logger, type Logger } from "../logger";
 import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 
@@ -49,6 +48,10 @@ export interface CoreDeviceGuardVersionProvider {
   >;
 }
 
+export interface DevicectlVersionSource {
+  getDevicectlVersion(): Promise<string>;
+}
+
 export type CoreDeviceDowngradeGuard = { kind: "safe" } | { kind: "blocked"; warning: string };
 
 /** Never enter devicectl through a developer directory with an older CoreDevice. */
@@ -82,7 +85,7 @@ export type CoreDeviceCapabilityResult =
   | { kind: "failed"; message: string };
 
 export interface CoreDeviceCapabilityProbeDependencies {
-  versionExecutor: Pick<HostCommandExecutor, "executeCommand">;
+  versionSource: DevicectlVersionSource;
   commandInvoker: DevicectlCommandInvoker;
   bootState: SimulatorBootStateProvider;
   guardVersions: CoreDeviceGuardVersionProvider;
@@ -165,11 +168,8 @@ export class CoreDeviceCapabilityProbe {
 
   private async probeVersion(): Promise<CoreDeviceVersionResult> {
     try {
-      const output = await this.dependencies.versionExecutor.executeCommand("xcrun", [
-        "devicectl",
-        "--version",
-      ]);
-      const version = parseCoreDeviceVersion(output.stdout);
+      const output = await this.dependencies.versionSource.getDevicectlVersion();
+      const version = parseCoreDeviceVersion(output);
       if (!version) {
         const reason = "devicectl returned an unrecognized CoreDevice version";
         (this.dependencies.logger ?? logger).warn(reason);

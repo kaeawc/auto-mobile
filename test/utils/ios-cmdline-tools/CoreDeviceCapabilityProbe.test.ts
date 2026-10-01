@@ -9,7 +9,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import {
   FakeCoreDeviceGuardVersionProvider,
-  FakeCoreDeviceVersionExecutor,
+  FakeDevicectlVersionSource,
   FakeDevicectlCommandInvoker,
   FakeSimulatorBootStateProvider,
 } from "../../fakes/FakeCoreDeviceCapabilityDependencies";
@@ -22,7 +22,7 @@ const installed: [number, number, number] = [651, 13, 4];
 const required: [number, number, number] = [651, 13, 4];
 
 function harness() {
-  const versionExecutor = new FakeCoreDeviceVersionExecutor(capturedVersion);
+  const versionSource = new FakeDevicectlVersionSource(capturedVersion);
   const guardVersions = new FakeCoreDeviceGuardVersionProvider();
   guardVersions.versions = {
     installedCoreDevice: installed,
@@ -32,13 +32,13 @@ function harness() {
   const commandInvoker = new FakeDevicectlCommandInvoker();
   const warnings: string[] = [];
   const probe = new CoreDeviceCapabilityProbe({
-    versionExecutor,
+    versionSource,
     guardVersions,
     bootState,
     commandInvoker,
     logger: { warn: (message) => warnings.push(message) },
   });
-  return { probe, versionExecutor, guardVersions, bootState, commandInvoker, warnings };
+  return { probe, versionSource, guardVersions, bootState, commandInvoker, warnings };
 }
 
 describe("CoreDeviceCapabilityProbe", () => {
@@ -53,20 +53,20 @@ describe("CoreDeviceCapabilityProbe", () => {
   });
 
   test("coalesces version calls and caches success for the instance", async () => {
-    const { probe, versionExecutor } = harness();
+    const { probe, versionSource } = harness();
     const [first, second] = await Promise.all([probe.getVersion(), probe.getVersion()]);
     expect(first).toEqual({ kind: "available", version: installed });
     expect(second).toEqual(first);
     expect(await probe.getVersion()).toEqual(first);
-    expect(versionExecutor.calls).toBe(1);
+    expect(versionSource.calls).toBe(1);
   });
 
   test("caches a failed version probe as unavailable and logs it", async () => {
-    const { probe, versionExecutor, warnings } = harness();
-    versionExecutor.failure = new Error("version command failed");
+    const { probe, versionSource, warnings } = harness();
+    versionSource.failure = new Error("version command failed");
     expect(await probe.getVersion()).toMatchObject({ kind: "unavailable" });
     expect(await probe.getVersion()).toMatchObject({ kind: "unavailable" });
-    expect(versionExecutor.calls).toBe(1);
+    expect(versionSource.calls).toBe(1);
     expect(warnings[0]).toContain("version command failed");
   });
 
@@ -80,13 +80,13 @@ describe("CoreDeviceCapabilityProbe", () => {
       kind: "blocked",
       warning: expect.stringContaining("older than installed CoreDevice"),
     });
-    expect(older.versionExecutor.calls).toBe(0);
+    expect(older.versionSource.calls).toBe(0);
     expect(older.commandInvoker.calls).toHaveLength(0);
 
     const unknown = harness();
     unknown.guardVersions.versions = undefined;
     expect(await unknown.probe.getVersion()).toMatchObject({ kind: "blocked" });
-    expect(unknown.versionExecutor.calls).toBe(0);
+    expect(unknown.versionSource.calls).toBe(0);
     expect(
       checkCoreDeviceDowngrade({
         installedCoreDevice: installed,

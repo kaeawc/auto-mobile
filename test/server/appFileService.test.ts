@@ -765,12 +765,12 @@ describe("AppFileService", () => {
     const writes: string[] = [];
     class TrackingFileSystem extends TestAppFileFileSystem {
       override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
-        writes.push(`copy:${destinationPath}`);
+        writes.push(`copy:${destinationPath}`.replaceAll("\\", "/"));
         await super.copyFile(sourcePath, destinationPath);
       }
 
       override async rename(oldPath: string, newPath: string): Promise<void> {
-        writes.push(`rename:${oldPath}:${newPath}`);
+        writes.push(`rename:${oldPath}:${newPath}`.replaceAll("\\", "/"));
         await super.rename(oldPath, newPath);
       }
     }
@@ -889,14 +889,14 @@ describe("AppFileService", () => {
     const writes: string[] = [];
     class TrackingFileSystem extends TestAppFileFileSystem {
       override async copyFile(sourcePath: string, destinationPath: string): Promise<void> {
-        writes.push(`copy:start:${destinationPath}`);
+        writes.push(`copy:start:${destinationPath}`.replaceAll("\\", "/"));
         await Promise.resolve();
         await super.copyFile(sourcePath, destinationPath);
-        writes.push(`copy:end:${destinationPath}`);
+        writes.push(`copy:end:${destinationPath}`.replaceAll("\\", "/"));
       }
 
       override async rename(oldPath: string, newPath: string): Promise<void> {
-        writes.push(`rename:${oldPath}:${newPath}`);
+        writes.push(`rename:${oldPath}:${newPath}`.replaceAll("\\", "/"));
         await super.rename(oldPath, newPath);
       }
     }

@@ -16,6 +16,13 @@ AutoMobile tests need:
 The sections below walk through each step.
 
 > [!NOTE]
+> **The XCTestRunner PR simulator lane is currently disabled.** The
+> `ios-xctest-runner-simulator-tests` job in `.github/workflows/pull_request.yml`
+> has `if: ${{ false }}` because XCTestRunner is not in active use (#8584). Its
+> definition is retained; to re-enable it, remove that one `if: ${{ false }}`
+> line and re-check the known failure signatures in `scripts/ci/known-flakes.txt`.
+
+> [!NOTE]
 > **No cloud device service required.** Unlike Android — which uses
 > [emulator.wtf](https://emulator.wtf) to provision managed cloud emulators — iOS
 > AutoMobile tests run on the macOS runner's built-in iOS Simulator. No external
@@ -301,7 +308,12 @@ Resolve them from the environment in the test target before executing the plan.
 
 ## Conditional execution
 
-To skip the job on draft pull requests or when a specific label is absent:
+The XCTestRunner PR simulator lane is currently disabled as described above.
+When re-enabled, restore its previous change-based condition in
+`.github/workflows/pull_request.yml` and verify the known failure signatures.
+
+For the reference `automobile-tests` workflow above, a condition can skip the
+job on draft pull requests or when a specific label is absent:
 
 ```yaml
 automobile-tests:

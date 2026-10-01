@@ -9,6 +9,7 @@ import { createH264CaptureSource } from "../features/webrtc/h264CaptureSourceFac
 import { ScreenRecordingPermissionError } from "../features/webrtc/IosH264Source";
 import { resolveVideoServerJar } from "../features/webrtc/videoServerJar";
 import { SIMULATOR_FPS_DEFAULT } from "../features/screen-stream/IosScreenCaptureHelper";
+import { WEBRTC_ANDROID_FPS_DEFAULT } from "../features/webrtc/webrtcStreamingConfig";
 import type { BootedDevice } from "../models";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { H264CaptureSource } from "../features/webrtc/H264CaptureSource";
@@ -62,6 +63,10 @@ export type CaptureSourceFactory = (options: {
   /** Capture rate for iOS Simulator sources; see the call site for why it is pinned. */
   fps?: number;
 }) => Promise<H264CaptureSource>;
+
+function defaultCaptureFps(device: BootedDevice): number {
+  return device.platform === "android" ? WEBRTC_ANDROID_FPS_DEFAULT : SIMULATOR_FPS_DEFAULT;
+}
 
 function tracksConsumers(
   source: H264CaptureSource | null,
@@ -723,12 +728,9 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       bitrateBps: hints.bitrateKbps ? hints.bitrateKbps * 1000 : undefined,
       size: capture.size,
       quality: hints.quality,
-      // Pin the observation rate explicitly when the client sent no hint. This
-      // relay borrows the WebRTC capture sources, so without this it would
-      // silently inherit whatever the *WebRTC* iOS Simulator default happens
-      // to be — a knob that is tuned for an interactive WHEP feed. A client
-      // hint wins so farm viewers can lower the rate across many streams.
-      fps: hints.fps ?? SIMULATOR_FPS_DEFAULT,
+      // Use the observation rate for this platform when the client sent no hint.
+      // A client hint wins so farm viewers can lower the rate across streams.
+      fps: hints.fps ?? defaultCaptureFps(device),
     });
   }
 

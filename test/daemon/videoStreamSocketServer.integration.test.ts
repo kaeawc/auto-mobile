@@ -30,7 +30,10 @@ import {
   type DeviceAdmissionGate,
 } from "../../src/daemon/deviceAdmissionGate";
 import { ActionableError } from "../../src/models";
-import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
+import {
+  WEBRTC_ANDROID_FPS_DEFAULT,
+  WEBRTC_IOS_SIMULATOR_FPS_DEFAULT,
+} from "../../src/features/webrtc/webrtcStreamingConfig";
 
 const DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
@@ -335,15 +338,41 @@ describe("VideoStreamSocketServer", () => {
     expect(h.server.activeDeviceIds()).toEqual([]);
   });
 
-  test("pins the observation capture rate rather than inheriting the WebRTC default", async () => {
+  test("defaults Android capture to the Android WebRTC rate", async () => {
     const h = await startHarness();
 
     await subscribe(h.socketPath);
 
-    // This relay borrows the WebRTC capture sources. Leaving fps unset would
-    // silently adopt whatever the interactive WHEP default happens to be.
+    expect(h.captureOptions[0].fps).toBe(WEBRTC_ANDROID_FPS_DEFAULT);
+    expect(h.captureOptions[0].fps).not.toBe(SIMULATOR_FPS_DEFAULT);
+  });
+
+  test("defaults iOS capture to the Simulator observation rate", async () => {
+    const h = await startHarness({ device: { ...DEVICE, platform: "ios" } });
+
+    await subscribe(h.socketPath);
+
     expect(h.captureOptions[0].fps).toBe(SIMULATOR_FPS_DEFAULT);
     expect(SIMULATOR_FPS_DEFAULT).not.toBe(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT);
+  });
+
+  test("lets explicit fps hints override the platform default", async () => {
+    const android = await startHarness();
+    const ios = await startHarness({ device: { ...DEVICE, platform: "ios" } });
+
+    await subscribe(android.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      fps: 15,
+    });
+    await subscribe(ios.socketPath, {
+      action: "subscribe",
+      deviceId: DEVICE.deviceId,
+      fps: 20,
+    });
+
+    expect(android.captureOptions[0].fps).toBe(15);
+    expect(ios.captureOptions[0].fps).toBe(20);
   });
 
   test("forwards client quality and fps hints to the capture source", async () => {

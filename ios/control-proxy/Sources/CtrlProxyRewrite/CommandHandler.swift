@@ -49,6 +49,25 @@ enum SdkHierarchyProbeDecision: Equatable {
 ///   the gesture-nested `track`s still accumulate (a plain `main.sync` would strand them).
 /// - the cached-SDK read path uses the cache's transactional `reconcile` (race #2).
 final class CommandHandler: CommandHandling {
+    /// `handle(_:)` exhaustively dispatches every decoded request. Filter only
+    /// commands whose handler's default collaborator cannot serve this runtime.
+    static func supportedRequestTypes(in environment: RunnerEnvironment) -> [RequestType] {
+        RequestType.allCases.filter { requestType in
+            switch requestType {
+            case .setVoiceOverState:
+                // DefaultVoiceOverToggle drives Settings on a physical device.
+                return environment == .device
+            case .setHingeAngle:
+                // DefaultHingeAngleSetter has a simulator-only implementation.
+                return environment == .simulator
+            default:
+                // The exhaustive WebSocketRequest decoder and handle(_:) switch
+                // guarantee a dispatch path for every other RequestType.
+                return true
+            }
+        }
+    }
+
     private let elementLocator: any ElementLocating
     private let gesturePerformer: any GesturePerforming
     private let perf: any PerfTracking

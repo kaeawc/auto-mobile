@@ -231,6 +231,7 @@ const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // writes are best-effort: if the bound elapses, shutdown proceeds anyway.
 const DB_WRITE_DRAIN_TIMEOUT_MS = 1_000;
 const SESSION_RELEASE_DRAIN_TIMEOUT_MS = 5_000;
+const DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS = 2_000;
 const DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS = 1_000;
 
 // Ceiling on awaiting an in-flight cold-start migration before closing the DB on
@@ -3249,6 +3250,14 @@ export class Daemon {
           run: () => this.closeHttpListener(),
         },
         { name: "active device sessions", run: () => this.releaseActiveSessionsForShutdown() },
+        {
+          name: "pending device cleanups",
+          run: async () => {
+            await this.sessionManager.drainPendingDeviceCleanups(
+              DEVICE_CLEANUP_SHUTDOWN_DRAIN_TIMEOUT_MS,
+            );
+          },
+        },
         {
           // Session release broadcasts must be written while subscribed proxy
           // sockets are still connected; closing first degrades the exact

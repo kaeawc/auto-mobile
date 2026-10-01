@@ -874,6 +874,30 @@ export class SessionManager {
     return this.pendingDeviceCleanups.get(deviceId) ?? null;
   }
 
+  /** Wait for the device work that outlived release, without blocking shutdown indefinitely. */
+  async drainPendingDeviceCleanups(timeoutMs: number): Promise<boolean> {
+    const cleanups = Array.from(this.pendingDeviceCleanups.values());
+    if (cleanups.length === 0) {
+      return true;
+    }
+    const timedOut = Symbol("device cleanup drain timeout");
+    try {
+      await raceWithDeadline(Promise.allSettled(cleanups), {
+        timer: this.timer,
+        timeoutMs,
+        label: "Device cleanup drain",
+        timeoutError: () => timedOut,
+      });
+      return true;
+    } catch (error) {
+      if (error !== timedOut) {
+        throw toActionableError(error, "Failed to drain pending device cleanups");
+      }
+      logger.warn(`Timed out after ${timeoutMs}ms draining pending device cleanups`);
+      return false;
+    }
+  }
+
   /**
    * Quarantine a device until externally-dispatched session work settles.
    *
@@ -1812,18 +1836,22 @@ export class SessionManager {
     platform: Platform,
     stableDeviceId: string | undefined,
   ): Promise<Session> {
+    const activeSetups = Array.from(this.sessionSetupPromises, (setup) =>
+      setup.session === existing ? setup.promise : null,
+    ).filter((setup): setup is Promise<void> => setup !== null);
+    // Keep the old binding when setup cannot settle: a late mutation could
+    // otherwise dirty the old simulator after its restore and pool release.
+    const setupDrain = await this.waitForSessionSetup(existing.sessionId, activeSetups, "rebind");
+    if (setupDrain.pending) {
+      throw new ActionableError(
+        `Session ${existing.sessionId} setup is still running; retry the device rebind after it settles.`,
+      );
+    }
     await this.livenessOwnershipClaimMutexFor(existing).runExclusive(async () => {
       await this.persistSession(
         this.createReboundSession(existing, assignedDevice, platform, stableDeviceId),
       );
     });
-    const activeSetups = Array.from(this.sessionSetupPromises, (setup) =>
-      setup.session === existing ? setup.promise : null,
-    ).filter((setup): setup is Promise<void> => setup !== null);
-    // A session-scoped biometric mutation targets the old simulator. Rebinding
-    // must wait for it before restoring that simulator and discarding its cache.
-    await Promise.allSettled(activeSetups);
-
     try {
       await this.restoreKeepScreenAwake(existing);
     } catch (error) {
@@ -2755,6 +2783,7 @@ export class SessionManager {
   private async waitForSessionSetup(
     sessionId: string,
     setups: readonly Promise<void>[],
+    phase: "release" | "rebind" = "release",
   ): Promise<{ pending: Promise<void> | null }> {
     const settled = Promise.allSettled(setups);
     const timeout = new Error("Session setup drain timed out");
@@ -2771,7 +2800,7 @@ export class SessionManager {
     });
     if (result === "timed-out") {
       logger.warn(
-        `Timed out after ${SESSION_SETUP_DRAIN_TIMEOUT_MS}ms waiting for session ${sessionId} setup during release`,
+        `Timed out after ${SESSION_SETUP_DRAIN_TIMEOUT_MS}ms waiting for session ${sessionId} setup during ${phase}`,
       );
       return { pending: settled.then(() => undefined) };
     }

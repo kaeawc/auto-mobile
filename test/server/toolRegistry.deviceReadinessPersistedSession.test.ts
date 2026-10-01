@@ -5,6 +5,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -55,6 +56,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
   let originalToolCallRepository: unknown;
   let daemonSessionManager: SessionManager | undefined;
   let ctrlProxyStub: CtrlProxySetupStub;
+  let restoreInventory: () => void;
 
   /**
    * Stand up a daemon with a device pool that has NOT bound `sessionUuid` to any
@@ -69,7 +71,9 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     fakeDeviceSessionManager.setConnectedDevices([androidA]);
 
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
+    // Keep the cleanup interval parked while asserting the recovered session.
+    // Auto-advance drives recurring intervals as fast as the event loop allows,
+    // which can expire this 60-second session during a slower coverage run.
     const persisted = nonTerminalPersisted(sessionUuid, androidA.deviceId);
     daemonSessionManager = new SessionManager(timer, {
       async getSession() {
@@ -94,19 +98,23 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
 
   beforeEach(() => {
     ToolRegistry.clearTools();
+    restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
-    originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
-    (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
-    originalToolCallRepository = (ToolRegistry as any).toolCallRepository;
-    (ToolRegistry as any).toolCallRepository = {
+    originalDeviceSessionManager = Reflect.get(ToolRegistry, "deviceSessionManager");
+    Reflect.set(ToolRegistry, "deviceSessionManager", fakeDeviceSessionManager);
+    originalToolCallRepository = Reflect.get(ToolRegistry, "toolCallRepository");
+    Reflect.set(ToolRegistry, "toolCallRepository", {
       async recordToolCall(): Promise<void> {},
-    };
+    });
     ctrlProxyStub = stubCtrlProxySetup();
   });
 
   afterEach(() => {
-    (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
-    (ToolRegistry as any).toolCallRepository = originalToolCallRepository;
+    restoreInventory();
+    Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
+    Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();

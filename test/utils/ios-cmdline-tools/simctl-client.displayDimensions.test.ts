@@ -70,6 +70,7 @@ describe("SimCtlClient display dimension enrichment", () => {
       },
     });
     expect(commands).toContain(`simctl io ${UDID} enumerate`);
+    expect((await simctl.readDeviceDisplays(UDID))?.panels).toEqual(device.displays?.panels);
     const [booted] = await simctl.getBootedSimulatorsChecked(100, undefined, { bypassCache: true });
     expect(booted.displays).toEqual(device.displays);
   });
@@ -91,6 +92,17 @@ describe("SimCtlClient display dimension enrichment", () => {
       }),
       "",
     );
+
+  test("readDeviceDisplays omits the inventory for a single screen", async () => {
+    const singleEnumerate = duoEnumerate.replace(
+      /    \(3\) LCD-1:\n[\s\S]*?(?=    \(5\) Resizable:)/,
+      "",
+    );
+    const simctl = new SimCtlClient(null, async (_file, args) =>
+      args.includes("enumerate") ? createExecResult(singleEnumerate, "") : simulatorList(),
+    );
+    expect(await simctl.readDeviceDisplays(UDID)).toBeUndefined();
+  });
 
   test("does not let a stalled profile lookup block device listing", async () => {
     const timer = new FakeTimer();

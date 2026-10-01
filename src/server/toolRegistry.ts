@@ -25,6 +25,10 @@ import { serverConfig } from "../utils/ServerConfig";
 import { MemoryAudit } from "../features/memory/MemoryAudit";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultDisplayInventoryProvider,
+  type DisplayInventoryProvider,
+} from "../devices/DisplayInventoryProvider";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
@@ -612,13 +616,17 @@ interface PlanLifecycleManager {
 
 interface ToolRegistryPipelineOverrides {
   executionTargetResolver?: ExecutionTargetResolver;
+  displayInventory?: DisplayInventoryProvider;
   auditRunner?: AuditRunner;
   afterToolCall?: AfterToolCallHandler;
   planLifecycleManager?: PlanLifecycleManager;
 }
 
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
-  constructor(private readonly logger: Logger = logger) {}
+  constructor(
+    private readonly logger: Logger = logger,
+    private readonly displayInventory: DisplayInventoryProvider = defaultDisplayInventoryProvider,
+  ) {}
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
     const { name, args, options, deviceSessionManager, signal } = input;
     signal?.throwIfAborted();
@@ -811,6 +819,20 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     let device: BootedDevice | undefined;
     if (shouldResolveDevice) {
+      const hydrateDisplays = async (
+        resolvedDevice: BootedDevice,
+        identityToken: string,
+      ): Promise<BootedDevice> => {
+        try {
+          return await this.displayInventory.hydrate(resolvedDevice, identityToken, signal);
+        } catch (error) {
+          this.logger.warn(
+            `[ToolRegistry] Display inventory unavailable for ${resolvedDevice.deviceId}: ${error}`,
+            error,
+          );
+          return resolvedDevice;
+        }
+      };
       if (sessionUuid && DaemonState.getInstance().isInitialized() && providedDeviceId) {
         // Daemon session path: device already resolved via createToolExecutionContext.
         // Construct BootedDevice directly to avoid mutating global DeviceSessionManager state.
@@ -823,6 +845,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           platform: pooledDevice?.platform ?? resolvedPlatform,
           iosVersion: pooledDevice?.iosVersion,
         };
+        device = await hydrateDisplays(
+          device,
+          `${pooledDevice?.incarnation ?? "unknown"}:${pooledDevice?.avdName ?? device.name}`,
+        );
         logger.info(`[ToolRegistry] ${name}: Using session-resolved device ${device.deviceId}`);
       } else {
         // Legacy single-agent path or no session: use DeviceSessionManager (may set global state)
@@ -837,6 +863,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
               : options.deviceReadiness,
           signal,
         });
+        // Discovery re-stamps observedAt; the serial/UDID stays stable until
+        // the daemon's removal/release hooks invalidate this device.
+        device = await hydrateDisplays(device, device.deviceId);
         logger.info(`[ToolRegistry] ${name}: Using device ${device.deviceId}`);
       }
     } else {
@@ -2126,6 +2155,11 @@ export class ToolRegistryClass {
 
     if (overrides.executionTargetResolver) {
       this.executionTargetResolver = overrides.executionTargetResolver;
+    } else if (overrides.displayInventory) {
+      this.executionTargetResolver = new DefaultExecutionTargetResolver(
+        logger,
+        overrides.displayInventory,
+      );
     }
     if (overrides.auditRunner) {
       this.auditRunner = overrides.auditRunner;

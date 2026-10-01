@@ -6,6 +6,7 @@ import {
   parseAndroidDeviceStates,
   parseAndroidPostures,
   readAndroidDeviceDisplays,
+  readAndroidDeviceDisplaysChecked,
 } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -41,6 +42,38 @@ describe("Android physical display inventory", () => {
       "shell dumpsys display",
       "shell cmd device_state print-states",
     ]);
+  });
+
+  test("reports rejected display commands as degraded while preserving the wrapper", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger --display-id",
+      createExecResult(fixture("fold-surfaceflinger.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "dumpsys display",
+      createExecResult(fixture("fold-open-display-device-info.txt"), ""),
+    );
+    adb.setCommandError("dumpsys SurfaceFlinger --display-id", new Error("unavailable"));
+    const checked = await readAndroidDeviceDisplaysChecked(adb);
+    expect(checked.degraded).toBe(true);
+    expect((await readAndroidDeviceDisplays(adb))?.panels).toEqual(checked.displays?.panels);
+  });
+
+  test("an unsupported posture command does not degrade a successful panel read", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "dumpsys SurfaceFlinger --display-id",
+      createExecResult(fixture("fold-surfaceflinger.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "dumpsys display",
+      createExecResult(fixture("fold-open-display-device-info.txt"), ""),
+    );
+    adb.setCommandError("cmd device_state print-states", new Error("unsupported"));
+    const checked = await readAndroidDeviceDisplaysChecked(adb);
+    expect(checked.degraded).toBe(false);
+    expect(checked.displays?.panels).toHaveLength(2);
   });
 
   test("omits a single-display phone", () => {

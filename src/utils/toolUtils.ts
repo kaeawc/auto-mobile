@@ -103,6 +103,7 @@ export class DefaultToolResponseFormatter implements ToolResponseFormatter {
 
 // Export convenience functions for backward compatibility
 export const createJSONToolResponse = DefaultToolResponseFormatter.createJSONToolResponse;
+export const createImageToolResponse = DefaultToolResponseFormatter.createImageToolResponse;
 /**
  * Typed MCP tool-call envelope produced by `createStructuredToolResponse`.
  *

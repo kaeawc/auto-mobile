@@ -206,6 +206,8 @@ export interface ObserveResult {
   screenshotPath?: string;
   screenshotFormat?: "png" | "jpeg" | "webp";
   screenshotMimeType?: "image/png" | "image/jpeg" | "image/webp";
+  /** Status of opt-in inline screenshot delivery; absent for ordinary observations. */
+  screenshotImage?: import("../features/observe/screenshot/inlineScreenshotImage").ScreenshotImageStatus;
 
   /**
    * Timestamp when the screen state was captured on the device (milliseconds since epoch)

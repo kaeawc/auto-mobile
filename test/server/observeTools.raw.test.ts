@@ -31,6 +31,45 @@ describe("observe accessibility readiness", () => {
 });
 
 describe("observeSchema raw flag", () => {
+  test("image delivery is opt-in and accepts only a boolean", () => {
+    expect(observeSchema.parse({ platform: "android" }).includeScreenshotImage).toBeUndefined();
+    expect(
+      observeSchema.parse({ platform: "android", includeScreenshotImage: false })
+        .includeScreenshotImage,
+    ).toBe(false);
+    expect(
+      observeSchema.parse({ platform: "android", includeScreenshotImage: true })
+        .includeScreenshotImage,
+    ).toBe(true);
+    expect(() =>
+      observeSchema.parse({ platform: "android", includeScreenshotImage: "true" }),
+    ).toThrow();
+  });
+
+  test("image delivery accepts encoding options through its effective settled capture", () => {
+    expect(
+      observeSchema.safeParse({
+        platform: "android",
+        includeScreenshotImage: true,
+        screenshotOptions: { format: "webp", quality: 80 },
+      }).success,
+    ).toBe(true);
+    for (const screenshot of ["async", "none"] as const) {
+      expect(
+        observeSchema.safeParse({
+          platform: "android",
+          includeScreenshotImage: true,
+          screenshot,
+          screenshotOptions: { format: "webp" },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      observeSchema.safeParse({ platform: "android", screenshotOptions: { format: "webp" } })
+        .success,
+    ).toBe(false);
+  });
+
   test("accepts raw: true", () => {
     expect(() => observeSchema.parse({ platform: "android", raw: true })).not.toThrow();
   });
@@ -45,7 +84,7 @@ describe("observeSchema raw flag", () => {
   });
 
   test("raw field is present in tool inputSchema", () => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
     registerObserveTools();
 
     const tool = ToolRegistry.getTool("observe");
@@ -58,7 +97,7 @@ describe("observeSchema raw flag", () => {
 
 describe("observe tool registration", () => {
   beforeEach(() => {
-    (ToolRegistry as any).tools.clear();
+    ToolRegistry.clearTools();
   });
 
   test("registers observe tool", () => {

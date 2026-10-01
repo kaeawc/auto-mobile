@@ -4727,6 +4727,10 @@
             }
           ]
         },
+        "includeScreenshotImage": {
+          "description": "Opt in to a bounded MCP image block from the completed settled capture (default: path only)",
+          "type": "boolean"
+        },
         "display": {
           "description": "Panel key, role (inner, cover, rear, external), or active; all is not supported yet",
           "type": "string"
@@ -5028,6 +5032,47 @@
         "screenshotMimeType": {
           "type": "string",
           "enum": ["image/png", "image/jpeg", "image/webp"]
+        },
+        "screenshotImage": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "included": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "mimeType": {
+                  "type": "string"
+                },
+                "sizeBytes": {
+                  "type": "number"
+                }
+              },
+              "required": ["included", "mimeType", "sizeBytes"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "included": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "sizeBytes": {
+                  "type": "number"
+                },
+                "capBytes": {
+                  "type": "number"
+                }
+              },
+              "required": ["included", "reason"],
+              "additionalProperties": false
+            }
+          ]
         },
         "screenSize": {
           "description": "Current-orientation native screen size for observe bounds and absolute tapAt input: Android physical pixels or iOS XCTest logical points. Valid points satisfy 0 <= x < width and 0 <= y < height. No density, inset, Retina, canonical-pixel, or rotation transform applies to an already-native point.",
@@ -13746,6 +13791,47 @@
                   "type": "string",
                   "enum": ["image/png", "image/jpeg", "image/webp"]
                 },
+                "screenshotImage": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "included": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["included", "mimeType", "sizeBytes"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "included": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        },
+                        "capBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["included", "reason"],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
                 "skeleton": {
                   "description": "Always present alongside a diff (issue #6221 item 4.1): the same actionable-only selector surface a full observation's `skeleton` carries.",
                   "type": "array",
@@ -14671,6 +14757,47 @@
                 "screenshotMimeType": {
                   "type": "string",
                   "enum": ["image/png", "image/jpeg", "image/webp"]
+                },
+                "screenshotImage": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "included": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "mimeType": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["included", "mimeType", "sizeBytes"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "included": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "sizeBytes": {
+                          "type": "number"
+                        },
+                        "capBytes": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["included", "reason"],
+                      "additionalProperties": false
+                    }
+                  ]
                 },
                 "selectedElements": {
                   "type": "array",

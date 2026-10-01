@@ -685,6 +685,17 @@ const observationScreenshotOutputFields = {
   screenshotPath: z.string().optional(),
   screenshotFormat: z.enum(["png", "jpeg", "webp"]).optional(),
   screenshotMimeType: z.enum(["image/png", "image/jpeg", "image/webp"]).optional(),
+  screenshotImage: z
+    .union([
+      z.object({ included: z.literal(true), mimeType: z.string(), sizeBytes: z.number() }),
+      z.object({
+        included: z.literal(false),
+        reason: z.string(),
+        sizeBytes: z.number().optional(),
+        capBytes: z.number().optional(),
+      }),
+    ])
+    .optional(),
 };
 
 /**

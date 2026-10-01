@@ -509,6 +509,7 @@ export class TakeScreenshot implements ScreenshotService {
         this.device.platform === "ios"
           ? IOS_CTRLPROXY_SCREENSHOT_METADATA
           : ANDROID_ADB_SCREENSHOT_METADATA,
+        { decodedImage: imageBuffer },
       );
     } catch (error) {
       logger.debug(`[SCREENSHOT] Failed to push screenshot to observation stream: ${error}`);

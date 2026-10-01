@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
@@ -11,8 +11,62 @@ import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { iosDevice } from "./takeScreenshotTestHelpers";
+import {
+  DeviceDataStreamSocketServer,
+  installDeviceDataStreamSocketServerForTesting,
+} from "../../../src/daemon/deviceDataStreamSocketServer";
 
 describe("TakeScreenshot iOS cancellation", function () {
+  test("decodes an iOS capture once and passes the bytes to the stream server", async function () {
+    const png = Buffer.alloc(24);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png, 0);
+    png.writeUInt32BE(13, 8);
+    png.write("IHDR", 12, "ascii");
+    png.writeUInt32BE(320, 16);
+    png.writeUInt32BE(640, 20);
+    const screenshotBase64 = png.toString("base64");
+    const fakeCtrlProxy = new FakeIOSCtrlProxy();
+    fakeCtrlProxy.setScreenshotData(screenshotBase64);
+    const originalGetInstance = IOSCtrlProxyClient.getInstance;
+    const streamServer = new DeviceDataStreamSocketServer("/fake/path/test.sock", new FakeTimer());
+    const pushSpy = spyOn(streamServer, "pushScreenshotUpdate");
+    const fromSpy = spyOn(Buffer, "from");
+    IOSCtrlProxyClient.getInstance = (() => ({
+      ensureConnected: async () => true,
+      requestScreenshot: fakeCtrlProxy.requestScreenshot.bind(fakeCtrlProxy),
+    })) as typeof IOSCtrlProxyClient.getInstance;
+    installDeviceDataStreamSocketServerForTesting(streamServer);
+
+    try {
+      const screenshot = new TakeScreenshot(
+        iosDevice("ios-single-decode"),
+        new FakeAdbClientFactory(new FakeAdbExecutor()),
+        new FakeTimer(),
+        new CountingIdGenerator("capture"),
+        new FakeScreenshotFileWriter(),
+      );
+      const result = await screenshot.execute({ format: "png" });
+
+      expect(result.success).toBe(true);
+      expect(
+        fromSpy.mock.calls.filter(
+          ([value, encoding]) => value === screenshotBase64 && encoding === "base64",
+        ),
+      ).toHaveLength(1);
+      expect(pushSpy).toHaveBeenCalledTimes(1);
+      const [deviceId, pushedBase64, , , , options] = pushSpy.mock.calls[0]!;
+      expect(deviceId).toBe("ios-single-decode");
+      expect(pushedBase64).toBe(screenshotBase64);
+      expect(options?.decodedImage).toBeInstanceOf(Buffer);
+      expect(options?.decodedImage?.toString("base64")).toBe(screenshotBase64);
+    } finally {
+      fromSpy.mockRestore();
+      pushSpy.mockRestore();
+      installDeviceDataStreamSocketServerForTesting(null);
+      IOSCtrlProxyClient.getInstance = originalGetInstance;
+    }
+  });
+
   test("does not let a reconnect hold an expired screenshot request open", async function () {
     const controller = new AbortController();
     const originalGetInstance = IOSCtrlProxyClient.getInstance;

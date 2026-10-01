@@ -33,7 +33,7 @@ function makeDependencies(
     checkXcodeCommandLineTools: async () => pass("/Applications/Xcode.app/Contents/Developer"),
     checkXcrunAvailable: async () => pass(),
     checkSimctlAvailable: async () => pass(),
-    checkDevicectlAvailable: async () => pass(),
+    probeCoreDeviceVersion: async () => ({ status: "meets-requirement", version: "651.13.4" }),
     ...overrides,
   };
 }
@@ -82,7 +82,17 @@ describe("host toolchain resource", () => {
       },
       xcrun: { name: "xcrun", available: true },
       simctl: { name: "simctl", available: true },
-      devicectl: { name: "devicectl", available: true },
+      devicectl: {
+        name: "devicectl",
+        available: true,
+        version: "651.13.4",
+        coreDevice: {
+          status: "meets-requirement",
+          requiredVersion: "651.0.0",
+          simulatorBootState: "not checked",
+          downgradeGuard: "not checked",
+        },
+      },
     });
   });
 
@@ -111,6 +121,27 @@ describe("host toolchain resource", () => {
     expect(entries.avdmanager.version).toBe("12.3");
     expect(entries.adb.version).toBe("35.0.1");
     expect(entries.xcodebuild.version).toBe("16.1");
+  });
+
+  test.each([
+    [{ status: "below-required", version: "650.2.0" }, true, "650.2.0"],
+    [{ status: "missing", reason: "devicectl missing" }, false, "devicectl missing"],
+    [{ status: "unparsable", reason: "unrecognized version" }, false, "unrecognized version"],
+    [
+      { status: "non-darwin", reason: "iOS development requires macOS" },
+      false,
+      "iOS development requires macOS",
+    ],
+  ] as const)("reports CoreDevice diagnostic %s", async (diagnostic, available, detail) => {
+    const payload = await read(
+      makeDependencies({ probeCoreDeviceVersion: async () => diagnostic }),
+    );
+    const entry = payload.entries.find((item: { name: string }) => item.name === "devicectl");
+    expect(entry.available).toBe(available);
+    expect(entry.coreDevice.status).toBe(diagnostic.status);
+    expect(entry.coreDevice.simulatorBootState).toBe("not checked");
+    expect(entry.coreDevice.downgradeGuard).toBe("not checked");
+    expect(entry.version ?? entry.error).toBe(detail);
   });
 
   test("converts one rejected probe into an entry failure without rejecting the read", async () => {

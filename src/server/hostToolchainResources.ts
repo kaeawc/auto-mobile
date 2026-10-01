@@ -7,6 +7,8 @@ import {
 } from "../doctor/checks/android";
 import {
   checkSimctlAvailable,
+  probeCoreDeviceVersion,
+  type CoreDeviceDiagnostic,
   checkXcodeCommandLineTools,
   checkXcodeInstallation,
   checkXcrunAvailable,
@@ -15,7 +17,10 @@ import {
 } from "../doctor/checks/ios";
 import type { CheckResult, DoctorProbeOptions } from "../doctor/types";
 import { errorMessage } from "../utils/describeUnknownError";
-import { checkDevicectlAvailability } from "../utils/ios-cmdline-tools/DevicectlDeviceLister";
+import {
+  formatCoreDeviceVersion,
+  REQUIRED_SIMULATOR_COREDEVICE_VERSION,
+} from "../utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -29,6 +34,12 @@ export interface HostToolchainEntry {
   version?: string;
   location?: string;
   error?: string;
+  coreDevice?: {
+    status: CoreDeviceDiagnostic["status"];
+    requiredVersion: string;
+    simulatorBootState: "not checked";
+    downgradeGuard: "not checked";
+  };
 }
 
 export interface HostToolchainResourceContent {
@@ -54,7 +65,7 @@ export interface HostToolchainResourceDependencies {
   checkXcodeCommandLineTools: DoctorCheck;
   checkXcrunAvailable: DoctorCheck;
   checkSimctlAvailable: DoctorCheck;
-  checkDevicectlAvailable: DoctorCheck;
+  probeCoreDeviceVersion: (probe: DoctorProbeOptions) => Promise<CoreDeviceDiagnostic>;
 }
 
 function createDefaultDependencies(): HostToolchainResourceDependencies {
@@ -72,12 +83,7 @@ function createDefaultDependencies(): HostToolchainResourceDependencies {
     checkXcodeCommandLineTools: () => checkXcodeCommandLineTools(undefined, iosDependencies),
     checkXcrunAvailable: () => checkXcrunAvailable(iosDependencies),
     checkSimctlAvailable: () => checkSimctlAvailable(iosDependencies),
-    checkDevicectlAvailable: () =>
-      checkDevicectlAvailability({
-        platform: iosDependencies.platform,
-        invoke: iosDependencies.execFile,
-        logger: iosDependencies.logger,
-      }),
+    probeCoreDeviceVersion: (probe) => probeCoreDeviceVersion(iosDependencies, probe),
   };
 }
 
@@ -151,6 +157,51 @@ async function probe(name: string, check: DoctorCheck, timer: Timer): Promise<Ch
   }
 }
 
+async function probeCoreDevice(
+  check: (probe: DoctorProbeOptions) => Promise<CoreDeviceDiagnostic>,
+  timer: Timer,
+): Promise<CoreDeviceDiagnostic> {
+  const controller = new AbortController();
+  let timeoutError: Error | undefined;
+  try {
+    return await raceWithDeadline(
+      Promise.resolve().then(() =>
+        check({ signal: controller.signal, timeoutMs: DOCTOR_EXEC_TIMEOUT_MS }),
+      ),
+      {
+        timer,
+        timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+        label: "CoreDevice",
+        timeoutError: () =>
+          (timeoutError = new Error(`Probe timed out after ${DOCTOR_EXEC_TIMEOUT_MS}ms`)),
+        onTimeout: () => controller.abort(timeoutError),
+      },
+    );
+  } catch (error) {
+    const reason = errorMessage(error);
+    logger.warn(`[HostToolchainResources] CoreDevice probe failed: ${reason}`, error);
+    return { status: "unparsable", reason };
+  }
+}
+
+function devicectlEntry(diagnostic: CoreDeviceDiagnostic): HostToolchainEntry {
+  const available =
+    diagnostic.status === "meets-requirement" || diagnostic.status === "below-required";
+  return {
+    name: "devicectl",
+    available,
+    ...(diagnostic.status === "meets-requirement" || diagnostic.status === "below-required"
+      ? { version: diagnostic.version }
+      : { error: diagnostic.reason }),
+    coreDevice: {
+      status: diagnostic.status,
+      requiredVersion: formatCoreDeviceVersion(REQUIRED_SIMULATOR_COREDEVICE_VERSION),
+      simulatorBootState: "not checked",
+      downgradeGuard: "not checked",
+    },
+  };
+}
+
 function timestamp(now: () => Date): string {
   try {
     return now().toISOString();
@@ -177,7 +228,7 @@ export function createHostToolchainResourceHandler(
         xcodeSelect,
         xcrun,
         simctl,
-        devicectl,
+        coreDevice,
       ] = await Promise.all([
         probe("adb installation", dependencies.checkAdbInstallation, timer),
         probe("adb version", dependencies.checkAdbVersion, timer),
@@ -187,7 +238,7 @@ export function createHostToolchainResourceHandler(
         probe("xcode-select", dependencies.checkXcodeCommandLineTools, timer),
         probe("xcrun", dependencies.checkXcrunAvailable, timer),
         probe("simctl", dependencies.checkSimctlAvailable, timer),
-        probe("devicectl", dependencies.checkDevicectlAvailable, timer),
+        probeCoreDevice(dependencies.probeCoreDeviceVersion, timer),
       ]);
       const adb = entryFromCheck("adb", adbInstallation, { location: true });
       if (adb.available && adbVersion.status === "pass") {
@@ -214,7 +265,7 @@ export function createHostToolchainResourceHandler(
           entryFromCheck("xcode-select", xcodeSelect, { location: true }),
           entryFromCheck("xcrun", xcrun),
           entryFromCheck("simctl", simctl),
-          entryFromCheck("devicectl", devicectl),
+          devicectlEntry(coreDevice),
         ],
       };
       return {

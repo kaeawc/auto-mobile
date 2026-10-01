@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { IosDoctorDependencies } from "../../src/doctor/checks/ios";
 import {
   checkAppleDeveloperAccount,
   checkBootedSimulators,
   checkCodeSigning,
+  checkCoreDeviceVersion,
   checkIosCtrlProxyRunner,
   checkIosObserveRoundTrip,
   checkProvisioningProfiles,
@@ -45,6 +48,11 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
     return this.stdout.includes(searchString);
   },
 });
+
+const capturedCoreDeviceVersion = readFileSync(
+  join(process.cwd(), "test/fixtures/ios-devicectl/version.txt"),
+  "utf8",
+);
 
 const baseDependencies: IosDoctorDependencies = {
   platform: () => "darwin",
@@ -91,6 +99,92 @@ const baseDependencies: IosDoctorDependencies = {
 };
 
 describe("iOS doctor checks", () => {
+  describe("checkCoreDeviceVersion", () => {
+    test("reports the captured installed version and requirement", async () => {
+      const calls: Array<{ file: string; args: string[] }> = [];
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        execFile: async (file, args) => {
+          calls.push({ file, args });
+          return createExecResult(capturedCoreDeviceVersion);
+        },
+      });
+      expect(result).toMatchObject({ name: "CoreDevice", status: "pass", value: "651.13.4" });
+      expect(result.message).toContain("requires CoreDevice >= 651.0.0");
+      expect(result.message).toContain("not checked");
+      expect(calls).toEqual([{ file: "xcrun", args: ["devicectl", "--version"] }]);
+    });
+
+    test("reports a below-required version", async () => {
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        execFile: async () => createExecResult("650.2.0"),
+      });
+      expect(result.status).toBe("warn");
+      expect(result.value).toBe("650.2.0");
+      expect(result.message).toContain("requires CoreDevice >= 651.0.0");
+    });
+
+    test("logs and warns when devicectl is missing", async () => {
+      const logger = new FakeLogger();
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        logger,
+        execFile: async () => {
+          throw new Error("command not found");
+        },
+      });
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("devicectl missing");
+      expect(result.message).toContain("devicectl-only simulator features will be unavailable");
+      expect(result.message).toContain("simctl-based features are unaffected");
+      expect(result.message).toContain("not checked");
+      expect(logger.at("warn")).toHaveLength(1);
+    });
+
+    test("logs and warns when the version is unreadable", async () => {
+      const logger = new FakeLogger();
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        logger,
+        execFile: async () => createExecResult("unexpected output"),
+      });
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("version unreadable");
+      expect(result.message).toContain("devicectl-only simulator features will be unavailable");
+      expect(result.message).toContain("simctl-based features are unaffected");
+      expect(result.message).toContain("not checked");
+      expect(logger.at("warn")).toHaveLength(1);
+    });
+
+    test("logs and warns when the version probe throws unexpectedly", async () => {
+      const logger = new FakeLogger();
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        logger,
+        platform: () => {
+          throw new Error("platform probe failed");
+        },
+      });
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("platform probe failed");
+      expect(result.message).toContain("devicectl-only simulator features will be unavailable");
+      expect(result.message).toContain("simctl-based features are unaffected");
+      expect(result.message).toContain("not checked");
+      expect(logger.at("warn")).toHaveLength(1);
+    });
+
+    test("skips without running devicectl on non-darwin hosts", async () => {
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        platform: () => "linux",
+        execFile: async () => {
+          throw new Error("must not run");
+        },
+      });
+      expect(result.status).toBe("skip");
+    });
+  });
   describe("checkXcodeInstallation", () => {
     test("passes when version meets minimum", async () => {
       const result = await checkXcodeInstallation("15.0", {
@@ -1198,6 +1292,7 @@ describe("checkIosObserveRoundTrip", () => {
     const results = await runIosChecks({}, baseDependencies);
     const names = results.map((check) => check.name);
     expect(names).toContain("iOS Observe Round Trip");
+    expect(names).toContain("CoreDevice");
   });
 
   test("keeps post-repair iOS verification device-neutral", async () => {
@@ -1221,6 +1316,7 @@ describe("checkIosObserveRoundTrip", () => {
     expect(results.map((result) => result.name)).not.toEqual(
       expect.arrayContaining(["iOS CtrlProxy Runner", "iOS Observe Round Trip"]),
     );
+    expect(results.map((result) => result.name)).toContain("CoreDevice");
   });
 });
 

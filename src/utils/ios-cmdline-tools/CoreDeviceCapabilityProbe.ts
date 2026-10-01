@@ -6,6 +6,9 @@ import { compareSimctlVersions, parseSimctlVersion } from "./simctlVersion";
 
 export type CoreDeviceVersion = [number, number, number];
 
+/** Minimum CoreDevice release required by the planned simulator devicectl features. */
+export const REQUIRED_SIMULATOR_COREDEVICE_VERSION: CoreDeviceVersion = [651, 0, 0];
+
 /** The captured `xcrun devicectl --version` output is a dotted CoreDevice version. */
 export function parseCoreDeviceVersion(output: string): CoreDeviceVersion | undefined {
   return parseSimctlVersion(output);

@@ -18,8 +18,13 @@ import { inferIosFormFactor, isIosPhysicalUdid } from "./iosDeviceType";
 /** Minimal injected seam for the diagnostic-only devicectl availability probe. */
 export interface DevicectlAvailabilityDependencies {
   platform: () => NodeJS.Platform;
-  invoke: (file: string, args: string[]) => Promise<ExecResult>;
+  invoke: (
+    file: string,
+    args: string[],
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ) => Promise<ExecResult>;
   logger: Pick<Logger, "warn">;
+  probe?: { signal?: AbortSignal; timeoutMs?: number };
 }
 
 /** Checks devicectl without constructing a lister or enumerating devices. */
@@ -30,8 +35,17 @@ export async function checkDevicectlAvailability(
     return { name: "devicectl", status: "skip", message: "iOS development requires macOS" };
   }
   try {
-    await dependencies.invoke("xcrun", ["devicectl", "--version"]);
-    return { name: "devicectl", status: "pass", message: "devicectl functional" };
+    const result = await dependencies.invoke(
+      "xcrun",
+      ["devicectl", "--version"],
+      dependencies.probe,
+    );
+    return {
+      name: "devicectl",
+      status: "pass",
+      message: "devicectl functional",
+      value: result.stdout,
+    };
   } catch (error) {
     dependencies.logger.warn(`devicectl check failed: ${errorMessage(error)}`, error);
     return {

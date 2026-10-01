@@ -1,4 +1,5 @@
-import { describe, expect, it } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
+import { loadSharp } from "../../src/utils/image/loadSharp";
 import {
   detectImageMimeType,
   readImageHeaderDimensions,
@@ -33,6 +34,87 @@ function jpeg(width: number, height: number, sofMarker = 0xc0): Buffer {
 }
 
 describe("readImageHeaderDimensions", () => {
+  let encoded: {
+    png: Buffer;
+    jpeg: Buffer;
+    progressiveJpeg: Buffer;
+    webpLossy: Buffer;
+    webpLossless: Buffer;
+    webpExtended: Buffer;
+  };
+
+  beforeAll(async () => {
+    const sharp = await loadSharp();
+    const pixels = Buffer.alloc(37 * 53 * 4, 255);
+    for (let pixel = 0; pixel < 37 * 53; pixel++) {
+      pixels[pixel * 4] = pixel % 251;
+      pixels[pixel * 4 + 1] = (pixel * 3) % 251;
+      pixels[pixel * 4 + 2] = (pixel * 7) % 251;
+    }
+    encoded = {
+      png: await sharp(pixels, { raw: { width: 37, height: 53, channels: 4 } })
+        .png()
+        .toBuffer(),
+      jpeg: await sharp(pixels, { raw: { width: 37, height: 53, channels: 4 } })
+        .jpeg()
+        .toBuffer(),
+      progressiveJpeg: await sharp(pixels, { raw: { width: 37, height: 53, channels: 4 } })
+        .jpeg({ progressive: true })
+        .toBuffer(),
+      webpLossy: await sharp(pixels, { raw: { width: 37, height: 53, channels: 4 } })
+        .webp()
+        .toBuffer(),
+      webpLossless: await sharp(pixels, { raw: { width: 37, height: 53, channels: 4 } })
+        .webp({ lossless: true })
+        .toBuffer(),
+      webpExtended: await sharp(
+        Buffer.from(pixels).map((value, index) => (index % 4 === 3 ? 128 : value)),
+        { raw: { width: 37, height: 53, channels: 4 } },
+      )
+        .webp()
+        .toBuffer(),
+    };
+    expect(encoded.webpLossy.toString("ascii", 12, 16)).toBe("VP8 ");
+    expect(encoded.webpLossless.toString("ascii", 12, 16)).toBe("VP8L");
+    expect(encoded.webpExtended.toString("ascii", 12, 16)).toBe("VP8X");
+  });
+
+  it.each([
+    ["PNG", "png"],
+    ["baseline JPEG", "jpeg"],
+    ["progressive JPEG", "progressiveJpeg"],
+    ["lossy WebP", "webpLossy"],
+    ["lossless WebP", "webpLossless"],
+    ["extended WebP", "webpExtended"],
+  ] as const)("reads dimensions from real %s encoder output", (_name, key) => {
+    expect(readImageHeaderDimensions(encoded[key])).toEqual({ width: 37, height: 53 });
+  });
+
+  it("returns null or the dimensions once available for every WebP prefix", () => {
+    const fixture = encoded.webpLossy;
+    for (let prefixLength = 0; prefixLength <= fixture.length; prefixLength++) {
+      const result = readImageHeaderDimensions(fixture.subarray(0, prefixLength));
+      expect(result === null || (result.width === 37 && result.height === 53)).toBe(true);
+    }
+  });
+
+  it("rejects a WebP with an unknown first chunk fourcc", () => {
+    const wrongChunk = Buffer.from(encoded.webpLossy);
+    wrongChunk.write("NOPE", 12, "ascii");
+    expect(readImageHeaderDimensions(wrongChunk)).toBeNull();
+  });
+
+  it("rejects a WebP lossy header with zero width", () => {
+    const zeroWidth = Buffer.from(encoded.webpLossy);
+    zeroWidth.writeUInt16LE(0, 26);
+    expect(readImageHeaderDimensions(zeroWidth)).toBeNull();
+  });
+
+  it("rejects garbage and a JPEG truncated before its frame header", () => {
+    expect(readImageHeaderDimensions(Buffer.from("garbage"))).toBeNull();
+    expect(readImageHeaderDimensions(encoded.jpeg.subarray(0, 20))).toBeNull();
+  });
+
   it("reads PNG dimensions from the IHDR chunk", () => {
     expect(readImageHeaderDimensions(png(1170, 2532))).toEqual({ width: 1170, height: 2532 });
   });

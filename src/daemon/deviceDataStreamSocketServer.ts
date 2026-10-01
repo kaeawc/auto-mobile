@@ -186,10 +186,10 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
  */
 function pixelsMatchClaimedGeometry(
   measured: { width: number; height: number } | null,
-  claimedWidth: number,
-  claimedHeight: number,
+  claimedWidth: number | undefined,
+  claimedHeight: number | undefined,
 ): boolean {
-  if (measured === null) {
+  if (measured === null || claimedWidth === undefined || claimedHeight === undefined) {
     return false;
   }
   const sameOrientation = measured.width === claimedWidth && measured.height === claimedHeight;
@@ -585,8 +585,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   pushScreenshotUpdate(
     deviceId: string,
     screenshotBase64: string,
-    screenWidth: number,
-    screenHeight: number,
+    screenWidth: number | undefined,
+    screenHeight: number | undefined,
     metadata: ScreenshotMetadata = {},
     options: PushScreenshotOptions = {},
   ): void {
@@ -621,8 +621,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotBase64,
       // Publish the measured geometry when we have it, so a client that falls back to these
       // dimensions for coordinate mapping maps through the pixels it is actually rendering.
-      screenWidth: measured?.width ?? screenWidth,
-      screenHeight: measured?.height ?? screenHeight,
+      ...(measured
+        ? { screenWidth: measured.width, screenHeight: measured.height }
+        : {
+            ...(screenWidth === undefined ? {} : { screenWidth }),
+            ...(screenHeight === undefined ? {} : { screenHeight }),
+          }),
       // Stamp the identity the caller BOUND at request initiation, and only when the frame's real
       // pixels also match the geometry that binding carried. The binding is what survives
       // same-resolution navigation; the pixel check is the backstop that still catches a geometry

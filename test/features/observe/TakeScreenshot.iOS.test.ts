@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { readFileSync } from "node:fs";
@@ -16,8 +16,24 @@ import {
   DeviceDataStreamSocketServer,
   installDeviceDataStreamSocketServerForTesting,
 } from "../../../src/daemon/deviceDataStreamSocketServer";
+import { loadSharp } from "../../../src/utils/image/loadSharp";
 
 describe("TakeScreenshot iOS cancellation", function () {
+  let encodedScreenshots: { jpeg: Buffer; webp: Buffer };
+
+  beforeAll(async () => {
+    const sharp = await loadSharp();
+    const pixels = Buffer.alloc(37 * 53 * 4, 255);
+    encodedScreenshots = {
+      jpeg: await sharp(pixels, { raw: { width: 37, height: 53, channels: 4 } })
+        .jpeg()
+        .toBuffer(),
+      webp: await sharp(pixels, { raw: { width: 37, height: 53, channels: 4 } })
+        .webp()
+        .toBuffer(),
+    };
+  });
+
   test("decodes an iOS capture once and passes the bytes to the stream server", async function () {
     const png = Buffer.alloc(24);
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png, 0);
@@ -62,6 +78,48 @@ describe("TakeScreenshot iOS cancellation", function () {
       expect(options?.decodedImage?.toString("base64")).toBe(screenshotBase64);
     } finally {
       fromSpy.mockRestore();
+      pushSpy.mockRestore();
+      installDeviceDataStreamSocketServerForTesting(null);
+      IOSCtrlProxyClient.getInstance = originalGetInstance;
+    }
+  });
+
+  test("pushes measured JPEG/WebP dimensions and no fabricated dimensions for garbage", async () => {
+    const originalGetInstance = IOSCtrlProxyClient.getInstance;
+    const streamServer = new DeviceDataStreamSocketServer("/fake/path/test.sock", new FakeTimer());
+    const pushSpy = spyOn(streamServer, "pushScreenshotUpdate");
+    installDeviceDataStreamSocketServerForTesting(streamServer);
+
+    try {
+      const frames = [encodedScreenshots.jpeg, encodedScreenshots.webp, Buffer.from("garbage")];
+      for (const frame of frames) {
+        const data = frame.toString("base64");
+        IOSCtrlProxyClient.getInstance = (() => ({
+          ensureConnected: async () => true,
+          requestScreenshot: async () => ({ success: true, data }),
+        })) as typeof IOSCtrlProxyClient.getInstance;
+        const screenshot = new TakeScreenshot(
+          iosDevice("ios-image-dimensions"),
+          new FakeAdbClientFactory(new FakeAdbExecutor()),
+          new FakeTimer(),
+          new CountingIdGenerator("capture"),
+          new FakeScreenshotFileWriter(),
+        );
+        expect((await screenshot.execute({ format: "png" })).success).toBe(true);
+      }
+
+      expect(pushSpy).toHaveBeenCalledTimes(3);
+      for (const [index, expected] of [
+        { width: 37, height: 53 },
+        { width: 37, height: 53 },
+        undefined,
+      ].entries()) {
+        const [, , width, height] = pushSpy.mock.calls[index]!;
+        expect(width).toBe(expected?.width);
+        expect(height).toBe(expected?.height);
+        expect(width === 1080 || height === 2340).toBe(false);
+      }
+    } finally {
       pushSpy.mockRestore();
       installDeviceDataStreamSocketServerForTesting(null);
       IOSCtrlProxyClient.getInstance = originalGetInstance;

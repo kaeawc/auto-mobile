@@ -434,15 +434,14 @@ class WebSocketServerTest {
   @Test
   fun `successful non-null response clears request owner`() =
     runTest(testScope.testScheduler) {
-      server =
-        serverWithHandler { request ->
-          SwipeResult(
-            timestamp = 0L,
-            requestId = request.requestId,
-            success = true,
-            totalTimeMs = 1L,
-          )
-        }
+      server = serverWithHandler { request ->
+        SwipeResult(
+          timestamp = 0L,
+          requestId = request.requestId,
+          success = true,
+          totalTimeMs = 1L,
+        )
+      }
       val owner = server.registerClient(1, RecordingTransport())
 
       server.handleClientMessage(
@@ -494,18 +493,16 @@ class WebSocketServerTest {
   @Test
   fun `cancelled never completing handler releases request owner`() =
     runTest(testScope.testScheduler) {
-      server =
-        serverWithHandler {
-          kotlinx.coroutines.awaitCancellation()
-        }
+      server = serverWithHandler {
+        kotlinx.coroutines.awaitCancellation()
+      }
       val owner = server.registerClient(1, RecordingTransport())
-      val handling =
-        launch {
-          server.handleClientMessage(
-            """{"type":"request_screenshot","requestId":"never-completes"}""",
-            owner,
-          )
-        }
+      val handling = launch {
+        server.handleClientMessage(
+          """{"type":"request_screenshot","requestId":"never-completes"}""",
+          owner,
+        )
+      }
       runCurrent()
       assertTrue(server.hasRequestOwner("never-completes"))
 

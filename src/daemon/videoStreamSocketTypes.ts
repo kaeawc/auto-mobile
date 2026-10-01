@@ -81,5 +81,7 @@ export interface VideoStreamSocketResponse {
    * to its prior per-platform stall policy.
    */
   heartbeatMs?: number;
+  /** Final JSON line after authorization is revoked; the socket then ends. */
+  terminal?: boolean;
   error?: string;
 }

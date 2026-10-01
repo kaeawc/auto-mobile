@@ -30,6 +30,7 @@ import {
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
+import { DaemonState } from "./daemonState";
 import {
   encodeDroppedFrames,
   encodeHeartbeat,
@@ -75,6 +76,12 @@ export interface VideoStreamSocketServerDependencies {
   resolveDevice: (deviceId?: string) => Promise<BootedDevice>;
   /** Monotonic microseconds, used for packet presentation timestamps. */
   nowUs: () => bigint;
+  ownershipChanges?: () => DeviceOwnershipChanges | null;
+}
+
+/** The only session-manager event surface the relay needs. */
+export interface DeviceOwnershipChanges {
+  onDeviceOwnershipChange(callback: (deviceId: string) => void): () => void;
 }
 
 /** One capture shared by every subscriber watching the same device. */
@@ -276,6 +283,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly captures = new Map<string, DeviceCapture>();
   private readonly pendingStops = new Map<string, Promise<void>>();
   private readonly socketDeviceIds = new Map<Socket, string>();
+  private readonly socketSessionUuids = new Map<Socket, string | undefined>();
+  private removeOwnershipListener: (() => void) | null = null;
   private closed = false;
 
   private readonly authenticator: StreamSocketAuthenticator;
@@ -308,11 +317,22 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     return capture ? capture.pendingSubscribers.size + capture.subscribers.size : 0;
   }
 
+  override async start(): Promise<void> {
+    await super.start();
+    this.removeOwnershipListener =
+      this.deps.ownershipChanges?.()?.onDeviceOwnershipChange((deviceId) => {
+        this.reauthorizeSubscribers(deviceId);
+      }) ?? null;
+  }
+
   override async close(): Promise<void> {
     this.closed = true;
+    this.removeOwnershipListener?.();
+    this.removeOwnershipListener = null;
     await Promise.all([...this.captures.keys()].map((deviceId) => this.stopCapture(deviceId)));
     await Promise.all(this.pendingStops.values());
     this.socketDeviceIds.clear();
+    this.socketSessionUuids.clear();
     await super.close();
   }
 
@@ -383,6 +403,12 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.admissionGate.assertDeviceActionable(device.deviceId, VIDEO_STREAM_PURPOSE);
       authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
       const capture = await this.attach(socket, device, request);
+      // Ownership can change while the source starts. A revoked pending subscriber
+      // must not receive a success acknowledgement or any binary stream data.
+      if (!this.socketDeviceIds.has(socket)) {
+        return;
+      }
+      authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
 
       this.sendJson(socket, {
         id: request.id,
@@ -427,6 +453,36 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.detach(socket);
   }
 
+  private reauthorizeSubscribers(deviceId: string): void {
+    const capture = this.captures.get(deviceId);
+    if (!capture) {
+      return;
+    }
+    for (const socket of [...capture.pendingSubscribers, ...capture.subscribers]) {
+      if (!this.socketDeviceIds.has(socket)) {
+        continue;
+      }
+      try {
+        this.authenticator.authorize({
+          sessionUuid: this.socketSessionUuids.get(socket),
+          deviceId,
+        });
+      } catch (error) {
+        logger.warn(`[VideoStream] revoking subscriber for ${deviceId}: ${error}`);
+        this.sendJson(socket, {
+          type: "video_stream_response",
+          success: false,
+          action: "unsubscribe",
+          deviceId,
+          terminal: true,
+          error: `Video stream ended: authorization changed for ${deviceId}: ${errorMessage(error)}`,
+        } satisfies VideoStreamSocketResponse);
+        socket.end();
+        this.detach(socket);
+      }
+    }
+  }
+
   private async attach(
     socket: Socket,
     device: BootedDevice,
@@ -457,6 +513,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         existing.source.setHasConsumers(true);
       }
       this.socketDeviceIds.set(socket, deviceId);
+      this.socketSessionUuids.set(socket, request.sessionUuid);
       await existing.startup;
       this.promoteSubscriber(existing, socket, true);
       return existing;
@@ -494,6 +551,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     // Registered before start() so a chunk arriving during startup still finds its subscribers.
     this.captures.set(deviceId, capture);
     this.socketDeviceIds.set(socket, deviceId);
+    this.socketSessionUuids.set(socket, request.sessionUuid);
 
     const attestSource = (): void => {
       if (this.captures.get(deviceId) !== capture) {
@@ -897,6 +955,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return;
     }
     this.socketDeviceIds.delete(socket);
+    this.socketSessionUuids.delete(socket);
 
     const capture = this.captures.get(deviceId);
     if (!capture) {
@@ -1067,6 +1126,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
     for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
       this.socketDeviceIds.delete(subscriber);
+      this.socketSessionUuids.delete(subscriber);
       subscriber.end();
     }
     capture.pendingSubscribers.clear();
@@ -1167,6 +1227,10 @@ async function defaultResolveDevice(deviceId?: string): Promise<BootedDevice> {
 
 function defaultDependencies(): VideoStreamSocketServerDependencies {
   return {
+    ownershipChanges: () => {
+      const state = DaemonState.getInstance();
+      return state.isInitialized() ? state.getSessionManager() : null;
+    },
     resolveDevice: defaultResolveDevice,
     createCaptureSource: async (options) => {
       // Resolved once per stream, off the frame path. A null jar means the Android source falls

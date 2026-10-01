@@ -658,6 +658,7 @@ export class SessionManager {
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
+  private readonly deviceOwnershipCallbacks = new Set<(deviceId: string) => void>();
   private readonly releasePromises: Map<string, SessionReleaseOperation> = new Map();
   /** Every release still running, including an older session that reused a UUID. */
   private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
@@ -845,6 +846,22 @@ export class SessionManager {
     this.releaseCallbacks.push(callback);
   }
 
+  /** Observe changes to the live device-owner map; returns a listener removal function. */
+  onDeviceOwnershipChange(callback: (deviceId: string) => void): () => void {
+    this.deviceOwnershipCallbacks.add(callback);
+    return () => this.deviceOwnershipCallbacks.delete(callback);
+  }
+
+  private notifyDeviceOwnershipChange(deviceId: string): void {
+    for (const callback of this.deviceOwnershipCallbacks) {
+      try {
+        callback(deviceId);
+      } catch (error) {
+        logger.warn(`Device ownership callback failed for ${deviceId}: ${error}`);
+      }
+    }
+  }
+
   /**
    * Register a callback invoked after a newly-created session is published.
    */
@@ -1012,6 +1029,7 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
+    this.notifyDeviceOwnershipChange(session.assignedDevice);
     this.notifySessionCreated(session);
     logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
     return session;
@@ -1847,6 +1865,10 @@ export class SessionManager {
       this.deviceSessionMap.delete(previousDevice);
     }
     this.deviceSessionMap.set(assignedDevice, existing.sessionId);
+    this.notifyDeviceOwnershipChange(previousDevice);
+    if (assignedDevice !== previousDevice) {
+      this.notifyDeviceOwnershipChange(assignedDevice);
+    }
     this.notifySessionDeviceUnbound(existing.sessionId, previousDevice);
     return existing;
   }
@@ -4056,6 +4078,7 @@ export class SessionManager {
     }
     if (this.deviceSessionMap.get(session.assignedDevice) === sessionId) {
       this.deviceSessionMap.delete(session.assignedDevice);
+      this.notifyDeviceOwnershipChange(session.assignedDevice);
     }
     this.sessions.delete(sessionId);
     this.sessionDeviceMap.delete(sessionId);

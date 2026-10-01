@@ -50,6 +50,32 @@ import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
 import { resetProvisionedDeviceTransportFenceForTests } from "../../src/utils/provisionedDeviceTransportFence";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 
+async function provisionResponseText(args: Record<string, unknown>): Promise<string> {
+  const tool = ToolRegistry.getTool("provisionDevice");
+  if (!tool) {
+    throw new Error("provisionDevice not registered");
+  }
+
+  const response: unknown = await tool.handler(args);
+  if (typeof response !== "object" || response === null || !("content" in response)) {
+    throw new Error("provisionDevice returned an invalid response");
+  }
+  const { content } = response;
+  if (!Array.isArray(content)) {
+    throw new Error("provisionDevice response has no content array");
+  }
+  const firstContent = content[0];
+  if (
+    typeof firstContent !== "object" ||
+    firstContent === null ||
+    !("text" in firstContent) ||
+    typeof firstContent.text !== "string"
+  ) {
+    throw new Error("provisionDevice response has no text content");
+  }
+  return firstContent.text;
+}
+
 class FakeExactDeviceProvisioner implements ExactDeviceProvisioner {
   readonly requests: ExactDeviceProvisionRequest[] = [];
 
@@ -5273,12 +5299,8 @@ describe("provisionDevice handler", () => {
     });
     const args = provisionTestArgs("android", "missing-device-operation-reuse");
 
-    const first = JSON.parse(
-      ((await ToolRegistry.getTool("provisionDevice")!.handler(args)) as any).content[0].text,
-    );
-    const replay = JSON.parse(
-      ((await ToolRegistry.getTool("provisionDevice")!.handler(args)) as any).content[0].text,
-    );
+    const first = JSON.parse(await provisionResponseText(args));
+    const replay = JSON.parse(await provisionResponseText(args));
 
     expect(first).toMatchObject({
       operationId: "missing-device-operation-reuse",

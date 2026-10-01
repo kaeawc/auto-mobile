@@ -71,7 +71,9 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
     fakeDeviceSessionManager.setConnectedDevices([androidA]);
 
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
+    // Keep the cleanup interval parked while asserting the recovered session.
+    // Auto-advance drives recurring intervals as fast as the event loop allows,
+    // which can expire this 60-second session during a slower coverage run.
     const persisted = nonTerminalPersisted(sessionUuid, androidA.deviceId);
     daemonSessionManager = new SessionManager(timer, {
       async getSession() {

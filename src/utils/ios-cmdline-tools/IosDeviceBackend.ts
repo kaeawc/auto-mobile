@@ -367,22 +367,21 @@ export function resolveIosClearDataBackend(
     : new PhysicalIosClearDataBackend(deviceId, deps.createReinstaller);
 }
 
-// Collapse this narrow contract onto the terminate backend once its PR merges.
-export interface IosColdStartTerminator {
-  terminate(bundleId: string): Promise<void>;
-}
-
-export class SimulatorIosColdStartTerminator implements IosColdStartTerminator {
-  constructor(private readonly simctl: Pick<SimCtlClient, "terminateApp">) {}
-
-  terminate(bundleId: string): Promise<void> {
-    return this.simctl.terminateApp(bundleId);
-  }
-}
-
-export function resolveIosColdStartTerminator(
+export function resolveIosColdStartTerminateBackend(
   deviceId: string,
   deps: { simctl: Pick<SimCtlClient, "terminateApp"> },
-): IosColdStartTerminator | null {
-  return isIosSimulatorUdid(deviceId) ? new SimulatorIosColdStartTerminator(deps.simctl) : null;
+): IosTerminateBackend | null {
+  const backend = resolveIosTerminateBackend(deviceId, {
+    // Cold-start termination historically omits the device argument; keep that
+    // contract while routing through the shared terminate backend.
+    simctl: { terminateApp: (bundleId) => deps.simctl.terminateApp(bundleId) },
+    // The resolver requires both transports, but this helper deliberately
+    // exposes only the simulator backend, so physical termination is unreachable.
+    deviceAppTerminator: {
+      terminateApp: async () => {
+        throw new Error("Cold-start termination is not supported for physical devices");
+      },
+    },
+  });
+  return backend.requiresInstalledAppCheck ? backend : null;
 }

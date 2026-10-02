@@ -10,6 +10,7 @@ import {
   PhysicalIosDeviceBackend,
   PhysicalIosTerminateBackend,
   SimulatorIosTerminateBackend,
+  resolveIosColdStartTerminateBackend,
   resolveIosTerminateBackend,
   resolveIosDeviceBackend,
   resolveIosLaunchBackend,
@@ -285,5 +286,20 @@ describe("resolveIosTerminateBackend", () => {
     });
 
     await expect(backend.terminateApp(bundleId)).rejects.toBe(error);
+  });
+
+  test("cold-start adapter keeps simulator termination on the shared backend without a device argument", async () => {
+    const simctl = new FakeSimctl();
+    const backend = resolveIosColdStartTerminateBackend(simulatorUdid, { simctl });
+
+    expect(backend).toBeInstanceOf(SimulatorIosTerminateBackend);
+    await backend?.terminateApp(bundleId);
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: undefined }]);
+  });
+
+  test("cold-start adapter returns no backend for a physical device", () => {
+    const simctl = new FakeSimctl();
+    expect(resolveIosColdStartTerminateBackend(physicalUdid, { simctl })).toBeNull();
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([]);
   });
 });

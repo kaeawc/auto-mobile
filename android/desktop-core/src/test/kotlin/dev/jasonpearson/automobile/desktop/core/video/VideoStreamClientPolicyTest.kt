@@ -14,6 +14,47 @@ import kotlinx.coroutines.test.runTest
 @OptIn(ExperimentalCoroutinesApi::class)
 class VideoStreamClientPolicyTest {
   @Test
+  fun `typed end reasons decide automatic reconnect`() {
+    for (reason in VideoStreamEndReason.entries) {
+      assertEquals(
+        reason == VideoStreamEndReason.DeviceRemoved ||
+          reason == VideoStreamEndReason.IdentityQuarantined,
+        VideoStreamState.Ended(reason).autoReconnects(),
+        reason.wire,
+      )
+    }
+    assertTrue(VideoStreamState.Unavailable("offline").autoReconnects())
+    assertTrue(
+      VideoStreamState.PermissionRequired(
+          VideoStreamPermission.ScreenRecordingNeedsApproval,
+          "AutoMobile",
+        )
+        .autoReconnects()
+    )
+    assertTrue(!VideoStreamState.Idle.autoReconnects())
+    assertTrue(!VideoStreamState.Connecting.autoReconnects())
+    assertTrue(!VideoStreamState.Streaming(1, 1).autoReconnects())
+  }
+
+  @Test
+  fun `fake viewer ack preserves input and downgrade is latched until connect`() {
+    val source = FakeVideoStreamSource()
+    source.connect("device")
+    source.setSubscriptionKind(VideoStreamSubscriptionKind.Viewer)
+    assertTrue(!source.readOnly.value)
+    source.becomeDowngraded()
+    assertEquals(VideoStreamSubscriptionKind.Viewer, source.subscriptionKind.value)
+    assertTrue(source.readOnly.value)
+    source.endWith(VideoStreamEndReason.SessionEnded)
+    assertEquals(VideoStreamState.Ended(VideoStreamEndReason.SessionEnded), source.state.value)
+    source.disconnect()
+    assertTrue(source.readOnly.value)
+    source.connect("device")
+    assertTrue(!source.readOnly.value)
+    assertEquals(null, source.subscriptionKind.value)
+  }
+
+  @Test
   fun `subscribe failures distinguish auth from device and capture errors`() = runTest {
     val other = VideoStreamState.UnavailableCause.OTHER
     val refused = VideoStreamState.UnavailableCause.REFUSED

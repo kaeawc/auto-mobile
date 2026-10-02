@@ -54,6 +54,8 @@ sealed class VideoStreamState {
 
   data class Streaming(val width: Int, val height: Int) : VideoStreamState()
 
+  data class Ended(val reason: VideoStreamEndReason) : VideoStreamState()
+
   /** A named host permission blocked the current subscribe attempt. */
   data class PermissionRequired(
     val permission: VideoStreamPermission,
@@ -65,6 +67,27 @@ sealed class VideoStreamState {
     val reason: String,
     val cause: UnavailableCause = UnavailableCause.OTHER,
   ) : VideoStreamState()
+}
+
+internal fun VideoStreamState.autoReconnects(): Boolean =
+  when (this) {
+    is VideoStreamState.Unavailable,
+    is VideoStreamState.PermissionRequired -> true
+    is VideoStreamState.Ended ->
+      reason == VideoStreamEndReason.DeviceRemoved ||
+        reason == VideoStreamEndReason.IdentityQuarantined
+    else -> false
+  }
+
+enum class VideoStreamSubscriptionKind(val wire: String) {
+  Owner("owner"),
+  Viewer("viewer");
+
+  companion object {
+    fun fromWire(value: String?): VideoStreamSubscriptionKind? = entries.firstOrNull {
+      it.wire == value
+    }
+  }
 }
 
 /** Recoverable permission state decoded from the local relay protocol. */
@@ -110,6 +133,9 @@ interface VideoStreamSource {
   /** Cumulative source-encoder drops, when the relay provides telemetry. */
   val droppedFrames: SharedFlow<Long>
   val state: StateFlow<VideoStreamState>
+  val subscriptionKind: StateFlow<VideoStreamSubscriptionKind?>
+  /** Latched only by a downgrade, not by a viewer ack; reset on the next connect. */
+  val readOnly: StateFlow<Boolean>
 
   /**
    * Cadence, in milliseconds, at which the relay sends a zero-payload heartbeat while the capture
@@ -243,6 +269,12 @@ class VideoStreamClient(
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
 
+  private val _subscriptionKind = MutableStateFlow<VideoStreamSubscriptionKind?>(null)
+  override val subscriptionKind: StateFlow<VideoStreamSubscriptionKind?> =
+    _subscriptionKind.asStateFlow()
+  private val _readOnly = MutableStateFlow(false)
+  override val readOnly: StateFlow<Boolean> = _readOnly.asStateFlow()
+
   private val _heartbeatMs = MutableStateFlow<Long?>(null)
   override val heartbeatMs: StateFlow<Long?> = _heartbeatMs.asStateFlow()
   private val _lastActivityMs = MutableStateFlow(0L)
@@ -277,6 +309,8 @@ class VideoStreamClient(
 
       val sessionId = sessionIds.incrementAndGet()
       activeSessionId = sessionId
+      _subscriptionKind.value = null
+      _readOnly.value = false
       _state.value = VideoStreamState.Connecting
       readerJob = scope.launch {
         // Name the dedicated thread per target so a farm's dozens of readers are tellable
@@ -380,10 +414,20 @@ class VideoStreamClient(
         }
         // Null on a daemon that predates this field; callers must treat that as "no relay-attested
         // liveness available", not "definitely heartbeat-less" (issue #7549).
-        if (isCurrent()) _heartbeatMs.value = ack.heartbeatMs
+        synchronized(sessionLock) {
+          if (isCurrent()) {
+            _heartbeatMs.value = ack.heartbeatMs
+            // Registration-only desktop sessions can subscribe as viewers to unowned devices
+            // where input still works. Only an explicit downgrade revokes desktop control.
+            _subscriptionKind.value = VideoStreamSubscriptionKind.fromWire(ack.subscriptionKind)
+          }
+        }
 
-        pumpFrames(input, decoder, sessionId)
-        publish(VideoStreamState.Unavailable("Live mirroring stopped"))
+        val endReason = pumpFrames(input, decoder, sessionId)
+        publish(
+          endReason?.let { VideoStreamState.Ended(it) }
+            ?: VideoStreamState.Unavailable("Live mirroring stopped")
+        )
       }
     } catch (e: Exception) {
       // Cancellation (from disconnect / a watchdog reconnect) supersedes this session, so publish()
@@ -417,7 +461,11 @@ class VideoStreamClient(
     }
   }
 
-  private fun pumpFrames(input: java.io.InputStream, decoder: H264Decoder, sessionId: Long) {
+  private fun pumpFrames(
+    input: java.io.InputStream,
+    decoder: H264Decoder,
+    sessionId: Long,
+  ): VideoStreamEndReason? {
     val parser = VideoStreamParser()
     val buffer = ByteArray(64 * 1024)
     // Latest attested rotation, updated by each config packet that carries it (issue #4786). A
@@ -425,16 +473,31 @@ class VideoStreamClient(
     // the current SPS/PPS attested. Stays null until the first attested config packet, so an
     // unattested stream (screenrecord/iOS relay) leaves the control gate to fail closed.
     var currentRotation: Int? = null
+    var endReason: VideoStreamEndReason? = null
 
     while (true) {
       val read = input.read(buffer)
-      if (read <= 0) return
+      if (read <= 0) return null
 
       parser.onBytes(
         buffer,
         read,
         onHeader = { header ->
           LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
+        },
+        onNotice = { notice ->
+          when (notice) {
+            VideoStreamNotice.Downgraded ->
+              synchronized(sessionLock) {
+                if (sessionId == activeSessionId) {
+                  _subscriptionKind.value = VideoStreamSubscriptionKind.Viewer
+                  _readOnly.value = true
+                }
+              }
+            is VideoStreamNotice.Ended -> endReason = notice.reason
+            is VideoStreamNotice.Unknown ->
+              LOG.warn("Ignoring unknown video subscription notice ${notice.code}")
+          }
         },
         onPacket = { packet ->
           if (packet.heartbeat) {
@@ -487,6 +550,40 @@ class VideoStreamClient(
           }
         },
       )
+      if (parser.hasEnded) {
+        return readTerminalReason(input, parser.trailingBytes) ?: endReason
+      }
+    }
+  }
+
+  /** The notice already ended the stream; an optional terminal line can refine its reason. */
+  private fun readTerminalReason(
+    input: java.io.InputStream,
+    trailingBytes: ByteArray,
+  ): VideoStreamEndReason? {
+    val line = java.io.ByteArrayOutputStream()
+    val limit = 16 * 1024
+    try {
+      var offset = 0
+      while (line.size() < limit) {
+        val byte =
+          if (offset < trailingBytes.size) trailingBytes[offset++].toInt() and 0xff
+          else input.read()
+        if (byte < 0 || byte == '\n'.code) break
+        line.write(byte)
+      }
+      if (line.size() == limit) {
+        LOG.debug("Video terminal line exceeded 16 KiB; using the end notice")
+        return null
+      }
+      val text = line.toString(StandardCharsets.UTF_8)
+      if (text.isBlank()) return null
+      val terminal = json.decodeFromString(serializer<VideoStreamResponse>(), text)
+      return VideoStreamEndReason.fromWire(terminal.reason)
+    } catch (e: Exception) {
+      // The typed end notice is sufficient even when an old/closing relay omits a valid line.
+      LOG.debug("Video terminal line unavailable; using the end notice: ${e.message}")
+      return null
     }
   }
 
@@ -526,6 +623,9 @@ internal data class VideoStreamResponse(
   val success: Boolean = false,
   val deviceId: String? = null,
   val framing: String? = null,
+  val subscriptionKind: String? = null,
+  val reason: String? = null,
+  val terminal: Boolean = false,
   val permission: VideoStreamPermissionResponse? = null,
   /**
    * Interval, in ms, at which the relay writes a zero-payload heartbeat while the capture has data
@@ -600,6 +700,12 @@ class FakeVideoStreamSource(
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
 
+  private val _subscriptionKind = MutableStateFlow<VideoStreamSubscriptionKind?>(null)
+  override val subscriptionKind: StateFlow<VideoStreamSubscriptionKind?> =
+    _subscriptionKind.asStateFlow()
+  private val _readOnly = MutableStateFlow(false)
+  override val readOnly: StateFlow<Boolean> = _readOnly.asStateFlow()
+
   private val _heartbeatMs = MutableStateFlow<Long?>(null)
   override val heartbeatMs: StateFlow<Long?> = _heartbeatMs.asStateFlow()
   private val _lastActivityMs = MutableStateFlow(0L)
@@ -614,6 +720,8 @@ class FakeVideoStreamSource(
   override fun isAvailable(): Boolean = available
 
   override fun connect(deviceId: String?) {
+    _subscriptionKind.value = null
+    _readOnly.value = false
     connectCalls++
     connectedDeviceId = deviceId
     if (connectThenRefuse && refuseWith != null) {
@@ -649,6 +757,19 @@ class FakeVideoStreamSource(
 
   override fun dispose() {
     disconnect()
+  }
+
+  fun becomeDowngraded() {
+    _subscriptionKind.value = VideoStreamSubscriptionKind.Viewer
+    _readOnly.value = true
+  }
+
+  fun setSubscriptionKind(kind: VideoStreamSubscriptionKind?) {
+    _subscriptionKind.value = kind
+  }
+
+  fun endWith(reason: VideoStreamEndReason) {
+    _state.value = VideoStreamState.Ended(reason)
   }
 
   /** Simulates an unavailable relay after a stream has started. */

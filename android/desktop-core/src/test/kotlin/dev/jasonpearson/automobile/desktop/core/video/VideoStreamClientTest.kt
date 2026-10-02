@@ -62,6 +62,9 @@ class VideoStreamClientTest {
     maxConnections: Int = 1,
     heartbeatMs: Long? = null,
     sendHeartbeatAfterPayload: Boolean = false,
+    subscriptionKind: String? = null,
+    extraBytes: ByteArray = byteArrayOf(),
+    extraBytesOnReconnect: ByteArray = extraBytes,
   ): FakeRelay =
     FakeRelay(
         success,
@@ -73,8 +76,186 @@ class VideoStreamClientTest {
         maxConnections,
         heartbeatMs,
         sendHeartbeatAfterPayload,
+        subscriptionKind,
+        extraBytes,
+        extraBytesOnReconnect,
       )
       .also { servers.add(it) }
+
+  // int64 BE (bit 61 | code), int32 BE zero length: a 12-byte notice header.
+  private fun notice(code: Long): ByteArray =
+    ByteBuffer.allocate(12)
+      .order(ByteOrder.BIG_ENDIAN)
+      .putLong((1L shl 61) or code)
+      .putInt(0)
+      .array()
+
+  private fun terminal(reason: String): ByteArray =
+    ("""{"type":"video_stream_response","success":false,"action":"unsubscribe","terminal":true,"reason":"$reason","subscriptionKind":"owner","error":"ended"}""" +
+        "\n")
+      .toByteArray()
+
+  private suspend fun assertAckKind(wire: String?, expected: VideoStreamSubscriptionKind?) {
+    val server = relay(payload = sampleH264(), keepOpen = true, subscriptionKind = wire)
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    try {
+      client.connect("emulator-5554")
+      server.awaitFirstFrameFrom(client)
+      assertEquals(expected, client.subscriptionKind.value)
+      assertTrue(!client.readOnly.value, "Viewer admission alone must preserve input")
+    } finally {
+      client.dispose()
+    }
+  }
+
+  @Test
+  fun `owner ack exposes owner kind`() = runBlocking {
+    assertAckKind("owner", VideoStreamSubscriptionKind.Owner)
+  }
+
+  @Test
+  fun `viewer ack exposes kind without revoking input`() = runBlocking {
+    assertAckKind("viewer", VideoStreamSubscriptionKind.Viewer)
+  }
+
+  @Test fun `old daemon ack exposes no kind`() = runBlocking { assertAckKind(null, null) }
+
+  @Test fun `unknown ack kind is tolerated`() = runBlocking { assertAckKind("future", null) }
+
+  @Test
+  fun `downgrade keeps streaming and latches read only until reconnect`() = runBlocking {
+    val server =
+      relay(
+        payload = sampleH264(),
+        keepOpen = true,
+        subscriptionKind = "owner",
+        maxConnections = 2,
+        extraBytes = notice(1),
+        extraBytesOnReconnect = byteArrayOf(),
+      )
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    try {
+      client.connect("emulator-5554")
+      waitUntil { client.readOnly.value }
+      assertEquals(VideoStreamSubscriptionKind.Viewer, client.subscriptionKind.value)
+      assertEquals(VideoStreamState.Streaming(320, 240), client.state.value)
+      client.disconnect()
+      client.connect("emulator-5554")
+      assertTrue(!client.readOnly.value)
+      waitUntil { client.subscriptionKind.value == VideoStreamSubscriptionKind.Owner }
+      assertTrue(!client.readOnly.value)
+    } finally {
+      client.dispose()
+    }
+  }
+
+  @Test
+  fun `unknown notice is ignored while stream remains usable`() = runBlocking {
+    val server = relay(payload = sampleH264(), keepOpen = true, extraBytes = notice(99) + notice(1))
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    try {
+      client.connect("emulator-5554")
+      // The following downgrade proves the reader made it past the unknown notice.
+      waitUntil { client.readOnly.value }
+      assertEquals(VideoStreamState.Streaming(320, 240), client.state.value)
+    } finally {
+      client.dispose()
+    }
+  }
+
+  private suspend fun assertEnd(
+    code: Long,
+    expected: VideoStreamEndReason,
+    line: ByteArray = terminal(expected.wire),
+  ) {
+    val server = relay(payload = sampleH264(), extraBytes = notice(code) + line)
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    try {
+      client.connect("emulator-5554")
+      waitUntil { client.state.value is VideoStreamState.Ended }
+      assertEquals(VideoStreamState.Ended(expected), client.state.value)
+      assertTrue(client.frames.replayCache.isNotEmpty())
+    } finally {
+      client.dispose()
+    }
+  }
+
+  @Test
+  fun `device removal publishes typed end`() = runBlocking {
+    assertEnd(2, VideoStreamEndReason.DeviceRemoved)
+  }
+
+  @Test
+  fun `identity quarantine publishes typed end`() = runBlocking {
+    assertEnd(3, VideoStreamEndReason.IdentityQuarantined)
+  }
+
+  @Test
+  fun `daemon shutdown publishes typed end`() = runBlocking {
+    assertEnd(4, VideoStreamEndReason.DaemonShutdown)
+  }
+
+  @Test
+  fun `session ending publishes typed end`() = runBlocking {
+    assertEnd(5, VideoStreamEndReason.SessionEnded)
+  }
+
+  @Test
+  fun `end notice alone at EOF is sufficient`() = runBlocking {
+    assertEnd(5, VideoStreamEndReason.SessionEnded, byteArrayOf())
+  }
+
+  @Test
+  fun `known terminal reason overrides end notice`() = runBlocking {
+    assertEnd(2, VideoStreamEndReason.SessionEnded)
+  }
+
+  @Test
+  fun `terminal line without newline at EOF still refines the reason`() = runBlocking {
+    assertEnd(
+      2,
+      VideoStreamEndReason.SessionEnded,
+      terminal("session_ended").dropLast(1).toByteArray(),
+    )
+  }
+
+  @Test
+  fun `terminal line without reason retains the notice reason`() = runBlocking {
+    assertEnd(2, VideoStreamEndReason.DeviceRemoved, "{\"terminal\":true}\n".toByteArray())
+  }
+
+  @Test
+  fun `unknown terminal reason retains notice reason`() = runBlocking {
+    assertEnd(2, VideoStreamEndReason.DeviceRemoved, terminal("future"))
+  }
+
+  @Test
+  fun `garbage terminal line retains notice reason`() = runBlocking {
+    assertEnd(2, VideoStreamEndReason.DeviceRemoved, "garbage\n".toByteArray())
+  }
+
+  @Test
+  fun `blank terminal line retains notice reason`() = runBlocking {
+    assertEnd(2, VideoStreamEndReason.DeviceRemoved, "\n".toByteArray())
+  }
+
+  @Test
+  fun `oversized terminal line retains notice reason`() = runBlocking {
+    assertEnd(2, VideoStreamEndReason.DeviceRemoved, ByteArray(16 * 1024) { 'x'.code.toByte() })
+  }
+
+  @Test
+  fun `old daemon EOF still reports live mirroring stopped`() = runBlocking {
+    val server = relay(payload = sampleH264())
+    val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
+    try {
+      client.connect("emulator-5554")
+      waitUntil { client.state.value is VideoStreamState.Unavailable }
+      assertEquals(VideoStreamState.Unavailable("Live mirroring stopped"), client.state.value)
+    } finally {
+      client.dispose()
+    }
+  }
 
   @Test
   fun `subscribes with the device id and decodes frames`() = runBlocking {
@@ -490,6 +671,9 @@ class VideoStreamClientTest {
     private val heartbeatMs: Long? = null,
     // When true, writes one zero-payload heartbeat packet right after the video payload.
     private val sendHeartbeatAfterPayload: Boolean = false,
+    private val subscriptionKind: String? = null,
+    private val extraBytes: ByteArray = byteArrayOf(),
+    private val extraBytesOnReconnect: ByteArray = extraBytes,
   ) : AutoCloseable {
     private val tempDir: Path = Files.createTempDirectory(Path.of("/tmp"), "amvsc-")
     val socketPath: Path = tempDir.resolve("video-stream.sock")
@@ -501,7 +685,7 @@ class VideoStreamClientTest {
     @Volatile private var captured: kotlinx.serialization.json.JsonObject? = null
     private val handlers = mutableListOf<Thread>()
 
-    private fun handle(socket: java.nio.channels.SocketChannel) {
+    private fun handle(socket: java.nio.channels.SocketChannel, connectionIndex: Int) {
       socket.use {
         val reader =
           BufferedReader(InputStreamReader(Channels.newInputStream(socket), StandardCharsets.UTF_8))
@@ -512,6 +696,7 @@ class VideoStreamClientTest {
           if (success) {
             buildString {
               append("""{"id":"1","type":"video_stream_response","success":true,"framing":"h264"""")
+              if (subscriptionKind != null) append(""", "subscriptionKind":"$subscriptionKind"""")
               if (heartbeatMs != null) append(""","heartbeatMs":$heartbeatMs""")
               append("}")
             }
@@ -532,6 +717,8 @@ class VideoStreamClientTest {
         if (success && sendHeartbeatAfterPayload) {
           writeHeartbeat(out)
         }
+        out.write(if (connectionIndex == 0) extraBytes else extraBytesOnReconnect)
+        out.flush()
         while (keepOpen && !Thread.currentThread().isInterrupted) {
           Thread.sleep(1000)
         }
@@ -540,11 +727,11 @@ class VideoStreamClientTest {
 
     private val thread = Thread {
       try {
-        repeat(maxConnections) {
+        repeat(maxConnections) { connectionIndex ->
           val socket = serverChannel.accept()
           val handler = Thread {
             try {
-              handle(socket)
+              handle(socket, connectionIndex)
             } catch (e: Exception) {
               // The client disconnecting mid-stream is the normal end of a handler.
               log.debug("Relay handler stopped after client disconnect: ${e.message}")

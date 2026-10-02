@@ -18,9 +18,11 @@ import dev.jasonpearson.automobile.desktop.core.control.testSnapshot
 import dev.jasonpearson.automobile.desktop.core.platform.ScreenRecordingSettingsLauncher
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamEndReason
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState.UnavailableCause
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSubscriptionKind
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,6 +30,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -40,6 +43,110 @@ class DeviceStreamViewTest {
 
   private fun iosCol() =
     DeviceColumn(deviceId = "ios-simulator", name = "iPhone 16", platform = Platform.Ios)
+
+  @Test
+  fun `end status uses plain words and retained frames show it`() {
+    val texts =
+      mapOf(
+        VideoStreamEndReason.DeviceRemoved to "The device was removed.",
+        VideoStreamEndReason.IdentityQuarantined to "The device's identity changed.",
+        VideoStreamEndReason.DaemonShutdown to "The AutoMobile daemon shut down.",
+        VideoStreamEndReason.SessionEnded to "This session ended.",
+      )
+    for ((reason, text) in texts) {
+      val state = VideoStreamState.Ended(reason)
+      assertEquals("Live mirroring stopped: $text", streamStatusHint(state))
+      assertEquals(streamStatusHint(state), retainedStreamStatus(true, state))
+      assertNull(retainedStreamStatus(false, state))
+    }
+  }
+
+  @Test
+  fun `control requires all armed inputs and is revoked by read only`() {
+    assertTrue(controlArmed(true, true, true, true, false))
+    assertFalse(controlArmed(true, true, true, true, true))
+    assertFalse(controlArmed(false, true, true, true, false))
+    assertFalse(controlArmed(true, false, true, true, false))
+    assertFalse(controlArmed(true, true, false, true, false))
+    assertFalse(controlArmed(true, true, true, false, false))
+  }
+
+  @Test
+  fun `ended without a frame offers reconnect`() = runComposeUiTest {
+    val source = FakeVideoStreamSource()
+    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    waitUntil { source.connectCalls == 1 }
+    runOnUiThread { source.endWith(VideoStreamEndReason.SessionEnded) }
+    onNodeWithText("Live mirroring stopped: This session ended.").assertIsDisplayed()
+    onNodeWithText("Reconnect").assertIsDisplayed().performClick()
+    waitUntil { source.connectCalls == 2 }
+    assertEquals("emulator-5554", source.connectedDeviceId)
+  }
+
+  @Test
+  fun `ended retained frame offers reconnect in status banner`() = runComposeUiTest {
+    val source = FakeVideoStreamSource()
+    setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }
+    waitUntil { source.connectCalls == 1 }
+    source.emitFrame(width = 1, height = 1)
+    waitUntil {
+      onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+    runOnUiThread { source.endWith(VideoStreamEndReason.SessionEnded) }
+    onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+    onNodeWithText("Live mirroring stopped: This session ended.").assertIsDisplayed()
+    onNodeWithText("Reconnect").assertIsDisplayed().performClick()
+    waitUntil { source.connectCalls == 2 }
+  }
+
+  @Test
+  fun `downgraded armed pane keeps mirror shows read only and removes control surface`() =
+    runComposeUiTest {
+      val source = FakeVideoStreamSource()
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val control =
+        WorkspaceDeviceControlState(
+          dispatcher =
+            VideoInputDispatcher(
+              scope = scope,
+              clientProvider = { null },
+              platform = { "android" },
+              deviceId = "emulator-5554",
+              tracer = InteractionLatencyTracer(),
+            ),
+          interactionSnapshot = testSnapshot(),
+          renderSnapshot = testSnapshot(),
+          tapError = null,
+          tracer = InteractionLatencyTracer(),
+        )
+      try {
+        setContent {
+          MaterialTheme {
+            DeviceStreamView(
+              col(),
+              enableDeviceControl = true,
+              control = control,
+              settings = FakeSettingsProvider(streamQualityPreset = "medium"),
+              sourceFactory = { _, _ -> source },
+            )
+          }
+        }
+        waitUntil { source.connectCalls == 1 }
+        source.setSubscriptionKind(VideoStreamSubscriptionKind.Viewer)
+        source.emitFrame(width = 1, height = 1)
+        waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+        runOnUiThread { source.becomeDowngraded() }
+        onNodeWithText("Read-only: another session now controls this device").assertIsDisplayed()
+        onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+        onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(0)
+        onNodeWithText("Medium · 0 fps").assertIsDisplayed()
+        runOnUiThread { source.endWith(VideoStreamEndReason.SessionEnded) }
+        onAllNodesWithText("fps", substring = true).assertCountEquals(0)
+      } finally {
+        scope.cancel()
+      }
+    }
 
   @Test
   fun `connects the source for the pane's device`() = runComposeUiTest {

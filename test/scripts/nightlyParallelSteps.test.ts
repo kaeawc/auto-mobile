@@ -108,3 +108,40 @@ describe("nightly XCTestRunner Thread Sanitizer lane", () => {
     }
   });
 });
+
+describe("nightly unit diagnostics", () => {
+  test("uses all three macOS cores for the complete unit lane", () => {
+    const step = stepNamed(
+      loadJobSteps(WORKFLOW, "macos-node-unit-tests"),
+      "Run complete unit lane",
+    );
+    expect(step?.env?.AUTOMOBILE_UNIT_TEST_WORKERS).toBe("3");
+    expect(step?.run).toContain("bash scripts/test-ts.sh unit");
+  });
+
+  test("keeps the race guard advisory, standalone and exclusive to nightly", () => {
+    const nightly = loadWorkflow(WORKFLOW);
+    const guard = nightly.jobs?.["auto-advance-race-guard"];
+    expect(guard).toBeDefined();
+    expect(guard).toHaveProperty("continue-on-error", true);
+    expect(guard?.["runs-on"]).toBe("ubuntu-latest");
+    expect(guard?.["timeout-minutes"]).toBe(20);
+    expect(guard?.needs).toBeUndefined();
+    const steps = loadJobSteps(WORKFLOW, "auto-advance-race-guard");
+    expect(stepNamed(steps, "Setup Bun")?.with?.["bun-version"]).toBe("1.3.14");
+    expect(stepNamed(steps, "Install Bun dependencies")?.run).toBe(
+      "scripts/ci/install-bun-deps.sh",
+    );
+    expect(stepNamed(steps, "Run auto-advance race guard")?.run).toBe(
+      "bash scripts/ci/auto-advance-race-guard.sh",
+    );
+    for (const job of Object.values(nightly.jobs ?? {})) {
+      expect(Array.isArray(job?.needs) ? job.needs : [job?.needs]).not.toContain(
+        "auto-advance-race-guard",
+      );
+    }
+    for (const workflow of [".github/workflows/pull_request.yml", ".github/workflows/merge.yml"]) {
+      expect(loadWorkflow(workflow).jobs?.["auto-advance-race-guard"]).toBeUndefined();
+    }
+  });
+});

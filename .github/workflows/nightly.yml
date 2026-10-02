@@ -126,12 +126,40 @@ jobs:
         env:
           AUTOMOBILE_TEST_MODE: "true"
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          AUTOMOBILE_UNIT_TEST_WORKERS: "3"
           AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
           fi
           bash scripts/test-ts.sh unit
+
+  # Opt-in diagnostic only: like the foldable lane, this cannot fail Nightly.
+  # No downstream job depends on its result; guard findings remain visible here.
+  auto-advance-race-guard:
+    name: "Auto-Advance Race Guard"
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 0
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run auto-advance race guard"
+        shell: bash
+        run: bash scripts/ci/auto-advance-race-guard.sh
 
   macos-node-host-integration-tests:
     name: "macOS Node Host Integration Tests"

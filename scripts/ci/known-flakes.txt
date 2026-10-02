@@ -1,7 +1,6 @@
 # job-name-glob|annotation-or-context-glob|verdict|operator note
 # Matching is case-insensitive. The second field also sees the run head branch,
 # so a signature can safely distinguish a Dependabot PR from a source failure.
-# XCTestRunner Simulator Tests is disabled by #8584; these rows apply only to older bases or after re-enabling.
 XCTestRunner Simulator Tests|*CtrlProxy is still running after forced teardown*|RERUN-DONT-FIX|macos-26 CtrlProxy forced-teardown lifecycle flap, non-required, rerun
 XCTestRunner Simulator Tests|*daemon did not become ready after*|RERUN-DONT-FIX|macos-26 daemon-ready lifecycle flap, non-required, rerun
 XCTestRunner Simulator Tests|*navigation events did not reach getNavigationGraph*|RERUN-DONT-FIX|macos-26 navigation-graph lifecycle flap, non-required, rerun

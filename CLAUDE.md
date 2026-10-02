@@ -333,11 +333,8 @@ plain `git` stays fine for read-only queries (`git log`, `git diff`, `gh`).
 - Before pushing a Swift change, run `scripts/prepush-ios.sh` (pinned
   SwiftFormat 0.54.6, SwiftLint error rules, XCTestRunner build, and pure unit
   tests).
-- `XCTestRunner Simulator Tests` is currently disabled (`if: ${{ false }}` in
-  `pull_request.yml`, #8584), so a missing check is expected. Re-enable it by
-  removing that line, then re-check these known signatures. When active it is
-  advisory, not required; read the exact job log and classify before rerunning.
-  Known 2026-09-07–13 signatures: five-minute
+- `XCTestRunner Simulator Tests` is advisory, not required. Read the exact job
+  log and classify before rerunning. Known 2026-09-07–13 signatures: five-minute
   CtrlProxy UI-test timeout, CtrlProxy surviving forced teardown, `simctl list`
   timing out during video recording, and a hierarchy UI test exceeding 90s.
 - A simulator UDID belongs to exactly one CI job and is used serially there;

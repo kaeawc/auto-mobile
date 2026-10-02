@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger";
 import type { SessionManager } from "../../daemon/sessionManager";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { defaultMockLocationClearRegistry, type MockLocationClears } from "./MockLocationClear";
 
 export interface LocationWaypoint {
   latitude: number;
@@ -310,13 +311,20 @@ export function registerLocationRouteSessionCleanup(
     SessionManager,
     "onSessionRelease" | "onSessionDeviceUnbound" | "registerPendingDeviceCleanup"
   >,
-  registry: LocationRouteRegistry = defaultLocationRouteRegistry,
+  options?: { registry?: LocationRouteRegistry; mockLocationClears?: MockLocationClears },
 ): void {
-  const cleanup = (_sessionId: string, deviceId: string): void => {
-    if (registry.isActive(deviceId)) {
+  const registry = options?.registry ?? defaultLocationRouteRegistry;
+  const mockLocationClears = options?.mockLocationClears ?? defaultMockLocationClearRegistry;
+  const cleanup = (sessionId: string, deviceId: string): void => {
+    const active = registry.isActive(deviceId);
+    const settled = active ? registry.stopAndSettle(deviceId) : Promise.resolve();
+    if (active) {
       // stopAndSettle cancels synchronously; publish quarantine before the hook returns.
-      const settlement = registry.stopAndSettle(deviceId);
-      manager.registerPendingDeviceCleanup(deviceId, settlement);
+      manager.registerPendingDeviceCleanup(deviceId, settled);
+    }
+    const clear = mockLocationClears.clearAfter(sessionId, deviceId, settled);
+    if (clear) {
+      manager.registerPendingDeviceCleanup(deviceId, clear);
     }
     registry.forget(deviceId);
   };

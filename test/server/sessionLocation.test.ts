@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ActionableError } from "../../src/models/ActionableError";
@@ -17,6 +17,11 @@ import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../fakes/FakeEmulatorConsoleClient";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import {
+  createSessionLocationAppliedCallback,
+  createSessionLocationWriteAdmission,
+} from "../../src/server/sessionLocation";
+import { MockLocationClearRegistry } from "../../src/features/utility/MockLocationClear";
 
 const deviceId = "emulator-5554";
 const points = [
@@ -36,11 +41,207 @@ const harness = () => {
     () => new FakeDbWriteBarrier(),
   );
   const registry = new LocationRouteRegistry(timer);
-  registerLocationRouteSessionCleanup(manager, registry);
+  registerLocationRouteSessionCleanup(manager, { registry });
   return { timer, manager, registry };
 };
 
 describe("session location admission", () => {
+  test("write admission evaluates the captured session lazily", async () => {
+    const { manager } = harness();
+    let admitted = false;
+    const admission = spyOn(manager, "isAdmittedForAutomation").mockImplementation(
+      (session) => admitted && manager.isCurrentSession(session),
+    );
+    try {
+      await manager.createSession("session", deviceId, "android");
+      const canWrite = createSessionLocationWriteAdmission({
+        sessionManager: manager,
+        sessionUuid: "session",
+        deviceId,
+      });
+      expect(canWrite()).toBe(false);
+      admitted = true;
+      expect(canWrite()).toBe(true);
+    } finally {
+      admission.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  for (const phase of ["released", "rebound", "replaced", "other device"] as const) {
+    test(`captured write admission remains false when ${phase}`, async () => {
+      const { manager } = harness();
+      try {
+        await manager.createSession("session", deviceId, "android");
+        const canWrite = createSessionLocationWriteAdmission({
+          sessionManager: manager,
+          sessionUuid: "session",
+          deviceId: phase === "other device" ? "emulator-5556" : deviceId,
+        });
+        if (phase === "rebound") {
+          await manager.rebindSession("session", "emulator-5556", "android");
+        } else if (phase !== "other device") {
+          await manager.releaseSession(
+            "session",
+            phase === "replaced" ? PLAN_AUTO_RELEASE_REASON : undefined,
+          );
+          if (phase === "replaced") {
+            await manager.createSession("session", deviceId, "android");
+          }
+        }
+        expect(canWrite()).toBe(false);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  }
+
+  for (const admittedAtApply of [true, false]) {
+    test(`apply-time attribution records a marker only when admitted: ${admittedAtApply}`, async () => {
+      const { timer, manager, registry } = harness();
+      const device = {
+        deviceId: "12345678-1234-1234-1234-123456789ABC",
+        platform: "ios" as const,
+        name: "iPhone",
+      };
+      const simctl = new FakeSimCtlClient();
+      const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
+      registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
+      let admitted = false;
+      const admission = spyOn(manager, "isAdmittedForAutomation").mockImplementation(
+        (session) => admitted && manager.isCurrentSession(session),
+      );
+      const markSet = spyOn(clears, "markSet");
+      try {
+        await manager.createSession("session", device.deviceId, "ios");
+        const applied = createSessionLocationAppliedCallback({
+          sessionManager: manager,
+          sessionUuid: "session",
+          device,
+          mockLocationClears: clears,
+        });
+        expect(applied).toBeDefined();
+        admitted = admittedAtApply;
+        applied!();
+        expect(markSet).toHaveBeenCalledTimes(admittedAtApply ? 1 : 0);
+        await manager.releaseSession("session");
+        await manager.getPendingDeviceCleanup(device.deviceId);
+        expect(simctl.getMethodCalls("executeCommandArgs")).toEqual(
+          admittedAtApply
+            ? [{ args: ["location", device.deviceId, "clear"], timeoutMs: 5000 }]
+            : [],
+        );
+      } finally {
+        markSet.mockRestore();
+        admission.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    });
+  }
+
+  test("handler attribution marks only admitted session-bound writes on the assigned device", async () => {
+    const { timer, manager } = harness();
+    const device = {
+      deviceId: "12345678-1234-1234-1234-123456789ABC",
+      platform: "ios" as const,
+      name: "iPhone",
+    };
+    const simctl = new FakeSimCtlClient();
+    const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
+    try {
+      await manager.createSession("session", device.deviceId, "ios");
+      expect(
+        createSessionLocationAppliedCallback({ device, mockLocationClears: clears }),
+      ).toBeUndefined();
+      expect(
+        createSessionLocationAppliedCallback({
+          sessionUuid: "session",
+          device,
+          mockLocationClears: clears,
+        }),
+      ).toBeUndefined();
+      expect(
+        createSessionLocationAppliedCallback({
+          sessionManager: manager,
+          device,
+          mockLocationClears: clears,
+        }),
+      ).toBeUndefined();
+      expect(
+        createSessionLocationAppliedCallback({
+          sessionManager: manager,
+          sessionUuid: "missing",
+          device,
+          mockLocationClears: clears,
+        }),
+      ).toBeUndefined();
+      const otherDeviceApplied = createSessionLocationAppliedCallback({
+        sessionManager: manager,
+        sessionUuid: "session",
+        device: { ...device, deviceId: "other" },
+        mockLocationClears: clears,
+      });
+      expect(otherDeviceApplied).toBeDefined();
+      otherDeviceApplied!();
+      expect(clears.clearAfter("session", "other", Promise.resolve())).toBeNull();
+      const callback = createSessionLocationAppliedCallback({
+        sessionManager: manager,
+        sessionUuid: "session",
+        device,
+        mockLocationClears: clears,
+      });
+      expect(callback).toBeDefined();
+      callback!();
+      await clears.clearAfter("session", device.deviceId, Promise.resolve());
+      expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+      await manager.releaseSession("session");
+      expect(
+        createSessionLocationAppliedCallback({
+          sessionManager: manager,
+          sessionUuid: "session",
+          device,
+          mockLocationClears: clears,
+        }),
+      ).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("direct-mode static fix is not cleared by a later session release", async () => {
+    const { timer, manager, registry } = harness();
+    const device = {
+      deviceId: "12345678-1234-1234-1234-123456789ABC",
+      platform: "ios" as const,
+      name: "iPhone",
+    };
+    const simctl = new FakeSimCtlClient();
+    const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
+    const markSet = spyOn(clears, "markSet");
+    registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
+    try {
+      const state = new DeviceState(device, {
+        timer,
+        routeRegistry: registry,
+        simctl,
+        onLocationApplied: createSessionLocationAppliedCallback({
+          device,
+          mockLocationClears: clears,
+        }),
+      });
+      await state.setState({ location: { mode: "static", latitude: 1, longitude: 2 } });
+      expect(markSet).not.toHaveBeenCalled();
+      await manager.createSession("session", device.deviceId, "ios");
+      await manager.releaseSession("session");
+      expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+      expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+      expect(simctl.getMethodCalls("executeCommandArgs")[0].args[2]).toBe("set");
+    } finally {
+      markSet.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  });
+
   for (const phase of ["releasing", "rebinding", "rebound", "released", "missing"] as const) {
     test(`refuses a route for the old device when ${phase}`, async () => {
       const { manager, registry, timer } = harness();
@@ -131,6 +332,148 @@ describe("session location admission", () => {
 });
 
 describe("session route cleanup", () => {
+  test("a successful static set after bounded release drain still clears and quarantines", async () => {
+    const { timer, manager, registry } = harness();
+    const device = {
+      deviceId: "12345678-1234-1234-1234-123456789ABC",
+      platform: "ios" as const,
+      name: "iPhone",
+    };
+    const finished = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    class DelayedSet extends FakeSimCtlClient {
+      override async executeCommandArgs(args: string[], timeoutMs?: number) {
+        if (args[2] === "set") {
+          entered.resolve();
+          await finished.promise;
+        }
+        return super.executeCommandArgs(args, timeoutMs);
+      }
+    }
+    const simctl = new DelayedSet();
+    const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
+    const markSet = spyOn(clears, "markSet");
+    registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
+    let mutation: Promise<unknown> | undefined;
+    try {
+      const { runSessionLocationMutation, createSessionLocationWriteAdmission } =
+        await import("../../src/server/sessionLocation");
+      await manager.createSession("session", device.deviceId, "ios");
+      const scope = { sessionManager: manager, sessionUuid: "session", deviceId: device.deviceId };
+      const state = new DeviceState(device, {
+        timer,
+        routeRegistry: registry,
+        simctl,
+        canWriteLocation: createSessionLocationWriteAdmission(scope),
+        onLocationApplied: createSessionLocationAppliedCallback({
+          ...scope,
+          device,
+          mockLocationClears: clears,
+        }),
+      });
+      mutation = runSessionLocationMutation({
+        ...scope,
+        mutation: () => state.setState({ location: { mode: "static", latitude: 1, longitude: 2 } }),
+      });
+      await entered.promise;
+      const release = manager.releaseSession("session");
+      await flush();
+      timer.advanceTime(1000);
+      await release;
+      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+      simctl.setCommandArgsResultSequence(
+        ["location", device.deviceId, "clear"],
+        [new Error("busy"), { stdout: "" }],
+      );
+      finished.resolve();
+      await mutation;
+      await flush();
+      expect(markSet).not.toHaveBeenCalled();
+      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
+        "set",
+        "clear",
+      ]);
+      const pending = manager.getPendingDeviceCleanup(device.deviceId);
+      expect(pending).not.toBeNull();
+      timer.advanceTime(250);
+      await pending;
+      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
+        "set",
+        "clear",
+        "clear",
+      ]);
+    } finally {
+      markSet.mockRestore();
+      finished.resolve();
+      await mutation;
+      clears.retireDevice(device.deviceId);
+      await manager.getPendingDeviceCleanup(device.deviceId);
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("failed simulator clear quarantines the pool until its retry succeeds", async () => {
+    const { timer, manager, registry } = harness();
+    const device = {
+      deviceId: "12345678-1234-1234-1234-123456789ABC",
+      platform: "ios" as const,
+      name: "iPhone",
+    };
+    const simctl = new FakeSimCtlClient();
+    const clears = new MockLocationClearRegistry({ timer, simctlFactory: () => simctl });
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "test-daemon", {
+        timer,
+        deviceManager: new FakeDeviceManager([], [device]),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+      }),
+    );
+    registerLocationRouteSessionCleanup(manager, { registry, mockLocationClears: clears });
+    try {
+      await pool.initializeWithDevices([device]);
+      await pool.bindOrReuseDeviceSession("session", device.deviceId, "ios");
+      const state = new DeviceState(device, {
+        timer,
+        routeRegistry: registry,
+        simctl,
+        onLocationApplied: createSessionLocationAppliedCallback({
+          sessionManager: manager,
+          sessionUuid: "session",
+          device,
+          mockLocationClears: clears,
+        }),
+      });
+      await state.setState({ location: { mode: "static", latitude: 1, longitude: 2 } });
+      simctl.setCommandArgsResultSequence(
+        ["location", device.deviceId, "clear"],
+        [new Error("busy"), { stdout: "" }],
+      );
+      await manager.releaseSession("session");
+      await flush();
+      const pending = manager.getPendingDeviceCleanup(device.deviceId);
+      expect(pending).not.toBeNull();
+      await pool.releaseDevice(device.deviceId, "session");
+      expect(pool.getDevice(device.deviceId)?.status).toBe("busy");
+      await expect(pool.bindOrReuseDeviceSession("new", device.deviceId, "ios")).rejects.toThrow(
+        "cleanup",
+      );
+      timer.advanceTime(250);
+      await pending;
+      await flush();
+      expect(manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();
+      expect(pool.getDevice(device.deviceId)?.status).toBe("idle");
+      expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args[2])).toEqual([
+        "set",
+        "clear",
+        "clear",
+      ]);
+    } finally {
+      clears.retireDevice(device.deviceId);
+      await manager.getPendingDeviceCleanup(device.deviceId);
+      manager.stopCleanupTimer();
+    }
+  });
+
   for (const platform of ["android", "ios"] as const) {
     test(`a ${platform} static fix outliving setup drain refuses to write after completed release`, async () => {
       const { timer, manager, registry } = harness();

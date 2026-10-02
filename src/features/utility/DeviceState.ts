@@ -479,6 +479,8 @@ export interface DeviceStateDependencies {
   consoleFactory?: EmulatorConsoleClientFactory;
   routeRegistry?: LocationRouteRegistry;
   canWriteLocation?: () => boolean;
+  /** Session attribution is supplied by the handler, never inferred from write admission. */
+  onLocationApplied?: () => void;
   clockAdapter?: DeviceClockAdapter;
   clockRestoreRegistry?: DeviceClockRestoreRegistry;
   invalidateClockCaches?: (deviceId: string) => void;
@@ -1309,6 +1311,7 @@ export class DeviceState {
   private consoleFactory: EmulatorConsoleClientFactory;
   private routeRegistry: LocationRouteRegistry;
   private readonly canWriteLocation: () => boolean;
+  private readonly onLocationApplied?: () => void;
   private readonly clockAdapter: DeviceClockAdapter;
   private readonly clockRestoreRegistry: DeviceClockRestoreRegistry;
   private readonly clockSignal: AbortSignal;
@@ -1341,6 +1344,7 @@ export class DeviceState {
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
     this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
     this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
+    this.onLocationApplied = dependencies.onLocationApplied;
   }
 
   async getState(
@@ -1599,6 +1603,7 @@ export class DeviceState {
           "set",
           `${input.latitude},${input.longitude}`,
         ]);
+        this.onLocationApplied?.();
         return {
           supported: true,
           mode: "static",
@@ -1685,6 +1690,7 @@ export class DeviceState {
       options: { signal: AbortSignal; timeoutMs: number },
     ) => Promise<void>;
     let method: DeviceLocationState["method"];
+    let onStarted: (() => void) | undefined;
     if (this.device.platform === "ios") {
       if (!isIosSimulatorDevice(this.device)) {
         return {
@@ -1706,6 +1712,7 @@ export class DeviceState {
         );
       };
       method = "ios_simctl";
+      onStarted = this.onLocationApplied;
     } else {
       const port = consolePortFromSerial(this.device.deviceId);
       if (port === null) {
@@ -1749,6 +1756,9 @@ export class DeviceState {
     // Setup drain is bounded; re-check ownership immediately before starting playback.
     this.assertLocationWriteAdmitted();
     this.routeRegistry.start(this.device.deviceId, input.waypoints, duration, interval, loop, emit);
+    // Mark at start: a release can precede the first scheduled simulator fix.
+    // Android's console has no unset command, so Android never acquires a marker.
+    onStarted?.();
     return {
       supported: true,
       mode: "route",

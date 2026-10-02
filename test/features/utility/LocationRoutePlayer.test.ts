@@ -371,7 +371,7 @@ describe("location route player", () => {
           unbound = callback;
         },
       },
-      registry,
+      { registry },
     );
     const pending = deferred();
     const fixes: number[] = [];
@@ -394,7 +394,7 @@ describe("location route player", () => {
     const timer = new FakeTimer();
     const registry = new LocationRouteRegistry(timer);
     const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    registerLocationRouteSessionCleanup(manager, registry);
+    registerLocationRouteSessionCleanup(manager, { registry });
     await manager.createSession("route-owner", "emulator-5554", "android");
     const fixes: number[] = [];
     registry.start("emulator-5554", points, 2000, 500, false, async (point) => {

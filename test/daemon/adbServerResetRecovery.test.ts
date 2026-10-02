@@ -344,7 +344,7 @@ describe("ADB server reset session recovery", () => {
       );
       await manager.readinessStarted.promise;
 
-      await sessionManager.releaseSession("session-1", "explicit-release");
+      await sessionManager.releaseSession("session-1", "allocation-rollback");
       const replacementSession = await sessionManager.createSession(
         "session-1",
         original.deviceId,
@@ -362,7 +362,7 @@ describe("ADB server reset session recovery", () => {
       });
     } finally {
       manager.releaseReadiness.resolve();
-      await sessionManager.releaseSession("session-1", "explicit-release");
+      await sessionManager.releaseSession("session-1", "allocation-rollback");
       sessionManager.stopCleanupTimer();
     }
   });
@@ -397,7 +397,7 @@ describe("ADB server reset session recovery", () => {
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
 
     try {
-      await sessionManager.releaseSession("session-1", "explicit-release");
+      await sessionManager.releaseSession("session-1", "allocation-rollback");
       const replacementSession = await sessionManager.createSession(
         "session-1",
         original.deviceId,
@@ -416,7 +416,7 @@ describe("ADB server reset session recovery", () => {
       expect(replacementSession.assignedDevice).toBe(original.deviceId);
     } finally {
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
-      await sessionManager.releaseSession("session-1", "explicit-release");
+      await sessionManager.releaseSession("session-1", "allocation-rollback");
       sessionManager.stopCleanupTimer();
     }
   });
@@ -750,7 +750,7 @@ describe("ADB server reset session recovery", () => {
         retryExecutor: new DefaultRetryExecutor(timer),
         recoveryPolicy: { onLoss: true, maxAttempts: 1 },
         cancelDeviceSessionExecutions: async (sessionId) => {
-          await sessionManager.releaseSession(sessionId);
+          await sessionManager.releaseSession(sessionId, "allocation-rollback");
           await pool.releaseDevice(device.deviceId, sessionId);
           await pool.bindOrReuseDeviceSession(sessionId, device.deviceId, "android", image);
           replacementSession = sessionManager.getSession(sessionId) ?? undefined;

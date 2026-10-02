@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { ActionableError } from "../../src/models/ActionableError";
 import {
@@ -244,7 +244,7 @@ describe("session route cleanup", () => {
         () => undefined,
         (error: unknown) => error,
       );
-      const release = manager.releaseSession("session");
+      const release = manager.releaseSession("session", PLAN_AUTO_RELEASE_REASON);
       await flush();
       timer.advanceTime(1000);
       await release;

@@ -680,7 +680,7 @@ describe("DevicePool autolock", () => {
           svcWasEnabled: false,
         });
 
-        const release = restoringManager.releaseSession("reused-session");
+        const release = restoringManager.releaseSession("reused-session", "allocation-rollback");
         await restorationStarted;
         timer.advanceTime(1_000);
         await restoringManager.waitForSessionRelease("reused-session");

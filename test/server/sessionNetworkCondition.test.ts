@@ -1,7 +1,7 @@
 import { FakeDeviceClockAdapter } from "../fakes/FakeDeviceClockAdapter";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { describe, expect, test } from "bun:test";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { runSessionNetworkMutation } from "../../src/server/sessionNetworkCondition";
 import { applyStateAfterBiometricCaptureFailure } from "../../src/server/sessionBiometricEnrollment";
 import { DeviceState, type DeviceStateResult } from "../../src/features/utility/DeviceState";
@@ -746,7 +746,7 @@ describe("runSessionNetworkMutation", () => {
       // Release begins. It cancels any pending TTL (none right now) and waits
       // up to 1s for A's tracked setup, which never comes since A is still
       // blocked — the drain times out and release removes the session anyway.
-      const release = manager.releaseSession("net-release-race");
+      const release = manager.releaseSession("net-release-race", PLAN_AUTO_RELEASE_REASON);
       await timer.advanceTimeAsync(1_000);
       await release;
 

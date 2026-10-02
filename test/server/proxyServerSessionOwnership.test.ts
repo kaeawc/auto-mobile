@@ -9,7 +9,9 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { appendHeartbeatExpiryMessage } from "../../src/server/deviceSessionResult";
-import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { SessionManager, type SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 
 describe("appendHeartbeatExpiryMessage", () => {
   const release: SessionReleaseSnapshot = {
@@ -186,6 +188,75 @@ describe("proxy server session ownership errors", () => {
       }
     },
   );
+
+  test("explicit-release regression returns ownership loss from a real release snapshot", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const timer = new FakeTimer();
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+    });
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        timer,
+        initialSessionUuid: "released-uuid",
+        clientFactory: () => fakeClient,
+        daemonManager,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "explicit-release-client", version: "0.0.1" });
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await proxy.listTools();
+      await manager.createSession("released-uuid", "handset", "android");
+      await manager.releaseSession("released-uuid");
+      const release = manager.getTerminalReleaseSnapshot("released-uuid");
+      expect(release).toMatchObject({ releaseReason: "explicit-release", terminal: true });
+      fakeClient.emitNotification(
+        SESSION_RELEASED_NOTIFICATION_METHOD,
+        "released-uuid",
+        "explicit-release",
+        release,
+      );
+      const result = await client.callTool({
+        name: "observe",
+        arguments: { sessionUuid: "released-uuid" },
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: JSON.stringify({
+            error: {
+              code: "session_ownership_lost",
+              message:
+                "Session ownership lost for released-uuid: explicit-release. " +
+                "Call getAndroid or getApple to acquire a new device session.",
+              sessionUuid: "released-uuid",
+              reason: "explicit-release",
+              retryable: true,
+              recovery: {
+                action: "acquire_replacement_session",
+                tools: ["getAndroid", "getApple"],
+              },
+              release,
+            },
+          }),
+        },
+      ]);
+      expect(fakeClient.callToolCalls).toEqual([]);
+    } finally {
+      manager.stopCleanupTimer();
+      await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
 
   test("preserves machine-readable ownership loss across discovery errors", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);

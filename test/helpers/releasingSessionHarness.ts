@@ -166,9 +166,17 @@ export function releasingSessionHarness() {
         expect(restores).toEqual([releasingDeviceId]);
         expect(poolReleases).toEqual([[releasingDeviceId, releasingSessionId]]);
         expect(persistence.releaseWrites).toBe(1);
-        expect((await persistence.getSession?.(releasingSessionId))?.status).toBe("released");
+        expect(await persistence.getSession?.(releasingSessionId)).toMatchObject({
+          status: "released",
+          release_reason: "explicit-release",
+        });
+        expect(manager.getTerminalReleaseSnapshot(releasingSessionId)).toMatchObject({
+          releaseReason: "explicit-release",
+          terminal: true,
+        });
         expect(manager.getSession(releasingSessionId)).toBeNull();
         expect(manager.getReleasingSession(releasingSessionId)).toBeNull();
+        expect(manager.getSessionForDevice(releasingDeviceId)).toBeNull();
       };
     },
     dispose() {

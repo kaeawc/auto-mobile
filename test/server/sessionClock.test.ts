@@ -4,7 +4,7 @@ import { retireShutdownOwnership } from "../../src/server/deviceToolsShutdown";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import {
   restoreDeviceClock,
@@ -369,14 +369,16 @@ describe("session clock restoration", () => {
     }
   });
 
-  test("release without a clock slot keeps the no-restore microtask budget and never quarantines", async () => {
+  test("non-terminal release without a clock slot keeps the no-restore microtask budget and never quarantines", async () => {
     const h = harness();
     try {
       await h.manager.createSession("clock-session", device.deviceId, "android");
       let releasedDevice: string | null | undefined;
-      const releasing = h.manager.releaseSession("clock-session").then((deviceId) => {
-        releasedDevice = deviceId;
-      });
+      const releasing = h.manager
+        .releaseSession("clock-session", PLAN_AUTO_RELEASE_REASON)
+        .then((deviceId) => {
+          releasedDevice = deviceId;
+        });
       // Measured against HEAD~1 using these same persistence and timer fakes.
       for (let tick = 0; tick < 8; tick++) {
         expect(h.manager.getPendingDeviceCleanup(device.deviceId)).toBeNull();

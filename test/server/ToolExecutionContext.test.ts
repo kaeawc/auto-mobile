@@ -1,7 +1,7 @@
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn } from "bun:test";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createToolExecutionContext } from "../../src/server/ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
@@ -1260,7 +1260,7 @@ describe("ToolExecutionContext", () => {
     // A nonterminal release reaches the ~1s setup-drain timeout while the
     // old incarnation's setup is still pending, and proceeds anyway
     // (fakeTimer auto-advance fires the drain timeout without a real wait).
-    await sessionManager.releaseSession("session-incarnation-scope");
+    await sessionManager.releaseSession("session-incarnation-scope", PLAN_AUTO_RELEASE_REASON);
 
     // The UUID is recreated as a brand-new incarnation (e.g. restart
     // recovery re-binding it, possibly to a different device).
@@ -1995,7 +1995,7 @@ describe("ToolExecutionContext", () => {
           finishSetup = resolve;
         }),
     );
-    const release = sessionManager.releaseSession("session-recreated");
+    const release = sessionManager.releaseSession("session-recreated", PLAN_AUTO_RELEASE_REASON);
     await Promise.resolve();
     const context = createToolExecutionContext(
       "session-recreated",

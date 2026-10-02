@@ -6,6 +6,7 @@ import {
 import {
   SessionManager,
   TerminalSessionError,
+  PLAN_AUTO_RELEASE_REASON,
   type Session,
   type SessionReleaseSnapshot,
 } from "../../src/daemon/sessionManager";
@@ -283,7 +284,7 @@ describe("requests during device session release", () => {
         livenessOwnershipClaims: ["new-owner"],
       });
       expect((await persistence.getSession?.(sessionId))?.liveness_owner_token).toBeNull();
-      const replacement = await manager.createSession(sessionId, deviceId, "android");
+      const replacement = await manager.createSession("fresh-session", deviceId, "android");
       expect(replacement.livenessOwnerToken).toBeUndefined();
       expect(replacement.livenessOwnershipClaims).toBeUndefined();
     });
@@ -435,14 +436,7 @@ describe("requests during device session release", () => {
       finishRestore.resolve();
       await release;
       const error = await admission;
-      if (reason === "heartbeat-timeout") {
-        expect(error).toBeInstanceOf(TerminalSessionError);
-      } else {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain(
-          `Session ${sessionId} is not an active daemon session (not found)`,
-        );
-      }
+      expect(error).toBeInstanceOf(TerminalSessionError);
       expect(assignments).toBe(0);
       expect(await handleDaemonRequest(request("daemon/heartbeat"), state)).toEqual(notFound);
       expect(await handleDaemonRequest(request("daemon/releaseSession"), state)).toEqual(
@@ -451,15 +445,13 @@ describe("requests during device session release", () => {
       await expect(
         manager.getOrCreateSession(sessionId, undefined, undefined, undefined, true),
       ).rejects.toThrow(
-        reason === "heartbeat-timeout"
-          ? "is terminal after heartbeat-timeout"
-          : "not an active daemon session (not found)",
+        reason === "heartbeat-timeout" ? "is terminal after heartbeat-timeout" : "was released",
       );
     });
   }
 
-  test("persisted explicit-release admission waits then permits existing recovery", async () => {
-    const { release } = await beginPhaseA("explicit-release");
+  test("persisted internal release admission waits then permits existing recovery", async () => {
+    const { release } = await beginPhaseA(PLAN_AUTO_RELEASE_REASON);
     let assignments = 0;
     let settled = false;
     const admission = manager
@@ -488,6 +480,69 @@ describe("requests during device session release", () => {
     expect((await admission).assignedDevice).toBe(deviceId);
     expect(assignments).toBe(1);
   });
+
+  for (const phase of ["A", "B"] as const) {
+    for (const method of ["getOrCreateSession", "admitIssuedSessionForAutomation"] as const) {
+      test(`Phase ${phase}: ${method} refuses explicit release with a retained persisted row`, async () => {
+        const h = releasingSessionHarness();
+        let assignments = 0;
+        let settled = false;
+        const pool = {
+          assignDeviceToSession: async () => {
+            assignments++;
+            return "unexpected-device";
+          },
+        };
+        const admit = () =>
+          method === "getOrCreateSession"
+            ? h.manager.getOrCreateSession(sessionId, pool, "android", undefined, true)
+            : h.manager.admitIssuedSessionForAutomation(sessionId);
+        try {
+          const session = await h.create();
+          const finish = await h.beginRelease(phase);
+          const admission = admit().then(
+            (result) => {
+              settled = true;
+              return result;
+            },
+            (error: unknown) => {
+              settled = true;
+              return error;
+            },
+          );
+          expect(await h.request("daemon/heartbeat")).toEqual(notFound);
+          if (phase === "A") {
+            expect(settled).toBe(false);
+          }
+          expect(assignments).toBe(0);
+          await finish();
+          const error = await admission;
+          expect(error).toBeInstanceOf(TerminalSessionError);
+          expect(error).toHaveProperty(
+            "message",
+            `Session ${sessionId} was released and cannot be reused. Acquire a new device with getAndroid or getApple.`,
+          );
+          await expect(admit()).rejects.toThrow(TerminalSessionError);
+          await expect(
+            h.manager.admitIssuedSessionForAutomation(sessionId, undefined, {
+              access: "read-only",
+            }),
+          ).rejects.toThrow("was released");
+          expect(assignments).toBe(0);
+          expect(h.manager.isAdmittedForAutomation(session)).toBe(false);
+          expect(h.manager.getSession(sessionId)).toBeNull();
+          expect(h.manager.getSessionForDevice(session.assignedDevice)).toBeNull();
+          expect(await h.request("daemon/heartbeat")).toEqual(notFound);
+          expect(await h.persistence.getSession?.(sessionId)).toMatchObject({
+            status: "released",
+            release_reason: "explicit-release",
+          });
+        } finally {
+          h.dispose();
+        }
+      });
+    }
+  }
 
   test("non-releasing heartbeat succeeds and extends deadlines", async () => {
     const session = await manager.createSession(sessionId, deviceId, "android");

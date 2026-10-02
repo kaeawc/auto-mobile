@@ -8,6 +8,7 @@ import {
   isDeviceControlRoutingSessionValid,
 } from "../../src/daemon/deviceControlSessionValidity";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { PLAN_AUTO_RELEASE_REASON, TerminalSessionError } from "../../src/daemon/sessionManager";
 import {
   MissingDeviceLiveness,
   type MissingDeviceLivenessPoolPort,
@@ -200,6 +201,34 @@ describe("remaining paths during session release", () => {
     });
   });
 
+  test("explicit terminal fence hides stream and sessionInfo during persistence while teardown stays busy", async () => {
+    await h.create();
+    const finish = await h.beginRelease("B");
+    expect(h.manager.getTerminalReleaseSnapshot(sessionId)).toMatchObject({
+      releaseReason: "explicit-release",
+      terminal: true,
+    });
+    const auth = new SessionScopedStreamAuthenticator(() => h.manager, "test op", {});
+    for (const requireOwnership of [false, true]) {
+      expect(() => auth.authorize({ sessionUuid: sessionId, deviceId, requireOwnership })).toThrow(
+        `test op rejected: session ${sessionId} is not an active daemon session (unknown or expired).`,
+      );
+    }
+    expect(await h.request("daemon/sessionInfo")).toEqual({
+      success: false,
+      error: `Session not found: ${sessionId}`,
+    });
+    expect(await h.request("daemon/activeSessions")).toEqual({
+      success: true,
+      result: { activeSessions: 1, activeExecutions: 0, releasingSessions: 1 },
+    });
+    await finish();
+    expect(await h.request("daemon/activeSessions")).toEqual({
+      success: true,
+      result: { activeSessions: 0, activeExecutions: 0 },
+    });
+  });
+
   for (const [name, valid, identityFor] of [
     [
       "target owner",
@@ -216,7 +245,7 @@ describe("remaining paths during session release", () => {
       }),
     ],
   ] as const) {
-    test(`device-control ${name} refuses recovery during release and after removal`, async () => {
+    test(`device-control ${name} refuses recovery and same-UUID replacement after explicit release`, async () => {
       const session = await h.create();
       const identity = identityFor(session);
       expect(valid(h.manager, identity)).toBe(true);
@@ -224,7 +253,43 @@ describe("remaining paths during session release", () => {
       expect(valid(h.manager, identity)).toBe(false);
       await finish();
       expect(valid(h.manager, identity)).toBe(false);
+      await expect(h.create()).rejects.toThrow(TerminalSessionError);
+      await expect(h.create()).rejects.toThrow(
+        `Session ${sessionId} was released and cannot be reused. Acquire a new device with getAndroid or getApple.`,
+      );
+      expect(valid(h.manager, identity)).toBe(false);
+      expect(h.manager.getSession(sessionId)).toBeNull();
+      expect(h.manager.getSessionForDevice(deviceId)).toBeNull();
+    });
+
+    test(`device-control ${name} accepts only the replacement incarnation after internal plan release`, async () => {
+      const session = await h.create();
+      const identity = identityFor(session);
+      expect(valid(h.manager, identity)).toBe(true);
+      const finishSetup = Promise.withResolvers<void>();
+      const setup = h.manager.trackSessionSetup(session, () => finishSetup.promise);
+      // Do not join daemon/releaseSession: that explicit client request upgrades
+      // an in-flight internal release to terminal.
+      const release = h.manager.releaseSession(sessionId, PLAN_AUTO_RELEASE_REASON);
+      try {
+        expect(h.manager.getReleasingSession(sessionId)).toBe(session);
+        expect(valid(h.manager, identity)).toBe(false);
+      } finally {
+        finishSetup.resolve();
+        h.persistence.finishRelease.resolve();
+        await setup;
+        expect(await release).toBe(deviceId);
+      }
+      expect(valid(h.manager, identity)).toBe(false);
+      expect(h.manager.getSession(sessionId)).toBeNull();
+      expect(h.manager.getSessionForDevice(deviceId)).toBeNull();
+      expect(h.manager.getTerminalReleaseSnapshot(sessionId)).toBeUndefined();
+      expect(await h.persistence.getSession?.(sessionId)).toMatchObject({
+        status: "released",
+        release_reason: PLAN_AUTO_RELEASE_REASON,
+      });
       const replacement = await h.create();
+      expect(replacement).not.toBe(session);
       expect(valid(h.manager, identity)).toBe(false);
       expect(valid(h.manager, identityFor(replacement))).toBe(true);
     });
@@ -386,6 +451,10 @@ describe("remaining paths during session release", () => {
         await expect(runDaemonCommand("heartbeat", [sessionId], options)).rejects.toThrow(
           "CLI exit",
         );
+        expect(error).toHaveBeenCalledTimes(2);
+        expect(error).toHaveBeenLastCalledWith(`Error: Session not found: ${sessionId}`);
+        expect(log).not.toHaveBeenCalled();
+        expect(h.persistence.activityWrites).toBe(writes);
       } finally {
         log.mockRestore();
         error.mockRestore();

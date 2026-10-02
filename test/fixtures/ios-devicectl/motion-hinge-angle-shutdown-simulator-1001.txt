@@ -1,0 +1,8 @@
+ERROR: The capability ?Monitor Motion? is not supported by this device. (com.apple.dt.CoreDeviceError error 1001 (0x3E9))
+       CapabilityName = Monitor Motion
+       CapabilityFeatureIdentifier = com.apple.coredevice.feature.monitormotion
+       DeviceIdentifier = 1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E
+Hinge angle monitoring encountered an issue: CoreDeviceError(errorCode: 1001, errorUserInfo: ["CapabilityName": "Monitor Motion", "CapabilityFeatureIdentifier": "com.apple.coredevice.feature.monitormotion", "DeviceIdentifier": "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E", "NSLocalizedDescription": "The capability ?Monitor Motion? is not supported by this device."])
+Error type: CoreDeviceError
+Description: The capability ?Monitor Motion? is not supported by this device.
+Hinge angle monitoring stopped.

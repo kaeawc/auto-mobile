@@ -1,0 +1,37 @@
+{
+  "error" : {
+    "code" : 1001,
+    "domain" : "com.apple.dt.CoreDeviceError",
+    "userInfo" : {
+      "CapabilityFeatureIdentifier" : {
+        "string" : "com.apple.coredevice.feature.monitormotion"
+      },
+      "CapabilityName" : {
+        "string" : "Monitor Motion"
+      },
+      "NSLocalizedDescription" : {
+        "string" : "Hinge angle monitoring is not available on this device."
+      }
+    }
+  },
+  "errorSignature" : "(com.apple.dt.CoreDeviceError 1001)",
+  "info" : {
+    "arguments" : [
+      "devicectl",
+      "device",
+      "motion",
+      "hinge-angle",
+      "--device",
+      "1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E",
+      "--json-output",
+      "booted-hinge-nonduo.json"
+    ],
+    "commandType" : "devicectl.device.motion.hinge-angle",
+    "environment" : {
+
+    },
+    "jsonVersion" : 5,
+    "outcome" : "failed",
+    "version" : "651.13.4"
+  }
+}

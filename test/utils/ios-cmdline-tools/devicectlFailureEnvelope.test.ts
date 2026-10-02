@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { parseDevicectlFailureEnvelope } from "../../../src/utils/ios-cmdline-tools/devicectlFailureEnvelope";
+import { loadDevicectlListFixture } from "../../helpers/devicectlListFixtures";
 
-// Constructed minimal objects, not devicectl output. Real 1000/1001 envelopes still need captures.
+// Constructed minimal objects, not devicectl output. 1001 has captures below; 1000 still needs captures.
 describe("constructed devicectl failure envelopes", () => {
   for (const [code, kind] of [
     [1000, "device-not-found"],
@@ -38,4 +39,87 @@ describe("constructed devicectl failure envelopes", () => {
       expect(parseDevicectlFailureEnvelope(data)).toBeUndefined();
     }
   });
+});
+
+describe("captured devicectl 1001 failure envelopes", () => {
+  for (const [file, capabilityFeatureId] of [
+    ["info-lockstate-booted-simulator-1001.json", "com.apple.coredevice.feature.getlockstate"],
+    ["info-lockstate-shutdown-simulator-1001.json", "com.apple.coredevice.feature.getlockstate"],
+    [
+      "motion-hinge-angle-shutdown-simulator-1001.json",
+      "com.apple.coredevice.feature.monitormotion",
+    ],
+    [
+      "motion-hinge-angle-booted-nonduo-simulator-1001.json",
+      "com.apple.coredevice.feature.monitormotion",
+    ],
+    [
+      "info-files-appdatacontainer-booted-simulator-1001.json",
+      "com.apple.coredevice.feature.listFiles",
+    ],
+  ] as const) {
+    test(`captured ${file} retains only structured failure metadata`, () => {
+      expect(parseDevicectlFailureEnvelope(JSON.parse(loadDevicectlListFixture(file)))).toEqual({
+        domain: "com.apple.dt.CoreDeviceError",
+        code: 1001,
+        kind: "capability-unsupported",
+        capabilityFeatureId,
+      });
+    });
+  }
+
+  test("captured hinge failures share a feature id despite different descriptions and device identifiers", () => {
+    const shutdown = JSON.parse(
+      loadDevicectlListFixture("motion-hinge-angle-shutdown-simulator-1001.json"),
+    );
+    const booted = JSON.parse(
+      loadDevicectlListFixture("motion-hinge-angle-booted-nonduo-simulator-1001.json"),
+    );
+    expect(shutdown.error.userInfo.NSLocalizedDescription).not.toEqual(
+      booted.error.userInfo.NSLocalizedDescription,
+    );
+    expect(shutdown.error.userInfo.DeviceIdentifier).toBeDefined();
+    expect(booted.error.userInfo.DeviceIdentifier).toBeUndefined();
+    expect(parseDevicectlFailureEnvelope(shutdown)?.capabilityFeatureId).toBe(
+      "com.apple.coredevice.feature.monitormotion",
+    );
+    expect(parseDevicectlFailureEnvelope(booted)).toEqual(parseDevicectlFailureEnvelope(shutdown));
+  });
+
+  test("captured successful displays envelope is not a failure", () => {
+    expect(
+      parseDevicectlFailureEnvelope(
+        JSON.parse(loadDevicectlListFixture("info-displays-booted-simulator.json")),
+      ),
+    ).toBeUndefined();
+  });
+});
+
+describe("DERIVED in-memory mutations of captured failure envelopes", () => {
+  for (const feature of [
+    undefined,
+    "unwrapped",
+    null,
+    { string: "" },
+    { string: 123 },
+    { string: null },
+  ]) {
+    test(`DERIVED absent or malformed feature ${JSON.stringify(feature)} adds no key`, () => {
+      const derived = JSON.parse(
+        loadDevicectlListFixture("info-lockstate-booted-simulator-1001.json"),
+      );
+      if (feature === undefined) {
+        delete derived.error.userInfo.CapabilityFeatureIdentifier;
+      } else {
+        derived.error.userInfo.CapabilityFeatureIdentifier = feature;
+      }
+      const parsed = parseDevicectlFailureEnvelope(derived);
+      expect(parsed).toEqual({
+        domain: "com.apple.dt.CoreDeviceError",
+        code: 1001,
+        kind: "capability-unsupported",
+      });
+      expect(Object.hasOwn(parsed!, "capabilityFeatureId")).toBe(false);
+    });
+  }
 });

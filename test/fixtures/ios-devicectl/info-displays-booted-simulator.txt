@@ -1,0 +1,18 @@
+Current Displays:
+? 1: LCD (primary):
+    ? bounds: (0.0, 0.0, 1206.0, 2622.0)
+    ? currentOrientation: rot0
+    ? displayId: 1
+    ? name: LCD
+    ? nativeOrientation: rot0
+    ? pointScale: 3
+    ? nativeSize: (1206.0, 2622.0)
+    ? physicalSize: (2.621739149093628, 5.699999809265137)
+    ? chromeIdentifier: com.apple.dt.devicekit.chrome.phone11
+    ? framebufferMaskIdentifier: 4E5532ED-1470-47D1-BDF4-7AA90C26957A
+    ? primary: true
+    ? backlightState: backlight is on and active
+    ? uniqueId: D93C043F-5B46-4213-B7A6-B6D082A5FAEE
+    ? type: integrated
+Main display backlight state: backlight is on and active
+Main display orientation: unknown, non-flat orientation: portrait, orientation not locked

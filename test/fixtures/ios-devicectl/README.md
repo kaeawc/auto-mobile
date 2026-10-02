@@ -52,15 +52,42 @@ Not captured (needs hardware):
 
 Not captured (needs a targeted simulator):
 
-- `device info displays --json-output` JSON for a booted simulator.
+- `device info displays --json-output` JSON for a booted iPhone Duo simulator (both postures); the
+  captured display is a non-Duo iPhone 18 Pro, see below.
 - A successful and a failed `device capture screenshot` run, including the failure envelope.
 - The CoreDevice minimum version for simulator `device capture screenshot`.
 - `booting` / `shuttingDown` simulator records (tests use DERIVED in-memory variants).
-- Real failed-command envelopes for CoreDeviceError 1000 and 1001: a captured
-  `--device <duplicate name>` failure and a shut-down `device info apps` failure.
-  Tests use constructed minimal objects, not captured output.
+- Real failed-command envelope for CoreDeviceError 1000 (a `--device <duplicate name>` failure)
+  and `device info apps` on a shut-down simulator. Tests use constructed minimal objects for 1000.
+- A successful `device info apps` capture exists but is deliberately NOT committed: its app `url`
+  values embed the capturing user's home directory, and these fixtures are verbatim (no redaction).
 
 Captured 2026-10-02 (Xcode 26.6 / CoreDevice 651.13.4; host-only help, no device targeted):
 
 - `capture-screenshot-help.txt`: `xcrun devicectl help device capture screenshot`
 - `info-displays-help.txt`: `xcrun devicectl help device info displays`
+
+Captured 2026-10-02 against a simulator (iPhone 18 Pro, iOS 27.0, non-Duo, UDID
+1CBBDFF1-96B4-479E-85D2-489FFAC3BC3E) with `devicectl` from the Xcode 27.1 beta developer
+directory, CoreDevice 651.13.4, jsonVersion 5. Each `.json` is the `--json-output` file and each
+`.txt` the terminal output of the same run. All are verbatim: the `info.arguments` still name the
+original `booted-*`/`shutdown-*` output file, and the `.txt` files show `?` where devicectl printed
+non-ASCII quotes. Capture JSON is excluded from formatting (`.oxfmtrc.json`); `manifest.json` stays
+list-devices-only, so these are not manifest rows.
+
+- `info-displays-booted-simulator.{json,txt}`: `device info displays --device <udid>` on the booted
+  simulator: success, one display (`displayId` 1, `uniqueId`, `primary: true`, `bounds`, `nativeSize`,
+  `pointScale`, `type.integrated`, per-display `backlightState`, `currentOrientation`) plus top-level
+  `backlightState` and `orientation`. A Duo capture must still confirm how two panels appear.
+- `info-lockstate-booted-simulator-1001.{json,txt}`, `info-lockstate-shutdown-simulator-1001.{json,txt}`:
+  `device info lockState`, booted and shut down: both 1001 with feature
+  `com.apple.coredevice.feature.getlockstate`; a shut-down simulator gives the same envelope as a
+  booted one.
+- `info-files-appdatacontainer-booted-simulator-1001.{json,txt}`:
+  `device info files --domain-type appDataContainer --domain-identifier <bundle id>` on the booted
+  simulator: 1001, feature `com.apple.coredevice.feature.listFiles`.
+- `motion-hinge-angle-shutdown-simulator-1001.{json,txt}`: `device motion hinge-angle` on the shut-down
+  simulator: 1001, feature `com.apple.coredevice.feature.monitormotion`, has `DeviceIdentifier`.
+- `motion-hinge-angle-booted-nonduo-simulator-1001.{json,txt}`: the same command on the booted non-Duo
+  simulator: 1001, same feature id, different `NSLocalizedDescription`, no `DeviceIdentifier`; the
+  stable key is `error.userInfo.CapabilityFeatureIdentifier.string`, not the localized text.

@@ -1,0 +1,434 @@
+import { describe, expect, test } from "bun:test";
+import { runBenchmark, type BenchmarkDeps } from "../../scripts/benchmark-settled-screenshot";
+import {
+  assertPrivateDaemonNamespace,
+  assertServerBuilt,
+  buildBenchmarkChildEnv,
+  isPrivateDaemonStartRefusal,
+  type BenchmarkChildEnv,
+} from "../../scripts/benchmarkSettledScreenshotEnv";
+import {
+  aggregateFailureReasons,
+  benchmarkExitCode,
+  calculateMetrics,
+  describeFailure,
+  formatReportJson,
+  formatReportTable,
+  helpText,
+  isInvalidSeries,
+  parseBenchmarkArgs,
+  settledAsyncDelta,
+  type BenchmarkReport,
+} from "../../scripts/benchmarkSettledScreenshotReport";
+
+const runDir = "/tmp/am-bench-fake";
+const expectedPaths: Record<string, string> = {
+  AUTOMOBILE_DAEMON_SOCKET_PATH: `${runDir}/d.sock`,
+  AUTOMOBILE_DAEMON_PID_FILE_PATH: `${runDir}/d.pid`,
+  AUTOMOBILE_DAEMON_LOCK_FILE_PATH: `${runDir}/d.lock`,
+  AUTOMOBILE_AUX_SOCKET_DIR: runDir,
+  AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: `${runDir}/w.sock`,
+  AUTOMOBILE_DATA_DIR: `${runDir}/data`,
+  AUTOMOBILE_LOG_DIR: `${runDir}/logs`,
+  AUTOMOBILE_DB_PATH: `${runDir}/auto-mobile.db`,
+  AUTOMOBILE_DAEMON_LAUNCH_CWD: runDir,
+};
+const success = { structuredContent: { success: true, observation: { platform: "ios" } } };
+const refusal =
+  "Found live AutoMobile daemon process(es) (123) but none became reachable within 100ms. Refusing to terminate a live daemon during start";
+const options = () =>
+  parseBenchmarkArgs([
+    "--platform",
+    "ios",
+    "--iterations",
+    "2",
+    "--warmup",
+    "1",
+    "--server",
+    "/fake/server.js",
+  ]);
+
+function harness(
+  respond: (name: string, args: Record<string, unknown>, index: number) => unknown = () => success,
+) {
+  const events: string[] = [];
+  const logs: string[] = [];
+  const envs: BenchmarkChildEnv[] = [];
+  let calls = 0;
+  let clock = 0;
+  let dirs = 0;
+  const deps: BenchmarkDeps = {
+    serverExists: () => true,
+    parentEnv: { PATH: "/fake/bin", AUTOMOBILE_COORDINATION_DIR: "/fake/shared" },
+    makeRunDir: () => {
+      events.push("make");
+      dirs += 1;
+      return `${runDir}-${dirs}`;
+    },
+    createClient: async (server, env) => {
+      expect(server).toBe("/fake/server.js");
+      assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
+      events.push("create");
+      envs.push(env);
+      return {
+        callTool: async (name, args) => {
+          calls += 1;
+          return respond(name, args, calls);
+        },
+        close: async () => {
+          events.push("close");
+        },
+      };
+    },
+    stopPrivateDaemon: async (server, env) => {
+      expect(server).toBe("/fake/server.js");
+      assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
+      expect(env).toBe(envs.at(-1));
+      events.push("stop");
+    },
+    removeRunDir: (dir) => {
+      expect(dir).toBe(`${runDir}-${dirs}`);
+      events.push("remove");
+    },
+    now: () => clock++,
+    log: (message) => {
+      logs.push(message);
+    },
+    write: () => {},
+  };
+  return { deps, events, logs, envs, calls: () => calls };
+}
+
+function reportWith(metric: ReturnType<typeof calculateMetrics>): BenchmarkReport {
+  return {
+    platform: "ios",
+    iterations: metric.sampleSize,
+    warmup: 0,
+    generatedAt: "2026-10-02T00:00:00.000Z",
+    actionMode: "ambient default, not mode-controlled",
+    results: { observe: { settled: metric } },
+    settledVsAsync: {},
+  };
+}
+
+describe("benchmark namespace isolation", () => {
+  test("replaces resident and stray selectors without mutating the parent", () => {
+    const parent: BenchmarkChildEnv = {
+      PATH: "/fake/bin",
+      ANDROID_HOME: "/fake/android",
+      AUTOMOBILE_COORDINATION_DIR: "/fake/coordination",
+      AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/auto-mobile-daemon-501.sock",
+      AUTOMOBILE_DAEMON_PID_FILE_PATH: "/tmp/auto-mobile-daemon-501.pid",
+      AUTOMOBILE_DAEMON_LOCK_FILE_PATH: "/tmp/auto-mobile-daemon-501.lock",
+      AUTOMOBILE_AUX_SOCKET_DIR: "~/.auto-mobile",
+      AUTOMOBILE_DATA_DIR: "~/.auto-mobile",
+      AUTOMOBILE_LOG_DIR: "~/.auto-mobile/logs",
+      AUTOMOBILE_DB_PATH: "~/.auto-mobile/auto-mobile.db",
+      AUTOMOBILE_DB_DIR: "/stray/db",
+      AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH: "/stray/webrtc.sock",
+      AUTOMOBILE_DAEMON_LAUNCH_CWD: "/stray/cwd",
+    };
+    for (const key of [...Object.keys(expectedPaths), "AUTOMOBILE_DB_DIR"]) {
+      parent[key.replace("AUTOMOBILE_", "AUTO_MOBILE_")] = "/stray/alias";
+    }
+    const before = { ...parent };
+    const env = buildBenchmarkChildEnv(parent, runDir);
+    expect(env).toMatchObject(expectedPaths);
+    expect(env.PATH).toBe(parent.PATH);
+    expect(env.ANDROID_HOME).toBe(parent.ANDROID_HOME);
+    expect(env.AUTOMOBILE_COORDINATION_DIR).toBe(parent.AUTOMOBILE_COORDINATION_DIR);
+    expect(Object.keys(env).some((key) => key.startsWith("AUTO_MOBILE_"))).toBe(false);
+    expect(Object.hasOwn(env, "AUTOMOBILE_DB_DIR")).toBe(false);
+    expect(parent).toEqual(before);
+    expect(env).not.toBe(parent);
+    expect(() => assertPrivateDaemonNamespace(env, runDir)).not.toThrow();
+    expect(buildBenchmarkChildEnv({}, runDir)).toEqual(expectedPaths);
+  });
+
+  test("different run dirs have disjoint selectors and sockets must fit, including auxiliary sockets", () => {
+    const first = buildBenchmarkChildEnv({}, runDir);
+    const second = buildBenchmarkChildEnv({}, `${runDir}-2`);
+    for (const key of Object.keys(expectedPaths)) {
+      expect(first[key]).not.toBe(second[key]);
+    }
+    expect(() => buildBenchmarkChildEnv({}, `/tmp/${"a".repeat(80)}`)).toThrow(
+      "shorter than 100 bytes",
+    );
+    expect(() => buildBenchmarkChildEnv({}, `/tmp/${"é".repeat(40)}`)).toThrow(
+      "shorter than 100 bytes",
+    );
+    expect(() => buildBenchmarkChildEnv({}, "relative")).toThrow("absolute");
+    expect(() => buildBenchmarkChildEnv({}, "/")).toThrow("non-root");
+  });
+
+  test("namespace assertion rejects every missing, escaped or resident selector and legacy alias", () => {
+    const env = buildBenchmarkChildEnv({}, runDir);
+    for (const key of Object.keys(expectedPaths)) {
+      const missing = { ...env };
+      delete missing[key];
+      expect(() => assertPrivateDaemonNamespace(missing, runDir)).toThrow(key);
+      expect(() =>
+        assertPrivateDaemonNamespace({ ...env, [key]: "/tmp/auto-mobile-daemon-501.sock" }, runDir),
+      ).toThrow(key);
+      expect(() =>
+        assertPrivateDaemonNamespace({ ...env, [key]: `${runDir}/../resident` }, runDir),
+      ).toThrow(key);
+      const alias = key.replace("AUTOMOBILE_", "AUTO_MOBILE_");
+      expect(() => assertPrivateDaemonNamespace({ ...env, [alias]: "" }, runDir)).toThrow(alias);
+    }
+    for (const key of ["AUTOMOBILE_DB_DIR", "AUTO_MOBILE_DB_DIR"]) {
+      expect(() => assertPrivateDaemonNamespace({ ...env, [key]: undefined }, runDir)).toThrow(key);
+    }
+  });
+});
+
+describe("benchmark injectable lifecycle", () => {
+  test("passes a private env, leaves global aux untouched, and stops before removal in distinct runs", async () => {
+    const oldAux = process.env.AUTOMOBILE_AUX_SOCKET_DIR;
+    const fake = harness();
+    await runBenchmark(options(), fake.deps);
+    await runBenchmark(options(), fake.deps);
+    expect(process.env.AUTOMOBILE_AUX_SOCKET_DIR).toBe(oldAux);
+    expect(fake.events).toEqual([
+      "make",
+      "create",
+      "close",
+      "stop",
+      "remove",
+      "make",
+      "create",
+      "close",
+      "stop",
+      "remove",
+    ]);
+    expect(fake.envs[0].AUTOMOBILE_DAEMON_SOCKET_PATH).not.toBe(
+      fake.envs[1].AUTOMOBILE_DAEMON_SOCKET_PATH,
+    );
+  });
+
+  test("missing build fails before directory or client side effects", async () => {
+    const fake = harness();
+    fake.deps.serverExists = () => false;
+    await expect(runBenchmark(options(), fake.deps)).rejects.toThrow('run "bun run build" first');
+    expect(fake.events).toEqual([]);
+    expect(() => assertServerBuilt("/missing/server.js", false)).toThrow("/missing/server.js");
+    expect(() => assertServerBuilt("/present/server.js", true)).not.toThrow();
+  });
+
+  test("primary failure still closes, stops and removes", async () => {
+    const fake = harness(() => {
+      throw new Error("launch broke");
+    });
+    await expect(runBenchmark({ ...options(), app: "fake.app" }, fake.deps)).rejects.toThrow(
+      "launch broke",
+    );
+    expect(fake.events).toEqual(["make", "create", "close", "stop", "remove"]);
+    expect(fake.logs.join("\n")).toContain("launch broke");
+  });
+
+  test("a failed connection still attempts private stop", async () => {
+    const fake = harness();
+    fake.deps.createClient = async (_server, env) => {
+      assertPrivateDaemonNamespace(env, `${runDir}-1`);
+      fake.envs.push(env);
+      throw new Error("connect failed");
+    };
+    await expect(runBenchmark(options(), fake.deps)).rejects.toThrow("connect failed");
+    expect(fake.events).toEqual(["make", "stop", "remove"]);
+  });
+
+  test("stop failure keeps the run dir and warns without masking the primary error", async () => {
+    const fake = harness(() => ({
+      isError: true,
+      content: [{ type: "text", text: "launch failed" }],
+    }));
+    fake.deps.stopPrivateDaemon = async () => {
+      fake.events.push("stop");
+      throw new Error("stop failed");
+    };
+    await expect(runBenchmark({ ...options(), app: "fake.app" }, fake.deps)).rejects.toThrow(
+      "launch failed",
+    );
+    expect(fake.events).toEqual(["make", "create", "close", "stop"]);
+    expect(fake.logs.join("\n")).toContain(`retaining ${runDir}-1: stop failed`);
+  });
+
+  test("guard refuses cleanup if the env has been retargeted", async () => {
+    const fake = harness();
+    const create = fake.deps.createClient;
+    fake.deps.createClient = async (server, env) => {
+      const client = await create(server, env);
+      env.AUTOMOBILE_DAEMON_SOCKET_PATH = "/outside/resident.sock";
+      return client;
+    };
+    await runBenchmark(options(), fake.deps);
+    expect(fake.events).toEqual(["make", "create", "close"]);
+    expect(fake.logs.join("\n")).toContain("retaining");
+  });
+
+  test("close and removal errors do not replace the primary failure", async () => {
+    const fake = harness();
+    fake.deps.createClient = async (_server, env) => {
+      fake.envs.push(env);
+      return {
+        callTool: async () => ({
+          isError: true,
+          content: [{ type: "text", text: "launch failed" }],
+        }),
+        close: async () => {
+          throw new Error("close failed");
+        },
+      };
+    };
+    fake.deps.removeRunDir = () => {
+      throw new Error("remove failed");
+    };
+    await expect(runBenchmark({ ...options(), app: "fake.app" }, fake.deps)).rejects.toThrow(
+      "launch failed",
+    );
+    expect(fake.events).toContain("stop");
+    expect(fake.logs.join("\n")).toContain("close failed");
+    expect(fake.logs.join("\n")).toContain("remove failed");
+  });
+
+  test("daemon refusal in warmup error envelopes and thrown calls aborts immediately", async () => {
+    for (const respond of [
+      () => ({ isError: true, content: [{ type: "text", text: refusal }] }),
+      () => ({ structuredContent: { success: false, error: { message: refusal } } }),
+      () => ({
+        structuredContent: { error: "generic" },
+        content: [{ type: "text", text: refusal }],
+      }),
+      () => {
+        throw new Error(refusal);
+      },
+    ]) {
+      const fake = harness(respond);
+      await expect(runBenchmark({ ...options(), iterations: 30 }, fake.deps)).rejects.toThrow(
+        "Wait for the #8749 fix, or stop the resident daemon yourself",
+      );
+      expect(fake.calls()).toBe(1);
+      expect(fake.events).toEqual(["make", "create", "close", "stop", "remove"]);
+    }
+    expect(isPrivateDaemonStartRefusal(refusal)).toBe(true);
+    expect(isPrivateDaemonStartRefusal("Refusing to terminate a live daemon during start")).toBe(
+      true,
+    );
+    expect(isPrivateDaemonStartRefusal("simulator rejected volume_up")).toBe(false);
+  });
+
+  test("ordinary thrown calls are counted, warmup excluded, partial failures keep latency", async () => {
+    const fake = harness((_name, _args, index) => {
+      if (index <= 2) {
+        throw new Error("transient failure");
+      }
+      return success;
+    });
+    const report = await runBenchmark(options(), fake.deps);
+    expect(fake.calls()).toBe(12);
+    expect(report.results.observe.async).toMatchObject({
+      sampleSize: 2,
+      failures: 1,
+      p50: 1,
+      failureReasons: [{ message: "transient failure", count: 1 }],
+    });
+    expect(report.results.observe.settled.failures).toBe(0);
+    expect(benchmarkExitCode(report, { allowFailures: false })).toBe(0);
+  });
+
+  test("all failed error envelopes produce invalid JSON, table reasons and no delta", async () => {
+    const fake = harness(() => ({
+      structuredContent: { success: false, error: "volume_up rejected" },
+    }));
+    const report = await runBenchmark(options(), fake.deps);
+    const metric = report.results.observe.settled;
+    expect(metric).toEqual({
+      invalid: true,
+      sampleSize: 2,
+      failures: 2,
+      screenshotSettledFalse: 0,
+      failureReasons: [{ message: "volume_up rejected", count: 2 }],
+    });
+    expect(report.settledVsAsync).toEqual({});
+    expect(JSON.parse(formatReportJson(report)).results.observe.settled).toEqual(metric);
+    expect(formatReportTable(report)).toContain("INVALID");
+    expect(formatReportTable(report)).toContain("observe/settled (2/2): 2x volume_up rejected");
+    expect(benchmarkExitCode(report, { allowFailures: false })).toBe(1);
+    expect(benchmarkExitCode(report, { allowFailures: true })).toBe(0);
+  });
+});
+
+describe("benchmark failure reporting", () => {
+  test("failure descriptions handle text, structured errors, JSON text and empty envelopes", () => {
+    for (const envelope of [
+      { isError: true, content: [{ type: "text", text: "failed" }] },
+      { structuredContent: { error: "failed" } },
+      { structuredContent: { error: { message: "failed" } } },
+      { structuredContent: { success: false, message: "failed" } },
+      { content: [{ type: "text", text: JSON.stringify({ success: false, error: "failed" }) }] },
+    ]) {
+      expect(describeFailure(envelope)).toBe("failed");
+    }
+    expect(describeFailure({ isError: true, content: [{ type: "text", text: "{broken" }] })).toBe(
+      "{broken",
+    );
+    for (const envelope of [
+      undefined,
+      null,
+      {},
+      { structuredContent: { error: {}, message: " " } },
+      { isError: true, content: [{ type: "text", text: "" }] },
+    ]) {
+      expect(describeFailure(envelope)).toBe("failed with no error message");
+    }
+  });
+
+  test("aggregation deduplicates and sorts count descending then message", () => {
+    expect(aggregateFailureReasons(["z", "b", "z", "a", "b", " "])).toEqual([
+      { message: "b", count: 2 },
+      { message: "z", count: 2 },
+      { message: "a", count: 1 },
+      { message: "failed with no error message", count: 1 },
+    ]);
+  });
+
+  test("JSON preserves full messages and table flattens and truncates only its display", () => {
+    const message = `failure\n${"x".repeat(300)}`;
+    const report = reportWith(calculateMetrics([1, 2], 1, 0, [message]));
+    const table = formatReportTable(report);
+    expect(
+      JSON.parse(formatReportJson(report)).results.observe.settled.failureReasons[0].message,
+    ).toBe(message);
+    expect(table).toContain("Failure reasons:");
+    expect(table).toContain("observe/settled (1/2): 1x failure ");
+    expect(table).toContain("…");
+    expect(table).not.toContain(message);
+    expect(formatReportTable(reportWith(calculateMetrics([1], 0, 0)))).not.toContain(
+      "Failure reasons:",
+    );
+  });
+
+  test("validity ignores empty samples and invalid metrics omit every percentile", () => {
+    expect(isInvalidSeries(0, 0)).toBe(false);
+    expect(isInvalidSeries(2, 1)).toBe(false);
+    expect(isInvalidSeries(2, 2)).toBe(true);
+    const invalid = calculateMetrics([1, 2], 2, 1, ["error", "error"]);
+    for (const key of ["p50", "p95", "p99", "min", "max"]) {
+      expect(Object.hasOwn(invalid, key)).toBe(false);
+    }
+    const valid = calculateMetrics([1, 2], 1, 0, ["error"]);
+    expect(valid).toMatchObject({
+      p50: 1,
+      p95: 2,
+      failureReasons: [{ message: "error", count: 1 }],
+    });
+    expect(settledAsyncDelta(invalid, valid)).toBeUndefined();
+    expect(settledAsyncDelta(valid, invalid)).toBeUndefined();
+  });
+
+  test("allow-failures defaults false, is parsed and documented", () => {
+    expect(parseBenchmarkArgs(["--platform", "ios"]).allowFailures).toBe(false);
+    expect(parseBenchmarkArgs(["--platform", "ios", "--allow-failures"]).allowFailures).toBe(true);
+    expect(helpText()).toContain("--allow-failures");
+  });
+});

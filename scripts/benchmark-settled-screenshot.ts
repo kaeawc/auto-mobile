@@ -1,76 +1,66 @@
 #!/usr/bin/env bun
 /**
- * Manual device benchmark for observe screenshot modes, ahead of issue #8042 PR 2.
- * It starts a fresh MCP child over stdio and gives it a unique auxiliary socket
- * directory in the OS temporary directory, so it cannot connect to or disturb ~/.auto-mobile
- * or /tmp/auto-mobile-daemon-* resident daemon sockets. The directory is removed
- * in finally. pressButton volume_up is the harmless action probe: volume keys
- * do not change app/window state. Its post-action observation uses the ambient
- * automatic screenshot policy; the action API does not accept screenshot mode.
+ * Manual observe screenshot-mode benchmark with one full private daemon namespace
+ * per run: lifecycle socket/PID/lock, auxiliary/WebRTC sockets, data/logs/DB and
+ * launch cwd live in a unique short temp directory. Parent env is never mutated.
+ * Both child launches require the private namespace; cleanup closes MCP, stops
+ * only that namespace's daemon, then removes the directory (retained on stop failure).
+ * Until #8749 is fixed, another live daemon can block private startup; that refusal
+ * aborts immediately without stopping or reusing the resident daemon.
+ * Failure reasons are reported in JSON/table; all-failed series are INVALID and
+ * exit nonzero unless --allow-failures. A missing build fails before any child.
+ * Device coordination remains shared. pressButton volume_up is valid on Android
+ * and iOS; its observation uses the ambient policy, without a screenshot-mode arg.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
+import { errorMessage } from "../src/utils/describeUnknownError";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import {
   calculateMetrics,
+  benchmarkExitCode,
+  describeFailure,
+  envelopeState,
+  invalidSeriesNames,
   formatReportJson,
   formatReportTable,
   helpText,
   parseBenchmarkArgs,
   settledAsyncDelta,
   type BenchmarkReport,
-  type Metrics,
   type ScreenshotMode,
 } from "./benchmarkSettledScreenshotReport";
+import {
+  assertNoPrivateDaemonStartRefusal,
+  assertPrivateDaemonNamespace,
+  assertServerBuilt,
+  buildBenchmarkChildEnv,
+  type BenchmarkChildEnv,
+} from "./benchmarkSettledScreenshotEnv";
 
 export interface BenchmarkClient {
   callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
   close(): Promise<void>;
 }
 export interface BenchmarkDeps {
-  createClient(serverPath: string, auxSocketDir: string): Promise<BenchmarkClient>;
+  createClient(serverPath: string, env: BenchmarkChildEnv): Promise<BenchmarkClient>;
   now(): number;
   log(message: string): void;
   write(path: string, content: string): void;
-  makeAuxDir(): string;
-  removeAuxDir(path: string): void;
+  makeRunDir(): string;
+  removeRunDir(path: string): void;
+  serverExists(path: string): boolean;
+  stopPrivateDaemon(serverPath: string, env: BenchmarkChildEnv): Promise<void>;
+  parentEnv?: BenchmarkChildEnv;
 }
 
 const MODES: ScreenshotMode[] = ["async", "settled", "none"];
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-
-function envelopeState(envelope: unknown): { failed: boolean; payload?: Record<string, unknown> } {
-  const outer = envelope as
-    | {
-        isError?: boolean;
-        structuredContent?: unknown;
-        content?: Array<{ type?: string; text?: string }>;
-      }
-    | undefined;
-  let payload =
-    outer?.structuredContent && typeof outer.structuredContent === "object"
-      ? (outer.structuredContent as Record<string, unknown>)
-      : undefined;
-  if (
-    !payload &&
-    outer?.content?.[0]?.type === "text" &&
-    typeof outer.content[0].text === "string"
-  ) {
-    try {
-      const parsed: unknown = JSON.parse(outer.content[0].text);
-      if (parsed && typeof parsed === "object") {
-        payload = parsed as Record<string, unknown>;
-      }
-    } catch {
-      // Plain text tool responses have no structured payload; top-level isError remains authoritative.
-    }
-  }
-  const failed = Boolean(outer?.isError || payload?.success === false || payload?.error);
-  return { failed, payload };
-}
 
 function observationPayload(
   payload: Record<string, unknown> | undefined,
@@ -85,109 +75,86 @@ export async function runBenchmark(
   options: ReturnType<typeof parseBenchmarkArgs>,
   deps: BenchmarkDeps,
 ): Promise<BenchmarkReport> {
-  const oldAux = process.env.AUTOMOBILE_AUX_SOCKET_DIR;
-  const auxDir = deps.makeAuxDir();
-  process.env.AUTOMOBILE_AUX_SOCKET_DIR = auxDir;
+  const serverPath = resolve(options.serverPath ?? resolve(repoRoot, "dist/src/index.js"));
+  assertServerBuilt(serverPath, deps.serverExists(serverPath));
+  const runDir = deps.makeRunDir();
+  let env: BenchmarkChildEnv | undefined;
   let client: BenchmarkClient | undefined;
+  let childAttempted = false;
   try {
-    const serverPath = options.serverPath ?? resolve(repoRoot, "dist/src/index.js");
-    client = await deps.createClient(serverPath, auxDir);
+    env = buildBenchmarkChildEnv(deps.parentEnv ?? process.env, runDir);
+    assertPrivateDaemonNamespace(env, runDir);
+    childAttempted = true;
+    client = await deps.createClient(serverPath, env);
+    const connectedClient = client;
     const target = options.deviceId
       ? { deviceId: options.deviceId }
       : { platform: options.platform };
+    const call = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+      let envelope: unknown;
+      try {
+        envelope = await connectedClient.callTool(name, args);
+      } catch (error) {
+        const message = errorMessage(error).trim() || "failed with no error message";
+        deps.log(`Warning: ${name} failed: ${message}`);
+        envelope = { isError: true, content: [{ type: "text", text: message }] };
+      }
+      const state = envelopeState(envelope);
+      if (state.parseError) {
+        deps.log(`Warning: ${name} response JSON could not be parsed: ${state.parseError}`);
+      }
+      // Inspect raw text as well: an envelope can contain a generic structured
+      // message alongside the actionable daemon-start refusal in text content.
+      assertNoPrivateDaemonStartRefusal([describeFailure(envelope), ...state.texts].join("\n"));
+      return envelope;
+    };
     if (options.app) {
-      const launch = envelopeState(
-        await client.callTool("launchApp", { appId: options.app, ...target }),
-      );
-      if (launch.failed) {
-        throw new Error(`launchApp failed for ${options.app}.`);
+      const launch = await call("launchApp", { appId: options.app, ...target });
+      if (envelopeState(launch).failed) {
+        throw new Error(`launchApp failed for ${options.app}: ${describeFailure(launch)}`);
       }
     }
     const results: BenchmarkReport["results"] = { observe: {}, pressButton: {} };
     let detectedPlatform = options.platform ?? "unknown";
-    const sample = async (
-      name: "observe" | "pressButton",
-      args: Record<string, unknown>,
-      mode: ScreenshotMode,
-      keep: boolean,
-    ): Promise<{ ms: number; failed: boolean; screenshotSettled: boolean | undefined }> => {
-      const started = deps.now();
-      const envelope = await client!.callTool(name, args);
-      const ms = deps.now() - started;
-      const state = envelopeState(envelope);
-      const observation = observationPayload(state.payload);
-      if (typeof state.payload?.platform === "string") {
-        detectedPlatform = state.payload.platform;
-      }
-      if (typeof observation?.platform === "string") {
-        detectedPlatform = observation.platform;
-      }
-      return {
-        ms,
-        failed: state.failed,
-        screenshotSettled:
-          typeof observation?.screenshotSettled === "boolean"
-            ? observation.screenshotSettled
-            : undefined,
-      };
-    };
-    for (const mode of MODES) {
+    const measure = async (name: string, args: Record<string, unknown>, mode?: ScreenshotMode) => {
       const values: number[] = [];
-      let failures = 0;
+      const failureMessages: string[] = [];
       let falseSettled = 0;
       for (let index = 0; index < options.warmup + options.iterations; index += 1) {
-        const result = await sample(
-          "observe",
-          { screenshot: mode, ...target },
-          mode,
-          index >= options.warmup,
-        );
+        const started = deps.now();
+        const envelope = await call(name, args);
+        const ms = deps.now() - started;
+        const state = envelopeState(envelope);
+        const observation = observationPayload(state.payload);
+        if (typeof state.payload?.platform === "string") {
+          detectedPlatform = state.payload.platform;
+        }
+        if (typeof observation?.platform === "string") {
+          detectedPlatform = observation.platform;
+        }
         if (index < options.warmup) {
           continue;
         }
-        values.push(result.ms);
-        if (result.failed) {
-          failures += 1;
+        values.push(ms);
+        if (state.failed) {
+          failureMessages.push(describeFailure(envelope));
         }
-        if (result.screenshotSettled === false) {
+        if (observation?.screenshotSettled === false && mode !== "none") {
           falseSettled += 1;
         }
       }
-      results.observe[mode] = calculateMetrics(
-        values,
-        failures,
-        mode === "none" ? 0 : falseSettled,
-      );
+      return calculateMetrics(values, failureMessages.length, falseSettled, failureMessages);
+    };
+    for (const mode of MODES) {
+      results.observe[mode] = await measure("observe", { screenshot: mode, ...target }, mode);
     }
-    // No screenshot mode parameter exists on pressButton; each call is explicitly
-    // labeled as an ambient-default action measurement in the report.
-    const action: number[] = [];
-    let actionFailures = 0;
-    let actionFalseSettled = 0;
-    for (let index = 0; index < options.warmup + options.iterations; index += 1) {
-      const result = await sample(
-        "pressButton",
-        { button: "volume_up", ...target },
-        "async",
-        index >= options.warmup,
-      );
-      if (index < options.warmup) {
-        continue;
-      }
-      action.push(result.ms);
-      if (result.failed) {
-        actionFailures += 1;
-      }
-      if (result.screenshotSettled === false) {
-        actionFalseSettled += 1;
-      }
-    }
-    results.pressButton["ambient default"] = calculateMetrics(
-      action,
-      actionFailures,
-      actionFalseSettled,
-    );
-    const report: BenchmarkReport = {
+    // Both platforms support volume_up. pressButton has no screenshot-mode argument.
+    results.pressButton["ambient default"] = await measure("pressButton", {
+      button: "volume_up",
+      ...target,
+    });
+    const delta = settledAsyncDelta(results.observe.settled, results.observe.async);
+    return {
       platform: detectedPlatform,
       deviceId: options.deviceId,
       generatedAt: new Date().toISOString(),
@@ -195,43 +162,102 @@ export async function runBenchmark(
       warmup: options.warmup,
       actionMode: "ambient default, not mode-controlled",
       results,
-      settledVsAsync: {
-        observe: settledAsyncDelta(
-          results.observe.settled as Metrics,
-          results.observe.async as Metrics,
-        ),
-      },
+      settledVsAsync: delta ? { observe: delta } : {},
     };
-    return report;
   } finally {
-    try {
-      if (client) {
-        await client.close();
-      }
-    } finally {
-      if (oldAux === undefined) {
-        delete process.env.AUTOMOBILE_AUX_SOCKET_DIR;
-      } else {
-        process.env.AUTOMOBILE_AUX_SOCKET_DIR = oldAux;
-      }
-      deps.removeAuxDir(auxDir);
-    }
+    await cleanupBenchmark(client, serverPath, env, runDir, childAttempted, deps);
   }
 }
 
-async function createSdkClient(serverPath: string, auxSocketDir: string): Promise<BenchmarkClient> {
+async function cleanupBenchmark(
+  client: BenchmarkClient | undefined,
+  serverPath: string,
+  env: BenchmarkChildEnv | undefined,
+  runDir: string,
+  childAttempted: boolean,
+  deps: BenchmarkDeps,
+): Promise<void> {
+  try {
+    await client?.close();
+  } catch (error) {
+    deps.log(`Warning: MCP close failed for ${runDir}: ${errorMessage(error)}`);
+  }
+  if (childAttempted && env) {
+    try {
+      assertPrivateDaemonNamespace(env, runDir);
+      await deps.stopPrivateDaemon(serverPath, env);
+    } catch (error) {
+      deps.log(`Warning: private daemon stop failed; retaining ${runDir}: ${errorMessage(error)}`);
+      return;
+    }
+  }
+  try {
+    deps.removeRunDir(runDir);
+  } catch (error) {
+    deps.log(`Warning: could not remove ${runDir}: ${errorMessage(error)}`);
+  }
+}
+
+async function createSdkClient(
+  serverPath: string,
+  env: BenchmarkChildEnv,
+): Promise<BenchmarkClient> {
   const client = new Client({ name: "benchmark-settled-screenshot", version: "1.0.0" });
+  assertPrivateDaemonNamespace(env, env.AUTOMOBILE_AUX_SOCKET_DIR ?? "");
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [serverPath],
     stderr: "inherit",
-    env: { ...process.env, AUTOMOBILE_AUX_SOCKET_DIR: auxSocketDir },
+    env: Object.fromEntries(
+      Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    ),
   });
-  await client.connect(transport);
+  try {
+    await client.connect(transport);
+  } catch (error) {
+    try {
+      await client.close();
+    } catch (closeError) {
+      console.warn(`Warning: failed MCP connection cleanup: ${errorMessage(closeError)}`);
+    }
+    throw new Error(`MCP connection failed: ${errorMessage(error)}`, { cause: error });
+  }
   return {
     callTool: (name, args) => client.callTool({ name, arguments: args }),
     close: () => client.close(),
   };
+}
+
+async function stopPrivateDaemon(
+  serverPath: string,
+  env: BenchmarkChildEnv,
+  timer: Timer = defaultTimer,
+): Promise<void> {
+  assertPrivateDaemonNamespace(env, env.AUTOMOBILE_AUX_SOCKET_DIR ?? "");
+  // Bound the wait without signalling any process. On timeout the directory
+  // remains available for the operator, even if the stop command is still alive.
+  const child = spawn(process.execPath, [serverPath, "--daemon", "stop"], {
+    env,
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  await new Promise<void>((resolveStop, reject) => {
+    const timeout = timer.setTimeout(() => {
+      child.unref();
+      reject(new Error("Private daemon stop timed out after 30000ms."));
+    }, 30_000);
+    child.once("error", (error) => {
+      timer.clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("close", (code, signal) => {
+      timer.clearTimeout(timeout);
+      if (code === 0) {
+        resolveStop();
+      } else {
+        reject(new Error(`Private daemon stop exited with ${signal ?? code}.`));
+      }
+    });
+  });
 }
 
 async function main(): Promise<void> {
@@ -254,8 +280,10 @@ async function main(): Promise<void> {
     now: () => performance.now(),
     log: (message) => console.log(message),
     write: (path, content) => writeFileSync(path, content, "utf8"),
-    makeAuxDir: () => mkdtempSync(join(tmpdir(), "benchmark-settled-screenshot-")),
-    removeAuxDir: (path) => rmSync(path, { recursive: true, force: true }),
+    serverExists: existsSync,
+    stopPrivateDaemon,
+    makeRunDir: () => mkdtempSync(join(tmpdir(), "am-bench-")),
+    removeRunDir: (path) => rmSync(path, { recursive: true, force: true }),
   };
   try {
     const report = await runBenchmark(options, deps);
@@ -271,6 +299,13 @@ async function main(): Promise<void> {
         ? formatReportJson(report)
         : `${formatReportTable(report)}\nFull JSON report: ${output}`,
     );
+    process.exitCode = benchmarkExitCode(report, options);
+    const invalid = invalidSeriesNames(report);
+    if (invalid.length > 0) {
+      console.error(
+        `INVALID series (all calls failed): ${invalid.join(", ")}. Use --allow-failures to permit exit zero.`,
+      );
+    }
   } catch (error) {
     console.error(
       `benchmark-settled-screenshot: ${error instanceof Error ? error.message : String(error)}`,

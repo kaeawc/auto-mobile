@@ -58,6 +58,7 @@ describe("benchmark-settled-screenshot pure logic", () => {
       sampleSize: 100,
       failures: 2,
       screenshotSettledFalse: 4,
+      failureReasons: [],
     });
   });
   test("settled delta is signed subtraction", () => {
@@ -70,6 +71,7 @@ describe("benchmark-settled-screenshot pure logic", () => {
       sampleSize: 1,
       failures: 0,
       screenshotSettledFalse: 0,
+      failureReasons: [],
     });
     expect(settledAsyncDelta(metrics(15, 29, 42), metrics(10, 31, 40))).toEqual({
       p50: 5,
@@ -122,8 +124,10 @@ describe("benchmark-settled-screenshot pure logic", () => {
       })(),
       log: () => {},
       write: () => {},
-      makeAuxDir: () => "/tmp/fake-aux",
-      removeAuxDir: () => {},
+      serverExists: () => true,
+      stopPrivateDaemon: async () => {},
+      makeRunDir: () => "/tmp/fake-aux",
+      removeRunDir: () => {},
     };
     const report = await runBenchmark(
       parseBenchmarkArgs(["--device", "emu", "--iterations", "1", "--warmup", "0"]),

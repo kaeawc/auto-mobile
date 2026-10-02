@@ -981,6 +981,10 @@ export class DevicePool {
       completeJoinedEmulatorLossRecovery: (id, outcome, state) =>
         this.completeEmulatorLossRecovery(id, outcome, state),
       getSessionForDevice: (id) => this.sessionManager.getSessionForDevice(id),
+      waitForReleasingSession: (sessionId) =>
+        this.sessionManager.getReleasingSession(sessionId)
+          ? this.sessionManager.waitForSessionRelease(sessionId)
+          : undefined,
       getAndroidSessionPreservingRecoveryTarget: (id, expected) =>
         this.getAndroidSessionPreservingRecoveryTarget(id, expected),
       getSessionPreservingRecoveryTarget: (id, expected) =>

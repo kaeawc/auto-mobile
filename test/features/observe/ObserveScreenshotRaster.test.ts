@@ -10,12 +10,15 @@ import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeImageBackend } from "../../fakes/FakeImageBackend";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { FakeScreenshotStateStore } from "../../fakes/FakeScreenshotStateStore";
 import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
-import { FakeImageBackend } from "../../fakes/FakeImageBackend";
+import { existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname } from "node:path";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device: BootedDevice = { deviceId: "raster-test", name: "Fake", platform: "android" };
@@ -54,9 +57,6 @@ function setup(
   };
   const viewHierarchy = new FakeViewHierarchy();
   viewHierarchy.configureHierarchy(hierarchy);
-  const backend = new FakeImageBackend();
-  backend.setMetadataResult({ width, height, format: "png", size: 12 });
-  const readPaths: string[] = [];
   const cacheStore = new FakeObserveCacheStore(timer);
   const store = new FakeScreenshotStateStore(timer);
   const recorder = new FakeScreenshotRecorder();
@@ -67,8 +67,13 @@ function setup(
     stderr: "",
   });
   let captureFails = false;
-  let unreadableHeader = false;
-  let captureSize: { width: number; height: number } | undefined;
+  let captureSize: { width: number; height: number } | undefined = { width, height };
+  recorder.captureSettled = async (observationId) => {
+    recorder.captureSettledCalls++;
+    const path = "/fake/settled.png";
+    store.updateForObservation(device.deviceId, observationId, path, undefined, captureSize);
+    return path;
+  };
   let capturedDisplayId: number | undefined;
   const screen = new RealObserveScreen(
     { ...device, platform, displays },
@@ -89,15 +94,6 @@ function setup(
       screenshotRecorder: recorder,
       display: displays && platform === "android" ? "external" : undefined,
       screenshotEvidenceFiles: { stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 0 }) },
-      screenshotDimensionsReader: {
-        read: async (path) => {
-          readPaths.push(path);
-          if (unreadableHeader) {
-            return null;
-          }
-          return backend.metadata(Buffer.from(path));
-        },
-      },
       cacheStore,
       screenshotStateStore: store,
     },
@@ -108,26 +104,21 @@ function setup(
   spyOn(screen["accessibilityStateDetector"], "run").mockResolvedValue(undefined);
   return {
     screen,
-    backend,
     store,
     recorder,
-    readPaths,
     cacheStore,
     failCapture: () => {
       captureFails = true;
     },
     capturedDisplay: () => capturedDisplayId,
-    makeHeaderUnreadable: () => {
-      unreadableHeader = true;
-    },
-    setCaptureSize: (size: { width: number; height: number }) => {
+    setCaptureSize: (size: { width: number; height: number } | undefined) => {
       captureSize = size;
     },
   };
 }
 
 test("Android identity scale reaches the default skeleton and cached reuse", async () => {
-  const { screen, readPaths } = setup();
+  const { screen } = setup();
   const result = await screen.execute(options);
   const fields = {
     screenshotOrientation: "display",
@@ -151,23 +142,21 @@ test("Android identity scale reaches the default skeleton and cached reuse", asy
     Buffer.byteLength(JSON.stringify(emitted.structuredContent)) -
       Buffer.byteLength(JSON.stringify(baseline.structuredContent)),
   ).toBe(145);
-  expect(readPaths).toEqual([result.screenshotPath!]);
 });
 
 test("deviceId read uses capture-buffer dimensions without file metadata I/O", async () => {
-  const { screen, setCaptureSize, readPaths } = setup();
+  const { screen, setCaptureSize } = setup();
   setCaptureSize({ width: 540, height: 1200 });
   expect(await screen.executeDeviceRead()).toMatchObject({
     screenshotOrientation: "display",
     screenshotImageSize: { width: 540, height: 1200 },
     screenshotPixelsPerNativeUnit: { x: 0.5, y: 0.5 },
   });
-  expect(readPaths).toEqual([]);
 });
 
 test.each([2, 3])("iOS %sx scale is confirmed by nativeScale", async (scale) => {
-  const { screen, backend } = setup("ios", 400, 800, scale);
-  backend.setMetadataResult({ width: 400 * scale, height: 800 * scale, format: "png", size: 12 });
+  const { screen, setCaptureSize } = setup("ios", 400, 800, scale);
+  setCaptureSize({ width: 400 * scale, height: 800 * scale });
   expect(await screen.execute(options)).toMatchObject({
     screenshotOrientation: "native",
     screenshotImageSize: { width: 400 * scale, height: 800 * scale },
@@ -177,13 +166,15 @@ test.each([2, 3])("iOS %sx scale is confirmed by nativeScale", async (scale) => 
 });
 
 test.each([1, 2, 3])("rotated iOS %s retains portrait raster dimensions", async (rotation) => {
-  const { screen, backend } = setup(
+  const { screen, setCaptureSize } = setup(
     "ios",
     rotation === 2 ? 400 : 800,
     rotation === 2 ? 800 : 400,
     3,
     rotation,
   );
+  setCaptureSize({ width: 1200, height: 2400 });
+  const backend = new FakeImageBackend();
   backend.setMetadataResult({ width: 1200, height: 2400, format: "png", size: 12 });
   const observation = await screen.execute(options);
   expect(observation).toMatchObject({
@@ -214,10 +205,13 @@ test.each([1, 2, 3])("rotated iOS %s retains portrait raster dimensions", async 
 });
 
 test("encoded downscaled capture reports the written raster", async () => {
-  const { screen, backend, recorder } = setup("android", 1080, 2400, 1);
-  backend.setMetadataResult({ width: 540, height: 1200, format: "webp", size: 12 });
-  recorder.captureSettled = async (_id, _perf, _signal, _display, encoding) => {
+  const { screen, store, recorder } = setup("android", 1080, 2400, 1);
+  recorder.captureSettled = async (observationId, _perf, _signal, _display, encoding) => {
     expect(encoding).toEqual({ format: "webp", quality: 70 });
+    store.updateForObservation(device.deviceId, observationId, "/fake/small.webp", undefined, {
+      width: 540,
+      height: 1200,
+    });
     return "/fake/small.webp";
   };
   expect(
@@ -239,39 +233,84 @@ test("session-less deviceId read reports its fresh file", async () => {
   });
 });
 
-test("cached fallback reads cached file dimensions rather than current screen", async () => {
-  const { screen, backend, store, failCapture, readPaths } = setup();
-  store.update(device.deviceId, "/fake/cached.png");
-  backend.setMetadataResult({ width: 540, height: 1200, format: "png", size: 12 });
+test("cached fallback uses cached dimensions without opening the path or writing temp files", async () => {
+  const { screen, cacheStore, store, failCapture, setCaptureSize } = setup();
+  setCaptureSize({ width: 540, height: 1200 });
+  const cached = await screen.executeDeviceRead();
+  const cachedPath = "scratch/rastersize/never-opened/never-opened.png";
+  expect(existsSync(cachedPath)).toBe(false);
+  expect(existsSync(dirname(cachedPath))).toBe(false);
+  await cacheStore.put(device.deviceId, { ...cached, screenshotPath: cachedPath });
+  store.update(device.deviceId, "/fake/other.png");
   failCapture();
-  expect(await screen.executeDeviceRead()).toMatchObject({
-    screenshotPath: "/fake/cached.png",
+  // Parallel shards share the temp directory; compare only names relevant to this path.
+  const relevantTempEntries = () =>
+    readdirSync(tmpdir()).filter((entry) => /screenshot|observe|never-opened/i.test(entry));
+  const tempEntries = new Set(relevantTempEntries());
+  const result = await screen.executeDeviceRead();
+  expect(relevantTempEntries().filter((entry) => !tempEntries.has(entry))).toEqual([]);
+  expect(existsSync(cachedPath)).toBe(false);
+  expect(existsSync(dirname(cachedPath))).toBe(false);
+  expect(existsSync("scratch/rastersize/never-opened.png")).toBe(false);
+  expect(result).toMatchObject({
+    screenshotPath: cachedPath,
     screenshotSource: "cached",
     screenshotImageSize: { width: 540, height: 1200 },
     screenshotPixelsPerNativeUnit: { x: 0.5, y: 0.5 },
+    screenshotScaleProvenance: "raster-dimensions",
+    screenshotSettled: false,
   });
-  expect(readPaths).toEqual(["/fake/cached.png"]);
 });
 
-test("metadata failure succeeds, clears old dimensions, and warns", async () => {
-  const { screen, backend } = setup();
+test("cached fallback with only a state-store path succeeds without raster dimensions and warns", async () => {
+  const { screen, store, failCapture } = setup();
+  store.update(device.deviceId, "/fake/cached.png");
+  failCapture();
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const result = await screen.executeDeviceRead();
+  expect(result).toMatchObject({
+    screenshotPath: "/fake/cached.png",
+    screenshotSource: "cached",
+    screenshotSettled: false,
+  });
+  expect(result.screenshotImageSize).toBeUndefined();
+  expect(result.screenshotPixelsPerNativeUnit).toBeUndefined();
+  expect(result.screenshotScaleProvenance).toBeUndefined();
+  expect(warn).toHaveBeenCalledWith("[OBSERVE] Could not read screenshot raster dimensions");
+});
+
+test("state-store fallback does not borrow dimensions from a cache entry without a path", async () => {
+  const { screen, cacheStore, store, failCapture } = setup();
+  const cached = await screen.executeDeviceRead();
+  delete cached.screenshotPath;
+  await cacheStore.put(device.deviceId, cached);
+  store.update(device.deviceId, "/fake/other.png");
+  failCapture();
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const result = await screen.executeDeviceRead();
+  expect(result.screenshotPath).toBe("/fake/other.png");
+  expect(result.screenshotImageSize).toBeUndefined();
+  expect(result.screenshotPixelsPerNativeUnit).toBeUndefined();
+  expect(result.screenshotScaleProvenance).toBeUndefined();
+  expect(warn).toHaveBeenCalledWith("[OBSERVE] Could not read screenshot raster dimensions");
+});
+
+test("missing capture dimensions succeeds, clears old dimensions, and warns", async () => {
+  const { screen, setCaptureSize } = setup();
   const observation = await screen.execute(options);
-  backend.setShouldThrowOnMetadata(true);
+  setCaptureSize(undefined);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   await screen.captureScreenshot(undefined, undefined, observation, "settled");
   expect(observation.screenshotSettled).toBe(true);
   expect(observation.screenshotImageSize).toBeUndefined();
   expect(observation.screenshotPixelsPerNativeUnit).toBeUndefined();
   expect(observation.screenshotScaleProvenance).toBeUndefined();
-  expect(warn).toHaveBeenCalledWith(
-    expect.stringContaining("Could not derive screenshot raster scale"),
-    expect.any(Error),
-  );
+  expect(warn).toHaveBeenCalledWith("[OBSERVE] Could not read screenshot raster dimensions");
 });
 
 test("incompatible aspect ratio retains imageSize and omits scale without failing observe", async () => {
-  const { screen, backend } = setup();
-  backend.setMetadataResult({ width: 800, height: 800, format: "png", size: 12 });
+  const { screen, setCaptureSize } = setup();
+  setCaptureSize({ width: 800, height: 800 });
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   const result = await screen.execute(options);
   expect(result.screenshotImageSize).toEqual({ width: 800, height: 800 });
@@ -309,7 +348,7 @@ test("per-display settled and device reads use the captured panel geometry", asy
 });
 
 test("fresh settled capture uses writer dimensions without another file read", async () => {
-  const { screen, recorder, store, readPaths } = setup();
+  const { screen, recorder, store } = setup();
   recorder.captureSettled = async (observationId) => {
     store.updateForObservation(device.deviceId, observationId, "/fake/settled.png", undefined, {
       width: 540,
@@ -320,35 +359,32 @@ test("fresh settled capture uses writer dimensions without another file read", a
   const result = await screen.execute(options);
   expect(result.screenshotImageSize).toEqual({ width: 540, height: 1200 });
   expect(result.screenshotPixelsPerNativeUnit).toEqual({ x: 0.5, y: 0.5 });
-  expect(readPaths).toEqual([]);
 });
 
-test("metadata null or invalid raster sizes warn and omit fields", async () => {
-  for (const width of [null, 0, -1, 1.5, NaN]) {
-    const { screen, backend, makeHeaderUnreadable } = setup();
-    if (width === null) {
-      makeHeaderUnreadable();
-    } else {
-      backend.setMetadataResult({ width, height: 2400, format: "png", size: 12 });
-    }
+test.each([undefined, 0, -1, 1.5, NaN])(
+  "missing or invalid raster width %s warns and omits fields",
+  async (width) => {
+    const { screen, setCaptureSize } = setup();
+    setCaptureSize(width === undefined ? undefined : { width, height: 2400 });
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const result = await screen.execute(options);
     expect(result.screenshotImageSize).toBeUndefined();
     expect(result.screenshotPixelsPerNativeUnit).toBeUndefined();
+    expect(result.screenshotScaleProvenance).toBeUndefined();
     expect(result.screenshotSettled).toBe(true);
     expect(warn).toHaveBeenCalledWith("[OBSERVE] Could not read screenshot raster dimensions");
-  }
-});
+  },
+);
 
 test("iOS multi-panel landscape capture is already display-oriented", async () => {
-  const { screen, backend } = setup("ios", 800, 400, 2, 1, {
+  const { screen, setCaptureSize } = setup("ios", 800, 400, 2, 1, {
     panels: [
       { key: "0", role: "primary", sizePx: { width: 800, height: 400 } },
       { key: "1", role: "external", sizePx: { width: 100, height: 100 } },
     ],
     postures: [],
   });
-  backend.setMetadataResult({ width: 1600, height: 800, format: "png", size: 12 });
+  setCaptureSize({ width: 1600, height: 800 });
   expect(await screen.execute(options)).toMatchObject({
     screenshotImageSize: { width: 1600, height: 800 },
     screenshotOrientation: "display",
@@ -376,7 +412,7 @@ test.each([
           postures: [],
         }
       : undefined;
-    const { screen, backend, store, failCapture } = setup(
+    const { screen, setCaptureSize, cacheStore, failCapture } = setup(
       "ios",
       width,
       height,
@@ -387,18 +423,16 @@ test.each([
     const imageSize = multiPanel
       ? { width: width * 2, height: height * 2 }
       : { width: 800, height: 1600 };
-    backend.setMetadataResult({ ...imageSize, format: "png", size: 12 });
+    setCaptureSize(imageSize);
     const fields = {
       screenshotOrientation: "native",
       screenshotImageSize: imageSize,
       screenshotPixelsPerNativeUnit: { x: 2, y: 2 },
       screenshotScaleProvenance: "native-scale-confirmed",
     };
-    expect(await screen.executeDeviceRead()).toMatchObject({
-      ...fields,
-      screenshotSource: "fresh",
-    });
-    store.update(device.deviceId, "/fake/cached.png");
+    const fresh = await screen.executeDeviceRead();
+    expect(fresh).toMatchObject({ ...fields, screenshotSource: "fresh" });
+    await cacheStore.put(device.deviceId, { ...fresh, screenshotPath: "/fake/cached.png" });
     failCapture();
     expect(await screen.executeDeviceRead()).toMatchObject({
       ...fields,
@@ -407,24 +441,22 @@ test.each([
   },
 );
 
-test.each(["portrait", "unreadable", "incompatible"])(
+test.each(["portrait", "unavailable", "incompatible"])(
   "iOS multi-panel settled orientation preserves the aspect rule for %s raster",
   async (raster) => {
-    const { screen, backend, makeHeaderUnreadable } = setup("ios", 800, 400, 2, 1, {
+    const { screen, setCaptureSize } = setup("ios", 800, 400, 2, 1, {
       panels: [
         { key: "0", role: "primary", sizePx: { width: 800, height: 400 } },
         { key: "1", role: "external", sizePx: { width: 100, height: 100 } },
       ],
       postures: [],
     });
-    if (raster === "unreadable") {
-      makeHeaderUnreadable();
+    if (raster === "unavailable") {
+      setCaptureSize(undefined);
     } else {
-      backend.setMetadataResult({
+      setCaptureSize({
         width: raster === "portrait" ? 800 : 1000,
         height: raster === "portrait" ? 1600 : 800,
-        format: "png",
-        size: 12,
       });
     }
     const result = await screen.execute(options);

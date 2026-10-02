@@ -110,10 +110,6 @@ import {
 } from "./DisplaySelection";
 import type { DisplayObservation } from "../../models/ObserveResult";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import {
-  HeaderScreenshotDimensionsReader,
-  type ScreenshotDimensionsReader,
-} from "./screenshot/ScreenshotDimensionsReader";
 import { snapshotRasterGeometry } from "./screenshot/snapshotRasterGeometry";
 import {
   observationScreenshotEvidence,
@@ -581,7 +577,6 @@ export class RealObserveScreen implements ObserveScreen {
 
   private screenshotRecorder: ObserveScreenshotRecorder;
   private readonly screenshotService: ScreenshotService;
-  private readonly screenshotDimensionsReader: ScreenshotDimensionsReader;
   private screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
   private readonly pathProtection: ScreenshotPathProtection;
   private hierarchyCollector: HierarchyCollector;
@@ -735,8 +730,6 @@ export class RealObserveScreen implements ObserveScreen {
         this.pathProtection,
       );
     this.screenshotEvidenceFiles = dependencies?.screenshotEvidenceFiles;
-    this.screenshotDimensionsReader =
-      dependencies?.screenshotDimensionsReader ?? new HeaderScreenshotDimensionsReader();
     this.hierarchyCollector =
       dependencies?.hierarchyCollector ??
       new HierarchyCollector({
@@ -927,13 +920,13 @@ export class RealObserveScreen implements ObserveScreen {
         `observe crop screenshot capture failed for device ${this.device.deviceId}: ${failure}. Retry with a fresh settled capture.`,
       );
     }
-    const cachedPath = this.eligibleCachedScreenshotPath(displayId);
-    if (cachedPath) {
+    const cachedScreenshot = this.eligibleCachedScreenshot(displayId);
+    if (cachedScreenshot) {
       try {
         Object.assign(
           result,
           await observationScreenshotEvidence(
-            cachedPath,
+            cachedScreenshot.path,
             "cached",
             failure,
             this.screenshotEvidenceFiles,
@@ -941,7 +934,7 @@ export class RealObserveScreen implements ObserveScreen {
             this.pathProtection,
           ),
         );
-        await this.attachScreenshotRaster(result);
+        await this.attachScreenshotRaster(result, cachedScreenshot.imageSize);
       } catch (error) {
         logger.warn(`[OBSERVE] Cached screenshot unavailable: ${describeError(error)}`, error);
       }
@@ -969,9 +962,28 @@ export class RealObserveScreen implements ObserveScreen {
     return displayId;
   }
 
-  private eligibleCachedScreenshotPath(displayId?: number): string | undefined {
+  private eligibleCachedScreenshot(
+    displayId?: number,
+  ): { path: string; imageSize?: { width: number; height: number } } | undefined {
     const cached = getObserveCacheStore().getRecentInMemoryForDevice(this.device.deviceId);
     const explicitDisplay = Boolean(this.requestedDisplay && this.requestedDisplay !== "active");
+    if (!this.cachedScreenshotDisplayMatches(cached, displayId)) {
+      return undefined;
+    }
+    if (cached?.screenshotPath) {
+      return { path: cached.screenshotPath, imageSize: cached.screenshotImageSize };
+    }
+    const path =
+      !explicitDisplay && displayId === undefined
+        ? getScreenshotStateStore().getPath(this.device.deviceId)
+        : undefined;
+    return path ? { path } : undefined;
+  }
+
+  private cachedScreenshotDisplayMatches(
+    cached: ObserveResult | undefined,
+    displayId?: number,
+  ): boolean {
     const displayMatches = [
       undefined,
       "active",
@@ -979,15 +991,7 @@ export class RealObserveScreen implements ObserveScreen {
       cached?.display.role,
     ].includes(this.requestedDisplay);
     const displayIdMatches = [undefined, cached?.viewHierarchy?.displayId].includes(displayId);
-    if (!displayMatches || !displayIdMatches) {
-      return undefined;
-    }
-    if (cached?.screenshotPath) {
-      return cached.screenshotPath;
-    }
-    return !explicitDisplay && displayId === undefined
-      ? getScreenshotStateStore().getPath(this.device.deviceId)
-      : undefined;
+    return displayMatches && displayIdMatches;
   }
 
   /**
@@ -1987,14 +1991,12 @@ export class RealObserveScreen implements ObserveScreen {
   /** Best-effort raster evidence belongs to the returned path, never the screen-size guess. */
   private async attachScreenshotRaster(
     observation: ObserveResult,
-    capturedSize?: { width: number; height: number },
+    imageSize: { width: number; height: number } | undefined,
   ): Promise<void> {
     delete observation.screenshotImageSize;
     delete observation.screenshotPixelsPerNativeUnit;
     delete observation.screenshotScaleProvenance;
     try {
-      const imageSize =
-        capturedSize ?? (await this.screenshotDimensionsReader.read(observation.screenshotPath!));
       if (
         !imageSize ||
         ![imageSize.width, imageSize.height].every((value) => Number.isInteger(value) && value > 0)

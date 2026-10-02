@@ -39,10 +39,12 @@ failed discovery asks for an explicit ID. Batches resolve once. Private
 `/storage/emulated/<userId>/Android/data/<appId>/files` for nonzero users.
 Shared-storage domains keep their existing resolution.
 
-The list resource is
-`automobile:devices/{deviceId}/apps/{appId}/files/{container}{?userId}`;
+The canonical list resource is
+`automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}{?userId}`;
+its existing `automobile:devices/{deviceId}/apps/{appId}/files/{container}{?userId}`
+alias remains supported until device verification permits retirement;
 append `/{path}` before the query to read a file. For example:
-`automobile:devices/emulator-5554/apps/com.example.app/files/documents/settings.json?userId=10`.
+`automobile:devices/emulator-5554/storage-domains/app_containers/com.example.app/documents/settings.json?userId=10`.
 Both accept the same optional `?userId=N`; omission auto-resolves on Android.
 Returned put and list file URIs pin the resolved Android user. Explicit IDs
 always round-trip, including `?userId=0`, without extra discovery. Auto-resolved

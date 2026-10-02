@@ -280,7 +280,41 @@ describe("storageCapabilityResources", () => {
       "supported",
       "supported",
       "supported",
+      "supported",
+      "supported",
     ]);
+  });
+
+  test("injected provider coverage controls capability resources independently of shared reads", async () => {
+    const coverageCalls: string[] = [];
+    setDevices([androidEmulator], {
+      adbFactory: new FakeAdbClientFactory(),
+      createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+      appFileCoverage: {
+        describeProviderCoverage: () => {
+          coverageCalls.push("providers");
+          return [];
+        },
+      },
+      sharedStorageReadCoverage: (platform) => {
+        coverageCalls.push(platform);
+        return { list: true, read: false };
+      },
+    });
+    const content = await readResource("automobile:devices/emulator-5554/storage/capabilities");
+    const body = JSON.parse(content.text ?? "{}");
+    const userFiles = body.domains.find(
+      (domain: { domain: string }) => domain.domain === "user_files",
+    );
+    expect(userFiles.operations.map((operation: { state: string }) => operation.state)).toEqual([
+      "supported",
+      "unavailable",
+      "unavailable",
+      "unavailable",
+      "unavailable",
+    ]);
+    expect(coverageCalls).toEqual(["providers", "android"]);
+    expect(userFiles.operations[1].reason).toContain("SharedStorageReadService read provider");
   });
 
   test("reports unavailable when no Android user can be selected", async () => {
@@ -299,6 +333,8 @@ describe("storageCapabilityResources", () => {
       (domain: { domain: string }) => domain.domain === "user_files",
     );
     expect(userFiles.operations.map((operation: { state: string }) => operation.state)).toEqual([
+      "unavailable",
+      "unavailable",
       "unavailable",
       "unavailable",
       "unavailable",
@@ -321,6 +357,8 @@ describe("storageCapabilityResources", () => {
       (domain: { domain: string }) => domain.domain === "user_files",
     );
     expect(userFiles.operations.map((operation: { state: string }) => operation.state)).toEqual([
+      "partial",
+      "partial",
       "partial",
       "partial",
       "partial",

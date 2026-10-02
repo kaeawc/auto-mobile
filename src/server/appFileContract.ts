@@ -24,6 +24,12 @@ export const APP_FILE_RESOURCE_TEMPLATES = {
   FILE: "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}{?userId}",
 } as const;
 
+export const CANONICAL_APP_FILE_RESOURCE_TEMPLATES = {
+  CONTAINER:
+    "automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}{?userId}",
+  FILE: "automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}/{path}{?userId}",
+} as const;
+
 export interface AppFileResourceParts {
   userId?: number;
   deviceId: string;
@@ -451,10 +457,19 @@ function encodePathSegments(path: string): string {
 }
 
 export function buildAppFileResourceUri(parts: AppFileResourceParts): string {
+  return buildAppFileUri(parts, false);
+}
+
+export function buildCanonicalAppFileResourceUri(parts: AppFileResourceParts): string {
+  return buildAppFileUri(parts, true);
+}
+
+function buildAppFileUri(parts: AppFileResourceParts, canonical: boolean): string {
   const base =
     `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
-    `/apps/${encodeURIComponent(parts.appId)}` +
-    `/files/${encodeURIComponent(parts.container)}`;
+    (canonical
+      ? `/storage-domains/app_containers/${encodeURIComponent(parts.appId)}/${encodeURIComponent(parts.container)}`
+      : `/apps/${encodeURIComponent(parts.appId)}/files/${encodeURIComponent(parts.container)}`);
   const uri = parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
   return parts.userId === undefined
     ? uri

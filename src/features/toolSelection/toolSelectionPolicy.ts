@@ -5,7 +5,7 @@ import {
 } from "./SessionToolSelectionService";
 import { SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionControl";
 
-type ToolSelectionReader = Pick<SessionToolSelectionService, "isEnabled"> &
+export type ToolSelectionReader = Pick<SessionToolSelectionService, "isEnabled"> &
   Partial<Pick<SessionToolSelectionService, "getOverride">>;
 
 /**

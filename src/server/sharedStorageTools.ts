@@ -31,14 +31,14 @@ export function registerSharedStorageTools(
 
   ToolRegistry.registerDeviceAware(
     "stageSharedStorage",
-    "Stage host-file, UTF-8, or base64 fixtures into one bounded Android Downloads namespace for system pickers.",
+    'Deprecated alias of putAppFile with target.domain "user_files"; retained until device verification. Stage host-file, UTF-8, or base64 fixtures into one bounded Android Downloads namespace for system pickers.',
     stageSharedStorageSchema,
     stageHandler,
     { defaultEnabled: true },
   );
   ToolRegistry.registerDeviceAware(
     "stageSharedStorageFixtures",
-    "Stage files in an isolated Android Download namespace for system picker workflows.",
+    'Deprecated alias of putAppFile with target.domain "user_files"; retained until device verification. Stage files in an isolated Android Download namespace for system picker workflows.',
     stageSharedStorageSchema,
     stageHandler,
     { defaultEnabled: false },

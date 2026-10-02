@@ -6,6 +6,26 @@ Android's single `storage.keystore` capability through the typed CtrlProxy
 `discover_keystore` request. No app scope or disabled embedded-SDK configuration
 means no discovery is attempted. iOS secure-state policy remains owned by #5161.
 
+App-container, user-files, and media-library operations derive from the registered
+production provider instances, combined with device/prerequisite signals. Missing
+write/list/read providers yield unavailable (or preserve a platform unsupported
+state); reset and indexing require the write provider's feature declaration.
+Bounded Android user-files list/read coverage comes separately from
+`SharedStorageReadService`. Android user_files reports `namespace_reset` (only
+the declared Downloads namespace) and optional `media_indexing`; media_library
+reports write and indexing according to its provider. iOS Simulator imports have
+no host MediaScanner indexing equivalent. Neither platform exposes media-library
+list/read. Capability support describes the registered contract, not proof that
+a device workflow has been verified.
+
+Canonical file resources use exact storage-domain names:
+`automobile:devices/{deviceId}/storage-domains/app_containers/{appId}/{container}[/{path}]{?userId}`
+and `automobile:devices/{deviceId}/storage-domains/user_files/{namespace}[/{path}]`.
+The app `.../apps/{appId}/files/{container}[/{path}]{?userId}` and bounded Downloads
+`.../downloads/{namespace}[/{path}]` aliases remain supported until device
+verification permits retirement; emitted write/list links remain aliases.
+See [putAppFile's canonical examples and session policy](../tools.md).
+
 KeystoreTestState is a code-only opt-in, disabled by default. The app declares an
 exact scope name and explicit alias set; no prefixes, globs, or cross-app access.
 The provider exists only in the SDK debug variant and executes in the target

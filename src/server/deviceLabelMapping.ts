@@ -4,6 +4,7 @@ import { createToolExecutionContext } from "./ToolExecutionContext";
 import type { SessionOptions } from "./ToolExecutionContext";
 import type { DeviceLabelMap, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { logger } from "../utils/logger";
+import { combineAbortSignals } from "../utils/AbortContext";
 
 const buildDeviceLabelList = (labels: string[]): string[] => {
   const seen = new Set<string>();
@@ -56,6 +57,97 @@ export const getDeviceLabelMap = (baseSessionUuid: string): DeviceLabelMap | nul
   return sessionManager.getDeviceLabels(baseSessionUuid) ?? null;
 };
 
+/**
+ * No general pool/boot parallel-start limit exists in devicePool.ts. Its
+ * assignmentMutex serializes assignment, preventing two labels from receiving
+ * the same device, before this readiness setup runs. This bound only caps
+ * concurrent CtrlProxy/accessibility-service readiness bring-up.
+ */
+export const MAX_CONCURRENT_LABEL_SESSION_SETUPS = 4;
+
+export const setUpLabelSessionsConcurrently = async (options: {
+  sessionUuids: readonly string[];
+  setup: (sessionUuid: string, signal: AbortSignal | undefined) => Promise<unknown>;
+  signal?: AbortSignal;
+  maxConcurrency?: number;
+}): Promise<void> => {
+  const {
+    sessionUuids,
+    setup,
+    signal,
+    maxConcurrency = MAX_CONCURRENT_LABEL_SESSION_SETUPS,
+  } = options;
+  if (sessionUuids.length === 0) {
+    return;
+  }
+  signal?.throwIfAborted();
+  if (sessionUuids.length === 1) {
+    await setup(sessionUuids[0], signal);
+    return;
+  }
+  if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+    throw new RangeError("maxConcurrency must be a positive integer");
+  }
+
+  const controller = new AbortController();
+  const siblingAbortReason = new DOMException(
+    "Another label's readiness setup failed",
+    "AbortError",
+  );
+  const setupSignal = combineAbortSignals(signal, controller.signal);
+  const failures: Array<{ error: unknown } | undefined> = [];
+  let nextIndex = 0;
+
+  const isSiblingAbort = (error: unknown): boolean => {
+    if (!controller.signal.aborted || signal?.aborted) {
+      return false;
+    }
+    return (
+      error === siblingAbortReason ||
+      (typeof error === "object" &&
+        error !== null &&
+        (("name" in error && error.name === "AbortError") ||
+          ("code" in error && error.code === "ABORT_ERR")))
+    );
+  };
+
+  const runSetup = async (index: number): Promise<void> => {
+    try {
+      await setup(sessionUuids[index], setupSignal);
+    } catch (error) {
+      // A prior genuine failure cancels siblings. Ignore only our own abort
+      // reason/abort-shaped fallout while the caller has not cancelled, so a
+      // lower-index sibling cancellation cannot replace the real cause.
+      if (isSiblingAbort(error)) {
+        logger.debug("[DeviceLabelMap] Sibling readiness setup cancelled", { error });
+        return;
+      }
+      logger.warn("[DeviceLabelMap] Label readiness setup failed", {
+        sessionUuid: sessionUuids[index],
+        error,
+      });
+      failures[index] = { error };
+      controller.abort(siblingAbortReason);
+    }
+  };
+
+  const worker = async (): Promise<void> => {
+    while (nextIndex < sessionUuids.length && !setupSignal?.aborted) {
+      const index = nextIndex++;
+      await runSetup(index);
+    }
+  };
+
+  // Drain every started setup before returning or throwing. Sessions remain
+  // owned by the published map; releaseDeviceLabelSessions/expiry releases them.
+  await Promise.all(Array.from({ length: Math.min(maxConcurrency, sessionUuids.length) }, worker));
+  const failure = failures.find((entry) => entry !== undefined);
+  if (failure) {
+    throw failure.error;
+  }
+  signal?.throwIfAborted();
+};
+
 export const registerDeviceLabelMap = async (
   baseSessionUuid: string,
   labels: string[],
@@ -94,18 +186,21 @@ export const registerDeviceLabelMap = async (
   const assignedSessions = new Set(Object.values(deviceLabelMap));
   assignedSessions.delete(baseSessionUuid);
 
-  for (const sessionUuid of assignedSessions) {
-    await createToolExecutionContext(
-      sessionUuid,
-      sessionManager,
-      devicePool,
-      sessionOptions,
-      execution,
-      undefined,
-      false,
-      signal,
-    );
-  }
+  await setUpLabelSessionsConcurrently({
+    sessionUuids: [...assignedSessions],
+    signal,
+    setup: (sessionUuid, setupSignal) =>
+      createToolExecutionContext(
+        sessionUuid,
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        execution,
+        undefined,
+        false,
+        setupSignal,
+      ),
+  });
 
   logger.info(
     `[DeviceLabelMap] Registered labels for session ${baseSessionUuid}: ${Object.keys(deviceLabelMap).join(", ")}`,

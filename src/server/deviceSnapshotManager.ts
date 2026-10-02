@@ -581,12 +581,7 @@ async function recordFailedVmSnapshotReclaim(
   const timestamp = now().toISOString();
   try {
     const existing = await snapshotRepository.getSnapshot(snapshotName);
-    if (
-      existing &&
-      (!isVmSnapshotRecord(existing) ||
-        existing.deviceId !== device.deviceId ||
-        existing.deviceName !== device.name)
-    ) {
+    if (existing && (!isVmSnapshotRecord(existing) || existing.deviceName !== device.name)) {
       const preservationReason = isVmSnapshotRecord(existing)
         ? `it belongs to AVD '${existing.deviceName}' (${existing.deviceId})`
         : "it is a non-VM snapshot record";
@@ -1017,7 +1012,8 @@ async function importFlatLegacySnapshots(
     if (isReservedScopeSegment(snapshotName)) {
       continue;
     }
-    if (existingSnapshots.has(snapshotName)) {
+    // Listing must not wait for a capture's lifecycle lock or import its partial data.
+    if (existingSnapshots.has(snapshotName) || snapshotNameLocks.has(snapshotName)) {
       continue;
     }
 
@@ -1080,7 +1076,8 @@ async function importScopedLegacySnapshots(
       if (snapshotName.endsWith(SNAPSHOT_REPLACING_SUFFIX)) {
         continue;
       }
-      if (existingSnapshots.has(snapshotName)) {
+      // Skip busy names without waiting; a later listing can import completed data.
+      if (existingSnapshots.has(snapshotName) || snapshotNameLocks.has(snapshotName)) {
         continue;
       }
 
@@ -1334,13 +1331,27 @@ async function deleteDeviceSnapshotRecord(
  * delete for the same snapshot (#6490).
  */
 async function removeSnapshotArchiveAndRow(record: DeviceSnapshotRecord): Promise<boolean> {
-  const { snapshotRepository, snapshotStore } = await getDeviceSnapshotDependencies();
+  const { snapshotRepository } = await getDeviceSnapshotDependencies();
+  await removeSnapshotArchiveData(record);
+  return snapshotRepository.deleteSnapshot(record.snapshotName);
+}
+
+/** Remove archive bytes only, optionally protecting a successful replacement's path. */
+async function removeSnapshotArchiveData(
+  record: DeviceSnapshotRecord,
+  options: { preserveSnapshotPath?: string } = {},
+): Promise<void> {
+  const { snapshotStore } = await getDeviceSnapshotDependencies();
   const pathOptions = getSnapshotPathOptions({
     platform: record.platform,
     deviceId: record.deviceId,
     // For Android, deviceName holds the AVD name (see the capture manifest).
     avdName: record.deviceName,
   });
+  const snapshotPath = snapshotStore.getSnapshotPathWithOptions(record.snapshotName, pathOptions);
+  if (snapshotPath === options.preserveSnapshotPath) {
+    return;
+  }
   await snapshotStore.deleteSnapshotData(record.snapshotName, pathOptions);
   // Snapshots captured before AVD-scoping (#5707) — including any created in the
   // ~/.auto-mobile base-path window between #5716 and this change — keep their
@@ -1352,11 +1363,13 @@ async function removeSnapshotArchiveAndRow(record: DeviceSnapshotRecord): Promis
   // always been scoped, so its flat path could hold unrelated Android data.
   // Never clear a reserved scope root (a snapshot literally named "android"/"ios",
   // whose flat path IS the scope tree); name sanitization is tracked separately (#5705).
-  if (pathOptions?.platform === "android" && !isReservedScopeSegment(record.snapshotName)) {
+  if (
+    pathOptions?.platform === "android" &&
+    !isReservedScopeSegment(record.snapshotName) &&
+    snapshotStore.getSnapshotPath(record.snapshotName) !== options.preserveSnapshotPath
+  ) {
     await snapshotStore.deleteSnapshotData(record.snapshotName);
   }
-  const deleted = await snapshotRepository.deleteSnapshot(record.snapshotName);
-  return deleted;
 }
 
 // Top-level segments the store uses to scope snapshots by platform/device. A
@@ -2169,6 +2182,24 @@ export async function captureDeviceSnapshot(
           throw error;
         }
 
+        // The row now belongs to this capture. Retire the prior archive scope only
+        // after replacement succeeds, while the name lock still protects both paths.
+        if (previousRecord) {
+          try {
+            await removeSnapshotArchiveData(previousRecord, {
+              preserveSnapshotPath: snapshotStore.getSnapshotPathWithOptions(
+                snapshotName,
+                pathOptions,
+              ),
+            });
+          } catch (error) {
+            // Retirement is best-effort: the successful replacement remains usable.
+            logger.warn(
+              `[DeviceSnapshot] Failed to retire prior archive data for '${snapshotName}': ${errorMessage(error)}`,
+              error,
+            );
+          }
+        }
         return captureResult;
       });
 
@@ -2242,6 +2273,26 @@ export async function restoreDeviceSnapshot(
       const reason = record.pendingReclaimReason ? `: ${record.pendingReclaimReason}` : "";
       throw new ActionableError(
         `Snapshot '${record.snapshotName}' is awaiting reclaim after a failed capture${reason}`,
+      );
+    }
+
+    try {
+      await snapshotStore.recoverSnapshotData(
+        record.snapshotName,
+        getSnapshotPathOptions({
+          platform: record.platform,
+          deviceId: record.deviceId,
+          avdName: record.deviceName,
+        }),
+      );
+    } catch (error) {
+      logger.warn(
+        `[DeviceSnapshot] Failed to recover snapshot '${record.snapshotName}' before restore: ${errorMessage(error)}`,
+        error,
+      );
+      throw toActionableError(
+        error,
+        `Failed to recover snapshot '${record.snapshotName}' before restore`,
       );
     }
 

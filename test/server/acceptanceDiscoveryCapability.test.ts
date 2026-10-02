@@ -1,4 +1,14 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import {
@@ -31,6 +41,14 @@ function restoreEnv(name: string, value: string | undefined): void {
     process.env[name] = value;
   }
 }
+
+let restoreDeviceToolProviders: () => void;
+beforeEach(() => {
+  restoreDeviceToolProviders = installFakeDeviceToolProviders();
+});
+afterEach(() => {
+  restoreDeviceToolProviders();
+});
 
 describe("acceptance discovery presentation capability (issue #7144)", () => {
   beforeAll(async () => {
@@ -66,7 +84,12 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
       acceptanceDiscoveryCapability: CAPABILITY,
     });
     unconfiguredFixture = new McpTestFixture({ daemonMode: true });
-    await Promise.all([configuredFixture.setup(), unconfiguredFixture.setup()]);
+    const restoreStartupProviders = installFakeDeviceToolProviders();
+    try {
+      await Promise.all([configuredFixture.setup(), unconfiguredFixture.setup()]);
+    } finally {
+      restoreStartupProviders();
+    }
   });
 
   afterAll(async () => {

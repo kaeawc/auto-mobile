@@ -4,6 +4,8 @@
 test/features/observe/activityActivitiesDumps/*.log text eol=lf
 test/fixtures/duo-enumerate.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
+# Pin byte-exact captured plutil output to LF across Windows checkouts.
+test/fixtures/ios-userdefaults-plist/*.plist text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 
 # Git LFS tracking for binary assets

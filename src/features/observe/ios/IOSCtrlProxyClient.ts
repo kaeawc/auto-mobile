@@ -89,6 +89,14 @@ import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/re
 import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
 import { iosMutationTokens } from "../../storage/IosMutationTokens";
 
+/** Pending requests lose their transport when the service endpoint changes. */
+export class CtrlProxyServicePortChangedError extends Error {
+  constructor() {
+    super("CtrlProxy service port changed");
+    this.name = "CtrlProxyServicePortChangedError";
+  }
+}
+
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
  * Used for testing to inject fake service managers.
@@ -1425,7 +1433,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         const staleSocket = this.ws;
         this.ws = null;
         this.stopHealthCheck();
-        this.requestManager.cancelAll(new Error("CtrlProxy service port changed"));
+        this.requestManager.cancelAll(new CtrlProxyServicePortChangedError());
         staleSocket.removeAllListeners();
         staleSocket.close();
       }
@@ -3585,6 +3593,28 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
   ): Promise<import("../../storage/storageTypes").KeyValueEntry[]> {
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
+  }
+
+  /** Existing-socket UserDefaults access: never reconnect or provision a runner. */
+  public getConnectedPreferenceClient(): Pick<
+    IOSCtrlProxyClient,
+    "getPreference" | "setPreference" | "isConnected"
+  > {
+    const storage = new CtrlProxyStorage(
+      {
+        ...this.createDelegateContext(),
+        // The storage delegate's connection probe must only inspect the socket.
+        ensureConnected: async () => this.isConnected(),
+        getWebSocket: () => (this.isConnected() ? this.ws : null),
+      },
+      () => this.boundSessionId,
+      (appId) => iosMutationTokens.get(this.device.deviceId, appId),
+    );
+    return {
+      isConnected: () => this.isConnected(),
+      getPreference: (...args) => storage.getPreference(...args),
+      setPreference: (...args) => storage.setPreference(...args),
+    };
   }
 
   async getPreference(

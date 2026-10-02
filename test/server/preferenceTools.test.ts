@@ -30,6 +30,26 @@ describe("preference tools", () => {
     expect(setTool?.requiresDevice).toBe(true);
   });
 
+  test("documents the unchanged iOS suite selector and app storage routes", () => {
+    for (const name of ["getPreference", "setPreference"]) {
+      const description = ToolRegistry.getTool(name)?.description;
+      expect(description).toContain("appId is required");
+      expect(description).toContain("suite (not name or fileName");
+      expect(description).toContain("embedded AutoMobile SDK");
+      expect(description).toContain("simulator data container");
+    }
+    for (const selector of ["name", "fileName"]) {
+      expect(
+        getPreferenceSchema.safeParse({
+          scope: "userDefaults",
+          appId: "com.example.app",
+          key: "k",
+          [selector]: "suite",
+        }).success,
+      ).toBe(false);
+    }
+  });
+
   test("accepts Android system property requests without appId", () => {
     expect(() =>
       getPreferenceSchema.parse({
@@ -101,6 +121,27 @@ describe("preference tools", () => {
     });
 
     expect(parsed.appId).toBe("com.example.app");
+  });
+
+  test("both schemas accept whitespace-only suites and reject embedded spaces and paths", () => {
+    const base = {
+      platform: "ios",
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "k",
+    };
+    for (const suite of ["  ", "\t\n"]) {
+      expect(getPreferenceSchema.safeParse({ ...base, suite }).success).toBe(true);
+      expect(
+        setPreferenceSchema.safeParse({ ...base, suite, type: "bool", value: true }).success,
+      ).toBe(true);
+    }
+    for (const suite of ["a b", "../x"]) {
+      expect(getPreferenceSchema.safeParse({ ...base, suite }).success).toBe(false);
+      expect(
+        setPreferenceSchema.safeParse({ ...base, suite, type: "bool", value: true }).success,
+      ).toBe(false);
+    }
   });
 
   test("rejects path-like suites while accepting reverse-DNS and Standard domains", () => {

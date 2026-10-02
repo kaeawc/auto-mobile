@@ -488,10 +488,15 @@ describe("AppPreferences", () => {
       "1\n",
     );
 
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app onboardingComplete",
+      "Type is boolean\n",
+    );
+
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "onboardingComplete",
       value: true,
       type: "bool",
@@ -501,7 +506,7 @@ describe("AppPreferences", () => {
       success: true,
       platform: "ios",
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "onboardingComplete",
       value: true,
       type: "bool",
@@ -562,14 +567,14 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "windowsPath",
       value: "C:\\tmp",
       type: "string",
     });
     await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "emptyString",
       value: "",
       type: "string",
@@ -618,7 +623,7 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "paddedString",
       value: "  padded value  ",
       type: "string",
@@ -671,7 +676,6 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
       suite: "group.com.example",
       key: "path\\key",
     });
@@ -713,7 +717,6 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
       suite: "group.com.example",
       key: "defaultHost",
     });
@@ -726,7 +729,7 @@ describe("AppPreferences", () => {
     });
   });
 
-  test("maps the iOS Standard suite to the app defaults domain", async () => {
+  test("reads an explicit simulator-global defaults domain without appId", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app defaultHost",
@@ -736,14 +739,13 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
-      suite: "Standard",
+      suite: "com.example.app",
       key: "defaultHost",
     });
 
     expect(result).toMatchObject({
       success: true,
-      suite: "Standard",
+      suite: "com.example.app",
       value: "dev.example.com",
       type: "string",
     });
@@ -757,7 +759,7 @@ describe("AppPreferences", () => {
     await expect(
       preferences.setPreference({
         scope: "userDefaults",
-        appId: "com.example.app",
+        suite: "com.example.app",
         key: "unsafeInteger",
         value: "9007199254740993",
         type: "int",
@@ -781,7 +783,7 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "onboardingComplete",
     });
 
@@ -831,7 +833,7 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "unsafeInteger",
     });
 
@@ -855,7 +857,7 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "missingKey",
     });
 
@@ -884,7 +886,7 @@ describe("AppPreferences", () => {
     const preferences = new AppPreferences(iosSimulator, { simctl });
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "missingType",
     });
 
@@ -906,7 +908,7 @@ describe("AppPreferences", () => {
     await expect(
       preferences.getPreference({
         scope: "userDefaults",
-        appId: "com.example.app",
+        suite: "com.example.app",
         key: "featureFlag",
       }),
     ).rejects.toThrow("Invalid device");
@@ -924,7 +926,7 @@ describe("AppPreferences", () => {
 
     await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "featureFlag",
       value: "enabled",
       type: "string",
@@ -949,7 +951,7 @@ describe("AppPreferences", () => {
     await expect(
       preferences.setPreference({
         scope: "userDefaults",
-        appId: "com.example.app",
+        suite: "com.example.app",
         key: "featureFlag",
         value: "enabled",
         type: "string",
@@ -969,7 +971,7 @@ describe("AppPreferences", () => {
 
     const result = await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "featureFlag",
       value: "enabled",
       type: "string",
@@ -993,7 +995,7 @@ describe("AppPreferences", () => {
     await expect(
       preferences.setPreference({
         scope: "userDefaults",
-        appId: "com.example.app",
+        suite: "com.example.app",
         key: "featureFlag",
         value: "enabled",
         type: "string",
@@ -1013,7 +1015,7 @@ describe("AppPreferences", () => {
 
     const result = await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "featureFlag",
       value: "enabled",
       type: "string",
@@ -1039,7 +1041,7 @@ describe("AppPreferences", () => {
 
     await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "featureFlag",
       value: "enabled",
       type: "string",
@@ -1068,7 +1070,7 @@ describe("AppPreferences", () => {
 
     const result = await preferences.setPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "featureFlag",
       value: "enabled",
       type: "string",
@@ -1099,7 +1101,7 @@ describe("AppPreferences", () => {
     await expect(
       preferences.setPreference({
         scope: "userDefaults",
-        appId: "com.example.app",
+        suite: "com.example.app",
         key: "featureFlag",
         value: "enabled",
         type: "string",
@@ -1124,7 +1126,7 @@ describe("AppPreferences", () => {
 
     const result = await preferences.getPreference({
       scope: "userDefaults",
-      appId: "com.example.app",
+      suite: "com.example.app",
       key: "featureFlag",
     });
 
@@ -1154,7 +1156,7 @@ describe("AppPreferences", () => {
     await expect(
       preferences.setPreference({
         scope: "userDefaults",
-        appId: "com.example.app",
+        suite: "com.example.app",
         key: "featureFlag",
         value: "enabled",
         type: "string",

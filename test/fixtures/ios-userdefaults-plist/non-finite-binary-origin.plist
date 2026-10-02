@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>nan</key>
+	<real>nan</real>
+	<key>negativeInfinity</key>
+	<real>-infinity</real>
+	<key>nested</key>
+	<array>
+		<real>nan</real>
+		<real>+infinity</real>
+		<real>-infinity</real>
+	</array>
+	<key>positiveInfinity</key>
+	<real>+infinity</real>
+</dict>
+</plist>

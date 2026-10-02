@@ -1,5 +1,6 @@
+import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { promises as fsPromises } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -281,7 +282,7 @@ describe("deleteDevice handler", () => {
   // from the caller's deadline rather than an independent timer.
   let runtimeAvdNameProbeTimeouts: number[];
 
-  beforeEach(async () => {
+  const setup = async () => {
     DaemonState.getInstance().reset();
     runtimeAvdNames = new Map();
     runtimeAvdNameProbes = [];
@@ -314,15 +315,25 @@ describe("deleteDevice handler", () => {
       },
     });
     registerDeviceTools();
-  });
+  };
 
-  afterEach(() => {
+  const cleanup = () => {
     clearDirectSessionDevices();
     resetDeviceToolsDependencies();
     resetVideoRecordingManagerDependencies();
     resetSegmentedSessions();
     DaemonState.getInstance().reset();
-  });
+    ToolRegistry.clearTools();
+  };
+
+  const reset = async () => {
+    cleanup();
+    await setup();
+  };
+  const test = warmedTests(reset);
+  beforeEach(reset);
+  afterEach(cleanup);
+  afterAll(cleanup);
 
   test("stops, destroys, and proves a booted iOS simulator is durably absent", async () => {
     const device: BootedDevice = {

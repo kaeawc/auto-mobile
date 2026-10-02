@@ -1,3 +1,4 @@
+import { warmedTests } from "../helpers/warmedTests";
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { toJSONSchema } from "zod/v4";
@@ -82,6 +83,7 @@ const provisionArgs: fc.Arbitrary<ProvisionDeviceArgs> = fc
   }));
 
 describe("provisionDeviceFingerprint (property-based)", () => {
+  const test = warmedTests(() => {});
   test("is deterministic and a 64-char lowercase hex digest", () => {
     fc.assert(
       fc.property(provisionArgs, (args) => {

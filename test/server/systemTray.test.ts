@@ -1,3 +1,4 @@
+import { warmedTests } from "../helpers/warmedTests";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -233,6 +234,10 @@ const advancePendingSleeps = async (timer: FakeTimer, steps: number): Promise<vo
 };
 
 describe("systemTray post-tap observation", () => {
+  const test = warmedTests(() => {
+    resetSystemTrayDependencies();
+    ToolRegistry.clearTools();
+  });
   afterEach(() => {
     resetSystemTrayDependencies();
     ToolRegistry.clearTools();

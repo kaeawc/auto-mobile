@@ -1,13 +1,5 @@
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  spyOn,
-  test,
-} from "bun:test";
+import { warmedTests } from "../helpers/warmedTests";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -60,7 +52,7 @@ describe("videoRecordingManager", () => {
     archiveRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
   });
 
-  beforeEach(async () => {
+  const setup = async () => {
     fakeTimer = new FakeTimer();
     fakeBackend = new FakeVideoCaptureBackend();
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
@@ -89,14 +81,23 @@ describe("videoRecordingManager", () => {
       platform: "android",
       name: "Test Device",
     };
-  });
+  };
 
-  afterEach(async () => {
+  const cleanup = () => {
     resetVideoRecordingManagerDependencies();
     displayTransitions.reset("recording-foldable");
-  });
+  };
+
+  const reset = async () => {
+    cleanup();
+    await setup();
+  };
+  const test = warmedTests(reset);
+  beforeEach(reset);
+  afterEach(cleanup);
 
   afterAll(async () => {
+    cleanup();
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
   });
 

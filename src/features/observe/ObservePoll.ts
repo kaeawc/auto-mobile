@@ -178,6 +178,96 @@ async function awaitFinalizationWhilePollIsLive(
     });
 }
 
+type PollingObserveScreen = Pick<
+  ObserveScreen,
+  | "execute"
+  | "processRecomposition"
+  | "captureCacheGeneration"
+  | "cacheObserveResult"
+  | "collectDeferredBackStack"
+>;
+
+interface PollCapture {
+  observation: ObserveResult;
+  generation?: number;
+  cachedAt: number;
+}
+
+function isCompleteFreshCapture(observation: ObserveResult): boolean {
+  return (
+    deviceCaptureTimestamp(observation) !== undefined &&
+    observation.freshness?.isFresh !== false &&
+    observation.freshness?.verified !== false
+  );
+}
+
+/** Bind deferred cache metadata to the capture that will actually be published. */
+async function capturePoll(
+  observeScreen: PollingObserveScreen,
+  timer: Timer,
+  options: ObservePollOptions,
+  minTimestamp: number,
+  timeoutMs?: number,
+  readBackStackEachPoll = options.readBackStackEachPoll,
+): Promise<PollCapture> {
+  const generation = observeScreen.captureCacheGeneration?.();
+  const cachedAt = timer.now();
+  const observation = await observeScreen.execute({
+    display: options.display,
+    freshness: options.display === undefined ? undefined : "fresh",
+    minTimestamp,
+    timeoutMs,
+    skipWaitForFresh: false,
+    signal: options.signal,
+    // Polls defer evidence and persistence until the selected terminal capture.
+    skipScreenshot: true,
+    skipCache: true,
+    skipBackStack: readBackStackEachPoll === true ? undefined : true,
+    skipAccessibilityAudit: true,
+    skipPerformanceAudit: options.skipPerformanceAudit,
+    skipRecompositionTracking: options.skipRecompositionTracking,
+  });
+  return { observation, generation, cachedAt };
+}
+
+/** Terminal work may outlive the loop budget, but never cancellation. */
+async function reconcileTerminalCapture(
+  observeScreen: PollingObserveScreen,
+  timer: Timer,
+  options: ObservePollOptions,
+  observation: ObserveResult,
+  minTimestamp: number,
+): Promise<PollCapture | undefined> {
+  if (options.readBackStackEachPoll || !observeScreen.collectDeferredBackStack) {
+    return undefined;
+  }
+  const disagrees = await raceWithDeadline(
+    () => observeScreen.collectDeferredBackStack!(observation, { signal: options.signal }),
+    { timer, signal: options.signal, label: "Observe poll terminal back stack" },
+  );
+  throwIfAborted(options.signal);
+  if (!disagrees) {
+    return undefined;
+  }
+  try {
+    // No exhausted remaining budget: use execute's normal capture timeout,
+    // while the outer race (like the terminal read) is bounded only by abort.
+    const capture = await raceWithDeadline(
+      () => capturePoll(observeScreen, timer, options, minTimestamp, undefined, true),
+      { timer, signal: options.signal, label: "Observe poll attribution reconciliation" },
+    );
+    throwIfAborted(options.signal);
+    return capture;
+  } catch (error) {
+    throwIfAborted(options.signal);
+    logger.warn(
+      "[ObservePoll] Terminal attribution poll failed; returning original observation",
+      error,
+    );
+    return undefined;
+  }
+}
+
 /**
  * Poll `observeScreen` until `onObservation` returns true or the budget expires.
  *
@@ -211,14 +301,7 @@ async function awaitFinalizationWhilePollIsLive(
  * screen.
  */
 export async function pollObserveUntil(
-  observeScreen: Pick<
-    ObserveScreen,
-    | "execute"
-    | "processRecomposition"
-    | "captureCacheGeneration"
-    | "cacheObserveResult"
-    | "collectDeferredBackStack"
-  >,
+  observeScreen: PollingObserveScreen,
   timer: Timer,
   options: ObservePollOptions,
   onObservation: (
@@ -254,16 +337,29 @@ export async function pollObserveUntil(
     generation?: number,
     cachedAt?: number,
   ): Promise<ObservePollOutcome> => {
-    if (!options.readBackStackEachPoll && observeScreen.collectDeferredBackStack) {
-      // Timeout results still need a back stack. Only cancellation bounds this
-      // wait here; the collector retains its own adb timeout (D42/#6598).
-      await raceWithDeadline(
-        () =>
-          observeScreen.collectDeferredBackStack!(outcome.observation, { signal: options.signal }),
-        { timer, signal: options.signal, label: "Observe poll terminal back stack" },
-      );
-      throwIfAborted(options.signal);
+    const refreshed = await reconcileTerminalCapture(
+      observeScreen,
+      timer,
+      options,
+      outcome.observation,
+      nextPollMinTimestamp(hasPostInvocationEvidence, deviceFloor, enteringReference),
+    );
+    if (refreshed) {
+      const original = outcome.observation;
+      outcome.observation = refreshed.observation;
+      outcome.polls++;
+      outcome.waitMs = timer.now() - start;
+      generation = refreshed.generation;
+      cachedAt = refreshed.cachedAt;
+      canProcessRecomposition = isCompleteFreshCapture(refreshed.observation);
+      // Return the newest full-pipeline capture even when the stop predicate
+      // ceased to hold; the existing timeout outcome reports that uncertainty.
+      if (outcome.stopped && !onObservation(refreshed.observation, original, outcome.polls)) {
+        outcome.stopped = false;
+        outcome.terminalReason = "timeout";
+      }
     }
+    throwIfAborted(options.signal);
     if (
       options.skipRecompositionTracking &&
       canProcessRecomposition &&
@@ -307,27 +403,17 @@ export async function pollObserveUntil(
       deviceFloor,
       enteringReference,
     );
-    // Capture alongside the observation's start, before asynchronous work can
-    // let terminateApp invalidate its cache generation (#5884).
-    const cacheGeneration = observeScreen.captureCacheGeneration?.();
-    const cacheStartedAt = timer.now();
-
-    const observation = await observeScreen.execute({
-      display: options.display,
-      freshness: options.display === undefined ? undefined : "fresh",
+    const {
+      observation,
+      generation: cacheGeneration,
+      cachedAt: cacheStartedAt,
+    } = await capturePoll(
+      observeScreen,
+      timer,
+      options,
       minTimestamp,
-      timeoutMs: Math.max(1, options.timeoutMs - (timer.now() - start)),
-      skipWaitForFresh: false,
-      signal: options.signal,
-      // Polls are intermediate state only. Public callers that opt into
-      // automatic evidence capture it once after this loop completes.
-      skipScreenshot: true,
-      skipCache: true,
-      skipBackStack: options.readBackStackEachPoll === true ? undefined : true,
-      skipAccessibilityAudit: true,
-      skipPerformanceAudit: options.skipPerformanceAudit,
-      skipRecompositionTracking: options.skipRecompositionTracking,
-    });
+      Math.max(1, options.timeoutMs - (timer.now() - start)),
+    );
     polls++;
     lastObservation = observation;
     lastGeneration = cacheGeneration;

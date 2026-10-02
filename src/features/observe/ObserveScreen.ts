@@ -567,6 +567,18 @@ function resolveBackStackActivityAttribution(
   return ownedByPackage ? { packageName, activityName } : undefined;
 }
 
+/** The same temporal-confirmation trigger for per-poll and deferred back-stack reads. */
+function needsBackStackActivityReconciliation(
+  result: ObserveResult,
+  activeWindow: NonNullable<ObserveResult["activeWindow"]>,
+  attribution: { packageName: string; activityName: string },
+): boolean {
+  return (
+    !hierarchyCarriesActivitySignal(result.viewHierarchy) ||
+    activeWindow.activityName !== attribution.activityName
+  );
+}
+
 export function hasUsableHierarchy(hierarchy: ObserveResult["viewHierarchy"]): boolean {
   return (
     hierarchy?.hierarchy !== undefined &&
@@ -2271,14 +2283,14 @@ export class RealObserveScreen implements ObserveScreen {
 
   // ---------- Orchestration ----------
 
-  /** Attach the terminal Android back stack without replacing the matched hierarchy. */
+  /** Attach the terminal stack and report whether a full poll must reconcile its attribution. */
   async collectDeferredBackStack(
     observation: ObserveResult,
     options: { signal?: AbortSignal } = {},
-  ): Promise<void> {
+  ): Promise<boolean> {
     const displayId = this.deferredBackStackDisplays.get(observation);
     if (displayId === undefined || this.device.platform !== "android" || observation.backStack) {
-      return;
+      return false;
     }
     await this.deviceStateCollector.collectBackStack(
       observation,
@@ -2286,7 +2298,19 @@ export class RealObserveScreen implements ObserveScreen {
       options.signal,
       displayId,
     );
+    // The collector scoped this stack to the capture's display. Compare before
+    // multi-display scoping can overwrite the captured activity name.
+    const attribution = resolveBackStackActivityAttribution(observation);
+    const activeWindow = observation.activeWindow;
+    const disagrees = Boolean(
+      attribution &&
+      activeWindow &&
+      !SYSTEM_UI_WINDOW_PACKAGES.has(observation.viewHierarchy?.packageName ?? "") &&
+      !SYSTEM_UI_WINDOW_PACKAGES.has(activeWindow.appId) &&
+      needsBackStackActivityReconciliation(observation, activeWindow, attribution),
+    );
     this.scopeActiveWindowToBackStack(observation);
+    return disagrees;
   }
 
   private scopeActiveWindowToBackStack(result: ObserveResult): void {
@@ -2653,7 +2677,7 @@ export class RealObserveScreen implements ObserveScreen {
     // the tree still describes A, and the package-level guard (#5867) cannot
     // tell A from B. Always confirm through the recapture there (#6088).
     const bootstrapAttribution = !hierarchyCarriesActivitySignal(result.viewHierarchy);
-    if (!bootstrapAttribution && activeWindow.activityName === backStackAttribution.activityName) {
+    if (!needsBackStackActivityReconciliation(result, activeWindow, backStackAttribution)) {
       return undefined;
     }
     // An empty `activityName` (the bootstrap `Window.getActive()` / last-resort

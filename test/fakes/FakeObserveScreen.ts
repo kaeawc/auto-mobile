@@ -20,6 +20,7 @@ export class FakeObserveScreen implements ObserveScreen {
   private processRecompositionCallCount: number = 0;
   private cacheObserveResultCallCount: number = 0;
   private readonly deferredBackStackObservations: ObserveResult[] = [];
+  private deferredBackStackDisagrees = false;
   private deferredBackStack?: ObserveResult["backStack"];
   private neverResolvingOperations: Set<string> = new Set();
   private getMostRecentCachedObserveResultCallCount: number = 0;
@@ -312,6 +313,10 @@ export class FakeObserveScreen implements ObserveScreen {
     this.deferredBackStack = backStack;
   }
 
+  setDeferredBackStackDisagreement(disagrees: boolean): void {
+    this.deferredBackStackDisagrees = disagrees;
+  }
+
   getCollectDeferredBackStackCallCount(): number {
     return this.deferredBackStackObservations.length;
   }
@@ -323,11 +328,11 @@ export class FakeObserveScreen implements ObserveScreen {
   async collectDeferredBackStack(
     observation: ObserveResult,
     _options?: { signal?: AbortSignal },
-  ): Promise<void> {
+  ): Promise<boolean | void> {
     this.executedOperations.push("collectDeferredBackStack");
     this.deferredBackStackObservations.push(observation);
     if (this.neverResolvingOperations.has("collectDeferredBackStack")) {
-      return await new Promise<void>(() => {});
+      return await new Promise<boolean>(() => {});
     }
     const error = this.failures.get("collectDeferredBackStack");
     if (error) {
@@ -336,6 +341,7 @@ export class FakeObserveScreen implements ObserveScreen {
     if (this.deferredBackStack) {
       observation.backStack = this.deferredBackStack;
     }
+    return this.deferredBackStackDisagrees;
   }
 
   captureCacheGeneration(): number | undefined {

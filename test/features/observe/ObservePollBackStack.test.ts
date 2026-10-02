@@ -32,6 +32,7 @@ function createHarness(
     platform?: "android" | "ios";
     changing?: boolean;
     multiDisplay?: boolean;
+    disagreement?: boolean;
     hierarchyCapture?: HierarchyCapture;
   } = {},
 ) {
@@ -83,7 +84,10 @@ function createHarness(
       source: "adb",
       capturedAt: timer.now(),
       displayCount: options.multiDisplay ? 2 : 1,
-      currentActivity: { name: "com.example.EndActivity", taskId: 1 },
+      currentActivity: {
+        name: options.disagreement ? "com.example.EndActivity" : "com.example.MainActivity",
+        taskId: 1,
+      },
     };
   };
   const device: BootedDevice = {
@@ -92,11 +96,22 @@ function createHarness(
     platform: options.platform ?? "android",
   };
   const cache = new FakeObserveCacheStore(timer);
+  const viewHierarchy = new FakeViewHierarchy();
+  viewHierarchy.configureHierarchy({
+    hierarchy: { node: { bounds: { left: 0, top: 0, right: 1080, bottom: 1920 }, text: "stable" } },
+    packageName: "com.example",
+    foregroundActivity: "com.example/.MainActivity",
+    screenWidth: 1080,
+    screenHeight: 1920,
+    wakefulness: "Awake",
+    fresh: true,
+    updatedAt: 50,
+  } as ViewHierarchyResult);
   const screen = new RealObserveScreen(
     device,
     new FakeAdbClientFactory(new FakeAdbExecutor()),
     {
-      viewHierarchy: new FakeViewHierarchy(),
+      viewHierarchy,
       hierarchyCapture: options.hierarchyCapture,
       hierarchyCollector: iosHierarchy as unknown as HierarchyCollector,
       deviceStateCollector: state as unknown as DeviceStateCollector,
@@ -135,6 +150,27 @@ describe("real settle pipeline deferred back stack (#6598)", () => {
       expect(h.cache.getPutCallCount()).toBe(1);
       expect(h.cache.getRecentInMemoryForDevice(h.device.deviceId)?.backStack).toEqual(
         result.observation.backStack,
+      );
+    },
+  );
+
+  test.each([false, true])(
+    "terminal A/B disagreement returns the normally reconciled B (multi-display: %s)",
+    async (multiDisplay) => {
+      const h = createHarness({ disagreement: true, multiDisplay });
+      const result = await new RealSettleObserve(h.screen, h.timer).execute({
+        stableReads: 3,
+        pollMs: 10,
+      });
+      expect(h.captures()).toBe(4);
+      expect(result.polls).toBe(4);
+      expect(result.observation.activeWindow?.activityName).toBe("com.example.EndActivity");
+      expect(result.observation.backStack?.currentActivity?.name).toBe("com.example.EndActivity");
+      expect(result.observation.freshness?.activityAttributionMismatch).toBeUndefined();
+      expect(h.state.backStackCalls).toBe(multiDisplay ? 2 : 3);
+      expect(h.cache.getPutCallCount()).toBe(1);
+      expect(h.cache.getRecentInMemoryForDevice(h.device.deviceId)?.activeWindow).toEqual(
+        result.observation.activeWindow,
       );
     },
   );
@@ -195,7 +231,7 @@ describe("real settle pipeline deferred back stack (#6598)", () => {
     });
     expect(h.captures()).toBe(3);
     expect(h.state.backStackCalls).toBe(1);
-    expect(result.observation.activeWindow?.activityName).toBe("com.example.EndActivity");
+    expect(result.observation.activeWindow?.activityName).toBe("com.example.MainActivity");
     const ordinary = await h.screen.execute({ skipScreenshot: true });
     expect(h.state.backStackCalls).toBe(2);
     expect(ordinary.activeWindow).toEqual(result.observation.activeWindow);

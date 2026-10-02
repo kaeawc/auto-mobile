@@ -641,6 +641,151 @@ describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
     expect(fake.getExecuteOptions().every((o) => o.skipBackStack === true)).toBe(true);
   });
 
+  test("disagreement takes one full poll and caches its own generation and start time", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    const original = obs(20, "matched");
+    const refreshed = obs(30, "no-longer-matched");
+    fake.setObserveSequence([original, refreshed]);
+    fake.setDeferredBackStackDisagreement(true);
+    fake.setCacheGenerationSequence([4, 5]);
+    const collect = fake.collectDeferredBackStack.bind(fake);
+    fake.collectDeferredBackStack = async (observation, options) => {
+      timer.advanceTime(7);
+      return collect(observation, options);
+    };
+    const execute = fake.execute.bind(fake);
+    fake.execute = async (options) => {
+      const result = await execute(options);
+      timer.advanceTime(3);
+      return result;
+    };
+    const predicateCalls: ObserveResult[] = [];
+    const outcome = await pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10, initialMinTimestampMs: 10, skipRecompositionTracking: true },
+      (observation) => {
+        predicateCalls.push(observation);
+        return observation === original;
+      },
+    );
+    expect(outcome.observation).toBe(refreshed);
+    expect(outcome).toMatchObject({
+      polls: 2,
+      waitMs: 13,
+      stopped: false,
+      terminalReason: "timeout",
+    });
+    expect(predicateCalls).toEqual([original, refreshed]);
+    expect(fake.getExecuteOptions().map((o) => o.skipBackStack)).toEqual([true, undefined]);
+    expect(fake.getExecuteOptions().every((o) => o.skipCache === true)).toBe(true);
+    expect(fake.getCollectDeferredBackStackObservations()).toEqual([original]);
+    expect(fake.getProcessRecompositionObservations()).toEqual([refreshed]);
+    expect(fake.getCacheObserveResultObservations()).toEqual([refreshed]);
+    expect(fake.getCacheObserveResultGenerations()).toEqual([5]);
+    expect(fake.getCacheObserveResultCachedAts()).toEqual([10]);
+  });
+
+  test("disagreement on timeout takes one full poll beyond the exhausted budget", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    const refreshed = obs(30, "newest");
+    fake.setObserveSequence([obs(20, "original"), refreshed]);
+    fake.setDeferredBackStackDisagreement(true);
+    const outcome = await pollObserveUntil(fake, timer, { timeoutMs: 1, pollMs: 10 }, () => false);
+    expect(outcome.observation).toBe(refreshed);
+    expect(outcome).toMatchObject({ polls: 2, stopped: false, terminalReason: "timeout" });
+    expect(fake.getExecuteOptions()[1]?.timeoutMs).toBeUndefined();
+    expect(fake.getExecuteOptions()[1]?.minTimestamp).toBe(21);
+    expect(fake.getExecuteOptions()[1]?.skipBackStack).toBeUndefined();
+    expect(fake.getCacheObserveResultObservations()).toEqual([refreshed]);
+    expect(fake.getCollectDeferredBackStackCallCount()).toBe(1);
+  });
+
+  test("abort during the extra poll rejects without a cache write", async () => {
+    const timer = new FakeTimer();
+    const fake = new FakeObserveScreen();
+    const controller = new AbortController();
+    fake.setObserveResult(obs(20, "original"));
+    fake.setDeferredBackStackDisagreement(true);
+    const execute = fake.execute.bind(fake);
+    fake.execute = async (options) => {
+      const observation = await execute(options);
+      if (fake.getExecuteCallCount() === 2) {
+        expect(options?.signal).toBe(controller.signal);
+        return new Promise<ObserveResult>(() => {});
+      }
+      return observation;
+    };
+    const pending = pollObserveUntil(
+      fake,
+      timer,
+      { timeoutMs: 100, pollMs: 10, initialMinTimestampMs: 10, signal: controller.signal },
+      () => true,
+    );
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve();
+    }
+    controller.abort(new Error("cancel extra poll"));
+    await expect(pending).rejects.toThrow("Operation cancelled");
+    expect(fake.getExecuteCallCount()).toBe(2);
+    expect(fake.getCacheObserveResultCallCount()).toBe(0);
+  });
+
+  test("extra poll failure returns the original with its terminal back stack", async () => {
+    const fake = new FakeObserveScreen();
+    const original = obs(20, "original");
+    const backStack: NonNullable<ObserveResult["backStack"]> = {
+      depth: 0,
+      activities: [],
+      tasks: [],
+      source: "adb",
+      capturedAt: 0,
+      currentActivity: { name: "com.example.OtherActivity", taskId: 1 },
+    };
+    fake.setDeferredBackStack(backStack);
+    fake.setDeferredBackStackDisagreement(true);
+    fake.setObserveResult((index) => {
+      if (index === 1) {
+        throw new Error("extra poll failed");
+      }
+      return original;
+    });
+    const outcome = await pollObserveUntil(
+      fake,
+      new FakeTimer(),
+      { timeoutMs: 100, pollMs: 10, initialMinTimestampMs: 10 },
+      () => true,
+    );
+    expect(fake.getExecuteCallCount()).toBe(2);
+    expect(outcome.observation).toBe(original);
+    expect(outcome.observation.backStack).toBe(backStack);
+    expect(fake.getCacheObserveResultObservations()).toEqual([original]);
+    expect(fake.getCollectDeferredBackStackCallCount()).toBe(1);
+  });
+
+  test("explicit skipBackStack adapter omits both terminal read and extra poll", async () => {
+    const fake = new FakeObserveScreen();
+    fake.setObserveResult(obs(20, "terminal"));
+    fake.setDeferredBackStackDisagreement(true);
+    const adapter = {
+      execute: (options: Parameters<FakeObserveScreen["execute"]>[0]) =>
+        fake.execute({ ...options, skipBackStack: true }),
+      cacheObserveResult: fake.cacheObserveResult.bind(fake),
+    };
+    await pollObserveUntil(
+      adapter,
+      new FakeTimer(),
+      { timeoutMs: 100, pollMs: 10, initialMinTimestampMs: 10 },
+      () => true,
+    );
+    expect(fake.getExecuteCallCount()).toBe(1);
+    expect(fake.getCollectDeferredBackStackCallCount()).toBe(0);
+    expect(fake.getCacheObserveResultCallCount()).toBe(1);
+  });
+
   test("screen-off terminal collects the returned back stack", async () => {
     const timer = new FakeTimer();
     const fake = new FakeObserveScreen();
@@ -664,6 +809,7 @@ describe("pollObserveUntil deferred back stack (D42/#6598)", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([obs(10, "baseline"), obs(20, "activity")]);
+    fake.setDeferredBackStackDisagreement(true);
     await pollObserveUntil(
       fake,
       timer,
@@ -723,6 +869,7 @@ test("abort after terminal collection writes neither recomposition nor cache", a
   const controller = new AbortController();
   const terminal = obs(20, "terminal");
   fake.setObserveResult(terminal);
+  fake.setDeferredBackStackDisagreement(true);
   const collect = fake.collectDeferredBackStack.bind(fake);
   fake.collectDeferredBackStack = async (observation, options): Promise<void> => {
     expect(options?.signal).toBe(controller.signal);
@@ -744,6 +891,7 @@ test("abort after terminal collection writes neither recomposition nor cache", a
     ),
   ).rejects.toThrow();
   expect(fake.getCollectDeferredBackStackObservations()).toEqual([terminal]);
+  expect(fake.getExecuteCallCount()).toBe(1);
   expect(fake.getProcessRecompositionCallCount()).toBe(0);
   expect(fake.getCacheObserveResultCallCount()).toBe(0);
 });

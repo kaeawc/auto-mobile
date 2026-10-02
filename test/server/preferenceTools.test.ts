@@ -123,6 +123,27 @@ describe("preference tools", () => {
     expect(parsed.appId).toBe("com.example.app");
   });
 
+  test("both schemas accept whitespace-only suites and reject embedded spaces and paths", () => {
+    const base = {
+      platform: "ios",
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "k",
+    };
+    for (const suite of ["  ", "\t\n"]) {
+      expect(getPreferenceSchema.safeParse({ ...base, suite }).success).toBe(true);
+      expect(
+        setPreferenceSchema.safeParse({ ...base, suite, type: "bool", value: true }).success,
+      ).toBe(true);
+    }
+    for (const suite of ["a b", "../x"]) {
+      expect(getPreferenceSchema.safeParse({ ...base, suite }).success).toBe(false);
+      expect(
+        setPreferenceSchema.safeParse({ ...base, suite, type: "bool", value: true }).success,
+      ).toBe(false);
+    }
+  });
+
   test("rejects path-like suites while accepting reverse-DNS and Standard domains", () => {
     const base = { platform: "ios", scope: "userDefaults", appId: "com.example.app", key: "k" };
     expect(

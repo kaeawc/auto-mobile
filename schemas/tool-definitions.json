@@ -2161,7 +2161,7 @@
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
           "type": "string",
-          "pattern": "^(?:$|[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)$"
+          "pattern": "^(?:\\s*|[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)$"
         },
         "key": {
           "description": "Preference key or Android system property name",
@@ -11933,7 +11933,7 @@
         "suite": {
           "description": "SharedPreferences file name or UserDefaults suite/app group",
           "type": "string",
-          "pattern": "^(?:$|[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)$"
+          "pattern": "^(?:\\s*|[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*)$"
         },
         "key": {
           "description": "Preference key or Android system property name",

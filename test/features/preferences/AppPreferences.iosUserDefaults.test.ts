@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   AppPreferences,
   isIosPreferenceSdkUnavailable,
@@ -252,14 +253,14 @@ describe("iOS app UserDefaults resolution", () => {
             device.deviceId,
             "defaults",
             "write",
-            `${container}/Library/Preferences/mt8327Suite`,
+            join(container, "Library", "Preferences", "mt8327Suite"),
             input.key,
             flag,
             String(value),
           ],
         ]);
         expect(plist.paths).toEqual(
-          Array(2).fill(`${container}/Library/Preferences/mt8327Suite.plist`),
+          Array(2).fill(join(container, "Library", "Preferences", "mt8327Suite.plist")),
         );
         expect(sdk.calls).toEqual([]);
       });
@@ -292,7 +293,7 @@ describe("iOS app UserDefaults resolution", () => {
         await fallback.preferences.setPreference({ ...input, suite, value: 42, type: "int" }),
       ).toMatchObject({ verified: true, resolvedStore: "standard", storeRoute: "container-plist" });
       expect(fallback.plist.paths).toEqual([
-        `${container}/Library/Preferences/${input.appId}.plist`,
+        join(container, "Library", "Preferences", `${input.appId}.plist`),
       ]);
     });
   }
@@ -704,6 +705,29 @@ describe("real plutil fixtures and route type consistency", () => {
 });
 
 describe("SDK redaction and collection encoding", () => {
+  for (const [type, value] of [
+    ["ARRAY", '[{"nested":[9007199254740993]}]'],
+    ["DICTIONARY", '{"nested":[[-9223372036854775808]]}'],
+  ] as const) {
+    test(`${type} nested unsafe integer is exposed as a lossy SDK description`, async () => {
+      const { sdk, preferences } = harness();
+      sdk.entry = { key: input.key, type, value };
+      const result = await preferences.getPreference(input);
+      expect(result).toMatchObject({ value, type: "unknown", valueFormat: "sdk-description" });
+      expect(result.warning).toContain("unsafe integers");
+    });
+  }
+
+  test("SDK numeric strings and safe boundary integers remain canonical", async () => {
+    const { sdk, preferences } = harness();
+    const value =
+      '[{"nested":["9007199254740993","\\\"-9223372036854775808",9007199254740991,-9007199254740991,1.5]}]';
+    sdk.entry = { key: input.key, type: "ARRAY", value };
+    const result = await preferences.getPreference(input);
+    expect(result).toMatchObject({ value, type: "array", valueFormat: "canonical-json" });
+    expect(result.warning).toBeUndefined();
+  });
+
   for (const [sdkType, type] of [
     ["INT", "int"],
     ["BOOLEAN", "bool"],
@@ -826,6 +850,30 @@ test("container-plist collections retain nested Date/Data as recursive JSON", as
 });
 
 describe("non-finite plist reals", () => {
+  for (const [spelling, value] of [
+    ["nan", "nan"],
+    ["inf", "inf"],
+    ["+inf", "inf"],
+    ["-inf", "-inf"],
+    ["infinity", "inf"],
+    ["+infinity", "inf"],
+    ["-infinity", "-inf"],
+  ]) {
+    test(`SDK Double ${spelling} matches plist normalization in any case`, async () => {
+      const { sdk, preferences } = harness();
+      for (const encoded of [spelling, spelling.toUpperCase()]) {
+        sdk.entry = { key: input.key, type: "DOUBLE", value: encoded };
+        const result = await preferences.getPreference(input);
+        expect(result).toMatchObject({ value, type: "float", storeRoute: "sdk" });
+        expect(JSON.parse(JSON.stringify(result)).value).toBe(value);
+      }
+      await expect(
+        preferences.setPreference({ ...input, type: "float", value: spelling }),
+      ).rejects.toThrow();
+      expect(sdk.calls.every((call) => call.operation === "get")).toBe(true);
+    });
+  }
+
   for (const filename of ["non-finite-origin.plist", "non-finite-binary-origin.plist"]) {
     const xml = readFileSync(
       new URL(`../../fixtures/ios-userdefaults-plist/${filename}`, import.meta.url),

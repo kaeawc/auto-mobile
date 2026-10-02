@@ -99,7 +99,7 @@ function plistInteger(text: string): number | string {
 
 // JSON cannot carry NaN/Infinity; preserve these as strings, including nested leaves.
 // plutil emits nan/+infinity/-infinity; accept the short input spellings too.
-function plistReal(text: string): number | string {
+export function plistReal(text: string): number | string {
   const normalized = text.trim().toLowerCase();
   if (normalized === "nan") {
     return "nan";

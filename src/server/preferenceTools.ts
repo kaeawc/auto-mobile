@@ -29,7 +29,7 @@ const getPreferenceBaseSchema = z
     appId: z.string().optional().describe("App package or bundle id"),
     suite: z
       .string()
-      .regex(/^(?:$|[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/)
+      .regex(/^(?:\s*|[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)$/)
       .optional()
       .describe("SharedPreferences file name or UserDefaults suite/app group"),
     key: z.string().min(1).describe("Preference key or Android system property name"),

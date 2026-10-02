@@ -3,7 +3,7 @@ import {
   iosPreferenceType,
   type IosPreferenceType,
 } from "./IosPreferenceTypes";
-import { parseIosUserDefaultsPlist } from "./IosUserDefaultsPlist";
+import { parseIosUserDefaultsPlist, plistReal } from "./IosUserDefaultsPlist";
 import { join } from "node:path";
 import {
   CtrlProxyServicePortChangedError,
@@ -909,7 +909,7 @@ function iosSdkPreferenceValue(
       value,
       valueFormat: "sdk-description",
       warning:
-        "The SDK could not encode this collection as JSON (nested Date/Data values can cause this). The raw SDK description may be lossy; the container-plist route, used when the SDK is not connected, returns recursive JSON with ISO/base64 leaves.",
+        "The SDK could not encode this collection as canonical JSON (nested Date/Data values or unsafe integers can cause this). The raw SDK description may be lossy; the container-plist route, used when the SDK is not connected, returns recursive JSON with ISO/base64 leaves and exact integer strings.",
     };
   }
   return {
@@ -922,7 +922,7 @@ function iosSdkPreferenceValue(
           : type === "bool"
             ? parseBool(value)
             : type === "float"
-              ? parseFloatValue(value)
+              ? plistReal(value)
               : value,
   };
 }
@@ -933,10 +933,21 @@ function iosSdkPreferenceValue(
 // valid JSON strings: they can be legitimate collection contents.
 function isCanonicalSdkCollection(value: string, type: "array" | "dictionary"): boolean {
   try {
-    const parsed: unknown = JSON.parse(value);
-    return type === "array"
-      ? Array.isArray(parsed)
-      : parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+    let hasUnsafeInteger = false;
+    const parsed: unknown = JSON.parse(value, (_key, leaf: unknown) => {
+      // Revivers visit nested numeric leaves without confusing them with strings.
+      // Rounded Int64 values still lie outside the safe integer range.
+      if (typeof leaf === "number" && Number.isInteger(leaf) && !Number.isSafeInteger(leaf)) {
+        hasUnsafeInteger = true;
+      }
+      return leaf;
+    });
+    return (
+      !hasUnsafeInteger &&
+      (type === "array"
+        ? Array.isArray(parsed)
+        : parsed !== null && typeof parsed === "object" && !Array.isArray(parsed))
+    );
   } catch (error) {
     // Swift interpolation is an expected fallback; callers expose the raw description.
     logger.debug("iOS SDK collection is not canonical JSON", error);

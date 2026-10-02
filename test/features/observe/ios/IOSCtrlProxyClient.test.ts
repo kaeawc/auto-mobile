@@ -2933,6 +2933,20 @@ describe("IOSCtrlProxyClient", function () {
         try {
           expect(await client.getSupportedCommandsForDiagnostics()).toEqual(["request_hierarchy"]);
           expect(await client.getSupportedFeaturesForDiagnostics()).toEqual(["feature"]);
+          expect(await client.getRunnerIdentityForDiagnostics()).toEqual({
+            commands: ["request_hierarchy"],
+            features: ["feature"],
+          });
+          socket.simulateMessage(
+            JSON.stringify({
+              type: "connected",
+              supportedCommands: ["request_hierarchy"],
+            }),
+          );
+          expect(await client.getRunnerIdentityForDiagnostics()).toEqual({
+            commands: ["request_hierarchy"],
+            features: null,
+          });
           const sentBeforeRead = socket.sentMessages.length;
           const pending = client.requestHierarchySyncForDiagnostics();
           await waitForSentMessages(socket, sentBeforeRead + 1);
@@ -3009,6 +3023,27 @@ describe("IOSCtrlProxyClient", function () {
       });
       return { client, timer, manager, sockets, modes, open, state };
     };
+
+    test("diagnostic identity reads both fields on one isolated socket", async () => {
+      const h = diagnosticResident();
+      h.modes.push("timeout");
+      try {
+        const before = h.state();
+        const identity = h.client.getRunnerIdentityForDiagnostics();
+        await flushPromises();
+        expect(h.sockets).toHaveLength(1);
+        const socket = h.sockets[0]!;
+        h.open(socket);
+        expect(await identity).toEqual({ commands: ["request_hierarchy"], features: ["feature"] });
+        await flushPromises();
+        expect(h.sockets).toHaveLength(1);
+        expect(socket.readyState).toBe(WebSocketState.CLOSED);
+        expect(h.state()).toEqual(before);
+        expect(h.manager.getExecutedOperations()).toEqual([]);
+      } finally {
+        await h.client.close();
+      }
+    });
 
     test("diagnostic dial cannot be joined by live ensureConnected or background reconnect", async () => {
       for (const connect of ["ensureConnected", "connectBackgroundWebSocket"] as const) {
@@ -3227,6 +3262,63 @@ describe("IOSCtrlProxyClient", function () {
         await h.client.close();
       }
     });
+
+    test.each(["identity", "commands", "features"] as const)(
+      "aborting a diagnostic %s handshake closes the throwaway socket without advancing time",
+      async (read) => {
+        const timer = new FakeTimer();
+        const sockets: FakeWebSocket[] = [];
+        const client = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          (url) => {
+            const socket = new FakeWebSocket(url, "none", 0, timer);
+            sockets.push(socket);
+            return socket;
+          },
+          timer,
+          () => {
+            throw new Error("diagnostics must not resolve the manager");
+          },
+        );
+        const abort = new AbortController();
+        const reason = new Error("doctor aborted during handshake");
+        let settled = false;
+        let rejection: unknown;
+        const pending = (
+          read === "identity"
+            ? client.getRunnerIdentityForDiagnostics(abort.signal)
+            : read === "commands"
+              ? client.getSupportedCommandsForDiagnostics(abort.signal)
+              : client.getSupportedFeaturesForDiagnostics(abort.signal)
+        ).then(
+          () => {
+            settled = true;
+          },
+          (error: unknown) => {
+            settled = true;
+            rejection = error;
+          },
+        );
+        try {
+          await flushPromises();
+          expect(sockets).toHaveLength(1);
+          expect(sockets[0]!.readyState).toBe(WebSocketState.OPEN);
+          expect(settled).toBe(false);
+          abort.abort(reason);
+          await flushPromises();
+          expect(settled).toBe(true);
+          expect(rejection).toBe(reason);
+          expect(sockets[0]!.readyState).toBe(WebSocketState.CLOSED);
+          expect(timer.now()).toBe(0);
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+          expect(timer.getPendingSleepCount()).toBe(0);
+          await pending;
+        } finally {
+          await client.close();
+        }
+      },
+    );
 
     test("doctor never changes resident autoReconnectEnabled on failure, thrown read or abort", async () => {
       for (const enabled of [true, false]) {

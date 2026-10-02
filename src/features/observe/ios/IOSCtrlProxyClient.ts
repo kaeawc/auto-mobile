@@ -1013,11 +1013,29 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     }
   }
 
+  /** Read both identity fields from one handshake on one connection. */
+  public async getRunnerIdentityForDiagnostics(
+    signal?: AbortSignal,
+  ): Promise<{ commands: string[] | null; features: string[] | null } | null> {
+    return this.readForDiagnostics(
+      async (client) => {
+        await client.waitForHandshake(undefined, signal);
+        signal?.throwIfAborted();
+        const commands = client.getCachedSupportedCommands();
+        return commands === null
+          ? null
+          : { commands, features: client.getCachedSupportedFeatures() };
+      },
+      null,
+      signal,
+    );
+  }
+
   /** Cached handshake or connection-only read; never sets up a runner. */
   public async getSupportedCommandsForDiagnostics(signal?: AbortSignal): Promise<string[] | null> {
     return this.readForDiagnostics(
       async (client) => {
-        await client.waitForHandshake();
+        await client.waitForHandshake(undefined, signal);
         signal?.throwIfAborted();
         return client.getCachedSupportedCommands();
       },
@@ -1029,7 +1047,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   public async getSupportedFeaturesForDiagnostics(signal?: AbortSignal): Promise<string[] | null> {
     return this.readForDiagnostics(
       async (client) => {
-        await client.waitForHandshake();
+        await client.waitForHandshake(undefined, signal);
         signal?.throwIfAborted();
         return client.getCachedSupportedFeatures();
       },
@@ -2889,10 +2907,32 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   private async waitForHandshake(
     timeoutMs: number = IOSCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS,
+    signal?: AbortSignal,
   ): Promise<void> {
+    signal?.throwIfAborted();
     const deadline = this.timer.now() + timeoutMs;
     while (this.supportedCommands === null && this.timer.now() < deadline) {
-      await this.timer.sleep(IOSCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+      if (!signal) {
+        await this.timer.sleep(IOSCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+        continue;
+      }
+      let timeout: ReturnType<Timer["setTimeout"]> | undefined;
+      try {
+        await raceWithDeadline(
+          () =>
+            new Promise<void>((resolve) => {
+              timeout = this.timer.setTimeout(
+                resolve,
+                IOSCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS,
+              );
+            }),
+          { timer: this.timer, signal, label: "iOS diagnostic handshake" },
+        );
+      } finally {
+        if (timeout !== undefined) {
+          this.timer.clearTimeout(timeout);
+        }
+      }
     }
   }
 

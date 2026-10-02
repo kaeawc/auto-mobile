@@ -1509,7 +1509,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
         connected: false,
         hierarchyError: "iOS CtrlProxy runner is not running or unreachable",
       });
-      expect(dials).toBe(6);
+      expect(dials).toBe(4);
       expect(client["connectionAttempts"]).toBe(0);
       expect(client["autoReconnectEnabled"]).toBe(true);
       expect(
@@ -1588,8 +1588,10 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
   test("closes a probe client it created (no pre-existing client)", async () => {
     let closes = 0;
     const probe = {
-      getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+      getRunnerIdentityForDiagnostics: async () => ({
+        commands: [...IOS_RUNNER_FEATURE_COMMANDS],
+        features: [...IOS_RUNNER_FEATURE_FLAGS],
+      }),
       close: async () => {
         closes += 1;
       },
@@ -1615,8 +1617,10 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
   test("does not close a pre-existing client it did not create", async () => {
     let closes = 0;
     const existing = {
-      getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+      getRunnerIdentityForDiagnostics: async () => ({
+        commands: [...IOS_RUNNER_FEATURE_COMMANDS],
+        features: [...IOS_RUNNER_FEATURE_FLAGS],
+      }),
       close: async () => {
         closes += 1;
       },
@@ -1644,8 +1648,10 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
 
   test("treats a reachable pre-existing client as running when manager port state is stale", async () => {
     const existing = {
-      getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+      getRunnerIdentityForDiagnostics: async () => ({
+        commands: [...IOS_RUNNER_FEATURE_COMMANDS],
+        features: [...IOS_RUNNER_FEATURE_FLAGS],
+      }),
       close: async () => {},
     };
     const hooks: IosRunnerInspectorHooks = {
@@ -1670,13 +1676,12 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     expect(inspections[0].supportedCommands).toEqual([...IOS_RUNNER_FEATURE_COMMANDS]);
   });
 
-  test("closes the created probe client even when the command read throws", async () => {
+  test("closes the created probe client even when the identity read throws", async () => {
     let closes = 0;
     const probe = {
-      getSupportedCommandsForDiagnostics: async () => {
+      getRunnerIdentityForDiagnostics: async () => {
         throw new Error("unreachable");
       },
-      getSupportedFeaturesForDiagnostics: async () => null,
       close: async () => {
         closes += 1;
       },
@@ -1707,19 +1712,23 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       const readStarted = Promise.withResolvers<void>();
       let closes = 0;
       const probe = {
-        getSupportedCommandsForDiagnostics: async () => {
-          if (stalledRead === "commands") {
-            readStarted.resolve();
-            return await new Promise<never>(() => {});
-          }
-          return [...IOS_RUNNER_FEATURE_COMMANDS];
-        },
-        getSupportedFeaturesForDiagnostics: async () => {
-          if (stalledRead === "features") {
-            readStarted.resolve();
-            return await new Promise<never>(() => {});
-          }
-          return [...IOS_RUNNER_FEATURE_FLAGS];
+        getRunnerIdentityForDiagnostics: async () => {
+          const readCommands = async () => {
+            if (stalledRead === "commands") {
+              readStarted.resolve();
+              return await new Promise<never>(() => {});
+            }
+            return [...IOS_RUNNER_FEATURE_COMMANDS];
+          };
+          const readFeatures = async () => {
+            if (stalledRead === "features") {
+              readStarted.resolve();
+              return await new Promise<never>(() => {});
+            }
+            return [...IOS_RUNNER_FEATURE_FLAGS];
+          };
+          const [commands, features] = await Promise.all([readCommands(), readFeatures()]);
+          return { commands, features };
         },
         close: async () => {
           closes += 1;
@@ -1743,10 +1752,45 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       deadline.dispose();
 
       expect(deadline.probe.signal?.aborted).toBe(true);
+      const result = await checkIosCtrlProxyRunner({
+        ...baseDependencies,
+        runnerInspector: { inspectBootedRunners: async () => inspections },
+      });
+      expect(result.status).toBe("warn");
+      expect(result.message).toContain("versionStatus=unknown");
+      expect(inspections[0]?.supportedCommands).toBeNull();
       expect(inspections[0]?.supportedFeatures).toBeNull();
       expect(closes).toBe(1);
     },
   );
+
+  test("unavailable commands with successful features cannot pass runner compatibility", async () => {
+    const probe = {
+      getRunnerIdentityForDiagnostics: async () => ({
+        commands: null,
+        features: [...IOS_RUNNER_FEATURE_FLAGS],
+      }),
+      close: async () => {},
+    };
+    const inspector = createIosCtrlProxyRunnerInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]),
+      new FakeLogger(),
+      {
+        getManager: () => runningManager,
+        getExistingClient: () => null,
+        createClient: () => probe,
+      },
+    );
+    const inspections = await inspector.inspectBootedRunners();
+    expect(inspections[0]?.supportedCommands).toBeNull();
+    expect(inspections[0]?.supportedFeatures).toBeNull();
+    const result = await checkIosCtrlProxyRunner({
+      ...baseDependencies,
+      runnerInspector: { inspectBootedRunners: async () => inspections },
+    });
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("versionStatus=unknown");
+  });
 
   test("filters unrelated booted simulators before creating a runner manager or client", async () => {
     const managerDevices: string[] = [];
@@ -1760,8 +1804,10 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       createClient: (device) => {
         clientDevices.push(device.deviceId);
         return {
-          getSupportedCommandsForDiagnostics: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-          getSupportedFeaturesForDiagnostics: async () => [...IOS_RUNNER_FEATURE_FLAGS],
+          getRunnerIdentityForDiagnostics: async () => ({
+            commands: [...IOS_RUNNER_FEATURE_COMMANDS],
+            features: [...IOS_RUNNER_FEATURE_FLAGS],
+          }),
           close: async () => {},
         };
       },

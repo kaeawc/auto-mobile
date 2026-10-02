@@ -150,8 +150,9 @@ interface IosRunnerManager {
  * set and (for throwaway probe clients) close the connection afterwards.
  */
 interface IosRunnerProbeClient {
-  getSupportedCommandsForDiagnostics(signal?: AbortSignal): Promise<string[] | null>;
-  getSupportedFeaturesForDiagnostics(signal?: AbortSignal): Promise<string[] | null>;
+  getRunnerIdentityForDiagnostics(
+    signal?: AbortSignal,
+  ): Promise<{ commands: string[] | null; features: string[] | null } | null>;
   close(): Promise<void>;
 }
 
@@ -280,19 +281,18 @@ export function createIosCtrlProxyRunnerInspector(
           // afterwards so doctor leaves no persistent runner connection or SDK
           // polling timer behind (especially for the one-shot CLI invocation).
           try {
-            supportedCommands = await awaitDoctorProbe(currentProbe, () =>
-              selectedProbe.client.getSupportedCommandsForDiagnostics(currentProbe.signal),
+            const identity = await awaitDoctorProbe(currentProbe, () =>
+              selectedProbe.client.getRunnerIdentityForDiagnostics(currentProbe.signal),
             );
-            currentProbe.signal?.throwIfAborted();
-            supportedFeatures = await awaitDoctorProbe(currentProbe, () =>
-              selectedProbe.client.getSupportedFeaturesForDiagnostics(currentProbe.signal),
-            );
+            const { commands, features } = identity ?? { commands: null, features: null };
+            supportedCommands = commands;
+            supportedFeatures = commands === null ? null : features;
             running = running || supportedCommands !== null;
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
             // failure: doctor still reports installed/running for the simulator.
             log.warn(
-              `iOS CtrlProxy runner command probe failed for ${simulator.deviceId}: ${errorMessage(error)}`,
+              `iOS CtrlProxy runner identity probe failed for ${simulator.deviceId}: ${errorMessage(error)}`,
               error,
             );
           } finally {

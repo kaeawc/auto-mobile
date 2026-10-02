@@ -2253,7 +2253,7 @@ export async function rotateHandler(
     }
     const rotate = rotateFactory(device);
     const result = await rotate.execute(args.orientation, progress, args.lockOrientation, signal);
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       observation: result.observation,
       ...result,
       message: formatRotateMessage(result),

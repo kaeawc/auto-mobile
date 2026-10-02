@@ -929,6 +929,15 @@ export class Rotate extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<RotateResult> {
     throwIfAborted(signal);
+    const observationOptions = {
+      changeExpected: true,
+      timeoutMs: 5000,
+      progress,
+      perf,
+      signal,
+      // Rotation animations are incorrectly detected as unstable by gfxinfo.
+      skipUiStability: true,
+    };
     return this.observedInteraction(
       // The read-auto-rotate -> disable -> rotate -> restore-auto-rotate
       // sequence below must run atomically per device: interleaving it with
@@ -947,21 +956,23 @@ export class Rotate extends BaseVisualChange {
           throw toActionableError(error, "Could not acquire the device rotation lock");
         }
         try {
-          return await this.performAndroidRotation(orientation, perf, lockOrientation, signal);
+          const result = await this.performAndroidRotation(
+            orientation,
+            perf,
+            lockOrientation,
+            signal,
+          );
+          // Decide from the completed action under the lock, not a racy pre-read.
+          // Successful no-ops still receive a fresh observation without requiring a diff.
+          if (result.success && result.rotationPerformed === false) {
+            observationOptions.changeExpected = false;
+          }
+          return result;
         } finally {
           release();
         }
       },
-      {
-        changeExpected: true,
-        timeoutMs: 5000,
-        progress,
-        perf,
-        signal,
-        // Skip gfxinfo-based UI stability tracking for rotation - it incorrectly
-        // detects rotation animation as "unstable UI" and can cause 5+ second waits
-        skipUiStability: true,
-      },
+      observationOptions,
     );
   }
 

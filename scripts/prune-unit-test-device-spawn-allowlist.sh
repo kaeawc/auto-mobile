@@ -107,8 +107,11 @@ run_batch() {
   local prefix="${run_dir}/${run_index}-${label}"
   printf '%s\n' "$@" > "${prefix}.files"
   : > "${census_file}"
+  set +e
   run_with_timeout 300 env AUTOMOBILE_SPAWN_GUARD_CENSUS_FILE="${census_file}" \
-    bun test --isolate --timeout 20000 "$@" > "${prefix}.log" 2>&1 || batch_status=$?
+    bun test --isolate --timeout 20000 "$@" > "${prefix}.log" 2>&1
+  batch_status=$?
+  set -e
   cat "${census_file}" >> "${records}"
   printf '%s\n' "${batch_status}" > "${prefix}.status"
   printf '%s: %s files, exit %s\n' "${label}" "$#" "${batch_status}"
@@ -118,9 +121,17 @@ run_batch() {
 for ((pass=1; pass<=repeat; pass++)); do
   for ((offset=0; offset<${#files[@]}; offset+=batch_size)); do
     batch=("${files[@]:offset:batch_size}")
-    if ! run_batch "pass-${pass}-batch-${offset}" "${batch[@]}"; then
+    set +e
+    run_batch "pass-${pass}-batch-${offset}" "${batch[@]}"
+    batch_rc=$?
+    set -e
+    if [[ "${batch_rc}" -ne 0 ]]; then
       for file in "${batch[@]}"; do
-        if ! run_batch "pass-${pass}-single" "${file}"; then
+        set +e
+        run_batch "pass-${pass}-single" "${file}"
+        single_rc=$?
+        set -e
+        if [[ "${single_rc}" -ne 0 ]]; then
           # A recorded blocked hit proves this file is an offender even if its
           # test expects a successful launch. Other failures cannot prove clean.
           if ! awk -F '\t' -v file="${file}" '$1 == file { found=1 } END { exit !found }' "${census_file}"; then

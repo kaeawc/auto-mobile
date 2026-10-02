@@ -562,9 +562,18 @@ export class DaemonManager implements DaemonManagerLike {
       // Windows named pipes cannot use this POSIX socket identity probe. This accepted
       // platform gap means a live Windows daemon with missing PID metadata will not
       // self-heal here; retain the pre-identity-recovery behavior on Windows.
+      // On win32, namespace attribution uses only the argv socket marker or our PID
+      // record; the default IO never probes a socket owner.
       socketExists: () => this.platform !== "win32" && existsSync(this.socketPath),
       readRecord: () => readPidFileDataSync(this.pidFilePath),
-      probe: () => new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
+      probe: () =>
+        this.platform === "win32"
+          ? Promise.reject(
+              new Error(
+                "Failed to connect to daemon: socket-owner probing is unsupported on win32",
+              ),
+            )
+          : new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
     };
     this.platform = platformOverride;
     this.portAvailabilityChecker = portAvailabilityChecker;

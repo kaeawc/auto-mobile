@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.RectF
 import android.view.Display
+import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
+import kotlinx.coroutines.CoroutineScope
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,6 +36,37 @@ class CtrlProxyDisplayRoutingDispatchTest {
     assertAtomicRouting(strokeCount = 1, duration = 10L) { displayId ->
       fixture.actions.requestTapCoordinates("tap", 100.0, 100.0, 10L, null, displayId)
     }
+  }
+
+  @Test
+  fun `completed tap refreshes the requested display including absent display`() {
+    val optionsSeen = mutableListOf<HierarchySnapshotOptions>()
+    // The first read starts the wait; every later read skips the initial wait and satisfies
+    // quiescence, without reaching the real delay or the max-wait warning path.
+    var reads = 0
+    val time =
+      object : TimeProvider {
+        override fun currentTimeMillis(): Long = if (reads++ == 0) 1_000L else 1_250L
+      }
+    ReflectionHelpers.setField(
+      fixture.service,
+      "hierarchyDebouncer",
+      HierarchyDebouncer(
+        scope = ReflectionHelpers.getField<CoroutineScope>(fixture.service, "serviceScope"),
+        timeProvider = time,
+        extractHierarchy = { _, snapshotOptions ->
+          optionsSeen.add(snapshotOptions)
+          null
+        },
+      ),
+    )
+    for (displayId in listOf(2, null)) {
+      reads = 0
+      fixture.actions.requestTapCoordinates("tap", 100.0, 100.0, 10L, null, displayId)
+      fixture.completeLastStroke()
+      assertEquals(displayId, optionsSeen.last().displayId)
+    }
+    assertEquals(2, optionsSeen.size)
   }
 
   @Test

@@ -187,6 +187,7 @@ interface SendKeysFailure {
 }
 
 export interface SendKeysCommandExecutor {
+  resetCaretState?(): void;
   type(command: SendKeysTypeCommand, signal?: AbortSignal): Promise<SendKeysCommandResult>;
   key(
     command: SendKeysKeyCommand,
@@ -308,6 +309,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private readonly inputKey: SendKeysInputKey;
   private readonly observer: SendKeysObserver;
   private androidKeyCombinationSupported: boolean | undefined;
+  private androidCaretUnsafe = false;
 
   // IME-mode typing captures the prior IME and profile, then restores both. The shared
   // per-device lock also protects persistent keyboard selection from a concurrent restore.
@@ -367,6 +369,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
               signal,
               this.isAutoPasswordInsert(requestedMode, resolvedMode),
             );
+      this.recordCaretState(result);
       return {
         ...baseResult,
         success: result.success,
@@ -437,6 +440,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     onDispatch?: () => void,
   ): Promise<SendKeysCommandResult> {
     signal?.throwIfAborted();
+    // Explicit keys can move the caret, mutate the selection, or change focus (including IME
+    // semantic actions). Subsequent typing must use the service's new reported selection.
+    this.resetCaretState();
     const modifiers = command.modifiers ?? [];
     if (isSemanticKey(command.key)) {
       if (this.device.platform === "android") {
@@ -478,6 +484,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   async clear(signal?: AbortSignal): Promise<TextActionResult> {
     signal?.throwIfAborted();
+    this.resetCaretState();
     const clearResult = await this.textClient.clear();
     if (clearResult.success || this.device.platform !== "android") {
       return clearResult;
@@ -499,6 +506,26 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 
   private resolveMode(requestedMode: SendKeysTypingMode): AndroidSendKeysTypingMode {
     return requestedMode === "auto" ? "ime" : requestedMode;
+  }
+
+  resetCaretState(): void {
+    this.androidCaretUnsafe = false;
+  }
+
+  private async insertText(
+    text: string,
+    options?: Parameters<SendKeysTextClient["insert"]>[1],
+  ): Promise<TextActionResult> {
+    const result = await this.textClient.insert(text, options);
+    this.recordCaretState(result);
+    return result;
+  }
+
+  private recordCaretState(result: TextActionResult): void {
+    // Older APKs omit this field. Only an explicit failure forbids later key-event typing.
+    if (this.device.platform === "android" && result.caretPlaced === false) {
+      this.androidCaretUnsafe = true;
+    }
   }
 
   private reportedMode(mode: AndroidSendKeysTypingMode): ResolvedSendKeysTypingMode {
@@ -589,11 +616,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?: AbortSignal,
     focusedInputVerified = false,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
+    if (operation === "replace") {
+      this.resetCaretState();
+    }
     switch (mode) {
       case "a11y":
-        return operation === "replace"
-          ? this.textClient.replace(text)
-          : this.textClient.insert(text);
+        return operation === "replace" ? this.textClient.replace(text) : this.insertText(text);
       case "eventLast":
         return this.executeAndroidEventLast(text, operation, signal);
       case "eventAll":
@@ -697,6 +725,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       };
     }
     this.checkAbort(signal);
+    if (mode === "imeKeyEvents" && this.androidCaretUnsafe) {
+      return {
+        success: false,
+        error:
+          "imeKeyEvents requires a known caret; use eventAll insertion or move the caret first",
+      };
+    }
 
     const profileSupport = await this.checkKeyboardProfileSupport(keyboardProfile);
     this.checkAbort(signal);
@@ -1151,12 +1186,17 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const split = await this.findLastKeyEvent(chars);
     if (!split) {
       const result =
-        operation === "replace"
-          ? await this.textClient.replace(text)
-          : await this.textClient.insert(text);
+        operation === "replace" ? await this.textClient.replace(text) : await this.insertText(text);
       return { ...result, resolvedMode: "a11y" };
     }
 
+    if (this.androidCaretUnsafe) {
+      return {
+        success: false,
+        error:
+          "eventLast requires a real tail key event, but a previous insert could not place the caret; text was not sent",
+      };
+    }
     const focusResult = await this.requireFocusedAndroidInput(signal);
     if (!focusResult.success) {
       return focusResult;
@@ -1188,7 +1228,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     try {
       const suffixResult = suffix
-        ? await this.textClient.insert(suffix, {
+        ? await this.insertText(suffix, {
             expectedSuffix: chars[split.index],
             ...(precedingState ? { precedingState } : {}),
           })
@@ -1226,7 +1266,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (operation === "replace") {
       return prefix ? await this.textClient.replace(prefix) : await this.textClient.clear();
     }
-    return prefix ? this.textClient.insert(prefix) : { success: true };
+    return prefix ? this.insertText(prefix) : { success: true };
   }
 
   private async executeAndroidEventAll(
@@ -1236,7 +1276,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     focusedInputVerified = false,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     const graphemes = segmentGraphemes(text);
-    if (!(await this.hasAndroidKeyEvent(graphemes))) {
+    if (this.androidCaretUnsafe || !(await this.hasAndroidKeyEvent(graphemes))) {
       const result =
         operation === "replace"
           ? await this.textClient.replace(text)
@@ -1319,7 +1359,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (!insertResult.success) {
         return insertResult;
       }
-      // Within this type command, an unknown caret prohibits further key events.
+      // An unknown caret prohibits further key events until an explicit caret reset.
       if (insertResult.caretPlaced === false) {
         const remainder = await this.insertEventAllRemainder(
           graphemes.slice(index + 1),
@@ -1459,7 +1499,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     const text = run.join("");
     const codePoints = graphemeCodePoints(run);
     try {
-      const result = await this.textClient.insert(text, options);
+      const result = await this.insertText(text, options);
       if (result.success) {
         return result;
       }
@@ -1552,6 +1592,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     let mutated = operation === "replace";
+    if (this.androidCaretUnsafe) {
+      return {
+        success: false,
+        error: "eventOnly requires a known caret; use eventAll insertion or move the caret first",
+      };
+    }
     for (const plan of plans) {
       const eventFailure = await this.executeKeyEventPlanSafely(plan, mutated, signal);
       if (eventFailure) {
@@ -1739,6 +1785,7 @@ export class SendKeys {
     signal?: AbortSignal,
     display?: string,
   ): Promise<SendKeysResult> {
+    this.executor.resetCaretState?.();
     let displayId: number | undefined;
     let assertCurrent: (() => void) | undefined;
     if (display !== undefined) {
@@ -2063,6 +2110,7 @@ export class SendKeys {
         return this.executor.type(command, signal);
       case "key":
         if (displayId !== undefined && !isSemanticKey(command.key)) {
+          this.executor.resetCaretState?.();
           const result = await new InputKey(this.device, this.adbFactory).press(
             command.key,
             undefined,

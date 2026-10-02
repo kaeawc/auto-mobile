@@ -148,3 +148,54 @@ frontmost app is not queried. The daemon preserves phase children on failures,
 adds them to requested iOS swipe timing, includes a received swipe failure's
 summary in its error, and warns with phases when the pending request has already
 been removed. It does not extend deadlines or wait for late replies.
+
+## Opt-in tap diagnostics
+
+A private daemon running with `--debug` adds `diagnostics: true` to
+`request_tap_coordinates`. A rebuilt/re-cut runner returns optional
+`tapDiagnostics` and always emits one `tap_diagnostics requested=... base=...
+resolved=... appFrame=... screenBounds=... native=... scale=...
+deviceOrientation=... interfaceOrientation=... sampleErrors=...` line, including
+fast taps, under the same `dev.jasonpearson.automobile` / `GesturePerformer`
+subsystem/category. The daemon logs compact JSON with `[CTRLPROXY_TAP_DIAG]`;
+its existing 1,000-character line limit can truncate unusually long errors.
+Diagnostics stay out of tool/observe output. Debug off omits both wire fields
+and performs no extra XCUI/UIKit reads; current released runners ignore the flag.
+A runner re-cut is required: the newer host alone has no diagnostics to log.
+
+The points are XCUITest's resolved coordinates immediately before the gesture,
+not measured touch delivery. Screen metrics and scene/interface orientation
+come from the runner process, not the target app; fallback/unknown readings are
+explicit. Each failed sample is omitted and named in `sampleErrors`. Only the
+necessary app frame attribute is read: no additional window enumeration or
+candidate-element snapshot query, and no cheap public bundle identifier getter.
+Tap construction, coordinates, and phase recording are unchanged.
+
+On the unfolded Duo, run an isolated private daemon with `--debug`, call
+`setPosture opened`, and confirm `observe` reports screenSize 951x669. Run
+`tapAt {x:443,y:202}` and `tapOn "Advanced Animations, 15:45"`. Capture the daemon's
+`[CTRLPROXY_TAP_DIAG]` lines and runner lines with:
+
+```bash
+xcrun simctl spawn <udid> log stream --predicate 'subsystem == "dev.jasonpearson.automobile" AND category == "GesturePerformer"'
+xcrun simctl io <udid> screenshot --display=primary-1 /tmp/duo-after-tap.png
+```
+
+Take the inner-panel screenshot after the taps. Interpret the readings:
+
+- Resolved point equals requested, but app frame is portrait 669x951, has a
+  non-zero origin, or available windows fail to cover the panel: the performer's
+  app handle/frame differs from the hierarchy space. Mapping may be needed;
+  the fix location is `GesturePerformer.tap` coordinate construction. This
+  payload omits window queries, so it cannot settle window coverage alone.
+- Resolved point differs by a constant offset or transpose/rotation (such as
+  (202,443) or 669-y): XCUITest resolves app-relative coordinates in another
+  space. A pure runner mapping gated on the multi-panel inner-panel reading
+  is the next fix to investigate.
+- Resolved equals requested, app frame is 951x669 at (0,0), and screen metrics
+  agree, yet the app does not react: coordinates are right in XCUITest's space.
+  Investigate display routing/lower-level event delivery, not coordinate mapping.
+- No `tap_diagnostics` runner line: the released runner predates this change;
+  re-cut the runner first.
+- Non-empty `sampleErrors`: the named read failed on the second display; report
+  the exact strings.

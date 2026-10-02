@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeAll, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
 import { Socket } from "node:net";
 import {
   DeviceDataStreamSocketServer,
+  installDeviceDataStreamSocketServerForTesting,
   type InitialFrameSubscriber,
   type NavigationGraphStreamData,
   type RequestedObservation,
@@ -26,6 +27,10 @@ import {
 } from "../../src/daemon/streamSocketAuth";
 import { loadCoordinateMappingVectors } from "../parity/coordinateMappingGoldenVectors";
 import { loadSharp } from "../../src/utils/image/loadSharp";
+import {
+  createDisplayCacheInvalidator,
+  DisplayTransitionTracker,
+} from "../../src/features/observe/DisplayTransition";
 
 /** Deterministic deviceSessionUuid the harness mints for a given serial. */
 function sessionUuidFor(deviceId: string): string {
@@ -135,14 +140,29 @@ describe("DeviceDataStreamSocketServer", () => {
     await server.startFake();
   });
 
-  function initialFrameHarness() {
-    const coordinator = new DefaultObservationInitialFrameCoordinator(
-      timer,
-      2,
-      (id) => server.getLiveFrameGeneration(id),
-      (id) => server.getDeviceSessionUuid(id),
-    );
-    const device = { id: "device-1", name: "Pixel", platform: "android" as const };
+  afterEach(() => {
+    installDeviceDataStreamSocketServerForTesting(null);
+  });
+
+  function initialFrameHarness(
+    options: {
+      deviceId?: string;
+      coordinator?: DefaultObservationInitialFrameCoordinator;
+    } = {},
+  ) {
+    const coordinator =
+      options.coordinator ??
+      new DefaultObservationInitialFrameCoordinator(
+        timer,
+        2,
+        (id) => server.getLiveFrameGeneration(id),
+        (id) => server.getDeviceSessionUuid(id),
+      );
+    const device = {
+      id: options.deviceId ?? "device-1",
+      name: "Pixel",
+      platform: "android" as const,
+    };
     let captures = 0;
     const recordedSequences: Array<number | null> = [];
     let context = "ctx-a";
@@ -197,6 +217,7 @@ describe("DeviceDataStreamSocketServer", () => {
         hierarchyDiff?: { hasBaseline: boolean; changed: number };
       }>();
     return {
+      coordinator,
       request,
       frames,
       hierarchy,
@@ -215,6 +236,95 @@ describe("DeviceDataStreamSocketServer", () => {
       },
     };
   }
+
+  function displayTracker(): DisplayTransitionTracker {
+    installDeviceDataStreamSocketServerForTesting(server);
+    return new DisplayTransitionTracker(createDisplayCacheInvalidator());
+  }
+
+  it("display transition clears the pre-transition hierarchy diff baseline", () => {
+    const h = initialFrameHarness();
+    const pane = server.simulateSubscription({ deviceId: "device-1" });
+    server.pushHierarchyUpdate("device-1", h.hierarchy("inner"), "inner");
+    server.pushHierarchyUpdate("device-1", h.hierarchy("inner"), "inner");
+    expect(h.frames(pane.socket).at(-1)?.hierarchyDiff?.hasBaseline).toBe(true);
+
+    displayTracker().notifyTransition("device-1", "fold to cover");
+    server.pushHierarchyUpdate("device-1", h.hierarchy("cover"), "cover");
+    expect(h.frames(pane.socket).at(-1)?.hierarchyDiff?.hasBaseline).toBe(false);
+  });
+
+  it("display transition prevents replay of a cached pre-transition initial frame", async () => {
+    const h = initialFrameHarness();
+    const first = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(first.subscriptionId);
+    expect(h.frames(first.socket).map((frame) => frame.frameContext)).toEqual(["ctx-a", "ctx-a"]);
+    timer.advanceTime(1);
+
+    displayTracker().notifyTransition("device-1", "fold to cover");
+    h.setContext("cover");
+    const next = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(next.subscriptionId);
+    expect(h.captures).toBe(2);
+    expect(h.frames(next.socket).map((frame) => frame.frameContext)).toEqual(["cover", "cover"]);
+  });
+
+  it("display transition discards an initial capture already in flight", async () => {
+    const h = initialFrameHarness();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    h.setScreenshot(async () => {
+      started.resolve();
+      await finish.promise;
+    });
+    const pane = server.simulateSubscription({ deviceId: "device-1" });
+    const capture = h.request(pane.subscriptionId);
+    await started.promise;
+    displayTracker().notifyTransition("device-1", "fold to cover");
+    const context = server.getCurrentFrameContext("device-1");
+    finish.resolve();
+    await capture;
+    expect(h.frames(pane.socket)).toEqual([]);
+    expect(h.recordedSequences).toEqual([]);
+    expect(server.getCurrentFrameContext("device-1")).toBe(context);
+
+    h.setScreenshot(async () => {});
+    h.setContext("cover");
+    const next = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(next.subscriptionId);
+    expect(h.captures).toBe(2);
+    expect(h.frames(next.socket).map((frame) => frame.frameContext)).toEqual(["cover", "cover"]);
+  });
+
+  it("display transition on A preserves B's cached initial frame and diff baseline", async () => {
+    const a = initialFrameHarness();
+    const b = initialFrameHarness({ deviceId: "device-2", coordinator: a.coordinator });
+    b.setContext("other-panel");
+    const firstA = server.simulateSubscription({ deviceId: "device-1" });
+    const firstB = server.simulateSubscription({ deviceId: "device-2" });
+    await a.request(firstA.subscriptionId);
+    await b.request(firstB.subscriptionId);
+    timer.advanceTime(1);
+    const generationB = server.getLiveFrameGeneration("device-2");
+
+    displayTracker().notifyTransition("device-1", "fold to cover");
+    a.setContext("cover");
+    b.setContext("should-not-be-captured");
+    const nextA = server.simulateSubscription({ deviceId: "device-1" });
+    const nextB = server.simulateSubscription({ deviceId: "device-2" });
+    await a.request(nextA.subscriptionId);
+    await b.request(nextB.subscriptionId);
+    expect(a.captures).toBe(2);
+    expect(b.captures).toBe(1);
+    expect(server.getLiveFrameGeneration("device-2")).toBe(generationB);
+    expect(b.frames(nextB.socket).map((frame) => frame.frameContext)).toEqual([
+      "other-panel",
+      "other-panel",
+    ]);
+    server.pushHierarchyUpdate("device-2", b.hierarchy("other-panel"), "other-panel");
+    expect(b.frames(firstB.socket).at(-1)?.hierarchyDiff?.hasBaseline).toBe(true);
+    expect(a.frames(nextA.socket).map((frame) => frame.frameContext)).toEqual(["cover", "cover"]);
+  });
 
   const frameInvalidations = [
     {

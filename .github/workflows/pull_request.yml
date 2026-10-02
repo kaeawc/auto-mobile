@@ -3313,6 +3313,24 @@ jobs:
               body += `| Unpacked Size | ${actual} | ${threshold} | ${usage} | ${status} |\n`;
               body += `\n**Package:** ${packageName}@${packageVersion}\n`;
               body += `**Tarball Size:** ${tarballSize}\n`;
+              if (typeof result?.headroomBytes === 'number' && typeof result?.headroomPercent === 'number') {
+                body += `**Headroom:** ${result.headroomBytes} bytes (${result.headroomPercent}%)\n`;
+              }
+
+              if (Array.isArray(report.warnings) && report.warnings.length > 0) {
+                body += '\n#### ⚠️ Size Warning\n\n';
+                for (const warning of report.warnings) {
+                  body += `- ${warning}\n`;
+                }
+              }
+
+              if (report.package?.largestFiles?.length) {
+                body += '\n#### Largest Packed Files\n\n';
+                body += '| File | Bytes |\n|------|-------|\n';
+                for (const file of report.package.largestFiles) {
+                  body += `| ${file.path} | ${file.size} |\n`;
+                }
+              }
 
               if (Array.isArray(report.violations) && report.violations.length > 0) {
                 body += '\n#### ⚠️ Size Violations\n\n';
@@ -3391,6 +3409,9 @@ jobs:
             failed=true
           else
             echo "::notice::NPM unpacked size benchmark passed - within threshold"
+            if [ -f reports/npm-unpacked-size.json ] && jq -e '(.warnings // []) | length > 0' reports/npm-unpacked-size.json >/dev/null; then
+              echo "::warning::NPM unpacked size headroom is low - see the benchmark report and PR size summary"
+            fi
           fi
 
           if [ "$failed" = "true" ]; then

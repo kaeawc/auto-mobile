@@ -25,6 +25,11 @@ interface SharedGestureConfig {
   includeSwipeTimeoutMs?: boolean;
 }
 
+export interface TapDiagnosticParameters {
+  diagnostics?: true;
+  tapStrategy?: "legacy" | "appRelative" | "appRelativeObserved";
+}
+
 export class SharedGestureDelegate {
   protected readonly context: DelegateContext;
   private readonly config: SharedGestureConfig;
@@ -51,7 +56,7 @@ export class SharedGestureDelegate {
   }
 
   /** iOS overrides this opt-in seam; Android keeps its existing wire. */
-  protected tapDiagnosticParams(): { diagnostics?: true } {
+  protected tapDiagnosticParams(): TapDiagnosticParameters {
     return {};
   }
 

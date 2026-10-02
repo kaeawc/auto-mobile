@@ -738,9 +738,13 @@ final class CommandHandler: CommandHandling {
         let duration = request.duration ?? 0
         let diagnostics: TapDiagnostics? = try await performContextCheckedGesture(expected: request.frameContext) {
             if request.diagnostics == true {
-                return try self.gesturePerformer.tapWithDiagnostics(x: request.x, y: request.y, durationMs: duration)
+                return try self.gesturePerformer.tapWithDiagnostics(
+                    x: request.x, y: request.y, durationMs: duration, strategy: request.tapStrategy
+                )
             }
-            try self.gesturePerformer.tap(x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0)
+            try self.gesturePerformer.tap(
+                x: request.x, y: request.y, duration: TimeInterval(duration) / 1000.0, strategy: request.tapStrategy
+            )
             return nil
         }
         if let locator = elementLocator as? ElementLocator {

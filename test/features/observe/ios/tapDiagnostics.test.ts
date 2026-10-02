@@ -12,6 +12,7 @@ import { RequestManager } from "../../../../src/utils/RequestManager";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { createSuccessWebSocketFactory } from "../../../fakes/FakeWebSocket";
 import { dispatchIosCoordinateTap } from "../../../../src/features/action/coordinateTapDispatch";
+import { FakeSystemDetection } from "../../../fakes/FakeSystemDetection";
 
 // #8379: conflicting app/screen frames are faithfully reported; no mapping is applied.
 const diagnostics: CtrlProxyTapDiagnostics = {
@@ -42,7 +43,7 @@ const diagnostics: CtrlProxyTapDiagnostics = {
 const originalLevel = logger.getLogLevel();
 afterEach(() => logger.setLogLevel(originalLevel));
 
-function gestureHarness() {
+function gestureHarness(environment = new FakeSystemDetection()) {
   const timer = new FakeTimer();
   const requestManager = new RequestManager(timer);
   const sent: string[] = [];
@@ -56,17 +57,65 @@ function gestureHarness() {
   } as unknown as WebSocket;
   return {
     sent,
-    gestures: new CtrlProxyGestures({
-      timer,
-      requestManager,
-      getWebSocket: () => socket,
-      ensureConnected: async () => true,
-      cancelScreenshotBackoff() {},
-    }),
+    gestures: new CtrlProxyGestures(
+      {
+        timer,
+        requestManager,
+        getWebSocket: () => socket,
+        ensureConnected: async () => true,
+        cancelScreenshotBackoff() {},
+      },
+      environment,
+    ),
   };
 }
 
 describe("iOS opt-in tap diagnostics", () => {
+  test.each(["legacy", "appRelative", "appRelativeObserved"])(
+    "debug-only environment override sends %s without changing coordinates",
+    async (strategy) => {
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        const environment = new FakeSystemDetection();
+        environment.setEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY", strategy);
+        const { sent, gestures } = gestureHarness(environment);
+        logger.setLogLevel(LogLevel.INFO);
+        await gestures.requestTapCoordinates(443, 202);
+        expect(JSON.parse(sent[0])).not.toHaveProperty("tapStrategy");
+        expect(JSON.parse(sent[0])).not.toHaveProperty("diagnostics");
+        logger.setLogLevel(LogLevel.DEBUG);
+        await gestures.requestTapCoordinates(443, 202);
+        expect(JSON.parse(sent[1])).toMatchObject({
+          diagnostics: true,
+          tapStrategy: strategy,
+          x: 443,
+          y: 202,
+        });
+      } finally {
+        debug.mockRestore();
+      }
+    },
+  );
+
+  test("unknown override is omitted and debug-off never reads the environment", async () => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    try {
+      const environment = new FakeSystemDetection();
+      environment.setEnvVar("AUTOMOBILE_IOS_TAP_STRATEGY", "unknown");
+      const read = spyOn(environment, "getEnvVar");
+      const { sent, gestures } = gestureHarness(environment);
+      logger.setLogLevel(LogLevel.INFO);
+      await gestures.requestTapCoordinates(443, 202);
+      expect(read).not.toHaveBeenCalled();
+      logger.setLogLevel(LogLevel.DEBUG);
+      await gestures.requestTapCoordinates(443, 202);
+      expect(JSON.parse(sent[1])).not.toHaveProperty("tapStrategy");
+      expect(JSON.parse(sent[1]).diagnostics).toBe(true);
+    } finally {
+      debug.mockRestore();
+    }
+  });
+
   test("debug off leaves the exact default wire JSON unchanged", async () => {
     logger.setLogLevel(LogLevel.INFO);
     const { sent, gestures } = gestureHarness();

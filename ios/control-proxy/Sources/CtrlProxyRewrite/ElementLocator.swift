@@ -67,6 +67,13 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// reference's cross-thread lock is unnecessary inside a single isolation domain.
         private var tracker = ForegroundTracker()
         private var appSwitcherMayBeVisible = false
+        private var gestureGeometryBundleId: String?
+        private var gestureGeometry: GestureCoordinateGeometry?
+
+        /// Reuse the last completed observation without XCUI reads on the legacy gesture path.
+        var observedGestureGeometry: GestureCoordinateGeometry? {
+            gestureGeometryBundleId == foregroundBundleId ? gestureGeometry : nil
+        }
 
         /// Recent apps is SpringBoard UI even while its cards report their apps as foreground.
         func noteAppSwitcherOpened() {
@@ -139,6 +146,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         public func setApplication(_ app: XCUIApplication) {
             tracker.setApplication(app, bundleId: nil, observe: false)
             elementCache.removeAll()
+            gestureGeometry = nil
         }
 
         public func trackObservedBundleId(_ bundleId: String) {
@@ -150,6 +158,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         public func setApplication(_ app: XCUIApplication, bundleId: String) {
             tracker.setApplication(app, bundleId: bundleId, observe: bundleId != "com.apple.springboard")
             elementCache.removeAll()
+            gestureGeometry = nil
         }
 
         /// Explicitly switch the tracked foreground app to the given bundle ID, clearing caches.
@@ -166,6 +175,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             )
             elementCache.removeAll()
             if previousBundleId != bundleId {
+                gestureGeometry = nil
                 print("[ElementLocator] Foreground app changed: \(previousBundleId ?? "nil") -> \(bundleId)")
             }
         }
@@ -523,6 +533,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
             }
 
             elementCache.removeAll()
+            gestureGeometry = nil
 
             // Use the observed app's bundle identifier for packageName
             let bundleId = foregroundBundleId ?? "com.apple.springboard"
@@ -725,6 +736,18 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
                 pointHeight: screenHeight,
                 nativeScale: currentScreenMetrics.nativeScale
             )
+
+            let observationSize = GestureSize(width: Double(screenWidth), height: Double(screenHeight))
+            gestureGeometry = GestureCoordinateGeometry(
+                app: GestureSize(width: Double(snapshot.frame.width), height: Double(snapshot.frame.height)),
+                screen: GestureSize(
+                    width: Double(currentScreenMetrics.fallbackWidth),
+                    height: Double(currentScreenMetrics.fallbackHeight)
+                ),
+                observation: observationSize,
+                rotation: GestureCoordinateGeometry.observationRotation(hierarchyRotation, size: observationSize)
+            )
+            gestureGeometryBundleId = bundleId
 
             return ViewHierarchy(
                 packageName: bundleId,
@@ -1547,6 +1570,8 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
     #else
         /// Non-iOS stub implementation
         public init() {}
+
+        var observedGestureGeometry: GestureCoordinateGeometry? { nil }
 
         func noteAppSwitcherOpened() {}
         func clearAppSwitcherHint() {}

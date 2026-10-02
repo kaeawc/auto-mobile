@@ -931,19 +931,42 @@ public final class GesturePerformer: GesturePerforming {
         // MARK: - Tap Gestures
 
         public func tap(x: Double, y: Double, duration: TimeInterval = 0) throws {
-            _ = try performTap(x: x, y: y, duration: duration, requested: nil)
+            try tap(x: x, y: y, duration: duration, strategy: nil)
+        }
+
+        public func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws {
+            _ = try performTap(x: x, y: y, duration: duration, requested: nil, forced: forcedTapStrategy(strategy))
+        }
+
+        private func forcedTapStrategy(_ value: String?) -> TapCoordinateStrategy? {
+            guard let value else { return nil }
+            let strategy = TapCoordinateStrategy(rawValue: value)
+            if strategy == nil { logger.warning("Ignoring unknown tapStrategy: \(value, privacy: .public)") }
+            return strategy
         }
 
         public func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {
+            try tapWithDiagnostics(x: x, y: y, durationMs: durationMs, strategy: nil)
+        }
+
+        public func tapWithDiagnostics(
+            x: Double, y: Double, durationMs: Int, strategy: String?
+        )
+            throws -> TapDiagnostics
+        {
             // The requested value is always returned when delivery succeeds, even if every read fails.
             let requested = TapDiagnostics.Requested(x: x, y: y, durationMs: durationMs)
-            return try performTap(x: x, y: y, duration: TimeInterval(durationMs) / 1000.0, requested: requested)
+            return try performTap(
+                x: x, y: y, duration: TimeInterval(durationMs) / 1000.0, requested: requested,
+                forced: forcedTapStrategy(strategy)
+            )
                 ?? TapDiagnostics(requested: requested, sampleErrors: ["sampler: no sample returned"])
         }
 
-        /// Shared construction keeps the opt-out path free of additional XCUI/UIKit reads.
+        /// Cached observation geometry keeps the single-panel opt-out path free of new platform reads.
         private func performTap(
-            x: Double, y: Double, duration: TimeInterval, requested: TapDiagnostics.Requested?
+            x: Double, y: Double, duration: TimeInterval, requested: TapDiagnostics.Requested?,
+            forced: TapCoordinateStrategy?
         )
             throws -> TapDiagnostics?
         {
@@ -954,16 +977,24 @@ public final class GesturePerformer: GesturePerforming {
 
             return try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
-                let base = app.coordinate(withNormalizedOffset: .zero)
-                let coordinate = base.withOffset(CGVector(dx: x, dy: y))
+                let provider = XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                let factory = try GestureCoordinateFactory(provider: provider, forced: forced)
+                let resolved = try factory.resolve(x: x, y: y, forced: forced)
+                let coordinate = resolved.coordinate
+                let selection = resolved.selection
                 var diagnostics: TapDiagnostics?
                 if let requested {
+                    let requested = TapDiagnostics.Requested(
+                        x: requested.x, y: requested.y, durationMs: requested.durationMs,
+                        coordinateConstruction: selection.strategy == .legacy
+                            ? "appFrameOriginPlusPointOffset" : "appNormalizedOffset"
+                    )
                     diagnostics = tapDiagnosticsSampler.sample(requested: requested, reads: TapDiagnosticReads(
-                        baseScreenPoint: { try Self.diagnosticPoint(base.screenPoint) },
-                        resolvedScreenPoint: { try Self.diagnosticPoint(coordinate.screenPoint) },
+                        baseScreenPoint: { try Self.diagnosticPoint(coordinate.base.screenPoint) },
+                        resolvedScreenPoint: { try Self.diagnosticPoint(coordinate.resolved.screenPoint) },
                         // Only the necessary app frame attribute; no snapshot tree/window query.
                         // XCUIApplication exposes no cheap public bundle identifier getter.
-                        application: { try .init(frame: Self.diagnosticFrame(app.frame)) },
+                        application: { try .init(frame: Self.diagnosticFrame(coordinate.application.frame)) },
                         screen: {
                             let screen = UIScreen.main
                             guard screen.scale.isFinite, screen.nativeScale.isFinite else {
@@ -979,16 +1010,21 @@ public final class GesturePerformer: GesturePerforming {
                         deviceOrientation: { .device(rawValue: XCUIDevice.shared.orientation.rawValue) },
                         interfaceOrientation: { DeviceRotation.tapDiagnosticInterfaceOrientation() }
                     ))
+                    diagnostics?.strategy = selection.strategy.rawValue
+                    diagnostics?.strategyReason = selection.reason
+                    if selection.strategy != .legacy {
+                        diagnostics?.normalizedOffset = .init(x: selection.normalized.x, y: selection.normalized.y)
+                    }
                     if let diagnostics { logger.warning("\(diagnostics.logLine(), privacy: .public)") }
+                } else if selection.strategy != .legacy || (forced != nil && forced != .legacy) ||
+                    factory.geometry.map({ hasMultiPanelMismatch(app: $0.app, screen: $0.screen) }) == true
+                {
+                    logger.warning("tap_diagnostics \(selection.logFields, privacy: .public)")
                 }
 
                 GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
-                if duration > 0 {
-                    coordinate.press(forDuration: duration)
-                } else {
-                    coordinate.tap()
-                }
+                try provider.tap(coordinate, duration: duration)
                 return diagnostics
             }
         }
@@ -1011,15 +1047,26 @@ public final class GesturePerformer: GesturePerforming {
             )
         }
 
+        private func logRelativeCoordinate(_ selection: GestureCoordinateSelection, gesture: String) {
+            if selection.strategy != .legacy {
+                logger.warning(
+                    "tap_diagnostics gesture=\(gesture, privacy: .public) \(selection.logFields, privacy: .public)"
+                )
+            }
+        }
+
         public func doubleTap(x: Double, y: Double) throws {
             guard let app = application else {
                 throw GestureError.noApplication
             }
 
             try catchingObjCException {
-                let coordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: x, dy: y))
-                coordinate.doubleTap()
+                let factory = try GestureCoordinateFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                )
+                let resolved = try factory.resolve(x: x, y: y)
+                logRelativeCoordinate(resolved.selection, gesture: "doubleTap")
+                try factory.provider.doubleTap(resolved.coordinate)
             }
         }
 
@@ -1029,9 +1076,12 @@ public final class GesturePerformer: GesturePerforming {
             }
 
             try catchingObjCException {
-                let coordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: x, dy: y))
-                coordinate.press(forDuration: duration)
+                let factory = try GestureCoordinateFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                )
+                let resolved = try factory.resolve(x: x, y: y)
+                logRelativeCoordinate(resolved.selection, gesture: "longPress")
+                try factory.provider.press(resolved.coordinate, duration: duration)
             }
         }
 
@@ -1045,21 +1095,24 @@ public final class GesturePerformer: GesturePerforming {
 
             try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
-                let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: startX, dy: startY))
-                let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: endX, dy: endY))
+                let factory = try GestureCoordinateFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                )
+                let start = try factory.resolve(x: startX, y: startY)
+                let end = try factory.resolve(x: endX, y: endY)
+                logRelativeCoordinate(start.selection, gesture: "swipe")
+                logRelativeCoordinate(end.selection, gesture: "swipeEnd")
                 let distance = hypot(endX - startX, endY - startY)
                 let velocity = Self.swipeVelocity(distance: distance, duration: duration)
-                    .map(XCUIGestureVelocity.init) ?? .default
 
                 GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
-                startCoordinate.press(
-                    forDuration: 0.05,
-                    thenDragTo: endCoordinate,
-                    withVelocity: velocity,
-                    thenHoldForDuration: 0
+                try factory.provider.drag(
+                    start.coordinate,
+                    to: end.coordinate,
+                    press: 0.05,
+                    velocity: velocity,
+                    hold: 0
                 )
             }
         }
@@ -1164,10 +1217,13 @@ public final class GesturePerformer: GesturePerforming {
 
             try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
-                let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: startX, dy: startY))
-                let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(dx: endX, dy: endY))
+                let factory = try GestureCoordinateFactory(
+                    provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
+                )
+                let start = try factory.resolve(x: startX, y: startY)
+                let end = try factory.resolve(x: endX, y: endY)
+                logRelativeCoordinate(start.selection, gesture: "drag")
+                logRelativeCoordinate(end.selection, gesture: "dragEnd")
 
                 // XCUICoordinate's drag API takes a velocity (points/second), not a duration,
                 // so honor the caller's dragDuration by converting it into the velocity that
@@ -1175,18 +1231,13 @@ public final class GesturePerformer: GesturePerforming {
                 // drag-speed control Android has. Fall back to .default when the duration or
                 // distance is non-positive (avoids divide-by-zero / infinite velocity).
                 let distance = hypot(endX - startX, endY - startY)
-                let velocity: XCUIGestureVelocity = (dragDuration > 0 && distance > 0)
-                    ? XCUIGestureVelocity(distance / dragDuration)
-                    : .default
+                let velocity: Double? = (dragDuration > 0 && distance > 0) ? distance / dragDuration : nil
 
                 // Press, drag, and hold
                 GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
-                startCoordinate.press(
-                    forDuration: pressDuration,
-                    thenDragTo: endCoordinate,
-                    withVelocity: velocity,
-                    thenHoldForDuration: holdDuration
+                try factory.provider.drag(
+                    start.coordinate, to: end.coordinate, press: pressDuration, velocity: velocity, hold: holdDuration
                 )
             }
         }

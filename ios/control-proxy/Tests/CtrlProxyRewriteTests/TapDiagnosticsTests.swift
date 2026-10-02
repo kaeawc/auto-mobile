@@ -72,6 +72,60 @@ final class TapDiagnosticsTests: XCTestCase {
         }
     }
 
+    func testRequestStrategyAbsentKnownAndUnknownRemainDecodable() throws {
+        for strategy in [String?.none, "legacy", "appRelative", "appRelativeObserved", "unknown"] {
+            let suffix = strategy.map { ",\"tapStrategy\":\"\($0)\"" } ?? ""
+            let request = try JSONDecoder().decode(
+                RequestTapCoordinates.self, from: Data("{\"x\":443,\"y\":202\(suffix)}".utf8)
+            )
+            XCTAssertEqual(request.tapStrategy, strategy)
+        }
+    }
+
+    func testHandlerPlumbsStrategyWithAndWithoutDiagnostics() async throws {
+        let gestures = RewriteFakeGesturePerformer()
+        let handler = CommandHandler(
+            elementLocator: RewriteFakeElementLocator(), gesturePerformer: gestures,
+            perf: FakePerfTracking(flushResult: nil)
+        )
+        for diagnostics in [false, true] {
+            let request = try JSONDecoder().decode(
+                WebSocketRequest.self,
+                from: Data(
+                    (
+                        "{\"type\":\"request_tap_coordinates\",\"x\":443,\"y\":202," +
+                            "\"diagnostics\":\(diagnostics),\"tapStrategy\":\"appRelativeObserved\"}"
+                    ).utf8
+                )
+            )
+            let result = await handler.handle(request)
+            XCTAssertEqual((result as? WebSocketResponse)?.success, true)
+        }
+        XCTAssertEqual(gestures.tapStrategies, ["appRelativeObserved", "appRelativeObserved"])
+        XCTAssertEqual(gestures.tapCalls, 1)
+        XCTAssertEqual(gestures.diagnosticTapCalls, 1)
+    }
+
+    func testStrategyFieldsAppendToLegacyLogAndRoundTripOptionally() throws {
+        var legacy = fixture
+        legacy.strategy = "legacy"
+        legacy.strategyReason = "singlePanel"
+        XCTAssertEqual(legacy.logLine(), fixture.logLine() + " strategy=legacy strategyReason=singlePanel")
+        XCTAssertFalse(try encoded(legacy).contains("normalizedOffset"))
+        var relative = fixture
+        relative.strategy = "appRelative"
+        relative.strategyReason = "multiPanelMismatch"
+        relative.normalizedOffset = .init(x: 202.0 / 669, y: 508.0 / 951)
+        XCTAssertTrue(relative.logLine().contains("strategy=appRelative strategyReason=multiPanelMismatch"))
+        XCTAssertTrue(relative.logLine().contains(" normalized=("))
+        XCTAssertTrue(relative.logLine().hasPrefix(fixture.logLine()))
+        let roundTrip = try JSONDecoder().decode(TapDiagnostics.self, from: Data(encoded(relative).utf8))
+        XCTAssertEqual(roundTrip, relative)
+        XCTAssertNil(fixture.strategy)
+        XCTAssertNil(fixture.strategyReason)
+        XCTAssertNil(fixture.normalizedOffset)
+    }
+
     func testHandlerOffUsesPlainTapAndOmitsDiagnostics() async throws {
         let gestures = RewriteFakeGesturePerformer()
         let handler = CommandHandler(

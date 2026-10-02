@@ -24,12 +24,15 @@ public struct TapDiagnostics: Codable, Sendable, Equatable {
         public let coordinateConstruction: String
         public let units: String
 
-        public init(x: Double, y: Double, durationMs: Int) {
+        public init(
+            x: Double, y: Double, durationMs: Int,
+            coordinateConstruction: String = "appFrameOriginPlusPointOffset"
+        ) {
             self.x = x
             self.y = y
             self.durationMs = durationMs
             mode = durationMs > 0 ? "press" : "tap"
-            coordinateConstruction = "appFrameOriginPlusPointOffset"
+            self.coordinateConstruction = coordinateConstruction
             units = "points"
         }
     }
@@ -74,6 +77,9 @@ public struct TapDiagnostics: Codable, Sendable, Equatable {
     public var screen: Screen?
     public var orientation: Orientation?
     public var sampleErrors: [String] = []
+    public var strategy: String?
+    public var strategyReason: String?
+    public var normalizedOffset: Point?
 
     /// Pure, stable formatter, emitted once even for a fast diagnostic tap.
     public func logLine() -> String {
@@ -90,6 +96,8 @@ public struct TapDiagnostics: Codable, Sendable, Equatable {
         }
         // JSON escapes exception reasons so the diagnostic remains one log line.
         let errors = (try? JSONEncoder().encode(sampleErrors)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-        return "tap_diagnostics requested=(\(requested.x),\(requested.y)) durationMs=\(requested.durationMs) mode=\(requested.mode) base=\(point(baseScreenPoint)) resolved=\(point(resolvedScreenPoint)) appFrame=\(frame(application?.frame)) screenBounds=\(frame(screen?.bounds)) native=\(frame(screen?.nativeBounds)) scale=\(screen.map { String($0.scale) } ?? "nil") nativeScale=\(screen.map { String($0.nativeScale) } ?? "nil") deviceOrientation=\(reading(orientation?.device)) interfaceOrientation=\(reading(orientation?.interface)) sampleErrors=\(errors)"
+        let strategyFields = strategy.map { " strategy=\($0) strategyReason=\(strategyReason ?? "nil")" } ?? ""
+        let normalizedFields = normalizedOffset.map { " normalized=(\($0.x),\($0.y))" } ?? ""
+        return "tap_diagnostics requested=(\(requested.x),\(requested.y)) durationMs=\(requested.durationMs) mode=\(requested.mode) base=\(point(baseScreenPoint)) resolved=\(point(resolvedScreenPoint)) appFrame=\(frame(application?.frame)) screenBounds=\(frame(screen?.bounds)) native=\(frame(screen?.nativeBounds)) scale=\(screen.map { String($0.scale) } ?? "nil") nativeScale=\(screen.map { String($0.nativeScale) } ?? "nil") deviceOrientation=\(reading(orientation?.device)) interfaceOrientation=\(reading(orientation?.interface)) sampleErrors=\(errors)\(strategyFields)\(normalizedFields)"
     }
 }

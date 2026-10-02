@@ -217,6 +217,9 @@ export interface CtrlProxyTapDiagnostics {
     interface?: TapDiagnosticOrientation;
   };
   sampleErrors?: string[];
+  strategy?: "legacy" | "appRelative" | "appRelativeObserved";
+  strategyReason?: string;
+  normalizedOffset?: { x?: number; y?: number };
 }
 
 interface TapDiagnosticFrame {

@@ -47,3 +47,9 @@ public protocol ElementLocating: Sendable {
     /// Refresh foreground-app tracking before returning the current bundle id.
     func refreshForegroundBundleId() -> String?
 }
+
+extension ElementLocating {
+    var gestureCoordinateGeometry: GestureCoordinateGeometry? {
+        (self as? ElementLocator)?.observedGestureGeometry
+    }
+}

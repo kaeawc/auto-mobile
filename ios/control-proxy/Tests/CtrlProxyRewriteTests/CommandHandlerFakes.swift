@@ -56,6 +56,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var keyError: CommandError?
     var tapCalls = 0
     var diagnosticTapCalls = 0
+    var tapStrategies: [String?] = []
     var tapDiagnosticsResult: TapDiagnostics?
     var lockScreenSwipeCalls = 0
     var swipeCalls = 0
@@ -96,6 +97,16 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     }
 
     func tap(x _: Double, y _: Double, duration _: TimeInterval) throws { tapCalls += 1 }
+    func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws {
+        tapStrategies.append(strategy)
+        try tap(x: x, y: y, duration: duration)
+    }
+
+    func tapWithDiagnostics(x: Double, y: Double, durationMs: Int, strategy: String?) throws -> TapDiagnostics {
+        tapStrategies.append(strategy)
+        return try tapWithDiagnostics(x: x, y: y, durationMs: durationMs)
+    }
+
     func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {
         diagnosticTapCalls += 1
         return tapDiagnosticsResult ?? TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))

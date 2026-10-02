@@ -189,6 +189,78 @@ interface DeviceSnapshotManagerDependencies {
 
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
 const LEGACY_MANIFEST_FILENAME = "manifest.json";
+export const STARTUP_SWEEP_DELAY_MS = 500;
+export const SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES = 50;
+export const SNAPSHOT_JOURNAL_SWEEP_MAX_SCOPE_DIRECTORIES = 64;
+let snapshotJournalSweepScheduled = false;
+let snapshotJournalSweepGeneration = 0;
+
+function ensureSnapshotJournalSweepScheduled(
+  deps: Pick<DeviceSnapshotManagerDependencies, "timer">,
+): void {
+  if (snapshotJournalSweepScheduled) {
+    return;
+  }
+  snapshotJournalSweepScheduled = true;
+  const generation = snapshotJournalSweepGeneration;
+  void deps.timer
+    .sleep(STARTUP_SWEEP_DELAY_MS)
+    .then(() => {
+      if (generation !== snapshotJournalSweepGeneration) {
+        return;
+      }
+      void runSnapshotJournalSweep().catch((error) => {
+        logger.warn("[DeviceSnapshot] Startup snapshot journal sweep failed", error);
+      });
+    })
+    .catch((error) => {
+      logger.warn("[DeviceSnapshot] Startup snapshot journal sweep delay failed", error);
+    });
+}
+
+export async function runSnapshotJournalSweep(): Promise<{
+  recovered: number;
+  failed: number;
+  skippedLocked: number;
+  truncated: boolean;
+}> {
+  const { snapshotStore } = await getDeviceSnapshotDependencies();
+  const { entries, truncated } = await snapshotStore.listLeftoverSnapshotJournals({
+    maxEntries: SNAPSHOT_JOURNAL_SWEEP_MAX_ENTRIES,
+    maxScopeDirectories: SNAPSHOT_JOURNAL_SWEEP_MAX_SCOPE_DIRECTORIES,
+  });
+  const result = { recovered: 0, failed: 0, skippedLocked: 0, truncated };
+  for (const { snapshotName, options } of entries) {
+    // Same-tick try/acquire: never queue behind a live capture or restore.
+    if (snapshotNameLocks.has(snapshotName)) {
+      result.skippedLocked++;
+      continue;
+    }
+    try {
+      await withSnapshotNameLock(snapshotName, () =>
+        snapshotStore.recoverSnapshotData(snapshotName, options),
+      );
+      result.recovered++;
+    } catch (error) {
+      logger.warn(
+        `[DeviceSnapshot] Failed to recover snapshot '${snapshotName}' in scope ${JSON.stringify(options ?? "flat")}`,
+        error,
+      );
+      result.failed++;
+    }
+  }
+  if (truncated) {
+    logger.warn(
+      "[DeviceSnapshot] Snapshot journal sweep truncated; remaining artifacts are left to lazy recovery",
+    );
+  }
+  if (result.recovered || result.failed || result.skippedLocked) {
+    logger.info(
+      `[DeviceSnapshot] Snapshot journal sweep: ${result.recovered} recovered, ${result.failed} failed, ${result.skippedLocked} locked`,
+    );
+  }
+  return result;
+}
 
 // Serializes the LIFECYCLE of one snapshot name within this process: captures,
 // restores, and reclaim all take this lock. Two concurrent same-name captures
@@ -401,6 +473,8 @@ export async function setDeviceSnapshotManagerDependencies(
 }
 
 export function resetDeviceSnapshotManagerDependencies(): void {
+  snapshotJournalSweepGeneration++;
+  snapshotJournalSweepScheduled = false;
   moduleDependencies = null;
   snapshotNameLocks.clear();
   archiveBudgetLocks.clear();
@@ -1325,9 +1399,42 @@ async function deleteDeviceSnapshotRecord(
       // faithful reference to the in-AVD snapshot that is still there.
       return false;
     }
-    return removeSnapshotArchiveAndRow(record);
+    return removeSnapshotArchiveAndRowAfterRecovery(record);
   });
   return outcome === true;
+}
+
+/** Called under the name lock, after any emulator-owned payload has been reclaimed. */
+async function removeSnapshotArchiveAndRowAfterRecovery(
+  record: DeviceSnapshotRecord,
+): Promise<boolean> {
+  const { snapshotStore } = await getDeviceSnapshotDependencies();
+  const pathOptions = getSnapshotPathOptions({
+    platform: record.platform,
+    deviceId: record.deviceId,
+    avdName: record.deviceName,
+  });
+  const scopes = [pathOptions];
+  if (pathOptions?.platform === "android" && !isReservedScopeSegment(record.snapshotName)) {
+    scopes.push(undefined);
+  }
+  for (const options of scopes) {
+    try {
+      await snapshotStore.recoverSnapshotData(record.snapshotName, options);
+    } catch (error) {
+      logger.warn(
+        `[DeviceSnapshot] Recovery before deletion failed for '${record.snapshotName}' in scope ${JSON.stringify(options ?? "flat")}`,
+        error,
+      );
+      const leftovers = await snapshotStore.discardSnapshotArtifacts(record.snapshotName, options);
+      if (leftovers.length > 0) {
+        logger.warn(
+          `[DeviceSnapshot] Snapshot artifacts left behind after deletion: ${leftovers.join(", ")}`,
+        );
+      }
+    }
+  }
+  return removeSnapshotArchiveAndRow(record);
 }
 
 /**
@@ -1866,7 +1973,7 @@ export async function sweepPendingVmSnapshotReclaims(device: BootedDevice): Prom
 
       // The in-AVD payload is gone, so finish the eviction the offline emulator
       // interrupted: archive data and row both go. No second console delete.
-      return removeSnapshotArchiveAndRow(record);
+      return removeSnapshotArchiveAndRowAfterRecovery(record);
     });
     if (swept === true) {
       reclaimed.push(record.snapshotName);
@@ -1960,7 +2067,8 @@ export async function updateDeviceSnapshotConfig(
   update: DeviceSnapshotConfigInput | null,
 ): Promise<DeviceSnapshotConfigUpdateResult> {
   return withConfigUpdateLock(async () => {
-    const { configRepository } = await getDeviceSnapshotDependencies();
+    const { configRepository, timer } = await getDeviceSnapshotDependencies();
+    ensureSnapshotJournalSweepScheduled({ timer });
     if (update === null) {
       await configRepository.clearConfig();
       const defaults = parseDeviceSnapshotConfig(serverConfig.getDeviceSnapshotDefaults());
@@ -2061,6 +2169,7 @@ export async function captureDeviceSnapshot(
 }> {
   const { snapshotRepository, snapshotStore, avdSnapshots, timer, now, createCaptureProvider } =
     await getDeviceSnapshotDependencies();
+  ensureSnapshotJournalSweepScheduled({ timer });
 
   const baseConfig = await getDeviceSnapshotConfig();
   const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
@@ -2249,6 +2358,7 @@ export async function restoreDeviceSnapshot(
     createRestoreProvider,
     deviceIncarnationInvalidator,
   } = await getDeviceSnapshotDependencies();
+  ensureSnapshotJournalSweepScheduled({ timer });
 
   // Reject a traversal/absolute name before any snapshot lookup or legacy
   // manifest read resolves a path from it (issue #5705).
@@ -2460,7 +2570,8 @@ export async function listDeviceSnapshots(): Promise<{
   pendingReclaimCount: number;
   orphanedAvdSnapshots: OrphanedAvdSnapshotSummary;
 }> {
-  const { snapshotRepository, snapshotStore, now } = await getDeviceSnapshotDependencies();
+  const { snapshotRepository, snapshotStore, now, timer } = await getDeviceSnapshotDependencies();
+  ensureSnapshotJournalSweepScheduled({ timer });
   const initialRecords = await snapshotRepository.listSnapshots({
     orderByCreatedAt: "desc",
   });

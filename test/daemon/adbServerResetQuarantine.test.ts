@@ -1,3 +1,6 @@
+import { ExecutionTracker } from "../../src/server/executionTracker";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { describe, expect, test } from "bun:test";
 import { Mutex } from "async-mutex";
 import {
@@ -37,6 +40,7 @@ function harness(session?: Session) {
   const removed: string[] = [];
   const mutex = new Mutex();
   let cancel = async (_sessionId: string, _reason: string): Promise<number> => 0;
+  let cancelDevice = async (_deviceId: string, _reason: string): Promise<number> => 0;
   const coordinator = {
     finalizeRecoveryRecord: (id: string, expected?: AndroidRecoveryRecord) => {
       finalized.push(id);
@@ -100,6 +104,7 @@ function harness(session?: Session) {
       return next;
     },
     recordEmulatorLossIncident: async () => "incident-1",
+    cancelDeviceExecutions: (id, reason) => cancelDevice(id, reason),
     cancelDeviceSessionExecutions: (id, reason) => cancel(id, reason),
     completeEmulatorLossRecovery: async (id, outcome) => {
       completed.push([id, outcome]);
@@ -121,6 +126,9 @@ function harness(session?: Session) {
     completed,
     settled,
     removed,
+    setDeviceCancel: (next: typeof cancelDevice) => {
+      cancelDevice = next;
+    },
     setCancel: (next: typeof cancel) => {
       cancel = next;
     },
@@ -140,6 +148,72 @@ function reservation(timer: FakeTimer): AdbServerResetRecoveryReservation {
 }
 
 describe("AdbServerResetQuarantine", () => {
+  test.each([false, true])(
+    "reset cancels serial-bound work, including idle cohort members (session=%s)",
+    async (withSession) => {
+      const session = withSession
+        ? ({
+            sessionId: "session-1",
+            assignedDevice: "emulator-5554",
+            platform: "android",
+          } as Session)
+        : undefined;
+      const h = harness(session);
+      const tracker = new ExecutionTracker(
+        h.timer,
+        new FakeIdGenerator(["bound", "session", "other"]),
+      );
+      const member = device(session?.sessionId);
+      h.devices.set(member.id, member);
+      const bound = tracker.startExecution("takeScreenshot");
+      tracker.bindDeviceExecution(bound.id, member.id);
+      const sessionOnly = tracker.startExecution("takeScreenshot", undefined, session?.sessionId);
+      const other = tracker.startExecution("takeScreenshot");
+      tracker.bindDeviceExecution(other.id, "emulator-5556");
+      const deviceReasons: string[] = [];
+      h.setDeviceCancel(async (id, reason) => {
+        deviceReasons.push(reason);
+        return tracker.cancelDeviceExecutions(id, reason);
+      });
+      h.setCancel((id, reason) => tracker.cancelDeviceSessionExecutions(id, reason));
+      await h.quarantine.detachAdbServerResetCohort([member]);
+      expect(bound.abortController.signal.aborted).toBe(true);
+      expect(sessionOnly.abortController.signal.aborted).toBe(withSession);
+      expect(other.abortController.signal.aborted).toBe(false);
+      expect(deviceReasons).toEqual([
+        deviceLossCancellationReason(member.id, withSession ? "incident-1" : undefined),
+      ]);
+    },
+  );
+
+  test("reset issues device and session cancellation before awaiting either drain", async () => {
+    const session = {
+      sessionId: "session-1",
+      assignedDevice: "emulator-5554",
+      platform: "android",
+    } as Session;
+    const h = harness(session);
+    const member = device(session.sessionId);
+    h.devices.set(member.id, member);
+    const calls: string[] = [];
+    let finishDeviceDrain: (() => void) | undefined;
+    const deviceDrain = new Promise<void>((resolve) => {
+      finishDeviceDrain = resolve;
+    });
+    h.setDeviceCancel(async () => {
+      calls.push("device");
+      await deviceDrain;
+      return 1;
+    });
+    h.setCancel(async () => {
+      calls.push("session");
+      finishDeviceDrain?.();
+      return 1;
+    });
+    await h.quarantine.detachAdbServerResetCohort([member]);
+    expect(calls).toEqual(["device", "session"]);
+  });
+
   test("reserves an idle cohort member, then releases its reservation", async () => {
     const h = harness();
     const member = device();

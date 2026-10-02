@@ -216,6 +216,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     for (const file of SCANNED) {
       namedFunctions(file);
     }
+    namedFunctions("src/utils/DeviceSessionManager.ts");
     poolSource = blankComments(readFileSync(join(ROOT, "src/daemon/devicePool.ts"), "utf8"));
     resolverSource = blankComments(
       readFileSync(join(ROOT, "src/daemon/deviceSessionResolver.ts"), "utf8"),
@@ -292,10 +293,20 @@ describe("device-addressed admission gate (issue #6863)", () => {
    * "gate before you bind" is an ordering obligation no signature expresses.
    */
   test("the adb client factory gates every device-bound client", () => {
-    expect(factorySource).toContain(`daemonDeviceAdmissionGate.${GATE}(device.deviceId`);
+    expect(factorySource).toContain(`this.admissionGate.${GATE}(device.deviceId`);
     // ... and the escape hatch the quarantine's own machinery needs is a
     // SEPARATE export, so reaching it is a deliberate act.
     expect(factorySource).toMatch(/export const unadmittedAdbClientFactory: AdbClientFactory/);
+  });
+
+  test("Android readiness gates before discovery and cached Window use", () => {
+    const target = namedFunctions("src/utils/DeviceSessionManager.ts").find(
+      (fn) => fn.name === "verifyAndroidDevice",
+    )!;
+    const gate = target.body.indexOf(`this.admissionGate.${GATE}(deviceId`);
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeLessThan(target.body.indexOf("this.adb.getBootedAndroidDevices"));
+    expect(gate).toBeLessThan(target.body.indexOf("this.provider.getWindow"));
   });
 
   test("the memoizing CtrlProxy client resolution gates too", () => {

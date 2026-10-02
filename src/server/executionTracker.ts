@@ -18,6 +18,7 @@ interface ActiveExecution {
   resolvedAutolockSessionUuid?: string;
   /** Captured when an untargeted device call starts, until routing finishes. */
   provisionalAutolockSessionUuid?: string;
+  deviceIds?: Set<string>;
   startTime: number;
   abortController: AbortController;
   /**
@@ -68,6 +69,7 @@ export type DaemonMaintenanceAdmission =
 export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
+  private deviceExecutions = new Map<string, Set<string>>();
   private sessionUuidExecutions = new Map<string, Set<string>>();
   private autolockSessionExecutions = new Map<string, Set<string>>();
   private executionEndListeners = new Set<() => void>();
@@ -214,6 +216,7 @@ export class ExecutionTracker {
     }
 
     this.executions.delete(executionId);
+    this.unregisterDeviceExecutions(executionId, execution.deviceIds);
 
     if (execution.sessionId) {
       this.unregisterSessionExecution(execution.sessionId, executionId);
@@ -307,6 +310,48 @@ export class ExecutionTracker {
     );
   }
 
+  /** Bind at admission, including sessionless calls and multi-device fan-out. */
+  bindDeviceExecution(executionId: string, deviceId: string): void {
+    const execution = this.executions.get(executionId);
+    if (!execution) {
+      return;
+    }
+    execution.deviceIds ??= new Set();
+    execution.deviceIds.add(deviceId);
+    const deviceSet = this.deviceExecutions.get(deviceId) ?? new Set<string>();
+    deviceSet.add(executionId);
+    this.deviceExecutions.set(deviceId, deviceSet);
+  }
+
+  async cancelDeviceExecutions(
+    deviceId: string,
+    reason: ExecutionCancellationReason = "unspecified",
+    options: ExecutionCancellationOptions = {},
+  ): Promise<number> {
+    return this.cancelExecutionIds(
+      this.deviceExecutions.get(deviceId),
+      "deviceId",
+      deviceId,
+      reason,
+      options,
+    );
+  }
+
+  hasActiveDeviceExecutions(deviceId: string, query?: ActiveExecutionQuery): boolean {
+    return this.hasActiveExecutionsForKey(this.deviceExecutions, deviceId, query);
+  }
+
+  async waitForDeviceExecutionsToEnd(
+    deviceId: string,
+    timeoutMs: number,
+    query?: ActiveExecutionQuery,
+  ): Promise<boolean> {
+    return this.waitForExecutionsToEnd(
+      () => this.hasActiveDeviceExecutions(deviceId, query),
+      timeoutMs,
+    );
+  }
+
   /**
    * Cancels both explicit and implicit work bound to a concrete device session.
    * Unresolved implicit calls retain their start-time autolock mapping until
@@ -336,7 +381,17 @@ export class ExecutionTracker {
     timeoutMs: number,
     query?: ActiveExecutionQuery,
   ): Promise<boolean> {
-    if (!this.hasActiveDeviceSessionExecutions(sessionUuid, query)) {
+    return this.waitForExecutionsToEnd(
+      () => this.hasActiveDeviceSessionExecutions(sessionUuid, query),
+      timeoutMs,
+    );
+  }
+
+  private async waitForExecutionsToEnd(
+    hasActive: () => boolean,
+    timeoutMs: number,
+  ): Promise<boolean> {
+    if (!hasActive()) {
       return true;
     }
     return await new Promise<boolean>((resolve) => {
@@ -354,7 +409,7 @@ export class ExecutionTracker {
         resolve(drained);
       };
       const check = (): void => {
-        if (!this.hasActiveDeviceSessionExecutions(sessionUuid, query)) {
+        if (!hasActive()) {
           finish(true);
         }
       };
@@ -468,6 +523,16 @@ export class ExecutionTracker {
     return false;
   }
 
+  private unregisterDeviceExecutions(executionId: string, deviceIds?: Set<string>): void {
+    for (const deviceId of deviceIds ?? []) {
+      const deviceSet = this.deviceExecutions.get(deviceId);
+      deviceSet?.delete(executionId);
+      if (deviceSet?.size === 0) {
+        this.deviceExecutions.delete(deviceId);
+      }
+    }
+  }
+
   private registerSessionExecution(sessionId: string, executionId: string): void {
     const sessionSet = this.sessionExecutions.get(sessionId) ?? new Set<string>();
     sessionSet.add(executionId);
@@ -544,7 +609,7 @@ export class ExecutionTracker {
 
   private async cancelExecutionIds(
     executionIds: Iterable<string> | undefined,
-    label: "sessionId" | "sessionUuid" | "deviceSessionUuid" | "toolName",
+    label: "sessionId" | "sessionUuid" | "deviceSessionUuid" | "deviceId" | "toolName",
     key: string,
     cancelReason: ExecutionCancellationReason = "unspecified",
     options: ExecutionCancellationOptions = {},

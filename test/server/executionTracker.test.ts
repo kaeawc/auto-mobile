@@ -6,6 +6,70 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 
 describe("ExecutionTracker", function () {
+  test("cancels sessionless device work once, excluding discovery and other devices", async () => {
+    const tracker = new ExecutionTracker(
+      new FakeTimer(),
+      new FakeIdGenerator(["work", "discover", "other"]),
+    );
+    const work = tracker.startExecution("takeScreenshot");
+    const discover = tracker.startExecution("killDevice");
+    const other = tracker.startExecution("takeScreenshot");
+    tracker.bindDeviceExecution(work.id, "emulator-5554");
+    tracker.bindDeviceExecution(work.id, "emulator-5554");
+    tracker.bindDeviceExecution(discover.id, "emulator-5554");
+    tracker.bindDeviceExecution(other.id, "emulator-5556");
+    expect(
+      await tracker.cancelDeviceExecutions("emulator-5554", "device-disconnected:emulator-5554", {
+        excludeExecutionId: discover.id,
+      }),
+    ).toBe(1);
+    expect(work.abortController.signal.aborted).toBe(true);
+    expect(work.cancelReason).toBeInstanceOf(DeviceLostError);
+    expect(discover.abortController.signal.aborted).toBe(false);
+    expect(other.abortController.signal.aborted).toBe(false);
+  });
+
+  test("endExecution removes every device binding and allows drain to finish", async () => {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["work"]));
+    const work = tracker.startExecution("takeScreenshot");
+    tracker.bindDeviceExecution(work.id, "emulator-5554");
+    tracker.bindDeviceExecution(work.id, "emulator-5556");
+    const drain = tracker.waitForDeviceExecutionsToEnd("emulator-5554", 100);
+    tracker.endExecution(work.id);
+    expect(await drain).toBe(true);
+    expect(tracker.hasActiveDeviceExecutions("emulator-5554")).toBe(false);
+    expect(tracker.hasActiveDeviceExecutions("emulator-5556")).toBe(false);
+    expect(tracker["deviceExecutions"].size).toBe(0);
+    tracker.bindDeviceExecution(work.id, "emulator-5554");
+    expect(await tracker.cancelDeviceExecutions("emulator-5554")).toBe(0);
+  });
+
+  test("device drain excludes discovery and has a FakeTimer timeout for undrained work", async () => {
+    const timer = new FakeTimer();
+    const tracker = new ExecutionTracker(timer, new FakeIdGenerator(["discover", "work"]));
+    const discover = tracker.startExecution("killDevice");
+    tracker.bindDeviceExecution(discover.id, "emulator-5554");
+    expect(
+      await tracker.waitForDeviceExecutionsToEnd("emulator-5554", 100, {
+        excludeExecutionId: discover.id,
+      }),
+    ).toBe(true);
+    const work = tracker.startExecution("takeScreenshot");
+    tracker.bindDeviceExecution(work.id, "emulator-5554");
+    const drain = tracker.waitForDeviceExecutionsToEnd("emulator-5554", 100, {
+      excludeExecutionId: discover.id,
+    });
+    timer.advanceTime(100);
+    expect(await drain).toBe(false);
+    tracker.endExecution(work.id);
+    expect(
+      await tracker.waitForDeviceExecutionsToEnd("emulator-5554", 100, {
+        excludeExecutionId: discover.id,
+      }),
+    ).toBe(true);
+  });
+
   test("uses injected id generator and timer when starting executions", function () {
     const timer = new FakeTimer();
     timer.setCurrentTime(1234);

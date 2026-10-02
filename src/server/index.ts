@@ -1355,6 +1355,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             ownsDeviceSession: (sessionUuid) =>
               sessionToolBinding.ownsSession(sessionId, sessionUuid),
             execution: {
+              deviceBinding: {
+                bindDeviceExecution: (deviceId) =>
+                  executionTracker.bindDeviceExecution(execution.id, deviceId),
+              },
               executionId: execution.id,
               startTime: execution.startTime,
             },

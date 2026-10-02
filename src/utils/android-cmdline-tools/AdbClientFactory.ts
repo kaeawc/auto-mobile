@@ -1,8 +1,15 @@
+import {
+  ambientDeviceExecutionBinding,
+  type DeviceExecutionBinding,
+} from "../../server/deviceExecutionBinding";
 import type { BootedDevice } from "../../models";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { AdbClient } from "./AdbClient";
 import type { RetryExecutor } from "../retry/RetryExecutor";
-import { daemonDeviceAdmissionGate } from "../../daemon/deviceAdmissionGate";
+import {
+  daemonDeviceAdmissionGate,
+  type DeviceAdmissionGate,
+} from "../../daemon/deviceAdmissionGate";
 import { defaultEmulatorConsoleBusyRegistry } from "./EmulatorConsoleBusyRegistry";
 
 /**
@@ -72,12 +79,25 @@ const ADB_CLIENT_PURPOSE = "to run an adb command";
  * The exception is {@link unadmittedAdbClientFactory}, for the machinery that has
  * to reach a quarantined serial precisely BECAUSE it is quarantined.
  */
-class AdmittingAdbClientFactory implements AdbClientFactory {
-  constructor(private readonly delegate: AdbClientFactory) {}
+export class AdmittingAdbClientFactory implements AdbClientFactory {
+  private readonly admissionGate: DeviceAdmissionGate;
+  private readonly executionBinding: DeviceExecutionBinding;
+
+  constructor(
+    private readonly delegate: AdbClientFactory,
+    options: {
+      admissionGate?: DeviceAdmissionGate;
+      executionBinding?: DeviceExecutionBinding;
+    } = {},
+  ) {
+    this.admissionGate = options.admissionGate ?? daemonDeviceAdmissionGate;
+    this.executionBinding = options.executionBinding ?? ambientDeviceExecutionBinding;
+  }
 
   create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor {
     if (device) {
-      daemonDeviceAdmissionGate.assertDeviceActionable(device.deviceId, ADB_CLIENT_PURPOSE);
+      this.admissionGate.assertDeviceActionable(device.deviceId, ADB_CLIENT_PURPOSE);
+      this.executionBinding.bindDeviceExecution(device.deviceId);
     }
     return this.delegate.create(device, retryExecutor);
   }

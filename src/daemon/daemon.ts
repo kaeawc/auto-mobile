@@ -1,4 +1,5 @@
 import { isSessionReleasing } from "./sessionReleaseState";
+import { ambientExecutionIdReader } from "../server/deviceExecutionBinding";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
@@ -613,8 +614,18 @@ export class Daemon {
         }
       },
       emulatorLossIncidentStore: new EmulatorLossIncidentRepository(this.timer, this.idGenerator),
-      cancelDeviceSessionExecutions: (sessionId, reason, options) =>
-        this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
+      ambientExecutionIdReader,
+      cancelDeviceSessionExecutions: Object.assign(
+        (sessionId: string, reason: string, options?: { excludeExecutionId?: string }) =>
+          this.cancelAndDrainDeviceSessionExecutions(sessionId, reason, options),
+        {
+          cancelDeviceExecutions: (
+            deviceId: string,
+            reason: string,
+            options?: { excludeExecutionId?: string },
+          ) => this.cancelAndDrainDeviceExecutions(deviceId, reason, options),
+        },
+      ),
       idGenerator: this.idGenerator,
       deviceSessionContinuityEnabled: isDeviceSessionContinuityEnabled(recoveryPolicyEnvironment),
     });
@@ -2917,6 +2928,29 @@ export class Daemon {
         `(reason=${releaseReason})`,
     );
     return true;
+  }
+
+  private async cancelAndDrainDeviceExecutions(
+    deviceId: string,
+    reason: string,
+    options?: { excludeExecutionId?: string },
+  ): Promise<number> {
+    const cancelled = await executionTracker.cancelDeviceExecutions(deviceId, reason, options);
+    if (cancelled === 0) {
+      return 0;
+    }
+    const drained = await executionTracker.waitForDeviceExecutionsToEnd(
+      deviceId,
+      DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS,
+      options,
+    );
+    if (!drained) {
+      logger.warn(
+        `[Daemon] Timed out after ${DEVICE_LOSS_EXECUTION_DRAIN_TIMEOUT_MS}ms draining ` +
+          `cancelled executions for device ${deviceId}`,
+      );
+    }
+    return cancelled;
   }
 
   private async cancelAndDrainDeviceSessionExecutions(

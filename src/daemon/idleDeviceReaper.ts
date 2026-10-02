@@ -1,7 +1,7 @@
 import { logger } from "../utils/logger";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
+import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
 import type { PooledDevice } from "./devicePool";
 
 /**
@@ -90,8 +90,11 @@ export class IdleDeviceReaper {
     return removedCount;
   }
 
-  async getIosLivenessSnapshot(): Promise<IosLivenessSnapshot> {
-    const discovery = await this.deviceManager.getBootedDevicesDetailed("ios");
+  async getIosLivenessSnapshot(
+    options: { discovery?: BootedDeviceDiscovery } = {},
+  ): Promise<IosLivenessSnapshot> {
+    const discovery =
+      options.discovery ?? (await this.deviceManager.getBootedDevicesDetailed("ios"));
     const sources = discovery.succeededSources;
     const platformSucceeded = discovery.succeededPlatforms.has("ios");
     // Presence alone does not prove liveness: a failed devicectl sweep replays
@@ -120,7 +123,7 @@ export class IdleDeviceReaper {
   }
 
   getIdleDeviceLivenessStatus(
-    device: PooledDevice,
+    device: Pick<PooledDevice, "id" | "platform">,
     iosLiveness: IosLivenessSnapshot | undefined,
   ): IdleDeviceLivenessStatus {
     if (device.platform !== "ios") {

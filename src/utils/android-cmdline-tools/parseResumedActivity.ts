@@ -81,5 +81,8 @@ export function parseResumedActivityForDisplay(
     }
   }
 
-  return { activity: displayCount > 0 ? selected : legacy, displayCount };
+  return {
+    activity: displayCount > 0 ? selected : displayId === 0 ? legacy : undefined,
+    displayCount,
+  };
 }

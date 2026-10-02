@@ -27,7 +27,7 @@ import {
   projectActionableHierarchy,
 } from "./HierarchyNormalization";
 import type { SettleObserve } from "./interfaces/SettleObserve";
-import type { HierarchySyncDiagnostics } from "./android/types";
+import type { HierarchySyncDiagnostics, ObserverHierarchyRequestOptions } from "./android/types";
 
 /** Dynamic platform bridge: normalizers own the raw response shape. */
 export interface HierarchySyncClient {
@@ -47,7 +47,7 @@ export interface HierarchySyncClient {
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    displayId?: number,
+    display?: number | ObserverHierarchyRequestOptions,
   ): Promise<{ hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] } | null>;
 }
 
@@ -90,7 +90,12 @@ async function requestSyncHierarchy(
     if (!client.requestHierarchySyncForObserver) {
       throw new ActionableError("Observer hierarchy read is unavailable for this client");
     }
-    synced = await client.requestHierarchySyncForObserver(...args, request.displayId);
+    synced = await client.requestHierarchySyncForObserver(
+      ...args,
+      request.preserveDisplayState
+        ? { displayId: request.displayId, preserveDisplayState: true }
+        : request.displayId,
+    );
   } else {
     synced = await client.requestHierarchySync(...args, diagnostics, request.displayId);
   }

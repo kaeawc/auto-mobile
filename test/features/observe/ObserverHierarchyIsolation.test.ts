@@ -443,8 +443,8 @@ test("Android observer change replaces the displaced owner push", async () => {
   });
   try {
     const requestId = "observer-android-1";
-    const observerIds = Reflect.get(client, "observerHierarchyRequestIds") as Set<string>;
-    observerIds.add(requestId);
+    const observerIds = Reflect.get(client, "observerHierarchyRequestIds") as Map<string, boolean>;
+    observerIds.set(requestId, false);
     client.handleHierarchyUpdate(
       { updatedAt: 1, packageName: "com.example", hierarchy: { text: "Read" } },
       undefined,
@@ -555,7 +555,10 @@ test("Android real client routes a changed correlated observer frame through the
     ).toBe("new");
     expect(push.mock.calls.length).toBe(before + 1);
     expect(navigationUpdates).toBe(beforeNavigation + 1);
-    expect((Reflect.get(client, "observerHierarchyRequestIds") as Set<string>).size).toBe(0);
+    expect(
+      (Reflect.get(client, "observerHierarchyRequestIds") as Map<string, boolean> | Set<string>)
+        .size,
+    ).toBe(0);
   } finally {
     push.mockRestore();
     await client.close();
@@ -678,7 +681,10 @@ test("Android uncorrelated push stays with owner and observer times out", async 
       (Reflect.get(client, "cachedHierarchy") as { hierarchy: { hierarchy: { text: string } } })
         .hierarchy.hierarchy.text,
     ).toBe("owner");
-    expect((Reflect.get(client, "observerHierarchyRequestIds") as Set<string>).size).toBe(0);
+    expect(
+      (Reflect.get(client, "observerHierarchyRequestIds") as Map<string, boolean> | Set<string>)
+        .size,
+    ).toBe(0);
   } finally {
     await client.close();
   }
@@ -713,7 +719,10 @@ test.each(["android", "ios"] as const)(
         .socket()
         .simulateMessage(JSON.stringify({ type: "error", requestId, error: "capture failed" }));
       await pending.catch(() => null);
-      expect((Reflect.get(client, "observerHierarchyRequestIds") as Set<string>).size).toBe(0);
+      expect(
+        (Reflect.get(client, "observerHierarchyRequestIds") as Map<string, boolean> | Set<string>)
+          .size,
+      ).toBe(0);
     } finally {
       await client.close();
     }
@@ -1214,5 +1223,66 @@ test("owned physical iOS screenshot does not create a replacement client", async
     expect(factory).not.toHaveBeenCalled();
   } finally {
     factory.mockRestore();
+  }
+});
+
+test("Android observer preservation policies use separate flights and isolate only the preserved reply", async () => {
+  const timer = new FakeTimer();
+  const sockets = capturingSockets(timer);
+  const client = AndroidCtrlProxyClient.createForTesting(
+    { deviceId: "android-observer-policies", name: "Android", platform: "android" },
+    new FakeAdbExecutor(),
+    sockets.factory,
+    timer,
+  );
+  const push = spyOn(client, "pushHierarchyToObservationStream");
+  try {
+    expect(await client.ensureConnected()).toBe(true);
+    Reflect.set(client, "hierarchyNavigationDetector", { onHierarchyUpdate: () => {} });
+    const ordinary = client.requestHierarchySyncForObserver(
+      new NoOpPerformanceTracker(),
+      false,
+      undefined,
+      100,
+    );
+    const preserved = client.requestHierarchySyncForObserver(
+      new NoOpPerformanceTracker(),
+      false,
+      undefined,
+      100,
+      { preserveDisplayState: true },
+    );
+    await sentRequestId(sockets.socket(), "request_hierarchy");
+    const requests = sockets
+      .socket()
+      .sent.map((wire) => JSON.parse(wire) as { type: string; requestId: string })
+      .filter((request) => request.type === "request_hierarchy");
+    expect(requests).toHaveLength(2);
+    const markers = Reflect.get(client, "observerHierarchyRequestIds") as Map<string, boolean>;
+    expect(requests.map((request) => markers.get(request.requestId))).toEqual([false, true]);
+    for (const [index, request] of requests.entries()) {
+      sockets.socket().simulateMessage(
+        JSON.stringify({
+          type: "hierarchy_update",
+          requestId: request.requestId,
+          data: {
+            updatedAt: index + 1,
+            packageName: "com.example",
+            hierarchy: { text: index === 0 ? "owner" : "aggregate" },
+          },
+        }),
+      );
+    }
+    expect((await ordinary)?.hierarchy.hierarchy.text).toBe("owner");
+    expect((await preserved)?.hierarchy.hierarchy.text).toBe("aggregate");
+    expect(
+      (Reflect.get(client, "cachedHierarchy") as { hierarchy: { hierarchy: { text: string } } })
+        .hierarchy.hierarchy.text,
+    ).toBe("owner");
+    expect(push).toHaveBeenCalledTimes(1);
+    expect(markers.size).toBe(0);
+  } finally {
+    push.mockRestore();
+    await client.close();
   }
 });

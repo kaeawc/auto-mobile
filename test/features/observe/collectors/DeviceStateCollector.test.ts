@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../../src/utils/logger";
 import { DeviceStateCollector } from "../../../../src/features/observe/collectors/DeviceStateCollector";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
@@ -56,6 +57,55 @@ describe("DeviceStateCollector", () => {
       adb: fakeAdb,
       timer: fakeTimer,
     });
+  });
+
+  test("foreground snapshot and confirmation use the requested display", async () => {
+    fakeAdb.setForegroundApp({ packageName: "com.example.default", userId: 0 });
+    fakeAdb.setForegroundApp({ packageName: "com.example.secondary", userId: 0 }, { displayId: 2 });
+    expect((await collector.collectForegroundSnapshot())?.packageName).toBe("com.example.default");
+    expect(
+      (await collector.collectForegroundSnapshot(undefined, { displayId: 2 }))?.packageName,
+    ).toBe("com.example.secondary");
+    expect(await collector.collectForegroundIdentity(undefined, { displayId: 2 })).toBe(
+      "com.example.secondary",
+    );
+    expect(await collector.collectForegroundIdentity(undefined, { displayId: 3 })).toBeUndefined();
+  });
+
+  test("foreground signal and display options leave the ADB timeout undefined", async () => {
+    const signal = new AbortController().signal;
+    const foreground = spyOn(fakeAdb, "getForegroundApp");
+    try {
+      await collector.collectForegroundSnapshot(signal, { displayId: 2 });
+      await collector.collectForegroundIdentity(signal, { displayId: 3 });
+      expect(foreground.mock.calls).toEqual([
+        [signal, { displayId: 2 }],
+        [signal, { displayId: 3 }],
+      ]);
+    } finally {
+      foreground.mockRestore();
+    }
+  });
+
+  test("aborted foreground read logs only at debug", async () => {
+    const controller = new AbortController();
+    const error = new Error("Observation deadline reached");
+    controller.abort(error);
+    const foreground = spyOn(fakeAdb, "getForegroundApp").mockImplementation(async (signal) => {
+      signal?.throwIfAborted();
+      return null;
+    });
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(await collector.collectForegroundSnapshot(controller.signal)).toBeNull();
+      expect(debug).toHaveBeenCalledWith("Failed to get ground-truth foreground app:", error);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      foreground.mockRestore();
+      debug.mockRestore();
+      warn.mockRestore();
+    }
   });
 
   describe("collectWakefulness", () => {

@@ -159,7 +159,7 @@ export interface AdbExecutor {
    */
   getForegroundApp(
     signal?: AbortSignal,
-    timeoutMs?: number,
+    timeout?: number | { timeoutMs?: number; displayId?: number },
   ): Promise<{
     packageName: string;
     userId: number;

@@ -5,6 +5,25 @@ import { ActionableError } from "../../models/ActionableError";
 /** Selection errors are returned directly to the tool caller. */
 export class DisplaySelectionError extends ActionableError {}
 
+/** Validate the opt-in observe aggregate without enabling aggregate input routing. */
+export function assertAllDisplayObserveSupported(
+  platform: "android" | "ios",
+  options: { waitFor?: unknown; includeScreenshotImage?: boolean; raw?: boolean } = {},
+): void {
+  if (platform === "ios") {
+    throw new DisplaySelectionError(
+      'display: "all" is unsupported on iOS; use display: "active" for the live panel.',
+    );
+  }
+  for (const option of ["waitFor", "includeScreenshotImage", "raw"] as const) {
+    if (option === "waitFor" ? options[option] !== undefined : options[option] === true) {
+      throw new ActionableError(
+        `display: "all" cannot be combined with ${option}; omit ${option} or observe one panel separately.`,
+      );
+    }
+  }
+}
+
 export interface DisplayLiveState {
   /** Physical key of the window that owns input focus (or the iOS key scene). */
   focusedPanelKey?: string;
@@ -19,7 +38,7 @@ function selectExplicitPanel(panels: readonly DisplayPanel[], request: string): 
   const available = panels.map((panel) => `${panel.key} (${panel.role})`).join(", ");
   if (request === "all") {
     throw new DisplaySelectionError(
-      `display: "all" is not supported yet. Choose one panel: ${available}`,
+      `display: "all" is not supported for single-panel targeting. Choose one panel: ${available}`,
     );
   }
   const selected =

@@ -26,6 +26,7 @@ import type {
   CachedHierarchy,
   AndroidPerfTiming,
   HierarchySyncDiagnostics,
+  ObserverHierarchyRequestOptions,
 } from "./types";
 import { generateSecureId } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
@@ -75,6 +76,7 @@ type HierarchySyncResult = {
 
 interface HierarchySyncFlight {
   observerMode: boolean;
+  preserveDisplayState: boolean;
   disableAllFiltering: boolean;
   displayId?: number;
   minReceivedAt: number;
@@ -714,14 +716,14 @@ export class CtrlProxyHierarchy {
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    displayId?: number,
+    display?: number | ObserverHierarchyRequestOptions,
   ): Promise<HierarchySyncResult> {
     return this.requestHierarchySyncWithOptions({
       perf,
       disableAllFiltering,
       signal,
       timeoutMs,
-      displayId,
+      ...(typeof display === "number" ? { displayId: display } : display),
       observerMode: true,
     });
   }
@@ -736,9 +738,11 @@ export class CtrlProxyHierarchy {
     observerMode: boolean;
     /** Synchronous registration before WS send or ADB broadcast; called again on fallback. */
     onRequestId?: (requestId: string) => void;
+    preserveDisplayState?: boolean;
   }): Promise<HierarchySyncResult> {
     const { perf, disableAllFiltering, signal, timeoutMs, diagnostics, displayId, observerMode } =
       options;
+    const preserveDisplayState = options.preserveDisplayState === true;
     const startTime = this.context.timer.now();
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
 
@@ -754,7 +758,13 @@ export class CtrlProxyHierarchy {
             signal ?? new AbortController().signal,
             effectiveTimeoutMs,
             diagnostics ?? {},
-            { startTime, displayId, observerMode, onRequestId: options.onRequestId },
+            {
+              startTime,
+              displayId,
+              observerMode,
+              preserveDisplayState,
+              onRequestId: options.onRequestId,
+            },
           ),
           signal,
         );
@@ -766,6 +776,7 @@ export class CtrlProxyHierarchy {
         (candidate) =>
           candidate.disableAllFiltering === disableAllFiltering &&
           candidate.observerMode === observerMode &&
+          candidate.preserveDisplayState === preserveDisplayState &&
           candidate.displayId === displayId &&
           candidate.minReceivedAt >= startTime &&
           candidate.timeoutMs === effectiveTimeoutMs,
@@ -776,6 +787,7 @@ export class CtrlProxyHierarchy {
         flight = {
           disableAllFiltering,
           observerMode,
+          preserveDisplayState,
           displayId,
           minReceivedAt: startTime,
           timeoutMs: effectiveTimeoutMs,
@@ -788,7 +800,7 @@ export class CtrlProxyHierarchy {
             controller.signal,
             effectiveTimeoutMs,
             sharedDiagnostics,
-            { startTime, displayId, observerMode },
+            { startTime, displayId, observerMode, preserveDisplayState },
           ),
         };
         const createdFlight = flight;
@@ -843,9 +855,10 @@ export class CtrlProxyHierarchy {
       displayId?: number;
       observerMode: boolean;
       onRequestId?: (requestId: string) => void;
+      preserveDisplayState: boolean;
     },
   ): Promise<HierarchySyncResult> {
-    const { startTime, displayId, observerMode } = request;
+    const { startTime, displayId, observerMode, preserveDisplayState } = request;
     try {
       logger.debug("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
@@ -869,6 +882,7 @@ export class CtrlProxyHierarchy {
           disableAllFiltering,
           displayId,
           observerMode,
+          preserveDisplayState,
           onRequestId: request.onRequestId,
         });
       });
@@ -1402,9 +1416,16 @@ export class CtrlProxyHierarchy {
     disableAllFiltering: boolean;
     displayId?: number;
     observerMode: boolean;
+    preserveDisplayState?: boolean;
     onRequestId?: (requestId: string) => void;
   }): string | null {
-    const { disableAllFiltering, displayId, observerMode, onRequestId } = options;
+    const {
+      disableAllFiltering,
+      displayId,
+      observerMode,
+      preserveDisplayState = false,
+      onRequestId,
+    } = options;
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       logger.warn("[CTRL_PROXY] Cannot send request - WebSocket not connected");
@@ -1415,7 +1436,9 @@ export class CtrlProxyHierarchy {
     try {
       onRequestId?.(requestId);
       if (observerMode) {
-        this.context.markObserverHierarchyRequest?.(requestId);
+        this.context.markObserverHierarchyRequest?.(requestId, {
+          isolateResponse: preserveDisplayState || displayId !== undefined,
+        });
       }
       const message = serializeCtrlProxyRequest(
         ctrlProxyRequests.requestHierarchy({ requestId, disableAllFiltering, displayId }),

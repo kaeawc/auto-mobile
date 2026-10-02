@@ -198,6 +198,7 @@ import type {
   InstalledPackageRecord,
   AndroidPerfTiming,
   HierarchySyncDiagnostics,
+  ObserverHierarchyRequestOptions,
 } from "./types";
 
 /**
@@ -1589,7 +1590,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private reportedScaleMetadata: ScreenScaleMetadata | null = null;
   /** @internal Test seam for CtrlProxyClient tests (#7992); not part of the public API. */
   readonly hierarchyObservationStreamSuppressions = new Map<string, NodeJS.Timeout>();
-  private readonly observerHierarchyRequestIds = new Set<string>();
+  private readonly observerHierarchyRequestIds = new Map<string, boolean>();
   private readonly transientObserver: boolean;
   // Request ids whose screenshot responses must not be auto-pushed to the
   // observation stream. Scoped per-request so an unrelated in-flight screenshot
@@ -2147,8 +2148,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       setLastWebSocketTimeout: (time) => {
         this.lastWebSocketTimeout = time;
       },
-      markObserverHierarchyRequest: (requestId) => {
-        this.observerHierarchyRequestIds.add(requestId);
+      markObserverHierarchyRequest: (requestId, options) => {
+        this.observerHierarchyRequestIds.set(requestId, options?.isolateResponse ?? false);
       },
       unmarkObserverHierarchyRequest: (requestId) => {
         this.observerHierarchyRequestIds.delete(requestId);
@@ -2970,7 +2971,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     disableAllFiltering = false,
     signal?: AbortSignal,
     timeoutMs = 10000,
-    displayId?: number,
+    display?: number | ObserverHierarchyRequestOptions,
   ): Promise<{ hierarchy: AccessibilityHierarchy; frameContext?: string } | null> {
     const deadline = this.timer.now() + timeoutMs;
     await this.waitForPendingRequests(timeoutMs, signal);
@@ -2983,7 +2984,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       disableAllFiltering,
       signal,
       remaining,
-      displayId,
+      display,
     );
   }
 
@@ -5711,6 +5712,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // A must-deliver correlated frame can leave the runner after a newer coalesced push.
     // Complete its own waiter, but do not regress the shared cache or observation stream.
     const observerResponse = !!requestId && this.observerHierarchyRequestIds.has(requestId);
+    const isolatedObserverResponse =
+      observerResponse && this.observerHierarchyRequestIds.get(requestId!) === true;
     this.hierarchy.resolvePendingHierarchy(requestId, incomingHierarchy);
     // Consume correlated responses even when too old for the shared cache or observer-only.
     let suppressObservationStreamPush =
@@ -5719,6 +5722,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.observerHierarchyRequestIds.delete(requestId);
       if (
         this.transientObserver ||
+        // Aggregate and explicit-panel observer frames cannot seed the owner's active frame.
+        isolatedObserverResponse ||
         (this.cachedHierarchy !== null &&
           isDeepStrictEqual(
             {

@@ -10,6 +10,8 @@ import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 export interface HierarchyCaptureRequest {
   /** Suppress all owner-visible effects of a session-free hierarchy request. */
   observerMode?: boolean;
+  /** Aggregate observer replies must not seed an owner's active hierarchy or push stream. */
+  preserveDisplayState?: boolean;
   freshness: "cached-ok" | "fresh" | "settled";
   searchRaw?: boolean;
   minTimestamp?: number;

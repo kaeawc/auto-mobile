@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createDeviceHierarchyCapture } from "../../../src/features/observe/DeviceHierarchyCapture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
@@ -18,6 +18,12 @@ import type { HierarchyCapture } from "../../../src/features/observe/HierarchyCa
 import type { ObserveScreenshotRecorder } from "../../../src/features/observe/screenshot/ObserveScreenshotRecorder";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
+import { FakeScreenshotRecorder } from "../../fakes/FakeScreenshotRecorder";
+import { ScreenshotJobTracker } from "../../../src/utils/ScreenshotJobTracker";
+import { getScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
+import { loadAndroidHomeObserve } from "../../fixtures/observe/observeFixture";
 
 const deviceStateFixture = (name: string): string =>
   readFileSync(join(import.meta.dir, "../../fixtures/android-display", name), "utf8");
@@ -32,6 +38,10 @@ const device: BootedDevice = {
   deviceId: "dual-display-test",
   displays: { panels, postures: ["closed"] },
 };
+
+// Reuse the logical-display response from the explicit routing guard below.
+const logicalDisplays =
+  'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}';
 
 describe("display read routing", () => {
   const readOptions = {
@@ -403,13 +413,12 @@ describe("display read routing", () => {
     }
   });
 
-  test("an explicit panel read does not change the default panel or transition revision", async () => {
+  test("explicit and all panel reads preserve the default result, cache and transition fence", async () => {
     const timer = new FakeTimer();
     const cache = new FakeObserveCacheStore(timer);
     const adb = new FakeAdbExecutor();
     adb.setCommandResponse("cmd display get-displays", {
-      stdout:
-        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+      stdout: logicalDisplays,
       stderr: "",
     });
     const hierarchy = new FakeViewHierarchy();
@@ -429,6 +438,7 @@ describe("display read routing", () => {
         hierarchy: { hierarchy: { node: {} }, displayId: 2, screenWidth: 200, screenHeight: 200 },
       }),
     };
+    const ids = new FakeIdGenerator();
     try {
       const screen = new RealObserveScreen(
         device,
@@ -439,8 +449,13 @@ describe("display read routing", () => {
           cacheStore: cache,
         },
         timer,
+        ids,
       );
-      expect((await screen.execute(readOptions)).display.key).toBe("cover");
+      ids.setScripted(["same-observation", "same-capture"]);
+      const ordinary = await screen.execute(readOptions);
+      expect(ordinary.display.key).toBe("cover");
+      expect(Object.hasOwn(ordinary, "displays")).toBe(false);
+      await cache.put(device.deviceId, ordinary);
       const revision = displayTransitions.revision(device.deviceId);
       const cacheGeneration = cache.currentGeneration(device.deviceId);
       expect((await screen.execute({ ...readOptions, display: "external" })).display.key).toBe(
@@ -448,9 +463,30 @@ describe("display read routing", () => {
       );
       expect(displayTransitions.revision(device.deviceId)).toBe(revision);
       expect(cache.currentGeneration(device.deviceId)).toBe(cacheGeneration);
-      expect((await screen.execute(readOptions)).display.key).toBe("cover");
+      ids.setScripted(["same-observation", "same-capture"]);
+      const { displays, ...topLevel } = await screen.execute({ ...readOptions, display: "all" });
+      expect(JSON.stringify(topLevel)).toBe(JSON.stringify(ordinary));
+      expect(displays?.map((entry) => entry.display.key)).toEqual(["cover", "external"]);
+      expect(displays?.map((entry) => entry.viewHierarchy?.displayId)).toEqual([0, 2]);
+      expect(displays?.map((entry) => entry.screenSize.width)).toEqual([100, 200]);
+      expect(displays?.map((entry) => entry.display.role)).toEqual(["cover", "external"]);
+      expect(cache.getPutCallCount()).toBe(1);
+      expect(cache.getRecentInMemoryForDevice(device.deviceId)).toBe(ordinary);
       expect(displayTransitions.revision(device.deviceId)).toBe(revision);
-      expect(cache.currentGeneration(device.deviceId)).toBe(cacheGeneration);
+      displayTransitions.notifyAndroidTransition(device.deviceId, {
+        change: "device_state",
+        deviceState: 1,
+      });
+      const fencedRevision = displayTransitions.revision(device.deviceId);
+      expect(displayTransitions.observedPanel(device.deviceId)).toBeUndefined();
+      await screen.execute({ ...readOptions, display: "all" });
+      expect(displayTransitions.revision(device.deviceId)).toBe(fencedRevision);
+      expect(displayTransitions.observedPanel(device.deviceId)).toBeUndefined();
+      expect(displayTransitions.currentObservedPanel(device.deviceId)).toBeUndefined();
+      // A normal read still consumes the pending fence.
+      expect((await screen.execute(readOptions)).display.key).toBe("cover");
+      expect(displayTransitions.revision(device.deviceId)).toBe(fencedRevision);
+      expect(displayTransitions.currentObservedPanel(device.deviceId)?.key).toBe("cover");
     } finally {
       displayTransitions.reset(device.deviceId);
       resetObserveCacheStore();
@@ -719,5 +755,431 @@ describe("display read routing", () => {
       getInstance.mockRestore();
       resetObserveCacheStore();
     }
+  });
+});
+
+describe("all-display captures", () => {
+  afterEach(() => {
+    displayTransitions.reset(device.deviceId);
+    resetObserveCacheStore();
+  });
+
+  function harness(displays: BootedDevice["displays"] | null = device.displays, observer = false) {
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("cmd display get-displays", { stdout: logicalDisplays, stderr: "" });
+    const hierarchy = new FakeViewHierarchy();
+    const source = loadAndroidHomeObserve().observe.viewHierarchy!;
+    hierarchy.configureHierarchy({ ...source, displayId: 0 });
+    const capture = new FakeHierarchyCapture(async () => {
+      const request = capture.requests.at(-1)!;
+      return { ...source, displayId: request.displayId ?? 0 };
+    });
+    const cache = new FakeObserveCacheStore(timer);
+    const screenshotRecorder = new FakeScreenshotRecorder();
+    const screen = new RealObserveScreen(
+      { ...device, displays: displays ?? undefined },
+      new FakeAdbClientFactory(adb),
+      {
+        display: "all",
+        deviceReadOnly: observer,
+        hierarchyCapture: capture,
+        viewHierarchy: hierarchy,
+        cacheStore: cache,
+        screenshotRecorder,
+        screenshotEvidenceFiles: {
+          stat: async () => ({ isFile: () => true, size: 1, mtimeMs: timer.now() }),
+        },
+      },
+      timer,
+      new FakeIdGenerator(),
+    );
+    return { screen, capture, hierarchy, timer, cache, screenshotRecorder, adb };
+  }
+
+  const options = {
+    skipScreenshot: true,
+    skipBackStack: true,
+    skipPerformanceAudit: true,
+    skipAccessibilityAudit: true,
+    skipRecompositionTracking: true,
+  };
+
+  function scriptPanelApps(h: ReturnType<typeof harness>) {
+    const source = loadAndroidHomeObserve().observe.viewHierarchy!;
+    const panelHierarchy = (displayId: number): ViewHierarchyResult => {
+      const packageName = displayId === 0 ? "com.example.appA" : "com.example.appB";
+      return {
+        ...source,
+        displayId,
+        packageName,
+        foregroundActivity: `${packageName}/.MainActivity`,
+        fresh: true,
+        updatedAt: h.timer.now(),
+        receivedAt: h.timer.now(),
+      };
+    };
+    h.adb.setForegroundApp({ packageName: "com.example.appA", userId: 0 });
+    h.adb.setForegroundApp({ packageName: "com.example.appB", userId: 0 }, { displayId: 2 });
+    h.hierarchy.configureHierarchy(panelHierarchy(0));
+    const read = h.capture.capture.bind(h.capture);
+    h.capture.capture = async (request) => {
+      const snapshot = await read(request);
+      return { ...snapshot, hierarchy: panelHierarchy(request.displayId ?? 0) };
+    };
+  }
+
+  test("all override starts on the active panel even when the screen targets another panel", async () => {
+    const h = harness();
+    scriptPanelApps(h);
+    Reflect.set(h.screen, "requestedDisplay", "external");
+    const result = await h.screen.execute({ ...options, display: "all" });
+    expect(result.display.key).toBe("cover");
+    expect(result.displays?.map((entry) => entry.viewHierarchy?.displayId)).toEqual([0, 2]);
+  });
+
+  test("each routed panel is fresh against its own foreground app", async () => {
+    const h = harness();
+    scriptPanelApps(h);
+    const result = await h.screen.execute(options);
+    expect(result.displays).toHaveLength(2);
+    for (const [index, packageName] of ["com.example.appA", "com.example.appB"].entries()) {
+      expect(result.displays?.[index].viewHierarchy?.packageName).toBe(packageName);
+      expect(result.displays?.[index].freshness.isFresh).toBe(true);
+      expect(result.displays?.[index].freshness.category).not.toBe("window_identity");
+    }
+  });
+
+  test("a routed mismatch is confirmed against the same panel", async () => {
+    const h = harness();
+    scriptPanelApps(h);
+    h.adb.setForegroundApp({ packageName: "com.example.appC", userId: 0 }, { displayId: 2 });
+    const foreground = spyOn(h.adb, "getForegroundApp");
+    try {
+      const result = await h.screen.execute(options);
+      expect(result.displays?.[0].freshness.isFresh).toBe(true);
+      expect(result.displays?.[1].freshness.category).toBe("window_identity");
+      expect(result.displays?.[1].freshness.warning).toContain("com.example.appC");
+      expect(
+        foreground.mock.calls.map((call) =>
+          typeof call[1] === "object" ? (call[1].displayId ?? 0) : 0,
+        ),
+      ).toEqual([0, 2, 2]);
+    } finally {
+      foreground.mockRestore();
+    }
+  });
+
+  test.each(["absent", "failed"])(
+    "a secondary panel with %s foreground remains present and unavailable",
+    async (kind) => {
+      const h = harness();
+      scriptPanelApps(h);
+      h.adb.setForegroundApp(null, { displayId: 2 });
+      if (kind === "failed") {
+        const read = h.adb.getForegroundApp.bind(h.adb);
+        h.adb.getForegroundApp = async (signal, options) => {
+          if (typeof options === "object" && options.displayId === 2) {
+            throw new Error("Foreground read failed");
+          }
+          return read(signal, options);
+        };
+      }
+      const result = await h.screen.execute(options);
+      expect(result.displays).toHaveLength(2);
+      expect(result.displays?.[0].freshness.isFresh).toBe(true);
+      expect(result.displays?.[1].viewHierarchy?.packageName).toBe("com.example.appB");
+      expect(result.displays?.[1].activeWindow?.appId).toBe("com.example.appB");
+      expect(result.displays?.[1].freshness).toMatchObject({
+        isFresh: false,
+        category: "unavailable",
+        unavailableReason: "unknown",
+        unavailableDetail: "The foreground app of display 2 could not be determined.",
+      });
+    },
+  );
+
+  test("default critical failure preserves the HEAD fallback without freshness", async () => {
+    const h = harness();
+    const error = new Error("Device access denied");
+    const base = h.screen.createBaseResult();
+    h.screen.collectAllData = async () => {
+      throw error;
+    };
+
+    const result = await h.screen.execute({ ...options, display: "active" });
+
+    expect(Object.hasOwn(result, "freshness")).toBe(false);
+    expect(result).toEqual({
+      ...base,
+      observationId: result.observationId,
+      screenSize: { ...base.screenSize, units: "physical-pixels" },
+      errors: [
+        {
+          phase: "critical",
+          message: "Observation failed due to device access error",
+          cause: error.stack || error.message,
+        },
+      ],
+      error: "Observation failed due to device access error",
+    });
+  });
+
+  test("iOS critical fallback retains main JSON field order, including the lock sample", async () => {
+    const h = harness();
+    const lock = { locked: true, keyguardShowing: true };
+    const screen = new RealObserveScreen(
+      { ...device, platform: "ios", deviceId: "00000000-0000-0000-0000-000000000001" },
+      new FakeAdbClientFactory(h.adb),
+      { iosLockStateProbe: { read: async () => lock }, cacheStore: h.cache },
+      h.timer,
+      new FakeIdGenerator(),
+    );
+    const error = new Error("Device access denied");
+    const base = screen.createBaseResult();
+    screen.collectAllData = async () => {
+      throw error;
+    };
+    const result = await screen.execute({ ...options, display: "active" });
+    expect(JSON.stringify(result)).toBe(
+      JSON.stringify({
+        ...base,
+        observationId: result.observationId,
+        screenSize: { ...base.screenSize, units: "points" },
+        deviceLock: lock,
+        errors: [
+          {
+            phase: "critical",
+            message: "Observation failed due to device access error",
+            cause: error.stack || error.message,
+          },
+        ],
+        error: "Observation failed due to device access error",
+      }),
+    );
+    expect(Object.hasOwn(result, "freshness")).toBe(false);
+  });
+
+  test("active critical failure preserves the default fallback and reads other panels", async () => {
+    const error = new Error("Device access denied");
+    const ordinary = harness();
+    ordinary.screen.collectAllData = async () => {
+      throw error;
+    };
+    const expected = await ordinary.screen.execute({ ...options, display: "active" });
+    const h = harness();
+    scriptPanelApps(h);
+    const collect = h.screen.collectAllData.bind(h.screen);
+    h.screen.collectAllData = async (...args) => {
+      if (args[10] === 0) {
+        throw error;
+      }
+      return collect(...args);
+    };
+    displayTransitions.notifyAndroidTransition(device.deviceId, {
+      change: "device_state",
+      deviceState: 1,
+    });
+    const revision = displayTransitions.revision(device.deviceId);
+    const cancel = spyOn(ScreenshotJobTracker, "cancelJob");
+    const update = spyOn(getScreenshotStateStore(), "update");
+    let result;
+    try {
+      result = await h.screen.execute(options);
+      expect(cancel).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+    } finally {
+      cancel.mockRestore();
+      update.mockRestore();
+    }
+    const { displays, ...headline } = result;
+    expect(headline).toEqual({ ...expected, freshness: result.freshness });
+    expect(result.freshness).toMatchObject({
+      category: "unavailable",
+      unavailableReason: "unknown",
+      unavailableDetail: error.stack || error.message,
+    });
+    expect(result.errors?.[0].phase).toBe("critical");
+    expect(displays).toHaveLength(2);
+    expect(displays?.[0].display.key).toBe("cover");
+    expect(displays?.[0].freshness).toEqual(result.freshness);
+    expect(displays?.[0].freshness.category).toBe("unavailable");
+    expect(displays?.[1].viewHierarchy?.packageName).toBe("com.example.appB");
+    expect(displays?.[1].freshness.isFresh).toBe(true);
+    expect(h.cache.getPutCallCount()).toBe(0);
+    expect(result.snapshotReference).toBeUndefined();
+    expect(displayTransitions.revision(device.deviceId)).toBe(revision);
+    expect(displayTransitions.currentObservedPanel(device.deviceId)).toBeUndefined();
+  });
+
+  test("active panel deadline retains request_timed_out without critical errors", async () => {
+    const h = harness();
+    let started!: () => void;
+    const start = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    h.screen.collectAllData = () => {
+      started();
+      return new Promise(() => {});
+    };
+    const pending = h.screen.execute({ ...options, timeoutMs: 10 });
+    await start;
+    h.timer.advanceTime(10);
+    const result = await pending;
+    expect(result.freshness?.unavailableReason).toBe("request_timed_out");
+    expect(result.errors).toBeUndefined();
+    expect(result.displays?.map((entry) => entry.freshness.unavailableReason)).toEqual([
+      "request_timed_out",
+      "request_timed_out",
+    ]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("only the active entry includes the ordinary settled screenshot path", async () => {
+    const { screen, screenshotRecorder } = harness();
+    const result = await screen.execute({
+      ...options,
+      skipScreenshot: false,
+      screenshot: "settled",
+    });
+    expect(result.screenshotPath).toBe("/fake/settled.png");
+    expect(result.displays?.[0].screenshotPath).toBe(result.screenshotPath);
+    expect(result.displays?.[1].screenshotPath).toBeUndefined();
+    expect(screenshotRecorder.captureSettledCalls).toBe(1);
+  });
+
+  test("an unavailable hierarchy retains the panel and its typed reason", async () => {
+    const { screen, capture } = harness();
+    capture.capture = async (request) => ({
+      captureId: "unavailable",
+      requestedFreshness: request.freshness,
+      platform: "android",
+      receivedAt: 0,
+      nodes: [],
+      hierarchy: {
+        hierarchy: { error: "Display has no windows", unavailableReason: "incomplete_capture" },
+        fresh: false,
+      },
+    });
+    const result = await screen.execute(options);
+    expect(result.displays).toHaveLength(2);
+    expect(result.displays?.[1]).toMatchObject({
+      display: { key: "external", role: "external" },
+      freshness: {
+        isFresh: false,
+        category: "unavailable",
+        unavailableReason: "incomplete_capture",
+      },
+    });
+  });
+
+  test.each(["absent", "empty", "single"])(
+    "%s inventory uses the documented aggregate shape",
+    async (kind) => {
+      const displays =
+        kind === "absent"
+          ? undefined
+          : {
+              ...device.displays!,
+              panels: kind === "empty" ? [] : [panels[0]],
+            };
+      const { screen } = harness(displays ?? null);
+      const result = await screen.execute(options);
+      expect(result.display.key).toBe(kind === "single" ? "cover" : "0");
+      if (kind === "single") {
+        expect(result.displays).toHaveLength(1);
+        expect(result.displays?.[0].viewHierarchy).toEqual(result.viewHierarchy);
+      } else {
+        expect(Object.hasOwn(result, "displays")).toBe(false);
+      }
+    },
+  );
+
+  test("a depleted deadline returns remaining panels without starting their reads", async () => {
+    const { screen, hierarchy, timer, capture } = harness();
+    const read = hierarchy.getViewHierarchy.bind(hierarchy);
+    hierarchy.getViewHierarchy = async (...args) => {
+      // Exhaust the shared budget during the active capture.
+      timer.advanceTime(9);
+      return read(...args);
+    };
+    const result = await screen.execute({ ...options, timeoutMs: 9 });
+    expect(result.displays?.[1].freshness).toMatchObject({
+      isFresh: false,
+      unavailableReason: "request_timed_out",
+      category: "unavailable",
+    });
+    expect(capture.requests).toHaveLength(0);
+  });
+
+  test("an in-flight panel timeout aborts its read and preserves the active result", async () => {
+    const { screen, timer, capture } = harness({
+      ...device.displays!,
+      panels: [...panels, { ...panels[0], key: "rear", role: "rear" }],
+    });
+    let readSignal: AbortSignal | undefined;
+    let reads = 0;
+    let started!: () => void;
+    const start = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    capture.capture = (request) => {
+      reads++;
+      readSignal = request.signal;
+      started();
+      return new Promise(() => {});
+    };
+    const pending = screen.execute({ ...options, timeoutMs: 10 });
+    await start;
+    timer.advanceTime(10);
+    const result = await pending;
+    expect(result.viewHierarchy).toBeDefined();
+    expect(result.displays?.[1].freshness.unavailableReason).toBe("request_timed_out");
+    expect(result.displays?.[2].freshness.unavailableReason).toBe("request_timed_out");
+    expect(reads).toBe(1);
+    expect(readSignal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("caller cancellation propagates instead of becoming panel unavailability", async () => {
+    const { screen, capture } = harness();
+    const controller = new AbortController();
+    let started!: () => void;
+    const start = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    capture.capture = () => {
+      started();
+      return new Promise(() => {});
+    };
+    const pending = screen.execute({ ...options, signal: controller.signal });
+    await start;
+    controller.abort(new Error("Caller cancelled"));
+    await expect(pending).rejects.toThrow("Caller cancelled");
+  });
+
+  test("session-less all reads retain observer capture policy and do not write the cache", async () => {
+    const { screen, capture, cache } = harness(device.displays, true);
+    const result = await screen.executeDeviceRead(undefined, "none");
+    expect(result.displays).toHaveLength(2);
+    expect(capture.requests.map((request) => request.displayId)).toEqual([undefined, 2]);
+    expect(capture.requests.every((request) => request.observerMode)).toBe(true);
+    expect(cache.getPutCallCount()).toBe(0);
+    expect(result.snapshotReference).toBeUndefined();
+  });
+
+  test("iOS all fails with a typed selection error before any capture", async () => {
+    const { capture } = harness();
+    const ios = new RealObserveScreen(
+      { ...device, platform: "ios" },
+      new FakeAdbClientFactory(),
+      {
+        hierarchyCapture: capture,
+        cacheStore: new FakeObserveCacheStore(),
+      },
+      new FakeTimer(),
+    );
+    await expect(ios.execute({ display: "all", ...options })).rejects.toThrow(/unsupported on iOS/);
+    expect(capture.requests).toHaveLength(0);
   });
 });

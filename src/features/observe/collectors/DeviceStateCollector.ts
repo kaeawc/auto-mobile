@@ -83,21 +83,30 @@ export class DeviceStateCollector {
    * `undefined`, which the caller treats as "cannot compare" (no false alarm)
    * rather than a mismatch.
    */
-  async collectForegroundIdentity(signal?: AbortSignal): Promise<string | undefined> {
-    const foreground = await this.collectForegroundSnapshot(signal);
+  async collectForegroundIdentity(
+    signal?: AbortSignal,
+    options: { displayId?: number } = {},
+  ): Promise<string | undefined> {
+    const foreground = await this.collectForegroundSnapshot(signal, options);
     return foreground?.packageName ?? undefined;
   }
 
   async collectForegroundSnapshot(
     signal?: AbortSignal,
+    options: { displayId?: number } = {},
   ): ReturnType<AdbExecutor["getForegroundApp"]> {
     const { adb } = this.opts;
     try {
-      return await adb.getForegroundApp(signal);
+      return await adb.getForegroundApp(signal, { displayId: options.displayId ?? 0 });
     } catch (error) {
       // Best-effort window-identity check: a failed foreground read must not fail
       // the observation, only skip the comparison.
-      logger.debug("Failed to get ground-truth foreground app:", error);
+      if (signal?.aborted) {
+        // Abort is expected; the observation itself surfaces cancellation or timeout.
+        logger.debug("Failed to get ground-truth foreground app:", error);
+      } else {
+        logger.warn("Failed to get ground-truth foreground app:", error);
+      }
       return null;
     }
   }

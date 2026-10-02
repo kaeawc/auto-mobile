@@ -5,6 +5,14 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ScreenshotMode } from "../automaticScreenshotPolicy";
 import type { ScreenshotEncodingOptions } from "../screenshot/screenshotOptions";
 
+/** Options for a session-free device observation. */
+export interface DeviceReadOptions {
+  /** Require a fresh screenshot; capture failure throws instead of using cached evidence. */
+  requireFreshScreenshot?: boolean;
+  /** Bound aggregate display reads by the remaining request budget in milliseconds. */
+  timeoutMs?: number;
+}
+
 export interface ObserveScreenExecuteOptions {
   /** A session-free read: collect the normal result without advancing owner-visible state. */
   observerMode?: boolean;
@@ -24,7 +32,7 @@ export interface ObserveScreenExecuteOptions {
   /** Per-call override; omitted reads the env and persisted flag. */
   screenshot?: ScreenshotMode;
   screenshotOptions?: ScreenshotEncodingOptions;
-  /** Physical display panel key or role; "active" follows focus. */
+  /** Physical panel key or role; "active" follows focus, Android "all" adds panel observations. */
   display?: string;
   /** Skip screenshot-dependent accessibility auditing for intermediate observations. */
   skipAccessibilityAudit?: boolean;

@@ -50,6 +50,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
   // Models failures before ADB can dispatch, so beforeDispatch must not run.
   private preDispatchErrors: Map<string, Error> = new Map();
   private foregroundApp: { packageName: string; userId: number } | null = null;
+  private readonly displayForegroundApps = new Map<
+    number,
+    { packageName: string; userId: number } | null
+  >();
   private foregroundAppError: Error | null = null;
   private hangingCommandPatterns: string[] = [];
   private users: Array<{ userId: number; name: string; flags?: number; running?: boolean }> = [
@@ -271,7 +275,15 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /**
    * Configure the current foreground app
    */
-  setForegroundApp(app: { packageName: string; userId: number } | null): void {
+  setForegroundApp(
+    app: { packageName: string; userId: number } | null,
+    options: { displayId?: number } = {},
+  ): void {
+    const displayId = options.displayId ?? 0;
+    if (displayId !== 0) {
+      this.displayForegroundApps.set(displayId, app);
+      return;
+    }
     this.foregroundApp = app;
     this.foregroundAppError = null;
   }
@@ -303,11 +315,17 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /**
    * Return the current foreground app
    */
-  async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+  async getForegroundApp(
+    _signal?: AbortSignal,
+    options?: number | { timeoutMs?: number; displayId?: number },
+  ): Promise<{ packageName: string; userId: number } | null> {
+    const displayId = typeof options === "object" ? (options.displayId ?? 0) : 0;
     if (this.foregroundAppError) {
       throw this.foregroundAppError;
     }
-    return this.foregroundApp;
+    return displayId === 0
+      ? this.foregroundApp
+      : (this.displayForegroundApps.get(displayId) ?? null);
   }
 
   /**
@@ -414,6 +432,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.commandResultSequences.clear();
     this.commandSequenceCursor.clear();
     this.foregroundAppError = null;
+    this.displayForegroundApps.clear();
     this.hangingCommandPatterns = [];
     this.spawnCalls = [];
     this.spawnedProcesses = [];

@@ -33,6 +33,8 @@ import { FakeFileSystem } from "../../fakes/FakeFileSystem";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { Window } from "../../../src/features/observe/Window";
 
 const device: BootedDevice = {
@@ -156,218 +158,252 @@ afterEach(() => {
   directory = undefined;
 });
 
-test("device read leaves real owner state intact and cannot delay an ADB owner action", async () => {
-  const timer = new FakeTimer();
-  const adb = new HoldingAdb();
-  configure(adb);
-  const maps = await seedDisplay(timer, adb);
-  timer.advanceTime(6000); // An observer must not refresh even expired owner display/posture entries.
-  const factory = new FakeAdbClientFactory(adb);
-  const writer = new FakeScreenshotFileWriter();
-  const shot = new TakeScreenshot(
-    device,
-    factory,
-    timer,
-    new CountingIdGenerator("shot"),
-    writer,
-    new FakeFileSystem(),
-    () => "/fake",
-    undefined,
-    false,
-  );
-  directory = mkdtempSync(join(tmpdir(), "observer-owner-state-"));
-  const store = new FileSystemObserveCacheStore(
-    timer,
-    directory,
-    async () => {},
-    new CountingIdGenerator("cache"),
-  );
-  setObserveCacheStore(store);
-  const screenshotState = new InMemoryScreenshotStateStore(timer);
-  setScreenshotStateStore(screenshotState);
-  const window = new Window(device, factory, timer);
-  const ownerWindow = { appId: "com.owner", activityName: "OwnerActivity", layoutSeqSum: 42 };
-  Reflect.set(window, "cachedActiveWindow", ownerWindow);
-  let windowWrites = 0;
-  Reflect.set(window, "writeCacheToDisk", async () => {
-    windowWrites++;
-  });
-  const screen = new RealObserveScreen(
-    device,
-    factory,
-    {
-      deviceReadOnly: true,
-      window,
-      screenshot: shot,
-      hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
-      screenshotEvidenceFiles: {
-        stat: async () => ({ isFile: () => true, size: 12, mtimeMs: timer.now() }),
-      },
-    },
-    timer,
-    new CountingIdGenerator("read"),
-  );
-  const baseline = (Reflect.get(screen, "createBaseResult") as () => ObserveResult).call(screen);
-  baseline.screenSize = { width: 100, height: 100 };
-  baseline.rotation = 0;
-  baseline.viewHierarchy = {
-    hierarchy: { node: { text: "Owner" } },
-    nativeScale: 1,
-    frameContext: "owner-frame",
-  };
-  baseline.observationId = "owner-baseline";
-  baseline.display = { key: "cover", role: "cover", posture: "closed", generation: 0 };
-  sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
-  const session = await sessions.createSession("owner", device.deviceId, "android");
-  sessions.setLastRenderedObservation("owner", baseline);
-  await store.put(device.deviceId, baseline, store.currentGeneration(device.deviceId));
-  screenshotState.updateForObservation(
-    device.deviceId,
-    "owner-baseline",
-    "/fake/owner.png",
-    "owner error",
-  );
-  screenshotState.beginObservation(device.deviceId, "owner-pending");
-  expect(snapshotReferences.capture(device.deviceId, baseline).status).toBe("captured");
-  displayTransitions.record(device.deviceId, baseline);
-  const daemon = DaemonState.getInstance();
-  Reflect.set(daemon, "sessionManager", sessions);
-  const assignment = { sessionId: "owner", poolStatus: "assigned" };
-  Reflect.set(daemon, "devicePool", {
-    getDevice: () => assignment,
-    assertDeviceActionable: () => {},
-  });
-  Reflect.set(daemon, "deviceSessionRegistry", {});
-  PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
-  let reply!: () => void;
-  const client = AndroidCtrlProxyClient.createForTesting(
-    device,
-    adb,
-    (url) => {
-      const socket = new FakeWebSocket(url, "none", 0, timer);
-      spyOn(socket, "send").mockImplementation((wire: string) => {
-        const request = JSON.parse(wire) as { type?: string; requestId?: string };
-        if (request.type === "request_hierarchy") {
-          reply = () =>
-            socket.simulateMessage(
-              JSON.stringify({
-                type: "hierarchy_update",
-                requestId: request.requestId,
-                data: {
-                  updatedAt: 1,
-                  hierarchy: {
-                    text: "Owner",
-                    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
-                  },
-                  screenWidth: 100,
-                  screenHeight: 100,
-                  displayId: 0,
-                  rotation: 0,
-                },
-              }),
-            );
-        }
-      });
-      return socket;
-    },
-    timer,
-  );
-  await client.ensureConnected();
-  AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
-  // Equal frame: the intentionally retained Android changed-frame push path is tested elsewhere.
-  Reflect.set(client, "cachedHierarchy", {
-    hierarchy: {
-      updatedAt: 1,
-      hierarchy: { text: "Owner", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
-      screenWidth: 100,
-      screenHeight: 100,
-      displayId: 0,
-      rotation: 0,
-    },
-    fresh: true,
-  });
-  const references = Reflect.get(snapshotReferences, "entries") as Map<string, unknown>;
-  const before = {
-    session: structuredClone(session.cacheData),
-    references: structuredClone([...references]),
-    cache: structuredClone(Reflect.get(store, "cache")),
-    generation: store.currentGeneration(device.deviceId),
-    screenshot: structuredClone(Reflect.get(screenshotState, "states")),
-    observations: structuredClone(Reflect.get(screenshotState, "observationStates")),
-    pending: screenshotState.isObservationPending(device.deviceId, "owner-pending"),
-    revision: displayTransitions.revision(device.deviceId),
-    identity: displayTransitions.identityRevision(device.deviceId),
-    display: snapshotMaps(maps),
-  };
-  adb.hold(ownerCommand);
-  adb.setCommandResponse(ownerCommand, { stdout: "owner result", stderr: "" });
-  const controller = new AbortController();
-  const owner = adb.executeCommand(
-    ownerCommand,
-    undefined,
-    undefined,
-    undefined,
-    controller.signal,
-  );
-  await adb.started.get(ownerCommand)!.promise;
-  const observerCommandsStart = adb.getExecutedCommands().length;
-  try {
-    const observer = screen.executeDeviceRead();
-    for (let i = 0; i < 100 && !reply; i++) {
-      await Promise.resolve();
-    }
-    expect(reply).toBeDefined();
-    // The observer is still waiting: releasing the owner must complete it immediately.
-    adb.release(ownerCommand);
-    expect((await owner).stdout).toBe("owner result");
-    expect(controller.signal.aborted).toBe(false);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    reply();
-    const result = await observer;
-    expect(result.screenshotSource).toBe("fresh");
-    const commands = adb.getExecutedCommands().slice(observerCommandsStart);
-    const allowlist = [
-      /^shell cmd display get-displays$/,
-      /^shell cmd device_state (?:state|print-states)$/,
-      /^shell dumpsys SurfaceFlinger --display-id$/,
-      /^shell "?dumpsys activity activities"?$/,
-      /^forward --list$/,
-      /^shell "dumpsys window displays"$/,
-      /^shell "dumpsys window windows"$/,
-      /^shell "screencap (?:-d \d+ )?-p \| base64"$/,
-    ];
-    expect(commands.length).toBeGreaterThan(0);
-    expect(
-      commands.filter((command) => !allowlist.some((allowed) => allowed.test(command))),
-    ).toEqual([]);
-    expect(windowWrites).toBe(0);
-    expect(Reflect.get(window, "cachedActiveWindow")).toBe(ownerWindow);
-    expect(getObserveCacheStore()).toBe(store);
-    expect(getScreenshotStateStore()).toBe(screenshotState);
-    expect(session.cacheData).toEqual(before.session);
-    expect(sessions.getLastRenderedObservation("owner")).toBe(baseline);
-    expect([...references]).toEqual(before.references);
-    expect(Reflect.get(store, "cache")).toEqual(before.cache);
-    expect(store.currentGeneration(device.deviceId)).toBe(before.generation);
-    expect(Reflect.get(screenshotState, "states")).toEqual(before.screenshot);
-    expect(Reflect.get(screenshotState, "observationStates")).toEqual(before.observations);
-    expect(screenshotState.isObservationPending(device.deviceId, "owner-pending")).toBe(
-      before.pending,
+test.each(["active", "all"])(
+  "device %s read leaves real owner state intact and cannot delay an ADB owner action",
+  async (display) => {
+    const timer = new FakeTimer();
+    const adb = new HoldingAdb();
+    configure(adb);
+    adb.setCommandResponse(displayCommand, {
+      stdout:
+        'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+      stderr: "",
+    });
+    adb.setForegroundApp({ packageName: "com.owner.inner", userId: 0 }, { displayId: 2 });
+    const maps = await seedDisplay(timer, adb);
+    timer.advanceTime(6000); // An observer must not refresh even expired owner display/posture entries.
+    const factory = new FakeAdbClientFactory(adb);
+    const writer = new FakeScreenshotFileWriter();
+    const shot = new TakeScreenshot(
+      device,
+      factory,
+      timer,
+      new CountingIdGenerator("shot"),
+      writer,
+      new FakeFileSystem(),
+      () => "/fake",
+      undefined,
+      false,
     );
-    expect(displayTransitions.revision(device.deviceId)).toBe(before.revision);
-    expect(displayTransitions.identityRevision(device.deviceId)).toBe(before.identity);
-    expect(snapshotMaps(maps)).toEqual(before.display);
-    expect(assignment).toEqual({ sessionId: "owner", poolStatus: "assigned" });
-  } finally {
-    adb.release(ownerCommand);
-    timer.enableAutoAdvance();
-    await client.close();
-  }
-});
+    directory = mkdtempSync(join(tmpdir(), "observer-owner-state-"));
+    const store = new FileSystemObserveCacheStore(
+      timer,
+      directory,
+      async () => {},
+      new CountingIdGenerator("cache"),
+    );
+    setObserveCacheStore(store);
+    const screenshotState = new InMemoryScreenshotStateStore(timer);
+    setScreenshotStateStore(screenshotState);
+    const window = new Window(device, factory, timer);
+    const ownerWindow = { appId: "com.owner", activityName: "OwnerActivity", layoutSeqSum: 42 };
+    Reflect.set(window, "cachedActiveWindow", ownerWindow);
+    let windowWrites = 0;
+    Reflect.set(window, "writeCacheToDisk", async () => {
+      windowWrites++;
+    });
+    const screen = new RealObserveScreen(
+      device,
+      factory,
+      {
+        deviceReadOnly: true,
+        display,
+        window,
+        screenshot: shot,
+        hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
+        screenshotEvidenceFiles: {
+          stat: async () => ({ isFile: () => true, size: 12, mtimeMs: timer.now() }),
+        },
+      },
+      timer,
+      new CountingIdGenerator("read"),
+    );
+    const baseline = (Reflect.get(screen, "createBaseResult") as () => ObserveResult).call(screen);
+    baseline.screenSize = { width: 100, height: 100 };
+    baseline.rotation = 0;
+    baseline.viewHierarchy = {
+      hierarchy: { node: { text: "Owner" } },
+      nativeScale: 1,
+      frameContext: "owner-frame",
+    };
+    baseline.observationId = "owner-baseline";
+    baseline.display = { key: "cover", role: "cover", posture: "closed", generation: 0 };
+    sessions = new SessionManager(
+      timer,
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+    );
+    const session = await sessions.createSession("owner", device.deviceId, "android");
+    sessions.setLastRenderedObservation("owner", baseline);
+    await store.put(device.deviceId, baseline, store.currentGeneration(device.deviceId));
+    screenshotState.updateForObservation(
+      device.deviceId,
+      "owner-baseline",
+      "/fake/owner.png",
+      "owner error",
+    );
+    screenshotState.beginObservation(device.deviceId, "owner-pending");
+    expect(snapshotReferences.capture(device.deviceId, baseline).status).toBe("captured");
+    displayTransitions.record(device.deviceId, baseline);
+    const daemon = DaemonState.getInstance();
+    Reflect.set(daemon, "sessionManager", sessions);
+    const assignment = { sessionId: "owner", poolStatus: "assigned" };
+    Reflect.set(daemon, "devicePool", {
+      getDevice: () => assignment,
+      assertDeviceActionable: () => {},
+    });
+    Reflect.set(daemon, "deviceSessionRegistry", {});
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+    let reply!: () => void;
+    const client = AndroidCtrlProxyClient.createForTesting(
+      device,
+      adb,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, timer);
+        spyOn(socket, "send").mockImplementation((wire: string) => {
+          const request = JSON.parse(wire) as {
+            type?: string;
+            requestId?: string;
+            displayId?: number;
+          };
+          if (request.type === "request_hierarchy") {
+            const secondary = request.displayId === 2;
+            const respond = () =>
+              socket.simulateMessage(
+                JSON.stringify({
+                  type: "hierarchy_update",
+                  requestId: request.requestId,
+                  data: {
+                    updatedAt: 1,
+                    hierarchy: {
+                      text: secondary ? "Inner" : display === "all" ? "Updated active" : "Owner",
+                      bounds: {
+                        left: 0,
+                        top: 0,
+                        right: secondary ? 200 : 100,
+                        bottom: secondary ? 200 : 100,
+                      },
+                    },
+                    screenWidth: secondary ? 200 : 100,
+                    screenHeight: secondary ? 200 : 100,
+                    displayId: request.displayId ?? 0,
+                    rotation: 0,
+                    // Force the bootstrap Window read; incomplete trees must not run UIAutomator.
+                    ctrlProxyIncomplete: true,
+                  },
+                }),
+              );
+            if (secondary) {
+              setImmediate(respond);
+            } else {
+              reply = respond;
+            }
+          }
+        });
+        return socket;
+      },
+      timer,
+    );
+    await client.ensureConnected();
+    AndroidCtrlProxyClient.registerForTesting(client, device.deviceId);
+    // The ordinary read is equal; aggregate active and secondary frames differ from this owner seed.
+    Reflect.set(client, "cachedHierarchy", {
+      hierarchy: {
+        updatedAt: 1,
+        hierarchy: { text: "Owner", bounds: { left: 0, top: 0, right: 100, bottom: 100 } },
+        screenWidth: 100,
+        screenHeight: 100,
+        displayId: 0,
+        rotation: 0,
+      },
+      fresh: true,
+    });
+    const references = Reflect.get(snapshotReferences, "entries") as Map<string, unknown>;
+    const before = {
+      session: structuredClone(session.cacheData),
+      references: structuredClone([...references]),
+      cache: structuredClone(Reflect.get(store, "cache")),
+      generation: store.currentGeneration(device.deviceId),
+      screenshot: structuredClone(Reflect.get(screenshotState, "states")),
+      observations: structuredClone(Reflect.get(screenshotState, "observationStates")),
+      pending: screenshotState.isObservationPending(device.deviceId, "owner-pending"),
+      revision: displayTransitions.revision(device.deviceId),
+      identity: displayTransitions.identityRevision(device.deviceId),
+      display: snapshotMaps(maps),
+      hierarchy: structuredClone(Reflect.get(client, "cachedHierarchy")),
+    };
+    adb.hold(ownerCommand);
+    adb.setCommandResponse(ownerCommand, { stdout: "owner result", stderr: "" });
+    const controller = new AbortController();
+    const owner = adb.executeCommand(
+      ownerCommand,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
+    await adb.started.get(ownerCommand)!.promise;
+    const observerCommandsStart = adb.getExecutedCommands().length;
+    try {
+      const observer = screen.executeDeviceRead();
+      for (let i = 0; i < 100 && !reply; i++) {
+        await Promise.resolve();
+      }
+      expect(reply).toBeDefined();
+      // The observer is still waiting: releasing the owner must complete it immediately.
+      adb.release(ownerCommand);
+      expect((await owner).stdout).toBe("owner result");
+      expect(controller.signal.aborted).toBe(false);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      reply();
+      const result = await observer;
+      expect(result.screenshotSource).toBe("fresh");
+      if (display === "all") {
+        expect(result.displays?.map((panel) => panel.display.key)).toEqual(["cover", "inner"]);
+        expect(result.displays?.map((panel) => panel.viewHierarchy?.displayId)).toEqual([0, 2]);
+        expect(result.displays?.[1].viewHierarchy?.ctrlProxyIncomplete).toBe(true);
+      }
+      expect(Reflect.get(client, "cachedHierarchy")).toEqual(before.hierarchy);
+      const commands = adb.getExecutedCommands().slice(observerCommandsStart);
+      const allowlist = [
+        /^shell cmd display get-displays$/,
+        /^shell cmd device_state (?:state|print-states)$/,
+        /^shell dumpsys SurfaceFlinger --display-id$/,
+        /^shell "?dumpsys activity activities"?$/,
+        /^forward --list$/,
+        /^shell "dumpsys window displays"$/,
+        /^shell "dumpsys window windows"$/,
+        /^shell "screencap (?:-d \d+ )?-p \| base64"$/,
+      ];
+      expect(commands.length).toBeGreaterThan(0);
+      expect(
+        commands.filter((command) => !allowlist.some((allowed) => allowed.test(command))),
+      ).toEqual([]);
+      expect(windowWrites).toBe(0);
+      expect(Reflect.get(window, "cachedActiveWindow")).toBe(ownerWindow);
+      expect(getObserveCacheStore()).toBe(store);
+      expect(getScreenshotStateStore()).toBe(screenshotState);
+      expect(session.cacheData).toEqual(before.session);
+      expect(sessions.getLastRenderedObservation("owner")).toBe(baseline);
+      expect([...references]).toEqual(before.references);
+      expect(Reflect.get(store, "cache")).toEqual(before.cache);
+      expect(store.currentGeneration(device.deviceId)).toBe(before.generation);
+      expect(Reflect.get(screenshotState, "states")).toEqual(before.screenshot);
+      expect(Reflect.get(screenshotState, "observationStates")).toEqual(before.observations);
+      expect(screenshotState.isObservationPending(device.deviceId, "owner-pending")).toBe(
+        before.pending,
+      );
+      expect(displayTransitions.revision(device.deviceId)).toBe(before.revision);
+      expect(displayTransitions.identityRevision(device.deviceId)).toBe(before.identity);
+      expect(snapshotMaps(maps)).toEqual(before.display);
+      expect(assignment).toEqual({ sessionId: "owner", poolStatus: "assigned" });
+    } finally {
+      adb.release(ownerCommand);
+      timer.enableAutoAdvance();
+      await client.close();
+    }
+  },
+);
 
 test.each(["display", "posture"] as const)(
   "late observer %s probe cannot repopulate caches cleared by an owner fold",
@@ -468,4 +504,134 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
   expect(adb.getExecutedCommands()).toEqual(['shell "screencap -d 0 -p | base64"']);
   expect(adb.getExecutedArgv()).toEqual([]);
   expect(writer.written).toEqual([]);
+});
+
+test("session all read preserves expired display/posture caches and recaptured bootstrap window state", async () => {
+  const timer = new FakeTimer();
+  const adb = new FakeAdbExecutor();
+  configure(adb);
+  adb.setCommandResponse(displayCommand, {
+    stdout:
+      'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+    stderr: "",
+  });
+  const maps = await seedDisplay(timer, adb);
+  timer.advanceTime(6000);
+  const before = snapshotMaps(maps);
+  const hierarchy = new FakeViewHierarchy();
+  hierarchy.configureHierarchy({
+    hierarchy: { node: { text: "Cover" } },
+    packageName: "com.owner",
+    updatedAt: 1,
+    fresh: true,
+    displayId: 0,
+    screenWidth: 100,
+    screenHeight: 100,
+  });
+  const window = new FakeWindow();
+  window.configureActiveWindow({ appId: "com.owner", activityName: "", layoutSeqSum: 42 });
+  const cache = new FakeObserveCacheStore(timer);
+  const screen = new RealObserveScreen(
+    device,
+    new FakeAdbClientFactory(adb),
+    {
+      display: "all",
+      window,
+      cacheStore: cache,
+      viewHierarchy: hierarchy,
+      backStack: {
+        execute: async () => ({
+          depth: 1,
+          activities: [],
+          tasks: [],
+          currentActivity: { name: "com.owner.MainActivity", taskId: 1 },
+          source: "adb",
+        }),
+      },
+      hierarchyCapture: {
+        capture: async (request) => ({
+          captureId: "inner",
+          platform: "android",
+          requestedFreshness: request.freshness,
+          receivedAt: timer.now(),
+          nodes: [],
+          hierarchy: {
+            hierarchy: { node: { text: "Inner" } },
+            displayId: request.displayId,
+            screenWidth: 200,
+            screenHeight: 200,
+          },
+        }),
+      },
+    },
+    timer,
+  );
+  const result = await screen.execute({
+    skipScreenshot: true,
+    skipRecompositionTracking: true,
+    skipPerformanceAudit: true,
+    skipAccessibilityAudit: true,
+  });
+  expect(result.displays?.map((panel) => panel.display.key)).toEqual(["cover", "inner"]);
+  expect(snapshotMaps(maps)).toEqual(before);
+  expect(window.getGetActiveOptions()).toEqual([
+    { cacheResult: false },
+    { cacheResult: false },
+    { cacheResult: false },
+  ]);
+  expect(hierarchy.getCallCount()).toBe(2);
+  expect(result.activeWindow?.activityName).toBe("com.owner.MainActivity");
+  expect(cache.getPutCallCount()).toBe(0);
+  expect(displayTransitions.currentObservedPanel(device.deviceId)).toBeUndefined();
+});
+
+test("observer readOnly flag is independent of recomposition skipping and logical display id", async () => {
+  const timer = new FakeTimer();
+  const adb = new FakeAdbExecutor();
+  configure(adb, "inner");
+  adb.setCommandResponse(displayCommand, {
+    stdout: 'Display id 2: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+    stderr: "",
+  });
+  const window = new FakeWindow();
+  window.configureActiveWindow({ appId: "com.owner", activityName: "", layoutSeqSum: 42 });
+  const screen = new RealObserveScreen(
+    device,
+    new FakeAdbClientFactory(adb),
+    {
+      window,
+      deviceReadOnly: true,
+      hierarchyCapture: {
+        capture: async (request) => ({
+          captureId: "inner",
+          platform: "android",
+          requestedFreshness: request.freshness,
+          receivedAt: timer.now(),
+          nodes: [],
+          hierarchy: {
+            hierarchy: { node: { text: "Inner" } },
+            displayId: request.displayId,
+            screenWidth: 200,
+            screenHeight: 200,
+          },
+        }),
+      },
+    },
+    timer,
+  );
+  const collect = spyOn(screen, "collectAllData");
+  try {
+    await screen.execute({
+      display: "inner",
+      observerMode: true,
+      skipScreenshot: true,
+      skipBackStack: true,
+      skipRecompositionTracking: false,
+    });
+    expect(collect.mock.calls[0]?.[7]).toBe(true);
+    expect(collect.mock.calls[0]?.[10]).toBe(2);
+    expect(window.getGetActiveOptions()).toEqual([{ cacheResult: false }]);
+  } finally {
+    collect.mockRestore();
+  }
 });

@@ -2,7 +2,10 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { Image } from "../../../src/utils/image-utils";
-import { detectImageMimeType } from "../../../src/utils/screenshot/imageHeaderDimensions";
+import {
+  detectImageMimeType,
+  readImageHeaderDimensions,
+} from "../../../src/utils/screenshot/imageHeaderDimensions";
 import {
   TakeScreenshot,
   replaceScreenshotExtension,
@@ -91,6 +94,7 @@ describe("screenshot encoding and truthful metadata", () => {
       );
       const directResult = await direct.execute({});
       expect(directResult.path).toEndWith(".png");
+      expect(directResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
       expect(directResult.screenshotFormat).toBe("png");
       expect(directResult.screenshotMimeType).toBe("image/png");
       expect(directWriter.files.get(directResult.path ?? "")).toEqual(png);
@@ -131,6 +135,7 @@ describe("screenshot encoding and truthful metadata", () => {
       fileSystem.setBinaryFile(`${expectedPath}.temp`, png);
       const pullResult = await pull.execute({});
       expect(pullResult.path).toBe(expectedPath);
+      expect(pullResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
       expect(pullResult.screenshotFormat).toBe("png");
       expect(pullResult.screenshotMimeType).toBe("image/png");
       expect(await fileSystem.readFileBuffer(expectedPath)).toEqual(png);
@@ -158,6 +163,7 @@ describe("screenshot encoding and truthful metadata", () => {
       for (const options of [undefined, {}]) {
         const result = await shot.execute(options);
         expect(result.path).toEndWith(".png");
+        expect(result.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
         expect(result.screenshotFormat).toBe("png");
         expect(result.screenshotMimeType).toBe("image/png");
         expect(writer.files.get(result.path ?? "")).toEqual(png);
@@ -195,6 +201,9 @@ describe("screenshot encoding and truthful metadata", () => {
       const result = await shot.execute({ format: "jpeg", quality: 70 });
       expect(result.success).toBe(true);
       expect(result.path).toEndWith(".jpg");
+      expect(result.screenshotImageSize).toEqual(
+        readImageHeaderDimensions(writer.files.get(result.path!)!),
+      );
       expect(result.screenshotFormat).toBe("jpeg");
       expect(result.screenshotMimeType).toBe("image/jpeg");
       expect(detectImageMimeType(writer.files.get(result.path ?? "") ?? Buffer.alloc(0))).toBe(
@@ -252,6 +261,9 @@ describe("screenshot encoding and truthful metadata", () => {
       const result = await shot.execute({ format: "webp", lossless: true });
       expect(result.success).toBe(true);
       expect(result.path).toEndWith(".webp");
+      expect(result.screenshotImageSize).toEqual(
+        readImageHeaderDimensions(writer.files.get(result.path!)!),
+      );
       expect(result.screenshotFormat).toBe("webp");
       expect(result.screenshotMimeType).toBe("image/webp");
       expect(detectImageMimeType(writer.files.get(result.path ?? "") ?? Buffer.alloc(0))).toBe(

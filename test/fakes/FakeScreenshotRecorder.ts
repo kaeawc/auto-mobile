@@ -1,4 +1,6 @@
 import type { ObserveScreenshotRecorder } from "../../src/features/observe/screenshot/ObserveScreenshotRecorder";
+import type { ScreenshotEncodingOptions } from "../../src/features/observe/screenshot/screenshotOptions";
+import type { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 
 export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   startCalls = 0;
@@ -19,7 +21,13 @@ export class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
     this.captureFreshCalls++;
   }
 
-  async captureSettled(): Promise<string> {
+  async captureSettled(
+    _observationId: string,
+    _perf?: PerformanceTracker,
+    _signal?: AbortSignal,
+    _displayId?: number,
+    _options?: ScreenshotEncodingOptions,
+  ): Promise<string> {
     this.captureSettledCalls++;
     if (this.settledError) {
       throw this.settledError;

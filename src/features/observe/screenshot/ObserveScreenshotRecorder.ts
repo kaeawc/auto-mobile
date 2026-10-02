@@ -231,7 +231,13 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
             this.device.deviceId,
           );
           this.store.update(this.device.deviceId, validated);
-          this.store.updateForObservation(this.device.deviceId, observationId, validated);
+          this.store.updateForObservation(
+            this.device.deviceId,
+            observationId,
+            validated,
+            undefined,
+            result.screenshotImageSize,
+          );
           return validated;
         }
         throw new ActionableError("Screenshot capture retry exhausted");
@@ -341,7 +347,13 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
         this.store.update(this.device.deviceId, path, error);
       }
       if (options.observationId) {
-        this.store.updateForObservation(this.device.deviceId, options.observationId, path, error);
+        this.store.updateForObservation(
+          this.device.deviceId,
+          options.observationId,
+          path,
+          error,
+          screenshotResult.screenshotImageSize,
+        );
       }
     };
     if (!screenshotResult.success) {

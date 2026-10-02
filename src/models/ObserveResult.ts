@@ -206,6 +206,10 @@ export interface ObserveResult {
   screenshotSettledError?: string;
   /** Orientation of screenshot bytes: iOS framebuffer native, Android display. */
   screenshotOrientation?: "native" | "display";
+  /** Full screenshot raster as written, including encoding/downscaling. */
+  screenshotImageSize?: { width: number; height: number };
+  screenshotPixelsPerNativeUnit?: { x: number; y: number };
+  screenshotScaleProvenance?: "raster-dimensions" | "native-scale-confirmed";
   /** Local path to this observation's validated settled screenshot. */
   screenshotPath?: string;
   /** Upright display-oriented PNG crop; its orientation is independent of the full screenshot. */

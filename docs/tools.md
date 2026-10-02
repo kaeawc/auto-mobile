@@ -192,7 +192,17 @@ Omitting options requests PNG. JPEG and WebP accept integer `quality` from 1 to 
 `quality`; PNG accepts neither. The returned `screenshotFormat`,
 `screenshotMimeType`, and `screenshotPath` extension describe the saved bytes
 after a platform capture fallback. The path does not depend on reading an
-in-protocol screenshot resource. The screenshot's orientation follows the device framebuffer:
+in-protocol screenshot resource. `screenshotImageSize: { width, height }` reports
+the full file's raster pixels as written after `screenshotOptions` encoding or
+downscaling. `screenshotPixelsPerNativeUnit: { x, y }` reports raster pixels per
+native unit, accounting for iOS native-orientation rasters after a quarter turn.
+`screenshotScaleProvenance` is `raster-dimensions`, or `native-scale-confirmed`
+when the hierarchy's `nativeScale` agrees within 0.02. These fields describe the
+file at `screenshotPath`, including a cached fallback, and remain in default
+skeleton and diff output. They are omitted when dimensions are unreadable;
+incompatible screen/raster aspect ratios retain `screenshotImageSize` but omit
+the two scale fields. These best-effort failures log a warning and do not fail
+observe. The screenshot's orientation follows the device framebuffer:
 on the iOS Simulator, the framebuffer can remain portrait after `rotate`, even
 while the device orientation is landscape (this is simulator framebuffer
 behavior, not an AutoMobile bug); on Android, the raster rotates with the

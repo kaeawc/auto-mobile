@@ -1503,6 +1503,9 @@ describe("finalizeToolResponse", () => {
         screenshotSettled: true,
         screenshotSettledError: "Settled screenshot capture timed out",
         screenshotOrientation: "display",
+        screenshotImageSize: { width: 1080, height: 2400 },
+        screenshotPixelsPerNativeUnit: { x: 1, y: 1 },
+        screenshotScaleProvenance: "raster-dimensions",
         screenshotPath: "/data/local/tmp/auto-mobile/screens/passthrough-observation.png",
         screenshotSource: "fresh",
         screenshotCaptureSource: "device",
@@ -1534,6 +1537,11 @@ describe("finalizeToolResponse", () => {
 
       const obsSc = structuredPayload(finalized).observation as ObserveResult;
       expect(obsSc.isDiff).toBe(true);
+      expect(obsSc).toMatchObject({
+        screenshotImageSize: next.screenshotImageSize,
+        screenshotPixelsPerNativeUnit: next.screenshotPixelsPerNativeUnit,
+        screenshotScaleProvenance: next.screenshotScaleProvenance,
+      });
       for (const field of DIFF_PASSTHROUGH_METADATA_FIELDS) {
         expect(obsSc[field]).toBeDefined();
         expect(obsSc[field]).toEqual(next[field]);

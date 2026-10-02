@@ -11,6 +11,27 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotStateStore } from "../../../fakes/FakeScreenshotStateStore";
 
 describe("InMemoryScreenshotStateStore", () => {
+  test("writer dimensions stay with the matching observation path and expire with it", () => {
+    const timer = new FakeTimer();
+    const store = new InMemoryScreenshotStateStore(timer);
+    const size = { width: 540, height: 1200 };
+    store.updateForObservation("device", "observation", "/fake/small.png", undefined, size);
+    expect(store.getImageSizeForObservation("device", "observation", "/fake/small.png")).toEqual(
+      size,
+    );
+    expect(
+      store.getImageSizeForObservation("device", "observation", "/fake/other.png"),
+    ).toBeUndefined();
+    timer.advanceTime(OBSERVE_RESULT_CACHE_TTL_MS + 1);
+    expect(
+      store.getImageSizeForObservation("device", "observation", "/fake/small.png"),
+    ).toBeUndefined();
+    store.updateForObservation("device", "observation", "/fake/other.png");
+    expect(
+      store.getImageSizeForObservation("device", "observation", "/fake/other.png"),
+    ).toBeUndefined();
+  });
+
   test("update + getPath round-trips for a single device", () => {
     const timer = new FakeTimer();
     timer.setCurrentTime(1000);

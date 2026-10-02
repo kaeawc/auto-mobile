@@ -111,8 +111,12 @@ import {
 import type { DisplayObservation } from "../../models/ObserveResult";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
+  HeaderScreenshotDimensionsReader,
+  type ScreenshotDimensionsReader,
+} from "./screenshot/ScreenshotDimensionsReader";
+import { snapshotRasterGeometry } from "./screenshot/snapshotRasterGeometry";
+import {
   observationScreenshotEvidence,
-  screenshotFormatForPath,
   type ScreenshotEvidenceFiles,
 } from "./screenshot/observationScreenshotEvidence";
 
@@ -134,23 +138,6 @@ function reconcileIosDisplayTransition(
       result.display,
     );
   }
-}
-
-async function iosScreenshotOrientation(
-  screenshotPath: string,
-  screenSize: ObserveResult["screenSize"],
-): Promise<"native" | "display"> {
-  try {
-    const dimensions = readImageHeaderDimensions(await readFile(screenshotPath));
-    if (dimensions) {
-      return dimensions.width > dimensions.height === screenSize.width > screenSize.height
-        ? "display"
-        : "native";
-    }
-  } catch (error) {
-    logger.warn(`[OBSERVE] Could not read iOS screenshot orientation: ${describeError(error)}`);
-  }
-  return "native";
 }
 
 /**
@@ -594,6 +581,7 @@ export class RealObserveScreen implements ObserveScreen {
 
   private screenshotRecorder: ObserveScreenshotRecorder;
   private readonly screenshotService: ScreenshotService;
+  private readonly screenshotDimensionsReader: ScreenshotDimensionsReader;
   private screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
   private readonly pathProtection: ScreenshotPathProtection;
   private hierarchyCollector: HierarchyCollector;
@@ -747,6 +735,8 @@ export class RealObserveScreen implements ObserveScreen {
         this.pathProtection,
       );
     this.screenshotEvidenceFiles = dependencies?.screenshotEvidenceFiles;
+    this.screenshotDimensionsReader =
+      dependencies?.screenshotDimensionsReader ?? new HeaderScreenshotDimensionsReader();
     this.hierarchyCollector =
       dependencies?.hierarchyCollector ??
       new HierarchyCollector({
@@ -914,6 +904,7 @@ export class RealObserveScreen implements ObserveScreen {
           this.pathProtection,
         ),
       );
+      await this.attachScreenshotRaster(result, capture.screenshotImageSize);
       result.screenshotSettled = true;
       return;
     }
@@ -950,6 +941,7 @@ export class RealObserveScreen implements ObserveScreen {
             this.pathProtection,
           ),
         );
+        await this.attachScreenshotRaster(result);
       } catch (error) {
         logger.warn(`[OBSERVE] Cached screenshot unavailable: ${describeError(error)}`, error);
       }
@@ -1953,7 +1945,6 @@ export class RealObserveScreen implements ObserveScreen {
         displayId,
         screenshotOptions,
       );
-      const screenshotFormat = screenshotFormatForPath(path);
       const screenshotEvidence = await observationScreenshotEvidence(
         path,
         "fresh",
@@ -1962,15 +1953,22 @@ export class RealObserveScreen implements ObserveScreen {
         this.timer,
         this.pathProtection,
       );
-      const screenshotOrientation =
-        this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
-          ? await iosScreenshotOrientation(path, observation.screenSize)
-          : undefined;
       Object.assign(observation, screenshotEvidence);
-      observation.screenshotFormat = screenshotFormat;
-      observation.screenshotMimeType = `image/${screenshotFormat}`;
-      if (screenshotOrientation) {
-        observation.screenshotOrientation = screenshotOrientation;
+      const imageSize = getScreenshotStateStore().getImageSizeForObservation(
+        this.device.deviceId,
+        observation.observationId,
+        path,
+      );
+      await this.attachScreenshotRaster(observation, imageSize);
+      // Only settled multi-panel iOS captures refine the platform orientation preset.
+      if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
+        const rasterSize = observation.screenshotImageSize;
+        observation.screenshotOrientation =
+          rasterSize &&
+          rasterSize.width > rasterSize.height ===
+            observation.screenSize.width > observation.screenSize.height
+            ? "display"
+            : "native";
       }
       observation.screenshotSettled = true;
     } catch (error) {
@@ -1983,6 +1981,56 @@ export class RealObserveScreen implements ObserveScreen {
       logger.warn(
         `[OBSERVE] Settled screenshot unavailable: ${observation.screenshotSettledError}`,
       );
+    }
+  }
+
+  /** Best-effort raster evidence belongs to the returned path, never the screen-size guess. */
+  private async attachScreenshotRaster(
+    observation: ObserveResult,
+    capturedSize?: { width: number; height: number },
+  ): Promise<void> {
+    delete observation.screenshotImageSize;
+    delete observation.screenshotPixelsPerNativeUnit;
+    delete observation.screenshotScaleProvenance;
+    try {
+      const imageSize =
+        capturedSize ?? (await this.screenshotDimensionsReader.read(observation.screenshotPath!));
+      if (
+        !imageSize ||
+        ![imageSize.width, imageSize.height].every((value) => Number.isInteger(value) && value > 0)
+      ) {
+        logger.warn("[OBSERVE] Could not read screenshot raster dimensions");
+        return;
+      }
+      observation.screenshotImageSize = { width: imageSize.width, height: imageSize.height };
+      const hierarchy: Partial<ViewHierarchyResult> = observation.viewHierarchy ?? {};
+      const scale = snapshotRasterGeometry(
+        imageSize,
+        {
+          platform: this.device.platform,
+          screenSize: observation.screenSize,
+          rotation: hierarchy.rotation ?? observation.rotation,
+          nativeScale: hierarchy.nativeScale,
+          rasterOrientation:
+            this.device.platform === "ios" &&
+            !(
+              (this.device.displays?.panels.length ?? 0) > 1 &&
+              imageSize.width > imageSize.height ===
+                observation.screenSize.width > observation.screenSize.height
+            )
+              ? "native"
+              : "display",
+        },
+        "observe",
+      );
+      observation.screenshotPixelsPerNativeUnit = scale.pixelsPerNativeUnit;
+      observation.screenshotScaleProvenance = scale.scaleProvenance;
+    } catch (error) {
+      logger.warn(
+        `[OBSERVE] Could not derive screenshot raster scale: ${describeError(error)}`,
+        error,
+      );
+      return;
     }
   }
 

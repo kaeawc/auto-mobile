@@ -233,6 +233,21 @@ describe("DefaultObserveScreenshotRecorder.capture", () => {
     expect(svc.lastCaptureOptions).toEqual({});
   });
 
+  test("settled recorder carries writer raster dimensions with the observation path", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "obs-rec-raster-"));
+    const file = path.join(dir, "shot.png");
+    writeFileSync(file, "fake image");
+    const imageSize = { width: 540, height: 1200 };
+    svc.setNextResult({ success: true, path: file, screenshotImageSize: imageSize });
+    expect(await recorder.captureSettled("raster-observation")).toBe(file);
+    expect(store.getImageSizeForObservation("test-device", "raster-observation", file)).toEqual(
+      imageSize,
+    );
+    expect(
+      store.getImageSizeForObservation("test-device", "raster-observation", "/other.png"),
+    ).toBeUndefined();
+  });
+
   test("failure writes error to store", async () => {
     svc.setNextResult({ success: false, error: "capture failed" });
 

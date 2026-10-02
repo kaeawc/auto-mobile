@@ -16,6 +16,7 @@ import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDete
 import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 import type { DaemonStateLike } from "../../daemon/daemonState";
 import type { IosLockStateProbe } from "./ios/IosLockStateProbe";
+import type { ScreenshotDimensionsReader } from "./screenshot/ScreenshotDimensionsReader";
 import type { ScreenshotEvidenceFiles } from "./screenshot/observationScreenshotEvidence";
 
 /**
@@ -41,6 +42,7 @@ export interface ObserveScreenDependencies {
   screenshotStateStore?: ScreenshotStateStore;
   screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
   screenshotPathProtection?: ScreenshotPathProtection;
+  screenshotDimensionsReader?: ScreenshotDimensionsReader;
 
   // Composed services. If omitted, defaults are built from the data sources above.
   screenshotRecorder?: ObserveScreenshotRecorder;

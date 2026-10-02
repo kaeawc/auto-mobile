@@ -706,6 +706,10 @@ export interface ObserveDiff {
   screenshotSettled?: boolean;
   screenshotSettledError?: string;
   screenshotOrientation?: "native" | "display";
+  /** Full screenshot raster as written, including encoding/downscaling. */
+  screenshotImageSize?: { width: number; height: number };
+  screenshotPixelsPerNativeUnit?: { x: number; y: number };
+  screenshotScaleProvenance?: "raster-dimensions" | "native-scale-confirmed";
   screenshotPath?: string;
   screenshotSource?: "fresh" | "cached";
   screenshotCaptureSource?: "device" | "observation-cache";

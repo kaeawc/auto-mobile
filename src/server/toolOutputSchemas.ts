@@ -749,6 +749,14 @@ const cropNativeBoundsSchema = boundsObjectSchema
   .pick({ left: true, top: true, right: true, bottom: true })
   .strict();
 
+const screenshotRasterFields = {
+  imageSize: z
+    .object({ width: z.number().int().positive(), height: z.number().int().positive() })
+    .strict(),
+  pixelsPerNativeUnit: z.object({ x: z.number().positive(), y: z.number().positive() }).strict(),
+  scaleProvenance: z.enum(["raster-dimensions", "native-scale-confirmed"]),
+};
+
 export const observeCropResultSchema = z
   .object({
     cropPath: z.string(),
@@ -757,12 +765,10 @@ export const observeCropResultSchema = z
     clippedBounds: cropNativeBoundsSchema,
     clipped: z.boolean(),
     screenSize: z.object({ width: z.number().positive(), height: z.number().positive() }).strict(),
-    imageSize: z
-      .object({ width: z.number().int().positive(), height: z.number().int().positive() })
-      .strict()
-      .describe("Pixel dimensions of the upright output crop PNG."),
-    pixelsPerNativeUnit: z.object({ x: z.number().positive(), y: z.number().positive() }).strict(),
-    scaleProvenance: z.enum(["raster-dimensions", "native-scale-confirmed"]),
+    ...screenshotRasterFields,
+    imageSize: screenshotRasterFields.imageSize.describe(
+      "Pixel dimensions of the upright output crop PNG.",
+    ),
     rasterBounds: z
       .object({
         left: z.number().int().nonnegative(),
@@ -783,6 +789,9 @@ export const observeCropResultSchema = z
   .strict();
 
 const observationScreenshotOutputFields = {
+  screenshotImageSize: screenshotRasterFields.imageSize.optional(),
+  screenshotPixelsPerNativeUnit: screenshotRasterFields.pixelsPerNativeUnit.optional(),
+  screenshotScaleProvenance: screenshotRasterFields.scaleProvenance.optional(),
   screenshotSettled: z.boolean().optional(),
   screenshotSettledError: z.string().optional(),
   screenshotOrientation: z.enum(["native", "display"]).optional(),

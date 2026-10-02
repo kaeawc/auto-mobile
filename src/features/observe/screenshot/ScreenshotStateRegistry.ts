@@ -18,6 +18,7 @@ export const MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE = 10;
 export const MAX_CLEARED_OBSERVATION_TOMBSTONES_PER_DEVICE = 64;
 
 interface ScreenshotState {
+  imageSize?: { width: number; height: number };
   path: string | null;
   error: string | null;
   timestamp: number;
@@ -41,6 +42,7 @@ export interface ScreenshotStateStore {
     observationId: string,
     path?: string,
     error?: string,
+    imageSize?: { width: number; height: number },
   ): void;
   /** Register a screenshot write that will later be committed for this observation. */
   beginObservation(deviceId: string, observationId: string): void;
@@ -53,6 +55,12 @@ export interface ScreenshotStateStore {
   getPath(deviceId?: string): string | undefined;
   getError(deviceId?: string): string | undefined;
   getPathForObservation(deviceId: string, observationId: string): string | undefined;
+  /** Dimensions carried by this observation's writer, only for the matching path. */
+  getImageSizeForObservation(
+    deviceId: string,
+    observationId: string,
+    path: string,
+  ): { width: number; height: number } | undefined;
   getErrorForObservation(deviceId: string, observationId: string): string | undefined;
   /** Screenshot paths retained by unexpired latest and observation state. */
   getReferencedScreenshotPaths(): readonly string[];
@@ -98,6 +106,7 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     observationId: string,
     path?: string,
     error?: string,
+    imageSize?: { width: number; height: number },
   ): void {
     if (this.isClearedObservation(deviceId, observationId)) {
       logger.debug(
@@ -110,6 +119,7 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
     states.set(observationId, {
       path: path ?? null,
       error: error ?? null,
+      ...(imageSize ? { imageSize } : {}),
       timestamp: this.timer.now(),
     });
     while (states.size > MAX_OBSERVATION_SCREENSHOT_STATES_PER_DEVICE) {
@@ -191,6 +201,11 @@ export class InMemoryScreenshotStateStore implements ScreenshotStateStore {
 
   getPathForObservation(deviceId: string, observationId: string): string | undefined {
     return this.findObservation(deviceId, observationId)?.path ?? undefined;
+  }
+
+  getImageSizeForObservation(deviceId: string, observationId: string, path: string) {
+    const state = this.findObservation(deviceId, observationId);
+    return state?.path === path ? state.imageSize : undefined;
   }
 
   getErrorForObservation(deviceId: string, observationId: string): string | undefined {

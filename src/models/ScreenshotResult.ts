@@ -6,6 +6,7 @@ import type { ScreenshotFormat, ScreenshotMimeType } from "../features/observe/S
 export interface ScreenshotResult {
   success: boolean;
   path?: string;
+  screenshotImageSize?: { width: number; height: number };
   error?: string;
   screenshotFormat?: ScreenshotFormat;
   screenshotMimeType?: ScreenshotMimeType;

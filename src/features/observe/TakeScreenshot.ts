@@ -677,6 +677,7 @@ export class TakeScreenshot implements ScreenshotService {
     return {
       success: true,
       path: screenshotPath,
+      screenshotImageSize: readImageHeaderDimensions(imageBuffer) ?? undefined,
       ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, format),
     };
   }
@@ -757,11 +758,20 @@ export class TakeScreenshot implements ScreenshotService {
     const durationMs = this.timer.now() - startTime;
     logger.info(`[SCREENSHOT] iOS screenshot captured in ${durationMs}ms, saved to ${finalPath}`);
 
-    this.pushiOSScreenshotIfAllowed(result, imageBuffer, encoded, format, pushToStream);
+    const screenshotImageSize = readImageHeaderDimensions(encoded) ?? undefined;
+    this.pushiOSScreenshotIfAllowed(
+      result,
+      imageBuffer,
+      encoded,
+      format,
+      pushToStream,
+      screenshotImageSize,
+    );
 
     return {
       success: true,
       path: finalPath,
+      screenshotImageSize,
       ...metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, format),
     };
   }
@@ -772,12 +782,14 @@ export class TakeScreenshot implements ScreenshotService {
     encoded: Buffer,
     format: "png" | "jpeg" | "webp",
     allowed: boolean,
+    dimensions: { width: number; height: number } | undefined,
   ): void {
     if (allowed && result.data) {
       this.pushScreenshotToStream(
         encoded === original ? result.data : encoded.toString("base64"),
         encoded,
         format,
+        dimensions,
       );
     }
   }
@@ -789,13 +801,13 @@ export class TakeScreenshot implements ScreenshotService {
     base64Data: string,
     imageBuffer: Buffer,
     format: "png" | "jpeg" | "webp",
+    dimensions: { width: number; height: number } | undefined,
   ): void {
     const server = getDeviceDataStreamServer();
     if (!server) {
       return;
     }
 
-    const dimensions = readImageHeaderDimensions(imageBuffer);
     if (!dimensions) {
       logger.debug("[SCREENSHOT] Could not read screenshot dimensions from image header");
     }
@@ -879,6 +891,7 @@ export class TakeScreenshot implements ScreenshotService {
     return {
       success: true,
       path: finalPath,
+      screenshotImageSize: readImageHeaderDimensions(encoded) ?? undefined,
       ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
     };
   }
@@ -941,12 +954,14 @@ export class TakeScreenshot implements ScreenshotService {
         `[SCREENSHOT] File read took ${readDuration}ms, buffer size: ${imageBuffer.length} bytes`,
       );
 
+      let writtenBuffer = imageBuffer;
       if (options.format === undefined || options.format === "png") {
         // ADB screencap is already PNG. Preserve the original file-pull move.
         await this.fileSystem.rename(tempLocalFile, finalPath);
       } else {
         const encoded = await encodeScreenshot(imageBuffer, encodingOptions(options));
         await this.fileWriter.write(finalPath, encoded);
+        writtenBuffer = encoded;
         await this.fileSystem.remove(tempLocalFile);
       }
 
@@ -956,6 +971,7 @@ export class TakeScreenshot implements ScreenshotService {
       result = {
         success: true,
         path: finalPath,
+        screenshotImageSize: readImageHeaderDimensions(writtenBuffer) ?? undefined,
         ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
       };
     } catch (err) {

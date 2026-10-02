@@ -465,6 +465,42 @@ describe("CrashApp (Android)", () => {
 });
 
 describe("CrashApp (iOS)", () => {
+  // RunningBoard lines are derived from the issue #6000 reproduction (NOT captured;
+  // capture needed from a real simulator). Other-bundle-id lines change only the bundle-id token.
+  const evidenceLines = [
+    [
+      "launchd",
+      "2023-11-14 22:13:20.100+0000 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
+    ],
+    [
+      "RunningBoard",
+      "2023-11-14 22:13:20.100+0000 RunningBoard: Now killing [app<com.example.app(UUID)>:27955] code:SIGABRT(6)",
+    ],
+  ] as const;
+
+  for (const [source, line] of evidenceLines) {
+    test(`${source} attributes the exact bundle-id token`, () => {
+      expect(findIosSimulatorCrashEvidence(line, "com.example.app", 27955)).toEqual({
+        source: "ios_unified_log",
+        summary: line,
+      });
+    });
+
+    for (const otherAppId of [
+      "com.example.app.widget",
+      "com.example.app.ShareExtension",
+      "com.example.application",
+      "com.example.app-beta",
+      "xcom.example.app",
+      "x.com.example.app",
+    ]) {
+      test(`${source} rejects other bundle-id token ${otherAppId}`, () => {
+        const output = line.replace("com.example.app", otherAppId);
+        expect(findIosSimulatorCrashEvidence(output, "com.example.app", 27955)).toBeUndefined();
+      });
+    }
+  }
+
   test("rejects unified-log crash evidence older than the induction time", () => {
     const output =
       "2023-11-14 22:13:20.100+0000 launchd_sim: " +

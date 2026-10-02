@@ -640,6 +640,27 @@ function findAndroidCrashMatch(
   return undefined;
 }
 
+const BUNDLE_ID_CHARACTER = /[A-Za-z0-9.-]/;
+
+function containsBundleIdToken(line: string, appId: string, markerPrefix: string): boolean {
+  if (!appId) {
+    return false;
+  }
+  const marker = `${markerPrefix}${appId}`;
+  let markerIndex = line.indexOf(marker);
+  while (markerIndex >= 0) {
+    const idIndex = markerIndex + markerPrefix.length;
+    if (
+      !BUNDLE_ID_CHARACTER.test(line.charAt(idIndex - 1)) &&
+      !BUNDLE_ID_CHARACTER.test(line.charAt(idIndex + appId.length))
+    ) {
+      return true;
+    }
+    markerIndex = line.indexOf(marker, markerIndex + 1);
+  }
+  return false;
+}
+
 export function findIosSimulatorCrashEvidence(
   logOutput: string,
   appId: string,
@@ -651,11 +672,12 @@ export function findIosSimulatorCrashEvidence(
       return false;
     }
     const launchdIdentity =
+      containsBundleIdToken(candidate, appId, "UIKitApplication:") &&
       candidate.includes(`UIKitApplication:${appId}[`) &&
       candidate.includes(`[${processId}]`) &&
       candidate.includes("exited due to SIGABRT");
     const runningBoardIdentity =
-      candidate.includes(`app<${appId}`) &&
+      containsBundleIdToken(candidate, appId, "app<") &&
       candidate.includes(`:${processId}]`) &&
       candidate.includes("code:SIGABRT(6)");
     return launchdIdentity || runningBoardIdentity;

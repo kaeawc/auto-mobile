@@ -55,12 +55,15 @@ class WebSocketServer(
       connection.send(Frame.Text(message))
     },
   private val sdkInt: () -> Int = { Build.VERSION.SDK_INT },
+  private val sendTimeoutMs: Long = OUTBOUND_SEND_TIMEOUT_MS,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
     private const val MAX_START_ATTEMPTS = 5
     private const val START_RETRY_BASE_DELAY_MS = 250L
     private const val CONNECTOR_RESOLVE_TIMEOUT_MS = 2_000L
+    // Allow large hierarchy frames over adb forward, but expire before ktor's 60-second timeout.
+    internal const val OUTBOUND_SEND_TIMEOUT_MS = 15_000L
     // Normal bound; bursts above it shed expendable frames before using the emergency reserve.
     internal const val OUTGOING_CAPACITY = 64
     // Four normal windows absorb short must-deliver bursts while bounding a stalled socket.
@@ -298,6 +301,15 @@ class WebSocketServer(
     internal var pendingHierarchy: OutgoingFrame? = null
   }
 
+  private suspend fun sendWithDeadline(send: suspend () -> Unit): Boolean =
+    // Use the injected dispatcher for deadlines without replacing the caller's cancellation job.
+    withContext(scope.coroutineContext.minusKey(Job)) {
+      withTimeoutOrNull(sendTimeoutMs) {
+        send()
+        true
+      } ?: false
+    }
+
   internal fun registerClient(id: Int, transport: ClientTransport): ConnectedClient {
     val client =
       ConnectedClient(
@@ -319,7 +331,11 @@ class WebSocketServer(
                     if (it === client.pendingHierarchy) client.pendingHierarchy = null
                   }
                 } ?: break
-              transport.send(frame.message)
+              if (!sendWithDeadline { transport.send(frame.message) }) {
+                Log.w(TAG, "Client #$id send timed out after ${sendTimeoutMs}ms; disconnecting")
+                disconnectClient(client, "Outbound send timed out")
+                return@launch
+              }
             }
           }
         } catch (e: CancellationException) {
@@ -438,17 +454,28 @@ class WebSocketServer(
 
                 try {
                   // Send connection greeting before registering for broadcasts
-                  send(
-                    Frame.Text(
-                      responseJson.encodeToString(
-                        WebSocketResponse.serializer(),
-                        ConnectedResponse(
-                          id = connectionId,
-                          supportedCommands = supportedCommands(),
-                        ),
+                  val greetingSent = sendWithDeadline {
+                    send(
+                      Frame.Text(
+                        responseJson.encodeToString(
+                          WebSocketResponse.serializer(),
+                          ConnectedResponse(
+                            id = connectionId,
+                            supportedCommands = supportedCommands(),
+                          ),
+                        )
                       )
                     )
-                  )
+                  }
+                  if (!greetingSent) {
+                    Log.w(
+                      TAG,
+                      "Client #$connectionId greeting send timed out after ${sendTimeoutMs}ms; disconnecting",
+                    )
+                    // Abandon the unregistered session without another potentially blocked write.
+                    cancel("Outbound greeting send timed out")
+                    return@webSocket
+                  }
 
                   val session = this
                   val client =

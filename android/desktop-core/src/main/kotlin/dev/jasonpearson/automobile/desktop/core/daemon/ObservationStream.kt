@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.Serializable
 
 /**
  * The observation-stream contract: per-device real-time updates (hierarchy, screenshot, navigation
@@ -15,6 +16,7 @@ interface ObservationStream {
   val hierarchyUpdates: SharedFlow<HierarchyStreamUpdate>
   val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate>
   val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate>
+  val buildContextUpdates: SharedFlow<BuildContextStreamUpdate>
   val performanceUpdates: SharedFlow<PerformanceStreamUpdate>
   /**
    * Lossless storage deltas for this pane's stream. Unlike layout telemetry, every mutation is a
@@ -78,4 +80,22 @@ data class StorageSubscriptionResponse(
   val subscribe: Boolean,
   val success: Boolean,
   val error: String? = null,
+)
+
+/** Per-device, per-package build identity; a null [buildKey] clears only [packageId]. */
+data class BuildContextStreamUpdate(
+  val deviceId: String,
+  val deviceSessionUuid: String?,
+  val timestamp: Long,
+  val packageId: String,
+  val buildKey: StreamBuildKey?,
+)
+
+/** Wire identity. [versionKey] preserves dotted iOS versions but is not a provenance dimension. */
+@Serializable
+data class StreamBuildKey(
+  val packageId: String,
+  val versionCode: Long,
+  val versionKey: String? = null,
+  val contentHash: String,
 )

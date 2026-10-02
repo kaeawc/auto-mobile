@@ -149,11 +149,19 @@ export interface NavigationBuildContext {
   appId: string;
   deviceId: string;
   versionCode: number;
+  /** Non-integer platform version, retained in memory/wire only; DB identity uses 0 + hash. */
+  versionKey?: string;
   contentHash: string;
 }
 
+export interface NavigationBuildContextChange {
+  appId: string;
+  deviceId: string;
+  buildContext: NavigationBuildContext | null;
+}
+
 /** Non-null legacy sentinel used when a provenance dimension is unknown (#4984). */
-const LEGACY_PROVENANCE_SENTINEL = "legacy";
+export const LEGACY_PROVENANCE_SENTINEL = "legacy";
 
 /** Immutable provenance snapshot captured once per event and shared by its writes (#4984). */
 interface ResolvedProvenance {
@@ -329,6 +337,8 @@ export class NavigationGraphManager implements NavigationGraphService {
   // provenance resolution.
   private sessionUuid: string | null;
   private buildContexts: Map<string, NavigationBuildContext> = new Map();
+  private buildContextUpdateListener: ((change: NavigationBuildContextChange) => void) | null =
+    null;
 
   // Tool call history kept in memory for correlation (transient data)
   private toolCallHistory: ToolCallInteraction[] = [];
@@ -376,7 +386,21 @@ export class NavigationGraphManager implements NavigationGraphService {
    * another.
    */
   public setBuildContext(context: NavigationBuildContext): void {
-    this.buildContexts.set(context.appId, context);
+    const previous = this.buildContexts.get(context.appId);
+    if (
+      previous?.deviceId === context.deviceId &&
+      previous.versionCode === context.versionCode &&
+      previous.versionKey === context.versionKey &&
+      previous.contentHash === context.contentHash
+    ) {
+      return;
+    }
+    this.buildContexts.set(context.appId, { ...context });
+    this.notifyBuildContextUpdate({
+      appId: context.appId,
+      deviceId: context.deviceId,
+      buildContext: { ...context },
+    });
   }
 
   /**
@@ -384,7 +408,32 @@ export class NavigationGraphManager implements NavigationGraphService {
    * default key until re-resolved. Called on a package update/reinstall/removal.
    */
   public clearBuildContext(appId: string): void {
-    this.buildContexts.delete(appId);
+    const previous = this.buildContexts.get(appId);
+    if (previous) {
+      this.buildContexts.delete(appId);
+      this.notifyBuildContextUpdate({ appId, deviceId: previous.deviceId, buildContext: null });
+    }
+  }
+
+  public getBuildContexts(): NavigationBuildContext[] {
+    return [...this.buildContexts.values()].map((context) => ({ ...context }));
+  }
+
+  public setBuildContextUpdateListener(
+    listener: ((change: NavigationBuildContextChange) => void) | null,
+  ): void {
+    this.buildContextUpdateListener = listener;
+  }
+
+  private notifyBuildContextUpdate(change: NavigationBuildContextChange): boolean {
+    try {
+      this.buildContextUpdateListener?.(change);
+      return true;
+    } catch (error) {
+      // Stream delivery is best-effort; a listener failure must not discard provenance.
+      logger.warn("[NAVIGATION_GRAPH] Build-context listener failed", error);
+      return false;
+    }
   }
 
   /**

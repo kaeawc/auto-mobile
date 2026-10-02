@@ -31,7 +31,6 @@ import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
-import dev.jasonpearson.automobile.desktop.core.navigation.NavigationActiveContext
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import kotlinx.coroutines.CancellationException
@@ -155,6 +154,11 @@ fun NavigationFacet(
   // retryable ConnectionError instead of a crash. Manual Retry clears it.
   var streamError by remember(column.deviceId) { mutableStateOf<String?>(null) }
 
+  // Immutable tracker updates trigger recomposition when this device's active build changes.
+  var buildKeys by
+    remember(column.deviceId, stream) {
+      mutableStateOf(NavigationBuildKeyTracker(column.deviceId))
+    }
   // Foreground app for THIS pane's device. The connection collector clears it on a drop, before
   // the same stream instance reconnects, so the pre-outage app cannot flash or be re-pulled.
   var foregroundAppId by remember(column.deviceId) { mutableStateOf<String?>(null) }
@@ -199,6 +203,33 @@ fun NavigationFacet(
     }
   }
 
+  LaunchedEffect(stream, collectorAttempt) {
+    val current = stream ?: return@LaunchedEffect
+    try {
+      coroutineScope {
+        launch {
+          current.buildContextUpdates.collect { update ->
+            if (current.connectionState.value is ConnectionState.Connected) {
+              buildKeys = buildKeys.updated(update)
+            }
+          }
+        }
+        launch {
+          current.deviceEvents.collect { event ->
+            buildKeys =
+              buildKeys.onDeviceEvent(event, current.buildContextUpdates.replayCache.lastOrNull())
+          }
+        }
+      }
+    } catch (c: CancellationException) {
+      throw c
+    } catch (e: Exception) {
+      LOG.warn("Navigation build context collection failed: ${e.message}", e)
+      navigationCollectorFailed = true
+      streamError = e.message ?: "Navigation build context stream error"
+    }
+  }
+
   // Mirror the stream's connection state and reset app resolution on the first loss of each
   // healthy connection. The helper's generation also catches a reconnect whose intermediate drop
   // was conflated away by StateFlow. Do not restart the navigation collector on this generation:
@@ -215,6 +246,7 @@ fun NavigationFacet(
   LaunchedEffect(stream, collectorAttempt) {
     val current = stream ?: return@LaunchedEffect
     fun clearOldApp() {
+      buildKeys = buildKeys.reset(current.buildContextUpdates.replayCache.lastOrNull())
       foregroundAppId = null
       currentScreen = null
       noNavigationApp = false
@@ -464,12 +496,9 @@ fun NavigationFacet(
         selectedAppId = foregroundAppId,
         screenshotLoader = screenshotLoader,
         streamOnly = true,
-        // Active-context resolution (#4985, design point 1): this pane's device + the app resolved
-        // from its stream. `buildKey` is null until the build discriminator is threaded through the
-        // navigation stream (deferred #4837, see class KDoc caveat), so provenance matching is
-        // device+package scoped for now and tightens to full build-key equality when it lands.
-        activeContext =
-          NavigationActiveContext(deviceId = column.deviceId, packageId = current.appId),
+        // Stream build identity tightens provenance to device + package + version + content hash.
+        // No known key keeps the existing device+package fallback.
+        activeContext = buildKeys.activeContext(current.appId),
       )
   }
 }

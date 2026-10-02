@@ -122,6 +122,7 @@ import {
   startDeviceDataStreamSocketServer,
   stopDeviceDataStreamSocketServer,
   getDeviceDataStreamServer,
+  type DeviceDataStreamSocketServer,
 } from "./deviceDataStreamSocketServer";
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
@@ -159,7 +160,10 @@ import {
   pushInitialObservationFramesForSubscriber,
   type ObservationStreamIosClient,
 } from "./observationInitialFrame";
-import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
+import {
+  LEGACY_PROVENANCE_SENTINEL,
+  NavigationGraphManager,
+} from "../features/navigation/NavigationGraphManager";
 import {
   convertSummaryToStreamData,
   createNavigationGraphRequestHandler,
@@ -402,6 +406,10 @@ export class Daemon {
   >();
   private deviceDataStreamServer: ReturnType<typeof getDeviceDataStreamServer> = null;
   private readonly navigationGraphListenerManagers = new WeakSet<NavigationGraphManager>();
+  private readonly navigationGraphSeededStreamManagers = new WeakMap<
+    DeviceDataStreamSocketServer,
+    WeakSet<NavigationGraphManager>
+  >();
   private unsubscribeAdbMissingDevice: (() => void) | null = null;
   private options: DaemonOptions;
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
@@ -2045,10 +2053,53 @@ export class Daemon {
   }
 
   private setupNavigationGraphUpdateListener(navGraphManager: NavigationGraphManager): void {
+    const streamServer = this.deviceDataStreamServer;
+    if (
+      streamServer &&
+      !this.navigationGraphSeededStreamManagers.get(streamServer)?.has(navGraphManager)
+    ) {
+      const seededManagers =
+        this.navigationGraphSeededStreamManagers.get(streamServer) ??
+        new WeakSet<NavigationGraphManager>();
+      seededManagers.add(navGraphManager);
+      this.navigationGraphSeededStreamManagers.set(streamServer, seededManagers);
+      for (const context of navGraphManager.getBuildContexts()) {
+        if (context.deviceId !== LEGACY_PROVENANCE_SENTINEL) {
+          streamServer.pushBuildContextUpdate(context.deviceId, context.appId, {
+            packageId: context.appId,
+            versionCode: context.versionCode,
+            ...(context.versionKey === undefined ? {} : { versionKey: context.versionKey }),
+            contentHash: context.contentHash,
+          });
+        }
+      }
+    }
     if (this.navigationGraphListenerManagers.has(navGraphManager)) {
       return;
     }
     this.navigationGraphListenerManagers.add(navGraphManager);
+    navGraphManager.setBuildContextUpdateListener(({ appId, deviceId, buildContext }) => {
+      if (
+        !this.navigationGraphListenerManagers.has(navGraphManager) ||
+        deviceId === LEGACY_PROVENANCE_SENTINEL
+      ) {
+        return;
+      }
+      this.deviceDataStreamServer?.pushBuildContextUpdate(
+        deviceId,
+        appId,
+        buildContext === null
+          ? null
+          : {
+              packageId: appId,
+              versionCode: buildContext.versionCode,
+              ...(buildContext.versionKey === undefined
+                ? {}
+                : { versionKey: buildContext.versionKey }),
+              contentHash: buildContext.contentHash,
+            },
+      );
+    });
     navGraphManager.setGraphUpdateListener(async () => {
       logger.info("[Daemon] Navigation graph listener triggered, exporting summary...");
       try {

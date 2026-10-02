@@ -11,9 +11,8 @@ package dev.jasonpearson.automobile.desktop.core.navigation
  *
  * Active-context matching (design point 1): a record is active when its device matches the pane's
  * device and its build's package matches the pane's app. When the context also carries a concrete
- * [ProvenanceBuildKey] the version/content-hash must match too; until the build discriminator is
- * threaded through the navigation stream (deferred #4837) the context build key is null and
- * matching is device+package scoped.
+ * [ProvenanceBuildKey] from the per-device observation stream, the version/content-hash must match
+ * too. When a build key is unavailable, matching remains device+package scoped.
  *
  * Offline behavior (design point 2): with no active device there is no build to contrast against,
  * so a null context renders the whole union at [ACTIVE_ALPHA] (full opacity) rather than a uniform
@@ -24,24 +23,22 @@ object ProvenanceOpacity {
   const val FADED_ALPHA: Float = 0.5f
 
   /**
-   * Non-null sentinel the ingest layer records for a provenance dimension it cannot resolve — e.g.
-   * iOS events carry no build context yet (deferred #4991), so their device is this sentinel.
-   * Mirrors `LEGACY_PROVENANCE_SENTINEL` in NavigationGraphManager.ts.
+   * Non-null sentinel the ingest layer records for genuinely unknown provenance, including rows
+   * written before Android/iOS build context was available. Mirrors `LEGACY_PROVENANCE_SENTINEL` in
+   * NavigationGraphManager.ts.
    */
   const val LEGACY_DEVICE_SENTINEL: String = "legacy"
 
   /** True when [record] was observed in the pane's active [context]. */
   fun isActiveRecord(record: ScreenProvenance, context: NavigationActiveContext): Boolean {
     // A record with the unknown-device sentinel is UNCLASSIFIED, not "another device's" reach: we
-    // cannot confidently fade it, so treat it as active/opaque. Without this the whole iOS graph —
-    // whose events always carry the legacy device until eager build-context (deferred #4991) —
-    // would render 50% faded, because none of its nodes match the pane's real device.
+    // cannot confidently fade it, so treat it as active/opaque. Android and iOS now provide build
+    // context, but legacy/unknown rows still cannot be assigned to the pane's real device.
     if (record.deviceId == LEGACY_DEVICE_SENTINEL) return true
     if (record.deviceId != context.deviceId) return false
     if (record.buildKey.packageId != context.packageId) return false
     val activeBuild = context.buildKey ?: return true
-    return record.buildKey.versionCode == activeBuild.versionCode &&
-      record.buildKey.contentHash == activeBuild.contentHash
+    return record.buildKey == activeBuild
   }
 
   /** Opacity for a node/edge given its [provenance] and the pane's active [context]. */

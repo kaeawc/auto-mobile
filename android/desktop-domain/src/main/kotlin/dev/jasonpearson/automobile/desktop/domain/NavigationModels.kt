@@ -8,7 +8,7 @@ package dev.jasonpearson.automobile.desktop.domain
  */
 public data class ProvenanceBuildKey(
   val packageId: String,
-  val versionCode: Int,
+  val versionCode: Long,
   val contentHash: String,
 )
 
@@ -28,8 +28,8 @@ public data class ScreenProvenance(
 /**
  * The active context a navigation pane resolves provenance against (#4985). A node/edge reached in
  * this context renders at full opacity; one reached only historically / by another build or device
- * fades. `buildKey` is null until the build discriminator is threaded through the navigation stream
- * (deferred #4837); while null, matching is scoped to (deviceId, packageId).
+ * fades. `buildKey` comes from the per-device observation stream; when unavailable, matching
+ * remains scoped to (deviceId, packageId).
  */
 public data class NavigationActiveContext(
   val deviceId: String,

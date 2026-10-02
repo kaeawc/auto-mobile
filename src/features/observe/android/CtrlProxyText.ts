@@ -54,6 +54,20 @@ export function imeCommitSegmentCount(text: string): number {
   return matches.length + (last.index + last[0].length < text.length ? 1 : 0);
 }
 
+/** Check literal or autoformatted suffixes; undefined means nothing is verifiable. */
+export function imeCommitSuffixMatches(committedText: string, text: string): boolean | undefined {
+  // Strip exactly INLINE_FORMAT_SPAN's marker characters from both sides so
+  // editors that have converted only some spans can still satisfy the check.
+  const markers = /[*_~`]/g;
+  const projectedText = text.replace(markers, "");
+  if (projectedText.length === 0) {
+    // Marker-only requests leave no verifiable content: skip, rather than
+    // passing accidentally because every string ends with the empty string.
+    return undefined;
+  }
+  return committedText.endsWith(text) || committedText.replace(markers, "").endsWith(projectedText);
+}
+
 export const IME_COMMIT_TIMEOUT = {
   baseMs: 10_000,
   perSegmentMs: 750,

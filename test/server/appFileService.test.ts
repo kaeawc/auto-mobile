@@ -2033,6 +2033,10 @@ for (const operation of ["put", "list", "read"] as const) {
             scenario.foregroundError,
           );
         }
+        if (debug) {
+          debugSpies.splice(debugSpies.indexOf(debug), 1);
+          debug.mockRestore();
+        }
       }
     });
 

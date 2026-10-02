@@ -105,12 +105,29 @@ export function iosMajorVersionFromSimctlListDevices(json: string, udid: string)
   return null;
 }
 
+function readVersionFieldString(
+  record: Record<string, unknown>,
+  field: string,
+): string | undefined {
+  let value = record[field];
+  if (
+    field === "osVersionNumber" &&
+    typeof value === "object" &&
+    value !== null &&
+    "stringValue" in value
+  ) {
+    value = value.stringValue;
+  }
+  return typeof value === "string" ? value : undefined;
+}
+
 /**
  * Resolve the major iOS version for a physical device from the JSON emitted by
  * `devicectl device info details --json-output`. Apple does not formally document
  * the envelope, so we deep-walk it and accept the several field spellings
- * observed across Xcode builds: `osVersionNumber` (the plain "18.6" string) is
- * preferred, then `osVersion`/`productVersion`/`operatingSystemVersion`. Returns
+ * observed across Xcode builds: `osVersionNumber` (a plain "18.6" string or an
+ * object with `stringValue`) is preferred, then
+ * `osVersion`/`productVersion`/`operatingSystemVersion`. Returns
  * `null` when nothing parses, so callers treat the version as "unknown" (and must
  * NOT block on an unresolved version) rather than guessing.
  */
@@ -147,7 +164,7 @@ export function iosMajorVersionFromDevicectlDetails(json: string): number | null
     }
     const record = node as Record<string, unknown>;
     for (const field of versionFields) {
-      const value = record[field];
+      const value = readVersionFieldString(record, field);
       if (typeof value === "string") {
         const major = parseIosMajorVersion(value);
         if (major !== null) {

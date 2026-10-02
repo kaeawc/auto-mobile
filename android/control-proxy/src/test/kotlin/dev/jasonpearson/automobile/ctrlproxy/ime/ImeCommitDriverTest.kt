@@ -60,8 +60,9 @@ class ImeCommitDriverTest {
     }
 
     assertEquals(listOf("a"), sink.sentKeyUnits)
-    assertTrue(result!!.partialApplication)
-    assertEquals(1, result!!.committedUnits)
+    val committed = result!!
+    assertTrue(committed.partialApplication)
+    assertEquals(1, committed.committedUnits)
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 

@@ -1,3 +1,4 @@
+import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidAvdProvenanceCache } from "../../src/utils/AndroidAvdProvenanceCache";
@@ -22,6 +23,14 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
+
+let restoreDeviceToolProviders: () => void;
+beforeEach(() => {
+  restoreDeviceToolProviders = installFakeDeviceToolProviders();
+});
+afterEach(() => {
+  restoreDeviceToolProviders();
+});
 
 describe("listDeviceImages", function () {
   describe("inventory session state", () => {
@@ -52,7 +61,12 @@ describe("listDeviceImages", function () {
         deviceManagerFactory: () => deviceUtils,
         avdManagerFactory: () => new FakeAvdManager(),
       });
-      await fixture.setup();
+      const restoreStartupProviders = installFakeDeviceToolProviders();
+      try {
+        await fixture.setup();
+      } finally {
+        restoreStartupProviders();
+      }
     });
 
     afterAll(async () => {

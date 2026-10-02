@@ -1,3 +1,5 @@
+import { AndroidCtrlProxyManager } from "../../../src/ctrlProxy/CtrlProxyManager";
+import { installFakeCtrlProxyManagers } from "../../helpers/hermeticDeviceTools";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ViewHierarchy,
@@ -21,6 +23,14 @@ const setupReadFileMock = () => {
 const teardownReadFileMock = () => {
   /* no-op: patched dependency was removed */
 };
+
+let restoreDeviceToolProviders: () => void;
+beforeEach(() => {
+  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
+});
+afterEach(() => {
+  restoreDeviceToolProviders();
+});
 
 describe("ViewHierarchy", function () {
   describe("Unit Tests for Public Methods", function () {
@@ -1810,7 +1820,19 @@ describe("Offscreen Node Filtering", function () {
         },
         awaitRecovery: async () => "failed",
       } as unknown as AndroidCtrlProxyClient;
-      const vh = new ViewHierarchy(device, new FakeAdbClientFactory(), connectedClient, timer);
+      timer.enableAutoAdvance();
+      const recoveryManager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        device,
+        new FakeAdbExecutor(),
+        timer,
+      );
+      const vh = new ViewHierarchy(
+        device,
+        new FakeAdbClientFactory(),
+        connectedClient,
+        timer,
+        () => recoveryManager,
+      );
       const result = await vh.getViewHierarchy();
       expect(result.hierarchy.transportFailure).toBeUndefined();
       expect(starts).toBe(0);

@@ -1,5 +1,6 @@
+import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import Ajv2020 from "ajv/dist/2020";
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { changeLocalizationSchema, displayConfigSchema } from "../../src/server/utilityTools";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -13,6 +14,14 @@ test("calendar identifiers accept ICU keywords and reject shell syntax", () => {
     changeLocalizationSchema.safeParse({ calendarSystem: "gregorian; touch /data/local/tmp/pwn" })
       .success,
   ).toBe(false);
+});
+
+let restoreDeviceToolProviders: () => void;
+beforeEach(() => {
+  restoreDeviceToolProviders = installFakeDeviceToolProviders();
+});
+afterEach(() => {
+  restoreDeviceToolProviders();
 });
 
 describe("displayConfigSchema", () => {
@@ -44,10 +53,19 @@ describe("displayConfigSchema", () => {
   // a generated tool client can reject an invalid request before dispatch,
   // not only after the zod runtime refinement runs it through the handler.
   describe("advertised JSON schema", () => {
-    createMcpServer();
-    const tool = ToolRegistry.getToolDefinitions().find((t) => t.name === "displayConfig");
-    const ajv = new Ajv2020({ strict: false });
-    const validate = ajv.compile(tool!.inputSchema as object);
+    let tool: ReturnType<typeof ToolRegistry.getToolDefinitions>[number] | undefined;
+    let validate: ReturnType<Ajv2020["compile"]>;
+    beforeAll(() => {
+      const restoreStartupProviders = installFakeDeviceToolProviders();
+      try {
+        createMcpServer();
+        tool = ToolRegistry.getToolDefinitions().find((t) => t.name === "displayConfig");
+        const ajv = new Ajv2020({ strict: false });
+        validate = ajv.compile(tool!.inputSchema as object);
+      } finally {
+        restoreStartupProviders();
+      }
+    });
 
     test("the tool is advertised", () => {
       expect(tool).toBeDefined();

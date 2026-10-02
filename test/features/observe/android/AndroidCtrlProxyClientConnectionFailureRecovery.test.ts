@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { installFakeCtrlProxyManagers } from "../../../helpers/hermeticDeviceTools";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
   type AndroidServiceRecoveryManager,
@@ -22,6 +23,14 @@ import { ForcedRestartBudget } from "../../../../src/ctrlProxy/ForcedRestartBudg
  * checks the accessibility service's health through an injected manager seam,
  * rebinding (#7470) or running full setup only when it is actually unhealthy.
  */
+let restoreDeviceToolProviders: () => void;
+beforeEach(() => {
+  restoreDeviceToolProviders = installFakeCtrlProxyManagers();
+});
+afterEach(() => {
+  restoreDeviceToolProviders();
+});
+
 describe("AndroidCtrlProxyClient - connection-failure escalation to service recovery", function () {
   const testDevice: BootedDevice = {
     deviceId: "test-device-recovery",

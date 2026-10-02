@@ -2445,6 +2445,55 @@ export function resetOpenLinkChooserFactory(): void {
   openLinkChooserFactory = (device) => new HandleIntentChooser(device);
 }
 
+let shakeFactory: (device: BootedDevice) => Pick<Shake, "execute"> = (device) => new Shake(device);
+export function setShakeFactory(factory: (device: BootedDevice) => Pick<Shake, "execute">): void {
+  shakeFactory = factory;
+}
+export function resetShakeFactory(): void {
+  shakeFactory = (device) => new Shake(device);
+}
+let recentAppsFactory: (device: BootedDevice) => Pick<RecentApps, "execute"> = (device) =>
+  new RecentApps(device);
+export function setRecentAppsFactory(
+  factory: (device: BootedDevice) => Pick<RecentApps, "execute">,
+): void {
+  recentAppsFactory = factory;
+}
+export function resetRecentAppsFactory(): void {
+  recentAppsFactory = (device) => new RecentApps(device);
+}
+let clipboardFactory: (device: BootedDevice) => Pick<Clipboard, "execute"> = (device) =>
+  new Clipboard(device);
+export function setClipboardFactory(
+  factory: (device: BootedDevice) => Pick<Clipboard, "execute">,
+): void {
+  clipboardFactory = factory;
+}
+export function resetClipboardFactory(): void {
+  clipboardFactory = (device) => new Clipboard(device);
+}
+let wakeAndUnlockFactory: (device: BootedDevice) => Pick<WakeAndUnlock, "execute"> = (device) =>
+  new WakeAndUnlock(device, undefined, {
+    credentialStore: new DeviceLockStore(),
+    iosUnlocker: device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined,
+    iosRunnerRecovery:
+      device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
+  });
+export function setWakeAndUnlockFactory(
+  factory: (device: BootedDevice) => Pick<WakeAndUnlock, "execute">,
+): void {
+  wakeAndUnlockFactory = factory;
+}
+export function resetWakeAndUnlockFactory(): void {
+  wakeAndUnlockFactory = (device) =>
+    new WakeAndUnlock(device, undefined, {
+      credentialStore: new DeviceLockStore(),
+      iosUnlocker: device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined,
+      iosRunnerRecovery:
+        device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
+    });
+}
+
 export function registerInteractionTools() {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -2842,20 +2891,20 @@ export function registerInteractionTools() {
   };
 
   // Wake and unlock handler
-  const wakeAndUnlockHandler = async (device: BootedDevice, args: WakeAndUnlockArgs) => {
-    const iosUnlocker = device.platform === "ios" ? new IosLockScreenUnlocker(device) : undefined;
-    const wakeAndUnlock = new WakeAndUnlock(device, undefined, {
-      credentialStore: new DeviceLockStore(),
-      iosUnlocker,
-      iosRunnerRecovery:
-        device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : undefined,
-    });
+  const wakeAndUnlockHandler = async (
+    device: BootedDevice,
+    args: WakeAndUnlockArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    const wakeAndUnlock = wakeAndUnlockFactory(device);
     const transportDeadlineMs = (args as Record<string, unknown>)[
       INTERNAL_MCP_REQUEST_DEADLINE_PARAM
     ];
     const result = await wakeAndUnlock.execute(
       args.pin,
       typeof transportDeadlineMs === "number" ? transportDeadlineMs : undefined,
+      signal,
     );
     const message = result.success
       ? result.wasLocked
@@ -2963,15 +3012,17 @@ export function registerInteractionTools() {
     device: BootedDevice,
     args: ShakeArgs,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ) => {
     try {
-      const shake = new Shake(device);
+      const shake = shakeFactory(device);
       const result = await shake.execute(
         {
           duration: args.duration ?? 1000,
           intensity: args.intensity ?? 100,
         },
         progress,
+        signal,
       );
 
       return createJSONToolResponse({
@@ -3020,10 +3071,11 @@ export function registerInteractionTools() {
     device: BootedDevice,
     args: RecentAppsArgs,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ) => {
     try {
-      const recentApps = new RecentApps(device);
-      const result = await recentApps.execute(progress);
+      const recentApps = recentAppsFactory(device);
+      const result = await recentApps.execute(progress, signal);
 
       return createJSONToolResponse({
         message: formatRecentAppsMessage(result),
@@ -3056,10 +3108,15 @@ export function registerInteractionTools() {
   };
 
   // Clipboard handler
-  const clipboardHandler = async (device: BootedDevice, args: ClipboardArgs) => {
+  const clipboardHandler = async (
+    device: BootedDevice,
+    args: ClipboardArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
     try {
-      const clipboard = new Clipboard(device);
-      const result = await clipboard.execute(args.action, args.text);
+      const clipboard = clipboardFactory(device);
+      const result = await clipboard.execute(args.action, args.text, signal);
 
       let message = formatClipboardMessage(result);
 

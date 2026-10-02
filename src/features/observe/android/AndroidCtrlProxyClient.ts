@@ -1149,6 +1149,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     text?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<A11yClipboardResult>;
 
   requestSettingsGet(
@@ -3548,10 +3549,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     text?: string,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<A11yClipboardResult> {
     const startTime = this.timer.now();
+    const combinedSignal = combineWithAmbientAbort(signal);
+    let requestId: string | undefined;
 
     try {
+      combinedSignal?.throwIfAborted();
       if (action === "copy" && !text) {
         return {
           success: false,
@@ -3561,7 +3566,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }
 
-      const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+      const connected = await this.awaitActionWork(
+        () => perf.track("ensureConnection", () => this.connectWebSocket(perf)),
+        combinedSignal,
+      );
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for clipboard");
         return {
@@ -3572,10 +3580,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         };
       }
 
-      const requestId = this.requestManager.generateId("clipboard");
+      combinedSignal?.throwIfAborted();
+      requestId = this.requestManager.generateId("clipboard");
+      const clipboardRequestId = requestId;
 
       const clipboardPromise = this.requestManager.register<A11yClipboardResult>(
-        requestId,
+        clipboardRequestId,
         "clipboard",
         timeoutMs,
         (_id, _type, timeout) => ({
@@ -3587,11 +3597,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       await perf.track("sendRequest", async () => {
+        combinedSignal?.throwIfAborted();
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
         const message = serializeCtrlProxyRequest(
-          ctrlProxyRequests.requestClipboard({ requestId, action, text }),
+          ctrlProxyRequests.requestClipboard({ requestId: clipboardRequestId, action, text }),
         );
         this.ws.send(message);
         logger.debug(
@@ -3599,7 +3610,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         );
       });
 
-      const result = await perf.track("waitForClipboard", () => clipboardPromise);
+      const result = await perf.track("waitForClipboard", () =>
+        this.awaitCancellableRequest(
+          clipboardRequestId,
+          clipboardPromise,
+          combinedSignal,
+          startTime,
+        ),
+      );
       const clientDuration = this.timer.now() - startTime;
 
       if (result.success) {
@@ -3614,6 +3632,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       return result;
     } catch (error) {
+      if (requestId) {
+        this.requestManager.resolveError(requestId, String(error), this.timer.now() - startTime);
+      }
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Clipboard request failed after ${duration}ms: ${error}`);
       return { success: false, action, totalTimeMs: duration, error: `${error}` };

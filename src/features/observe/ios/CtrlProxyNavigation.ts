@@ -77,12 +77,14 @@ export class CtrlProxyNavigation {
   async requestShake(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyShakeResult> {
     return sendCommand<CtrlProxyShakeResult>(this.context, {
       idPrefix: "shake",
       responseType: "shake",
       messageType: "request_shake",
       timeoutMs,
+      abortSignal: signal,
       perf,
       cancelScreenshotBackoff: false,
       notConnectedMessage: "Not connected to CtrlProxy",
@@ -214,6 +216,7 @@ export class CtrlProxyNavigation {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyRecentAppsResult> {
     return sendCommand<CtrlProxyRecentAppsResult>(this.context, {
       idPrefix: "recentApps",
@@ -221,6 +224,7 @@ export class CtrlProxyNavigation {
       messageType: "request_recent_apps",
       params: frameContext === undefined ? undefined : { frameContext },
       timeoutMs,
+      abortSignal: signal,
       perf,
       cancelScreenshotBackoff: false,
       errorLabel: "Recent apps",

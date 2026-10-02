@@ -1,3 +1,4 @@
+import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
@@ -10,7 +11,7 @@ import { SwipeOn } from "./swipeon/SwipeOn";
 import type { IosScreenUnlocker } from "./WakeAndUnlock";
 
 export interface IosUnlockActions {
-  pressHome(timeoutMs: number): Promise<{ success: boolean; error?: string }>;
+  pressHome(timeoutMs: number, signal?: AbortSignal): Promise<{ success: boolean; error?: string }>;
   swipeUp(
     timeoutMs: number,
     signal?: AbortSignal,
@@ -39,7 +40,8 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     this.actions = actions ?? {
       // press() skips execute()'s observedInteraction, but simulator Home still
       // verifies foreground through a runner hierarchy read.
-      pressHome: (timeoutMs) => new PressButton(device).press("home", timeoutMs),
+      pressHome: (timeoutMs, signal) =>
+        new PressButton(device).press("home", timeoutMs, undefined, signal),
       swipeUp: (timeoutMs, signal) => {
         const deadline = this.timer.now() + timeoutMs;
         return createSwipe(device, {
@@ -53,8 +55,11 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
 
   async wakeAndDismiss(
     remainingMs: () => number = () => Infinity,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string }> {
-    await this.pressHomeBestEffort(remainingMs);
+    throwIfAborted(signal);
+    await this.pressHomeBestEffort(remainingMs, signal);
+    throwIfAborted(signal);
     const swipeBudget = Math.min(5_000, remainingMs());
     if (swipeBudget <= 0) {
       throw new ActionableError(
@@ -64,9 +69,14 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     try {
       const swipeAbort = new AbortController();
       const swipe = await raceWithDeadline(
-        () => this.actions.swipeUp(swipeBudget, swipeAbort.signal),
+        () =>
+          this.actions.swipeUp(
+            swipeBudget,
+            signal ? AbortSignal.any([signal, swipeAbort.signal]) : swipeAbort.signal,
+          ),
         {
           timer: this.timer,
+          signal,
           timeoutMs: swipeBudget,
           label: "iOS lock-screen swipe",
           onTimeout: () => swipeAbort.abort(),
@@ -85,13 +95,17 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
             : undefined,
       };
     } catch (error) {
+      throwIfAborted(signal);
       const message = errorMessage(error);
       logger.warn(`[IosLockScreenUnlocker] lock-screen swipe failed: ${message}`, error);
       return { success: false, error: message };
     }
   }
 
-  private async pressHomeBestEffort(remainingMs: () => number): Promise<void> {
+  private async pressHomeBestEffort(
+    remainingMs: () => number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     // Home is best effort: its lock-screen foreground verification can fail
     // even after the display wakes. The swipe and lock-state probe decide success.
     try {
@@ -99,15 +113,21 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       if (homeBudget <= 0) {
         throw new ActionableError("iOS unlock budget exhausted before Home press");
       }
-      const home = await raceWithDeadline(() => this.actions.pressHome(homeBudget), {
-        timer: this.timer,
-        timeoutMs: homeBudget,
-        label: "iOS Home press before unlock",
-      });
+      throwIfAborted(signal);
+      const home = await awaitWhileRequestIsLive(
+        raceWithDeadline(() => this.actions.pressHome(homeBudget, signal), {
+          timer: this.timer,
+          timeoutMs: homeBudget,
+          label: "iOS Home press before unlock",
+          signal,
+        }),
+        signal,
+      );
       if (!home.success) {
         logger.warn(`[IosLockScreenUnlocker] Home press failed: ${home.error ?? "unknown error"}`);
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[IosLockScreenUnlocker] Home press failed: ${errorMessage(error)}`, error);
     }
   }

@@ -1,4 +1,7 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { runWithAbortSignal } from "../../utils/AbortContext";
+import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, ShakeOptions, ShakeResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -11,12 +14,17 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 export class Shake extends BaseVisualChange {
   private shakeTimer: Timer;
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
+  constructor(device: BootedDevice, adb: AdbExecutor | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
     this.shakeTimer = timer;
   }
 
-  async execute(options: ShakeOptions = {}, progress?: ProgressCallback): Promise<ShakeResult> {
+  async execute(
+    options: ShakeOptions = {},
+    progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<ShakeResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("shake");
 
@@ -40,7 +48,11 @@ export class Shake extends BaseVisualChange {
           try {
             await perf.track("shakeExecution", async () => {
               const client = IOSCtrlProxyClient.getInstance(this.device);
-              const result = await client.requestShake(duration + 2000, perf);
+              throwIfAborted(signal);
+              const result = await awaitWhileRequestIsLive(
+                client.requestShake(duration + 2000, perf, signal),
+                signal,
+              );
               if (!result.success) {
                 throw new Error(result.error ?? "Failed to shake iOS device");
               }
@@ -54,8 +66,9 @@ export class Shake extends BaseVisualChange {
               intensity,
             };
           } catch (error) {
+            throwIfAborted(signal);
             perf.end();
-            logger.error(`Failed to execute iOS shake: ${error}`);
+            logger.warn("Failed to execute iOS shake", error);
             return {
               success: false,
               duration,
@@ -69,6 +82,7 @@ export class Shake extends BaseVisualChange {
           timeoutMs: duration + 2000,
           tolerancePercent: 0.0,
           progress,
+          signal,
           perf,
         },
       );
@@ -79,17 +93,20 @@ export class Shake extends BaseVisualChange {
         try {
           // Start the shake by setting high acceleration values
           await perf.track("shakeExecution", async () => {
-            await this.adb.executeCommand(
-              `emu sensor set acceleration ${intensity}:${intensity}:${intensity}`,
-            );
-
-            logger.info(`Started shake with intensity ${intensity} for ${duration}ms`);
-
-            // Wait for the specified duration
-            await this.shakeTimer.sleep(duration);
-
-            // Stop the shake by resetting acceleration to 0
-            await this.adb.executeCommand(`emu sensor set acceleration 0:0:0`);
+            throwIfAborted(signal);
+            // Once acceleration is dispatched, always reset it, even on cancellation.
+            try {
+              await awaitWhileRequestIsLive(
+                this.adb.executeCommand(
+                  `emu sensor set acceleration ${intensity}:${intensity}:${intensity}`,
+                ),
+                signal,
+              );
+              throwIfAborted(signal);
+              await awaitWhileRequestIsLive(this.shakeTimer.sleep(duration), signal);
+            } finally {
+              await this.resetAcceleration();
+            }
           });
 
           logger.info("Shake completed");
@@ -100,8 +117,9 @@ export class Shake extends BaseVisualChange {
             intensity,
           };
         } catch (error) {
+          throwIfAborted(signal);
           perf.end();
-          logger.error(`Failed to execute shake: ${error}`);
+          logger.warn("Failed to execute shake", error);
           return {
             success: false,
             duration,
@@ -115,8 +133,19 @@ export class Shake extends BaseVisualChange {
         timeoutMs: duration + 2000, // Give extra time beyond shake duration
         tolerancePercent: 0.0,
         progress,
+        signal,
         perf,
       },
+    );
+  }
+  private async resetAcceleration(): Promise<void> {
+    // Cleanup must also escape AdbClient's ambient request signal.
+    await runWithAbortSignal(undefined, () =>
+      raceWithDeadline(() => this.adb.executeCommand("emu sensor set acceleration 0:0:0", 1000), {
+        timer: this.shakeTimer,
+        timeoutMs: 1000,
+        label: "Reset shake acceleration",
+      }),
     );
   }
 }

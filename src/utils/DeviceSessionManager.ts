@@ -1,3 +1,9 @@
+import { isDeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
+import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../daemon/deviceAdmissionGate";
+import {
+  ambientDeviceExecutionBinding,
+  type DeviceExecutionBinding,
+} from "../server/deviceExecutionBinding";
 import { errorMessage } from "./describeUnknownError";
 import {
   ActionableError,
@@ -351,6 +357,8 @@ export interface DeviceReadyOptions {
 }
 
 export interface DeviceSessionManagerOptions {
+  admissionGate?: DeviceAdmissionGate;
+  executionBinding?: DeviceExecutionBinding;
   runnerReadinessTimer?: Timer;
   runnerReadinessTimeoutMs?: number;
   /**
@@ -369,6 +377,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private explicitDevicePin: BootedDevice | undefined;
   private static instance: DeviceSessionManager;
   private static defaultProvider: DeviceClientProvider | undefined;
+  private readonly admissionGate: DeviceAdmissionGate;
+  private readonly executionBinding: DeviceExecutionBinding;
   private readonly provider: DeviceClientProvider;
   private readonly adbFactory: AdbClientFactory;
   private readonly runnerReadinessService: RunnerReadinessService;
@@ -387,6 +397,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     options: DeviceSessionManagerOptions = {},
   ) {
+    this.admissionGate = options.admissionGate ?? daemonDeviceAdmissionGate;
+    this.executionBinding = options.executionBinding ?? ambientDeviceExecutionBinding;
     this.provider = provider;
     this.adbFactory = adbFactory;
     this.runnerReadinessTimer = options.runnerReadinessTimer ?? defaultTimer;
@@ -695,7 +707,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         // the user's explicit selection so a later platform-implicit call does
         // not become ambiguous merely because this caller disconnected.
         options?.signal?.throwIfAborted();
-        if (error instanceof RunnerReadinessError) {
+        if (error instanceof RunnerReadinessError || isDeviceIdentityQuarantinedError(error)) {
           throw error;
         }
         logger.warn(`Current device ${this.currentDevice} is no longer ready: ${error}`);
@@ -811,6 +823,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
     resolvedIdentity?: ResolvedDeviceIdentity,
   ): Promise<void> {
     options?.signal?.throwIfAborted();
+    // Gate before discovery or a cached Window can use its pre-quarantine executor.
+    // Identity reconciliation/lifting uses discovery directly, never readiness.
+    this.admissionGate.assertDeviceActionable(deviceId, "to verify Android device readiness");
+    this.executionBinding.bindDeviceExecution(deviceId);
     const allDevices = await this.adb.getBootedAndroidDevices();
     const device = allDevices.find((device) => device.deviceId === deviceId);
 

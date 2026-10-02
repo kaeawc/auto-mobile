@@ -5,6 +5,7 @@ import {
   type DeviceHealthMarker,
 } from "./deviceHealthMarkers";
 import type { BackoffPolicy } from "../utils/Backoff";
+import type { AmbientExecutionIdReader } from "../utils/interfaces/AmbientExecutionIdReader";
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
@@ -294,8 +295,8 @@ export interface PooledDevice {
    *   entry with a confirmed `avdName`. Three attempts are made through
    *   the injected retry executor. The entry stays actionable while they run;
    *   only exhaustion enters quarantine. Entering also CANCELS AND DRAINS the
-   *   bound session's in-flight executions through the injected
-   *   `cancelDeviceSessionExecutions` seam
+   *   device-bound (including sessionless) and bound session's in-flight executions
+   *   through the injected `cancelDeviceSessionExecutions` seam
    *   ({@link DevicePool.enterPooledIdentityQuarantine}): FUNNEL 2 only refuses
    *   LATER calls, while an execution already registered keeps issuing
    *   serial-addressed operations. The session and the `incarnation` survive;
@@ -463,7 +464,13 @@ interface DeviceRemovedListener {
   (deviceId: string, platform: "android" | "ios"): void;
 }
 
-interface DeviceSessionExecutionCanceller {
+export interface DeviceSessionExecutionCanceller {
+  /** Same injected cancellation/drain seam, for work with no bound session. */
+  cancelDeviceExecutions?(
+    deviceId: string,
+    reason: string,
+    options?: { excludeExecutionId?: string },
+  ): Promise<number>;
   (sessionId: string, reason: string, options?: { excludeExecutionId?: string }): Promise<number>;
 }
 
@@ -582,6 +589,7 @@ export interface DevicePoolDependencies {
   onDeviceFramesInvalidated?: (deviceId: string) => void;
   emulatorLossIncidentStore?: EmulatorLossIncidentStore;
   cancelDeviceSessionExecutions?: DeviceSessionExecutionCanceller;
+  ambientExecutionIdReader?: AmbientExecutionIdReader;
   idGenerator?: IdGenerator;
   lifecycleCoordinator?: VirtualDeviceLifecycleCoordinator;
   consoleBusyRegistry?: EmulatorConsoleBusyRegistry;
@@ -813,6 +821,7 @@ export class DevicePool {
     onDeviceFramesInvalidated,
     emulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
     cancelDeviceSessionExecutions,
+    ambientExecutionIdReader,
     idGenerator = defaultIdGenerator,
     lifecycleCoordinator,
     consoleBusyRegistry,
@@ -1022,6 +1031,7 @@ export class DevicePool {
     this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
     const runtimeIdentityPort: DeviceRuntimeIdentityPoolPort = {
+      getAmbientExecutionId: () => ambientExecutionIdReader?.getExecutionId(),
       notifyDeviceFramesInvalidated: (deviceId) => this.notifyDeviceFramesInvalidated(deviceId),
       getDevices: () => this.devices,
       getDeviceManager: () => this.deviceManager,
@@ -1029,6 +1039,9 @@ export class DevicePool {
       getTimer: () => this.timer,
       getRefreshGeneration: () => this.refreshCoordinator.getRefreshGeneration(),
       hasReusableSerial: (device) => this.hasReusableSerial(device),
+      cancelDeviceExecutions: (deviceId, reason, options) =>
+        this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(deviceId, reason, options) ??
+        Promise.resolve(0),
       cancelDeviceSessionExecutions: (sessionId, reason, options) =>
         this.cancelDeviceSessionExecutions(sessionId, reason, options),
     };
@@ -1105,6 +1118,9 @@ export class DevicePool {
           this.startAndroidRecoveryRecord(sessionId, details, reservations, replace),
         recordEmulatorLossIncident: (id, path, exit, state) =>
           this.recordEmulatorLossIncident(id, path, exit, state),
+        cancelDeviceExecutions: (id, reason) =>
+          this.cancelDeviceSessionExecutions.cancelDeviceExecutions?.(id, reason) ??
+          Promise.resolve(0),
         cancelDeviceSessionExecutions: (id, reason) =>
           this.cancelDeviceSessionExecutions(id, reason),
         completeEmulatorLossRecovery: (id, outcome) =>

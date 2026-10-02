@@ -50,6 +50,7 @@ export interface AdbServerResetQuarantinePoolPort {
     processExit: undefined,
     lastAdbState: "absent",
   ): Promise<string | undefined>;
+  cancelDeviceExecutions(deviceId: string, reason: string): Promise<number>;
   cancelDeviceSessionExecutions(sessionId: string, reason: string): Promise<number>;
   completeEmulatorLossRecovery(
     incidentId: string,
@@ -195,14 +196,22 @@ export class AdbServerResetQuarantine {
         ]);
       }
       await this.settleAbandonedAdbResetIncidents(cohort, sessionTargets);
-      await Promise.all(
-        sessionTargets.map(({ sessionId, deviceId, incidentId }) =>
+      // Issue both scopes before awaiting drains; idle serials also carry sessionless work.
+      // Reset recovery retains its existing semantics: cancel every affected execution.
+      await Promise.all([
+        ...cohort.map((device) =>
+          this.pool.cancelDeviceExecutions(
+            device.id,
+            deviceLossCancellationReason(device.id, device.adbServerResetIncidentId),
+          ),
+        ),
+        ...sessionTargets.map(({ sessionId, deviceId, incidentId }) =>
           this.pool.cancelDeviceSessionExecutions(
             sessionId,
             deviceLossCancellationReason(deviceId, incidentId),
           ),
         ),
-      );
+      ]);
       await this.stopTrackedIdleAdbResetCohortProcesses(cohort);
     } catch (error) {
       await this.settleFailedAdbResetCohortPreparation(cohort, capturedTargets);

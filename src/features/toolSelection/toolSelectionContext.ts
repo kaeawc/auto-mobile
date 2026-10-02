@@ -1,3 +1,4 @@
+import type { DeviceExecutionBinding } from "../../server/deviceExecutionBinding";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionToolSelectionService } from "./SessionToolSelectionService";
 import type { ProgressCallback } from "../../server/toolRegistry";
@@ -17,6 +18,7 @@ export type ToolSelectionContext = {
   /** Connection-bound ownership proof for read-only cross-device checks. */
   ownsDeviceSession?: (sessionUuid: string) => boolean;
   execution?: {
+    deviceBinding?: DeviceExecutionBinding;
     executionId: string;
     startTime: number;
   };

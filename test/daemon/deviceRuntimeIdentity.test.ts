@@ -1,3 +1,4 @@
+import { DeviceIdentityQuarantinedError } from "../../src/models/DeviceIdentityQuarantinedError";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import type { PooledDevice } from "../../src/daemon/devicePool";
@@ -48,6 +49,7 @@ function harness() {
   const devices = new Map<string, PooledDevice>();
   const manager = new FakeDeviceManager();
   const calls: string[] = [];
+  const deviceCalls: string[] = [];
   let generation = 1;
   const port: DeviceRuntimeIdentityPoolPort = {
     getDevices: () => devices,
@@ -56,6 +58,10 @@ function harness() {
     getTimer: () => timer,
     getRefreshGeneration: () => generation,
     hasReusableSerial: (device) => device.id.startsWith("emulator-"),
+    cancelDeviceExecutions: async (deviceId, _reason, options) => {
+      deviceCalls.push(`${deviceId}:${options.excludeExecutionId ?? "all"}`);
+      return 1;
+    },
     cancelDeviceSessionExecutions: async (sessionId, _reason, options) => {
       calls.push(`${sessionId}:${options.excludeExecutionId ?? "all"}`);
       return 1;
@@ -66,6 +72,7 @@ function harness() {
     devices,
     manager,
     calls,
+    deviceCalls,
     timer,
     nextGeneration: () => {
       generation += 1;
@@ -74,6 +81,37 @@ function harness() {
 }
 
 describe("DeviceRuntimeIdentity", () => {
+  test("admission refusal has a quarantine type and preserves the existing message", () => {
+    const h = harness();
+    const device = pooled();
+    device.identityUnresolved = true;
+    h.devices.set(device.id, device);
+    expect(() =>
+      h.identity.assertDeviceActionable(device.id, "to verify Android device readiness"),
+    ).toThrow(DeviceIdentityQuarantinedError);
+    expect(() =>
+      h.identity.assertDeviceActionable(device.id, "to verify Android device readiness"),
+    ).toThrow(
+      h.identity.describeUnresolvedPooledIdentity(
+        device,
+        "Refusing to verify Android device readiness on device",
+      ),
+    );
+  });
+
+  test("quarantine cancels by device even when the pool has no session", async () => {
+    const h = harness();
+    const device = pooled();
+    device.sessionId = undefined;
+    h.devices.set(id, device);
+    await h.identity.reconcileDiscoveryObservation([observed("Other", 20)], "test", {
+      excludeExecutionId: "own-execution",
+    });
+    expect(device.identityUnresolved).toBe(true);
+    expect(h.deviceCalls).toEqual([`${id}:own-execution`]);
+    expect(h.calls).toEqual([]);
+  });
+
   test("a matching AVD advances evidence and stale disagreement cannot quarantine", async () => {
     const h = harness();
     const device = pooled();

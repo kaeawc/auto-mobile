@@ -1,3 +1,4 @@
+import { DeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
 import { ActionableError, type BootedDevice } from "../models";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { getAbortSignal } from "../utils/AbortContext";
@@ -25,6 +26,7 @@ function unknownAndroidRuntimeName(deviceId: string): string {
 
 /** Mutable pool state is read at use time, including after every await. */
 export interface DeviceRuntimeIdentityPoolPort {
+  getAmbientExecutionId?(): string | undefined;
   getDevices(): Map<string, PooledDevice>;
   notifyDeviceFramesInvalidated?(deviceId: string): void;
   getDeviceManager(): PlatformDeviceManager;
@@ -32,6 +34,11 @@ export interface DeviceRuntimeIdentityPoolPort {
   getTimer(): Timer;
   getRefreshGeneration(): number;
   hasReusableSerial(device: PooledDevice): boolean;
+  cancelDeviceExecutions?(
+    deviceId: string,
+    reason: ReturnType<typeof deviceLossCancellationReason>,
+    options: { excludeExecutionId?: string },
+  ): Promise<number>;
   cancelDeviceSessionExecutions(
     sessionId: string,
     reason: ReturnType<typeof deviceLossCancellationReason>,
@@ -285,7 +292,7 @@ export class DeviceRuntimeIdentity {
     if (pooled?.identityUnresolved !== true) {
       return;
     }
-    throw new ActionableError(
+    throw new DeviceIdentityQuarantinedError(
       this.describeUnresolvedPooledIdentity(pooled, `Refusing ${purpose} on device`),
     );
   }
@@ -704,7 +711,7 @@ export class DeviceRuntimeIdentity {
    *
    * The entry keeps its session and its `incarnation` -- the quarantine
    * withholds trust, it does not retire the epoch -- but the work already IN
-   * FLIGHT on the bound session is not covered by any admission gate: those
+   * FLIGHT on the serial or bound session is not covered by any admission gate: those
    * executions are registered and keep issuing serial-addressed operations that
    * can land on whatever now answers on the serial. So they are cancelled and
    * drained through the same injected seam the ADB-reset quarantine uses, under
@@ -712,8 +719,8 @@ export class DeviceRuntimeIdentity {
    * naming the serial ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863)
    * review).
    *
-   * The ONE exception is {@link DiscoveryReconcileOptions.excludeExecutionId}:
-   * the execution whose own discovery produced this observation. It is the
+   * Exclude the explicit {@link DiscoveryReconcileOptions.excludeExecutionId},
+   * or the ambient execution whose own discovery produced this observation. It is the
    * operation that is about to act on this evidence -- a session-bound
    * `killDevice` confirming its target, say -- and cancelling it would make the
    * funnel defeat the very refusal it exists to enable.
@@ -737,23 +744,31 @@ export class DeviceRuntimeIdentity {
     // Full: the serial may now identify another runtime, so its screen/context is untrusted.
     this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
     logger.warn(`[DevicePool] Quarantining ${pooled.id}: ${reason}`);
+    const cancellationOptions = {
+      excludeExecutionId: options.excludeExecutionId ?? this.pool.getAmbientExecutionId?.(),
+    };
     const sessionId = pooled.sessionId;
-    if (!sessionId) {
-      return;
-    }
-    const cancelled = await this.pool.cancelDeviceSessionExecutions(
-      sessionId,
-      deviceLossCancellationReason(pooled.id),
-      // The execution that PRODUCED this observation is the one operation that
-      // must survive it: cancelling it would abort the destructive call that is
-      // about to confirm-or-refuse on this very evidence
-      // ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
-      { excludeExecutionId: options.excludeExecutionId },
-    );
+    // Invoke both cancellers before awaiting either drain: serial-bound work
+    // exists without a session, and session-only work must also stop immediately.
+    const counts = await Promise.all([
+      this.pool.cancelDeviceExecutions?.(
+        pooled.id,
+        deviceLossCancellationReason(pooled.id),
+        cancellationOptions,
+      ) ?? Promise.resolve(0),
+      sessionId
+        ? this.pool.cancelDeviceSessionExecutions(
+            sessionId,
+            deviceLossCancellationReason(pooled.id),
+            cancellationOptions,
+          )
+        : Promise.resolve(0),
+    ]);
+    const cancelled = counts[0] + counts[1];
     if (cancelled > 0) {
       logger.warn(
-        `[DevicePool] Cancelled ${cancelled} in-flight execution(s) on session ${sessionId} ` +
-          `while quarantining ${pooled.id}`,
+        `[DevicePool] Cancelled ${counts[0]} device-bound and ${counts[1]} session-bound ` +
+          `in-flight execution(s) while quarantining ${pooled.id}`,
       );
     }
   }

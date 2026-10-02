@@ -2,6 +2,8 @@ import {
   isDeviceControlTargetOwnerValid,
   isDeviceControlRoutingSessionValid,
 } from "./deviceControlSessionValidity";
+import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { runWithAbortSignal } from "../utils/AbortContext";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -6040,10 +6042,23 @@ export class UnixSocketServer {
       this.daemonState.getDevicePool().assertSessionReadyForAutomation?.(sessionUuid);
     }
     const execution = executionTracker.startExecution(toolName, undefined, sessionUuid);
-    const signal = sessionUuid ? execution.abortController.signal : undefined;
+    executionTracker.bindDeviceExecution(execution.id, targetDevice.deviceId);
+    const signal = execution.abortController.signal;
     try {
-      signal?.throwIfAborted();
-      return await operation(signal);
+      signal.throwIfAborted();
+      return await runWithToolSelectionContext(
+        {
+          execution: {
+            executionId: execution.id,
+            startTime: execution.startTime,
+            deviceBinding: {
+              bindDeviceExecution: (deviceId) =>
+                executionTracker.bindDeviceExecution(execution.id, deviceId),
+            },
+          },
+        },
+        () => runWithAbortSignal(signal, () => operation(signal)),
+      );
     } finally {
       executionTracker.endExecution(execution.id);
     }

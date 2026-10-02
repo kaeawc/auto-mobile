@@ -1,5 +1,6 @@
+import { DeviceIdentityQuarantinedError } from "../../src/models/DeviceIdentityQuarantinedError";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
   defaultAdbClientFactory,
   unadmittedAdbClientFactory,
@@ -12,6 +13,16 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import {
+  DefaultDeviceClientProvider,
+  DeviceSessionManager,
+} from "../../src/utils/DeviceSessionManager";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeWindow } from "../fakes/FakeWindow";
+import { FakeDeviceExecutionBinding } from "../fakes/FakeDeviceExecutionBinding";
+import { permissiveDeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
 import type { BootedDevice } from "../../src/models";
 
 /**
@@ -54,6 +65,109 @@ describe("device-client admission seam", () => {
     expect(pool.isPooledIdentityUnresolved(SERIAL)).toBe(true);
     return pool;
   }
+
+  test.each(["raw", "equal"] as const)(
+    "refuses %s-identity readiness before a cached Window executes",
+    async (identity) => {
+      const adb = new FakeAdbExecutor();
+      adb.setDevices([{ ...DEVICE, name: SERIAL }]);
+      const provider = new DefaultDeviceClientProvider(new FakeAdbClientFactory(adb));
+      const cached = provider.getWindow(DEVICE);
+      const active = spyOn(cached, "getActive").mockResolvedValue({
+        appId: "com.example.app",
+        activityName: "MainActivity",
+        layoutSeqSum: 0,
+      });
+      try {
+        const manager = DeviceSessionManager.createInstance(provider);
+        await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" }, DEVICE);
+        expect(active).toHaveBeenCalledTimes(1);
+        await quarantinedPool();
+        await expect(
+          manager.verifyAndroidDevice(
+            SERIAL,
+            { readiness: "booted" },
+            identity === "equal" ? DEVICE : undefined,
+          ),
+        ).rejects.toThrow(/Refusing to verify Android device readiness on device 'emulator-5554'/);
+        expect(active).toHaveBeenCalledTimes(1);
+      } finally {
+        active.mockRestore();
+      }
+    },
+  );
+
+  test.each(["provided", "current", "existing"] as const)(
+    "refuses the %s-device readiness route before using the retained Window",
+    async (route) => {
+      const adb = new FakeAdbExecutor();
+      adb.setDevices([DEVICE]);
+      const utils = new FakeDeviceUtils();
+      utils.setBootedDevices("android", [DEVICE]);
+      const window = new FakeWindow();
+      window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
+      const provider = new FakeDeviceClientProvider(adb, utils, undefined, { window });
+      const manager = DeviceSessionManager.createInstance(provider, new FakeAdbClientFactory(adb));
+      await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" });
+      if (route === "current") {
+        manager.setCurrentDevice(DEVICE, "android");
+      }
+      await quarantinedPool();
+      const ready =
+        route === "existing"
+          ? manager.findOrStartAndroidDevice({ readiness: "booted" })
+          : manager.ensureDeviceReady("android", route === "provided" ? SERIAL : undefined, {
+              readiness: "booted",
+            });
+      await expect(ready).rejects.toThrow("Refusing to verify Android device readiness");
+      expect(window.getCallCount("getActive")).toBe(1);
+    },
+  );
+
+  test("current quarantine refusal preserves selection and never discovers a replacement", async () => {
+    const refusal = new DeviceIdentityQuarantinedError("identity unresolved");
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(),
+      new FakeAdbClientFactory(),
+      {
+        admissionGate: {
+          assertDeviceActionable: () => {
+            throw refusal;
+          },
+        },
+      },
+    );
+    manager.setCurrentDevice(DEVICE, "android");
+    const discovery = spyOn(manager, "findOrStartDevice").mockResolvedValue({
+      ...DEVICE,
+      deviceId: "emulator-5556",
+    });
+    try {
+      await expect(
+        manager.ensureDeviceReady("android", undefined, { readiness: "booted" }),
+      ).rejects.toBe(refusal);
+      expect(discovery).not.toHaveBeenCalled();
+      expect(manager.getCurrentDevice()).toBe(DEVICE);
+      expect(manager.getCurrentPlatform()).toBe("android");
+    } finally {
+      discovery.mockRestore();
+    }
+  });
+
+  test("readiness binds the ambient execution even when its Window is already cached", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setDevices([DEVICE]);
+    const window = new FakeWindow();
+    window.configureActiveWindow({ appId: "com.example", activityName: "Main", layoutSeqSum: 0 });
+    const binding = new FakeDeviceExecutionBinding();
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(adb, new FakeDeviceUtils(), undefined, { window }),
+      new FakeAdbClientFactory(adb),
+      { admissionGate: permissiveDeviceAdmissionGate, executionBinding: binding },
+    );
+    await manager.verifyAndroidDevice(SERIAL, { readiness: "booted" });
+    expect(binding.deviceIds).toEqual([SERIAL]);
+  });
 
   test("refuses to bind an adb client to a quarantined serial", async () => {
     await quarantinedPool();

@@ -8,6 +8,7 @@ export interface ScreenshotResult {
   path?: string;
   screenshotImageSize?: { width: number; height: number };
   error?: string;
+  actionableError?: import("./ActionableError").ActionableError;
   screenshotFormat?: ScreenshotFormat;
   screenshotMimeType?: ScreenshotMimeType;
 }

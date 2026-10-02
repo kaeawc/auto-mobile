@@ -1,3 +1,5 @@
+import { writeRetainedScreenshot } from "../features/observe/ScreenshotRetention";
+import type { FileSystem } from "../utils/filesystem/DefaultFileSystem";
 import {
   screenshotPathProtection,
   type ScreenshotPathProtection,
@@ -12,10 +14,7 @@ import { createDeviceHierarchyCapture } from "../features/observe/DeviceHierarch
 import type { HierarchyCapture } from "../features/observe/HierarchyCapture";
 import { TakeScreenshot } from "../features/observe/TakeScreenshot";
 import type { ScreenshotService } from "../features/observe/interfaces/ScreenshotService";
-import {
-  defaultScreenshotFileWriter,
-  type ScreenshotFileWriter,
-} from "../features/observe/screenshot/ScreenshotFileWriter";
+import { type ScreenshotFileWriter } from "../features/observe/screenshot/ScreenshotFileWriter";
 import { cropSnapshot } from "../features/observe/screenshot/snapshotCrop";
 import { ElementResolver } from "../features/utility/ElementResolver";
 import { resolveImageBackend } from "../utils/image/backend/resolveImageBackend";
@@ -63,6 +62,7 @@ export interface SnapshotOfDependencies {
   imageBackend?: ImageBackend;
   outputDirectory?: () => string;
   ids?: IdGenerator;
+  fileSystem?: FileSystem;
 }
 
 function resolveRequestedBounds(
@@ -112,6 +112,9 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
         const screenshot = await (
           dependencies.screenshotFactory?.(device) ?? new TakeScreenshot(device)
         ).execute({ format: "png" });
+        if (screenshot.actionableError) {
+          throw screenshot.actionableError;
+        }
         if (!screenshot.success || !screenshot.path) {
           throw new ActionableError(
             `snapshotOf screenshot capture failed: ${screenshot.error ?? "no path"}`,
@@ -135,11 +138,12 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
           outputDirectory,
           `snapshot-of-${(dependencies.ids ?? defaultIdGenerator).next()}.png`,
         );
-        await (dependencies.pathProtection ?? screenshotPathProtection).protect(outputPath);
-        await (dependencies.writer ?? defaultScreenshotFileWriter).write(outputPath, cropped.png);
-        await (dependencies.pathProtection ?? screenshotPathProtection).protect(outputPath);
+        const protection = dependencies.pathProtection ?? screenshotPathProtection;
+        await writeRetainedScreenshot(outputPath, cropped.png, dependencies);
+        const expiresAt = await protection.protect(outputPath);
         return createJSONToolResponse({
           path: outputPath,
+          expiresAt,
           unit: device.platform === "ios" ? "points" : "pixels",
           requestedBounds: cropped.requestedBounds,
           clippedBounds: cropped.clippedBounds,

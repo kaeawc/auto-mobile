@@ -3575,6 +3575,9 @@
                 "screenshotPath": {
                   "type": "string"
                 },
+                "screenshotExpiresAt": {
+                  "type": "number"
+                },
                 "screenshotSource": {
                   "type": "string",
                   "enum": ["fresh", "cached"]
@@ -4651,6 +4654,9 @@
                 },
                 "screenshotPath": {
                   "type": "string"
+                },
+                "screenshotExpiresAt": {
+                  "type": "number"
                 },
                 "screenshotSource": {
                   "type": "string",
@@ -8099,7 +8105,7 @@
   },
   {
     "name": "observe",
-    "description": "Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for 30 seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after 24 hours on capture construction. Copy files needed longer.",
+    "description": "Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -9580,6 +9586,9 @@
               "screenshotPath": {
                 "type": "string"
               },
+              "screenshotExpiresAt": {
+                "type": "number"
+              },
               "observeScope": {
                 "type": "object",
                 "properties": {
@@ -9826,6 +9835,9 @@
         "screenshotPath": {
           "type": "string"
         },
+        "screenshotExpiresAt": {
+          "type": "number"
+        },
         "screenshotSource": {
           "type": "string",
           "enum": ["fresh", "cached"]
@@ -9910,6 +9922,9 @@
           "properties": {
             "cropPath": {
               "type": "string"
+            },
+            "expiresAt": {
+              "type": "number"
             },
             "unit": {
               "type": "string",
@@ -14304,6 +14319,9 @@
                 "screenshotPath": {
                   "type": "string"
                 },
+                "screenshotExpiresAt": {
+                  "type": "number"
+                },
                 "screenshotSource": {
                   "type": "string",
                   "enum": ["fresh", "cached"]
@@ -15380,6 +15398,9 @@
                 },
                 "screenshotPath": {
                   "type": "string"
+                },
+                "screenshotExpiresAt": {
+                  "type": "number"
                 },
                 "screenshotSource": {
                   "type": "string",
@@ -19095,6 +19116,9 @@
                 "screenshotPath": {
                   "type": "string"
                 },
+                "screenshotExpiresAt": {
+                  "type": "number"
+                },
                 "screenshotSource": {
                   "type": "string",
                   "enum": ["fresh", "cached"]
@@ -20171,6 +20195,9 @@
                 },
                 "screenshotPath": {
                   "type": "string"
+                },
+                "screenshotExpiresAt": {
+                  "type": "number"
                 },
                 "screenshotSource": {
                   "type": "string",
@@ -26193,6 +26220,9 @@
                 "screenshotPath": {
                   "type": "string"
                 },
+                "screenshotExpiresAt": {
+                  "type": "number"
+                },
                 "screenshotSource": {
                   "type": "string",
                   "enum": ["fresh", "cached"]
@@ -27269,6 +27299,9 @@
                 },
                 "screenshotPath": {
                   "type": "string"
+                },
+                "screenshotExpiresAt": {
+                  "type": "number"
                 },
                 "screenshotSource": {
                   "type": "string",
@@ -29846,6 +29879,9 @@
                 "screenshotPath": {
                   "type": "string"
                 },
+                "screenshotExpiresAt": {
+                  "type": "number"
+                },
                 "screenshotSource": {
                   "type": "string",
                   "enum": ["fresh", "cached"]
@@ -30922,6 +30958,9 @@
                 },
                 "screenshotPath": {
                   "type": "string"
+                },
+                "screenshotExpiresAt": {
+                  "type": "number"
                 },
                 "screenshotSource": {
                   "type": "string",

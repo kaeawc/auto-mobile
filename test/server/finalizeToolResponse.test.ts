@@ -1530,6 +1530,7 @@ describe("finalizeToolResponse", () => {
         screenshotPath: "/data/local/tmp/auto-mobile/screens/passthrough-observation.png",
         screenshotSource: "fresh",
         screenshotCaptureSource: "device",
+        screenshotExpiresAt: 600_000,
         screenshotCapturedAt: "1970-01-01T00:00:08.000Z",
         screenshotAgeMs: 2_000,
         screenshotFreshFailure: {

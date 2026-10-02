@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { resolveIosObserveRotation } from "../../src/features/observe/iosObserveRotation";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
@@ -1011,18 +1012,28 @@ describe("session-free observe device read", () => {
       stat: async () => ({ isFile: () => true, size: 12, mtimeMs: 8_000 }),
     };
     expect(
-      await observationScreenshotEvidence("/screen.png", "fresh", undefined, files, timer),
+      await observationScreenshotEvidence("/screen.png", "fresh", undefined, {
+        files,
+        timer,
+        protection: new FakeScreenshotPathProtection(timer),
+      }),
     ).toMatchObject({
       screenshotPath: "/screen.png",
+      screenshotExpiresAt: 610_000,
       screenshotSource: "fresh",
       screenshotCaptureSource: "device",
       screenshotCapturedAt: "1970-01-01T00:00:08.000Z",
       screenshotAgeMs: 2_000,
     });
     expect(
-      await observationScreenshotEvidence("/cached.png", "cached", "capture failed", files, timer),
+      await observationScreenshotEvidence("/cached.png", "cached", "capture failed", {
+        files,
+        timer,
+        protection: new FakeScreenshotPathProtection(timer),
+      }),
     ).toMatchObject({
       screenshotPath: "/cached.png",
+      screenshotExpiresAt: 610_000,
       screenshotSource: "cached",
       screenshotCaptureSource: "observation-cache",
       screenshotCapturedAt: "1970-01-01T00:00:08.000Z",

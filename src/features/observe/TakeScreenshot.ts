@@ -25,14 +25,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
-import {
-  selectScreenshotsToEvict,
-  screenshotPathKey,
-  SCREENSHOT_MIN_LIFETIME_MS,
-  SCREENSHOT_CACHE_MAX_SIZE_BYTES,
-  SCREENSHOT_STALE_AGE_MS,
-  type ScreenshotCacheFile,
-} from "./screenshotCacheEviction";
+import { ScreenshotRetentionCapacityError, writeRetainedScreenshot } from "./ScreenshotRetention";
 import {
   screenshotPathProtection,
   type ScreenshotPathProtection,
@@ -62,8 +55,6 @@ import {
   type ScreenshotFileWriter,
 } from "./screenshot/ScreenshotFileWriter";
 import { shellQuote } from "../../utils/shellQuote";
-import { getObserveCacheStore } from "./cache/ObserveCacheRegistry";
-import { getScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
 import {
   AndroidPhysicalDisplayIdResolver,
   assertValidPng,
@@ -207,6 +198,7 @@ export class TakeScreenshot implements ScreenshotService {
       return {
         success: false,
         error: callerSignal?.aborted ? OPERATION_CANCELLED_MESSAGE : errorMessage(error),
+        actionableError: error instanceof ScreenshotRetentionCapacityError ? error : undefined,
       };
     } finally {
       // Fence a late lock waiter or capture after timeout/cancellation.
@@ -266,6 +258,7 @@ export class TakeScreenshot implements ScreenshotService {
   private fileWriter: ScreenshotFileWriter;
   private fileSystem: FileSystem;
   private cacheDirResolver: () => string;
+  private readonly pathProtection: ScreenshotPathProtection;
   private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
   private static cacheDir: string | null = null;
 
@@ -299,8 +292,9 @@ export class TakeScreenshot implements ScreenshotService {
       },
     ),
     cleanupOnCreate = true,
-    private readonly pathProtection: ScreenshotPathProtection = screenshotPathProtection,
+    options: { pathProtection?: ScreenshotPathProtection } = {},
   ) {
+    this.pathProtection = options.pathProtection ?? screenshotPathProtection;
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
@@ -313,115 +307,29 @@ export class TakeScreenshot implements ScreenshotService {
     this.physicalDisplayIdResolver = physicalDisplayIdResolver;
 
     // Manage cache size (getCacheDir ensures directory exists with secure permissions)
+    this.pathProtection.start(this.cacheDirResolver(), { fileSystem: this.fileSystem });
     if (cleanupOnCreate) {
       void this.cleanupCache();
     }
   }
 
-  /** Sweep stale files on the first construction and every subsequent cleanup pass. */
   private async cleanupCache(): Promise<void> {
-    try {
-      const cacheDir = this.cacheDirResolver();
-      const names = await this.fileSystem.readdir(cacheDir);
-      const candidates = names.filter((name) =>
-        /^(?:screenshot_.+\.(?:png|jpe?g|webp)(?:\.temp)?|snapshot-of-.+\.png|crop-[A-Za-z0-9_-]+\.png)$/.test(
-          name,
-        ),
-      );
-      let files = (
-        await Promise.all(
-          candidates.map((name) => this.readCachedScreenshot(path.join(cacheDir, name))),
-        )
-      ).filter((file): file is ScreenshotCacheFile => file !== undefined);
-      const referencedPaths = new Set(
-        [
-          ...getScreenshotStateStore().getReferencedScreenshotPaths(),
-          ...(await getObserveCacheStore().getReferencedScreenshotPaths()),
-        ].map((filePath) => screenshotPathKey(filePath)),
-      );
-      const isReferenced = (filePath: string): boolean =>
-        referencedPaths.has(screenshotPathKey(filePath));
-      const isProtected = (filePath: string): boolean => this.pathProtection.isProtected(filePath);
-      const nowMs = this.timer.now();
-      const stale = files.filter((file) => nowMs - file.mtimeMs > SCREENSHOT_STALE_AGE_MS);
-      files = await this.evictCandidates(
-        stale.map((file) => file.path),
-        files,
-        isReferenced,
-      );
-      const evictionPlan = selectScreenshotsToEvict(
-        files,
-        SCREENSHOT_CACHE_MAX_SIZE_BYTES,
-        SCREENSHOT_MIN_LIFETIME_MS,
-        nowMs,
-        isReferenced,
-        isProtected,
-      );
-      files = await this.evictCandidates(evictionPlan.toEvict, files, isReferenced);
-      if (files.reduce((total, file) => total + file.size, 0) > SCREENSHOT_CACHE_MAX_SIZE_BYTES) {
-        logger.warn(
-          `Screenshot cache remains over budget after eviction; skipped ${evictionPlan.skippedReferenced} referenced screenshots; ${files.filter((file) => isProtected(file.path)).length} protected screenshots`,
-        );
-      }
-    } catch (error) {
-      logger.warn("Failed to cleanup screenshot cache:", error);
-    }
+    await this.pathProtection.sweep(this.cacheDirResolver(), this.fileSystem);
   }
 
-  private async readCachedScreenshot(filePath: string): Promise<ScreenshotCacheFile | undefined> {
-    try {
-      // lstat excludes symlinks; legacy injected filesystems without it must
-      // explicitly identify plain files through stat.isFile instead.
-      const stats = await (this.fileSystem.lstat?.(filePath) ?? this.fileSystem.stat(filePath));
-      return stats.isFile?.() === true
-        ? { path: filePath, size: stats.size, mtimeMs: stats.mtimeMs }
-        : undefined;
-    } catch (error) {
-      logger.warn(`Failed to stat screenshot during cleanup: ${filePath}`, error);
-      return undefined;
-    }
+  private async writeScreenshot(filePath: string, bytes: Buffer): Promise<void> {
+    await writeRetainedScreenshot(filePath, bytes, {
+      pathProtection: this.pathProtection,
+      writer: this.fileWriter,
+      fileSystem: this.fileSystem,
+    });
   }
 
-  private async evictCandidates(
-    candidates: string[],
-    files: ScreenshotCacheFile[],
-    isReferenced: (path: string) => boolean,
-  ): Promise<ScreenshotCacheFile[]> {
-    const removed = new Set<string>();
-    for (const filePath of candidates) {
-      // Recheck after every await: a path may have been returned since selection.
-      if (isReferenced(filePath)) {
-        continue;
-      }
-      const deleted = await this.pathProtection.removeIfUnprotected(filePath, () => {
-        // Screenshot completion can add a cache reference after plan selection.
-        if (
-          getScreenshotStateStore()
-            .getReferencedScreenshotPaths()
-            .some(
-              (referencedPath) => screenshotPathKey(referencedPath) === screenshotPathKey(filePath),
-            )
-        ) {
-          return Promise.resolve(false);
-        }
-        return this.removeCachedScreenshot(filePath);
-      });
-      if (deleted) {
-        removed.add(filePath);
-      }
-    }
-    return files.filter((file) => !removed.has(file.path));
-  }
-
-  private async removeCachedScreenshot(filePath: string): Promise<boolean> {
-    try {
-      await this.fileSystem.unlink(filePath);
-      logger.debug(`Removed cached screenshot: ${filePath}`);
+  private async removeUnpublishedScreenshot(filePath: string): Promise<void> {
+    await this.pathProtection.removeIfUnprotected(filePath, async () => {
+      await this.fileWriter.remove(filePath);
       return true;
-    } catch (error) {
-      logger.warn(`Failed to remove cached screenshot: ${filePath}`, error);
-      return false;
-    }
+    });
   }
 
   /**
@@ -433,7 +341,7 @@ export class TakeScreenshot implements ScreenshotService {
   generateScreenshotPath(timestamp: number, options: ScreenshotOptions): string {
     const fileExtension = screenshotExtensionForFormat(options.format ?? "png");
     return path.join(
-      TakeScreenshot.getCacheDir(),
+      this.cacheDirResolver(),
       // The device id is part of the name so a disk scan of the shared cache
       // dir can tell whose capture a file is (#6599).
       screenshotFileName(timestamp, this.device.deviceId, this.idGenerator.next(), fileExtension),
@@ -483,10 +391,11 @@ export class TakeScreenshot implements ScreenshotService {
     } catch (err) {
       const totalDuration = this.timer.now() - startTime;
       const errorMsg = errorMessage(err);
-      logger.warn(`[SCREENSHOT] Execute failed after ${totalDuration}ms: ${errorMsg}`);
+      logger.warn(`[SCREENSHOT] Execute failed after ${totalDuration}ms: ${errorMsg}`, err);
       return {
         success: false,
         error: `Failed to take screenshot: ${errorMsg}`,
+        actionableError: err instanceof ScreenshotRetentionCapacityError ? err : undefined,
       };
     }
   }
@@ -553,7 +462,7 @@ export class TakeScreenshot implements ScreenshotService {
           options.format === undefined,
         );
       } catch (error) {
-        if (options.displayId !== undefined) {
+        if (error instanceof ScreenshotRetentionCapacityError || options.displayId !== undefined) {
           throw error;
         }
         logger.info(`[SCREENSHOT] CtrlProxy capture failed, falling back to ADB: ${error}`);
@@ -666,12 +575,12 @@ export class TakeScreenshot implements ScreenshotService {
       finalPath,
       screenshotExtensionForFormat(format),
     );
-    await this.fileWriter.write(screenshotPath, imageBuffer);
+    await this.writeScreenshot(screenshotPath, imageBuffer);
     if (signal?.aborted) {
       // Cancellation can land while the write is in flight: the request is over,
       // so drop the frame instead of leaving it for the latest-screenshot disk
       // fallback to serve as the device's current screen (#6605).
-      await this.fileWriter.remove(screenshotPath);
+      await this.removeUnpublishedScreenshot(screenshotPath);
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
     return {
@@ -714,10 +623,11 @@ export class TakeScreenshot implements ScreenshotService {
       return await this.writeiOSScreenshot(finalPath, result, startTime, options, signal);
     } catch (error) {
       const errorMsg = errorMessage(error);
-      logger.error(`[SCREENSHOT] iOS screenshot capture failed: ${errorMsg}`);
+      logger.warn(`[SCREENSHOT] iOS screenshot capture failed: ${errorMsg}`, error);
       return {
         success: false,
         error: errorMsg,
+        actionableError: error instanceof ScreenshotRetentionCapacityError ? error : undefined,
       };
     }
   }
@@ -747,11 +657,11 @@ export class TakeScreenshot implements ScreenshotService {
     const format = encoding.format ?? "png";
     // The historical iOS PNG path persisted CtrlProxy's bytes without encoding.
     const encoded = format === "png" ? imageBuffer : await encodeScreenshot(imageBuffer, encoding);
-    await this.fileWriter.write(finalPath, encoded);
+    await this.writeScreenshot(finalPath, encoded);
     if (signal?.aborted) {
       // A cancellation can land while the write is in flight. Remove the frame
       // so findLatestScreenshotPath(deviceId) cannot surface it as current (#6605).
-      await this.fileWriter.remove(finalPath);
+      await this.removeUnpublishedScreenshot(finalPath);
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
 
@@ -879,9 +789,9 @@ export class TakeScreenshot implements ScreenshotService {
     );
 
     const encoded = await encodeScreenshot(imageBuffer, encodingOptions(options));
-    await this.fileWriter.write(finalPath, encoded);
+    await this.writeScreenshot(finalPath, encoded);
     if (signal?.aborted) {
-      await this.fileWriter.remove(finalPath);
+      await this.removeUnpublishedScreenshot(finalPath);
       return { success: false, error: OPERATION_CANCELLED_MESSAGE };
     }
 
@@ -954,16 +864,14 @@ export class TakeScreenshot implements ScreenshotService {
         `[SCREENSHOT] File read took ${readDuration}ms, buffer size: ${imageBuffer.length} bytes`,
       );
 
-      let writtenBuffer = imageBuffer;
-      if (options.format === undefined || options.format === "png") {
-        // ADB screencap is already PNG. Preserve the original file-pull move.
-        await this.fileSystem.rename(tempLocalFile, finalPath);
-      } else {
-        const encoded = await encodeScreenshot(imageBuffer, encodingOptions(options));
-        await this.fileWriter.write(finalPath, encoded);
-        writtenBuffer = encoded;
-        await this.fileSystem.remove(tempLocalFile);
-      }
+      const encoded =
+        options.format === undefined || options.format === "png"
+          ? imageBuffer
+          : await encodeScreenshot(imageBuffer, encodingOptions(options));
+      // Bytes are already in memory. Remove the unpublished pull temporary before
+      // admission so it is not counted twice; persist through the secure 0o600 writer.
+      await this.removeLocalTempScreenshot(tempLocalFile);
+      await this.writeScreenshot(finalPath, encoded);
 
       const totalDuration = this.timer.now() - startTime;
       logger.info(`[SCREENSHOT] File pull screenshot capture completed in ${totalDuration}ms`);
@@ -971,7 +879,7 @@ export class TakeScreenshot implements ScreenshotService {
       result = {
         success: true,
         path: finalPath,
-        screenshotImageSize: readImageHeaderDimensions(writtenBuffer) ?? undefined,
+        screenshotImageSize: readImageHeaderDimensions(encoded) ?? undefined,
         ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
       };
     } catch (err) {
@@ -1004,7 +912,10 @@ export class TakeScreenshot implements ScreenshotService {
     // Cancellation can land while device cleanup is in flight. Remove the
     // completed frame so the latest-screenshot disk fallback cannot serve it.
     if (await this.fileSystem.pathExists(finalPath)) {
-      await this.fileSystem.remove(finalPath);
+      await this.pathProtection.removeIfUnprotected(finalPath, async () => {
+        await this.fileSystem.remove(finalPath);
+        return true;
+      });
     }
     return { success: false, error: OPERATION_CANCELLED_MESSAGE };
   }

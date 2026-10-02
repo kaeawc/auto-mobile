@@ -1,3 +1,9 @@
+import { writeRetainedScreenshot } from "../ScreenshotRetention";
+import {
+  screenshotPathProtection,
+  type ScreenshotPathProtection,
+} from "../ScreenshotPathProtection";
+import type { FileSystem } from "../../../utils/filesystem/DefaultFileSystem";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod/v4";
@@ -12,7 +18,7 @@ import type { ImageBackend } from "../../../utils/image/backend/ImageBackend";
 import { resolveImageBackend } from "../../../utils/image/backend/resolveImageBackend";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../../utils/tempDir";
-import { defaultScreenshotFileWriter, type ScreenshotFileWriter } from "./ScreenshotFileWriter";
+import { type ScreenshotFileWriter } from "./ScreenshotFileWriter";
 import { cropSnapshot, type SnapshotCropResult } from "./snapshotCrop";
 
 export const observeCropSchema = z.union([
@@ -34,6 +40,7 @@ export const observeCropSchema = z.union([
 export type ObserveCrop = z.infer<typeof observeCropSchema>;
 export interface ObserveCropResult extends Omit<SnapshotCropResult, "png"> {
   cropPath: string;
+  expiresAt?: number;
   unit: "pixels" | "points";
 }
 
@@ -43,6 +50,8 @@ export interface ObserveCropDependencies {
   imageBackend?: ImageBackend;
   outputDirectory?: () => string;
   ids?: IdGenerator;
+  pathProtection?: ScreenshotPathProtection;
+  fileSystem?: FileSystem;
 }
 
 function requestedBounds(crop: ObserveCrop, observation: ObserveResult): ElementBounds {
@@ -131,6 +140,8 @@ export async function createObserveCrop(
     dependencies.outputDirectory?.() ?? ensureSecureTempDirSync(TEMP_SUBDIRS.SCREENSHOTS),
     `crop-${(dependencies.ids ?? defaultIdGenerator).next()}.png`,
   );
-  await (dependencies.writer ?? defaultScreenshotFileWriter).write(cropPath, png);
-  return { ...metadata, cropPath, unit: platform === "ios" ? "points" : "pixels" };
+  const protection = dependencies.pathProtection ?? screenshotPathProtection;
+  await writeRetainedScreenshot(cropPath, png, dependencies);
+  const expiresAt = await protection.protect(cropPath);
+  return { ...metadata, cropPath, expiresAt, unit: platform === "ios" ? "points" : "pixels" };
 }

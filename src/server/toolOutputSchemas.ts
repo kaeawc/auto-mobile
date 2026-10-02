@@ -814,6 +814,7 @@ const screenshotRasterFields = {
 export const observeCropResultSchema = z
   .object({
     cropPath: z.string(),
+    expiresAt: z.number().optional(),
     unit: z.enum(["pixels", "points"]),
     requestedBounds: cropNativeBoundsSchema,
     clippedBounds: cropNativeBoundsSchema,
@@ -850,6 +851,7 @@ const observationScreenshotOutputFields = {
   screenshotSettledError: z.string().optional(),
   screenshotOrientation: z.enum(["native", "display"]).optional(),
   screenshotPath: z.string().optional(),
+  screenshotExpiresAt: z.number().optional(),
   screenshotSource: z.enum(["fresh", "cached"]).optional(),
   screenshotCaptureSource: z.enum(["device", "observation-cache"]).optional(),
   screenshotCapturedAt: z.string().optional(),
@@ -1712,6 +1714,7 @@ export const displayObservationSchema = z.object({
   truncationReasons: z.array(z.string()).optional(),
   windowTruncations: windowTruncationsSchema,
   screenshotPath: z.string().optional(),
+  screenshotExpiresAt: z.number().optional(),
   observeScope: observeScopeMetadataSchema.optional(),
   freshness: freshnessSchema,
 });

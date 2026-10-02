@@ -1,10 +1,9 @@
+import { ScreenshotRetentionCapacityError } from "../../../src/features/observe/ScreenshotRetention";
+import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { logger } from "../../../src/utils/logger";
 import { getScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
-import {
-  SCREENSHOT_MIN_LIFETIME_MS,
-  SCREENSHOT_STALE_AGE_MS,
-} from "../../../src/features/observe/screenshotCacheEviction";
+import {} from "../../../src/features/observe/screenshotCacheEviction";
 import { BoundedScreenshotPathProtection } from "../../../src/features/observe/ScreenshotPathProtection";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
@@ -67,7 +66,7 @@ function capture(cleanupOnCreate = false) {
     () => "/screenshots",
     undefined,
     cleanupOnCreate,
-    protection,
+    { pathProtection: protection },
   );
 }
 async function sweep() {
@@ -76,7 +75,7 @@ async function sweep() {
 beforeEach(() => {
   timer = new FakeTimer();
   files = new RetentionFiles();
-  protection = new BoundedScreenshotPathProtection(timer);
+  protection = new BoundedScreenshotPathProtection(timer, undefined);
   files.setDirectory("/screenshots");
   setObserveCacheStore(new FakeObserveCacheStore(timer));
   states = new InMemoryScreenshotStateStore(timer);
@@ -90,7 +89,7 @@ afterEach(() => {
 test("returned old-mtime path survives the next size sweep", async () => {
   timer.advanceTime(300_000);
   const path = files.add("screenshot_0_device_old.png", 129 * 1024 * 1024, 0);
-  await observationScreenshotEvidence(path, "cached", undefined, files, timer, protection);
+  await observationScreenshotEvidence(path, "cached", undefined, { files, timer, protection });
   await sweep();
   expect(files.existsSync(path)).toBe(true);
 });
@@ -103,7 +102,7 @@ test("an equivalent protected spelling survives an over-budget sweep", async () 
 });
 
 test("equivalent reference spellings in both stores survive a stale sweep", async () => {
-  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const statePath = files.add("snapshot-of-state.png", 1, 0);
   const observePath = files.add("snapshot-of-observe.png", 1, 0);
   states.update("retention", "/screenshots/./snapshot-of-state.png");
@@ -118,13 +117,13 @@ test("equivalent reference spellings in both stores survive a stale sweep", asyn
   expect(files.existsSync(observePath)).toBe(true);
 });
 test("previous-run stale screenshots are swept even below the size cap", async () => {
-  timer.advanceTime(24 * 60 * 60 * 1000 + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const path = files.add("snapshot-of-abandoned.png", 1, 0);
   await sweep();
   expect(files.existsSync(path)).toBe(false);
 });
 test("stale observe crops are swept while similar unrelated filenames survive", async () => {
-  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const stale = [
     files.add("crop-8a4edfd3-272f-4d47-9288-1e73aacd1b97.png", 1, 0),
     files.add("crop-test_1-A.png", 1, 0),
@@ -155,7 +154,7 @@ test("repeated publication near cache expiry survives clear and the next ten cap
   const path = files.add("screenshot_0_device_cached.png", 129 * 1024 * 1024, 0);
   getScreenshotStateStore().update("retention", path);
   timer.advanceTime(299_999);
-  await observationScreenshotEvidence(path, "cached", undefined, files, timer, protection);
+  await observationScreenshotEvidence(path, "cached", undefined, { files, timer, protection });
   timer.advanceTime(2);
   expect(getScreenshotStateStore().getReferencedScreenshotPaths().includes(path)).toBe(false);
   for (let i = 0; i < 10; i++) {
@@ -164,7 +163,7 @@ test("repeated publication near cache expiry survives clear and the next ten cap
     await sweep();
     expect(files.existsSync(path)).toBe(true);
   }
-  timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS - 2);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 2);
   await sweep();
   expect(files.existsSync(path)).toBe(false);
 });
@@ -180,14 +179,14 @@ test("fresh and crop publications use the same return-time window even with an o
     await protection.protect(path);
     await sweep();
     expect(files.existsSync(path)).toBe(true);
-    timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS);
+    timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
     await sweep();
     expect(files.existsSync(path)).toBe(false);
   }
 });
 
 test("stale sweep excludes unrelated files, directories, references and protected files", async () => {
-  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const referenced = files.add("screenshot_0_device_referenced.png", 1, 0);
   const protectedPath = files.add("snapshot-of-protected.png", 1, 0);
   const unrelated = files.add("unrelated.txt", 1, 0);
@@ -217,7 +216,7 @@ test("readdir failure logs its error and never rejects cleanup", async () => {
 });
 
 test("stat and unlink failures log their errors and do not stop other stale deletions", async () => {
-  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const badStat = files.add("snapshot-of-stat.png", 1, 0);
   const badUnlink = files.add("snapshot-of-unlink.png", 1, 0);
   const good = files.add("snapshot-of-good.png", 1, 0);
@@ -252,11 +251,24 @@ test("stat and unlink failures log their errors and do not stop other stale dele
 });
 
 test("first capture construction sweeps files left by an earlier process", async () => {
-  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const path = files.add("screenshot_0_device_previous.png", 1, 0);
-  capture(true);
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  expect(files.existsSync(path)).toBe(false);
+  let deleted!: () => void;
+  const deletion = new Promise<void>((resolve) => {
+    deleted = resolve;
+  });
+  const remove = files.unlink.bind(files);
+  const unlink = spyOn(files, "unlink").mockImplementation(async (target) => {
+    await remove(target);
+    deleted();
+  });
+  try {
+    capture(true);
+    await deletion;
+    expect(files.existsSync(path)).toBe(false);
+  } finally {
+    unlink.mockRestore();
+  }
 });
 
 test("over-budget cleanup logs protected count without deleting the live lease", async () => {
@@ -302,7 +314,7 @@ test("cache invalidation drops both reference stores without unlinking a returne
 });
 
 test("a reference added while another unlink is pending prevents deleting the next file", async () => {
-  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const first = files.add("snapshot-of-first.png", 1, 0);
   const next = files.add("screenshot_0_device_next.png", 1, 0);
   const remove = files.unlink.bind(files);
@@ -322,7 +334,7 @@ test("a reference added while another unlink is pending prevents deleting the ne
 });
 
 test("a newly added equivalent reference prevents deleting the next stale file", async () => {
-  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS + 1);
   const first = files.add("snapshot-of-first.png", 1, 0);
   const next = files.add("screenshot_0_device_next.png", 1, 0);
   const remove = files.unlink.bind(files);
@@ -339,4 +351,162 @@ test("a newly added equivalent reference prevents deleting the next stale file",
   } finally {
     unlink.mockRestore();
   }
+});
+
+test("restart gives old files a full process-start grace, then age sweeps them", async () => {
+  timer.advanceTime(2_000_000);
+  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  const old = files.add("snapshot-of-restart.png", 1, 0);
+  await sweep();
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
+  await sweep();
+  expect(files.existsSync(old)).toBe(true);
+  timer.advanceTime(1);
+  await sweep();
+  expect(files.existsSync(old)).toBe(false);
+});
+
+test("restart grace never shortens a newer file's mtime floor", async () => {
+  timer.advanceTime(2_000_000);
+  protection = new BoundedScreenshotPathProtection(timer, undefined);
+  const recent = files.add("snapshot-of-newer.png", 1, timer.now() + 100);
+  await sweep();
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
+  await sweep();
+  expect(files.existsSync(recent)).toBe(true);
+  timer.advanceTime(100);
+  await sweep();
+  expect(files.existsSync(recent)).toBe(false);
+});
+
+test("one opted-in timer per directory sweeps expired files while idle", async () => {
+  const old = files.add("crop-timer.png", 1, 0);
+  const interval = spyOn(timer, "setInterval");
+  protection.start("/screenshots", { fileSystem: files, scheduled: true });
+  protection.start("/screenshots", { fileSystem: files, scheduled: true });
+  await sweep();
+  await protection.protect(old);
+  expect(interval).toHaveBeenCalledTimes(1);
+  await timer.advanceTimeAsync(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
+  expect(files.existsSync(old)).toBe(true);
+  await timer.advanceTimeAsync(1);
+  expect(files.existsSync(old)).toBe(false);
+  interval.mockRestore();
+});
+
+function writeFrame(name: string, size: number) {
+  const path = `/screenshots/${name}`;
+  return protection.write(path, {
+    size,
+    fileSystem: files,
+    write: async () => {
+      files.add(name, size, timer.now());
+    },
+    remove: () => files.unlink(path),
+  });
+}
+
+test("two devices and sessions share the byte cap without evicting live paths", async () => {
+  const paths = [
+    files.add("screenshot_0_deviceA_sessionA.png", 64 * 1024 * 1024, 0),
+    files.add("screenshot_0_deviceB_sessionB.png", 64 * 1024 * 1024, 0),
+  ];
+  timer.advanceTime(100);
+  await protection.protect(paths[0]);
+  await protection.protect(paths[1]);
+  let failure: unknown;
+  try {
+    await writeFrame("crop-capacity.png", 1);
+  } catch (error) {
+    failure = error;
+  }
+  expect(failure).toBeInstanceOf(ScreenshotRetentionCapacityError);
+  expect(failure).toMatchObject({
+    cap: 128 * 1024 * 1024,
+    liveCount: 2,
+    earliestExpiresAt: 600_100,
+  });
+  expect((failure as Error).message).toContain(new Date(600_100).toISOString());
+  for (const path of paths) {
+    expect(files.existsSync(path)).toBe(true);
+  }
+  expect(files.existsSync("/screenshots/crop-capacity.png")).toBe(false);
+});
+
+test("count capacity refuses a new file and never drops a live file", async () => {
+  for (let i = 0; i < 4096; i++) {
+    files.add(`crop-count-${i}.png`, 1, 0);
+  }
+  await expect(writeFrame("crop-count-overflow.png", 1)).rejects.toMatchObject({
+    countCap: 4096,
+    liveCount: 4096,
+    earliestExpiresAt: 600_000,
+  });
+  expect(files.existsSync("/screenshots/crop-count-0.png")).toBe(true);
+  expect(files.existsSync("/screenshots/crop-count-4095.png")).toBe(true);
+});
+
+test("post-write overshoot rolls back only the new unpublished frame", async () => {
+  const live = files.add("screenshot_0_device_live.png", 127 * 1024 * 1024, 0);
+  await protection.protect(live);
+  const unlink = spyOn(files, "unlink");
+  await expect(writeFrame("crop-overshoot.png", 2 * 1024 * 1024)).rejects.toBeInstanceOf(
+    ScreenshotRetentionCapacityError,
+  );
+  expect(unlink.mock.calls).toEqual([["/screenshots/crop-overshoot.png"]]);
+  expect(files.existsSync(live)).toBe(true);
+  expect(files.existsSync("/screenshots/crop-overshoot.png")).toBe(false);
+  unlink.mockRestore();
+});
+
+test("unlink failure logs and retries next sweep without rejecting capture cleanup", async () => {
+  const old = files.add("crop-retry.png", 1, 0);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
+  const error = new Error("unlink denied");
+  const unlink = spyOn(files, "unlink").mockRejectedValueOnce(error);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    await sweep();
+    expect(files.existsSync(old)).toBe(true);
+    expect(warn.mock.calls.some((call) => call[1] === error)).toBe(true);
+    await sweep();
+    expect(files.existsSync(old)).toBe(false);
+  } finally {
+    unlink.mockRestore();
+    warn.mockRestore();
+  }
+});
+
+test("cleanup failures still consume capacity and cannot permit unlimited new captures", async () => {
+  files.add("crop-unremovable.png", 128 * 1024 * 1024, 0);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
+  const unlink = spyOn(files, "unlink").mockRejectedValue(new Error("denied"));
+  try {
+    await expect(writeFrame("crop-not-admitted.png", 1)).rejects.toBeInstanceOf(
+      ScreenshotRetentionCapacityError,
+    );
+    expect(files.existsSync("/screenshots/crop-not-admitted.png")).toBe(false);
+  } finally {
+    unlink.mockRestore();
+  }
+});
+
+test("publication waits for post-write admission and cannot lease an oversized frame", async () => {
+  files.add("screenshot_0_device_live.png", 127 * 1024 * 1024, 0);
+  let publication!: Promise<number>;
+  const path = "/screenshots/crop-in-flight.png";
+  const write = protection.write(path, {
+    size: 2 * 1024 * 1024,
+    fileSystem: files,
+    write: async () => {
+      files.add("crop-in-flight.png", 2 * 1024 * 1024, timer.now());
+      publication = protection.protect(path);
+      // Attach the rejection reader before the write's admission settles.
+      void publication.catch(() => {});
+    },
+    remove: () => files.unlink(path),
+  });
+  await expect(write).rejects.toBeInstanceOf(ScreenshotRetentionCapacityError);
+  await expect(publication).rejects.toBeInstanceOf(ScreenshotRetentionCapacityError);
+  expect(files.existsSync(path)).toBe(false);
 });

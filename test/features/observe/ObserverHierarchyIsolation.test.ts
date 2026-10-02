@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
@@ -942,6 +943,7 @@ test("Android observer JPEG screenshot uses ADB while the real owner client stay
       undefined,
       undefined,
       false,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     const result = await screenshot.executeObservationRead({ format: "jpeg" });
     expect(result.success).toBe(true);
@@ -996,6 +998,7 @@ test.each([true, false])(
         undefined,
         undefined,
         false,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       expect((await screenshot.executeObservationRead({ format: "png" })).success).toBe(true);
       expect(captures).toEqual([hasObservedPanel ? "primary-1" : "cover-1"]);
@@ -1029,6 +1032,7 @@ test("aborted iOS simulator observer removes its frame and never pushes to the s
       undefined,
       undefined,
       false,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     let pushes = 0;
     Reflect.set(screenshot, "pushScreenshotToStream", () => {
@@ -1038,6 +1042,8 @@ test("aborted iOS simulator observer removes its frame and never pushes to the s
       success: false,
       error: OPERATION_CANCELLED_MESSAGE,
     });
+    // Admission and rollback settle after the abort wins the request race.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(writer.removed).toEqual(writer.written);
     expect(pushes).toBe(0);
   } finally {
@@ -1073,6 +1079,7 @@ test("iOS observer screenshot uses the real open client without reconnect or str
       undefined,
       undefined,
       false,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     let pushes = 0;
     Reflect.set(screenshot, "pushScreenshotToStream", () => {
@@ -1169,6 +1176,7 @@ test("unowned physical iOS screenshot uses and closes a real transient client", 
       undefined,
       undefined,
       false,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     const pending = screenshot.executeObservationRead({ format: "png" });
     await new Promise<void>((resolve) => setImmediate(resolve));
@@ -1215,6 +1223,7 @@ test("owned physical iOS screenshot does not create a replacement client", async
       undefined,
       undefined,
       false,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     expect(await screenshot.executeObservationRead({ format: "png" })).toMatchObject({
       success: false,

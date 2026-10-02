@@ -1,4 +1,9 @@
 import { displayPinFailure } from "./SessionDisplayContext";
+import {
+  publishScreenshotPaths,
+  requireScreenshotSuccess,
+  ScreenshotRetentionCapacityError,
+} from "./ScreenshotRetention";
 import { resolveIosObserveRotation } from "./iosObserveRotation";
 import {
   screenshotPathProtection,
@@ -850,7 +855,7 @@ export class RealObserveScreen implements ObserveScreen {
       requireFreshScreenshot,
     });
     if (result.screenshotPath) {
-      await this.pathProtection.protect(result.screenshotPath);
+      result.screenshotExpiresAt = await this.pathProtection.protect(result.screenshotPath);
     }
     return result;
   }
@@ -905,6 +910,7 @@ export class RealObserveScreen implements ObserveScreen {
   ): boolean {
     if (
       error instanceof StrictSettledScreenshotCaptureError ||
+      error instanceof ScreenshotRetentionCapacityError ||
       error instanceof DisplaySelectionError
     ) {
       return true;
@@ -970,19 +976,17 @@ export class RealObserveScreen implements ObserveScreen {
     if (capture.success && capture.path) {
       Object.assign(
         result,
-        await observationScreenshotEvidence(
-          capture.path,
-          "fresh",
-          undefined,
-          this.screenshotEvidenceFiles,
-          this.timer,
-          this.pathProtection,
-        ),
+        await observationScreenshotEvidence(capture.path, "fresh", undefined, {
+          files: this.screenshotEvidenceFiles,
+          timer: this.timer,
+          protection: this.pathProtection,
+        }),
       );
       await this.attachScreenshotRaster(result, capture.screenshotImageSize);
       result.screenshotSettled = true;
       return;
     }
+    requireScreenshotSuccess(capture, requireFreshScreenshot);
     await this.handleDeviceReadScreenshotFailure(
       result,
       capture.error ?? "Screenshot capture failed",
@@ -1007,14 +1011,11 @@ export class RealObserveScreen implements ObserveScreen {
       try {
         Object.assign(
           result,
-          await observationScreenshotEvidence(
-            cachedScreenshot.path,
-            "cached",
-            failure,
-            this.screenshotEvidenceFiles,
-            this.timer,
-            this.pathProtection,
-          ),
+          await observationScreenshotEvidence(cachedScreenshot.path, "cached", failure, {
+            files: this.screenshotEvidenceFiles,
+            timer: this.timer,
+            protection: this.pathProtection,
+          }),
         );
         await this.attachScreenshotRaster(result, cachedScreenshot.imageSize);
       } catch (error) {
@@ -1111,6 +1112,7 @@ export class RealObserveScreen implements ObserveScreen {
           : stored;
       const duration = this.timer.now() - startTime;
       if (cached) {
+        await publishScreenshotPaths(cached, this.pathProtection);
         logger.debug(`[OBSERVE_CACHE] Found recent result in cache (${duration}ms)`);
         this.identifyCapture(cached, "cached-ok");
         // A cache read does not re-verify the hierarchy, even when the capture
@@ -1208,6 +1210,7 @@ export class RealObserveScreen implements ObserveScreen {
         viewHierarchy,
         elements,
         screenshotPath,
+        screenshotExpiresAt,
         systemInsets,
         insets,
         activeWindow,
@@ -1218,6 +1221,7 @@ export class RealObserveScreen implements ObserveScreen {
         viewHierarchy,
         elements,
         screenshotPath,
+        screenshotExpiresAt,
         systemInsets,
         insets,
         activeWindow,
@@ -1225,7 +1229,9 @@ export class RealObserveScreen implements ObserveScreen {
           observation.freshness ?? computeFreshness({ now: this.timer.now(), unavailable: true }),
       });
     }
-    return { ...active, displays };
+    const result = { ...active, displays };
+    await publishScreenshotPaths(result, this.pathProtection);
+    return result;
   }
 
   private async readAggregatePanel(
@@ -1855,7 +1861,7 @@ export class RealObserveScreen implements ObserveScreen {
       }
 
       if (result.screenshotPath) {
-        await this.pathProtection.protect(result.screenshotPath);
+        result.screenshotExpiresAt = await this.pathProtection.protect(result.screenshotPath);
       }
       logger.debug("Observe command completed");
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
@@ -2024,14 +2030,11 @@ export class RealObserveScreen implements ObserveScreen {
         displayId,
         screenshotOptions,
       );
-      const screenshotEvidence = await observationScreenshotEvidence(
-        path,
-        "fresh",
-        undefined,
-        this.screenshotEvidenceFiles,
-        this.timer,
-        this.pathProtection,
-      );
+      const screenshotEvidence = await observationScreenshotEvidence(path, "fresh", undefined, {
+        files: this.screenshotEvidenceFiles,
+        timer: this.timer,
+        protection: this.pathProtection,
+      });
       Object.assign(observation, screenshotEvidence);
       const imageSize = getScreenshotStateStore().getImageSizeForObservation(
         this.device.deviceId,
@@ -2039,19 +2042,13 @@ export class RealObserveScreen implements ObserveScreen {
         path,
       );
       await this.attachScreenshotRaster(observation, imageSize);
-      // Only settled multi-panel iOS captures refine the platform orientation preset.
-      if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
-        const rasterSize = observation.screenshotImageSize;
-        observation.screenshotOrientation =
-          rasterSize &&
-          rasterSize.width > rasterSize.height ===
-            observation.screenSize.width > observation.screenSize.height
-            ? "display"
-            : "native";
-      }
+      this.refineIosPanelOrientation(observation);
       observation.screenshotSettled = true;
     } catch (error) {
       signal?.throwIfAborted();
+      if (strict && error instanceof ScreenshotRetentionCapacityError) {
+        throw error;
+      }
       if (strict) {
         throw new StrictSettledScreenshotCaptureError(error, this.device.deviceId);
       }
@@ -2059,7 +2056,21 @@ export class RealObserveScreen implements ObserveScreen {
       observation.screenshotSettledError = describeError(error);
       logger.warn(
         `[OBSERVE] Settled screenshot unavailable: ${observation.screenshotSettledError}`,
+        error,
       );
+    }
+  }
+
+  private refineIosPanelOrientation(observation: ObserveResult): void {
+    // Only settled multi-panel iOS captures refine the platform orientation preset.
+    if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
+      const rasterSize = observation.screenshotImageSize;
+      observation.screenshotOrientation =
+        rasterSize &&
+        rasterSize.width > rasterSize.height ===
+          observation.screenSize.width > observation.screenSize.height
+          ? "display"
+          : "native";
     }
   }
 

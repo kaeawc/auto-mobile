@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -58,6 +59,11 @@ describe("screenshot encoding and truthful metadata", () => {
         new FakeTimer(),
         new CountingIdGenerator("shot"),
         writer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       for (const options of [{}, { format: undefined }]) {
         const result = await shot.execute(options);
@@ -91,6 +97,11 @@ describe("screenshot encoding and truthful metadata", () => {
         new FakeTimer(),
         new CountingIdGenerator("direct"),
         directWriter,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       const directResult = await direct.execute({});
       expect(directResult.path).toEndWith(".png");
@@ -107,6 +118,11 @@ describe("screenshot encoding and truthful metadata", () => {
         new FakeTimer(),
         new CountingIdGenerator("noarg"),
         noArgWriter,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       const noArgResult = await noArg.execute();
       expect(noArgResult.path).toEndWith(".png");
@@ -127,6 +143,9 @@ describe("screenshot encoding and truthful metadata", () => {
         pullWriter,
         fileSystem,
         () => "/screenshots",
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       const expectedPath = path.join(
         path.dirname(pull.generateScreenshotPath(0, {})),
@@ -138,8 +157,8 @@ describe("screenshot encoding and truthful metadata", () => {
       expect(pullResult.screenshotImageSize).toEqual(readImageHeaderDimensions(png));
       expect(pullResult.screenshotFormat).toBe("png");
       expect(pullResult.screenshotMimeType).toBe("image/png");
-      expect(await fileSystem.readFileBuffer(expectedPath)).toEqual(png);
-      expect(pullWriter.files.size).toBe(0);
+      expect(pullWriter.files.get(expectedPath)).toEqual(png);
+      expect(fileSystem.existsSync(`${expectedPath}.temp`)).toBe(false);
     } finally {
       AndroidCtrlProxyClient.getInstance = original;
     }
@@ -159,6 +178,11 @@ describe("screenshot encoding and truthful metadata", () => {
         new FakeTimer(),
         new CountingIdGenerator("shot"),
         writer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       for (const options of [undefined, {}]) {
         const result = await shot.execute(options);
@@ -175,7 +199,18 @@ describe("screenshot encoding and truthful metadata", () => {
 
   test("rejects contradictory options before any device request", async () => {
     const adb = new FakeAdbExecutor();
-    const shot = new TakeScreenshot(mockDevice, new FakeAdbClientFactory(adb));
+    const shot = new TakeScreenshot(
+      mockDevice,
+      new FakeAdbClientFactory(adb),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
+    );
     const result = await shot.execute({ format: "webp", quality: 80, lossless: true });
     expect(result.success).toBe(false);
     expect(result.error).toContain("Invalid screenshot options");
@@ -197,6 +232,11 @@ describe("screenshot encoding and truthful metadata", () => {
         new FakeTimer(),
         new CountingIdGenerator("shot"),
         writer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       const result = await shot.execute({ format: "jpeg", quality: 70 });
       expect(result.success).toBe(true);
@@ -231,6 +271,11 @@ describe("screenshot encoding and truthful metadata", () => {
         new FakeTimer(),
         new CountingIdGenerator("shot"),
         writer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       const result = await shot.execute({ format: "jpeg" });
       expect(result.path).toEndWith(".png");
@@ -257,6 +302,11 @@ describe("screenshot encoding and truthful metadata", () => {
         new FakeTimer(),
         new CountingIdGenerator("shot"),
         writer,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
       );
       const result = await shot.execute({ format: "webp", lossless: true });
       expect(result.success).toBe(true);

@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { AndroidPhysicalDisplayIdResolver } from "../../../src/features/observe/android/AndroidPhysicalDisplayId";
@@ -52,6 +53,8 @@ function createScreenshot(
     new FakeFileSystem(),
     () => "/screenshots/cache",
     new AndroidPhysicalDisplayIdResolver({ timer, displayRevision }),
+    undefined,
+    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
   );
 }
 
@@ -151,6 +154,9 @@ describe("TakeScreenshot Android physical display selection", function () {
       writer,
       new FakeFileSystem(),
       () => "/screenshots/cache",
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
 
     await Promise.all([
@@ -206,6 +212,9 @@ describe("TakeScreenshot Android physical display selection", function () {
       writer,
       new FakeFileSystem(),
       () => "/screenshots/cache",
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
 
     await captureBase64(screenshot, "/screenshots/warning.png");

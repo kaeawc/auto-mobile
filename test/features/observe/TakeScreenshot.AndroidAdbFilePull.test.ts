@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { describe, expect, test } from "bun:test";
 import path from "node:path";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";
@@ -38,6 +39,9 @@ describe("Android file-pull screenshots", function () {
       writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     await expect(
       (screenshot as any).captureScreenshotFilePull("/screenshots/quiet-failure.png", {
@@ -63,6 +67,9 @@ describe("Android file-pull screenshots", function () {
       writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     const firstPath = path.join(localDir, "first.png");
     const secondPath = path.join(localDir, "second.png");
@@ -109,6 +116,9 @@ describe("Android file-pull screenshots", function () {
       writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     fileSystem.setBinaryFile(`${finalPath}.temp`, pngBytes);
     await expect(
@@ -138,6 +148,9 @@ describe("Android file-pull screenshots", function () {
       writerFor(fileSystem),
       fileSystem,
       () => "/screenshots/cache",
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     const finalPath = path.join(localDir, "malicious.png");
     const tempFile = `/sdcard/screenshot_${screenshotTempIdToken("../evil id; rm -rf /")}.png`;
@@ -163,6 +176,9 @@ describe("Android file-pull screenshots", function () {
       undefined,
       fileSystem,
       () => "/screenshots/cache",
+      undefined,
+      undefined,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     const first = (screenshot as any).sanitizeDeviceTempId("a_b");
     const second = (screenshot as any).sanitizeDeviceTempId("ab");

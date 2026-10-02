@@ -12,7 +12,7 @@ import {
   type ResolutionAction,
 } from "./ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "./SearchableNode";
-import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
+import { resolveActionableHierarchyScreenSize } from "../observe/HierarchyNormalization";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 
@@ -33,6 +33,7 @@ export class ResolverElementSelector implements ElementSelector {
   constructor(
     private readonly resolver: Pick<ElementResolver, "resolve"> = new ElementResolver(),
     private readonly projection = new SearchableHierarchy(),
+    private readonly options: { iosMultiPanel?: boolean } = {},
   ) {}
 
   selectByText(
@@ -139,7 +140,7 @@ export class ResolverElementSelector implements ElementSelector {
       return undefined;
     }
     return (
-      extractHierarchyScreenSize(capture) ??
+      resolveActionableHierarchyScreenSize(capture, this.options.iosMultiPanel) ??
       (capture.screenWidth && capture.screenHeight
         ? { width: capture.screenWidth, height: capture.screenHeight }
         : undefined)

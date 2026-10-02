@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { ObserveResult, SkeletonElement } from "../../src/models/ObserveResult";
 import type { VideoRecordingMetadata } from "../../src/models/VideoRecording";
 import { readImageHeaderDimensions } from "../../src/utils/screenshot/imageHeaderDimensions";
+import { assertRecordingSpansObservation } from "./foldableRecordingSpan";
 
 const runLane = process.env.AUTOMOBILE_FOLDABLE_LANE === "1";
 const describeLane = runLane ? describe : describe.skip;
@@ -264,6 +265,7 @@ describeLane("foldable posture round trips through the daemon", () => {
     let stopped: RecordingResult | undefined;
     let opened: ObserveResult | undefined;
     let closed: ObserveResult | undefined;
+    let reopened: ObserveResult | undefined;
     try {
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
       opened = await expectPanel(sessionUuid, undefined, isFold ? "inner" : undefined, "opened");
@@ -288,7 +290,12 @@ describeLane("foldable posture round trips through the daemon", () => {
       await setPosture(sessionUuid, "closed", isFold ? undefined : "phone");
       closed = await expectPanel(sessionUuid, undefined, isFold ? "cover" : undefined, "closed");
       await setPosture(sessionUuid, "opened", isFold ? undefined : "unfolded");
-      await expectPanel(sessionUuid, opened.screenSize, isFold ? "inner" : undefined, "opened");
+      reopened = await expectPanel(
+        sessionUuid,
+        opened.screenSize,
+        isFold ? "inner" : undefined,
+        "opened",
+      );
     } finally {
       try {
         if (recordingStarted) {
@@ -319,6 +326,15 @@ describeLane("foldable posture round trips through the daemon", () => {
 
     expect(stopped?.recordings).toHaveLength(1);
     const metadata = stopped?.recordings[0]?.metadata;
+    if (!metadata || !reopened) {
+      throw new Error("Missing finalized recording metadata or post-unfold observation");
+    }
+    expect(reopened.screenshotSettled).toBe(true);
+    expect(reopened.screenshotSource).toBe("fresh");
+    // screenshotCapturedAt is the settled screenshot's host-file mtime (or host
+    // Timer.now), comparable to recording startedAt on the same stable host clock.
+    // Android freshness.actualTimestamp and updatedAt can use the device clock.
+    assertRecordingSpansObservation(metadata, Date.parse(reopened.screenshotCapturedAt ?? ""));
     expect(metadata?.recordedPanel?.key).toBeTruthy();
     expect(metadata?.recordedPanel).toMatchObject({
       key: opened!.display.key,

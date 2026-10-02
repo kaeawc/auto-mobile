@@ -3,8 +3,10 @@
  * Manual observe screenshot-mode benchmark with one full private daemon namespace
  * per run: lifecycle socket/PID/lock, auxiliary/WebRTC sockets, data/logs/DB and
  * launch cwd live in a unique short temp directory. Parent env is never mutated.
- * Both child launches require the private namespace; cleanup closes MCP, stops
- * only that namespace's daemon, then removes the directory (retained on stop failure).
+ * Each run selects an ephemeral loopback port and passes --port N --strict-port.
+ * A guard rejects resident/default paths, ports and unsafe argv before each spawn.
+ * SIGINT/SIGTERM and normal cleanup close MCP exactly once, then stop
+ * only that namespace's daemon and remove the directory (retained on stop failure).
  * Failure reasons are reported in JSON/table; all-failed series are INVALID and
  * exit nonzero unless --allow-failures. A missing build fails before any child.
  * Device coordination remains shared. pressButton volume_up is valid on Android
@@ -14,8 +16,14 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { resolve, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
-import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
+import { toActionableError } from "../src/models/ActionableError";
+import {
+  assertPrivateBenchmarkRunDir,
+  buildPrivateBenchmarkLaunch,
+  pickBenchmarkPort,
+  stopPrivateDaemon,
+  type BenchmarkLaunchOptions,
+} from "./benchmarkSettledScreenshotIsolation";
 import { errorMessage } from "../src/utils/describeUnknownError";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -34,7 +42,6 @@ import {
   type ScreenshotMode,
 } from "./benchmarkSettledScreenshotReport";
 import {
-  assertPrivateDaemonNamespace,
   assertServerBuilt,
   buildBenchmarkChildEnv,
   type BenchmarkChildEnv,
@@ -45,15 +52,22 @@ export interface BenchmarkClient {
   close(): Promise<void>;
 }
 export interface BenchmarkDeps {
-  createClient(serverPath: string, env: BenchmarkChildEnv): Promise<BenchmarkClient>;
+  createClient(options: BenchmarkLaunchOptions): Promise<BenchmarkClient>;
+  pickPort(): Promise<number>;
+  signals?: BenchmarkSignals;
   now(): number;
   log(message: string): void;
   write(path: string, content: string): void;
   makeRunDir(): string;
   removeRunDir(path: string): void;
   serverExists(path: string): boolean;
-  stopPrivateDaemon(serverPath: string, env: BenchmarkChildEnv): Promise<void>;
+  stopPrivateDaemon(options: BenchmarkLaunchOptions): Promise<void>;
   parentEnv?: BenchmarkChildEnv;
+}
+
+export interface BenchmarkSignals {
+  onTerminate(handler: (signal: "SIGINT" | "SIGTERM") => Promise<void>): () => void;
+  exit(code: 130 | 143): void;
 }
 
 const MODES: ScreenshotMode[] = ["async", "settled", "none"];
@@ -75,19 +89,54 @@ export async function runBenchmark(
   const serverPath = resolve(options.serverPath ?? resolve(repoRoot, "dist/src/index.js"));
   assertServerBuilt(serverPath, deps.serverExists(serverPath));
   const runDir = deps.makeRunDir();
-  let env: BenchmarkChildEnv | undefined;
+  let launch: BenchmarkLaunchOptions | undefined;
   let client: BenchmarkClient | undefined;
   let childAttempted = false;
+  let terminated = false;
+  let releaseSetup: () => void = () => {};
+  const setupDone = new Promise<void>((resolveSetup) => {
+    releaseSetup = resolveSetup;
+  });
+  let cleanupPromise: Promise<void> | undefined;
+  const cleanup = (): Promise<void> => {
+    cleanupPromise ??= setupDone.then(() =>
+      cleanupBenchmark(client, launch, runDir, childAttempted, deps),
+    );
+    return cleanupPromise;
+  };
+  const unregister = deps.signals?.onTerminate(async (signal) => {
+    if (terminated) {
+      return;
+    }
+    terminated = true;
+    await cleanup();
+    deps.signals?.exit(signal === "SIGINT" ? 130 : 143);
+  });
+  const assertRunning = (): void => {
+    if (terminated) {
+      throw new Error("Benchmark terminated; private cleanup requested.");
+    }
+  };
   try {
-    env = buildBenchmarkChildEnv(deps.parentEnv ?? process.env, runDir);
-    assertPrivateDaemonNamespace(env, runDir);
-    childAttempted = true;
-    client = await deps.createClient(serverPath, env);
+    try {
+      assertPrivateBenchmarkRunDir(runDir);
+      const port = await deps.pickPort();
+      assertRunning();
+      const env = buildBenchmarkChildEnv(deps.parentEnv ?? process.env, runDir);
+      launch = { serverPath, env, runDir, port };
+      buildPrivateBenchmarkLaunch(launch, "client");
+      childAttempted = true;
+      client = await deps.createClient(launch);
+    } finally {
+      releaseSetup();
+    }
+    assertRunning();
     const connectedClient = client;
     const target = options.deviceId
       ? { deviceId: options.deviceId }
       : { platform: options.platform };
     const call = async (name: string, args: Record<string, unknown>): Promise<unknown> => {
+      assertRunning();
       let envelope: unknown;
       try {
         envelope = await connectedClient.callTool(name, args);
@@ -96,6 +145,7 @@ export async function runBenchmark(
         deps.log(`Warning: ${name} failed: ${message}`);
         envelope = { isError: true, content: [{ type: "text", text: message }] };
       }
+      assertRunning();
       const state = envelopeState(envelope);
       if (state.parseError) {
         deps.log(`Warning: ${name} response JSON could not be parsed: ${state.parseError}`);
@@ -159,14 +209,17 @@ export async function runBenchmark(
       settledVsAsync: delta ? { observe: delta } : {},
     };
   } finally {
-    await cleanupBenchmark(client, serverPath, env, runDir, childAttempted, deps);
+    try {
+      await cleanup();
+    } finally {
+      unregister?.();
+    }
   }
 }
 
 async function cleanupBenchmark(
   client: BenchmarkClient | undefined,
-  serverPath: string,
-  env: BenchmarkChildEnv | undefined,
+  launch: BenchmarkLaunchOptions | undefined,
   runDir: string,
   childAttempted: boolean,
   deps: BenchmarkDeps,
@@ -176,35 +229,31 @@ async function cleanupBenchmark(
   } catch (error) {
     deps.log(`Warning: MCP close failed for ${runDir}: ${errorMessage(error)}`);
   }
-  if (childAttempted && env) {
+  if (childAttempted && launch) {
     try {
-      assertPrivateDaemonNamespace(env, runDir);
-      await deps.stopPrivateDaemon(serverPath, env);
+      buildPrivateBenchmarkLaunch(launch, "stop");
+      await deps.stopPrivateDaemon(launch);
     } catch (error) {
       deps.log(`Warning: private daemon stop failed; retaining ${runDir}: ${errorMessage(error)}`);
       return;
     }
   }
   try {
+    assertPrivateBenchmarkRunDir(runDir);
     deps.removeRunDir(runDir);
   } catch (error) {
     deps.log(`Warning: could not remove ${runDir}: ${errorMessage(error)}`);
   }
 }
 
-async function createSdkClient(
-  serverPath: string,
-  env: BenchmarkChildEnv,
-): Promise<BenchmarkClient> {
+async function createSdkClient(options: BenchmarkLaunchOptions): Promise<BenchmarkClient> {
+  const launch = buildPrivateBenchmarkLaunch(options, "client");
   const client = new Client({ name: "benchmark-settled-screenshot", version: "1.0.0" });
-  assertPrivateDaemonNamespace(env, env.AUTOMOBILE_AUX_SOCKET_DIR ?? "");
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [serverPath],
+    args: launch.args,
     stderr: "inherit",
-    env: Object.fromEntries(
-      Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-    ),
+    env: launch.env,
   });
   try {
     await client.connect(transport);
@@ -214,44 +263,12 @@ async function createSdkClient(
     } catch (closeError) {
       console.warn(`Warning: failed MCP connection cleanup: ${errorMessage(closeError)}`);
     }
-    throw new Error(`MCP connection failed: ${errorMessage(error)}`, { cause: error });
+    throw toActionableError(error, "MCP connection failed; check the private daemon startup error");
   }
   return {
     callTool: (name, args) => client.callTool({ name, arguments: args }),
     close: () => client.close(),
   };
-}
-
-async function stopPrivateDaemon(
-  serverPath: string,
-  env: BenchmarkChildEnv,
-  timer: Timer = defaultTimer,
-): Promise<void> {
-  assertPrivateDaemonNamespace(env, env.AUTOMOBILE_AUX_SOCKET_DIR ?? "");
-  // Bound the wait without signalling any process. On timeout the directory
-  // remains available for the operator, even if the stop command is still alive.
-  const child = spawn(process.execPath, [serverPath, "--daemon", "stop"], {
-    env,
-    stdio: ["ignore", "ignore", "inherit"],
-  });
-  await new Promise<void>((resolveStop, reject) => {
-    const timeout = timer.setTimeout(() => {
-      child.unref();
-      reject(new Error("Private daemon stop timed out after 30000ms."));
-    }, 30_000);
-    child.once("error", (error) => {
-      timer.clearTimeout(timeout);
-      reject(error);
-    });
-    child.once("close", (code, signal) => {
-      timer.clearTimeout(timeout);
-      if (code === 0) {
-        resolveStop();
-      } else {
-        reject(new Error(`Private daemon stop exited with ${signal ?? code}.`));
-      }
-    });
-  });
 }
 
 async function main(): Promise<void> {
@@ -271,6 +288,27 @@ async function main(): Promise<void> {
   }
   const deps: BenchmarkDeps = {
     createClient: createSdkClient,
+    pickPort: pickBenchmarkPort,
+    signals: {
+      onTerminate: (handler) => {
+        const interrupt = () => {
+          // Keep duplicate signals trapped until idempotent cleanup completes.
+          process.once("SIGINT", interrupt);
+          void handler("SIGINT");
+        };
+        const terminate = () => {
+          process.once("SIGTERM", terminate);
+          void handler("SIGTERM");
+        };
+        process.once("SIGINT", interrupt);
+        process.once("SIGTERM", terminate);
+        return () => {
+          process.removeListener("SIGINT", interrupt);
+          process.removeListener("SIGTERM", terminate);
+        };
+      },
+      exit: (code) => process.exit(code),
+    },
     now: () => performance.now(),
     log: (message) => console.log(message),
     write: (path, content) => writeFileSync(path, content, "utf8"),

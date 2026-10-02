@@ -119,6 +119,7 @@ describe("benchmark-settled-screenshot pure logic", () => {
     const fake = new FakeClient();
     const deps: BenchmarkDeps = {
       createClient: async () => fake,
+      pickPort: async () => 49152,
       now: (() => {
         let n = 0;
         return () => n++;

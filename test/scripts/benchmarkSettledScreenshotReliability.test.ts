@@ -58,13 +58,14 @@ function harness(
   let dirs = 0;
   const deps: BenchmarkDeps = {
     serverExists: () => true,
+    pickPort: async () => 49152,
     parentEnv: { PATH: "/fake/bin", AUTOMOBILE_COORDINATION_DIR: "/fake/shared" },
     makeRunDir: () => {
       events.push("make");
       dirs += 1;
       return `${runDir}-${dirs}`;
     },
-    createClient: async (server, env) => {
+    createClient: async ({ serverPath: server, env }) => {
       expect(server).toBe(resolve("/fake/server.js"));
       assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
       events.push("create");
@@ -79,7 +80,7 @@ function harness(
         },
       };
     },
-    stopPrivateDaemon: async (server, env) => {
+    stopPrivateDaemon: async ({ serverPath: server, env }) => {
       expect(server).toBe(resolve("/fake/server.js"));
       assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
       expect(env).toBe(envs.at(-1));
@@ -346,7 +347,7 @@ describe("benchmark injectable lifecycle", () => {
 
   test("a failed connection still attempts private stop", async () => {
     const fake = harness();
-    fake.deps.createClient = async (_server, env) => {
+    fake.deps.createClient = async ({ env }) => {
       assertPrivateDaemonNamespace(env, `${runDir}-1`);
       fake.envs.push(env);
       throw new Error("connect failed");
@@ -374,8 +375,9 @@ describe("benchmark injectable lifecycle", () => {
   test("guard refuses cleanup if the env has been retargeted", async () => {
     const fake = harness();
     const create = fake.deps.createClient;
-    fake.deps.createClient = async (server, env) => {
-      const client = await create(server, env);
+    fake.deps.createClient = async (launch) => {
+      const client = await create(launch);
+      const { env } = launch;
       env.AUTOMOBILE_DAEMON_SOCKET_PATH = "/outside/resident.sock";
       return client;
     };
@@ -386,7 +388,7 @@ describe("benchmark injectable lifecycle", () => {
 
   test("close and removal errors do not replace the primary failure", async () => {
     const fake = harness();
-    fake.deps.createClient = async (_server, env) => {
+    fake.deps.createClient = async ({ env }) => {
       fake.envs.push(env);
       return {
         callTool: async () => ({

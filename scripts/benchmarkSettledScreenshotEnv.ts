@@ -42,7 +42,14 @@ export function buildBenchmarkChildEnv(
   pathApi: BenchmarkPathApi = nodePath,
 ): BenchmarkChildEnv {
   const paths = privatePaths(runDir, pathApi);
-  const env = { ...parentEnv, ...paths };
+  const env = { ...parentEnv };
+  // Daemon launch metadata and timing selectors must not leak from the parent.
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("AUTOMOBILE_DAEMON_") || key.startsWith("AUTO_MOBILE_DAEMON_")) {
+      delete env[key];
+    }
+  }
+  Object.assign(env, paths);
   delete env.AUTOMOBILE_DB_DIR;
   for (const key of legacyKeys(paths)) {
     delete env[key];
@@ -55,7 +62,7 @@ export function assertPrivateDaemonNamespace(
   env: BenchmarkChildEnv,
   runDir: string,
   pathApi: BenchmarkPathApi = nodePath,
-): void {
+): Record<string, string> {
   const paths = privatePaths(runDir, pathApi);
   for (const [key, expected] of Object.entries(paths)) {
     if (env[key] !== expected) {
@@ -67,6 +74,7 @@ export function assertPrivateDaemonNamespace(
       throw new Error(`Refusing benchmark child launch: ${key} must be absent.`);
     }
   }
+  return paths;
 }
 
 export function assertServerBuilt(serverPath: string, exists: boolean): void {

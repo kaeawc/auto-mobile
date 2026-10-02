@@ -11,6 +11,7 @@ import { ActionableError } from "../../../src/models/ActionableError";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -119,6 +120,86 @@ describe("ObserveScreen skip options", () => {
       (result as ObserveResult & { screenshotCaptureAttempted?: boolean })
         .screenshotCaptureAttempted,
     ).toBe(false);
+  });
+
+  test("a push after panel reconciliation retains the reconciled display provenance", async () => {
+    const foldedDevice: BootedDevice = {
+      deviceId: "observe-reconciled-provenance",
+      name: "Foldable",
+      platform: "android",
+      displays: {
+        panels: [
+          { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } },
+          { key: "cover", role: "cover", sizePx: { width: 100, height: 100 } },
+        ],
+        postures: ["opened", "closed"],
+      },
+    };
+    const timer = new FakeTimer();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponseSequence("cmd display get-displays", [
+      {
+        stdout: 'Display id 0: DisplayInfo{uniqueId "local:inner" type INTERNAL, real 200 x 200}',
+        stderr: "",
+      },
+      {
+        stdout: 'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}',
+        stderr: "",
+      },
+    ]);
+    const hierarchy = new FakeViewHierarchy();
+    hierarchy.configureHierarchySequence([
+      { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200, updatedAt: 1 },
+      { hierarchy: { node: {} }, screenWidth: 100, screenHeight: 100, updatedAt: 2 },
+    ]);
+    let pushAfterReconciliation = false;
+    let reconciledRevision = -1;
+    let reconciledGeneration = -1;
+    const detector: Pick<AccessibilityStateDetector, "run"> = {
+      async run(result): Promise<void> {
+        if (pushAfterReconciliation) {
+          expect(result.display.key).toBe("cover");
+          reconciledRevision = displayTransitions.revision(foldedDevice.deviceId);
+          reconciledGeneration = displayTransitions.identityRevision(foldedDevice.deviceId);
+          displayTransitions.notifyAndroidTransition(foldedDevice.deviceId, {
+            change: "device_state",
+            displayId: 0,
+            deviceState: 2,
+          });
+        }
+      },
+    };
+    const screen = new RealObserveScreen(
+      foldedDevice,
+      new FakeAdbClientFactory(adb),
+      {
+        viewHierarchy: hierarchy,
+        cacheStore: new FakeObserveCacheStore(timer),
+        accessibilityStateDetector: detector as AccessibilityStateDetector,
+      },
+      timer,
+    );
+    const options = {
+      skipScreenshot: true,
+      skipBackStack: true,
+      skipRecompositionTracking: true,
+      skipPerformanceAudit: true,
+      skipAccessibilityAudit: true,
+    };
+    displayTransitions.reset(foldedDevice.deviceId);
+    try {
+      const first = await screen.execute(options);
+      pushAfterReconciliation = true;
+      const folded = await screen.execute(options);
+      expect(first.display.key).toBe("inner");
+      expect(reconciledGeneration).toBe(first.display.generation + 1);
+      expect(reconciledRevision).toBe(first.displayRevision! + 1);
+      expect(displayTransitions.revision(foldedDevice.deviceId)).toBe(reconciledRevision + 1);
+      expect(folded.display.generation).toBe(reconciledGeneration);
+      expect(folded.displayRevision).toBe(reconciledRevision);
+    } finally {
+      displayTransitions.reset(foldedDevice.deviceId);
+    }
   });
 
   test("skipCache defers the write without skipping back-stack collection; default observe still writes", async () => {

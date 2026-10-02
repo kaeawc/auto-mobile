@@ -553,7 +553,7 @@ function resolveBackStackActivityAttribution(
   return ownedByPackage ? { packageName, activityName } : undefined;
 }
 
-function hasUsableHierarchy(hierarchy: ObserveResult["viewHierarchy"]): boolean {
+export function hasUsableHierarchy(hierarchy: ObserveResult["viewHierarchy"]): boolean {
   return (
     hierarchy?.hierarchy !== undefined &&
     typeof hierarchy.hierarchy === "object" &&
@@ -1443,12 +1443,12 @@ export class RealObserveScreen implements ObserveScreen {
             : "android",
           recordProvenance,
         );
-      // Stale coordinates retain their capture-start fence, never the active panel's generation.
+      // Stale coordinates retain this observation's reconciled provenance, never a later push's fence.
       result.display.generation = staleDisplay
-        ? captureStart.identityRevision
+        ? recordProvenance.identityRevision
         : displayTransitions.identityRevision(this.device.deviceId);
       result.displayRevision = staleDisplay
-        ? captureStart.revision
+        ? recordProvenance.revision
         : displayTransitions.revision(this.device.deviceId);
       if (geometryTransition) {
         cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);

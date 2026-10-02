@@ -1,6 +1,7 @@
+import com.android.build.api.dsl.LibraryExtension
 import com.vanniktech.maven.publish.AndroidMultiVariantLibrary
 import com.vanniktech.maven.publish.JavadocJar
-import java.util.concurrent.TimeUnit
+import dev.jasonpearson.automobile.buildlogic.api.SdkApiSignature
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -27,6 +28,15 @@ android {
   testOptions {
     unitTests.isReturnDefaultValues = true
   }
+
+  // Compile the same signature implementation for JVM tests without shipping it in the SDK.
+  // Use the new DSL type to avoid AGP's legacy AndroidLibrarySourceSet cast.
+  (this as LibraryExtension)
+    .sourceSets
+    .getByName("test")
+    .kotlin
+    .directories
+    .add("../build-logic/src/main/kotlin/dev/jasonpearson/automobile/buildlogic/api")
 
   buildTypes {
     release {
@@ -100,8 +110,10 @@ tasks.withType<KotlinCompile>().configureEach {
 // --- API surface tracking ---
 // BCV (binary-compatibility-validator) is incompatible with AGP 9 because AGP 9 no longer
 // applies the "kotlin-android" plugin ID that BCV's withPlugin callback relies on.
-// These custom tasks use javap to produce a public API signature file from compiled release
-// classes. apiDump generates the baseline and apiCheck verifies it hasn't changed.
+// These custom tasks use javap -public -constants to track declarations and inlined constant
+// values from compiled release classes. Only public declarations with public enclosing classes
+// are included; anonymous/local/lambda classes are excluded. apiDump generates the baseline
+// and apiCheck verifies it hasn't changed.
 
 abstract class SdkApiSignatureTask : DefaultTask() {
   @get:InputFiles
@@ -109,37 +121,11 @@ abstract class SdkApiSignatureTask : DefaultTask() {
   abstract val releaseClasses: ConfigurableFileCollection
 
   protected fun generateApiSignature(): String {
-    val classesDir = releaseClasses
-    val classpath = classesDir.files.joinToString(":") { it.path }
-    val classNames =
-      classesDir.asFileTree
-        .matching { include("**/*.class") }
-        .files
-        .sortedBy { it.path }
-        .mapNotNull { classFile ->
-          val relativePath =
-            classesDir.files.firstNotNullOfOrNull { root ->
-              if (classFile.startsWith(root)) classFile.relativeTo(root).path else null
-            } ?: return@mapNotNull null
-          if ("\$\$" in relativePath || "BuildConfig" in relativePath) return@mapNotNull null
-          relativePath.removeSuffix(".class").replace('/', '.')
-        }
-    if (classNames.isEmpty()) return ""
-    // Run javap once with all class names for efficiency
-    val proc =
-      ProcessBuilder(listOf("javap", "-public", "-classpath", classpath) + classNames)
-        .redirectErrorStream(true)
-        .start()
-    val output = proc.inputStream.bufferedReader().readText()
-    val exited = proc.waitFor(60, TimeUnit.SECONDS)
-    if (!exited) {
-      proc.destroyForcibly()
-      throw GradleException("javap timed out after 60 seconds")
+    try {
+      return SdkApiSignature().generate(releaseClasses.files)
+    } catch (error: IllegalStateException) {
+      throw GradleException(error.message ?: "API signature generation failed", error)
     }
-    if (proc.exitValue() != 0) {
-      throw GradleException("javap failed with exit code ${proc.exitValue()}: $output")
-    }
-    return output.trim() + "\n"
   }
 }
 

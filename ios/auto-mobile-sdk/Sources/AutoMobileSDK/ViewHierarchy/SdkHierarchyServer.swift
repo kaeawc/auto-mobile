@@ -34,6 +34,7 @@
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
     final class SdkHierarchyServer: @unchecked Sendable {
         static let port: UInt16 = 8766
+        static let bindFailureLogPrefix = "[AutoMobileSDK] SDK_SERVER_BIND_FAILED"
         private static let httpHeaderDelimiter = Data("\r\n\r\n".utf8)
         private static let maxHttpBodyBytes = 1024 * 1024
 
@@ -45,6 +46,8 @@
         private var isStarted = false
         private let identity: SdkSimulatorIdentity
         private let warning: (String) -> Void
+        private let error: (String) -> Void
+        private var bindPlanner = SdkBindPlanner()
         private let listenerFactory: (UInt16) throws -> any SdkHierarchyListener
         private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
         private weak var tracker: (any SdkHierarchyServing)?
@@ -59,11 +62,13 @@
             portListenerFactory: @escaping (UInt16) throws -> any SdkHierarchyListener = {
                 try SdkHierarchyServer.makeListener(port: $0)
             },
-            warning: @escaping (String) -> Void = { InternalLogger.warning($0) }
+            warning: @escaping (String) -> Void = { InternalLogger.warning($0) },
+            error: @escaping (String) -> Void = { InternalLogger.error($0) }
         ) {
             self.tracker = tracker
             self.identity = identity
             self.warning = warning
+            self.error = error
             if let listenerFactory {
                 self.listenerFactory = { _ in try listenerFactory() }
             } else {
@@ -74,6 +79,12 @@
 
         // MARK: - Lifecycle
 
+        var bindState: SdkServerBindState {
+            lock.lock()
+            defer { lock.unlock() }
+            return bindPlanner.state
+        }
+
         func start() {
             // Keep assign/configure/start atomic with stop(). NWListener callbacks run
             // asynchronously; fake listeners deliver state changes after start returns.
@@ -81,33 +92,30 @@
             defer { lock.unlock() }
             guard !isStarted else { return }
             isStarted = true
-            startPrimary(attempt: 0)
+            advancePrimary(.start)
             if identity.udid != nil {
-                startListener(port: Self.port, attempt: 0, legacy: true)
+                startListener(port: Self.port, legacy: true)
             }
         }
 
-        /// Called with the lifecycle lock held; creation failures probe synchronously.
-        private func startPrimary(attempt: Int) {
-            if let udid = identity.udid {
-                guard attempt < SdkSimulatorPort.probeCount else {
-                    warning(
-                        "[SdkHierarchyServer] Simulator \(udid): all \(SdkSimulatorPort.probeCount) "
-                            + "port candidates failed; the in-app server is unavailable on this device"
-                    )
-                    return
-                }
-                startListener(
-                    port: SdkSimulatorPort.simulatorPort(udid: udid, attempt: attempt),
-                    attempt: attempt,
-                    legacy: false
+        /// Called with the lifecycle lock held. The pure planner owns all primary decisions.
+        private func advancePrimary(_ event: SdkBindPlanner.Event) {
+            let transition = bindPlanner.next(event, udid: identity.udid)
+            let previousState = bindPlanner.state
+            bindPlanner = transition.planner
+            if case let .failed(ports, reason) = bindPlanner.state, previousState != bindPlanner.state {
+                if identity.udid == nil { isStarted = false }
+                error(
+                    "\(Self.bindFailureLogPrefix) udid=\(identity.udid ?? "none") "
+                        + "attemptedPorts=\(ports) lastReason=\(reason)"
                 )
-            } else {
-                startListener(port: Self.port, attempt: 0, legacy: false)
+            }
+            if let port = transition.port {
+                startListener(port: port, legacy: false)
             }
         }
 
-        private func startListener(port: UInt16, attempt: Int, legacy: Bool) {
+        private func startListener(port: UInt16, legacy: Bool) {
             do {
                 let nextListener = try listenerFactory(port)
                 let token = UUID()
@@ -119,19 +127,19 @@
                     listenerToken = token
                 }
                 nextListener.stateUpdateHandler = { [weak self] state in
-                    self?.listenerStateChanged(state, token: token, port: port, attempt: attempt, legacy: legacy)
+                    self?.listenerStateChanged(state, token: token, port: port, legacy: legacy)
                 }
                 nextListener.newConnectionHandler = { [weak self] connection in
                     self?.handleConnection(connection)
                 }
                 nextListener.start(queue: queue)
             } catch {
-                listenerFailed(port: port, attempt: attempt, legacy: legacy, reason: String(describing: error))
+                listenerFailed(port: port, legacy: legacy, reason: String(describing: error))
             }
         }
 
         private func listenerStateChanged(
-            _ state: NWListener.State, token: UUID, port: UInt16, attempt: Int, legacy: Bool
+            _ state: NWListener.State, token: UUID, port: UInt16, legacy: Bool
         ) {
             lock.lock()
             defer { lock.unlock() }
@@ -139,6 +147,7 @@
             guard isStarted, token == (legacy ? legacyToken : listenerToken) else { return }
             switch state {
             case .ready:
+                if !legacy { advancePrimary(.ready(port)) }
                 InternalLogger.debug("[SdkHierarchyServer] Ready on port \(port)")
             case let .failed(error):
                 if legacy {
@@ -152,22 +161,19 @@
                     listenerToken = nil
                     failed?.cancel()
                 }
-                listenerFailed(port: port, attempt: attempt, legacy: legacy, reason: String(describing: error))
+                listenerFailed(port: port, legacy: legacy, reason: String(describing: error))
             default:
                 break
             }
         }
 
-        private func listenerFailed(port: UInt16, attempt: Int, legacy: Bool, reason: String) {
+        private func listenerFailed(port: UInt16, legacy: Bool, reason: String) {
             if legacy {
                 // Another simulator may own 8766. The identity-verified listener is sufficient.
                 InternalLogger.debug("[SdkHierarchyServer] Legacy port \(port) unavailable: \(reason)")
-            } else if identity.udid != nil {
-                InternalLogger.debug("[SdkHierarchyServer] Probe port \(port) failed: \(reason)")
-                startPrimary(attempt: attempt + 1)
             } else {
-                isStarted = false
-                warning("[SdkHierarchyServer] Failed on port \(port): \(reason)")
+                InternalLogger.debug("[SdkHierarchyServer] Probe port \(port) failed: \(reason)")
+                advancePrimary(.failed(reason))
             }
         }
 
@@ -179,6 +185,7 @@
             listenerToken = nil
             legacyToken = nil
             isStarted = false
+            bindPlanner = SdkBindPlanner()
             lock.unlock()
             for listener in listenersToCancel {
                 listener.cancel()

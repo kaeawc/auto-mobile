@@ -9,12 +9,38 @@ import { spawnArgv } from "./realDeviceToolSpawnGuard";
 // An env override would leak to child server/daemon processes in integration tests.
 testOverrides.gitMetadataClient = { readVersion: () => null };
 
-/** Record import-time git probes, including ones swallowed by version fallback. */
+/**
+ * Match GitMetadataClient's three initial version probes, ignoring other test
+ * files' git commands. Keep this local so importing production code cannot bind
+ * spawnSync before the recording hooks are installed.
+ */
+export function isGitVersionProbe(argv: readonly string[]): boolean {
+  if (argv[0] !== "git") {
+    return false;
+  }
+  return (
+    (argv.length === 3 && argv[1] === "rev-parse" && argv[2] === "--show-toplevel") ||
+    (argv.length === 4 &&
+      argv[1] === "rev-parse" &&
+      argv[2] === "--short=12" &&
+      argv[3] === "HEAD") ||
+    (argv.length === 4 &&
+      argv[1] === "status" &&
+      argv[2] === "--porcelain" &&
+      argv[3] === "--untracked-files=no")
+  );
+}
+
+/** Record version probes, including ones swallowed by version fallback. */
 export const gitVersionPreloadSpawns: string[][] = [];
 childProcess.spawnSync = new Proxy(childProcess.spawnSync, {
   apply(target, thisArg, args: unknown[]) {
-    if (args[0] === "git") {
-      gitVersionPreloadSpawns.push(["git"]);
+    const argv =
+      args[0] === "git" && Array.isArray(args[1]) && args[1].every((arg) => typeof arg === "string")
+        ? ["git", ...args[1]]
+        : [];
+    if (isGitVersionProbe(argv)) {
+      gitVersionPreloadSpawns.push([...argv]);
     }
     return Reflect.apply(target, thisArg, args);
   },
@@ -22,7 +48,7 @@ childProcess.spawnSync = new Proxy(childProcess.spawnSync, {
 Bun.spawnSync = new Proxy(Bun.spawnSync, {
   apply(target, thisArg, args: unknown[]) {
     const argv = spawnArgv(args);
-    if (argv[0] === "git") {
+    if (isGitVersionProbe(argv)) {
       gitVersionPreloadSpawns.push([...argv]);
     }
     return Reflect.apply(target, thisArg, args);

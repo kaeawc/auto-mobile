@@ -17,10 +17,13 @@ import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { LocationRouteRegistry } from "../../src/features/utility/LocationRoutePlayer";
 
 const createBootedDevice = (
   deviceId: string,
@@ -33,6 +36,204 @@ const createBootedDevice = (
 });
 
 describe("device state tools", () => {
+  for (const location of [
+    { mode: "static" as const, latitude: 1, longitude: 2 },
+    {
+      mode: "route" as const,
+      waypoints: [
+        { latitude: 0, longitude: 0 },
+        { latitude: 1, longitude: 1 },
+      ],
+      durationMs: 1000,
+    },
+  ]) {
+    test(`tracks a location-only ${location.mode} request through session setup`, async () => {
+      const timer = new FakeTimer();
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+      );
+      const pool = new DevicePool(
+        createDevicePoolDependencies(manager, "test-daemon", {
+          timer,
+          deviceManager: new FakeDeviceManager([], []),
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+        }),
+      );
+      DaemonState.getInstance().initialize(manager, pool);
+      await manager.createSession("location-session", "emulator-5554", "android");
+      const tracking = spyOn(manager, "trackSessionSetup");
+      const setState = spyOn(DeviceState.prototype, "setState").mockResolvedValue({
+        success: true,
+        deviceId: "emulator-5554",
+        platform: "android",
+      });
+      try {
+        await ToolRegistry.getTool("setDeviceState")!.deviceAwareHandler!(
+          createBootedDevice("emulator-5554"),
+          {
+            sessionUuid: "location-session",
+            location,
+          },
+        );
+        expect(tracking).toHaveBeenCalledTimes(1);
+        expect(setState).toHaveBeenCalledTimes(1);
+        await manager.rebindSession("location-session", "emulator-5556", "android");
+        await expect(
+          ToolRegistry.getTool("setDeviceState")!.deviceAwareHandler!(
+            createBootedDevice("emulator-5554"),
+            {
+              sessionUuid: "location-session",
+              location,
+            },
+          ),
+        ).rejects.toBeInstanceOf(ActionableError);
+        expect(setState).toHaveBeenCalledTimes(1);
+      } finally {
+        tracking.mockRestore();
+        setState.mockRestore();
+        manager.stopCleanupTimer();
+      }
+    });
+  }
+
+  test("combined biometric/location request is tracked once when capture succeeds", async () => {
+    const timer = new FakeTimer();
+    const manager = new SessionManager(
+      timer,
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+    );
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "test-daemon", {
+        timer,
+        deviceManager: new FakeDeviceManager([], []),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+      }),
+    );
+    DaemonState.getInstance().initialize(manager, pool);
+    await manager.createSession("location-session", "sim-1", "ios");
+    const tracking = spyOn(manager, "trackSessionSetup");
+    const capture = spyOn(DeviceState.prototype, "getBiometricEnrollmentState").mockResolvedValue({
+      supported: true,
+      enrollment: "not_enrolled",
+    });
+    const setState = spyOn(DeviceState.prototype, "setState").mockResolvedValue({
+      success: true,
+      deviceId: "sim-1",
+      platform: "ios",
+      location: { supported: true, mode: "static" },
+    });
+    try {
+      const location = { mode: "static" as const, latitude: 1, longitude: 2 };
+      const response = await ToolRegistry.getTool("setDeviceState")!.deviceAwareHandler!(
+        createBootedDevice("sim-1", "ios"),
+        {
+          sessionUuid: "location-session",
+          location,
+          biometrics: { enrollment: "enrolled" },
+        },
+      );
+      expect(setState).toHaveBeenCalledTimes(1);
+      expect(setState.mock.calls[0][0].location).toEqual(location);
+      expect(setState.mock.calls[0][0].biometrics).toEqual({ enrollment: "enrolled" });
+      expect(tracking).toHaveBeenCalledTimes(1);
+      const payload = JSON.parse(
+        (response as { content: Array<{ text: string }> }).content[0].text,
+      );
+      expect(payload.success).toBe(true);
+    } finally {
+      tracking.mockRestore();
+      capture.mockRestore();
+      setState.mockRestore();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  for (const mode of ["static", "route"] as const) {
+    for (const releaseDuringCapture of [false, true]) {
+      test(`biometric capture failure skips ${mode} location and preserves failure${releaseDuringCapture ? " after release" : ""}`, async () => {
+        const timer = new FakeTimer();
+        const manager = new SessionManager(
+          timer,
+          new FakeDeviceSessionPersistence(),
+          () => new FakeDbWriteBarrier(),
+        );
+        const pool = new DevicePool(
+          createDevicePoolDependencies(manager, "test-daemon", {
+            timer,
+            deviceManager: new FakeDeviceManager([], []),
+            installedAppsRepository: new FakeInstalledAppsRepository(),
+          }),
+        );
+        DaemonState.getInstance().initialize(manager, pool);
+        const device = createBootedDevice("12345678-1234-1234-1234-123456789ABC", "ios");
+        await manager.createSession("location-session", device.deviceId, "ios");
+        const simctl = new FakeSimCtlClient();
+        const registry = new LocationRouteRegistry(timer);
+        const state = new DeviceState(device, { timer, simctl, routeRegistry: registry });
+        const originalSetState = DeviceState.prototype.setState;
+        const setState = spyOn(DeviceState.prototype, "setState").mockImplementation((input) =>
+          originalSetState.call(state, input),
+        );
+        const biometrics = { supported: false, error: "capture failed" };
+        const capture = spyOn(
+          DeviceState.prototype,
+          "getBiometricEnrollmentState",
+        ).mockImplementation(async () => {
+          if (releaseDuringCapture) {
+            await manager.releaseSession("location-session");
+          }
+          return biometrics;
+        });
+        const start = spyOn(registry, "start");
+        const tracking = spyOn(manager, "trackSessionSetup");
+        try {
+          const location =
+            mode === "static"
+              ? { mode, latitude: 1, longitude: 2 }
+              : {
+                  mode,
+                  waypoints: [
+                    { latitude: 0, longitude: 0 },
+                    { latitude: 1, longitude: 1 },
+                  ],
+                  durationMs: 1000,
+                };
+          const response = await ToolRegistry.getTool("setDeviceState")!.deviceAwareHandler!(
+            device,
+            {
+              sessionUuid: "location-session",
+              location,
+              biometrics: { enrollment: "enrolled" },
+            },
+          );
+          const payload = JSON.parse(
+            (response as { content: Array<{ text: string }> }).content[0].text,
+          );
+          expect(payload.success).toBe(false);
+          expect(payload.error).toBe("capture failed");
+          expect(payload.message).toBe("capture failed");
+          expect(payload.biometrics).toEqual(biometrics);
+          expect(payload.location).toBeUndefined();
+          expect(setState).not.toHaveBeenCalled();
+          expect(start).not.toHaveBeenCalled();
+          expect(tracking).not.toHaveBeenCalled();
+          timer.advanceTime(0);
+          expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+        } finally {
+          capture.mockRestore();
+          setState.mockRestore();
+          start.mockRestore();
+          tracking.mockRestore();
+          registry.stopAll();
+          manager.stopCleanupTimer();
+        }
+      });
+    }
+  }
+
   beforeEach(() => {
     ToolRegistry.clearTools();
     registerUtilityTools();

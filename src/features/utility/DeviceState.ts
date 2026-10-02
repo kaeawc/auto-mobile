@@ -478,6 +478,7 @@ export interface DeviceStateDependencies {
   timer?: Timer;
   consoleFactory?: EmulatorConsoleClientFactory;
   routeRegistry?: LocationRouteRegistry;
+  canWriteLocation?: () => boolean;
   clockAdapter?: DeviceClockAdapter;
   clockRestoreRegistry?: DeviceClockRestoreRegistry;
   invalidateClockCaches?: (deviceId: string) => void;
@@ -1295,6 +1296,8 @@ function validateClockCombinedInputs(input: SetDeviceStateInput): void {
   }
 }
 
+class LocationWriteAdmissionError extends ActionableError {}
+
 export class DeviceState {
   private device: BootedDevice;
 
@@ -1305,6 +1308,7 @@ export class DeviceState {
   private timer: Timer;
   private consoleFactory: EmulatorConsoleClientFactory;
   private routeRegistry: LocationRouteRegistry;
+  private readonly canWriteLocation: () => boolean;
   private readonly clockAdapter: DeviceClockAdapter;
   private readonly clockRestoreRegistry: DeviceClockRestoreRegistry;
   private readonly clockSignal: AbortSignal;
@@ -1334,9 +1338,9 @@ export class DeviceState {
       dependencies.invalidateClockCaches ??
       ((deviceId) => invalidateDisplayCaches(deviceId, "Device clock changed"));
     this.simctl = dependencies.simctl ?? null;
-    this.timer = dependencies.timer ?? defaultTimer;
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
     this.routeRegistry = dependencies.routeRegistry ?? defaultLocationRouteRegistry;
+    this.canWriteLocation = dependencies.canWriteLocation ?? (() => true);
   }
 
   async getState(
@@ -1469,7 +1473,10 @@ export class DeviceState {
         ),
       );
     } catch (error) {
-      if (error instanceof DeviceClockValidationError) {
+      if (
+        error instanceof DeviceClockValidationError ||
+        error instanceof LocationWriteAdmissionError
+      ) {
         throw error;
       }
       logger.warn(`Clock mutation failed for ${this.device.deviceId}`, error);
@@ -1556,6 +1563,14 @@ export class DeviceState {
     return this.writeStaticLocation(input);
   }
 
+  private assertLocationWriteAdmitted(): void {
+    if (!this.canWriteLocation()) {
+      throw new LocationWriteAdmissionError(
+        "Cannot change location: session is released, releasing, rebound, or replaced.",
+      );
+    }
+  }
+
   private async writeStaticLocation(
     input: Extract<SetDeviceLocationInput, { mode: "static" }>,
   ): Promise<DeviceLocationState> {
@@ -1577,6 +1592,7 @@ export class DeviceState {
           this.device.deviceId,
           "replaced",
         ));
+        this.assertLocationWriteAdmitted();
         await simctl.executeCommandArgs([
           "location",
           this.device.deviceId,
@@ -1592,6 +1608,9 @@ export class DeviceState {
           previousRoute,
         };
       } catch (error) {
+        if (error instanceof LocationWriteAdmissionError) {
+          throw error;
+        }
         logger.warn(
           `Failed to set iOS Simulator location for ${this.device.deviceId}: ${errorMessage(error)}`,
           error,
@@ -1627,6 +1646,7 @@ export class DeviceState {
         "replaced",
       ));
       const consoleClient: EmulatorConsoleClient = this.consoleFactory(port);
+      this.assertLocationWriteAdmitted();
       await consoleClient.geoFix(input.longitude, input.latitude);
       return {
         supported: true,
@@ -1637,6 +1657,9 @@ export class DeviceState {
         previousRoute,
       };
     } catch (error) {
+      if (error instanceof LocationWriteAdmissionError) {
+        throw error;
+      }
       logger.warn(
         `Failed to set Android emulator location for ${this.device.deviceId}: ${errorMessage(error)}`,
         error,
@@ -1675,6 +1698,7 @@ export class DeviceState {
         throw new ActionableError("simctl client does not support argv commands");
       }
       emit = async (point, options) => {
+        this.assertLocationWriteAdmitted();
         await simctl.executeCommandArgs!(
           ["location", this.device.deviceId, "set", `${point.latitude},${point.longitude}`],
           options.timeoutMs,
@@ -1713,6 +1737,7 @@ export class DeviceState {
       }
       const client = this.consoleFactory(port);
       emit = async (point, options) => {
+        this.assertLocationWriteAdmitted();
         await client.geoFix(point.longitude, point.latitude, point.altitude, options.signal);
       };
       method = "android_emulator_console";
@@ -1721,6 +1746,8 @@ export class DeviceState {
       this.device.deviceId,
       "replaced",
     );
+    // Setup drain is bounded; re-check ownership immediately before starting playback.
+    this.assertLocationWriteAdmitted();
     this.routeRegistry.start(this.device.deviceId, input.waypoints, duration, interval, loop, emit);
     return {
       supported: true,

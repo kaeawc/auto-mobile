@@ -366,6 +366,7 @@ describe("location route player", () => {
     registerLocationRouteSessionCleanup(
       {
         onSessionRelease: () => {},
+        registerPendingDeviceCleanup: () => {},
         onSessionDeviceUnbound: (callback) => {
           unbound = callback;
         },

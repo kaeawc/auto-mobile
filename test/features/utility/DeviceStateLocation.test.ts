@@ -18,6 +18,8 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeEmulatorConsoleClient } from "../../fakes/FakeEmulatorConsoleClient";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
+import { DeviceClockRestoreRegistry } from "../../../src/features/utility/DeviceClock";
 import {
   LocationRouteRegistry,
   registerLocationRouteSessionCleanup,
@@ -49,6 +51,91 @@ const flush = async (): Promise<void> => {
 };
 
 describe("setDeviceState location", () => {
+  for (const device of [android, ios]) {
+    test(`${device.platform} route rechecks admission before emitting each fix`, async () => {
+      const timer = new FakeTimer();
+      const routeRegistry = new LocationRouteRegistry(timer);
+      const adbFactory = new FakeAdbClientFactory();
+      adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+      const consoleClient = new FakeEmulatorConsoleClient();
+      const simctl = new FakeSimCtlClient();
+      let admitted = true;
+      const state = new DeviceState(device, {
+        timer,
+        routeRegistry,
+        adbFactory,
+        consoleFactory: () => consoleClient,
+        simctl,
+        canWriteLocation: () => admitted,
+      });
+      try {
+        await state.setState({ location: route });
+        timer.advanceTime(0);
+        await flush();
+        const initialConsoleCalls = consoleClient.calls.length;
+        const initialSimctlCalls = simctl.getMethodCalls("executeCommandArgs").length;
+        expect(initialConsoleCalls + initialSimctlCalls).toBe(1);
+        admitted = false;
+        timer.advanceTime(500);
+        await flush();
+        expect(consoleClient.calls).toHaveLength(initialConsoleCalls);
+        expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(initialSimctlCalls);
+      } finally {
+        routeRegistry.stopAll();
+      }
+    });
+  }
+
+  test("a combined clock request propagates location admission refusal", async () => {
+    const timer = new FakeTimer();
+    const adbFactory = new FakeAdbClientFactory();
+    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+    const consoleClient = new FakeEmulatorConsoleClient();
+    const clockAdapter = new FakeDeviceClockAdapter();
+    const state = new DeviceState(android, {
+      timer,
+      adbFactory,
+      consoleFactory: () => consoleClient,
+      routeRegistry: new LocationRouteRegistry(timer),
+      clockAdapter,
+      clockRestoreRegistry: new DeviceClockRestoreRegistry(),
+      canWriteLocation: () => false,
+    });
+    await expect(
+      state.setState({ location: point, clock: { mode: "advance", byMs: 60_000 } }),
+    ).rejects.toThrow(
+      "Cannot change location: session is released, releasing, rebound, or replaced.",
+    );
+    expect(consoleClient.calls).toEqual([]);
+    expect(clockAdapter.calls.some((call) => call.startsWith("instant:"))).toBe(false);
+  });
+
+  test("checks session ownership after awaiting the previous route's in-flight fix", async () => {
+    const timer = new FakeTimer();
+    const routeRegistry = new LocationRouteRegistry(timer);
+    const finished = Promise.withResolvers<void>();
+    let admitted = true;
+    const simctl = new FakeSimCtlClient();
+    routeRegistry.start(ios.deviceId, route.waypoints, 1000, 500, true, () => finished.promise);
+    timer.advanceTime(0);
+    await flush();
+    const state = new DeviceState(ios, {
+      timer,
+      routeRegistry,
+      simctl,
+      canWriteLocation: () => admitted,
+    });
+    const replacement = state.setState({ location: route });
+    await flush();
+    admitted = false;
+    finished.resolve();
+    await expect(replacement).rejects.toBeInstanceOf(ActionableError);
+    expect(routeRegistry.isActive(ios.deviceId)).toBe(false);
+    timer.advanceTime(1000);
+    await flush();
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+  });
+
   test("static fix waits for a cancelled route fix before writing", async () => {
     const timer = new FakeTimer();
     const routeRegistry = new LocationRouteRegistry(timer);
@@ -192,27 +279,29 @@ describe("setDeviceState location", () => {
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
   });
 
-  test("maps a generic console or simctl command failure", async () => {
-    const adbFactory = new FakeAdbClientFactory();
-    adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
-    const consoleClient = new FakeEmulatorConsoleClient();
-    consoleClient.failNext("geoFix", new Error("Command exited with code 1"));
-    const androidResult = await new DeviceState(android, {
-      adbFactory,
-      consoleFactory: () => consoleClient,
-    }).setState({ location: point });
-    expect(androidResult.success).toBe(false);
-    expect(androidResult.error).toContain("Command exited with code 1");
+  for (const ErrorType of [Error, ActionableError]) {
+    test(`maps a ${ErrorType.name} console or simctl command failure`, async () => {
+      const adbFactory = new FakeAdbClientFactory();
+      adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+      const consoleClient = new FakeEmulatorConsoleClient();
+      consoleClient.failNext("geoFix", new ErrorType("Command exited with code 1"));
+      const androidResult = await new DeviceState(android, {
+        adbFactory,
+        consoleFactory: () => consoleClient,
+      }).setState({ location: point });
+      expect(androidResult.success).toBe(false);
+      expect(androidResult.error).toContain("Command exited with code 1");
 
-    const simctl = new FakeSimCtlClient();
-    simctl.setCommandArgsError(
-      ["location", ios.deviceId, "set", "37.7749,-122.4194"],
-      new Error("Command exited with code 1"),
-    );
-    const iosResult = await new DeviceState(ios, { simctl }).setState({ location: point });
-    expect(iosResult.success).toBe(false);
-    expect(iosResult.error).toContain("Command exited with code 1");
-  });
+      const simctl = new FakeSimCtlClient();
+      simctl.setCommandArgsError(
+        ["location", ios.deviceId, "set", "37.7749,-122.4194"],
+        new ErrorType("Command exited with code 1"),
+      );
+      const iosResult = await new DeviceState(ios, { simctl }).setState({ location: point });
+      expect(iosResult.success).toBe(false);
+      expect(iosResult.error).toContain("Command exited with code 1");
+    });
+  }
 
   test("advertises a strict, bounded, extensible location mode", () => {
     expect(setDeviceStateSchema.safeParse({ location: point }).success).toBe(true);
@@ -307,6 +396,7 @@ describe("setDeviceState location", () => {
     let unbound: Parameters<SessionManager["onSessionDeviceUnbound"]>[0] | undefined;
     registerLocationRouteSessionCleanup(
       {
+        registerPendingDeviceCleanup: () => {},
         onSessionRelease: (callback) => {
           release = callback;
         },

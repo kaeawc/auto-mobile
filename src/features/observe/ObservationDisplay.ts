@@ -310,8 +310,7 @@ export function observedIosDisplay(
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",
     posture: iosPanelPosture(panel?.role),
-    // The runner hierarchy carries the forwarded capture identity when one
-    // exists. Zero is the explicit no-sequence fallback, not a new counter.
-    generation: hierarchy?.captureSequence ?? 0,
+    // ObserveScreen stamps the tracker generation after recording the final display.
+    generation: 0,
   };
 }

@@ -16,6 +16,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { DisplayPanel } from "../../models/DisplayPanel";
 import { displayTransitions, type DisplayTransitionSink } from "../observe/DisplayTransition";
+import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 
@@ -314,10 +315,15 @@ export class SetPosture {
 
     await observeAndroidPosture(adb, requested, states, this.timer);
 
+    // A posture-only change need not produce a display push or new geometry.
+    ObservedAndroidDisplayCache.clear(this.device.deviceId);
     const observation = await this.observeFactory(this.device).execute({});
     return {
       posture: requested,
-      display: observation.display,
+      display: {
+        ...observation.display,
+        generation: this.transitionSink.identityRevision(this.device.deviceId),
+      },
       ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
     };
   }
@@ -372,7 +378,10 @@ export class SetPosture {
     );
     return {
       posture: requested,
-      display: observation.display,
+      display: {
+        ...observation.display,
+        generation: this.transitionSink.identityRevision(this.device.deviceId),
+      },
       ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
     };
   }

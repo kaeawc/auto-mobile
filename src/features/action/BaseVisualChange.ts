@@ -189,9 +189,7 @@ export class BaseVisualChange {
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
     const actionDisplayRevision = (): number =>
-      this.device.platform === "ios"
-        ? displayTransitions.identityRevision(this.device.deviceId)
-        : displayTransitions.revision(this.device.deviceId);
+      displayTransitions.identityRevision(this.device.deviceId);
     const displayRevision = actionDisplayRevision();
     const callerDisplayRevision = this.renderedDisplayRevision(this.device.deviceId);
     if (

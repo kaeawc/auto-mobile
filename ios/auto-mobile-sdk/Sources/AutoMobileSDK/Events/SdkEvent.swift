@@ -515,8 +515,8 @@ public struct SdkEventEnvelope: Codable, Sendable {
     public let payload: Data
 
     public init<E: SdkEvent>(_ event: E) throws {
-        self.eventType = event.eventType
-        self.payload = try JSONEncoder().encode(event)
+        eventType = event.eventType
+        payload = try JSONEncoder().encode(event)
     }
 }
 

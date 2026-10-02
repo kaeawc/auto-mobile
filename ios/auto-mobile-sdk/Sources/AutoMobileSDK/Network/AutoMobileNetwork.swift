@@ -170,9 +170,9 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     /// auth tokens, credentials, or PII.
     public func setCaptureBodies(_ capture: Bool) {
         #if DEBUG
-        lock.lock()
-        _captureBodies = capture
-        lock.unlock()
+            lock.lock()
+            _captureBodies = capture
+            lock.unlock()
         #endif
     }
 
@@ -235,8 +235,10 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         lock.unlock()
 
         // Truncate bodies if needed
-        let finalRequestBody: String? = captureBodies ? record.requestBody.map { truncateBody($0, maxBytes: maxBytes) } : nil
-        let finalResponseBody: String? = captureBodies ? record.responseBody.map { truncateBody($0, maxBytes: maxBytes) } : nil
+        let finalRequestBody: String? = captureBodies ? record.requestBody
+            .map { truncateBody($0, maxBytes: maxBytes) } : nil
+        let finalResponseBody: String? = captureBodies ? record.responseBody
+            .map { truncateBody($0, maxBytes: maxBytes) } : nil
 
         // Extract host and path from URL
         let urlComponents = URLComponents(string: record.url)
@@ -308,7 +310,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         // Walk backwards to find a valid UTF-8 boundary
         var endIndex = truncatedBytes.endIndex
         while endIndex > truncatedBytes.startIndex {
-            if let result = String(utf8[truncatedBytes.startIndex..<endIndex]) {
+            if let result = String(utf8[truncatedBytes.startIndex ..< endIndex]) {
                 return result
             }
             endIndex = utf8.index(before: endIndex)
@@ -404,7 +406,8 @@ public final class AutoMobileNetwork: @unchecked Sendable {
             url: url,
             method: method,
             requestHeaders: originalRequest?.allHTTPHeaderFields,
-            requestBodySize: originalRequest?.httpBody?.count ?? (task.countOfBytesSent > 0 ? Int(task.countOfBytesSent) : nil),
+            requestBodySize: originalRequest?.httpBody?
+                .count ?? (task.countOfBytesSent > 0 ? Int(task.countOfBytesSent) : nil),
             statusCode: httpResponse?.statusCode,
             responseHeaders: httpResponse?.allHeaderFields as? [String: String],
             responseBodySize: responseBodySize,
@@ -449,7 +452,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 
     // MARK: - Testing Support
 
-    internal func reset() {
+    func reset() {
         lock.lock()
         bundleId = nil
         buffer = nil
@@ -464,18 +467,18 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 // MARK: - URLProtocol Implementation
 
 #if DEBUG
-/// Seam for scheduling a delayed network fault (issue #5697), so tests can fire it
-/// deterministically instead of waiting on a real timer. Production schedules the work
-/// item on a global queue via `asyncAfter`.
-protocol FaultScheduling {
-    func schedule(delayMs: Int, work: DispatchWorkItem)
-}
-
-struct RealFaultScheduler: FaultScheduling {
-    func schedule(delayMs: Int, work: DispatchWorkItem) {
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: work)
+    /// Seam for scheduling a delayed network fault (issue #5697), so tests can fire it
+    /// deterministically instead of waiting on a real timer. Production schedules the work
+    /// item on a global queue via `asyncAfter`.
+    protocol FaultScheduling {
+        func schedule(delayMs: Int, work: DispatchWorkItem)
     }
-}
+
+    struct RealFaultScheduler: FaultScheduling {
+        func schedule(delayMs: Int, work: DispatchWorkItem) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: work)
+        }
+    }
 #endif
 
 /// A URLProtocol subclass that intercepts network requests for monitoring.
@@ -485,9 +488,9 @@ struct RealFaultScheduler: FaultScheduling {
 public class AutoMobileURLProtocol: URLProtocol {
     private static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
     #if DEBUG
-    /// Injectable delayed-fault scheduler; tests override it to fire the fault on demand
-    /// (no real timer). Reset to `RealFaultScheduler()` in `tearDown`.
-    static var faultScheduler: FaultScheduling = RealFaultScheduler()
+        /// Injectable delayed-fault scheduler; tests override it to fire the fault on demand
+        /// (no real timer). Reset to `RealFaultScheduler()` in `tearDown`.
+        static var faultScheduler: FaultScheduling = RealFaultScheduler()
     #endif
     private var startTime: Date?
     private var urlSession: URLSession?
@@ -504,110 +507,111 @@ public class AutoMobileURLProtocol: URLProtocol {
 
     private static let supportedSchemes: Set<String> = ["http", "https"]
 
-    public override class func canInit(with request: URLRequest) -> Bool {
+    override public class func canInit(with request: URLRequest) -> Bool {
         guard let scheme = request.url?.scheme?.lowercased(),
               supportedSchemes.contains(scheme),
-              URLProtocol.property(forKey: handledKey, in: request) == nil else {
+              URLProtocol.property(forKey: handledKey, in: request) == nil
+        else {
             return false
         }
         return true
     }
 
-    public override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+    override public class func canonicalRequest(for request: URLRequest) -> URLRequest {
         return request
     }
 
-    public override func startLoading() {
+    override public func startLoading() {
         startTime = Date()
         receivedData = Data()
         totalBytesReceived = 0
 
         #if DEBUG
-        if AutoMobileSDK.shared.isEnabled,
-           let url = request.url,
-           let fault = NetworkMockRuleStore.shared.evaluate(
-               NetworkMockRuleStore.FaultRequest(
-                   transport: .urlSession,
-                   host: url.host,
-                   port: url.port,
-                   scheme: url.scheme,
-                   path: url.path,
-                   method: request.httpMethod ?? "GET",
-                   headers: request.allHTTPHeaderFields ?? [:],
-                   origin: request.value(forHTTPHeaderField: "Origin"),
-                   connectionId: nil,
-                   sessionId: nil
-               )
-           ),
-           !fault.dryRun
-        {
-            if let delayMs = fault.delayMs, delayMs > 0 {
-                // The delayed serveFault checks `stopped` under faultLock before delivering,
-                // so a fault whose timer fires after stopLoading() never touches the client
-                // (the guard also covers the case where the timer already began executing —
-                // which a work-item cancel could not). No cancellation needed.
-                let workItem = DispatchWorkItem { [weak self] in
-                    self?.serveFault(fault, url: url)
+            if AutoMobileSDK.shared.isEnabled,
+               let url = request.url,
+               let fault = NetworkMockRuleStore.shared.evaluate(
+                   NetworkMockRuleStore.FaultRequest(
+                       transport: .urlSession,
+                       host: url.host,
+                       port: url.port,
+                       scheme: url.scheme,
+                       path: url.path,
+                       method: request.httpMethod ?? "GET",
+                       headers: request.allHTTPHeaderFields ?? [:],
+                       origin: request.value(forHTTPHeaderField: "Origin"),
+                       connectionId: nil,
+                       sessionId: nil
+                   )
+               ),
+               !fault.dryRun
+            {
+                if let delayMs = fault.delayMs, delayMs > 0 {
+                    // The delayed serveFault checks `stopped` under faultLock before delivering,
+                    // so a fault whose timer fires after stopLoading() never touches the client
+                    // (the guard also covers the case where the timer already began executing —
+                    // which a work-item cancel could not). No cancellation needed.
+                    let workItem = DispatchWorkItem { [weak self] in
+                        self?.serveFault(fault, url: url)
+                    }
+                    Self.faultScheduler.schedule(delayMs: delayMs, work: workItem)
+                } else {
+                    serveFault(fault, url: url)
                 }
-                Self.faultScheduler.schedule(delayMs: delayMs, work: workItem)
-            } else {
-                serveFault(fault, url: url)
+                return
             }
-            return
-        }
 
-        if AutoMobileSDK.shared.isEnabled,
-           let url = request.url,
-           let match = NetworkMockRuleStore.shared.findMatchingRule(
-               host: url.host ?? "",
-               path: url.path,
-               method: request.httpMethod ?? "GET"
-           )
-        {
-            let body = Data(match.responseBody.utf8)
-            var headers = match.responseHeaders
-            headers["Content-Type"] = match.contentType
-            // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
-            // is a valid request URL and any Int statusCode is accepted.
-            let response = HTTPURLResponse(
-                url: url,
-                statusCode: match.statusCode,
-                httpVersion: "HTTP/1.1",
-                headerFields: headers
-            )!  // swiftlint:disable:this force_unwrapping
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            if !body.isEmpty {
-                client?.urlProtocol(self, didLoad: body)
+            if AutoMobileSDK.shared.isEnabled,
+               let url = request.url,
+               let match = NetworkMockRuleStore.shared.findMatchingRule(
+                   host: url.host ?? "",
+                   path: url.path,
+                   method: request.httpMethod ?? "GET"
+               )
+            {
+                let body = Data(match.responseBody.utf8)
+                var headers = match.responseHeaders
+                headers["Content-Type"] = match.contentType
+                // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
+                // is a valid request URL and any Int statusCode is accepted.
+                let response = HTTPURLResponse(
+                    url: url,
+                    statusCode: match.statusCode,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: headers
+                )! // swiftlint:disable:this force_unwrapping
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                if !body.isEmpty {
+                    client?.urlProtocol(self, didLoad: body)
+                }
+                client?.urlProtocolDidFinishLoading(self)
+                AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+                    url: url.absoluteString,
+                    method: request.httpMethod ?? "GET",
+                    requestHeaders: request.allHTTPHeaderFields,
+                    requestBodySize: request.httpBody?.count,
+                    statusCode: match.statusCode,
+                    responseHeaders: headers,
+                    responseBodySize: body.count,
+                    durationMs: startTime.map { Date().timeIntervalSince($0) * 1000 },
+                    error: "mocked:\(match.mockId)",
+                    requestBody: request.httpBody.flatMap { data in
+                        AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type"))
+                            ? AutoMobileNetwork.utf8String(from: data.prefix(AutoMobileNetwork.shared.maxBodyBytes))
+                            : nil
+                    },
+                    responseBody: match.responseBody,
+                    contentType: match.contentType
+                ))
+                return
             }
-            client?.urlProtocolDidFinishLoading(self)
-            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
-                url: url.absoluteString,
-                method: request.httpMethod ?? "GET",
-                requestHeaders: request.allHTTPHeaderFields,
-                requestBodySize: request.httpBody?.count,
-                statusCode: match.statusCode,
-                responseHeaders: headers,
-                responseBodySize: body.count,
-                durationMs: startTime.map { Date().timeIntervalSince($0) * 1000 },
-                error: "mocked:\(match.mockId)",
-                requestBody: request.httpBody.flatMap { data in
-                    AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type"))
-                        ? AutoMobileNetwork.utf8String(from: data.prefix(AutoMobileNetwork.shared.maxBodyBytes))
-                        : nil
-                },
-                responseBody: match.responseBody,
-                contentType: match.contentType
-            ))
-            return
-        }
 
-        if AutoMobileSDK.shared.isEnabled,
-           let url = request.url,
-           let simulation = NetworkMockRuleStore.shared.activeErrorSimulation()
-        {
-            serveSimulatedError(simulation, url: url)
-            return
-        }
+            if AutoMobileSDK.shared.isEnabled,
+               let url = request.url,
+               let simulation = NetworkMockRuleStore.shared.activeErrorSimulation()
+            {
+                serveSimulatedError(simulation, url: url)
+                return
+            }
         #endif
 
         guard let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
@@ -627,7 +631,7 @@ public class AutoMobileURLProtocol: URLProtocol {
         dataTask?.resume()
     }
 
-    public override func stopLoading() {
+    override public func stopLoading() {
         // Mark the protocol stopped so a delayed fault whose timer fires later (or is
         // mid-serveFault) sees it under faultLock and does not invoke the client.
         faultLock.lock()
@@ -642,160 +646,160 @@ public class AutoMobileURLProtocol: URLProtocol {
     }
 
     #if DEBUG
-    private func serveFault(_ fault: NetworkMockRuleStore.FaultDecision, url: URL) {
-        // Snapshot `stopped` under the lock, then RELEASE the lock before any client
-        // callbacks. The lock must NOT be held across the callouts: a client whose
-        // didFailWithError synchronously calls stopLoading() would deadlock on this
-        // non-recursive lock. The stopped-check drops the delayed fault once stopLoading()
-        // has run; a callback that races an in-progress stopLoading() (delivered in the
-        // sub-microsecond window after this check) is the ordinary "response arrives as the
-        // task is cancelled" race the URL loading system already tolerates — making it
-        // fully atomic is not possible without reintroducing the deadlock above.
-        faultLock.lock()
-        let isStopped = stopped
-        faultLock.unlock()
-        if isStopped { return }
+        private func serveFault(_ fault: NetworkMockRuleStore.FaultDecision, url: URL) {
+            // Snapshot `stopped` under the lock, then RELEASE the lock before any client
+            // callbacks. The lock must NOT be held across the callouts: a client whose
+            // didFailWithError synchronously calls stopLoading() would deadlock on this
+            // non-recursive lock. The stopped-check drops the delayed fault once stopLoading()
+            // has run; a callback that races an in-progress stopLoading() (delivered in the
+            // sub-microsecond window after this check) is the ordinary "response arrives as the
+            // task is cancelled" race the URL loading system already tolerates — making it
+            // fully atomic is not possible without reintroducing the deadlock above.
+            faultLock.lock()
+            let isStopped = stopped
+            faultLock.unlock()
+            if isStopped { return }
 
-        let method = request.httpMethod ?? "GET"
-        let error: URLError
-        switch fault.errorType {
-        case "dnsFailure": error = URLError(.cannotFindHost)
-        case "connectionReset", "reset": error = URLError(.networkConnectionLost)
-        case "timeout": error = URLError(.timedOut)
-        default: error = URLError(.cannotConnectToHost)
-        }
-
-        if fault.action == .error || fault.action == .closeConnection {
-            client?.urlProtocol(self, didFailWithError: error)
-            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
-                url: url.absoluteString, method: method, error: "fault:\(fault.faultId):\(fault.action.rawValue)"
-            ))
-            return
-        }
-
-        let body = Data((fault.responseBody ?? "").utf8)
-        let drop = max(0, fault.dropBytes ?? 0)
-        let delivered = drop == 0 ? body : body.dropLast(min(drop, body.count))
-        var headers = fault.responseHeaders
-        if let contentType = fault.contentType {
-            headers["Content-Type"] = contentType
-        }
-        let status = fault.statusCode ?? 200
-        let response = HTTPURLResponse(
-            url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
-        )!  // swiftlint:disable:this force_unwrapping
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        if !delivered.isEmpty {
-            client?.urlProtocol(self, didLoad: Data(delivered))
-        }
-        client?.urlProtocolDidFinishLoading(self)
-        AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
-            url: url.absoluteString, method: method, statusCode: status,
-            responseHeaders: headers, responseBodySize: delivered.count,
-            error: "fault:\(fault.faultId):\(fault.action.rawValue)",
-            responseBody: String(decoding: delivered, as: UTF8.self),
-            contentType: fault.contentType
-        ))
-    }
-
-    private func capturedRequestBodyData(limit: Int?) -> Data? {
-        guard let limit, limit > 0 else {
-            return nil
-        }
-
-        if let body = request.httpBody {
-            return Data(body.prefix(limit))
-        }
-
-        guard let stream = request.httpBodyStream else {
-            return nil
-        }
-
-        stream.open()
-        defer { stream.close() }
-
-        var data = Data()
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while stream.hasBytesAvailable, data.count < limit {
-            let remaining = limit - data.count
-            let read = stream.read(&buffer, maxLength: min(buffer.count, remaining))
-            if read > 0 {
-                data.append(buffer, count: read)
-            } else {
-                break
+            let method = request.httpMethod ?? "GET"
+            let error: URLError
+            switch fault.errorType {
+            case "dnsFailure": error = URLError(.cannotFindHost)
+            case "connectionReset", "reset": error = URLError(.networkConnectionLost)
+            case "timeout": error = URLError(.timedOut)
+            default: error = URLError(.cannotConnectToHost)
             }
-        }
-        return data.isEmpty ? nil : data
-    }
 
-    private func serveSimulatedError(_ simulation: NetworkMockRuleStore.ErrorSimulation, url: URL) {
-        let method = request.httpMethod ?? "GET"
-        let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
-        let requestBodySize = request.httpBody?.count
-        let requestBodyData: Data?
-        if AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type")) {
-            requestBodyData = capturedRequestBodyData(limit: AutoMobileNetwork.shared.requestBodyCaptureLimit)
-        } else {
-            requestBodyData = nil
-        }
-        let requestBody = requestBodyData.flatMap { AutoMobileNetwork.utf8String(from: $0) }
+            if fault.action == .error || fault.action == .closeConnection {
+                client?.urlProtocol(self, didFailWithError: error)
+                AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+                    url: url.absoluteString, method: method, error: "fault:\(fault.faultId):\(fault.action.rawValue)"
+                ))
+                return
+            }
 
-        if simulation.errorType == "http500" {
-            // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
-            // is a valid request URL and 500 is a valid status code.
+            let body = Data((fault.responseBody ?? "").utf8)
+            let drop = max(0, fault.dropBytes ?? 0)
+            let delivered = drop == 0 ? body : body.dropLast(min(drop, body.count))
+            var headers = fault.responseHeaders
+            if let contentType = fault.contentType {
+                headers["Content-Type"] = contentType
+            }
+            let status = fault.statusCode ?? 200
             let response = HTTPURLResponse(
-                url: url,
-                statusCode: 500,
-                httpVersion: "HTTP/1.1",
-                headerFields: nil
-            )!  // swiftlint:disable:this force_unwrapping
+                url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
+            )! // swiftlint:disable:this force_unwrapping
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            if !delivered.isEmpty {
+                client?.urlProtocol(self, didLoad: Data(delivered))
+            }
+            client?.urlProtocolDidFinishLoading(self)
+            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+                url: url.absoluteString, method: method, statusCode: status,
+                responseHeaders: headers, responseBodySize: delivered.count,
+                error: "fault:\(fault.faultId):\(fault.action.rawValue)",
+                responseBody: String(decoding: delivered, as: UTF8.self),
+                contentType: fault.contentType
+            ))
+        }
+
+        private func capturedRequestBodyData(limit: Int?) -> Data? {
+            guard let limit, limit > 0 else {
+                return nil
+            }
+
+            if let body = request.httpBody {
+                return Data(body.prefix(limit))
+            }
+
+            guard let stream = request.httpBodyStream else {
+                return nil
+            }
+
+            stream.open()
+            defer { stream.close() }
+
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable, data.count < limit {
+                let remaining = limit - data.count
+                let read = stream.read(&buffer, maxLength: min(buffer.count, remaining))
+                if read > 0 {
+                    data.append(buffer, count: read)
+                } else {
+                    break
+                }
+            }
+            return data.isEmpty ? nil : data
+        }
+
+        private func serveSimulatedError(_ simulation: NetworkMockRuleStore.ErrorSimulation, url: URL) {
+            let method = request.httpMethod ?? "GET"
+            let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
+            let requestBodySize = request.httpBody?.count
+            let requestBodyData: Data?
+            if AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type")) {
+                requestBodyData = capturedRequestBodyData(limit: AutoMobileNetwork.shared.requestBodyCaptureLimit)
+            } else {
+                requestBodyData = nil
+            }
+            let requestBody = requestBodyData.flatMap { AutoMobileNetwork.utf8String(from: $0) }
+
+            if simulation.errorType == "http500" {
+                // HTTPURLResponse(url:statusCode:...) only fails on a nil-ish URL; `url`
+                // is a valid request URL and 500 is a valid status code.
+                let response = HTTPURLResponse(
+                    url: url,
+                    statusCode: 500,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: nil
+                )! // swiftlint:disable:this force_unwrapping
+                AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+                    url: url.absoluteString,
+                    method: method,
+                    requestHeaders: request.allHTTPHeaderFields,
+                    requestBodySize: requestBodySize,
+                    statusCode: 500,
+                    durationMs: durationMs,
+                    error: "simulated:\(simulation.errorType)",
+                    requestBody: requestBody
+                ))
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocolDidFinishLoading(self)
+                return
+            }
+
+            let code: URLError.Code
+            switch simulation.errorType {
+            case "timeout":
+                code = .timedOut
+            case "connectionRefused":
+                code = .cannotConnectToHost
+            case "dnsFailure":
+                code = .cannotFindHost
+            case "tlsFailure":
+                code = .secureConnectionFailed
+            default:
+                code = .cannotConnectToHost
+            }
+
             AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: url.absoluteString,
                 method: method,
                 requestHeaders: request.allHTTPHeaderFields,
                 requestBodySize: requestBodySize,
-                statusCode: 500,
                 durationMs: durationMs,
                 error: "simulated:\(simulation.errorType)",
                 requestBody: requestBody
             ))
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocolDidFinishLoading(self)
-            return
+            client?.urlProtocol(self, didFailWithError: URLError(code))
         }
-
-        let code: URLError.Code
-        switch simulation.errorType {
-        case "timeout":
-            code = .timedOut
-        case "connectionRefused":
-            code = .cannotConnectToHost
-        case "dnsFailure":
-            code = .cannotFindHost
-        case "tlsFailure":
-            code = .secureConnectionFailed
-        default:
-            code = .cannotConnectToHost
-        }
-
-        AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
-            url: url.absoluteString,
-            method: method,
-            requestHeaders: request.allHTTPHeaderFields,
-            requestBodySize: requestBodySize,
-            durationMs: durationMs,
-            error: "simulated:\(simulation.errorType)",
-            requestBody: requestBody
-        ))
-        client?.urlProtocol(self, didFailWithError: URLError(code))
-    }
     #endif
 }
 
 extension AutoMobileURLProtocol: URLSessionDataDelegate {
     public func urlSession(
-        _ session: URLSession,
-        dataTask: URLSessionDataTask,
+        _: URLSession,
+        dataTask _: URLSessionDataTask,
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
@@ -804,7 +808,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
         completionHandler(.allow)
     }
 
-    public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    public func urlSession(_: URLSession, dataTask _: URLSessionDataTask, didReceive data: Data) {
         totalBytesReceived += data.count
         // Accumulate response data for body capture (up to configured limit)
         let maxBytes = AutoMobileNetwork.shared.maxBodyBytes
@@ -814,7 +818,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
         client?.urlProtocol(self, didLoad: data)
     }
 
-    public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    public func urlSession(_: URLSession, task _: URLSessionTask, didCompleteWithError error: Error?) {
         let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
 
         if let error = error {

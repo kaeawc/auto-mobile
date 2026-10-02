@@ -124,7 +124,40 @@ describe("App file resources", () => {
     expect(content.text).toBe('{"enabled":true}\n');
     expect(content.blob).toBeUndefined();
   });
-  test.each(["list", "read"])("passes the query userId to %s handler", async (operation) => {
+  test.each(["list", "read"])("rejects unsupported query keys in %s handler", async (operation) => {
+    registerAppFileResources(fakeService);
+    const base = `automobile:devices/device/apps/com.example.app/files/documents${operation === "read" ? "/welcome.txt" : ""}`;
+    for (const [query, key] of [
+      ["userID=10", "userID"],
+      ["user=10", "user"],
+      ["userId=10&foo=1", "foo"],
+      ["deviceId=other", "deviceId"],
+      ["appId=other", "appId"],
+      ["container=cache", "container"],
+      ["path=other.txt", "path"],
+    ]) {
+      const match = ResourceRegistry.matchTemplate(`${base}?${query}`);
+      expect(match).toBeDefined();
+      await expect(match!.template.handler(match!.params)).rejects.toThrow(
+        `App file resource does not accept query parameter "${key}"; the only supported query parameter is "userId".`,
+      );
+    }
+  });
+
+  test.each(["list", "read"])("registry rejects repeated userId for %s template", (operation) => {
+    registerAppFileResources(fakeService);
+    const uri = `automobile:devices/device/apps/com.example.app/files/documents${operation === "read" ? "/welcome.txt" : ""}?userId=1&userId=2`;
+    expect(ResourceRegistry.matchTemplate(uri)).toBeUndefined();
+  });
+
+  test.each([
+    ["list", undefined],
+    ["list", 0],
+    ["list", 10],
+    ["read", undefined],
+    ["read", 0],
+    ["read", 10],
+  ])("passes %p handler userId %p", async (operation, userId) => {
     const calls: Array<number | undefined> = [];
     registerAppFileResources({
       ...fakeService,
@@ -137,11 +170,11 @@ describe("App file resources", () => {
         return fakeService.readFile(request);
       },
     });
-    const uri = `automobile:devices/device/apps/com.example.app/files/documents${operation === "read" ? "/welcome.txt" : ""}?userId=10`;
+    const uri = `automobile:devices/device/apps/com.example.app/files/documents${operation === "read" ? "/welcome.txt" : ""}${userId === undefined ? "" : `?userId=${userId}`}`;
     const match = ResourceRegistry.matchTemplate(uri);
     expect(match).toBeDefined();
     const content = await match!.template.handler(match!.params);
-    expect(calls).toEqual([10]);
+    expect(calls).toEqual([userId]);
     expect(content.uri).toBe(uri);
   });
 });

@@ -7,6 +7,7 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
+import { getRequestedResourceUri } from "./resourceRegistry";
 
 export const APP_FILE_CONTAINERS = [
   "documents",
@@ -461,6 +462,20 @@ export function buildAppFileResourceUri(parts: AppFileResourceParts): string {
 }
 
 export function parseAppFileResourceParams(params: Record<string, string>): AppFileResourceParts {
+  const requestedUri = getRequestedResourceUri(params);
+  const queryKeys = requestedUri
+    ? new URL(requestedUri).searchParams.keys()
+    : Object.keys(params).filter(
+        (key) => !["deviceId", "appId", "container", "path"].includes(key),
+      );
+  for (const key of queryKeys) {
+    if (key !== "userId") {
+      throw new Error(
+        `App file resource does not accept query parameter "${key}"; the only supported query parameter is "userId".`,
+      );
+    }
+  }
+
   const container = decodeURIComponent(params.container);
   if (!APP_FILE_CONTAINERS.includes(container as AppFileContainer)) {
     throw new Error(`Unsupported app file container: ${container}`);

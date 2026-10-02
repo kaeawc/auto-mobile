@@ -612,6 +612,7 @@ async function resolveAndroidAppFileUser(
 }
 
 function androidRunAsPrefix(appId: string, userId: number): string {
+  // AOSP run-as grammar: usage: run-as <package-name> [--user <uid>] <command> [<args>] (system/core/run-as/run-as.cpp), so --user follows the package name.
   return `shell run-as ${shellQuote(appId)}${userId ? ` --user ${userId}` : ""}`;
 }
 

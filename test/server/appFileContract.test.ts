@@ -73,6 +73,19 @@ describe("App file resource contract", () => {
 
 describe("App file resource userId", () => {
   afterEach(() => ResourceRegistry.clearResources());
+  test.each(["userID", "user", "foo"])("rejects unsupported query key %s directly", (key) => {
+    expect(() =>
+      parseAppFileResourceParams({
+        deviceId: "device",
+        appId: "com.example.app",
+        container: "documents",
+        userId: "10",
+        [key]: "1",
+      }),
+    ).toThrow(
+      `App file resource does not accept query parameter "${key}"; the only supported query parameter is "userId".`,
+    );
+  });
   test.each([undefined, 0, 10, Number.MAX_SAFE_INTEGER])(
     "round trips userId %p on both templates",
     (userId) => {
@@ -97,6 +110,7 @@ describe("App file resource userId", () => {
         const match = ResourceRegistry.matchTemplate(uri);
         expect(match).toBeDefined();
         expect(parseAppFileResourceParams(match!.params)).toEqual(parts);
+        expect(buildAppFileResourceUri(parseAppFileResourceParams(match!.params))).toBe(uri);
         expect(
           uri.endsWith(
             userId === undefined

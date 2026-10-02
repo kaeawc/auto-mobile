@@ -1,5 +1,6 @@
 import { exponentialBackoff, type BackoffPolicy } from "../utils/Backoff";
 import type { DeviceHealthMarkers, DeviceHealthReason } from "./deviceHealthMarkers";
+import { Rotate, type RotationRestoreState } from "../features/action/Rotate";
 import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
 import {
   AndroidDeviceClockAdapter,
@@ -116,9 +117,23 @@ interface PendingClockRestore {
 export interface ClockRestorer {
   restore(state: ClockSessionState, signal?: AbortSignal): Promise<void>;
 }
+/** Original rotation settings recorded before the first session settings write. */
+export type RotationSessionState = RotationRestoreState;
+interface PendingRotationRestore {
+  state: RotationSessionState;
+  removed: boolean;
+  controller: AbortController;
+  clear: () => void;
+  result: Promise<{ pending: Promise<void> | null }>;
+}
+
+export interface RotationRestorer {
+  restore(state: RotationSessionState, signal?: AbortSignal): Promise<void>;
+}
 export interface DeviceStateRestorerFactories {
   networkCondition: (device: BootedDevice) => NetworkConditionRestorer;
   clock: (device: BootedDevice) => ClockRestorer;
+  rotation?: (device: BootedDevice) => RotationRestorer;
 }
 
 /** Narrow seam for restoring the device-wide network condition on release. */
@@ -154,6 +169,7 @@ export interface SessionCacheData {
   biometricEnrollment?: BiometricEnrollmentSessionState; // Original iOS Simulator biometric enrollment, restored on release
   networkCondition?: NetworkConditionSessionState; // Original device-wide network condition, restored on release (#6012)
   clock?: ClockSessionState;
+  rotation?: RotationSessionState;
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
   /**
    * Highest {@link DeviceReadinessLevel} actually achieved by
@@ -792,6 +808,13 @@ export class SessionManager {
   >();
   private readonly clockRemovalGenerations = new Map<string, number>();
   private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
+  private readonly rotationRestorerFactory: (device: BootedDevice) => RotationRestorer;
+  private readonly pendingRotationRestores = new Map<
+    string,
+    Map<RotationSessionState, PendingRotationRestore>
+  >();
+  private readonly rotationRemovalGenerations = new Map<string, number>();
+  private readonly rotationMutationQueues = new Map<string, Promise<unknown>>();
   private observerSessions?: Pick<ObserverSessionStore, "release">;
 
   /** Optional daemon wiring; existing constructors and device-session lookups stay unchanged. */
@@ -1005,6 +1028,14 @@ export class SessionManager {
             },
           })
         : networkConditionRestorerFactory.clock;
+    this.rotationRestorerFactory =
+      (typeof networkConditionRestorerFactory === "function"
+        ? undefined
+        : networkConditionRestorerFactory.rotation) ??
+      ((device) => ({
+        restore: (state, signal) =>
+          new Rotate(device, null, this.timer).restoreRotationSettings(state, signal),
+      }));
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -2073,11 +2104,15 @@ export class SessionManager {
     const pendingClockRestoration = existing.cacheData.clock
       ? (await this.getPendingClockRestoration(existing, null)).pending
       : null;
+    const pendingRotationRestoration = existing.cacheData.rotation
+      ? (await this.getPendingRotationRestoration(existing, null)).pending
+      : null;
     const previousDevice = existing.assignedDevice;
     const pendingRebindCleanup = [
       pendingBiometricRestoration,
       pendingNetworkRestoration,
       pendingClockRestoration,
+      pendingRotationRestoration,
     ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
     if (pendingRebindCleanup.length > 0) {
       this.trackPendingDeviceCleanup(previousDevice, pendingRebindCleanup);
@@ -2731,12 +2766,16 @@ export class SessionManager {
     const pendingClockRestoration = session.cacheData.clock
       ? (await this.getPendingClockRestoration(session, pendingSetups)).pending
       : null;
+    const pendingRotationRestoration = session.cacheData.rotation
+      ? (await this.getPendingRotationRestoration(session, pendingSetups)).pending
+      : null;
     return [
       pendingSetups,
       pendingRestoration,
       pendingBiometricRestoration,
       pendingNetworkRestoration,
       pendingClockRestoration,
+      pendingRotationRestoration,
     ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
   }
 
@@ -3443,6 +3482,161 @@ export class SessionManager {
     });
   }
 
+  /** Sequence restoration after any still-draining setup; deduplicate by owned slot. */
+  private async getPendingRotationRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    if (pendingSetups) {
+      const deviceId = session.assignedDevice;
+      const generation = this.rotationRemovalGenerations.get(deviceId) ?? 0;
+      return {
+        pending: pendingSetups.then(async () => {
+          if ((this.rotationRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+            delete session.cacheData.rotation;
+            return;
+          }
+          const result = await this.getPendingRotationRestoration(session, null);
+          await result.pending;
+        }),
+      };
+    }
+    const state = session.cacheData.rotation;
+    if (!state) {
+      return { pending: null };
+    }
+    const deviceId = session.assignedDevice;
+    let targets = this.pendingRotationRestores.get(deviceId);
+    const existing = targets?.get(state);
+    if (existing) {
+      return existing.result;
+    }
+    if (!targets) {
+      targets = new Map();
+      this.pendingRotationRestores.set(deviceId, targets);
+    }
+    const result = Promise.withResolvers<{ pending: Promise<void> | null }>();
+    const target: PendingRotationRestore = {
+      state,
+      removed: false,
+      controller: new AbortController(),
+      result: result.promise,
+      clear: () => {
+        if (session.cacheData.rotation === state) {
+          delete session.cacheData.rotation;
+        }
+      },
+    };
+    // Publish the join point before starting any asynchronous restore work.
+    targets.set(state, target);
+    void this.startRotationRestoration(deviceId, target).then(result.resolve, result.reject);
+    return target.result;
+  }
+
+  private async startRotationRestoration(
+    deviceId: string,
+    target: PendingRotationRestore,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
+    const restore = async () => {
+      target.controller.signal.throwIfAborted();
+      await this.rotationRestorerFactory(device).restore(target.state, target.controller.signal);
+      target.controller.signal.throwIfAborted();
+      target.clear();
+      const targets = this.pendingRotationRestores.get(deviceId);
+      if (targets?.get(target.state) === target) {
+        targets.delete(target.state);
+        if (targets.size === 0) {
+          this.pendingRotationRestores.delete(deviceId);
+        }
+      }
+    };
+    const restoration = restore().then(
+      () => ({ outcome: "restored" as const }),
+      (error: unknown) => ({ outcome: "failed" as const, error }),
+    );
+    const timeout = new Error("Rotation restoration timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.timer,
+      timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+      label: "Rotation restoration",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw toActionableError(error, "Rotation restoration failed");
+    });
+    if (result.outcome === "restored") {
+      return { pending: null };
+    }
+    logger.warn(
+      `Rotation restore ${result.outcome}; quarantining ${device.deviceId}`,
+      result.outcome === "failed" ? result.error : timeout,
+    );
+    const pending = raceWithDeadline(
+      this.retryRotationRestore(device.deviceId, target, restoration, restore),
+      {
+        timer: this.timer,
+        signal: target.controller.signal,
+        label: "Pending rotation restoration",
+      },
+    ).catch((error: unknown) => {
+      if (!target.removed) {
+        throw toActionableError(error, "Rotation restoration failed");
+      }
+      // Proven removal retires ownership; no restoration may reach a replacement.
+      logger.debug(`Retired rotation restoration on removed device ${device.deviceId}`);
+    });
+    return { pending };
+  }
+
+  /** Same setup drain, deadline, retry delay and pool quarantine as network restoration.
+   * Rotation ownership remains pending beyond the network path's bounded retry batch.
+   */
+  private async retryRotationRestore(
+    deviceId: string,
+    target: PendingRotationRestore,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+    restore: () => Promise<void>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(`Failed to restore rotation on ${deviceId}`, result.error);
+    while (!target.removed) {
+      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+      if (target.removed) {
+        return;
+      }
+      try {
+        await restore();
+        return;
+      } catch (error) {
+        logger.warn(
+          `Rotation restore retry failed on ${deviceId}; device remains quarantined`,
+          error,
+        );
+      }
+    }
+  }
+
+  /** Removal retires in-memory ownership; no retries may target a replacement device. */
+  retireRotationRestoration(deviceId: string): void {
+    const targets = this.pendingRotationRestores.get(deviceId);
+    this.rotationRemovalGenerations.set(
+      deviceId,
+      (this.rotationRemovalGenerations.get(deviceId) ?? 0) + 1,
+    );
+    for (const target of targets?.values() ?? []) {
+      target.removed = true;
+      target.controller.abort();
+      target.clear();
+    }
+    this.pendingRotationRestores.delete(deviceId);
+  }
+
   /**
    * Returned wrapped, never bare (see `getPendingBiometricRestoration`): sequence
    * the network restore after any still-draining setup so it never restores
@@ -4128,6 +4322,48 @@ export class SessionManager {
   }
   runClockMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
     return this.runDeviceStateMutationExclusive(this.clockMutationQueues, sessionId, fn);
+  }
+
+  trackRotationSessionSetup(
+    session: Session,
+    createSetup: (assertCurrentDevice: () => void) => Promise<void>,
+  ): Promise<void> {
+    const deviceId = session.assignedDevice;
+    const generation = this.rotationRemovalGenerations.get(deviceId) ?? 0;
+    return this.trackSessionSetup(session, async () => {
+      try {
+        await createSetup(() => {
+          if ((this.rotationRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+            throw new ActionableError(
+              "Cannot change rotation: device was removed during session setup.",
+            );
+          }
+        });
+      } finally {
+        if ((this.rotationRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+          delete session.cacheData.rotation;
+        } else if (this.sessions.get(session.sessionId) !== session && session.cacheData.rotation) {
+          // Rotate still holds the device mutex here. Publish quarantine before
+          // setup settles, then let restoration acquire that mutex after return.
+          const restoration = this.getPendingRotationRestoration(session, null).then(
+            async ({ pending }) => {
+              await pending;
+            },
+          );
+          this.trackPendingDeviceCleanup(deviceId, [restoration]);
+        }
+      }
+    });
+  }
+
+  setRotation(session: Session, state: RotationSessionState): void {
+    session.cacheData.rotation ??= state;
+  }
+  getRotation(sessionId: string): RotationSessionState | undefined {
+    return this.getSession(sessionId)?.cacheData.rotation;
+  }
+  runRotationMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    return this.runDeviceStateMutationExclusive(this.rotationMutationQueues, sessionId, fn);
   }
 
   /**

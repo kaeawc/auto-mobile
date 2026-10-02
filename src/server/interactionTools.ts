@@ -41,7 +41,9 @@ import {
 import { Shake } from "../features/action/Shake";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
-import { Rotate } from "../features/action/Rotate";
+import { DaemonState } from "../daemon/daemonState";
+import { runSessionRotationMutation } from "./sessionRotation";
+import { Rotate, type RotateOptions } from "../features/action/Rotate";
 import {
   SetPosture,
   type SetPostureOutput,
@@ -1279,7 +1281,7 @@ export const rotateSchema = addDeviceTargetingToSchema(
         .boolean()
         .optional()
         .describe(
-          "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+          "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
         ),
       // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
       // not required — a device handle from getAndroid/getApple is sufficient on
@@ -2233,14 +2235,19 @@ export async function pressButtonHandler(
 // failures must reach MCP clients as errors rather than success-shaped results.
 export type RotateLike = Pick<Rotate, "execute">;
 
-let rotateFactory: (device: BootedDevice) => RotateLike = (device) => new Rotate(device);
+let rotateFactory: (device: BootedDevice, options?: RotateOptions) => RotateLike = (
+  device,
+  options,
+) => new Rotate(device, null, defaultTimer, options);
 
-export function setRotateFactory(factory: (device: BootedDevice) => RotateLike): void {
+export function setRotateFactory(
+  factory: (device: BootedDevice, options?: RotateOptions) => RotateLike,
+): void {
   rotateFactory = factory;
 }
 
 export function resetRotateFactory(): void {
-  rotateFactory = (device) => new Rotate(device);
+  rotateFactory = (device, options) => new Rotate(device, null, defaultTimer, options);
 }
 
 export type SetPostureLike = Pick<SetPosture, "execute">;
@@ -2294,7 +2301,14 @@ export async function rotateHandler(
     if (args.lockOrientation !== undefined && device.platform !== "android") {
       throw new ActionableError("lockOrientation is supported only on Android devices.");
     }
-    const rotate = rotateFactory(device);
+    const manager =
+      args.sessionUuid && device.platform === "android" && DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getSessionManager()
+        : undefined;
+    const rotate = rotateFactory(device, {
+      sessionRotation: (mutation) =>
+        runSessionRotationMutation(manager, args.sessionUuid, device.deviceId, mutation),
+    });
     const result = await rotate.execute(args.orientation, progress, args.lockOrientation, signal);
     const response = createStructuredToolResponse({
       observation: result.observation,

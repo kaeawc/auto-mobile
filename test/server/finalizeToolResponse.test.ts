@@ -2606,11 +2606,14 @@ describe("finalizeToolResponse", () => {
 
     test("artifacted observe keeps wait status inline", () => {
       const writer = new FakeObservationArtifactWriter();
+      const timeoutReason =
+        'Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"';
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({
           ...makeObserveResult(),
           matched: false,
           timedOut: true,
+          timeoutReason,
           polls: 3,
           waitMs: 250,
         }),
@@ -2621,10 +2624,12 @@ describe("finalizeToolResponse", () => {
         artifact: expect.any(Object),
         matched: false,
         timedOut: true,
+        timeoutReason,
         polls: 3,
         waitMs: 250,
       });
       expect(writer.writes[0].data).toMatchObject({ matched: false, timedOut: true });
+      expect(JSON.parse(finalized.content[0].text).timeoutReason).toBe(timeoutReason);
     });
 
     test("action observation fields are replaced with artifact metadata", () => {
@@ -3182,6 +3187,32 @@ describe("finalizeToolResponse", () => {
         expect(structured.matched).toBe(false);
         expect(structured.timedOut).toBe(true);
         expect(structured.candidates).toEqual({ _truncated: true, bytes: expect.any(Number) });
+      });
+
+      test("keeps the wait timeout reason inline when spilling oversized action residue", () => {
+        const writer = new FakeObservationArtifactWriter();
+        const timeoutReason =
+          'Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"';
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            observation: makeObserveResult(),
+            matched: false,
+            timedOut: true,
+            timeoutReason,
+            pad: "z".repeat(90_000),
+          }),
+          { ...oversizedCtx(writer), name: "openLink" },
+        );
+
+        expect(structuredPayload(finalized)).toMatchObject({
+          artifact: expect.objectContaining({ payload: "ToolResponse", tool: "openLink" }),
+          matched: false,
+          timedOut: true,
+          timeoutReason,
+        });
+        expect(JSON.parse(finalized.content[0].text).timeoutReason).toBe(timeoutReason);
+        expect(payloadBytes(finalized)).toBeLessThanOrEqual(DEFAULT_OBSERVATION_INLINE_MAX_BYTES);
       });
 
       test("stays under the ceiling when every retained field is oversized", () => {

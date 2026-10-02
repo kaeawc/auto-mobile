@@ -860,6 +860,7 @@ export const DIFF_SCALAR_FIELDS: readonly string[] = [
   "deviceLock",
   "awaitTimeout",
   "awaitDuration",
+  "timeoutReason",
   "layoutWarnings",
   "error",
 ];

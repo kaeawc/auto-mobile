@@ -160,6 +160,7 @@ const ACTION_AUTHORED_OBSERVATION_METADATA = [
   "awaitTimeout",
   "matched",
   "timedOut",
+  "timeoutReason",
   "polls",
   "waitMs",
   "matchedElement",

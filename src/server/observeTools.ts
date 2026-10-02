@@ -670,6 +670,7 @@ export interface WaitForObservationOutcome {
   matched?: boolean;
   settled?: boolean;
   timedOut: boolean;
+  timeoutReason?: string;
   polls: number;
   waitMs: number;
   matchedElement?: Element;
@@ -1303,9 +1304,14 @@ export const waitForObservation = async (
   screenshot?: ScreenshotMode,
   screenshotOptions?: z.infer<typeof screenshotOptionsSchema>,
 ): Promise<WaitForObservationOutcome> => {
+  let lastObservedPosture = "unknown";
+  let postureSupported = false;
   const complete = async (
     outcome: WaitForObservationOutcome,
   ): Promise<WaitForObservationOutcome> => {
+    if (outcome.timedOut && waitFor.posture !== undefined) {
+      outcome.timeoutReason = `Timed out after ${outcome.awaitDuration} ms waiting for posture "${waitFor.posture}"; last observed posture "${lastObservedPosture}"`;
+    }
     const mode = resolveScreenshotMode(screenshot);
     if (
       mode === "settled" ||
@@ -1362,16 +1368,36 @@ export const waitForObservation = async (
       skipScreenshot: true,
       skipAccessibilityAudit: true,
     });
+    lastObservedPosture = observation.display?.posture ?? lastObservedPosture;
     if (
-      waitFor.activeDisplay !== undefined &&
+      observation.display &&
+      (observation.display.key !== "0" ||
+        observation.display.role !== "unknown" ||
+        observation.display.posture !== "unknown")
+    ) {
+      postureSupported = true;
+    }
+    return observation;
+  };
+
+  const checkDisplaySupport = (observation: ObserveResult, first: boolean): void => {
+    // The no-inventory stub is shared with activeDisplay. A known panel whose
+    // posture is temporarily unknown still establishes support for polling.
+    const unsupportedCondition =
+      waitFor.activeDisplay !== undefined
+        ? "activeDisplay"
+        : first && waitFor.posture !== undefined && observation.display?.posture === "unknown"
+          ? "posture"
+          : undefined;
+    if (
+      unsupportedCondition &&
       observation.display?.key === "0" &&
       observation.display.role === "unknown"
     ) {
       throw new ActionableError(
-        "Cannot wait for activeDisplay: this device has no display inventory. Select a device that reports display panels and retry.",
+        `Cannot wait for ${unsupportedCondition}: this device has no display inventory. Select a device that reports display panels and posture and retry.`,
       );
     }
-    return observation;
   };
 
   // Settle gate (issue #3490 §3): once the predicate matches, hold until the
@@ -1398,9 +1424,20 @@ export const waitForObservation = async (
   // Evaluate the current cache on the first poll, then use its device-clock
   // timestamp to request a strictly newer hierarchy on later polls.
   let observation = await observeOnce(0);
+  checkDisplaySupport(observation, true);
   const baselineTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
+  // A posture-only stamp is read independently of hierarchy capture, including
+  // while folding locks the device. UI predicates/settling still need a fresh tree.
+  const needsHierarchyFreshness =
+    waitFor.posture === undefined ||
+    hasElementPredicate(waitFor) ||
+    waitFor.absent !== undefined ||
+    waitFor.activeWindow !== undefined ||
+    settled !== undefined;
   const minTimestamp =
-    baselineTimestamp !== undefined && baselineTimestamp > 0 ? baselineTimestamp + 1 : 0;
+    needsHierarchyFreshness && baselineTimestamp !== undefined && baselineTimestamp > 0
+      ? baselineTimestamp + 1
+      : 0;
   let polls = 1;
   const modes = new Map<string, MatchMode>();
   let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
@@ -1444,8 +1481,27 @@ export const waitForObservation = async (
     await timer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
     throwIfAborted(signal);
 
-    observation = await observeOnce(minTimestamp);
     polls++;
+    try {
+      observation = await observeOnce(minTimestamp);
+    } catch (error) {
+      if (
+        waitFor.posture === undefined ||
+        !postureSupported ||
+        signal?.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        logger.debug("[observe] Wait observation failed", error);
+        throw error;
+      }
+      // A fold may lock/disconnect hierarchy capture after support was established.
+      logger.debug("[observe] Posture transition interrupted observation; retrying", error);
+      waitEvaluation = { matched: false };
+      matchedHash = null;
+      continue;
+    }
+    throwIfAborted(signal);
+    checkDisplaySupport(observation, false);
     const observedTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
     // A timed-out delegate may return its old cache despite the requested
     // floor. It must not satisfy waitFor as post-invocation evidence.
@@ -1731,7 +1787,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
           candidates: waitOutcome.candidates,
         };
         return await createObserveResponse(
-          { ...result, ...waitMetadata },
+          { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
           args.includeScreenshotImage,
           signal,
         );

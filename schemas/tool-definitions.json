@@ -7219,6 +7219,10 @@
         "timedOut": {
           "type": "boolean"
         },
+        "timeoutReason": {
+          "description": "Posture wait timeout with the last observed posture",
+          "type": "string"
+        },
         "polls": {
           "type": "integer",
           "minimum": 0,

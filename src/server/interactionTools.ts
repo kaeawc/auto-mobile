@@ -1174,6 +1174,7 @@ export const buildOpenLinkPayload = (
     matched: waitOutcome.matched,
     settled: waitOutcome.settled,
     timedOut: waitOutcome.timedOut,
+    timeoutReason: waitOutcome.timeoutReason,
     polls: waitOutcome.polls,
     waitMs: waitOutcome.waitMs,
     matchedElement: waitOutcome.matchedElement,

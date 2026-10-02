@@ -838,6 +838,29 @@ describe("diffObserveResult", () => {
     expect(DIFF_SCALAR_FIELDS).toContain("awaitDuration");
   });
 
+  test("timeout reason gains, changes and removals survive action observation diffs", () => {
+    const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
+    const timeoutReason =
+      'Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"';
+    const plain = obs(node);
+    const timedOut = obs(node, { timeoutReason });
+    const changed = obs(node, { timeoutReason: `${timeoutReason} (retry)` });
+
+    expect(diffObserveResult(plain, timedOut).fields?.timeoutReason).toEqual({
+      from: undefined,
+      to: timeoutReason,
+    });
+    expect(diffObserveResult(timedOut, changed).fields?.timeoutReason).toEqual({
+      from: timeoutReason,
+      to: changed.timeoutReason,
+    });
+    expect(diffObserveResult(timedOut, plain).fields?.timeoutReason).toEqual({
+      from: timeoutReason,
+      to: undefined,
+    });
+    expect(diffObserveResult(timedOut, timedOut).fields?.timeoutReason).toBeUndefined();
+  });
+
   test("layout warnings are captured in action observation diffs", () => {
     const node = { "resource-id": "a", bounds: { left: 0, top: 0, right: 10, bottom: 10 } };
     const warning = {
@@ -2366,6 +2389,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     },
     awaitTimeout: { from: false, to: true },
     awaitDuration: { from: undefined, to: 250 },
+    timeoutReason: { from: undefined, to: "posture wait timed out" },
     layoutWarnings: { from: undefined, to: { scope: "full", warnings: [warning] } },
     error: { from: undefined, to: "capture failed" },
   };
@@ -2382,6 +2406,7 @@ describe("diffObserveResult — all DIFF_SCALAR_FIELDS members (P6)", () => {
     "layoutWarnings",
     "notificationPermissionDetected",
     "rotation",
+    "timeoutReason",
     "userId",
     "wakefulness",
   ];

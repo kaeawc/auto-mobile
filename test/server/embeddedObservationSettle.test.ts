@@ -160,6 +160,31 @@ describe("settleEmbeddedObservation (#6866)", () => {
     expect((outcome.observation.viewHierarchy!.hierarchy.node as any).node.node.length).toBe(2);
   });
 
+  test("the action's wait timeout reason survives replacing its capture", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const fake = new FakeObserveScreen();
+    fake.setObserveSequence([obs(AIRPLANE_ROW_INFLATED, 20), obs(AIRPLANE_ROW_INFLATED, 30)]);
+    const captured = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    const timeoutReason =
+      'Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"';
+    captured.timeoutReason = timeoutReason;
+    captured.timedOut = true;
+    captured.awaitTimeout = true;
+
+    const outcome = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: captured,
+      settleObserve: settleFor(fake, timer),
+    });
+
+    expect(outcome.observation).not.toBe(captured);
+    expect(outcome.settled).toBe(true);
+    expect(outcome.observation.timeoutReason).toBe(timeoutReason);
+    expect(outcome.observation.timedOut).toBe(true);
+    expect(outcome.observation.awaitTimeout).toBe(true);
+  });
+
   test("in-place actions keep the single capture and report settled:false", async () => {
     const timer = new FakeTimer();
     const fake = new FakeObserveScreen();

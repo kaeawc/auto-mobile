@@ -1,8 +1,12 @@
-import { cancellationHandlers, pausedSleep } from "../helpers/interactionCancellation";
+import {
+  cancellationHandlers,
+  cancellationTests,
+  pausedSleep,
+} from "../helpers/interactionCancellation";
 import { CtrlProxyClipboard } from "../../src/features/observe/ios/CtrlProxyClipboard";
 import { RequestManager } from "../../src/utils/RequestManager";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { Shake } from "../../src/features/action/Shake";
 import { RecentApps } from "../../src/features/action/RecentApps";
@@ -46,7 +50,7 @@ function observed(command: Shake | RecentApps) {
 }
 
 describe("slice 2 registered handler cancellation", () => {
-  afterEach(() => {
+  const test = cancellationTests(() => {
     resetShakeFactory();
     resetRecentAppsFactory();
     resetClipboardFactory();

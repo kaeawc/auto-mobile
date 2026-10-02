@@ -153,7 +153,7 @@ import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
-import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
+import { CtrlProxyText, imeCommitUnitFields, type ImeCommitActionResult } from "./CtrlProxyText";
 import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
@@ -408,12 +408,14 @@ interface WsSetTextResultMessage extends WsRequestBase {
 interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
   partialApplication?: boolean;
+  committedUnits?: number;
 }
 
 interface WsCancelImeCommitResultMessage extends WsRequestBase {
   type: "cancel_ime_commit_result";
   targetRequestId?: string;
   partialApplication?: boolean;
+  committedUnits?: number;
 }
 
 interface WsSetKeyboardProfileResultMessage extends WsRequestBase {
@@ -4997,6 +4999,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         partialApplication: message.partialApplication,
+        ...imeCommitUnitFields(message),
         perfTiming: message.perfTiming,
       })),
 
@@ -5005,6 +5008,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         success: message.success,
         targetRequestId: message.targetRequestId,
         partialApplication: message.partialApplication,
+        ...imeCommitUnitFields(message),
         error: message.error,
       })),
 

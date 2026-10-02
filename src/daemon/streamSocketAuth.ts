@@ -1,3 +1,4 @@
+import { isSessionReleasing } from "./sessionReleaseState";
 import { ActionableError } from "../models";
 import { DaemonState } from "./daemonState";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
@@ -30,6 +31,7 @@ export const STREAM_SOCKET_AUTH_ENV = "AUTOMOBILE_DAEMON_STREAM_AUTH";
  */
 export interface StreamAuthSessionManager {
   getSession(sessionUuid: string): unknown | null;
+  getReleasingSession?(sessionUuid: string): unknown | null;
   getSessionForDevice(deviceId: string): string | null;
   getDeviceLabels(sessionUuid: string): Record<string, string> | undefined;
 }
@@ -120,9 +122,15 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     // Resolve derived `${base}:${label}` device-label sessions to the base whose
     // identity the daemon tracks, exactly as the main socket does (#4611/#4655).
     const baseSessionUuid = this.resolveSessionIdentity(uuid) ?? uuid;
-    if (!sessionManager.getSession(baseSessionUuid)) {
+    const session = sessionManager.getSession(baseSessionUuid);
+    if (!session) {
       throw new ActionableError(
         `${this.operation} rejected: session ${uuid} is not an active daemon session (unknown or expired).`,
+      );
+    }
+    if (isSessionReleasing(sessionManager, baseSessionUuid, session)) {
+      throw new ActionableError(
+        `${this.operation} rejected: session ${uuid} is not an active daemon session (being released).`,
       );
     }
 

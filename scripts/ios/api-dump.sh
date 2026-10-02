@@ -50,7 +50,14 @@ strip_body_brace() {
     i=$((i + 1))
   done
   if (( last_open_at >= 0 )); then
-    stripped_signature="${s:0:last_open_at}"
+    local brace_group="${s:last_open_at}"
+    # Keep same-line accessor requirements. Multi-line accessor blocks still
+    # emit only the declaration; their get/set lines are not declarations.
+    if [[ "${2:-}" == protocol && "$brace_group" =~ ^\{[[:space:]]*(get|set|_read|_modify|willSet|didSet)([[:space:]}]|$) && "$brace_group" == *\}* ]]; then
+      stripped_signature="$s"
+    else
+      stripped_signature="${s:0:last_open_at}"
+    fi
   else
     stripped_signature="$s"
   fi
@@ -113,13 +120,18 @@ generate_api() {
   while IFS= read -r swift_file; do
     local rel_path="${swift_file#"$SDK_SOURCES/"}"
     local collecting_multiline=false
+    local collecting_case=false
     local multiline_buffer=""
     local paren_depth=0
     local brace_depth=0 context_count=0
-    local context_depths=() context_kinds=() context_public=()
+    local context_depths=() context_kinds=() context_public=() context_default_public=()
     local pending_kind="" pending_public=false pending_depth=0
+    local pending_default_public=false public_types=" "
+    local pending_attributes=""
+    local held_member="" held_indent=""
     local scope_code="" in_block_comment=false in_multiline_string=false
     local type_pattern='^((public|open|private|fileprivate|internal)[[:space:]]+)?((final|indirect)[[:space:]]+)?(class|struct|enum|protocol|extension|actor)[[:space:]]'
+    local type_name_pattern='^([[:alnum:]_]+)([[:space:]<{:]|$)'
     local attribute_pattern='^@[[:alnum:]_.]+(\([^)]*\))?[[:space:]]*'
     local member_pattern='^((static|class|mutating|nonmutating|optional|override|final|convenience|required|nonisolated|indirect)[[:space:]]+)*(func|var|let|init[?!]?|subscript|associatedtype|typealias)([[:space:](<]|$)'
     local class_member_pattern='^((public|open|private|fileprivate|internal)[[:space:]]+)?class[[:space:]]+(func|var|subscript)([[:space:](]|$)'
@@ -131,25 +143,45 @@ generate_api() {
       fi
       # Fast path: most source lines contain no lexical tokens to remove.
       if [[ "$in_block_comment" == true || "$in_multiline_string" == true || "$line" == *\"* || "$line" == */* ]]; then
-        scan_scope_code "$line"
+        scan_scope_code "$stripped"
       else
-        scope_code="$line"
+        scope_code="$stripped"
       fi
       local declaration="${scope_code#"${scope_code%%[![:space:]]*}"}"
       if [[ -z "$stripped" || "$stripped" == //* || ( -z "$declaration" && "$collecting_multiline" == false ) ]]; then
         continue
       fi
+      # Hold each completed signature until the next non-empty code line so
+      # a following where clause can join it. Flush before any other code.
+      local where_continuation=false
+      if [[ -n "$held_member" ]]; then
+        if [[ "$declaration" =~ ^where([[:space:]]|$) ]]; then
+          strip_body_brace "$stripped"
+          local where_words=()
+          read -r -a where_words <<< "$stripped_signature"
+          held_member="$held_member ${where_words[*]}"
+          where_continuation=true
+        fi
+        emit_file_header "$rel_path"
+        echo "$held_indent$held_member"
+        held_member=""
+      fi
       while [[ "$declaration" == @* && "$declaration" =~ $attribute_pattern ]]; do
         declaration="${declaration#"${BASH_REMATCH[0]}"}"
       done
+      if [[ -z "$declaration" && "$stripped" == @* ]]; then
+        pending_attributes="${pending_attributes:+$pending_attributes }${stripped%"${stripped##*[![:space:]]}"}"
+        continue
+      fi
 
-      local kind="" visible=false at_type_depth=false
+      local kind="" visible=false at_type_depth=false default_public=false
       if (( context_count > 0 )); then
         local parent=$((context_count - 1))
         if (( brace_depth == context_depths[parent] )); then
           at_type_depth=true
           kind="${context_kinds[parent]}"
           visible="${context_public[parent]}"
+          default_public="${context_default_public[parent]}"
         fi
       fi
 
@@ -158,10 +190,27 @@ generate_api() {
       if [[ "$collecting_multiline" == false && ( "$brace_depth" == 0 || "$at_type_depth" == true ) && ! "$declaration" =~ $class_member_pattern && "$declaration" =~ $type_pattern ]]; then
         pending_kind="${BASH_REMATCH[5]}"
         local access="${BASH_REMATCH[2]}"
+        local type_name="${declaration#"${BASH_REMATCH[0]}"}"
+        if [[ "$type_name" =~ $type_name_pattern ]]; then
+          type_name="${BASH_REMATCH[1]}"
+        else
+          type_name=""
+        fi
         pending_depth=$brace_depth
         pending_public=false
-        if [[ "$access" == public || "$access" == open || ( -z "$access" && "$kind" == extension && "$visible" == true ) ]]; then
+        pending_default_public=false
+        if [[ "$access" == public || "$access" == open || ( -z "$access" && "$kind" == extension && "$default_public" == true ) ]]; then
           if (( brace_depth == 0 )) || [[ "$at_type_depth" == true && "$visible" == true ]]; then
+            pending_public=true
+            pending_default_public=true
+          fi
+        fi
+        # Same-file earlier top-level declarations suffice; unqualified
+        # extensions do not grant public access to implicit members.
+        if (( brace_depth == 0 )) && [[ -n "$type_name" ]]; then
+          if [[ "$pending_kind" != extension && "$pending_public" == true ]]; then
+            public_types="$public_types$type_name "
+          elif [[ "$pending_kind" == extension && -z "$access" && "$public_types" == *" $type_name "* ]]; then
             pending_public=true
           fi
         fi
@@ -169,36 +218,45 @@ generate_api() {
 
       # If collecting a multi-line declaration, append
       local signature="" indent="  "
-      if [[ "$collecting_multiline" == true ]]; then
+      if [[ "$where_continuation" == true ]]; then
+        :
+      elif [[ "$collecting_multiline" == true ]]; then
         multiline_buffer="$multiline_buffer $stripped"
-        count_paren_depth "$stripped"
+        count_paren_depth "$scope_code"
         paren_depth=$(( paren_depth + paren_delta ))
-        # Declaration complete when parens are balanced (depth <= 0)
-        if [[ $paren_depth -le 0 ]]; then
+        local continuation_code="${scope_code%"${scope_code##*[![:space:]]}"}"
+        # Cases also continue across a trailing comma after balanced parens.
+        if [[ $paren_depth -le 0 && ( "$collecting_case" == false || "$continuation_code" != *, ) ]]; then
           collecting_multiline=false
+          collecting_case=false
           signature="$multiline_buffer"
         fi
-      elif [[ "$stripped" =~ ^public[[:space:]]+((final|indirect)[[:space:]]+)?(class|struct|enum|protocol|extension)[[:space:]] ]]; then
+      elif [[ "$declaration" =~ ^public[[:space:]]+((final|indirect)[[:space:]]+)?(class|struct|enum|protocol|extension)[[:space:]] ]]; then
         # Preserve the existing type headers and member formatting verbatim.
         signature="$stripped"
         indent=""
       else
         local record=false
-        if [[ "$stripped" =~ ^(@discardableResult[[:space:]]+)?public[[:space:]] ]]; then
+        if [[ "$declaration" =~ ^public[[:space:]] ]]; then
           record=true
         elif [[ "$at_type_depth" == true && "$visible" == true ]]; then
           if [[ "$kind" == enum && "$declaration" =~ ^(indirect[[:space:]]+)?case[[:space:]] ]]; then
             record=true
-          elif [[ ( "$kind" == protocol || "$kind" == extension ) && "$declaration" =~ $member_pattern ]]; then
+          elif [[ ( "$kind" == protocol || ( "$kind" == extension && "$default_public" == true ) ) && "$declaration" =~ $member_pattern ]]; then
             record=true
-          elif [[ "$kind" == extension && "$declaration" =~ $type_pattern && -z "${BASH_REMATCH[2]}" ]]; then
+          elif [[ "$kind" == extension && "$default_public" == true && "$declaration" =~ $type_pattern && -z "${BASH_REMATCH[2]}" ]]; then
             record=true
           fi
         fi
         if [[ "$record" == true ]]; then
-          count_paren_depth "$stripped"
+          count_paren_depth "$scope_code"
           paren_depth=$paren_delta
-          if [[ $paren_depth -gt 0 ]]; then
+          collecting_case=false
+          if [[ "$kind" == enum && "$declaration" =~ ^(indirect[[:space:]]+)?case[[:space:]] ]]; then
+            collecting_case=true
+          fi
+          local case_code="${scope_code%"${scope_code##*[![:space:]]}"}"
+          if [[ $paren_depth -gt 0 || ( "$collecting_case" == true && "$case_code" == *, ) ]]; then
             collecting_multiline=true
             multiline_buffer="$stripped"
           else
@@ -207,13 +265,22 @@ generate_api() {
         fi
       fi
 
+      if [[ -n "$pending_attributes" ]]; then
+        if [[ -n "$signature" ]]; then
+          signature="$pending_attributes $signature"
+        elif [[ "$collecting_multiline" == true ]]; then
+          multiline_buffer="$pending_attributes $multiline_buffer"
+        fi
+        pending_attributes=""
+      fi
+
       if [[ -n "$signature" ]]; then
         local member
-        strip_body_brace "$signature"
+        strip_body_brace "$signature" "$kind"
         member="$stripped_signature"
         member="${member%"${member##*[![:space:]]}"}"
-        emit_file_header "$rel_path"
-        echo "$indent$member"
+        held_member="$member"
+        held_indent="$indent"
       fi
 
       local opens="${scope_code//[^\{]/}" closes="${scope_code//[^\}]/}"
@@ -221,6 +288,7 @@ generate_api() {
         context_depths[context_count]=$((pending_depth + 1))
         context_kinds[context_count]="$pending_kind"
         context_public[context_count]="$pending_public"
+        context_default_public[context_count]="$pending_default_public"
         context_count=$((context_count + 1))
         pending_kind=""
       fi
@@ -235,6 +303,11 @@ generate_api() {
         context_count=$((context_count - 1))
       done
     done < "$swift_file"
+    # EOF also flushes before the next file's header (including the last file).
+    if [[ -n "$held_member" ]]; then
+      emit_file_header "$rel_path"
+      echo "$held_indent$held_member"
+    fi
   done < <(find "$SDK_SOURCES" -name "*.swift" -not -name "PrivacyInfo*" | sort)
 }
 

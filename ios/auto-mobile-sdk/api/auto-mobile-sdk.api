@@ -19,7 +19,7 @@ public final class AutoMobileSDK: @unchecked Sendable
   public func initialize(bundleId: String? = nil)
   public func initialize(bundleId: String? = nil, configuration: AutoMobileConfiguration)
   public func addNavigationListener(_ listener: NavigationListener)
-  public func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
+  @discardableResult public func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
   public func removeNavigationListener(_ listener: NavigationListener)
   public func clearNavigationListeners()
   public func notifyNavigationEvent(_ event: NavigationEvent)
@@ -103,8 +103,8 @@ public protocol EventProcessing: Sendable
 
 // Events/SdkEvent.swift
 public protocol SdkEvent: Codable, Sendable
-  var eventType: SdkEventType
-  var timestamp: Int64
+  var eventType: SdkEventType { get }
+  var timestamp: Int64 { get }
 public enum SdkEventType: String, Codable, Sendable
   case navigation
   case handledException = "handled_exception"
@@ -398,7 +398,7 @@ public final class UIKitNavigationAdapter: NavigationFrameworkAdapter, @unchecke
 public protocol NavigationFrameworkAdapter: AnyObject, Sendable
   func start()
   func stop()
-  var isActive: Bool
+  var isActive: Bool { get }
 
 // Navigation/Adapters/SwiftUINavigationAdapter.swift
 public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
@@ -491,7 +491,7 @@ public final class AutoMobileNetwork: @unchecked Sendable
   public func protocolClass() -> AnyClass
   public func captureRecorder() -> NetworkCaptureRecorder
   public func recordRequest(_ record: NetworkRequestRecord)
-  public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
+  @available(*, deprecated, message: "Use recordRequest(_:) with NetworkRequestRecord instead") public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
   public func recordFromTask( _ task: URLSessionTask, startTime: Date, receivedData: Data?, error: Error? )
   public func recordWebSocketFrame( url: String, direction: WebSocketFrameDirection, frameType: WebSocketFrameType, payloadSize: Int? = nil )
 public class AutoMobileURLProtocol: URLProtocol
@@ -513,7 +513,7 @@ public final class NetworkCaptureRecorder: @unchecked Sendable
   public typealias Emit = @Sendable (NetworkRequestRecord) -> Void
   public typealias IDGenerator = @Sendable () -> String
   public init( emit: @escaping Emit, maxBodyBytes: Int = 32 * 1024, idGenerator: @escaping IDGenerator = { UUID().uuidString }, isEnabled: @escaping @Sendable () -> Bool = { true }, isBodyCaptureEnabled: @escaping @Sendable () -> Bool = { true }, samplingRate: Double = 1, sampler: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) }, headerRedactor: @escaping @Sendable ([String: String]) -> [String: String] = { NetworkCaptureRecorder.redactHeaders($0) } )
-  public func beginRequest( url: String, method: String = "GET", connectionId: String? = nil, protocolName: String = "http", requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, requestBody: String? = nil ) -> String
+  @discardableResult public func beginRequest( url: String, method: String = "GET", connectionId: String? = nil, protocolName: String = "http", requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, requestBody: String? = nil ) -> String
   public func recordRequestHeaders( requestId: String, headers: [String: String] )
   public func recordResponseHeaders( requestId: String, headers: [String: String] )
   public func recordMetadata(requestId: String, key: String, value: String)
@@ -527,8 +527,8 @@ public final class NetworkCaptureRecorder: @unchecked Sendable
 public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable
   public init(recorder: NetworkCaptureRecorder)
   public func evaluateFault(for task: URLSessionTask, sessionId: String? = nil) -> NetworkMockRuleStore.FaultDecision?
-  public func begin( url: String, method: String = "GET", connectionId: String? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil ) -> String
-  public func begin( task: URLSessionTask, connectionId: String? = nil ) -> String
+  @discardableResult public func begin( url: String, method: String = "GET", connectionId: String? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil ) -> String
+  @discardableResult public func begin( task: URLSessionTask, connectionId: String? = nil ) -> String
   public func didReceiveResponseHeaders(requestId: String, headers: [String: String])
   public func didReceiveBody(requestId: String, bytes: Int, text: String? = nil)
   public func didReceiveMetrics(requestId: String, durationMs: Double)
@@ -543,7 +543,7 @@ public final class WebSocketNetworkCaptureAdapter: @unchecked Sendable
 public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable
   public init(recorder: NetworkCaptureRecorder)
   public func evaluateFault( endpoint: String, connectionId: String, sessionId: String? = nil ) -> NetworkMockRuleStore.FaultDecision?
-  public func begin( endpoint: String, connectionId: String ) -> String
+  @discardableResult public func begin( endpoint: String, connectionId: String ) -> String
   public func didSend(requestId: String, bytes: Int)
   public func didUpdateState(requestId: String, state: String)
   public func didReceive(requestId: String, bytes: Int, text: String? = nil)
@@ -737,23 +737,23 @@ public protocol AutoMobileAPI: AnyObject, Sendable
   func initialize()
   func initialize(configuration: AutoMobileConfiguration)
   func shutdown()
-  var isEnabled: Bool
+  var isEnabled: Bool { get }
   func setEnabled(_ enabled: Bool)
-  var isInitialized: Bool
+  var isInitialized: Bool { get }
   func addNavigationListener(_ listener: NavigationListener)
-  func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
+  @discardableResult func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
   func removeNavigationListener(_ listener: NavigationListener)
   func clearNavigationListeners()
   func notifyNavigationEvent(_ event: NavigationEvent)
-  var listenerCount: Int
+  var listenerCount: Int { get }
   func currentSessionId() -> String?
   func addBreadcrumb(message: String, category: BreadcrumbCategory, metadata: [String: String])
   func setUserId(_ userId: String?)
   func setTag(_ key: String, value: String)
   func removeTag(_ key: String)
-  var configuration: AutoMobileConfiguration?
-  var bundleId: String?
-  var dropReport: [DropReason: Int]
+  var configuration: AutoMobileConfiguration? { get }
+  var bundleId: String? { get }
+  var dropReport: [DropReason: Int] { get }
 
 // Public/AutoMobileCrashesAPI.swift
 public protocol AutoMobileCrashesAPI: AnyObject, Sendable
@@ -787,7 +787,7 @@ public final class DefaultAutoMobileAPI: AutoMobileAPI, @unchecked Sendable
   public func setEnabled(_ enabled: Bool)
   public var isInitialized: Bool
   public func addNavigationListener(_ listener: NavigationListener)
-  public func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
+  @discardableResult public func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
   public func removeNavigationListener(_ listener: NavigationListener)
   public func clearNavigationListeners()
   public func notifyNavigationEvent(_ event: NavigationEvent)

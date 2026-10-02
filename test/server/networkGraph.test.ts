@@ -29,6 +29,37 @@ function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWit
 }
 
 describe("buildNetworkGraph", () => {
+  it("counts the Playground timeout as an error without changing latency", () => {
+    const { graph } = buildNetworkGraph([
+      makeEvent({
+        path: "/timeout",
+        statusCode: 0,
+        error: "The request timed out",
+        durationMs: 30000,
+      }),
+      makeEvent({ path: "/posts", method: "POST", durationMs: 250 }),
+      makeEvent({ path: "/users", durationMs: 150 }),
+    ]);
+    expect(graph[0].paths["timeout[GET]"]).toMatchObject({
+      success: 0,
+      errors: 1,
+      p50: 30000,
+      p95: 30000,
+    });
+    expect(graph[0].paths["posts[POST]"]).toMatchObject({
+      success: 1,
+      errors: 0,
+      p50: 250,
+      p95: 250,
+    });
+    expect(graph[0].paths["users[GET]"]).toMatchObject({
+      success: 1,
+      errors: 0,
+      p50: 150,
+      p95: 150,
+    });
+  });
+
   it("returns empty graph for no events", () => {
     const result = buildNetworkGraph([]);
     expect(result.graph).toHaveLength(0);

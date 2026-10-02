@@ -31,6 +31,15 @@ function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWit
 }
 
 describe("bucketEvents", () => {
+  it("counts missing responses and recorded transport errors", () => {
+    const events = [
+      makeEvent({ statusCode: 0 }),
+      makeEvent({ error: "timed out" }),
+      makeEvent({ statusCode: 301 }),
+    ];
+    expect(bucketEvents(events, 60)[0]).toMatchObject({ requests: 3, errors: 2 });
+  });
+
   it("returns empty array for no events", () => {
     expect(bucketEvents([], 60)).toEqual([]);
   });
@@ -134,6 +143,16 @@ describe("bucketEvents", () => {
 // after an `Object.prototype` member read back as the inherited member (truthy),
 // initialization was skipped, and the host vanished from the emitted stats.
 describe("aggregateStatsByHost", () => {
+  it("counts missing responses and recorded transport errors per host", () => {
+    expect(
+      aggregateStatsByHost([
+        makeEvent({ statusCode: 0 }),
+        makeEvent({ error: "cancelled" }),
+        makeEvent({ statusCode: 301 }),
+      ])["api.example.com"],
+    ).toMatchObject({ requests: 3, errors: 2 });
+  });
+
   const PROTOTYPE_HOSTS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
 
   it.each([...PROTOTYPE_HOSTS, "api.example.com"])("aggregates the %s host", (host) => {
@@ -159,6 +178,38 @@ describe("aggregateStatsByHost", () => {
 });
 
 describe("network resource registration", () => {
+  it("includes transport failures in the stats error count and rate", async () => {
+    registerNetworkResources({
+      getNetworkEvents: async () => [
+        makeEvent({ statusCode: 0 }),
+        makeEvent({ error: "timed out" }),
+        makeEvent({ statusCode: 301 }),
+        makeEvent(),
+      ],
+      getNetworkEventById: async () => null,
+    });
+    const content = await ResourceRegistry.getResource("automobile:network/stats")!.handler();
+    expect(JSON.parse(content.text!)).toMatchObject({
+      totalRequests: 4,
+      errorCount: 2,
+      errorRate: 0.5,
+    });
+  });
+
+  it("queries failures before applying the errors resource limit", async () => {
+    registerNetworkResources({
+      getNetworkEvents: async (query) => {
+        expect(query).toEqual({ errorsOnly: true, limit: 20 });
+        return [makeEvent({ statusCode: 0, error: "timed out" })];
+      },
+      getNetworkEventById: async () => null,
+    });
+    const content = await ResourceRegistry.getResource(
+      "automobile:network/traffic/errors",
+    )!.handler();
+    expect(JSON.parse(content.text!).errors).toHaveLength(1);
+  });
+
   afterEach(() => {
     ResourceRegistry.clearResources();
   });

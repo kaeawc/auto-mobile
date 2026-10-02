@@ -1,3 +1,4 @@
+import { isFailedNetworkRequest } from "../utils/networkRequestOutcome";
 import { ResourceRegistry } from "./resourceRegistry";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -275,7 +276,7 @@ export class NetworkState {
       return;
     }
 
-    const isError = notification.statusCode >= 400;
+    const isError = isFailedNetworkRequest(notification);
     const isSlow = notification.durationMs >= this._slowThresholdMs;
 
     // Gate by filter
@@ -310,7 +311,7 @@ export class NetworkState {
       return;
     }
 
-    const hasErrors = pending.some((n) => n.statusCode >= 400);
+    const hasErrors = pending.some(isFailedNetworkRequest);
     const hasSlow = pending.some((n) => n.durationMs >= this._slowThresholdMs);
 
     try {

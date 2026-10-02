@@ -155,9 +155,9 @@ export class DaemonRequestNotDeliveredError extends DaemonUnavailableError {
   }
 }
 
-/** Retryable response from a live daemon that has stopped admitting work. */
+/** Shutdown response; only unadmitted requests are safe to replay unconditionally. */
 export class DaemonShuttingDownError extends DaemonUnavailableError {
-  constructor() {
+  constructor(readonly requestMayHaveDispatched = false) {
     super(DAEMON_SHUTTING_DOWN_ERROR_MESSAGE);
     this.name = "DaemonShuttingDownError";
   }
@@ -206,7 +206,9 @@ function daemonLifecycleResponseError(response: DaemonResponse): Error | undefin
     );
   }
   if (isDaemonShuttingDownFailure(response.daemonShuttingDown)) {
-    return new DaemonShuttingDownError();
+    return new DaemonShuttingDownError(
+      response.daemonShuttingDown.requestMayHaveDispatched === true,
+    );
   }
   const overloadFailure = sanitizeMcpOverloadFailure(response.overloadFailure);
   if (overloadFailure) {

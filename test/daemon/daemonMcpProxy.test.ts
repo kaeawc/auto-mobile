@@ -2713,6 +2713,71 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test.each(["tapOn", "observe"])(
+      "possibly-dispatched shutdown preserves the recovery barrier for %s",
+      async (toolName) => {
+        const shutdownError = new DaemonShuttingDownError(true);
+        const quiescedClient = new ScriptedDaemonClient({ toolError: shutdownError });
+        const recoveredResult = { content: [{ type: "text", text: "successor" }] };
+        const freshClient = new ScriptedDaemonClient({ toolResult: recoveredResult });
+        const clients = [quiescedClient, freshClient];
+        const manager = matchingDaemonManager();
+        const timer = new FakeTimer();
+        let availabilityChecks = 0;
+        let successorAvailable = false;
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockImplementation(async () => {
+          availabilityChecks += 1;
+          return availabilityChecks === 1 || successorAvailable;
+        });
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => clients.shift()!,
+          daemonManager: manager,
+          autoStartDaemon: false,
+          timer,
+        });
+
+        try {
+          let completed = false;
+          const attempt = proxy
+            .callTool(toolName, {})
+            .catch((error: unknown) => error)
+            .then((result) => {
+              completed = true;
+              return result;
+            });
+          if (toolName === "tapOn") {
+            for (let i = 0; i < 40 && !completed; i++) {
+              await Promise.resolve();
+            }
+            expect(completed).toBe(true);
+            const error = await attempt;
+            expect(error).toBeInstanceOf(DaemonToolOutcomeUnknownError);
+            expect(error).toMatchObject({ cause: shutdownError });
+            expect(quiescedClient.callToolCalls).toEqual([{ toolName, params: {} }]);
+            expect(quiescedClient.closeCallCount).toBe(1);
+            expect(freshClient.callToolCalls).toEqual([]);
+            expect(freshClient.connectCallCount).toBe(0);
+          }
+          // For a refused mutation, the next read must still wait for the successor.
+          const recovery = toolName === "tapOn" ? proxy.callTool("observe", {}) : attempt;
+          for (let i = 0; i < 40 && timer.getPendingSleepCount() === 0; i++) {
+            await Promise.resolve();
+          }
+          expect(timer.getPendingSleeps()).toEqual([100]);
+          expect(freshClient.connectCallCount).toBe(0);
+
+          successorAvailable = true;
+          timer.advanceTime(100);
+          await expect(recovery).resolves.toEqual(recoveredResult);
+          expect(freshClient.callToolCalls).toEqual([{ toolName: "observe", params: {} }]);
+          expect(manager.startCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      },
+    );
+
     test("waits through a successor startup lock when auto-start is disabled (#6336)", async () => {
       const recoveredResult = { content: [{ type: "text", text: "joined successor" }] };
       const quiescedClient = new ScriptedDaemonClient({

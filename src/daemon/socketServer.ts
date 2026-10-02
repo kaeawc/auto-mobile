@@ -56,7 +56,11 @@ import {
   resolveSocketAdmissionLane,
   SocketRequestAdmissionQueue,
 } from "./socketRequestAdmission";
-import { daemonShuttingDownFailure, isDaemonShuttingDownToolResult } from "./daemonShutdownOutcome";
+import {
+  daemonShuttingDownFailure,
+  daemonShuttingDownFailureFromToolResult,
+  isDaemonShuttingDownToolResult,
+} from "./daemonShutdownOutcome";
 import { registerLiveDeadline, unregisterLiveDeadline } from "./liveDeadlineRegistry";
 import {
   DaemonSocketReachability,
@@ -1692,7 +1696,7 @@ export class UnixSocketServer {
               type: "mcp_response",
               success: false,
               error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-              daemonShuttingDown: daemonShuttingDownFailure(),
+              daemonShuttingDown: daemonShuttingDownFailureFromToolResult(result),
             };
           }
 
@@ -6701,7 +6705,7 @@ export class UnixSocketServer {
       type: "mcp_response",
       success: false,
       error: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
-      daemonShuttingDown: daemonShuttingDownFailure(),
+      daemonShuttingDown: daemonShuttingDownFailure(pending.admitted),
     });
   }
 

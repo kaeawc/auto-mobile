@@ -140,8 +140,8 @@ function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError)
   );
 }
 
-function daemonShuttingDownResult(hasOutputSchema: boolean) {
-  const shutdown = daemonShuttingDownMcpOutcome();
+function daemonShuttingDownResult(hasOutputSchema: boolean, requestMayHaveDispatched = false) {
+  const shutdown = daemonShuttingDownMcpOutcome(requestMayHaveDispatched);
   const result = {
     content: [{ type: "text" as const, text: JSON.stringify(shutdown) }],
     structuredContent: shutdown,
@@ -408,7 +408,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       return noActiveDeviceSessionResult(error);
     }
     if (error instanceof DaemonShuttingDownError) {
-      return daemonShuttingDownResult(hasOutputSchema);
+      return daemonShuttingDownResult(hasOutputSchema, error.requestMayHaveDispatched);
     }
     if (error instanceof DaemonRestartDeferredError) {
       return daemonRestartDeferredResult(error);

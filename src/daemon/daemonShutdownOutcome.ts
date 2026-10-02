@@ -1,8 +1,11 @@
+import { getStructuredPayload } from "../utils/toolUtils";
 import { DAEMON_SHUTTING_DOWN_ERROR_CODE, DAEMON_SHUTTING_DOWN_ERROR_MESSAGE } from "./constants";
 
 export interface DaemonShuttingDownFailure {
   code: typeof DAEMON_SHUTTING_DOWN_ERROR_CODE;
   retryable: true;
+  /** Admission occurred; replay may duplicate device work. */
+  requestMayHaveDispatched?: true;
 }
 
 export interface DaemonShuttingDownMcpOutcome {
@@ -11,19 +14,25 @@ export interface DaemonShuttingDownMcpOutcome {
   };
 }
 
-export function daemonShuttingDownFailure(): DaemonShuttingDownFailure {
+export function daemonShuttingDownFailure(
+  requestMayHaveDispatched = false,
+): DaemonShuttingDownFailure {
   return {
     code: DAEMON_SHUTTING_DOWN_ERROR_CODE,
     retryable: true,
+    ...(requestMayHaveDispatched ? { requestMayHaveDispatched: true } : {}),
   };
 }
 
-export function daemonShuttingDownMcpOutcome(): DaemonShuttingDownMcpOutcome {
+export function daemonShuttingDownMcpOutcome(
+  requestMayHaveDispatched = false,
+): DaemonShuttingDownMcpOutcome {
   return {
     error: {
       code: DAEMON_SHUTTING_DOWN_ERROR_CODE,
       message: DAEMON_SHUTTING_DOWN_ERROR_MESSAGE,
       retryable: true,
+      ...(requestMayHaveDispatched ? { requestMayHaveDispatched: true } : {}),
     },
   };
 }
@@ -44,6 +53,18 @@ export function isDaemonShuttingDownMcpOutcome(
   return isRecord(value) && isDaemonShuttingDownFailure(value.error);
 }
 
-export function isDaemonShuttingDownToolResult(value: unknown): boolean {
+export function isDaemonShuttingDownToolResult(
+  value: unknown,
+): value is { structuredContent: DaemonShuttingDownMcpOutcome } {
   return isRecord(value) && isDaemonShuttingDownMcpOutcome(value.structuredContent);
+}
+
+export function daemonShuttingDownFailureFromToolResult(
+  result: unknown,
+): DaemonShuttingDownFailure {
+  return daemonShuttingDownFailure(
+    isDaemonShuttingDownToolResult(result) &&
+      getStructuredPayload<DaemonShuttingDownMcpOutcome>(result)?.error.requestMayHaveDispatched ===
+        true,
+  );
 }

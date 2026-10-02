@@ -1,10 +1,78 @@
-import type { SessionManager } from "../daemon/sessionManager";
+import type { SessionManager, Session } from "../daemon/sessionManager";
 import { ActionableError } from "../models/ActionableError";
+import type { BootedDevice } from "../models";
+import {
+  defaultMockLocationClearRegistry,
+  type MockLocationClears,
+} from "../features/utility/MockLocationClear";
 
 interface SessionLocationScope {
   sessionManager?: SessionManager;
   sessionUuid?: string;
   deviceId: string;
+}
+
+/** Attribution requires the captured identity to remain live, admitted, and bound. */
+export function getLiveSessionLocationWrite(
+  options: SessionLocationScope & {
+    sessionManager: SessionManager;
+    sessionUuid: string;
+    session: Session;
+  },
+) {
+  const { sessionManager, sessionUuid, deviceId, session } = options;
+  return sessionManager.getSession(sessionUuid) === session &&
+    sessionManager.isAdmittedForAutomation(session) &&
+    session.assignedDevice === deviceId
+    ? session
+    : null;
+}
+
+/** Only the handler's live session scope owns automatic simulator cleanup. */
+export function createSessionLocationAppliedCallback(
+  options: Omit<SessionLocationScope, "deviceId"> & {
+    device: BootedDevice;
+    mockLocationClears?: MockLocationClears;
+  },
+): (() => void) | undefined {
+  const { sessionManager, sessionUuid } = options;
+  if (!sessionManager || !sessionUuid) {
+    return undefined;
+  }
+  const session = sessionManager.getSession(sessionUuid);
+  if (!session) {
+    return undefined;
+  }
+  const scope = {
+    ...options,
+    sessionManager,
+    sessionUuid,
+    session,
+    deviceId: options.device.deviceId,
+  };
+  // Remember initial eligibility solely for a write that outlives release/unbind.
+  // Ordinary ownership is decided at apply time, including newly admitted sessions.
+  const admittedAtConstruction = getLiveSessionLocationWrite(scope) === session;
+  const registry = options.mockLocationClears ?? defaultMockLocationClearRegistry;
+  return () => {
+    if (getLiveSessionLocationWrite(scope) === session) {
+      registry.markSet(session.sessionId, options.device);
+      return;
+    }
+    const releasedOrUnbound =
+      sessionManager.getSession(sessionUuid) !== session ||
+      session.assignedDevice !== options.device.deviceId ||
+      sessionManager.getReleasingSession(sessionUuid) === session;
+    if (!admittedAtConstruction || !releasedOrUnbound) {
+      return;
+    }
+    // Setup drain is bounded: a successful late set can follow its lifecycle hook.
+    // Publish its clear before setup settles, extending the existing quarantine.
+    const clear = registry.clearLateSet({ sessionId: session.sessionId, device: options.device });
+    if (clear) {
+      sessionManager.registerPendingDeviceCleanup(options.device.deviceId, clear);
+    }
+  };
 }
 
 /** Retain the session identity so a late write cannot borrow a replacement's admission. */

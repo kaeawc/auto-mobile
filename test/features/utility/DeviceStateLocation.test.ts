@@ -51,6 +51,73 @@ const flush = async (): Promise<void> => {
 };
 
 describe("setDeviceState location", () => {
+  test("marks successful iOS static writes and route starts before their first fix", async () => {
+    const timer = new FakeTimer();
+    const routeRegistry = new LocationRouteRegistry(timer);
+    const simctl = new FakeSimCtlClient();
+    let applied = 0;
+    const state = new DeviceState(ios, {
+      timer,
+      routeRegistry,
+      simctl,
+      onLocationApplied: () => {
+        applied++;
+      },
+    });
+    await state.setState({ location: point });
+    expect(applied).toBe(1);
+    await state.setState({ location: route });
+    expect(applied).toBe(2);
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+    routeRegistry.stopAll();
+  });
+
+  test("failed static set does not mark a location", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandArgsError(
+      ["location", ios.deviceId, "set", `${point.latitude},${point.longitude}`],
+      new Error("failed"),
+    );
+    let applied = false;
+    const state = new DeviceState(ios, {
+      simctl,
+      timer: new FakeTimer(),
+      routeRegistry: new LocationRouteRegistry(new FakeTimer()),
+      onLocationApplied: () => {
+        applied = true;
+      },
+    });
+    const result = await state.setState({ location: point });
+    expect(result.location?.error).toContain("failed");
+    expect(applied).toBe(false);
+  });
+
+  for (const device of [android, { ...ios, deviceId: "00008110-0012345678901234" }]) {
+    test(`static and route writes do not mark ${device.deviceId}`, async () => {
+      const timer = new FakeTimer();
+      const routeRegistry = new LocationRouteRegistry(timer);
+      const adbFactory = new FakeAdbClientFactory();
+      adbFactory.getFakeClient().setCommandResult("shell getprop ro.kernel.qemu", "1\n");
+      const simctl = new FakeSimCtlClient();
+      let applied = false;
+      const state = new DeviceState(device, {
+        timer,
+        routeRegistry,
+        adbFactory,
+        simctl,
+        consoleFactory: () => new FakeEmulatorConsoleClient(),
+        onLocationApplied: () => {
+          applied = true;
+        },
+      });
+      await state.setState({ location: point });
+      await state.setState({ location: route });
+      expect(applied).toBe(false);
+      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
+      routeRegistry.stopAll();
+    });
+  }
+
   for (const device of [android, ios]) {
     test(`${device.platform} route rechecks admission before emitting each fix`, async () => {
       const timer = new FakeTimer();
@@ -404,7 +471,7 @@ describe("setDeviceState location", () => {
           unbound = callback;
         },
       },
-      routeRegistry,
+      { registry: routeRegistry },
     );
     const snapshot: SessionReleaseSnapshot = {
       sessionId: "session",

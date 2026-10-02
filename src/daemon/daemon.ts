@@ -22,6 +22,7 @@ import {
   registerLocationRouteSessionCleanup,
   stopLocationRouteForRemovedDevice,
 } from "../features/utility/LocationRoutePlayer";
+import { defaultMockLocationClearRegistry } from "../features/utility/MockLocationClear";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { IOSCtrlProxyManager } from "../ctrlProxy/IOSCtrlProxyManager";
 import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -603,6 +604,7 @@ export class Daemon {
       onDeviceRemoved: (deviceId, platform) => {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
+        defaultMockLocationClearRegistry.retireDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);

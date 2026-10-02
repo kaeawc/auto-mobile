@@ -1,3 +1,4 @@
+import { throwIfAborted, awaitWhileRequestIsLive } from "../toolUtils";
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
@@ -16,9 +17,11 @@ export async function readAndroidDeviceApiLevel(
   adb: AdbExecutor,
   timeoutMs?: number,
   timer: Timer = defaultTimer,
+  signal?: AbortSignal,
 ): Promise<number | null> {
+  throwIfAborted(signal);
   const extended = adb as AdbExecutor & {
-    getAndroidApiLevel?: (timeoutMs?: number) => Promise<number | null>;
+    getAndroidApiLevel?: (timeoutMs?: number, signal?: AbortSignal) => Promise<number | null>;
   };
   // Single deadline for the whole read. The fallback is charged against what is
   // LEFT after the primary probe, never a fresh full budget.
@@ -30,7 +33,10 @@ export async function readAndroidDeviceApiLevel(
     // the fallback's timeout exists to prevent: a stalled getprop holds the
     // daemon's per-device queue for as long as the subprocess lives.
     if (typeof extended.getAndroidApiLevel === "function") {
-      const fromClient = await extended.getAndroidApiLevel(timeoutMs);
+      const fromClient = await awaitWhileRequestIsLive(
+        extended.getAndroidApiLevel(timeoutMs, signal),
+        signal,
+      );
       if (fromClient !== null && fromClient !== undefined) {
         return fromClient;
       }
@@ -51,15 +57,21 @@ export async function readAndroidDeviceApiLevel(
       fallbackTimeoutMs = remaining;
     }
 
-    const r = await adb.executeCommand(
-      "shell getprop ro.build.version.sdk",
-      fallbackTimeoutMs,
-      undefined,
-      true,
+    throwIfAborted(signal);
+    const r = await awaitWhileRequestIsLive(
+      adb.executeCommand(
+        "shell getprop ro.build.version.sdk",
+        fallbackTimeoutMs,
+        undefined,
+        true,
+        signal,
+      ),
+      signal,
     );
     const n = parseInt(r.stdout.trim(), 10);
     return Number.isFinite(n) ? n : null;
   } catch (error) {
+    throwIfAborted(signal);
     // getprop can fail if the device disconnects mid-command; null lets the caller fall back to another detection path.
     logger.debug(
       `src/utils/android-cmdline-tools/readAndroidDeviceApiLevel.ts fallback failed: ${error}`,

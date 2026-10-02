@@ -27,6 +27,7 @@ export class CtrlProxyClipboard {
     text?: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyClipboardResult> {
     const params: Record<string, unknown> = { action };
     if (text !== undefined) {
@@ -39,6 +40,7 @@ export class CtrlProxyClipboard {
       messageType: "request_clipboard",
       params,
       timeoutMs,
+      abortSignal: signal,
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, action, totalTimeMs: 0, error: "Not connected" }),

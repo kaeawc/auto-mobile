@@ -1,3 +1,4 @@
+import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
@@ -7,7 +8,10 @@ import {
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ClipboardResult } from "../../models";
 import { logger } from "../../utils/logger";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
 import { shellQuote } from "../../utils/shellQuote";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -16,6 +20,9 @@ type ClipboardCtrlProxy = {
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string; text?: string; totalTimeMs: number }>;
 };
 type ClipboardCtrlProxyFactory = (
@@ -43,7 +50,9 @@ export class Clipboard {
   async execute(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
+    signal?: AbortSignal,
   ): Promise<ClipboardResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("clipboard");
 
@@ -52,10 +61,12 @@ export class Clipboard {
       switch (this.device.platform) {
         case "android":
           return await perf.track("androidClipboard", () =>
-            this.executeAndroidClipboard(action, text),
+            this.executeAndroidClipboard(action, text, signal),
           );
         case "ios":
-          return await perf.track("iosClipboard", () => this.executeIOSClipboard(action, text));
+          return await perf.track("iosClipboard", () =>
+            this.executeIOSClipboard(action, text, signal),
+          );
         default:
           perf.end();
           return {
@@ -65,6 +76,8 @@ export class Clipboard {
           };
       }
     } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("[Clipboard] Clipboard operation failed", error);
       perf.end();
       return {
         success: false,
@@ -79,13 +92,18 @@ export class Clipboard {
   private async executeIOSClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
+    signal?: AbortSignal,
   ): Promise<ClipboardResult> {
     if (action === "copy" && !text) {
       return { success: false, action, error: "Text is required for copy action" };
     }
 
+    throwIfAborted(signal);
     const client = this.getIOSCtrlProxy();
-    const result = await client.requestClipboard(action, text);
+    const result = await awaitWhileRequestIsLive(
+      client.requestClipboard(action, text, undefined, undefined, signal),
+      signal,
+    );
 
     if (!result.success) {
       return { success: false, action, error: result.error };
@@ -111,6 +129,7 @@ export class Clipboard {
   private async executeAndroidClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
+    signal?: AbortSignal,
   ): Promise<ClipboardResult> {
     // Validate input
     if (action === "copy" && !text) {
@@ -122,10 +141,14 @@ export class Clipboard {
     }
 
     // Try accessibility service first (preferred method)
+    throwIfAborted(signal);
     const a11yClient = this.getAndroidCtrlProxy();
 
     try {
-      const a11yResult = await a11yClient.requestClipboard(action, text);
+      const a11yResult = await awaitWhileRequestIsLive(
+        a11yClient.requestClipboard(action, text, undefined, undefined, signal),
+        signal,
+      );
 
       if (a11yResult.success) {
         logger.info(`[Clipboard] ${action} via accessibility service: ${a11yResult.totalTimeMs}ms`);
@@ -153,7 +176,8 @@ export class Clipboard {
         };
       }
     } catch (error) {
-      logger.warn(`[Clipboard] Accessibility service error: ${error}`);
+      throwIfAborted(signal);
+      logger.warn(`[Clipboard] Accessibility service error: ${error}`, error);
       if (action === "get") {
         return {
           success: false,
@@ -166,8 +190,10 @@ export class Clipboard {
 
     // Fall back to ADB cmd clipboard
     try {
-      return await this.executeAdbClipboard(action, text);
+      return await this.executeAdbClipboard(action, text, signal);
     } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("[Clipboard] Clipboard operation failed", error);
       return {
         success: false,
         action,
@@ -199,6 +225,7 @@ export class Clipboard {
   private async executeAdbClipboard(
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
+    signal?: AbortSignal,
   ): Promise<ClipboardResult> {
     try {
       switch (action) {
@@ -211,8 +238,10 @@ export class Clipboard {
             };
           }
           // ADB hands the command to the device shell, so preserve user text as one literal word.
-          const result = await this.adb.executeCommand(
-            `shell cmd clipboard set ${shellQuote(text)}`,
+          throwIfAborted(signal);
+          const result = await awaitWhileRequestIsLive(
+            this.adb.executeCommand(`shell cmd clipboard set ${shellQuote(text)}`),
+            signal,
           );
 
           // Check if cmd clipboard is supported
@@ -234,7 +263,11 @@ export class Clipboard {
         }
 
         case "get": {
-          const result = await this.adb.executeCommand("shell cmd clipboard get");
+          throwIfAborted(signal);
+          const result = await awaitWhileRequestIsLive(
+            this.adb.executeCommand("shell cmd clipboard get"),
+            signal,
+          );
 
           // Check if cmd clipboard is supported
           if (result.includes("No shell command implementation")) {
@@ -256,7 +289,11 @@ export class Clipboard {
         }
 
         case "clear": {
-          const result = await this.adb.executeCommand("shell cmd clipboard clear");
+          throwIfAborted(signal);
+          const result = await awaitWhileRequestIsLive(
+            this.adb.executeCommand("shell cmd clipboard clear"),
+            signal,
+          );
 
           // Check if cmd clipboard is supported
           if (result.includes("No shell command implementation")) {
@@ -279,7 +316,11 @@ export class Clipboard {
         case "paste": {
           // For paste, we need to use key event since cmd clipboard doesn't have a paste command
           // First, try to get clipboard content to verify it exists
-          const clipboardContent = await this.adb.executeCommand("shell cmd clipboard get");
+          throwIfAborted(signal);
+          const clipboardContent = await awaitWhileRequestIsLive(
+            this.adb.executeCommand("shell cmd clipboard get"),
+            signal,
+          );
 
           if (clipboardContent.includes("No shell command implementation")) {
             return {
@@ -291,7 +332,11 @@ export class Clipboard {
           }
 
           // Use KEYCODE_PASTE (279) to paste
-          await this.adb.executeCommand("shell input keyevent KEYCODE_PASTE");
+          throwIfAborted(signal);
+          await awaitWhileRequestIsLive(
+            this.adb.executeCommand("shell input keyevent KEYCODE_PASTE"),
+            signal,
+          );
 
           logger.info(`[Clipboard] Pasted clipboard via ADB keyevent`);
           return {
@@ -309,6 +354,8 @@ export class Clipboard {
           };
       }
     } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("[Clipboard] Clipboard operation failed", error);
       return {
         success: false,
         action,

@@ -396,6 +396,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     text?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyClipboardResult>;
 
   requestPressHome(
@@ -410,7 +411,11 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     frameContext?: string,
   ): Promise<CtrlProxyPressBackResult>;
 
-  requestShake(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyShakeResult>;
+  requestShake(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyShakeResult>;
 
   requestPressButton(
     button: string,
@@ -423,6 +428,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyRecentAppsResult>;
 
   requestRotate(
@@ -3310,8 +3316,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.navigation.requestPressBack(timeoutMs, perf, frameContext);
   }
 
-  async requestShake(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyShakeResult> {
-    return this.navigation.requestShake(timeoutMs, perf);
+  async requestShake(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    signal?: AbortSignal,
+  ): Promise<CtrlProxyShakeResult> {
+    return this.navigation.requestShake(timeoutMs, perf, signal);
   }
 
   async requestPressButton(
@@ -3330,9 +3340,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs?: number,
     perf?: PerformanceTracker,
     frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyRecentAppsResult> {
     this.invalidateSdkCapabilities();
-    return this.navigation.requestRecentApps(timeoutMs, perf, frameContext);
+    return this.navigation.requestRecentApps(timeoutMs, perf, frameContext, signal);
   }
 
   async requestRotate(
@@ -3396,8 +3407,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     text?: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyClipboardResult> {
-    return this.clipboard.requestClipboard(action, text, timeoutMs, perf);
+    return this.clipboard.requestClipboard(action, text, timeoutMs, perf, signal);
   }
 
   // ===========================================================================

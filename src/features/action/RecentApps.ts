@@ -1,4 +1,5 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, RecentAppsResult, ViewHierarchyResult } from "../../models";
 import { PressButton } from "./PressButton";
@@ -23,7 +24,7 @@ export class RecentApps extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     finder: ElementFinder = new DefaultElementFinder(),
     geometry: ElementGeometry = new DefaultElementGeometry(),
@@ -39,19 +40,21 @@ export class RecentApps extends BaseVisualChange {
    * @param progress - Optional progress callback
    * @returns Result of the recent apps operation
    */
-  async execute(progress?: ProgressCallback): Promise<RecentAppsResult> {
+  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<RecentAppsResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("recentApps");
 
     if (this.device.platform === "ios") {
       return this.observedInteraction(
         async () => {
-          return perf.track("iOSRecentApps", () => this.executeIosRecentApps());
+          return perf.track("iOSRecentApps", () => this.executeIosRecentApps(signal));
         },
         {
           changeExpected: true,
           timeoutMs: 5000,
           progress,
+          signal,
           perf,
         },
       );
@@ -69,15 +72,17 @@ export class RecentApps extends BaseVisualChange {
         switch (navigationMethod) {
           case "gesture":
             await perf.track("gestureNavigation", () =>
-              this.executeGestureNavigation(observeResult),
+              this.executeGestureNavigation(observeResult, signal),
             );
             return { success: true, method: "gesture" };
           case "legacy":
-            await perf.track("legacyNavigation", () => this.executeLegacyNavigation(observeResult));
+            await perf.track("legacyNavigation", () =>
+              this.executeLegacyNavigation(observeResult, signal),
+            );
             return { success: true, method: "legacy" };
           case "hardware":
           default:
-            await perf.track("hardwareNavigation", () => this.executeHardwareNavigation());
+            await perf.track("hardwareNavigation", () => this.executeHardwareNavigation(signal));
             return { success: true, method: "hardware" };
         }
       },
@@ -85,6 +90,7 @@ export class RecentApps extends BaseVisualChange {
         changeExpected: true,
         timeoutMs: 3000,
         progress,
+        signal,
         perf,
       },
     );
@@ -164,7 +170,10 @@ export class RecentApps extends BaseVisualChange {
    * @param observeResult - Current observation result
    * @returns Recent apps result
    */
-  private async executeGestureNavigation(observeResult: any): Promise<RecentAppsResult> {
+  private async executeGestureNavigation(
+    observeResult: any,
+    signal?: AbortSignal,
+  ): Promise<RecentAppsResult> {
     if (!observeResult.screenSize || !observeResult.systemInsets) {
       throw new Error("Screen size or system insets not available for gesture navigation");
     }
@@ -180,7 +189,11 @@ export class RecentApps extends BaseVisualChange {
     const endY = Math.floor(screenHeight * 0.5); // Swipe up to middle of screen
 
     // Execute swipe gesture with longer duration for recent apps
-    await this.adb.executeCommand(`shell input swipe ${startX} ${startY} ${endX} ${endY} 500`);
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.adb.executeCommand(`shell input swipe ${startX} ${startY} ${endX} ${endY} 500`),
+      signal,
+    );
 
     return {
       success: true,
@@ -193,7 +206,10 @@ export class RecentApps extends BaseVisualChange {
    * @param observeResult - Current observation result
    * @returns Recent apps result
    */
-  private async executeLegacyNavigation(observeResult: ObserveResult): Promise<RecentAppsResult> {
+  private async executeLegacyNavigation(
+    observeResult: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<RecentAppsResult> {
     const recentAppsButtonIds = [
       "recent_apps",
       "recent",
@@ -232,7 +248,11 @@ export class RecentApps extends BaseVisualChange {
 
     // Tap on the recent apps button
     const center = this.geometry.getElementCenter(recentButton);
-    await this.adb.executeCommand(`shell input tap ${center.x} ${center.y}`);
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.adb.executeCommand(`shell input tap ${center.x} ${center.y}`),
+      signal,
+    );
 
     return {
       success: true,
@@ -244,27 +264,37 @@ export class RecentApps extends BaseVisualChange {
    * Execute hardware button navigation
    * @returns Recent apps result
    */
-  private async executeHardwareNavigation(): Promise<RecentAppsResult> {
+  private async executeHardwareNavigation(signal?: AbortSignal): Promise<RecentAppsResult> {
     // Try accessibility service global action first
     try {
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-      const result = await client.requestGlobalAction("recent", 3000);
+      throwIfAborted(signal);
+      const result = await awaitWhileRequestIsLive(
+        client.requestGlobalAction("recent", 3000, undefined, undefined, signal),
+        signal,
+      );
       if (result.success) {
         logger.debug("[RECENT_APPS] Used accessibility service global action");
         return { success: true, method: "hardware" };
       }
       logger.debug(`[RECENT_APPS] Global action failed (${result.error}), falling back to ADB`);
-    } catch {
-      // Fall through to ADB
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("[RECENT_APPS] Global action unavailable; falling back to ADB", error);
     }
 
-    await this.adb.executeCommand("shell input keyevent 187");
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(this.adb.executeCommand("shell input keyevent 187"), signal);
     return { success: true, method: "hardware" };
   }
 
-  private async executeIosRecentApps(): Promise<RecentAppsResult> {
+  private async executeIosRecentApps(signal?: AbortSignal): Promise<RecentAppsResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestRecentApps();
+    throwIfAborted(signal);
+    const result = await awaitWhileRequestIsLive(
+      client.requestRecentApps(undefined, undefined, undefined, signal),
+      signal,
+    );
     return {
       success: result.success,
       method: "ios_swipe",

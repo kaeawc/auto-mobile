@@ -1,3 +1,4 @@
+import { throwIfAborted, awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { ActionableError, BootedDevice, type DeviceLockState } from "../../models";
 import { logger } from "../../utils/logger";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
@@ -42,7 +43,10 @@ export interface LockCredentialStore {
  * gesture primitives; a fake in tests.
  */
 export interface IosScreenUnlocker {
-  wakeAndDismiss(remainingMs?: () => number): Promise<{ success: boolean; error?: string }>;
+  wakeAndDismiss(
+    remainingMs?: () => number,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string }>;
 }
 
 /** The same runner recovery operations used by iOS observe. */
@@ -154,27 +158,39 @@ export class WakeAndUnlock {
    *   thrown. Ignored on iOS.
    * @param transportDeadlineMs - Daemon absolute host-clock deadline; bounds simulator unlock.
    */
-  async execute(pin?: string, transportDeadlineMs?: number): Promise<WakeAndUnlockResult> {
+  async execute(
+    pin?: string,
+    transportDeadlineMs?: number,
+    signal?: AbortSignal,
+  ): Promise<WakeAndUnlockResult> {
+    throwIfAborted(signal);
     switch (this.device.platform) {
       case "android":
-        return this.executeAndroid(pin);
+        return this.executeAndroid(pin, signal);
       case "ios":
-        return this.executeIos(transportDeadlineMs);
+        return this.executeIos(transportDeadlineMs, signal);
       default:
         throw new ActionableError(`wakeAndUnlock: unsupported platform ${this.device.platform}`);
     }
   }
 
-  private async executeAndroid(pin?: string): Promise<WakeAndUnlockResult> {
-    const wakefulness = await this.adb.getWakefulness();
+  private async executeAndroid(pin?: string, signal?: AbortSignal): Promise<WakeAndUnlockResult> {
+    throwIfAborted(signal);
+    const wakefulness = await awaitWhileRequestIsLive(this.adb.getWakefulness(), signal);
     const wasAsleep = wakefulness !== "Awake";
     if (wasAsleep) {
       logger.info("[WakeAndUnlock] device asleep, sending KEYCODE_WAKEUP");
-      await this.adb.executeCommand("shell input keyevent KEYCODE_WAKEUP");
-      await this.timer.sleep(WAKE_SETTLE_MS);
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(
+        this.adb.executeCommand("shell input keyevent KEYCODE_WAKEUP"),
+        signal,
+      );
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(this.timer.sleep(WAKE_SETTLE_MS), signal);
     }
 
-    const lock = await this.adb.getDeviceLock();
+    throwIfAborted(signal);
+    const lock = await awaitWhileRequestIsLive(this.adb.getDeviceLock(signal), signal);
     if (lock === null) {
       // Unreadable lock state (dumpsys unavailable/unparsable). Never claim
       // "unlocked" from an absent signal — the device was woken, but its lock
@@ -204,21 +220,26 @@ export class WakeAndUnlock {
     // wm dismiss-keyguard fully dismisses a swipe lock and raises the bouncer on
     // a secure lock (verified #4360). Do it first, then branch on the credential
     // requirement.
-    await this.adb.executeCommand("shell wm dismiss-keyguard");
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(this.adb.executeCommand("shell wm dismiss-keyguard"), signal);
 
     // Only a *definitely* non-secure lock takes the pure swipe path. A secure
     // lock — or one whose `secure` field could not be read (`undefined`) — goes
     // through the credential path, which handles the unknown case rather than
     // guessing it is a swipe lock.
     return lock.secure === false
-      ? this.dismissSwipe(wasAsleep)
-      : this.unlockSecure(wasAsleep, pin, lock.secure);
+      ? this.dismissSwipe(wasAsleep, signal)
+      : this.unlockSecure(wasAsleep, pin, lock.secure, signal);
   }
 
-  private async dismissSwipe(wasAsleep: boolean): Promise<WakeAndUnlockResult> {
-    const cleared = await this.pollUnlocked();
+  private async dismissSwipe(
+    wasAsleep: boolean,
+    signal?: AbortSignal,
+  ): Promise<WakeAndUnlockResult> {
+    throwIfAborted(signal);
+    const cleared = await this.pollUnlocked(signal);
     if (cleared) {
-      await this.rememberLock("swipe", null);
+      await this.rememberLock("swipe", null, signal);
     }
     return {
       success: cleared,
@@ -239,8 +260,10 @@ export class WakeAndUnlock {
     wasAsleep: boolean,
     pin: string | undefined,
     secure: boolean | undefined,
+    signal?: AbortSignal,
   ): Promise<WakeAndUnlockResult> {
-    const recorded = pin ? null : await this.getRecordedCredential();
+    throwIfAborted(signal);
+    const recorded = pin ? null : await this.getRecordedCredential(signal);
     const effectivePin = pin ?? recorded;
     const usedRecordedCredential = !pin && !!recorded;
 
@@ -253,9 +276,9 @@ export class WakeAndUnlock {
       }
       // Unknown secure status and no credential: dismiss-keyguard (already
       // issued) may have cleared a swipe lock, so check before demanding a PIN.
-      const cleared = await this.pollUnlocked();
+      const cleared = await this.pollUnlocked(signal);
       if (cleared) {
-        await this.rememberLock("swipe", null);
+        await this.rememberLock("swipe", null, signal);
         return {
           success: true,
           platform: "android",
@@ -270,17 +293,23 @@ export class WakeAndUnlock {
       );
     }
 
-    const commands = await this.buildCredentialCommands(effectivePin);
+    const commands = await this.buildCredentialCommands(effectivePin, signal);
 
     // The bouncer was raised by dismiss-keyguard; let it settle, type the
     // credential, and submit.
-    await this.timer.sleep(BOUNCER_SETTLE_MS);
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(this.timer.sleep(BOUNCER_SETTLE_MS), signal);
     for (const command of commands) {
-      await this.adb.executeCommand(command);
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(this.adb.executeCommand(command), signal);
     }
-    await this.adb.executeCommand("shell input keyevent KEYCODE_ENTER");
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.adb.executeCommand("shell input keyevent KEYCODE_ENTER"),
+      signal,
+    );
 
-    const cleared = await this.pollUnlocked();
+    const cleared = await this.pollUnlocked(signal);
     if (!cleared) {
       logger.warn("[WakeAndUnlock] device remained locked after credential entry");
       // A *recorded* credential that failed is stale (the device PIN likely
@@ -288,7 +317,7 @@ export class WakeAndUnlock {
       // the keyguard retry throttle toward a lockout — it falls back to asking
       // for a PIN instead.
       if (usedRecordedCredential) {
-        await this.rememberLock("pin", null);
+        await this.rememberLock("pin", null, signal);
       }
       return {
         success: false,
@@ -305,7 +334,7 @@ export class WakeAndUnlock {
     // Only remember a credential the caller freshly supplied and that worked —
     // never re-persist a recorded one, and never a value that failed to unlock.
     if (pin) {
-      await this.rememberLock("pin", pin);
+      await this.rememberLock("pin", pin, signal);
     }
     // A credential unlocked it, so it was in fact secure.
     return {
@@ -320,8 +349,12 @@ export class WakeAndUnlock {
   }
 
   /** Expand a credential into its key-event commands, or throw if unmappable. */
-  private async buildCredentialCommands(credential: string): Promise<string[]> {
-    const supportsCombination = await this.supportsKeyCombination();
+  private async buildCredentialCommands(
+    credential: string,
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    throwIfAborted(signal);
+    const supportsCombination = await this.supportsKeyCombination(signal);
     const chars = Array.from(credential);
     const commands: string[] = [];
     for (let index = 0; index < chars.length; index++) {
@@ -355,14 +388,18 @@ export class WakeAndUnlock {
     return this.timer.now() + budgetMs;
   }
 
-  private async executeIos(transportDeadlineMs?: number): Promise<WakeAndUnlockResult> {
+  private async executeIos(
+    transportDeadlineMs?: number,
+    signal?: AbortSignal,
+  ): Promise<WakeAndUnlockResult> {
+    throwIfAborted(signal);
     if (!this.iosUnlocker) {
       throw new ActionableError("wakeAndUnlock: iOS unlocker is not configured");
     }
     const simulator = isIosSimulatorUdid(this.device.deviceId);
     const deadline = this.iosUnlockDeadline(transportDeadlineMs);
     if (simulator) {
-      const initialLock = await this.readIosLockState(deadline);
+      const initialLock = await this.readIosLockState(deadline, signal);
       if (!initialLock) {
         throw new ActionableError("wakeAndUnlock: could not read the iOS lock state before unlock");
       }
@@ -373,9 +410,13 @@ export class WakeAndUnlock {
 
     const recovery = this.iosRunnerRecovery;
     if (recovery && !recovery.isConnected()) {
-      await this.waitForIosRunner(
-        recovery,
-        Math.min(deadline, this.timer.now() + IOS_RECOVERY_WAIT_MS),
+      await awaitWhileRequestIsLive(
+        this.waitForIosRunner(
+          recovery,
+          Math.min(deadline, this.timer.now() + IOS_RECOVERY_WAIT_MS),
+          signal,
+        ),
+        signal,
       );
     }
     if (this.timer.now() >= deadline) {
@@ -383,7 +424,11 @@ export class WakeAndUnlock {
         "wakeAndUnlock: iOS unlock budget exhausted before swipe; retry after the runner reconnects",
       );
     }
-    const result = await this.iosUnlocker.wakeAndDismiss(() => deadline - this.timer.now());
+    throwIfAborted(signal);
+    const result = await awaitWhileRequestIsLive(
+      this.iosUnlocker.wakeAndDismiss(() => deadline - this.timer.now(), signal),
+      signal,
+    );
     // A transport timeout leaves the Swift gesture's completion unknown. Never
     // issue a second swipe (or a post-swipe runner request) after that failure.
     if (!simulator) {
@@ -394,16 +439,19 @@ export class WakeAndUnlock {
     const swipeFailure = result.success
       ? undefined
       : (result.error ?? "iOS lock-screen swipe failed");
-    return this.confirmIosSimulatorUnlocked(deadline, swipeFailure);
+    return this.confirmIosSimulatorUnlocked(deadline, swipeFailure, signal);
   }
 
   private async confirmIosSimulatorUnlocked(
     deadline: number,
     swipeFailure: string | undefined,
+    signal?: AbortSignal,
   ): Promise<WakeAndUnlockResult> {
+    throwIfAborted(signal);
     const finalLock = await this.pollIosUnlocked(
       deadline,
       swipeFailure === undefined ? IOS_UNLOCK_POLL_MAX_MS : Infinity,
+      signal,
     );
     if (!finalLock) {
       throw new ActionableError(
@@ -425,11 +473,17 @@ export class WakeAndUnlock {
     return this.iosResult(true, true);
   }
 
-  private async waitForIosRunner(recovery: IosRunnerRecovery, deadline: number): Promise<void> {
+  private async waitForIosRunner(
+    recovery: IosRunnerRecovery,
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
     recovery.ensureRecoveryStarted();
     const recoveryBudget = Math.max(0, deadline - this.timer.now());
     let outcome = await raceWithDeadline(() => recovery.awaitRecovery(recoveryBudget), {
       timer: this.timer,
+      signal,
       timeoutMs: recoveryBudget,
       label: "iOS runner recovery before unlock",
     });
@@ -442,6 +496,7 @@ export class WakeAndUnlock {
     if (outcome === "not_recovering" && this.timer.now() < deadline) {
       const connected = await raceWithDeadline(() => recovery.ensureConnected(), {
         timer: this.timer,
+        signal,
         timeoutMs: deadline - this.timer.now(),
         label: "iOS runner reconnection before unlock",
       });
@@ -456,6 +511,7 @@ export class WakeAndUnlock {
       }
       outcome = await raceWithDeadline(() => recovery.awaitRecovery(remaining), {
         timer: this.timer,
+        signal,
         timeoutMs: remaining,
         label: "iOS runner recovery before unlock",
       });
@@ -480,7 +536,11 @@ export class WakeAndUnlock {
     };
   }
 
-  private async readIosLockState(deadline: number): Promise<DeviceLockState | undefined> {
+  private async readIosLockState(
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<DeviceLockState | undefined> {
+    throwIfAborted(signal);
     const remaining = deadline - this.timer.now();
     const probe = this.iosLockStateProbe;
     if (remaining <= 0 || !probe) {
@@ -489,10 +549,12 @@ export class WakeAndUnlock {
     try {
       return await raceWithDeadline(() => probe.read(this.device.deviceId), {
         timer: this.timer,
+        signal,
         timeoutMs: remaining,
         label: "iOS lock-state probe",
       });
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[WakeAndUnlock] iOS lock-state probe exceeded unlock budget: ${error}`, error);
       return undefined;
     }
@@ -501,11 +563,13 @@ export class WakeAndUnlock {
   private async pollIosUnlocked(
     overallDeadline: number,
     maxWindowMs: number,
+    signal?: AbortSignal,
   ): Promise<DeviceLockState | undefined> {
+    throwIfAborted(signal);
     const deadline = Math.min(overallDeadline, this.timer.now() + maxWindowMs);
     let lastReadable: DeviceLockState | undefined;
     while (this.timer.now() < deadline) {
-      const lock = await this.readIosLockState(deadline);
+      const lock = await this.readIosLockState(deadline, signal);
       if (lock) {
         lastReadable = lock;
         if (!lock.locked) {
@@ -514,35 +578,49 @@ export class WakeAndUnlock {
       }
       const remaining = deadline - this.timer.now();
       if (remaining > 0) {
-        await this.timer.sleep(Math.min(IOS_UNLOCK_POLL_INTERVAL_MS, remaining));
+        throwIfAborted(signal);
+        await awaitWhileRequestIsLive(
+          this.timer.sleep(Math.min(IOS_UNLOCK_POLL_INTERVAL_MS, remaining)),
+          signal,
+        );
       }
     }
     return lastReadable;
   }
 
   /** Poll the lock state until the keyguard clears or the budget expires. */
-  private async pollUnlocked(): Promise<boolean> {
+  private async pollUnlocked(signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
     let elapsed = 0;
     while (elapsed < UNLOCK_POLL_MAX_MS) {
-      const lock = await this.adb.getDeviceLock();
+      throwIfAborted(signal);
+      const lock = await awaitWhileRequestIsLive(this.adb.getDeviceLock(signal), signal);
       if (lock && !lock.locked) {
         return true;
       }
-      await this.timer.sleep(UNLOCK_POLL_INTERVAL_MS);
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(this.timer.sleep(UNLOCK_POLL_INTERVAL_MS), signal);
       elapsed += UNLOCK_POLL_INTERVAL_MS;
     }
-    const finalLock = await this.adb.getDeviceLock();
+    throwIfAborted(signal);
+    const finalLock = await awaitWhileRequestIsLive(this.adb.getDeviceLock(signal), signal);
     return !!finalLock && !finalLock.locked;
   }
 
   /** Best-effort recorded-credential lookup: a store failure degrades to "none". */
-  private async getRecordedCredential(): Promise<string | null> {
+  private async getRecordedCredential(signal?: AbortSignal): Promise<string | null> {
+    throwIfAborted(signal);
     if (!this.credentialStore) {
       return null;
     }
     try {
-      return await this.credentialStore.getRecordedCredential(this.device.deviceId);
+      throwIfAborted(signal);
+      return await awaitWhileRequestIsLive(
+        this.credentialStore.getRecordedCredential(this.device.deviceId),
+        signal,
+      );
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(
         `[WakeAndUnlock] failed to read recorded credential for ${this.device.deviceId}: ${error}`,
       );
@@ -550,24 +628,36 @@ export class WakeAndUnlock {
     }
   }
 
-  private async rememberLock(lockType: DeviceLockType, credential: string | null): Promise<void> {
+  private async rememberLock(
+    lockType: DeviceLockType,
+    credential: string | null,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
     if (!this.credentialStore) {
       return;
     }
     try {
-      await this.credentialStore.rememberLock(this.device.deviceId, lockType, credential);
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(
+        this.credentialStore.rememberLock(this.device.deviceId, lockType, credential),
+        signal,
+      );
     } catch (error) {
+      throwIfAborted(signal);
       // Best-effort persistence: failing to remember must not fail the unlock the
       // caller actually asked for.
       logger.warn(`[WakeAndUnlock] failed to remember lock for ${this.device.deviceId}: ${error}`);
     }
   }
 
-  private async supportsKeyCombination(): Promise<boolean> {
+  private async supportsKeyCombination(signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
     if (this.keyCombinationSupported !== undefined) {
       return this.keyCombinationSupported;
     }
-    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
+    throwIfAborted(signal);
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb, undefined, this.timer, signal);
     this.keyCombinationSupported =
       apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
     return this.keyCombinationSupported;

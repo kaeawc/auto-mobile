@@ -40,6 +40,152 @@ function capturedLister(readFile: () => Promise<string>, timer = new FakeTimer()
 }
 
 describe("devicectl list devices host captures", () => {
+  test("captures classify equally per record; DERIVED availability exposes every device field", () => {
+    const withDeprecated = loadDerivedDevicectlListing("list-devices-simulators-only.json");
+    const withoutDeprecated = loadDerivedDevicectlListing();
+    expect(withDeprecated.result.devices.map((record) => record.identifier).toSorted()).toEqual(
+      withoutDeprecated.result.devices.map((record) => record.identifier).toSorted(),
+    );
+    for (const record of withDeprecated.result.devices) {
+      const paired = withoutDeprecated.result.devices.find(
+        (other) => other.identifier === record.identifier,
+      );
+      expect(paired).toBeDefined();
+      expect(parseDevicectlDeviceList([record])).toEqual(parseDevicectlDeviceList([paired]));
+      // DERIVED availability only: expose names, IDs, versions and form factors of shutdown records too.
+      const available = (entry: typeof record) => ({
+        ...entry,
+        properties: {
+          ...entry.properties,
+          state: { ...entry.properties.state, bootState: "booted" },
+          connection: { ...entry.properties.connection, state: "connected" },
+        },
+      });
+      if (paired) {
+        const parsed = parseDevicectlDeviceList([available(record)]);
+        expect(parsed).toEqual(parseDevicectlDeviceList([available(paired)]));
+        expect(parsed).toMatchObject({
+          simulators: [{ deviceId: record.properties.hardware.udid }],
+        });
+      }
+    }
+  });
+
+  for (const [bootState, reason] of [
+    ["SHUTDOWN", "shutdown"],
+    ["Booting", "booting"],
+    ["shuttingDown", "shutting-down"],
+    ["future", "not-booted"],
+    [undefined, "not-booted"],
+    ["BOOTED", "unreachable"],
+  ] as const) {
+    test(`DERIVED captured simulator with bootState=${bootState} maps to ${reason} and stays complete`, async () => {
+      const listing = loadDerivedDevicectlListing();
+      const record = listing.result.devices[0];
+      if (bootState === undefined) {
+        Reflect.deleteProperty(record.properties.state, "bootState");
+      } else {
+        record.properties.state.bootState = bootState;
+      }
+      record.properties.connection.state = "disconnected";
+      expect(parseDevicectlDeviceList([record])).toMatchObject({
+        ok: true,
+        notAvailable: [{ reason }],
+        unidentified: [],
+      });
+      expect(
+        await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
+      ).toEqual({
+        complete: true,
+        devices: [],
+      });
+    });
+  }
+
+  test("DERIVED visibilityClass substitutes only for missing reality with positive simulator evidence", async () => {
+    for (const topLevel of [true, false]) {
+      const listing = loadDerivedDevicectlListing();
+      const record = listing.result.devices[0];
+      delete record.properties.hardware.reality;
+      if (!topLevel) {
+        Reflect.deleteProperty(record, "visibilityClass");
+      }
+      expect(parseDevicectlDeviceList([record])).toMatchObject({
+        simulators: [expect.anything()],
+        unidentified: [],
+      });
+      expect(
+        await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
+      ).toEqual({ complete: true, devices: [] });
+      const platform = record.properties.hardware.platform;
+      delete record.properties.hardware.platform;
+      expect(parseDevicectlDeviceList([record])).toMatchObject({
+        simulators: [],
+        unidentified: [expect.any(String)],
+      });
+      record.properties.hardware.platform = platform;
+      record.properties.hardware.udid = "unknown-shape";
+      expect(parseDevicectlDeviceList([record])).toMatchObject({
+        simulators: [],
+        unidentified: [expect.any(String)],
+      });
+      record.properties.hardware.udid = PHYSICAL_UDID;
+      expect(parseDevicectlDeviceList([record])).toMatchObject({
+        physical: [],
+        unidentified: [expect.any(String)],
+      });
+    }
+  });
+
+  test("DERIVED explicit simulated reality ignores unknown visibility; unknown visibility alone identifies nothing", () => {
+    const record = loadDerivedDevicectlListing().result.devices[0];
+    record.visibilityClass = "unknown";
+    record.properties.state.visibilityClass = "unknown";
+    expect(parseDevicectlDeviceList([record])).toMatchObject({
+      simulators: [expect.anything()],
+      unidentified: [],
+    });
+    delete record.properties.hardware.reality;
+    expect(parseDevicectlDeviceList([record])).toMatchObject({
+      simulators: [],
+      unidentified: [expect.any(String)],
+    });
+  });
+
+  test("DERIVED physical reality contradicting simulator visibility is unidentified; top-level visibility wins", () => {
+    const listing = loadDerivedDevicectlListing();
+    const record = derivePhysicalDevicectlRecord(listing.result.devices[0], PHYSICAL_UDID);
+    record.properties.state.visibilityClass = "simulators";
+    expect(parseDevicectlDeviceList([record])).toMatchObject({
+      physical: [],
+      unidentified: [expect.any(String)],
+    });
+    record.properties.hardware.platform = "watchOS";
+    expect(parseDevicectlDeviceList([record])).toMatchObject({
+      physical: [],
+      notAvailable: [],
+      unidentified: [expect.any(String)],
+    });
+    record.properties.hardware.platform = "iOS";
+    record.visibilityClass = "unknown";
+    expect(parseDevicectlDeviceList([record])).toMatchObject({
+      physical: [expect.anything()],
+      unidentified: [],
+    });
+    record.visibilityClass = "simulators";
+    record.properties.state.visibilityClass = "unknown";
+    expect(parseDevicectlDeviceList([record])).toMatchObject({
+      physical: [],
+      unidentified: [expect.any(String)],
+    });
+    record.properties.hardware.reality = "future";
+    expect(parseDevicectlDeviceList([record])).toMatchObject({
+      simulators: [],
+      physical: [],
+      unidentified: [expect.any(String)],
+    });
+  });
+
   test("DERIVED cold incomplete sweep includes its recognized phone", async () => {
     // DERIVED connected physical phone plus schema drift in a captured simulator record.
     const listing = loadDerivedDevicectlListing();
@@ -209,7 +355,6 @@ describe("devicectl list devices host captures", () => {
     });
 
     for (const [field, value] of [
-      ["reality", undefined],
       ["udid", undefined],
       ["platform", undefined],
       ["reality", "future"],
@@ -254,6 +399,13 @@ describe("devicectl list devices host captures", () => {
       expect(parsed.physical).toHaveLength(row.physical);
       expect(parsed.simulators).toHaveLength(row.availableSimulators);
       expect(parsed.notAvailable).toHaveLength(row.notAvailable);
+      if (row.notAvailableReasons) {
+        const counts: Record<string, number> = {};
+        for (const { reason } of parsed.notAvailable) {
+          counts[reason] = (counts[reason] ?? 0) + 1;
+        }
+        expect(counts).toEqual(row.notAvailableReasons);
+      }
       expect(parsed.unidentified).toHaveLength(row.unidentified);
       if (row.physicalUdids) {
         expect(parsed.physical.map((device) => device.deviceId)).toEqual(row.physicalUdids);

@@ -10,6 +10,8 @@ import {
   isDevicectlProcessGoneError,
   parseDevicectlJsonOutputPath,
 } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import { DevicectlDeviceLister } from "../../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { createExecResult } from "../../../src/utils/execResult";
 import { isProcessAlreadyGoneError } from "../../../src/utils/ios-cmdline-tools/iosProcessErrors";
 import { hashAppBundle } from "../../../src/utils/ios-cmdline-tools/AppBundleHasher";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -54,7 +56,10 @@ const parseArgValue = (command: string, arg: string): string | null => {
 };
 
 describe("DeviceAppManager", () => {
-  const createCommandSpanManager = (commands: string[]) =>
+  const createCommandSpanManager = (
+    commands: string[],
+    overrides: Partial<ConstructorParameters<typeof DeviceAppManager>[0]> = {},
+  ) =>
     new DeviceAppManager({
       platform: () => "darwin",
       execute: async (file, args) => {
@@ -74,7 +79,117 @@ describe("DeviceAppManager", () => {
       stat: async () => ({ isDirectory: () => false }),
       tmpdir,
       logger: createFakeLogger(),
+      ...overrides,
     });
+
+  test("constructed aggregate physical operations always address the UDID, never the device name", async () => {
+    const device = { deviceId: "00008120-001C2D3EDEADBEEF", name: "Duplicate Acceptance iPhone" };
+    const argv: string[][] = [];
+    const remoteBundle = "/private/var/containers/Bundle/Application/ABC/AutoMobileTest.app";
+    let findCopiedBundle = true;
+    const execute = async (file: string, args: string[]) => {
+      expect(file).toBe("xcrun");
+      argv.push(args);
+      return createExecResult("", "");
+    };
+    const manager = createCommandSpanManager([], {
+      execute,
+      readFile: async (path) => {
+        if (path.endsWith("details.json")) {
+          return JSON.stringify({ deviceProperties: { osVersionNumber: "18.6" } });
+        }
+        if (path.endsWith("launch.json")) {
+          return JSON.stringify({ processIdentifier: 42 });
+        }
+        if (path.endsWith("processes.json")) {
+          return JSON.stringify({
+            runningProcesses: [
+              { processIdentifier: 42, executable: `${remoteBundle}/AutoMobileTest` },
+            ],
+          });
+        }
+        return JSON.stringify({
+          apps: [{ bundleIdentifier: bundleId, bundleURL: `file://${remoteBundle}` }],
+        });
+      },
+      readdir: async () => (findCopiedBundle ? ["AutoMobileTest.app"] : []),
+      stat: async () => ({ isDirectory: () => true }),
+    });
+    // Assert each public method reaches its command path, so an early return cannot satisfy the test.
+    const checkMethod = async (action: () => Promise<unknown>, command: string[]) => {
+      const start = argv.length;
+      await action();
+      expect(
+        argv.slice(start).some((args) => command.every((arg, index) => args[index] === arg)),
+      ).toBe(true);
+    };
+    await checkMethod(
+      () => manager.installApp(device.deviceId, "/fake/App.ipa"),
+      ["devicectl", "device", "install", "app"],
+    );
+    await checkMethod(
+      () => manager.uninstallApp(device.deviceId, bundleId),
+      ["devicectl", "device", "uninstall", "app"],
+    );
+    await checkMethod(
+      () => manager.launchApp(device.deviceId, bundleId),
+      ["devicectl", "device", "process", "launch"],
+    );
+    await checkMethod(
+      () => manager.terminateApp(device.deviceId, bundleId),
+      ["devicectl", "device", "process", "terminate"],
+    );
+    await checkMethod(
+      () => manager.listInstalledApps(device.deviceId),
+      ["devicectl", "device", "info", "apps"],
+    );
+    await checkMethod(
+      () => manager.getInstalledAppInfo(device.deviceId, bundleId),
+      ["devicectl", "device", "info", "apps"],
+    );
+    await checkMethod(
+      () => manager.clearAppDataViaReinstall(device.deviceId, bundleId),
+      ["devicectl", "device", "install", "app"],
+    );
+    // The hashing callback has no injectable manager seam. Exercise its info/copy argv,
+    // then fake an absent copied bundle to avoid real filesystem hashing.
+    findCopiedBundle = false;
+    await checkMethod(
+      () => manager.getInstalledAppBundleHash(device.deviceId, bundleId),
+      ["devicectl", "device", "copy", "from"],
+    );
+    await checkMethod(
+      () => manager.launchWithPayloadUrl(device.deviceId, bundleId, "example://test"),
+      ["devicectl", "device", "process", "launch"],
+    );
+    expect(argv.length).toBeGreaterThanOrEqual(9);
+    for (const args of argv) {
+      expect(args.slice(0, 2)).toEqual(["devicectl", "device"]);
+      expect(args.filter((arg) => arg === "--device")).toHaveLength(1);
+      expect(args[args.indexOf("--device") + 1]).toBe(device.deviceId);
+      expect(args).not.toContain(device.name);
+    }
+    const lister = new DevicectlDeviceLister({
+      platform: () => "darwin",
+      timer: new FakeTimer(),
+      execute,
+      mkdtemp: async () => "/fake/listing",
+      tmpdir: () => "/fake",
+      readFile: async () => "[]",
+      rm: async () => {},
+      logger: createFakeLogger(),
+    });
+    await lister.listConnectedDevices();
+    expect(argv.at(-1)).toEqual([
+      "devicectl",
+      "list",
+      "devices",
+      "--json-output",
+      join("/fake/listing", "devices.json"),
+      "--quiet",
+    ]);
+    expect(argv.at(-1)).not.toContain("--device");
+  });
 
   test("records a devicectl command span into the ambient tracker", async () => {
     const commands: string[] = [];

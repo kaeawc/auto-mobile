@@ -22,12 +22,17 @@ The tool capability claims below are per #8347. “Current code status” descri
 `SimCtlClient.ts` is the simulator command runner and implements simulator discovery, lifecycle, app operations, push, appearance, and simulator display enumeration. `DevicectlDeviceLister.ts` classifies simulator records and drops them at the lister boundary; simctl remains the simulator source of truth. It lists connected physical devices; `DeviceAppManager.ts` implements physical-device app operations. `discoverySource.ts` keeps simulator and physical-device discovery as separate sources, and `DeviceDetection.ts` identifies iOS device IDs for routing.
 
 A devicectl listing is complete only when every record is positively classified.
-Simulator records require an iOS/iPadOS platform, `reality: "simulated"`, and a
+Simulator records require an iOS/iPadOS platform, `reality: "simulated"` (or, only
+when reality is absent, `visibilityClass: "simulators"`), and a
 simulator-shaped hardware UDID, as present in both captured listings under
 `test/fixtures/ios-devicectl/`. The same evidence is required before filtering a
 simulator as not booted or unreachable. Known Watch/TV/Vision platforms are
 excluded explicitly; unknown platforms or conflicting/missing simulator kind
-evidence are unidentified. Such records make discovery incomplete with a
+evidence are unidentified. Explicit physical reality combined with simulator
+visibility is contradictory and unidentified before platform exclusion; top-level
+visibility takes precedence
+over `properties.state.visibilityClass`, and no other visibility value is interpreted.
+Such records make discovery incomplete with a
 `failed` error and replay the bounded last-good physical inventory. The manager
 does not mark that physical source successful or its replayed IDs fresh, so the
 idle-device reaper cannot infer that a connected phone disappeared. Unidentified
@@ -55,14 +60,53 @@ The following behaviors are per #8347:
 
 - File copy and `device info files` are unsupported.
 - `device process terminate --pid` fails with “No such process” on CoreDevice 27.0, 27.1, and iOS 18.6.
-- Every command fails for a shut-down simulator with `CoreDeviceError 1001`.
-- Never-booted simulators and simulators in custom device sets are not visible.
+- Per #8623 findings (2026-10-01, devicectl 651.13.4, no physical device), shut-down
+  simulators support `list devices`, `device info details`, and `device info ddiServices`
+  (static properties, 7 capabilities). `device info apps/processes/displays/appearance/voiceover`
+  fail with CoreDeviceError 1001, "capability … is not supported by this device".
+  `device info lockState` fails with 1001 even when booted. Shutdown adds the
+  `com.apple.dt.coredevice.device.boot` capability; capability presence is a pre-check.
+- Per the same #8623 findings, devicectl listed 8 of simctl's 18 simulators. The 10
+  missing were default-named, never-booted iOS 27.0 devices, but a freshly created
+  never-booted simulator did appear. The visibility rule is undetermined; simctl
+  stays the simulator source of truth. Custom-device-set invisibility is per #8347.
 - `launch --console` blocks until the app exits.
 - `device info apps` needs `--include-all-apps` to include all apps.
 - Negative coordinates need `--longitude=-122.4` syntax.
 - Lock state, profiles, notification post, and sysdiagnose are unsupported.
 
-These simulator limitations are why simulator paths must check that a simulator is booted before issuing a devicectl-only operation. That boot-state check is Planned (#8354).
+Simulator paths must check availability and capability presence before issuing a
+state-dependent devicectl-only operation. That operation probe is Planned (#8354).
+
+### Inventory state and command failures
+
+The following are per #8623 findings, probed 2026-10-01 on devicectl 651.13.4
+with no physical device; they are not newly verified hardware behavior:
+
+- Simulator `bootState` values include `shutdown`, `booting`, `booted`, and
+  `shuttingDown`. Connection is `disconnected` while booting/shutting down;
+  simctl calls the latter "Shutting Down". The parser compares boot states
+  case-insensitively and returns typed not-available reasons `shutdown`, `booting`,
+  `shutting-down`, or `not-booted` for unknown/missing states. Booted simulators
+  also need a connected state; otherwise their reason is `unreachable`. These
+  recognized unavailable records keep discovery complete.
+- Failed commands still write JSON with `info.outcome: "failed"`, an `error`
+  object with domain/code and nested `NSUnderlyingError`, then exit 1. CoreDevice
+  codes 1000 (device not found) and 1001 (capability unsupported) are distinct
+  from "could not run". The lister attaches `coreDeviceError` on parsed failure
+  envelopes, including after a non-zero exit. It recognizes 1000/1001 only when
+  the domain contains "CoreDevice" (case-insensitive; its exact string is
+  unverified). Other domains/codes have kind `other`; timeout/unavailable
+  invocation failures keep their existing meaning. Real failed-envelope captures
+  are still owed.
+- Address devices by UDID, never by name: duplicate simulator names yielded 1000
+  rather than 1001 or an ambiguity error.
+- `--json-output -` writes stdout on this version. The lister keeps its temp file
+  because older CoreDevice versions are unverified and DeviceAppManager uses
+  files too; changing this awaits a minimum supported version.
+- Physical-record shapes under `properties.*`, including whether `identifier`
+  differs from the UDID, remain unverified. Physical availability stays lenient;
+  simulator boot-state observations do not establish physical-device rules.
 
 ## CoreDevice gating
 

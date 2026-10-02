@@ -8,7 +8,6 @@ import {
   type IosInstallBackend,
 } from "../../../src/utils/ios-cmdline-tools/IosDeviceBackend";
 import type { DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
-import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeDeviceAppTerminator } from "../../fakes/FakeDeviceAppTerminator";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";

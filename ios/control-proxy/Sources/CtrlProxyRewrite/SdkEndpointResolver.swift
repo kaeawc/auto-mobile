@@ -3,12 +3,14 @@ import os
 
 /// Shared lazy discovery for all SDK clients. The cache is actor-isolated; failed
 /// requests invalidate only the endpoint they used, so late failures cannot evict a
-/// different endpoint found by another request. Mutations are never automatically retried.
+/// different endpoint found by another request. GET requests re-resolve once when
+/// the app is no longer foreground. Mutations are never automatically retried.
 ///
 /// Compatibility:
 /// | runner | SDK app | result |
 /// | new | new, simulator(s) | derived port, identity verified, each reaches its own app |
 /// | new | new, one simulator | derived port, works |
+/// | new | new, two apps one simulator | foreground gate re-resolves |
 /// | new | old, fixed 8766 | legacy fallback, identity unknowable, warn once; residual old-SDK risk |
 /// | old | new | best-effort 8766, missing header accepted; unchanged if another simulator owns it |
 /// | new | new, other simulator on 8766, own app absent | typed wrongSimulator, no data |
@@ -81,9 +83,25 @@ actor SdkEndpointResolver {
     }
 
     /// One request path supplies the identity header and rejects wrong-simulator
-    /// responses before any client can decode data. Transport failure clears discovery.
+    /// responses before any client can decode data. Transport failure and a background
+    /// app clear discovery; only GET requests may retry once at a different endpoint.
     func data(for original: URLRequest, transport: any HTTPRequesting) async throws -> (Data, URLResponse) {
         let endpoint = try await resolve()
+        let result = try await data(for: original, endpoint: endpoint, transport: transport)
+        guard simulatorUdid != nil,
+              SdkEndpointError.isAppNotActive(data: result.0, response: result.1),
+              original.httpMethod == nil || original.httpMethod == "GET"
+        else { return result }
+        let replacement = try await resolve()
+        guard replacement != endpoint else { return result }
+        return try await data(for: original, endpoint: replacement, transport: transport)
+    }
+
+    private func data(
+        for original: URLRequest, endpoint: URL, transport: any HTTPRequesting
+    )
+        async throws -> (Data, URLResponse)
+    {
         var request = original
         guard let originalURL = original.url,
               var components = URLComponents(url: originalURL, resolvingAgainstBaseURL: false),
@@ -106,6 +124,9 @@ actor SdkEndpointResolver {
         {
             invalidate(endpoint: endpoint)
             throw error
+        }
+        if simulatorUdid != nil, SdkEndpointError.isAppNotActive(data: result.0, response: result.1) {
+            invalidate(endpoint: endpoint)
         }
         return result
     }
@@ -174,6 +195,17 @@ enum SdkEndpointError: LocalizedError, Sendable {
         // The server's expected identity is the answering app; actual is the request header.
         return .wrongSimulator(expectedUdid: payload.actualUdid, actualUdid: payload.expectedUdid)
     }
+
+    static func isAppNotActive(data: Data, response: URLResponse) -> Bool {
+        guard let http = response as? HTTPURLResponse, http.statusCode == 409,
+              let payload = try? JSONDecoder().decode(AppNotActivePayload.self, from: data)
+        else { return false }
+        return payload.error == "app_not_active"
+    }
+}
+
+private struct AppNotActivePayload: Decodable {
+    let error: String
 }
 
 private struct WrongSimulatorPayload: Decodable {

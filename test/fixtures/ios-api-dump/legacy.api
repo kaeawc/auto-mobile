@@ -1,0 +1,6 @@
+// Legacy.swift
+public struct Legacy
+  public var value: Int
+  public init( value: Int, factory: () -> Int = { 1 } )
+  @discardableResult public func update(_ value: Int) -> Int
+  public static let notification = Notification.Name( "legacy.notification" )

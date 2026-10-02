@@ -8,7 +8,7 @@ describe("WebRTC incarnation listener", () => {
     const stopped: string[] = [];
     const listener = createWebRtcStreamDeviceIncarnationListener({
       stopStreamsForDevice: async ({ deviceId, reason, cause }) => {
-        expect(reason).toBe("device_removed");
+        expect(reason).toBe("device_restored");
         expect(cause).toBe("incarnation change");
         if (active.delete(deviceId)) {
           stopped.push(deviceId);

@@ -174,6 +174,7 @@ export const SUBSCRIPTION_NOTICE_CODES = {
   identity_quarantined: 3,
   daemon_shutdown: 4,
   session_ended: 5,
+  device_restored: 6,
 } as const;
 export function encodeSubscriptionNotice(
   notice: Exclude<StreamSubscriptionEndReason, "stopped_by_owner"> | "downgraded_to_viewer",

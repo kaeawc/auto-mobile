@@ -134,8 +134,9 @@ Admission is unchanged for every `start`, including renewal: the device must be
 unowned or owned by the requesting session. A viewer starting a new stream on
 another session's device, or renewing there, is still rejected by that admission check.
 
-Either kind ends when its session ends, the device is removed or quarantined, or
-the daemon shuts down. VM restore ends the captured incarnation as `device_removed`.
+Either kind ends when its session ends (`session_ended`), the device is removed
+(`device_removed`) or quarantined (`identity_quarantined`), or the daemon shuts down
+(`daemon_shutdown`). VM restore ends the captured incarnation as `device_restored`.
 This socket is request/response only: the next `status`, `await`, or `stop` carrying
 an ended lease reports its `reason` and `subscriptionKind`. Ended leases are retained
 for one lease TTL, up to 256 entries; a later `start` can re-subscribe with a new lease.

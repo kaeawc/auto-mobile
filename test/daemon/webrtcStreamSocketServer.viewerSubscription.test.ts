@@ -160,6 +160,7 @@ function harness(
         },
       },
       deviceLifecycle: () => ({
+        onDeviceRestored: (cb) => lifecycle.onDeviceRestored(cb),
         onDeviceRemoved: (cb) => {
           lifecycleListeners++;
           const remove = lifecycle.onDeviceRemoved(cb);
@@ -381,20 +382,23 @@ test("f: close logs shutdown once and removes every listener within the stop bou
   expect(h.releases.size).toBe(0);
   expect(h.lifecycleCount()).toBe(0);
 });
-test("g: incarnation cleanup reports device_removed once at info with its cause", async () => {
+test("g: incarnation cleanup reports device_restored once at info with its cause", async () => {
   const h = harness();
   const first = await h.start();
   const listener = createWebRtcStreamDeviceIncarnationListener();
   await listener.prepareForIncarnationChange?.(device.deviceId);
   await listener.onDeviceIncarnationChanged(device.deviceId);
-  expect(
-    await h.request({
-      action: "status",
-      streamId: first.stream?.streamId,
-      leaseId: first.stream?.lease?.id,
-    }),
-  ).toMatchObject({ reason: "device_removed", subscriptionKind: "viewer" });
+  for (const action of ["status", "await", "stop"] as const) {
+    expect(
+      await h.request({
+        action,
+        streamId: first.stream?.streamId,
+        leaseId: first.stream?.lease?.id,
+      }),
+    ).toMatchObject({ success: false, reason: "device_restored", subscriptionKind: "viewer" });
+  }
   expect(endings(h)).toHaveLength(1);
+  expect(endings(h)[0][0]).toContain("reason=device_restored");
   expect(
     h.info.mock.calls.filter(([message]) => String(message).includes("incarnation change")),
   ).toHaveLength(1);

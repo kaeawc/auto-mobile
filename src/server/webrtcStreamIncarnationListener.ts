@@ -24,7 +24,7 @@ export function createWebRtcStreamDeviceIncarnationListener(
   const stop = (deviceId: string): Promise<void> =>
     (dependencies ?? loadedManager)?.stopStreamsForDevice({
       deviceId,
-      reason: "device_removed",
+      reason: "device_restored",
       cause: "incarnation change",
     }) ?? Promise.resolve();
   return {

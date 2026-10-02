@@ -3,8 +3,8 @@ import { ActionableError } from "../models/ActionableError";
 /**
  * Shared relay/WebRTC rule: admission stays transport-specific and unchanged. A live viewer
  * survives ownership changes; a live owner losing its device becomes a read-only viewer. The
- * subscribing identity ending terminates either kind. Device removal, identity quarantine and
- * daemon shutdown terminate both kinds. Auth-off skips ownership reconciliation entirely.
+ * subscribing identity ending terminates either kind. Device removal, VM restore, identity
+ * quarantine and daemon shutdown terminate both kinds. Auth-off skips ownership reconciliation entirely.
  * WebRTC lease holders may release/renew their own leases without stream control authority.
  * Device owners may stop all WebRTC leases (stopped_by_owner); this is neither a lifecycle
  * event nor an ownership-change outcome. Relay control/admission remains unchanged.
@@ -13,6 +13,7 @@ import { ActionableError } from "../models/ActionableError";
 export type StreamSubscriptionKind = "owner" | "viewer";
 export type StreamSubscriptionLifecycleEndReason =
   | "device_removed"
+  | "device_restored"
   | "identity_quarantined"
   | "daemon_shutdown";
 export type StreamSubscriptionEndReason =

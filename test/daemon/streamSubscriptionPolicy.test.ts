@@ -40,7 +40,12 @@ describe("transport-independent subscription policy", () => {
   });
   test("all lifecycle events end both kinds with typed reasons", () => {
     for (const kind of ["owner", "viewer"] as const) {
-      for (const event of ["device_removed", "identity_quarantined", "daemon_shutdown"] as const) {
+      for (const event of [
+        "device_removed",
+        "device_restored",
+        "identity_quarantined",
+        "daemon_shutdown",
+      ] as const) {
         expect(decideLifecycleEvent({ kind, event })).toEqual({ action: "end", reason: event });
       }
     }

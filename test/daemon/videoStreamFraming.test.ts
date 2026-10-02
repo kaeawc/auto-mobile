@@ -246,3 +246,18 @@ test("subscription notice codes occupy empty non-CONFIG, non-KEY packets safe fo
     ).toBe(0n);
   }
 });
+
+test("VM restore notice uses additive code 6 without renumbering existing ends", () => {
+  expect(SUBSCRIPTION_NOTICE_CODES).toEqual({
+    downgraded_to_viewer: 1,
+    device_removed: 2,
+    identity_quarantined: 3,
+    daemon_shutdown: 4,
+    session_ended: 5,
+    device_restored: 6,
+  });
+  const packet = encodeSubscriptionNotice("device_restored");
+  expect(packet.length).toBe(12);
+  expect(packet.readBigUInt64BE(0)).toBe(PACKET_FLAG_SUBSCRIPTION_NOTICE | 6n);
+  expect(packet.readInt32BE(8)).toBe(0);
+});

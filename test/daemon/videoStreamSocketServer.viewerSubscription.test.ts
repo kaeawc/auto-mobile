@@ -149,6 +149,14 @@ async function harness(
         },
       },
       deviceLifecycle: () => ({
+        onDeviceRestored: (cb) => {
+          lifecycleListeners++;
+          const remove = lifecycle.onDeviceRestored(cb);
+          return () => {
+            lifecycleListeners--;
+            remove();
+          };
+        },
         onDeviceRemoved: (cb) => {
           lifecycleListeners++;
           const remove = lifecycle.onDeviceRemoved(cb);
@@ -433,6 +441,7 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
     "daemon_shutdown",
     "session_ended",
     "device_removed",
+    "device_restored",
     "identity_quarantined",
     "authorization_failure",
   ] as const)(
@@ -460,6 +469,9 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
       try {
         if (event === "daemon_shutdown") {
           await h.server.close();
+        } else if (event === "device_restored") {
+          h.lifecycle.deviceRestored(device.deviceId);
+          h.lifecycle.deviceRestored(device.deviceId);
         } else if (event === "device_removed") {
           h.lifecycle.deviceRemoved(device.deviceId);
         } else if (event === "identity_quarantined") {
@@ -476,7 +488,10 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
         h.lifecycle.deviceRemoved(device.deviceId);
         terminal(socket, reason);
         const message = `[VideoStream] ending subscriber: deviceId=${device.deviceId} kind=${kind} reason=${reason}`;
-        const expected = event === "daemon_shutdown" || event === "session_ended" ? info : warn;
+        const expected =
+          event === "daemon_shutdown" || event === "session_ended" || event === "device_restored"
+            ? info
+            : warn;
         const other = expected === info ? warn : info;
         expect(expected.mock.calls.filter(([text]) => text === message)).toHaveLength(1);
         expect(other.mock.calls.filter(([text]) => text === message)).toHaveLength(0);
@@ -701,24 +716,38 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
     h.ownership.changed();
     terminal(a, "session_ended");
   });
-  test("removal ends owner and viewer with binary END then typed terminal", async () => {
-    const h = await harness();
-    const viewer = await h.subscribe();
-    h.state.owner = "b";
-    h.ownership.changed();
-    const owner = await h.subscribe("b");
-    h.lifecycle.deviceRemoved(device.deviceId);
-    for (const socket of [viewer, owner]) {
-      terminal(socket, "device_removed");
-      expect(binary(socket).at(-1)).toEqual(encodeSubscriptionNotice("device_removed"));
-      expect(typeof socket.written.at(-1)).toBe("string");
-    }
-    expect(h.server.subscriberCount(device.deviceId)).toBe(0);
-    h.state.owner = null;
-    const again = await h.subscribe();
-    expect(messages(again)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
-    expect(h.server.subscriberCount(device.deviceId)).toBe(1);
-  });
+  test.each(["device_removed", "device_restored"] as const)(
+    "%s ends owner and viewer with binary END then typed terminal",
+    async (reason) => {
+      const h = await harness();
+      const viewer = await h.subscribe();
+      h.state.owner = "b";
+      h.ownership.changed();
+      const owner = await h.subscribe("b");
+      if (reason === "device_restored") {
+        h.lifecycle.deviceRestored(device.deviceId);
+        h.lifecycle.deviceRestored(device.deviceId);
+      } else {
+        h.lifecycle.deviceRemoved(device.deviceId);
+      }
+      for (const socket of [viewer, owner]) {
+        terminal(socket, reason);
+        expect(binary(socket).at(-1)).toEqual(encodeSubscriptionNotice(reason));
+        expect(binary(socket).at(-1)?.readBigUInt64BE(0)).toBe(
+          (1n << 61n) | BigInt(reason === "device_restored" ? 6 : 2),
+        );
+        expect(messages(socket).at(-1)?.subscriptionKind).toBe(
+          socket === viewer ? "viewer" : "owner",
+        );
+        expect(typeof socket.written.at(-1)).toBe("string");
+      }
+      expect(h.server.subscriberCount(device.deviceId)).toBe(0);
+      h.state.owner = null;
+      const again = await h.subscribe();
+      expect(messages(again)[0]).toMatchObject({ success: true, subscriptionKind: "viewer" });
+      expect(h.server.subscriberCount(device.deviceId)).toBe(1);
+    },
+  );
   test("pending owner downgrade is reflected only in its ack, and a pending viewer survives acquisition", async () => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
@@ -786,27 +815,34 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
       expect(Reflect.get(h.server, name).has(a)).toBe(false);
     }
   });
-  test("pending removal sends JSON only and never a later success ack", async () => {
-    let release = () => {};
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const h = await harness({ startGate: gate });
-    const socket = new FakeSocket();
-    const joining = h.server.line(socket, {
-      action: "subscribe",
-      sessionUuid: "a",
-      deviceId: device.deviceId,
-    });
-    await flush();
-    expect(h.server.subscriberCount(device.deviceId)).toBe(1);
-    h.lifecycle.deviceRemoved(device.deviceId);
-    terminal(socket, "device_removed");
-    expect(binary(socket)).toHaveLength(0);
-    release();
-    await joining;
-    expect(messages(socket)).toHaveLength(1);
-  });
+  test.each(["device_removed", "device_restored"] as const)(
+    "pending %s sends JSON only and never a later success ack",
+    async (reason) => {
+      let release = () => {};
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const h = await harness({ startGate: gate });
+      const socket = new FakeSocket();
+      const joining = h.server.line(socket, {
+        action: "subscribe",
+        sessionUuid: "a",
+        deviceId: device.deviceId,
+      });
+      await flush();
+      expect(h.server.subscriberCount(device.deviceId)).toBe(1);
+      if (reason === "device_restored") {
+        h.lifecycle.deviceRestored(device.deviceId);
+      } else {
+        h.lifecycle.deviceRemoved(device.deviceId);
+      }
+      terminal(socket, reason);
+      expect(binary(socket)).toHaveLength(0);
+      release();
+      await joining;
+      expect(messages(socket)).toHaveLength(1);
+    },
+  );
   test.each(["identity_quarantined", "daemon_shutdown"] as const)(
     "pending %s ends without binary data when startup later settles",
     async (reason) => {
@@ -861,7 +897,7 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
     h.state.owner = "b";
     const owner = await h.subscribe("b");
     expect(h.ownership.listeners.size).toBe(1);
-    expect(h.lifecycleListenerCount()).toBe(2);
+    expect(h.lifecycleListenerCount()).toBe(3);
     h.sources[0].onStop = () => {
       for (const socket of [viewer, owner]) {
         terminal(socket, "daemon_shutdown");
@@ -926,4 +962,16 @@ describe("viewer subscriptions (moved from real-socket ownership tests)", () => 
     expect(b.destroyed).toBe(false);
     expect(h.server.subscriberCount(device.deviceId)).toBe(1);
   });
+});
+
+test("restore without a capture is a no-op and does not affect another device", async () => {
+  const h = await harness();
+  h.lifecycle.deviceRestored(device.deviceId);
+  expect(h.server.activeDeviceIds()).toEqual([]);
+  expect(h.sources).toHaveLength(0);
+  const socket = await h.subscribe();
+  const writes = socket.written.length;
+  h.lifecycle.deviceRestored("unrelated");
+  expect(socket.written).toHaveLength(writes);
+  expect(h.server.subscriberCount(device.deviceId)).toBe(1);
 });

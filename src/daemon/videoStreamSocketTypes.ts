@@ -19,8 +19,9 @@ import type {
  * Admission still requires a live session and a device unowned or owned by that session.
  * An owning subscriber is an owner; an unowned-device subscriber is a read-only viewer. Viewers
  * survive ownership changes, and a live owner losing ownership downgrades to viewer. Either kind
- * ends when its own session ends (session_ended), the device is removed (device_removed), its
- * identity is quarantined (identity_quarantined), or the daemon closes (daemon_shutdown).
+ * ends when its own session ends (session_ended), the device is removed (device_removed) or
+ * VM-restored (device_restored), its identity is quarantined (identity_quarantined), or the daemon
+ * closes (daemon_shutdown).
  * Auth-off admits with owner semantics and skips ownership reconciliation and its notices.
  * Subscribe-time quality/fps/bitrate hints work for both kinds and can start/retain shared capture.
  * The relay has no post-subscribe controls: all extra lines are ignored without a reply (writing
@@ -29,7 +30,8 @@ import type {
  * Additive subscription notices use a 12-byte packet header: big-endian int64 ptsAndFlags with
  * bit 61 set, CONFIG (63), KEY (62), heartbeat (60) and dropped-frames (59) clear, code in bits
  * 0-58, followed by big-endian int32 zero payload length. Codes: 1=downgraded_to_viewer,
- * 2=device_removed, 3=identity_quarantined, 4=daemon_shutdown, 5=session_ended. Old clients ignore
+ * 2=device_removed, 3=identity_quarantined, 4=daemon_shutdown, 5=session_ended, 6=device_restored.
+ * VM restore is a distinct end for the captured incarnation. Old clients ignore
  * the empty non-CONFIG payload. Downgrade sends only this packet and keeps flowing. End sends
  * this packet then a terminal JSON line and closes; pending/pre-ack sockets get only JSON.
  * To resume after an end, subscribe again on a fresh socket and pass admission again.

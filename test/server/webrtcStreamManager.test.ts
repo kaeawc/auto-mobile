@@ -1851,6 +1851,47 @@ describe("webrtcStreamManager", () => {
 });
 
 describe("WebRTC ended lease tombstones", () => {
+  test.each(["device_restored", "device_removed"] as const)(
+    "%s retains the reason and kind and logs each lease once",
+    async (reason) => {
+      installFakes();
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const stream = await startWebRtcStream({
+          device: ANDROID,
+          subscriptionKind: "viewer",
+          overrides: { whipEndpoint: ENDPOINT },
+        });
+        const listener = createWebRtcStreamDeviceIncarnationListener();
+        if (reason === "device_restored") {
+          await listener.prepareForIncarnationChange?.(ANDROID.deviceId);
+          await listener.onDeviceIncarnationChanged(ANDROID.deviceId);
+        } else {
+          await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason });
+          await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason });
+        }
+        expect(() => getWebRtcStreamDescriptor(stream.streamId, stream.lease?.id)).toThrow(reason);
+        try {
+          getWebRtcStreamDescriptor(stream.streamId, stream.lease?.id);
+        } catch (error) {
+          expect(error).toMatchObject({ reason, subscriptionKind: "viewer" });
+        }
+        const expected = reason === "device_restored" ? info : warn;
+        const other = expected === info ? warn : info;
+        expect(
+          expected.mock.calls.filter(([message]) => String(message).includes(`reason=${reason}`)),
+        ).toHaveLength(1);
+        expect(
+          other.mock.calls.filter(([message]) => String(message).includes(`reason=${reason}`)),
+        ).toHaveLength(0);
+      } finally {
+        info.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
+
   test("retains 256 newest ends, expires lazily at the lease TTL, and reset clears ends", async () => {
     installFakes();
     const timer = new FakeTimer();

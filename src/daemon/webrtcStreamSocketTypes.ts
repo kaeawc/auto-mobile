@@ -57,7 +57,8 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
  * A viewer lease survives device ownership changes; an owner losing ownership
  * downgrades to a read-only viewer. The downgrade is one-way; either kind may release or
  * renew its own lease with compatible parameters, subject to unchanged start admission.
- * Ends report device_removed, identity_quarantined, daemon_shutdown, session_ended,
+ * Ends report device_removed, device_restored (VM restore), identity_quarantined,
+ * daemon_shutdown, session_ended,
  * or stopped_by_owner when the current device owner stops the stream outright.
  * This socket has no push channel: typed ends are reported on the next request carrying
  * the lease. These optional

@@ -1,7 +1,8 @@
 #if DEBUG
 import Foundation
+import os
 
-struct NetworkMockRuleDTO: Codable, Equatable {
+struct NetworkMockRuleDTO: Codable, Equatable, Sendable {
     let mockId: String
     let host: String
     let path: String
@@ -14,21 +15,21 @@ struct NetworkMockRuleDTO: Codable, Equatable {
     let contentType: String
 }
 
-struct NetworkErrorSimulationDTO: Codable, Equatable {
+struct NetworkErrorSimulationDTO: Codable, Equatable, Sendable {
     let enabled: Bool
     let errorType: String?
     let limit: Int?
     let expiresAtEpochMs: Int64?
 }
 
-public enum NetworkFaultTransport: String, Codable, Equatable {
+public enum NetworkFaultTransport: String, Codable, Equatable, Sendable {
     case urlSession
     case webSocket
     case nwConnection
     case webView
 }
 
-public enum NetworkFaultAction: String, Codable, Equatable {
+public enum NetworkFaultAction: String, Codable, Equatable, Sendable {
     case response
     case status
     case error
@@ -39,7 +40,7 @@ public enum NetworkFaultAction: String, Codable, Equatable {
     case rejectFrame
 }
 
-public struct NetworkFaultRuleDTO: Codable, Equatable {
+public struct NetworkFaultRuleDTO: Codable, Equatable, Sendable {
     public let faultId: String
     public let transport: NetworkFaultTransport?
     public let host: String?
@@ -85,14 +86,14 @@ public struct NetworkFaultRuleDTO: Codable, Equatable {
     }
 }
 
-public final class NetworkMockRuleStore: @unchecked Sendable {
+public final class NetworkMockRuleStore: Sendable {
     static let shared = NetworkMockRuleStore()
 
-    struct ErrorSimulation: Equatable {
+    struct ErrorSimulation: Equatable, Sendable {
         let errorType: String
     }
 
-    struct MatchedRule: Equatable {
+    struct MatchedRule: Equatable, Sendable {
         let mockId: String
         let statusCode: Int
         let responseHeaders: [String: String]
@@ -100,7 +101,7 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
         let contentType: String
     }
 
-    public struct FaultDecision: Equatable {
+    public struct FaultDecision: Equatable, Sendable {
         public let faultId: String
         public let action: NetworkFaultAction
         public let statusCode: Int?
@@ -114,7 +115,7 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
         public let dryRun: Bool
     }
 
-    public struct FaultRequest: Equatable {
+    public struct FaultRequest: Equatable, Sendable {
         public let transport: NetworkFaultTransport
         public let host: String?
         public let port: Int?
@@ -133,7 +134,7 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
         }
     }
 
-    private struct CompiledRule {
+    private struct CompiledRule: Sendable {
         let mockId: String
         let host: NSRegularExpression
         let path: NSRegularExpression
@@ -145,13 +146,16 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
         let contentType: String
     }
 
-    private let lock = NSLock()
+    private struct State: Sendable {
+        var rules: [CompiledRule] = []
+        var faultRules: [CompiledFaultRule] = []
+        var consumedConnections = Set<String>()
+        var consumedSessions = Set<String>()
+        var errorSimulation: CompiledErrorSimulation?
+    }
+
+    private let state = OSAllocatedUnfairLock<State>(initialState: State())
     private let dateProvider: DateProvider
-    private var rules: [CompiledRule] = []
-    private var faultRules: [CompiledFaultRule] = []
-    private var consumedConnections = Set<String>()
-    private var consumedSessions = Set<String>()
-    private var errorSimulation: CompiledErrorSimulation?
 
     public init() {
         self.dateProvider = SystemDateProvider()
@@ -183,9 +187,7 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
             }
         }
 
-        lock.lock()
-        rules = compiled
-        lock.unlock()
+        state.withLock { $0.rules = compiled }
     }
 
     public func setFaultRules(_ dtos: [NetworkFaultRuleDTO]) {
@@ -201,130 +203,132 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
                 return nil
             }
         }
-        lock.lock()
-        faultRules = compiled
-        consumedConnections.removeAll()
-        consumedSessions.removeAll()
-        lock.unlock()
+        state.withLock { state in
+            state.faultRules = compiled
+            state.consumedConnections.removeAll()
+            state.consumedSessions.removeAll()
+        }
     }
 
     public func clearFaultRules() {
-        lock.lock()
-        faultRules.removeAll()
-        consumedConnections.removeAll()
-        consumedSessions.removeAll()
-        lock.unlock()
+        state.withLock { state in
+            state.faultRules.removeAll()
+            state.consumedConnections.removeAll()
+            state.consumedSessions.removeAll()
+        }
     }
 
     public func evaluate(_ request: FaultRequest) -> FaultDecision? {
-        lock.lock()
-        defer { lock.unlock() }
-        for index in faultRules.indices {
-            let rule = faultRules[index]
-            guard !isExpired(rule.expiresAtEpochMs),
-                  matches(rule, request: request) else {
-                continue
+        state.withLock { state in
+            for index in state.faultRules.indices {
+                let rule = state.faultRules[index]
+                guard !isExpired(rule.expiresAtEpochMs),
+                      matches(rule, request: request)
+                else {
+                    continue
+                }
+                if !rule.dryRun, !Self.consume(
+                    rule: &state.faultRules[index], request: request,
+                    consumedConnections: &state.consumedConnections,
+                    consumedSessions: &state.consumedSessions
+                ) {
+                    continue
+                }
+                return FaultDecision(
+                    faultId: rule.faultId,
+                    action: rule.action,
+                    statusCode: rule.statusCode,
+                    responseHeaders: rule.responseHeaders,
+                    responseBody: rule.responseBody,
+                    contentType: rule.contentType,
+                    errorType: rule.errorType,
+                    delayMs: rule.delayMs,
+                    bandwidthBytesPerSecond: rule.bandwidthBytesPerSecond,
+                    dropBytes: rule.dropBytes,
+                    dryRun: rule.dryRun
+                )
             }
-            if !rule.dryRun, !consume(rule: &faultRules[index], request: request) {
-                continue
-            }
-            return FaultDecision(
-                faultId: rule.faultId,
-                action: rule.action,
-                statusCode: rule.statusCode,
-                responseHeaders: rule.responseHeaders,
-                responseBody: rule.responseBody,
-                contentType: rule.contentType,
-                errorType: rule.errorType,
-                delayMs: rule.delayMs,
-                bandwidthBytesPerSecond: rule.bandwidthBytesPerSecond,
-                dropBytes: rule.dropBytes,
-                dryRun: rule.dryRun
-            )
+            return nil
         }
-        return nil
     }
 
     func setErrorSimulation(_ dto: NetworkErrorSimulationDTO) {
-        lock.lock()
-        defer { lock.unlock() }
+        state.withLock { state in
+            guard dto.enabled, let errorType = dto.errorType else {
+                state.errorSimulation = nil
+                return
+            }
 
-        guard dto.enabled, let errorType = dto.errorType else {
-            errorSimulation = nil
-            return
+            state.errorSimulation = CompiledErrorSimulation(
+                errorType: errorType,
+                remaining: dto.limit,
+                expiresAtEpochMs: dto.expiresAtEpochMs
+            )
         }
-
-        errorSimulation = CompiledErrorSimulation(
-            errorType: errorType,
-            remaining: dto.limit,
-            expiresAtEpochMs: dto.expiresAtEpochMs
-        )
     }
 
     func activeErrorSimulation() -> ErrorSimulation? {
-        lock.lock()
-        defer { lock.unlock() }
-
-        guard var simulation = errorSimulation else {
-            return nil
-        }
-
-        if let expiresAtEpochMs = simulation.expiresAtEpochMs,
-           currentEpochMs() >= expiresAtEpochMs
-        {
-            errorSimulation = nil
-            return nil
-        }
-
-        if let remaining = simulation.remaining {
-            guard remaining > 0 else {
-                errorSimulation = nil
+        state.withLock { state in
+            guard var simulation = state.errorSimulation else {
                 return nil
             }
-            simulation.remaining = remaining - 1
-            errorSimulation = simulation.remaining == 0 ? nil : simulation
-        }
 
-        return ErrorSimulation(errorType: simulation.errorType)
+            if let expiresAtEpochMs = simulation.expiresAtEpochMs,
+               currentEpochMs() >= expiresAtEpochMs
+            {
+                state.errorSimulation = nil
+                return nil
+            }
+
+            if let remaining = simulation.remaining {
+                guard remaining > 0 else {
+                    state.errorSimulation = nil
+                    return nil
+                }
+                simulation.remaining = remaining - 1
+                state.errorSimulation = simulation.remaining == 0 ? nil : simulation
+            }
+
+            return ErrorSimulation(errorType: simulation.errorType)
+        }
     }
 
     func findMatchingRule(host: String, path: String, method: String) -> MatchedRule? {
-        lock.lock()
-        defer { lock.unlock() }
-
-        for index in rules.indices {
-            let rule = rules[index]
-            if rule.method != "*", rule.method.caseInsensitiveCompare(method) != .orderedSame {
-                continue
-            }
-            guard Self.matches(rule.host, host), Self.matches(rule.path, path) else {
-                continue
-            }
-            if var remaining = rule.remaining {
-                remaining -= 1
-                rules[index].remaining = remaining
-                if remaining < 0 {
+        state.withLock { state in
+            for index in state.rules.indices {
+                let rule = state.rules[index]
+                if rule.method != "*", rule.method.caseInsensitiveCompare(method) != .orderedSame {
                     continue
                 }
+                guard Self.matches(rule.host, host), Self.matches(rule.path, path) else {
+                    continue
+                }
+                if var remaining = rule.remaining {
+                    remaining -= 1
+                    state.rules[index].remaining = remaining
+                    if remaining < 0 {
+                        continue
+                    }
+                }
+                return MatchedRule(
+                    mockId: rule.mockId,
+                    statusCode: rule.statusCode,
+                    responseHeaders: rule.responseHeaders,
+                    responseBody: rule.responseBody,
+                    contentType: rule.contentType
+                )
             }
-            return MatchedRule(
-                mockId: rule.mockId,
-                statusCode: rule.statusCode,
-                responseHeaders: rule.responseHeaders,
-                responseBody: rule.responseBody,
-                contentType: rule.contentType
-            )
+            return nil
         }
-        return nil
     }
 
-    private struct CompiledErrorSimulation {
+    private struct CompiledErrorSimulation: Sendable {
         let errorType: String
         var remaining: Int?
         let expiresAtEpochMs: Int64?
     }
 
-    private struct CompiledFaultRule {
+    private struct CompiledFaultRule: Sendable {
         let faultId: String
         let transport: NetworkFaultTransport?
         let host: NSRegularExpression?
@@ -395,7 +399,12 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
         }
     }
 
-    private func consume(rule: inout CompiledFaultRule, request: FaultRequest) -> Bool {
+    private static func consume(
+        rule: inout CompiledFaultRule, request: FaultRequest,
+        consumedConnections: inout Set<String>, consumedSessions: inout Set<String>
+    )
+        -> Bool
+    {
         switch rule.scope {
         case "connection":
             if let id = request.connectionId,
@@ -427,10 +436,10 @@ public final class NetworkMockRuleStore: @unchecked Sendable {
     }
 
     public func clearSession(_ sessionId: String) {
-        lock.lock()
-        faultRules.removeAll { $0.sessionId == sessionId }
-        consumedSessions = consumedSessions.filter { !$0.hasSuffix(":\(sessionId)") }
-        lock.unlock()
+        state.withLock { state in
+            state.faultRules.removeAll { $0.sessionId == sessionId }
+            state.consumedSessions = state.consumedSessions.filter { !$0.hasSuffix(":\(sessionId)") }
+        }
     }
 
     private func isExpired(_ epochMs: Int64?) -> Bool {

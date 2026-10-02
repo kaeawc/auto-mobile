@@ -1,8 +1,31 @@
 @testable import AutoMobileSDK
 import Foundation
+import os
 import XCTest
 
 final class UserDefaultsStoreResolverTests: XCTestCase {
+    func testConcurrentResolutionUsesSendableSuiteValidator() {
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let resolver = UserDefaultsStoreResolver(bundleIdentifier: "com.example.app", suiteIsValid: { name in
+            calls.withLock { $0 += 1 }
+            return name.hasPrefix("group.")
+        })
+        let successes = OSAllocatedUnfairLock(initialState: 0)
+
+        DispatchQueue.concurrentPerform(iterations: 32) { index in
+            let name = "group.storage.\(index)"
+            if resolver.resolve(name) == ResolvedStore(suiteName: name),
+               resolver.resolve("standard") == ResolvedStore(suiteName: nil),
+               resolver.resolve("invalid") == nil
+            {
+                successes.withLock { $0 += 1 }
+            }
+        }
+
+        XCTAssertEqual(calls.withLock { $0 }, 64)
+        XCTAssertEqual(successes.withLock { $0 }, 32)
+    }
+
     func testEmptyAndStandardInAnyCaseResolveToStandard() {
         let resolver = UserDefaultsStoreResolver(bundleIdentifier: nil, suiteIsValid: { _ in
             XCTFail("Standard aliases must not open a suite")

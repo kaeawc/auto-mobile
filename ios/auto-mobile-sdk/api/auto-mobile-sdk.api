@@ -509,7 +509,7 @@ public enum NetworkCaptureDirection: String, Codable, Sendable
   case response
   case sent
   case received
-public final class NetworkCaptureRecorder: @unchecked Sendable
+public final class NetworkCaptureRecorder: Sendable
   public typealias Emit = @Sendable (NetworkRequestRecord) -> Void
   public typealias IDGenerator = @Sendable () -> String
   public init( emit: @escaping Emit, maxBodyBytes: Int = 32 * 1024, idGenerator: @escaping IDGenerator = { UUID().uuidString }, isEnabled: @escaping @Sendable () -> Bool = { true }, isBodyCaptureEnabled: @escaping @Sendable () -> Bool = { true }, samplingRate: Double = 1, sampler: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) }, headerRedactor: @escaping @Sendable ([String: String]) -> [String: String] = { NetworkCaptureRecorder.redactHeaders($0) } )
@@ -524,7 +524,7 @@ public final class NetworkCaptureRecorder: @unchecked Sendable
   public func recordFailure(requestId: String, error: String)
   public func recordWebSocketFrame( url: String, connectionId: String?, direction: NetworkCaptureDirection, frameType: WebSocketFrameType, payloadSize: Int? )
   public static func redactHeaders(_ headers: [String: String]) -> [String: String]
-public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable
+public final class URLSessionNetworkCaptureAdapter: Sendable
   public init(recorder: NetworkCaptureRecorder)
   public func evaluateFault(for task: URLSessionTask, sessionId: String? = nil) -> NetworkMockRuleStore.FaultDecision?
   @discardableResult public func begin( url: String, method: String = "GET", connectionId: String? = nil, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil ) -> String
@@ -536,11 +536,11 @@ public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable
   public func didAuthenticate(requestId: String, method: String)
   public func didComplete(requestId: String, statusCode: Int? = nil)
   public func didFail(requestId: String, error: Error)
-public final class WebSocketNetworkCaptureAdapter: @unchecked Sendable
+public final class WebSocketNetworkCaptureAdapter: Sendable
   public init(recorder: NetworkCaptureRecorder)
   public func evaluateFault( url: String, connectionId: String?, direction: NetworkCaptureDirection, sessionId: String? = nil ) -> NetworkMockRuleStore.FaultDecision?
   public func recordFrame( url: String, connectionId: String?, direction: NetworkCaptureDirection, frameType: WebSocketFrameType, payloadSize: Int? )
-public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable
+public final class NWConnectionNetworkCaptureAdapter: Sendable
   public init(recorder: NetworkCaptureRecorder)
   public func evaluateFault( endpoint: String, connectionId: String, sessionId: String? = nil ) -> NetworkMockRuleStore.FaultDecision?
   @discardableResult public func begin( endpoint: String, connectionId: String ) -> String
@@ -552,12 +552,12 @@ public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable
   public func didCancel(requestId: String)
 
 // Network/NetworkMockRuleStore.swift
-public enum NetworkFaultTransport: String, Codable, Equatable
+public enum NetworkFaultTransport: String, Codable, Equatable, Sendable
   case urlSession
   case webSocket
   case nwConnection
   case webView
-public enum NetworkFaultAction: String, Codable, Equatable
+public enum NetworkFaultAction: String, Codable, Equatable, Sendable
   case response
   case status
   case error
@@ -566,7 +566,7 @@ public enum NetworkFaultAction: String, Codable, Equatable
   case dropBytes
   case closeConnection
   case rejectFrame
-public struct NetworkFaultRuleDTO: Codable, Equatable
+public struct NetworkFaultRuleDTO: Codable, Equatable, Sendable
   public let faultId: String
   public let transport: NetworkFaultTransport?
   public let host: String?
@@ -592,8 +592,8 @@ public struct NetworkFaultRuleDTO: Codable, Equatable
   public let scope: String?
   public let dryRun: Bool
   public init( faultId: String, transport: NetworkFaultTransport?, host: String?, port: Int?, scheme: String?, path: String?, method: String?, headers: [String: String]?, origin: String?, connectionId: String?, sessionId: String?, action: NetworkFaultAction, statusCode: Int?, responseHeaders: [String: String]?, responseBody: String?, contentType: String?, errorType: String?, delayMs: Int?, bandwidthBytesPerSecond: Int?, dropBytes: Int?, limit: Int?, expiresAtEpochMs: Int64?, scope: String?, dryRun: Bool )
-public final class NetworkMockRuleStore: @unchecked Sendable
-public struct FaultDecision: Equatable
+public final class NetworkMockRuleStore: Sendable
+public struct FaultDecision: Equatable, Sendable
   public let faultId: String
   public let action: NetworkFaultAction
   public let statusCode: Int?
@@ -605,7 +605,7 @@ public struct FaultDecision: Equatable
   public let bandwidthBytesPerSecond: Int?
   public let dropBytes: Int?
   public let dryRun: Bool
-public struct FaultRequest: Equatable
+public struct FaultRequest: Equatable, Sendable
   public let transport: NetworkFaultTransport
   public let host: String?
   public let port: Int?
@@ -802,7 +802,7 @@ public final class DefaultAutoMobileAPI: AutoMobileAPI, @unchecked Sendable
   public var dropReport: [DropReason: Int]
 
 // Storage/DatabaseInspector.swift
-public final class DatabaseInspector: @unchecked Sendable
+public final class DatabaseInspector: Sendable
   public static let shared = DatabaseInspector()
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
@@ -1074,7 +1074,7 @@ public struct SdkWebViewEvent: SdkEvent
   public let requestId: String?
   public let metadata: [String: String]
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), webViewId: String, name: String, url: String? = nil, frameId: String? = nil, requestId: String? = nil, metadata: [String: String] = [:] )
-public final class AutoMobileWebViewPolicy: @unchecked Sendable
+public final class AutoMobileWebViewPolicy: Sendable
   public init(configuration: AutoMobileWebViewConfiguration = .init())
   public func allows(url: URL?, frameId: String?) -> Bool
   public func accept(_ snapshot: AutoMobileWebSnapshot) -> AutoMobileWebSnapshot

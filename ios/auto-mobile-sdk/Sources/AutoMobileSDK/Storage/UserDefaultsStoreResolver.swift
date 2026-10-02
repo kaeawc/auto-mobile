@@ -6,10 +6,10 @@
         var label: String { suiteName ?? "standard" }
     }
 
-    struct UserDefaultsStoreResolver {
+    struct UserDefaultsStoreResolver: Sendable {
         let bundleIdentifier: String?
-        let suiteIsValid: (String) -> Bool
-        static let defaultSuiteIsValid: (String) -> Bool = { UserDefaults(suiteName: $0) != nil }
+        let suiteIsValid: @Sendable (String) -> Bool
+        static let defaultSuiteIsValid: @Sendable (String) -> Bool = { UserDefaults(suiteName: $0) != nil }
 
         /// A nil resolution means Foundation rejected the suite name.
         func resolve(_ name: String) -> ResolvedStore? {

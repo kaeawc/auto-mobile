@@ -438,10 +438,10 @@ protocol PersistentDomainReading {
     func persistentKeys(domain: String, suiteName: String?) -> Set<String>
 }
 
-final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReading, @unchecked Sendable {
-    private let makeDefaults: (String?) -> UserDefaults?
+final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReading, Sendable {
+    private let makeDefaults: @Sendable (String?) -> UserDefaults?
 
-    init(makeDefaults: @escaping (String?) -> UserDefaults? = { name in
+    init(makeDefaults: @escaping @Sendable (String?) -> UserDefaults? = { name in
         if let name { return UserDefaults(suiteName: name) }
         return .standard
     }) {
@@ -519,11 +519,12 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReadi
     /// ISO-8601 formatter with fractional seconds, so `Date` values round-trip
     /// to sub-second precision. `.withInternetDateTime` alone truncates to whole
     /// seconds; adding `.withFractionalSeconds` preserves the stored instant.
-    private static let iso8601: ISO8601DateFormatter = {
+    /// Each call owns its formatter; no mutable formatter is shared between threads.
+    private static func iso8601String(from date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
+        return formatter.string(from: date)
+    }
 
     /// Encode a UserDefaults value into a recoverable string for telemetry.
     ///
@@ -542,7 +543,7 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReadi
         switch type {
         case .date:
             if let date = value as? Date {
-                return iso8601.string(from: date)
+                return iso8601String(from: date)
             }
             return "\(value)"
         case .data:
@@ -574,7 +575,7 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReadi
         case let date as Date:
             // Same formatter as top-level dates: UTC with exactly three fractional
             // digits (yyyy-MM-dd'T'HH:mm:ss.SSS'Z'), matching the host plist route.
-            return iso8601.string(from: date)
+            return iso8601String(from: date)
         case let data as Data:
             return data.base64EncodedString()
         case let number as NSNumber:

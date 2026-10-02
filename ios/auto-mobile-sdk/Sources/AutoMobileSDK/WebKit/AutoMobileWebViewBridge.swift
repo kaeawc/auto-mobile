@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// A stable description of an interactive element in a web document.
 public struct AutoMobileWebElement: Codable, Sendable, Equatable {
@@ -120,10 +121,9 @@ public struct SdkWebViewEvent: SdkEvent {
 }
 
 /// Validates bridge policy and action references without requiring WebKit.
-public final class AutoMobileWebViewPolicy: @unchecked Sendable {
+public final class AutoMobileWebViewPolicy: Sendable {
     private let configuration: AutoMobileWebViewConfiguration
-    private let lock = NSLock()
-    private var latestSnapshots: [String: AutoMobileWebSnapshot] = [:]
+    private let lock = OSAllocatedUnfairLock<[String: AutoMobileWebSnapshot]>(initialState: [:])
 
     public init(configuration: AutoMobileWebViewConfiguration = .init()) {
         self.configuration = configuration
@@ -154,12 +154,12 @@ public final class AutoMobileWebViewPolicy: @unchecked Sendable {
                 )
             }
         )
-        lock.lock()
-        latestSnapshots[bounded.snapshotId] = bounded
-        if latestSnapshots.count > 4, let first = latestSnapshots.keys.sorted().first {
-            latestSnapshots.removeValue(forKey: first)
+        lock.withLock { latestSnapshots in
+            latestSnapshots[bounded.snapshotId] = bounded
+            if latestSnapshots.count > 4, let first = latestSnapshots.keys.sorted().first {
+                latestSnapshots.removeValue(forKey: first)
+            }
         }
-        lock.unlock()
         return bounded
     }
 
@@ -175,12 +175,12 @@ public final class AutoMobileWebViewPolicy: @unchecked Sendable {
             case let .scroll(id, element, _, _): snapshotId = id; elementId = element
             case .evaluateJavaScript: return false
             }
-            lock.lock()
-            defer { lock.unlock() }
-            guard let snapshot = latestSnapshots[snapshotId] else { return false }
-            return elementId.map { element in
-                snapshot.elements.contains { $0.id == element && $0.enabled && $0.visible }
-            } ?? true
+            return lock.withLock { latestSnapshots in
+                guard let snapshot = latestSnapshots[snapshotId] else { return false }
+                return elementId.map { element in
+                    snapshot.elements.contains { $0.id == element && $0.enabled && $0.visible }
+                } ?? true
+            }
         }
         return false
     }
@@ -197,8 +197,7 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
     private let emitEvent: @Sendable (SdkWebViewEvent) -> Void
     private let recorder: NetworkCaptureRecorder?
     private weak var webView: WKWebView?
-    private let requestLock = NSLock()
-    private var nativeRequestIds: [String: String] = [:]
+    private let requestLock = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
 
     public init(
         webViewId: String = UUID().uuidString,
@@ -277,18 +276,19 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
                 protocolName: "webview"
             )
             if let nativeId {
-                requestLock.lock()
-                nativeRequestIds[scriptRequestId] = nativeId
-                requestLock.unlock()
+                requestLock.withLock { nativeRequestIds in
+                    nativeRequestIds[scriptRequestId] = nativeId
+                }
                 requestId = nativeId
             }
         } else if let scriptRequestId {
-            requestLock.lock()
-            requestId = nativeRequestIds[scriptRequestId] ?? scriptRequestId
-            if name == "request_finished" || name == "request_failed" {
-                nativeRequestIds.removeValue(forKey: scriptRequestId)
+            requestId = requestLock.withLock { nativeRequestIds in
+                let nativeId = nativeRequestIds[scriptRequestId] ?? scriptRequestId
+                if name == "request_finished" || name == "request_failed" {
+                    nativeRequestIds.removeValue(forKey: scriptRequestId)
+                }
+                return nativeId
             }
-            requestLock.unlock()
         }
         if name == "request_finished", let requestId {
             recorder?.recordCompletion(requestId: requestId, statusCode: body["status"] as? Int)

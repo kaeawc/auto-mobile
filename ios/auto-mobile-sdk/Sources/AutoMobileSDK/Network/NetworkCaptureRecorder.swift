@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 
 /// The direction of a captured transport event.
 public enum NetworkCaptureDirection: String, Codable, Sendable {
@@ -13,11 +14,11 @@ public enum NetworkCaptureDirection: String, Codable, Sendable {
 ///
 /// Adapters call the lifecycle methods from their delegate or connection queues.
 /// The recorder emits at most one terminal `NetworkRequestRecord` per request.
-public final class NetworkCaptureRecorder: @unchecked Sendable {
+public final class NetworkCaptureRecorder: Sendable {
     public typealias Emit = @Sendable (NetworkRequestRecord) -> Void
     public typealias IDGenerator = @Sendable () -> String
 
-    private struct InFlightRequest {
+    private struct InFlightRequest: Sendable {
         let requestId: String
         let url: String
         let method: String
@@ -34,17 +35,15 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
         let sampled: Bool
     }
 
-    private let lock = NSLock()
+    private let lock = OSAllocatedUnfairLock<[String: InFlightRequest]>(initialState: [:])
     private let emit: Emit
-    private let emissionLock = NSLock()
+    private let emissionLock = OSAllocatedUnfairLock<UInt64>(initialState: 0)
     private let idGenerator: IDGenerator
     private let isEnabled: @Sendable () -> Bool
     private let isBodyCaptureEnabled: @Sendable () -> Bool
     private let samplingRate: Double
     private let sampler: @Sendable () -> Double
     private let headerRedactor: @Sendable ([String: String]) -> [String: String]
-    private var requests: [String: InFlightRequest] = [:]
-    private var nextSequenceNumber: UInt64 = 0
     private let maxBodyBytes: Int
 
     public init(
@@ -94,9 +93,9 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
             responseHeaders: nil,
             sampled: sampled
         )
-        lock.lock()
-        requests[requestId] = request
-        lock.unlock()
+        lock.withLock { requests in
+            requests[requestId] = request
+        }
         return requestId
     }
 
@@ -229,20 +228,19 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
         idGenerator()
     }
 
-    private func update(_ requestId: String, _ body: (inout InFlightRequest) -> Void) {
-        lock.lock()
-        guard var request = requests[requestId], !request.terminal else {
-            lock.unlock()
-            return
+    private func update(_ requestId: String, _ body: @Sendable (inout InFlightRequest) -> Void) {
+        lock.withLock { requests in
+            guard var request = requests[requestId], !request.terminal else {
+                return
+            }
+            body(&request)
+            requests[requestId] = request
         }
-        body(&request)
-        requests[requestId] = request
-        lock.unlock()
     }
 
     private func finish(
         _ requestId: String,
-        _ makeRecord: (InFlightRequest) -> NetworkRequestRecord
+        _ makeRecord: @Sendable (InFlightRequest) -> NetworkRequestRecord
     ) {
         complete(requestId, mutate: { _ in }, makeRecord)
     }
@@ -252,18 +250,17 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
     /// (torn `responseBodySize`/`responseBody`). `emitRecord` runs outside the lock.
     private func complete(
         _ requestId: String,
-        mutate: (inout InFlightRequest) -> Void,
-        _ makeRecord: (InFlightRequest) -> NetworkRequestRecord
+        mutate: @Sendable (inout InFlightRequest) -> Void,
+        _ makeRecord: @Sendable (InFlightRequest) -> NetworkRequestRecord
     ) {
-        lock.lock()
-        guard var request = requests.removeValue(forKey: requestId), !request.terminal else {
-            lock.unlock()
-            return
+        let record = lock.withLock { requests -> NetworkRequestRecord? in
+            guard var request = requests.removeValue(forKey: requestId), !request.terminal else {
+                return nil
+            }
+            mutate(&request)
+            request.terminal = true
+            return request.sampled ? makeRecord(request) : nil
         }
-        mutate(&request)
-        request.terminal = true
-        let record = request.sampled ? makeRecord(request) : nil
-        lock.unlock()
         if let record {
             emitRecord(record)
         }
@@ -284,11 +281,12 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
         // record carries `sequenceNumber`, which exists precisely so a consumer can restore
         // the total order. Preserving strict delivery order here would require either holding
         // the lock across `emit` (the deadlock above) or an unbounded in-recorder queue.
-        emissionLock.lock()
-        nextSequenceNumber += 1
-        var sequencedRecord = record
-        sequencedRecord.sequenceNumber = nextSequenceNumber
-        emissionLock.unlock()
+        let sequencedRecord = emissionLock.withLock { nextSequenceNumber in
+            nextSequenceNumber += 1
+            var sequencedRecord = record
+            sequencedRecord.sequenceNumber = nextSequenceNumber
+            return sequencedRecord
+        }
         emit(sequencedRecord)
     }
 
@@ -317,7 +315,7 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
 }
 
 /// Adapter for URLSession delegates that already receive lifecycle callbacks.
-public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable {
+public final class URLSessionNetworkCaptureAdapter: Sendable {
     private let recorder: NetworkCaptureRecorder
 
     public init(recorder: NetworkCaptureRecorder) {
@@ -400,7 +398,7 @@ public final class URLSessionNetworkCaptureAdapter: @unchecked Sendable {
 }
 
 /// Adapter for URLSessionWebSocketTask message and close callbacks.
-public final class WebSocketNetworkCaptureAdapter: @unchecked Sendable {
+public final class WebSocketNetworkCaptureAdapter: Sendable {
     private let recorder: NetworkCaptureRecorder
 
     public init(recorder: NetworkCaptureRecorder) {
@@ -441,7 +439,7 @@ public final class WebSocketNetworkCaptureAdapter: @unchecked Sendable {
 }
 
 /// Adapter for Network.framework connection state and byte callbacks.
-public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable {
+public final class NWConnectionNetworkCaptureAdapter: Sendable {
     private let recorder: NetworkCaptureRecorder
 
     public init(recorder: NetworkCaptureRecorder) {

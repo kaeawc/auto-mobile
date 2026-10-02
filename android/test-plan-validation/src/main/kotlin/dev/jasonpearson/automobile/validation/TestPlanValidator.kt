@@ -85,7 +85,7 @@ object TestPlanValidator {
       try {
         kotlinx.serialization.json.Json.encodeToString(
           kotlinx.serialization.json.JsonElement.serializer(),
-          convertToJsonElement(parsedObject),
+          convertToJsonElement(normalizeClockFractionsForSchema(parsedObject)),
         )
       } catch (e: Exception) {
         return ValidationResult(
@@ -190,7 +190,7 @@ object TestPlanValidator {
       val text = clock["instant"] as? String ?: return@flatMapIndexed emptyList()
       val instant =
         try {
-          OffsetDateTime.parse(text).toInstant()
+          OffsetDateTime.parse(normalizeClockInstantFraction(text)).toInstant()
         } catch (e: DateTimeParseException) {
           // Schema syntax errors are reported separately; retain a useful field error too.
           null
@@ -214,6 +214,39 @@ object TestPlanValidator {
         )
       }
     }
+  }
+
+  private fun normalizeClockInstantFraction(text: String): String {
+    return text.replace(Regex("\\.(\\d{10,})")) { match ->
+      val digits = match.groupValues[1]
+      val retained = digits.take(9)
+      // Preserve a positive subnanosecond fraction at the inclusive window boundaries.
+      val fraction =
+        if (retained.all { it == '0' } && digits.drop(9).any { it != '0' }) "000000001"
+        else retained
+      ".$fraction"
+    }
+  }
+
+  /** The schema's date-time format checker also limits fractions to nanoseconds. */
+  private fun normalizeClockFractionsForSchema(parsedObject: Any?): Any? {
+    val plan = parsedObject as? Map<*, *> ?: return parsedObject
+    val steps = plan["steps"] as? List<*> ?: return parsedObject
+    fun normalizeFields(fields: Map<*, *>): Map<*, *> {
+      val clock = fields["clock"] as? Map<*, *> ?: return fields
+      if (clock["mode"] != "set") return fields
+      val text = clock["instant"] as? String ?: return fields
+      return fields + ("clock" to (clock + ("instant" to normalizeClockInstantFraction(text))))
+    }
+    return plan +
+      ("steps" to
+        steps.map { raw ->
+          val step = raw as? Map<*, *> ?: return@map raw
+          if (step["tool"] != "setDeviceState") return@map raw
+          val inline = normalizeFields(step)
+          val params = step["params"] as? Map<*, *> ?: return@map inline
+          inline + ("params" to normalizeFields(params))
+        })
   }
 
   /** Validate that all tool names in steps are valid AutoMobile tools */

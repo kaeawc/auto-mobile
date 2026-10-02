@@ -409,12 +409,13 @@ merely command dispatch or process disappearance.
 Android app containers accept optional <code>userId</code>, a non-negative safe
 integer. Explicit IDs skip user discovery. When omitted, AutoMobile lists users
 and checks <code>pm list packages --user N</code> for each one. A sole installed
-user wins; for multiple installations, the current foreground user wins only if
-the app is installed for that user. Otherwise the error lists candidate IDs and
+user wins; for multiple installations, prefer the user of the foreground app
+when it is the requested package and that user is a candidate, then the current
+user if it is a candidate. Otherwise the error lists candidate IDs and
 asks for <code>userId</code>. No installation reports the app and device; failed
 user discovery asks for an explicit ID. Resolution happens once per operation,
 including once for a multi-file batch. A single-user device needs one user-list
-read and one package-list read, with no foreground-user probe.
+read and one package-list read, with no foreground-app or current-user probe.
 
 Android <code>externalFiles</code> uses the same user resolution and maps user 0
 to <code>/sdcard/Android/data/{appId}/files</code>, preserving the verified argv;

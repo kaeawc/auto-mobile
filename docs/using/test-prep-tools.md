@@ -29,8 +29,9 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
 
 On Android, `putAppFile` accepts optional `userId` (a non-negative safe integer).
 An explicit ID selects that profile without discovery. Omission checks package
-installation for every user: use the sole installed user, or the current
-foreground user if installed among several candidates. Ambiguity lists the
+installation for every user: use the sole installed user; with several candidates,
+prefer the user of the foreground app when it is the requested package, then the
+current user if installed among the candidates. Otherwise, ambiguity lists the
 candidate IDs and asks for `userId`; no installation names the app/device, and
 failed discovery asks for an explicit ID. Batches resolve once. Private
 `documents`/`cache`/`tmp` containers use `run-as` and require a debuggable app.

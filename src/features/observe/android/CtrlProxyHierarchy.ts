@@ -801,12 +801,7 @@ export class CtrlProxyHierarchy {
       flight.waiters += 1;
       try {
         const result = await awaitWhileRequestIsLive(flight.promise, signal);
-        if (flight.diagnostics.runnerError && diagnostics) {
-          diagnostics.runnerError = flight.diagnostics.runnerError;
-        }
-        if (flight.diagnostics.failureReason && diagnostics) {
-          diagnostics.failureReason = flight.diagnostics.failureReason;
-        }
+        this.copyFlightDiagnostics(flight.diagnostics, diagnostics);
         return result;
       } finally {
         flight.waiters -= 1;
@@ -822,6 +817,18 @@ export class CtrlProxyHierarchy {
       }
       logger.warn(`[CTRL_PROXY] Sync hierarchy caller stopped: ${errorMessage(error)}`, error);
       return null;
+    }
+  }
+
+  private copyFlightDiagnostics(
+    source: HierarchySyncDiagnostics,
+    target: HierarchySyncDiagnostics | undefined,
+  ): void {
+    if (source.runnerError && target) {
+      target.runnerError = source.runnerError;
+    }
+    if (source.failureReason && target) {
+      target.failureReason = source.failureReason;
     }
   }
 

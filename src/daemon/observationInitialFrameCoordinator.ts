@@ -1,10 +1,16 @@
 import type { InitialObservationFrame } from "./observationInitialFrame";
 import { INITIAL_FRAME_MAX_CONCURRENCY } from "./observationInitialFrame";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import { TTLCache } from "../utils/cache/Cache";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 // A reconnect burst can reuse a complete frame, without delaying a later refresh.
 export const INITIAL_FRAME_FRESHNESS_WINDOW_MS = 1_000;
+// Whole started-job budget: hierarchy (3s) + screenshot (3s), with 14s for
+// connection/setup and fallback overhead. Queued time does not consume this budget.
+export const INITIAL_FRAME_CAPTURE_DEADLINE_MS = 20_000;
 
 interface InitialFrameResult {
   frame: InitialObservationFrame;
@@ -40,8 +46,9 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
   private active = 0;
 
   constructor(
-    timer: Timer = defaultTimer,
+    private readonly timer: Timer = defaultTimer,
     private maxConcurrency = INITIAL_FRAME_MAX_CONCURRENCY,
+    private readonly getLiveFrameGeneration: (deviceId: string) => number = () => 0,
   ) {
     if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
       throw new RangeError("Initial observation frame concurrency must be a positive integer");
@@ -67,9 +74,10 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
       return Promise.resolve(undefined);
     }
     const recent = this.recent.get(deviceId);
-    if (recent) {
+    if (recent && recent.liveFrameGeneration === this.getLiveFrameGeneration(deviceId)) {
       return Promise.resolve({ frame: recent, replay: true });
     }
+    this.recent.delete(deviceId);
     let entry = this.captures.get(deviceId);
     if (!entry) {
       entry = { deviceId, run: capture, started: false, waiters: new Set() };
@@ -119,7 +127,19 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
 
   private async capture(entry: Capture): Promise<void> {
     try {
-      const frame = await entry.run();
+      const generation = this.getLiveFrameGeneration(entry.deviceId);
+      const captured = await raceWithDeadline(entry.run, {
+        timer: this.timer,
+        timeoutMs: INITIAL_FRAME_CAPTURE_DEADLINE_MS,
+        label: `Initial observation frame for ${entry.deviceId}`,
+      });
+      // A live frame delivered while connecting/capturing supersedes this result.
+      // Drop it, including for joined waiters; a later subscription can recapture.
+      const frame =
+        generation === this.getLiveFrameGeneration(entry.deviceId) ? captured : undefined;
+      if (frame) {
+        frame.liveFrameGeneration = generation;
+      }
       if (frame?.screenshot && entry.waiters.size > 0) {
         this.recent.set(entry.deviceId, frame);
       }
@@ -127,7 +147,13 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
         waiter.complete(frame ? { frame, replay: false } : undefined);
       }
     } catch (error) {
-      // Forward the shared failure to every live waiter; the request boundary logs each one.
+      // Live request boundaries log their failures; ownerless jobs still need a trace.
+      if (entry.waiters.size === 0) {
+        logger.warn(
+          `[Daemon] Initial observation capture failed for ${entry.deviceId}: ${errorMessage(error)}`,
+          error,
+        );
+      }
       for (const waiter of [...entry.waiters]) {
         waiter.fail(error);
       }

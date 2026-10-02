@@ -388,6 +388,16 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private readonly currentFrameContexts = new Map<string, string>();
   /** Incremented for every hierarchy accepted from a device, including contextless frames. */
   private readonly frameContextGenerations = new Map<string, number>();
+  // Live hierarchy AND screenshot pushes invalidate initial captures, even without a context.
+  private readonly liveFrameGenerations = new Map<string, number>();
+
+  getLiveFrameGeneration(deviceId: string): number {
+    return this.liveFrameGenerations.get(deviceId) ?? 0;
+  }
+
+  private recordLiveFramePush(deviceId: string): void {
+    this.liveFrameGenerations.set(deviceId, this.getLiveFrameGeneration(deviceId) + 1);
+  }
 
   getCurrentFrameContext(deviceId: string): string | undefined {
     return this.currentFrameContexts.get(deviceId);
@@ -480,7 +490,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return this.pushToSubscribers({
       message: { ...message, deviceSessionUuid },
       targetDeviceSessionUuid: deviceSessionUuid,
-      targetFilter: subscriber?.filter,
+      // A fresh initial capture advances shared state, so every entitled pane must see it.
+      // Cached/joined replays remain targeted and never advance that state.
+      targetFilter: target?.replay ? subscriber?.filter : undefined,
     });
   }
 
@@ -554,10 +566,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     frameContext?: string,
     target?: InitialFrameSubscriber,
   ): number | null {
-    if (target && !this.initialFrameTargetWantsDevice(target, deviceId)) {
+    if (!this.acceptObservationFramePush(deviceId, target)) {
       return null;
     }
-    target = this.initialFrameDeliveryTarget(deviceId, target);
     if (!target?.replay) {
       this.recordFrameContext(deviceId, frameContext);
     }
@@ -606,17 +617,17 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     return captureSequence;
   }
 
-  private initialFrameDeliveryTarget(
-    deviceId: string,
-    target?: InitialFrameSubscriber,
-  ): InitialFrameSubscriber | undefined {
-    if (
-      target?.frameContextGeneration !== undefined &&
-      target.frameContextGeneration !== this.getCurrentFrameContextGeneration(deviceId)
-    ) {
-      return { ...target, replay: true };
+  /** Recheck initial-frame scope/provenance, or invalidate initial captures for a live push. */
+  private acceptObservationFramePush(deviceId: string, target?: InitialFrameSubscriber): boolean {
+    if (!target) {
+      this.recordLiveFramePush(deviceId);
+      return true;
     }
-    return target;
+    return (
+      this.initialFrameTargetWantsDevice(target, deviceId) &&
+      (target.frameContextGeneration === undefined ||
+        target.frameContextGeneration === this.getCurrentFrameContextGeneration(deviceId))
+    );
   }
 
   private annotateInitialOrLiveHierarchy(
@@ -659,6 +670,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     metadata: ScreenshotMetadata = {},
     options: PushScreenshotOptions = {},
   ): void {
+    if (!this.acceptObservationFramePush(deviceId, options.initialFrameSubscriber)) {
+      return;
+    }
     const {
       screenshotMimeType,
       screenshotFormat,

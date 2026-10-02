@@ -1664,7 +1664,9 @@ export class Daemon {
   ) {
     let coordinator = this.initialFrameCoordinators.get(server);
     if (!coordinator) {
-      coordinator = new DefaultObservationInitialFrameCoordinator(this.timer);
+      coordinator = new DefaultObservationInitialFrameCoordinator(this.timer, undefined, (id) =>
+        server.getLiveFrameGeneration(id),
+      );
       this.initialFrameCoordinators.set(server, coordinator);
     }
     return coordinator;

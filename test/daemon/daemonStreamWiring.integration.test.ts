@@ -107,6 +107,10 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   screenshotCadenceChanged: ((deviceId: string | null) => void) | null = null;
   hierarchyCadenceChanged: ((deviceId: string | null) => void) | null = null;
 
+  getLiveFrameGeneration(_deviceId: string): number {
+    return 0;
+  }
+
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
     this.started.push(record);
   }

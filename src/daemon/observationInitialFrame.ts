@@ -106,7 +106,12 @@ export interface ObservationStreamIosClient {
 
 export interface ObservationInitialFrameDependencies {
   streamServer: Pick<DeviceDataStreamSocketServer, "pushHierarchyUpdate" | "pushScreenshotUpdate"> &
-    Partial<Pick<DeviceDataStreamSocketServer, "getCurrentFrameContextGeneration">>;
+    Partial<
+      Pick<
+        DeviceDataStreamSocketServer,
+        "getCurrentFrameContextGeneration" | "getLiveFrameGeneration"
+      >
+    >;
   androidClientFactory: (device: BootedDevice) => ObservationStreamAndroidClient;
   iosClientFactory: (device: BootedDevice) => ObservationStreamIosClient;
   maxConcurrency?: number;
@@ -193,6 +198,7 @@ export interface InitialObservationFrame {
   screenshotFailure?: { error: unknown };
   captureSequence?: number;
   frameContextGeneration?: number;
+  liveFrameGeneration?: number;
   recordHierarchy: (captureSequence: number | null) => void;
 }
 
@@ -333,10 +339,20 @@ function deliverInitialObservationFrame(
   dependencies: ObservationInitialFrameDependencies,
   subscriber?: InitialFrameSubscriber,
 ): void {
-  const newerHierarchyArrived =
-    frame.frameContextGeneration !== undefined &&
-    frame.frameContextGeneration !==
-      dependencies.streamServer.getCurrentFrameContextGeneration?.(deviceId);
+  // Recheck after awaiting the shared job/cache too: a live push may have occurred
+  // between coordinator completion and this subscriber's delivery continuation.
+  if (!isInitialObservationFrameCurrent(deviceId, frame, dependencies.streamServer)) {
+    return;
+  }
+  // The first fresh delivery reached every entitled current subscriber, including
+  // joined waiters. Only a subsequent cache hit needs a targeted replay.
+  if (subscriber && !subscriber.replay && frame.captureSequence !== undefined) {
+    // Each live request boundary still reports the shared screenshot failure.
+    if (frame.screenshotFailure) {
+      throw frame.screenshotFailure.error;
+    }
+    return;
+  }
   const sequence = dependencies.streamServer.pushHierarchyUpdate(
     deviceId,
     frame.hierarchy,
@@ -349,18 +365,51 @@ function deliverInitialObservationFrame(
         }
       : undefined,
   );
-  if (
-    !subscriber ||
-    (!newerHierarchyArrived && frame.captureSequence === undefined && sequence !== null)
-  ) {
+  if (!subscriber || (frame.captureSequence === undefined && sequence !== null)) {
     frame.recordHierarchy(sequence);
   }
   if (sequence !== null) {
     frame.captureSequence = sequence;
+    frame.frameContextGeneration =
+      dependencies.streamServer.getCurrentFrameContextGeneration?.(deviceId);
   }
+  pushInitialObservationScreenshot(
+    deviceId,
+    frame,
+    sequence,
+    dependencies.streamServer,
+    subscriber,
+  );
+}
+
+function isInitialObservationFrameCurrent(
+  deviceId: string,
+  frame: InitialObservationFrame,
+  streamServer: ObservationInitialFrameDependencies["streamServer"],
+): boolean {
+  if (
+    frame.liveFrameGeneration !== undefined &&
+    streamServer.getLiveFrameGeneration &&
+    frame.liveFrameGeneration !== streamServer.getLiveFrameGeneration(deviceId)
+  ) {
+    return false;
+  }
+  return (
+    frame.frameContextGeneration === undefined ||
+    frame.frameContextGeneration === streamServer.getCurrentFrameContextGeneration?.(deviceId)
+  );
+}
+
+function pushInitialObservationScreenshot(
+  deviceId: string,
+  frame: InitialObservationFrame,
+  sequence: number | null,
+  streamServer: ObservationInitialFrameDependencies["streamServer"],
+  subscriber?: InitialFrameSubscriber,
+): void {
   const screenshot = frame.screenshot;
-  if (screenshot) {
-    dependencies.streamServer.pushScreenshotUpdate(
+  if (screenshot && (!subscriber || sequence !== null)) {
+    streamServer.pushScreenshotUpdate(
       deviceId,
       screenshot.data,
       screenshot.width,

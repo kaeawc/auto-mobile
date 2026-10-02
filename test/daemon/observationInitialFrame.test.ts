@@ -2,6 +2,7 @@ import { describe, expect, it, spyOn } from "bun:test";
 import {
   pushInitialObservationFramesForSubscriber,
   selectObservationStreamDevices,
+  type InitialObservationFrame,
   type ObservationStreamAndroidClient,
   type ObservationStreamDevice,
   type ObservationStreamIosClient,
@@ -9,9 +10,11 @@ import {
 import {
   DefaultObservationInitialFrameCoordinator,
   INITIAL_FRAME_FRESHNESS_WINDOW_MS,
+  INITIAL_FRAME_CAPTURE_DEADLINE_MS,
 } from "../../src/daemon/observationInitialFrameCoordinator";
 import type { InitialFrameSubscriber } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ActionableError } from "../../src/models/ActionableError";
 import { logger } from "../../src/utils/logger";
 import type { ViewHierarchyResult } from "../../src/models";
 import type {
@@ -1163,22 +1166,37 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
   readonly deliveries = new Map<string, FakeObservationStreamServer>();
   readonly scopes = new Map<string, string | null>();
 
-  register(id: string, scope: string | null): void {
+  readonly eligibility = new Map<string, (deviceId: string) => boolean>();
+
+  register(
+    id: string,
+    scope: string | null,
+    allowed: (deviceId: string) => boolean = () => true,
+  ): void {
     this.deliveries.set(id, new FakeObservationStreamServer(42));
     this.scopes.set(id, scope);
+    this.eligibility.set(id, allowed);
   }
 
-  private destination(
+  private destinations(
     deviceId: string,
     target?: InitialFrameSubscriber,
-  ): FakeObservationStreamServer | undefined {
-    if (!target || target.signal.aborted) {
-      return undefined;
+  ): FakeObservationStreamServer[] {
+    if (
+      !target ||
+      target.signal.aborted ||
+      !this.eligibility.get(target.subscriptionId)?.(deviceId)
+    ) {
+      return [];
     }
-    const scope = this.scopes.get(target.subscriptionId);
-    return scope === null || scope === deviceId
-      ? this.deliveries.get(target.subscriptionId)
-      : undefined;
+    return [...this.deliveries].flatMap(([id, destination]) => {
+      const scope = this.scopes.get(id);
+      return (!target.replay || id === target.subscriptionId) &&
+        (scope === null || scope === deviceId) &&
+        this.eligibility.get(id)?.(deviceId)
+        ? [destination]
+        : [];
+    });
   }
 
   override pushHierarchyUpdate(
@@ -1187,10 +1205,11 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
     frameContext?: string,
     target?: InitialFrameSubscriber,
   ): number | null {
-    return (
-      this.destination(deviceId, target)?.pushHierarchyUpdate(deviceId, hierarchy, frameContext) ??
-      null
-    );
+    const destinations = this.destinations(deviceId, target);
+    for (const destination of destinations) {
+      destination.pushHierarchyUpdate(deviceId, hierarchy, frameContext);
+    }
+    return destinations.length > 0 ? 42 : null;
   }
 
   override pushScreenshotUpdate(
@@ -1201,14 +1220,9 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
     metadata?: Record<string, unknown>,
     options?: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[5],
   ): void {
-    this.destination(deviceId, options?.initialFrameSubscriber)?.pushScreenshotUpdate(
-      deviceId,
-      data,
-      width,
-      height,
-      metadata,
-      options,
-    );
+    for (const destination of this.destinations(deviceId, options?.initialFrameSubscriber)) {
+      destination.pushScreenshotUpdate(deviceId, data, width, height, metadata, options);
+    }
   }
 }
 
@@ -1233,7 +1247,14 @@ function coalescingHarness(maxConcurrency = 2) {
   ) {
     const id = `pane-${nextSubscriber++}`;
     const controller = new AbortController();
-    server.register(id, scope);
+    server.register(
+      id,
+      scope,
+      (deviceId) =>
+        !controller.signal.aborted &&
+        entitled.some((device) => device.id === deviceId) &&
+        allowed(deviceId),
+    );
     const done = pushInitialObservationFramesForSubscriber(scope, entitled, {
       streamServer: server,
       coordinator,
@@ -1489,7 +1510,8 @@ describe("coalesced subscriber initial frames", () => {
     screenshotGate.resolve();
     await done;
     expect(client.forwardedInitialHierarchies).toHaveLength(0);
-    expect(streamServer.deliveries.get("pane")?.screenshotUpdates).toHaveLength(1);
+    expect(streamServer.deliveries.get("pane")?.screenshotUpdates).toHaveLength(0);
+    expect(streamServer.deliveries.get("pane")?.hierarchyUpdates).toHaveLength(0);
   });
 
   it("reports a shared screenshot exception once per waiter, still delivers hierarchy, and retries", async () => {
@@ -1594,5 +1616,114 @@ describe("coalesced subscriber initial frames", () => {
     await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
     await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
     expect(calls).toBe(6);
+  });
+});
+
+describe("initial capture deadline and diagnostics", () => {
+  const frame = (): InitialObservationFrame => ({
+    hierarchy: { hierarchy: { node: {} } },
+    screenshot: { data: "shot", width: 1, height: 1, metadata: {} },
+    recordHierarchy: () => {},
+  });
+  async function flushMicrotasks() {
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  it("releases two hung capture slots at the deadline and admits a third device", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const never = new Promise<InitialObservationFrame>(() => {});
+    const signal = new AbortController().signal;
+    const first = coordinator
+      .request("one", () => never, signal)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    const second = coordinator
+      .request("two", () => never, signal)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    let started = false;
+    const third = coordinator.request(
+      "three",
+      async () => {
+        started = true;
+        return frame();
+      },
+      signal,
+    );
+    timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS - 1);
+    await flushMicrotasks();
+    expect(started).toBe(false);
+    timer.advanceTime(1);
+    await flushMicrotasks();
+    expect(started).toBe(true);
+    expect(await first).toBeInstanceOf(ActionableError);
+    expect(await second).toBeInstanceOf(ActionableError);
+    expect((await third)?.frame.screenshot?.data).toBe("shot");
+  });
+
+  it("ignores a capture resolving after its deadline without delivering or caching it", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const late = Promise.withResolvers<InitialObservationFrame>();
+    const signal = new AbortController().signal;
+    let result: unknown;
+    void coordinator
+      .request("device", () => late.promise, signal)
+      .then(
+        (value) => {
+          result = value;
+        },
+        (error: unknown) => {
+          result = error;
+        },
+      );
+    timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+    await flushMicrotasks();
+    expect(result).toBeInstanceOf(ActionableError);
+    late.resolve(frame());
+    await flushMicrotasks();
+    let recaptured = false;
+    const retry = await coordinator.request(
+      "device",
+      async () => {
+        recaptured = true;
+        return frame();
+      },
+      signal,
+    );
+    expect(recaptured).toBe(true);
+    expect(retry?.replay).toBe(false);
+  });
+
+  it("warns when a shared capture fails after all waiters abort", async () => {
+    const coordinator = new DefaultObservationInitialFrameCoordinator(new FakeTimer());
+    const gate = deferred<void>();
+    const controller = new AbortController();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const failure = new Error("ownerless capture failed");
+    try {
+      const done = coordinator.request(
+        "device",
+        async () => {
+          await gate.promise;
+          throw failure;
+        },
+        controller.signal,
+      );
+      controller.abort();
+      await done;
+      gate.resolve();
+      await flushMicrotasks();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("device"), failure);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

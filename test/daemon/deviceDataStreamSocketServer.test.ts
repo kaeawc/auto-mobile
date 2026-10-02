@@ -11,7 +11,12 @@ import {
   PER_DEVICE_OBSERVATION_TIMEOUT_MS,
   runObservationRequestBatch,
 } from "../../src/daemon/observationRequestBatch";
-import type { ObserveResult } from "../../src/models";
+import {
+  pushInitialObservationFramesForSubscriber,
+  type ObservationStreamAndroidClient,
+} from "../../src/daemon/observationInitialFrame";
+import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
+import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeDeviceSessionResolver } from "../fakes/FakeDeviceSessionResolver";
@@ -130,7 +135,169 @@ describe("DeviceDataStreamSocketServer", () => {
     await server.startFake();
   });
 
-  it("targets initial frames to exactly one registered subscriber with live session checks", async () => {
+  function initialFrameHarness() {
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer, 2, (id) =>
+      server.getLiveFrameGeneration(id),
+    );
+    const device = { id: "device-1", name: "Pixel", platform: "android" as const };
+    let captures = 0;
+    let context = "ctx-a";
+    let screenshot: () => Promise<void> = async () => {};
+    const hierarchy = (text: string): ViewHierarchyResult => ({
+      hierarchy: { node: { $: { class: "Root", text } } },
+      screenWidth: 37,
+      screenHeight: 53,
+    });
+    const request = (subscriptionId: string) =>
+      pushInitialObservationFramesForSubscriber(device.id, [device], {
+        streamServer: server,
+        coordinator,
+        subscriber: { subscriptionId, signal: new AbortController().signal },
+        androidClientFactory: () => {
+          captures++;
+          const capturedContext = context;
+          const client: ObservationStreamAndroidClient = {
+            ensureConnected: async () => true,
+            getLatestHierarchy: async () => ({
+              hierarchy: { hierarchy: {}, updatedAt: 1 },
+              fresh: true,
+              frameContext: capturedContext,
+            }),
+            requestHierarchySyncWithoutObservationStreamPush: async () => null,
+            convertToViewHierarchyResult: () => hierarchy(capturedContext),
+            recordInitialObservationStreamHierarchy: () => {},
+            captureScreenshotForObservationStream: async () => {
+              await screenshot();
+              return {
+                success: true,
+                data: encodedFrames.jpeg.toString("base64"),
+                frameContext: capturedContext,
+              };
+            },
+          };
+          return client;
+        },
+        iosClientFactory: () => {
+          throw new Error("unexpected iOS");
+        },
+      });
+    const frames = (socket: FakeSocket) =>
+      socket.getWrittenMessages<{
+        type: string;
+        frameContext?: string;
+        captureSequence?: number;
+        hierarchyDiff?: { hasBaseline: boolean; changed: number };
+      }>();
+    return {
+      request,
+      frames,
+      hierarchy,
+      get captures() {
+        return captures;
+      },
+      setContext: (value: string) => {
+        context = value;
+      },
+      setScreenshot: (value: typeof screenshot) => {
+        screenshot = value;
+      },
+    };
+  }
+
+  it("recaptures after a live hierarchy supersedes the cached initial frame", async () => {
+    const h = initialFrameHarness();
+    const a = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(a.subscriptionId);
+    // A received initial sequence 1; its latest live frame is now sequence 4.
+    server.pushHierarchyUpdate("device-1", h.hierarchy("ctx-b"), "ctx-b");
+    server.pushHierarchyUpdate("device-1", h.hierarchy("ctx-b"), "ctx-b");
+    server.pushHierarchyUpdate("device-1", h.hierarchy("ctx-b"), "ctx-b");
+    expect(h.frames(a.socket).at(-1)?.captureSequence).toBe(4);
+    h.setContext("ctx-b");
+    const b = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(b.subscriptionId);
+    expect(h.frames(b.socket).map((frame) => frame.frameContext)).toEqual(["ctx-b", "ctx-b"]);
+    expect(h.captures).toBe(2);
+    expect(server.getCurrentFrameContext("device-1")).toBe("ctx-b");
+  });
+
+  it("recaptures after a live screenshot supersedes the cached initial frame", async () => {
+    const h = initialFrameHarness();
+    const a = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(a.subscriptionId);
+    server.pushScreenshotUpdate("device-1", encodedFrames.jpeg.toString("base64"), 37, 53);
+    h.setContext("ctx-b");
+    const b = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(b.subscriptionId);
+    expect(h.frames(b.socket).map((frame) => frame.frameContext)).toEqual(["ctx-b", "ctx-b"]);
+    expect(h.captures).toBe(2);
+  });
+
+  it("drops joined captures superseded by a live push and does not cache their late result", async () => {
+    const h = initialFrameHarness();
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    h.setScreenshot(async () => {
+      started.resolve();
+      await finish.promise;
+    });
+    const a = server.simulateSubscription({ deviceId: "device-1" });
+    const first = h.request(a.subscriptionId);
+    await started.promise;
+    const b = server.simulateSubscription({ deviceId: "device-1" });
+    const joined = h.request(b.subscriptionId);
+    server.pushHierarchyUpdate("device-1", h.hierarchy("ctx-b"), "ctx-b");
+    finish.resolve();
+    await Promise.all([first, joined]);
+    expect(h.frames(a.socket).map((frame) => frame.frameContext)).toEqual(["ctx-b"]);
+    expect(h.frames(b.socket).map((frame) => frame.frameContext)).toEqual(["ctx-b"]);
+    h.setContext("ctx-b");
+    h.setScreenshot(async () => {});
+    const c = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(c.subscriptionId);
+    expect(h.captures).toBe(2);
+    expect(h.frames(c.socket).map((frame) => frame.frameContext)).toEqual(["ctx-b", "ctx-b"]);
+  });
+
+  it("broadcasts fresh initial captures so existing subscribers keep valid input and diff baselines", async () => {
+    const h = initialFrameHarness();
+    const a = server.simulateSubscription({ deviceId: "device-1" });
+    const foreign = server.simulateSubscription({ deviceId: "device-2" });
+    await h.request(a.subscriptionId);
+    timer.advanceTime(1_000);
+    h.setContext("ctx-b");
+    const b = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(b.subscriptionId);
+    expect(h.frames(a.socket).map((frame) => frame.frameContext)).toEqual([
+      "ctx-a",
+      "ctx-a",
+      "ctx-b",
+      "ctx-b",
+    ]);
+    expect(h.frames(a.socket).at(-1)?.frameContext).toBe(server.getCurrentFrameContext("device-1"));
+    expect(h.frames(b.socket).map((frame) => frame.frameContext)).toEqual(["ctx-b", "ctx-b"]);
+    expect(h.frames(foreign.socket)).toHaveLength(0);
+    server.pushHierarchyUpdate("device-1", h.hierarchy("ctx-b"), "ctx-b");
+    expect(h.frames(a.socket).at(-1)?.hierarchyDiff).toEqual({
+      hasBaseline: true,
+      added: 0,
+      changed: 0,
+      removed: 0,
+    });
+    const c = server.simulateSubscription({ deviceId: "device-1" });
+    h.setContext("ctx-c");
+    // The live push invalidated the cache; a fresh frame must reach every entitled pane once.
+    await h.request(c.subscriptionId);
+    expect(h.frames(a.socket).at(-1)?.frameContext).toBe("ctx-c");
+    const aCount = h.frames(a.socket).length;
+    const d = server.simulateSubscription({ deviceId: "device-1" });
+    await h.request(d.subscriptionId);
+    expect(h.captures).toBe(3);
+    expect(h.frames(a.socket)).toHaveLength(aCount);
+    expect(h.frames(d.socket).map((frame) => frame.frameContext)).toEqual(["ctx-c", "ctx-c"]);
+  });
+
+  it("broadcasts fresh initial frames and targets replays with live session checks", async () => {
     const targets: InitialFrameSubscriber[] = [];
     server.setOnSubscriberConnected((_deviceId, subscriber) => targets.push(subscriber));
     server.sessionResolver.bind("device-1", sessionUuidFor("device-1"));
@@ -172,12 +339,12 @@ describe("DeviceDataStreamSocketServer", () => {
       all
         .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
         .filter((message) => message.type === "hierarchy_update"),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect(
       second
         .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
         .filter((message) => message.type === "screenshot_update"),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect(server.pushHierarchyUpdate("device-2", hierarchy, "foreign", targets[1])).toBeNull();
     server.pushScreenshotUpdate(
       "device-2",

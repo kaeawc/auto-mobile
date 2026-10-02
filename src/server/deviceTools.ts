@@ -1051,6 +1051,7 @@ export function listDevicePayloads(
       kind: "booted",
       device,
       pooled,
+      unhealthy: pooled ? devicePool?.getDeviceHealthMarker(device.deviceId) : undefined,
       configured: configuredImageForBootedDevice(device, configuredImages),
       session,
       deviceSessionUuid: pooled ? initializedDeviceSessionUuid(device.deviceId) : undefined,

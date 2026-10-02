@@ -1,4 +1,10 @@
 import { isSessionReleasing } from "./sessionReleaseState";
+import {
+  InMemoryDeviceHealthMarkers,
+  type DeviceHealthMarkers,
+  type DeviceHealthMarker,
+} from "./deviceHealthMarkers";
+import type { BackoffPolicy } from "../utils/Backoff";
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
@@ -131,6 +137,13 @@ export type { DeviceRecoveryPolicy } from "./poolConfig";
 interface McpSessionRecoveryLease {
   readonly device: PooledDevice;
   readonly token: symbol;
+}
+
+function resolveDeviceHealthMarkers(
+  markers: DeviceHealthMarkers | undefined,
+  timer: Timer,
+): DeviceHealthMarkers {
+  return markers ?? new InMemoryDeviceHealthMarkers(timer);
 }
 
 function resolveLifecycleCoordinator(
@@ -515,6 +528,8 @@ export type SessionContinuityDevice = AndroidEmulatorContinuityDevice | IOSSimul
  * Works with SessionManager to maintain bidirectional mappings.
  */
 export interface DevicePoolDependencies {
+  deviceHealthMarkers?: DeviceHealthMarkers;
+  deviceHealthRecoveryBackoff?: BackoffPolicy;
   sessionManager: SessionManager;
   daemonSessionId: string;
   timer?: Timer;
@@ -740,10 +755,14 @@ export class DevicePool {
     return new DevicePool(deps);
   }
 
+  private readonly deviceHealthMarkers: DeviceHealthMarkers;
+
   constructor({
     sessionManager,
     daemonSessionId,
     timer = defaultTimer,
+    deviceHealthMarkers,
+    deviceHealthRecoveryBackoff,
     installedAppsRepository,
     deviceManager = new MultiPlatformDeviceManager(),
     retryExecutor = defaultRetryExecutor,
@@ -772,6 +791,20 @@ export class DevicePool {
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
+    this.deviceHealthMarkers = resolveDeviceHealthMarkers(deviceHealthMarkers, timer);
+    sessionManager.setDeviceHealthMarkers(
+      this.deviceHealthMarkers,
+      (id) => this.getDeviceIncarnation(id),
+      (id) => {
+        const device = this.devices.get(id);
+        return (
+          device?.status === "idle" &&
+          !device.sessionId &&
+          !sessionManager.hasDeviceCleanupInProgress(id)
+        );
+      },
+      deviceHealthRecoveryBackoff,
+    );
     this.refreshMissingDeviceMisses = resolveMissingDeviceMisses(missingDeviceMisses);
     this.idGenerator = idGenerator;
     this.consoleBusyRegistry = resolveConsoleBusyRegistry(consoleBusyRegistry);
@@ -1507,6 +1540,7 @@ export class DevicePool {
     }
 
     this.devices.delete(deviceId);
+    this.deviceHealthMarkers.clear(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
     this.sessionManager.retireClockRestoration(deviceId);
@@ -3925,6 +3959,8 @@ export class DevicePool {
       candidates = selectCandidates();
       totalDevices = candidates.length;
 
+      this.assertHealthyAllocationPossible(candidates, device);
+
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup
       const busyDevicesBeforeRefresh = candidates.filter(
@@ -4063,6 +4099,9 @@ export class DevicePool {
     device: PooledDevice,
     recoveryTarget?: SessionRecoveryTarget,
   ): Promise<{ deviceId: string; session?: Session }> {
+    if (this.getDeviceHealthMarker(device.id)) {
+      throw this.unhealthyDevicesError([device]);
+    }
     const existingSession = this.sessionManager.getSession(sessionId);
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     device.sessionId = sessionId;
@@ -4095,7 +4134,10 @@ export class DevicePool {
   private selectIdleDevice(candidates: PooledDevice[]): PooledDevice | undefined {
     // Find idle devices and prefer most recently released for reuse
     const idleDevices = candidates.filter(
-      (device) => device.status === "idle" && !this.isReservedForAssignment(device),
+      (device) =>
+        device.status === "idle" &&
+        !this.isReservedForAssignment(device) &&
+        !this.getDeviceHealthMarker(device.id),
     );
     if (idleDevices.length === 0) {
       return undefined;
@@ -4175,8 +4217,55 @@ export class DevicePool {
     );
   }
 
-  /** Exact-device acquisition must honor the same cleanup quarantine as allocation. */
+  /** Health of the current runtime only; stale incarnations never gate allocation. */
+  getDeviceHealthMarker(deviceId: string): DeviceHealthMarker | undefined {
+    const incarnation = this.getDeviceIncarnation(deviceId);
+    return incarnation === undefined
+      ? undefined
+      : this.deviceHealthMarkers.get(deviceId, incarnation);
+  }
+
+  private assertHealthyAllocationPossible(
+    candidates: readonly PooledDevice[],
+    selected: PooledDevice | undefined,
+  ): void {
+    if (selected) {
+      return;
+    }
+    const healthyBusy = candidates.some(
+      (device) =>
+        !this.getDeviceHealthMarker(device.id) &&
+        (device.status === "busy" || this.isReservedForAssignment(device)),
+    );
+    if (!healthyBusy && candidates.some((device) => this.getDeviceHealthMarker(device.id))) {
+      // Health recovery has its own bounded retry budget. Allocation fails
+      // promptly; waiting for a session release cannot clean these devices.
+      throw this.unhealthyDevicesError(candidates);
+    }
+  }
+
+  private unhealthyDevicesError(devices: readonly PooledDevice[]): ActionableError {
+    const reasons = devices.flatMap((device) => {
+      const marker = this.getDeviceHealthMarker(device.id);
+      return marker ? [`'${device.id}' (${marker.reason}, since ${marker.since})`] : [];
+    });
+    return new ActionableError(
+      `Unhealthy devices cannot be assigned: ${reasons.join(", ")}. ` +
+        "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
+        "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed.",
+    );
+  }
+
+  /** Exact-device acquisition honors cleanup and health; live-owner reuse stays valid. */
   assertDeviceCleanupComplete(deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (
+      device &&
+      this.getDeviceHealthMarker(deviceId) &&
+      (!device.sessionId || !this.sessionManager.getSession(device.sessionId))
+    ) {
+      throw this.unhealthyDevicesError([device]);
+    }
     if (this.sessionManager.hasDeviceCleanupInProgress(deviceId)) {
       throw new ActionableError(
         `Device '${deviceId}' is still completing session cleanup; retry after cleanup finishes.`,
@@ -5588,6 +5677,8 @@ export class DevicePool {
     if (!device) {
       return false;
     }
+    this.sessionManager.retireClockRestoration(deviceId);
+    this.deviceHealthMarkers.clear(deviceId);
     device.incarnation = this.nextDeviceIncarnation();
     // Full: a VM restore can replace the rendered screen even on the same connection/serial.
     this.notifyDeviceFramesInvalidated(deviceId);
@@ -5650,7 +5741,10 @@ export class DevicePool {
    */
   getIdleDevices(): PooledDevice[] {
     return Array.from(this.devices.values()).filter(
-      (device) => device.status === "idle" && !this.isReservedForAssignment(device),
+      (device) =>
+        device.status === "idle" &&
+        !this.isReservedForAssignment(device) &&
+        !this.getDeviceHealthMarker(device.id),
     );
   }
 
@@ -5900,7 +5994,10 @@ export class DevicePool {
   } {
     const devices = this.getDevicesByPlatform(platform);
     const idle = devices.filter(
-      (device) => device.status === "idle" && !this.isReservedForAssignment(device),
+      (device) =>
+        device.status === "idle" &&
+        !this.isReservedForAssignment(device) &&
+        !this.getDeviceHealthMarker(device.id),
     ).length;
     const assigned = devices.filter(
       (device) => device.status === "busy" || this.isReservedForAssignment(device),

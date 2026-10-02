@@ -6247,6 +6247,20 @@
                 "required": ["stableId"],
                 "additionalProperties": false
               },
+              "unhealthy": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": ["biometric-enrollment", "network-condition", "clock"]
+                  },
+                  "since": {
+                    "type": "number"
+                  }
+                },
+                "required": ["reason", "since"],
+                "additionalProperties": false
+              },
               "name": {
                 "type": "string"
               },
@@ -6904,6 +6918,20 @@
                   }
                 },
                 "required": ["stableId"],
+                "additionalProperties": false
+              },
+              "unhealthy": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": ["biometric-enrollment", "network-condition", "clock"]
+                  },
+                  "since": {
+                    "type": "number"
+                  }
+                },
+                "required": ["reason", "since"],
                 "additionalProperties": false
               },
               "name": {
@@ -16080,6 +16108,20 @@
                 }
               },
               "required": ["stableId"],
+              "additionalProperties": false
+            },
+            "unhealthy": {
+              "type": "object",
+              "properties": {
+                "reason": {
+                  "type": "string",
+                  "enum": ["biometric-enrollment", "network-condition", "clock"]
+                },
+                "since": {
+                  "type": "number"
+                }
+              },
+              "required": ["reason", "since"],
               "additionalProperties": false
             },
             "name": {

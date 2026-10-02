@@ -1,3 +1,4 @@
+import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { z } from "zod/v4";
 import type { PooledDevice } from "../daemon/devicePool";
 import type { Session } from "../daemon/sessionManager";
@@ -34,6 +35,7 @@ export interface CapabilityInventory {
 }
 
 export interface DeviceDescription {
+  unhealthy?: DeviceHealthMarker;
   name: string;
   platform: DevicePlatform;
   isVirtual: boolean;
@@ -120,6 +122,7 @@ export type DeviceDescriptionInput =
     }
   | {
       kind: "booted";
+      unhealthy?: DeviceHealthMarker;
       device: BootedDevice;
       pooled?: PooledDevice;
       discovery?: DeviceInfo;
@@ -132,6 +135,7 @@ export type DeviceDescriptionInput =
     }
   | {
       kind: "provisioned";
+      unhealthy?: DeviceHealthMarker;
       provisioned: ExactProvisionedDevice;
       booted?: BootedDevice;
       pooled?: PooledDevice;
@@ -171,7 +175,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
   const booted = input.kind === "booted" ? input.device : input.booted!;
   const pooled = input.pooled;
   const imageFacts = bootedImageFacts(input, booted);
-  return describeBooted(
+  const description = describeBooted(
     booted,
     imageFacts.admittedImage,
     imageFacts.authoritative,
@@ -183,6 +187,7 @@ export function describeDevice(input: DeviceDescriptionInput): DeviceDescription
     input.orientation,
     input.kind === "booted" ? input.configured : undefined,
   );
+  return input.unhealthy ? { ...description, unhealthy: input.unhealthy } : description;
 }
 
 function bootedImageFacts(
@@ -608,6 +613,13 @@ export const deviceDescriptionSchema = z
         stableId: z.string(),
       })
       .strict(),
+    unhealthy: z
+      .object({
+        reason: z.enum(["biometric-enrollment", "network-condition", "clock"]),
+        since: z.number(),
+      })
+      .strict()
+      .optional(),
     name: z.string(),
     platform: z.enum(["android", "ios"]),
     isVirtual: z.boolean(),

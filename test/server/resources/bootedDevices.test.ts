@@ -1,3 +1,4 @@
+import { FakeDeviceHealthMarkers } from "../../fakes/FakeDeviceHealthMarkers";
 import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import {
@@ -122,6 +123,40 @@ describe("MCP Booted Device Resources", () => {
     // Reset to default device manager
     setDeviceManager(null);
     restoreHermeticServer();
+  });
+
+  test("booted resource surfaces health reason and excludes dirty idle devices from availability", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1234);
+    const markers = new FakeDeviceHealthMarkers(timer);
+    const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "health-resource", {
+        timer,
+        deviceManager: fakeDeviceUtils,
+        deviceHealthMarkers: markers,
+      }),
+    );
+    try {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
+      await pool.initializeWithDevices([mockAndroidDevice1, mockAndroidDevice2]);
+      DaemonState.getInstance().initialize(manager, pool);
+      markers.mark(
+        mockAndroidDevice1.deviceId,
+        pool.getDeviceIncarnation(mockAndroidDevice1.deviceId)!,
+        "biometric-enrollment",
+      );
+      const result = await getBootedDevicesForPlatforms(["android"], timer);
+      expect(result.devices[0].unhealthy).toEqual({ reason: "biometric-enrollment", since: 1234 });
+      expect(result.devices[1]).not.toHaveProperty("unhealthy");
+      expect(result.poolStatus?.idle).toBe(1);
+      expect(listDevicesEntrySchema.shape.unhealthy.parse(result.devices[0].unhealthy)).toEqual({
+        reason: "biometric-enrollment",
+        since: 1234,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
   });
 
   test("coalesces and caches the full Android booted-device resource snapshot", async () => {

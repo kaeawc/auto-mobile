@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
@@ -323,3 +324,10 @@ describe("MCP Resources Read", () => {
     );
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

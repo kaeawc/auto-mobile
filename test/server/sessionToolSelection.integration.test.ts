@@ -1,5 +1,6 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { z } from "zod/v4";
 import { INTERNAL_TOOL_RESULTS_NO_STRUCTURED_CONTENT_PARAM } from "../../src/daemon/constants";
 import type { SessionToolSelectionService } from "../../src/features/toolSelection/SessionToolSelectionService";
@@ -1666,3 +1667,10 @@ describe("post-handler cancellation guard scope", () => {
     expect(resolveDirectSessionDevice("direct-minted-session")).toBeUndefined();
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

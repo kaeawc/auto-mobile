@@ -1,4 +1,5 @@
-import { describe, test, expect, beforeEach } from "bun:test";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { describe, test, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import {
   renderObserveAppHtml,
   registerObserveAppResource,
@@ -145,3 +146,10 @@ describe("ui:// resource resolves through the MCP read path (scheme guard)", () 
     }
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

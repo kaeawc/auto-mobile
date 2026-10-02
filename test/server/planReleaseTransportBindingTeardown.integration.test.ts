@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { afterEach, describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
 import type { ToolCapability } from "../../src/features/toolSelection/SessionToolSelectionService";
@@ -95,3 +96,10 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
     expect(tools.tools.map((tool) => tool.name)).not.toContain("clipboard");
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

@@ -10,6 +10,7 @@ import {
   installRealDeviceToolSpawnGuard,
   isUnitTestPath,
   spawnArgv,
+  testFileFromStack,
   type SpawnGuardDependencies,
   type Violation,
 } from "./realDeviceToolSpawnGuard";
@@ -34,6 +35,75 @@ function fakeGuard(overrides: Partial<SpawnGuardDependencies> = {}) {
   const restore = installRealDeviceToolSpawnGuard(deps);
   return { target, report, result, calls, original, deps, restore };
 }
+
+test("stack attribution recognizes caller files, Windows paths and retained async frames", () => {
+  expect(testFileFromStack(undefined)).toBeUndefined();
+  expect(testFileFromStack("Error\n    at work (/repo/src/worker.ts:1:2)")).toBeUndefined();
+  expect(
+    testFileFromStack(
+      "Error\n    at spawn (/repo/src/worker.ts:1:2)\n    at async run (/repo/test/actual.test.ts:3:4)",
+    ),
+  ).toBe("/repo/test/actual.test.ts");
+  expect(testFileFromStack("Error\n    at run (C:\\my repo\\test\\actual.test.ts:3:4)")).toBe(
+    "C:/my repo/test/actual.test.ts",
+  );
+  expect(testFileFromStack("Error\n    at run (/repo/test/host.integration.test.ts:3:4)")).toBe(
+    "/repo/test/host.integration.test.ts",
+  );
+});
+
+test("runtime attribution changes allow-list and unit policy per launch, even after an exempt first file", () => {
+  let file = "test/host.integration.test.ts";
+  let loads = 0;
+  const guard = fakeGuard({
+    testFile: file,
+    getTestFile: () => file,
+    loadAllowList: () => {
+      loads++;
+      return new Set(["test/allowed.test.ts"]);
+    },
+  });
+  expect(guard.target.spawn(["ffmpeg", "-version"])).toBe(guard.result);
+  expect(loads).toBe(0);
+  file = "test/allowed.test.ts";
+  expect(guard.target.spawn(["adb"])).toBe(guard.result);
+  file = "test/offender.test.ts";
+  expect(() => guard.target.spawn(["adb"])).toThrow("test/offender.test.ts");
+  expect(guard.report[0].testFile).toBe(file);
+  file = "test/stress/host.test.ts";
+  expect(guard.target.spawn(["adb"])).toBe(guard.result);
+  expect(loads).toBe(1);
+  expect(guard.calls).toHaveLength(3);
+});
+
+test("a test drains only its own scope, leaving outside-test violations for one file failure", () => {
+  const first = {};
+  const second = {};
+  const outside = { testFile: "test/late.test.ts", tool: "adb", argv: ["adb"] };
+  const report: Violation[] = [
+    { ...outside, testFile: "test/first.test.ts", testScope: first },
+    outside,
+  ];
+  expect(() => drainViolations(report, (v) => v.testScope === first)).toThrow("test/first.test.ts");
+  expect(() => drainViolations(report, (v) => v.testScope === second)).not.toThrow();
+  expect(report).toEqual([outside]);
+  expect(() => drainViolations(report, (v) => v.testFile === outside.testFile)).toThrow(
+    "test/late.test.ts",
+  );
+  expect(() => drainViolations(report)).not.toThrow();
+});
+
+test("runtime census records the actual file independently of the allow-list", () => {
+  const records: string[] = [];
+  const guard = fakeGuard({
+    mode: "census",
+    getTestFile: () => "test/actual.test.ts",
+    record: (_tool, _argv, file) => records.push(file),
+  });
+  expect(() => guard.target.spawn(["adb"])).toThrow("ENOENT");
+  expect(records).toEqual(["test/actual.test.ts"]);
+  expect(guard.report).toHaveLength(0);
+});
 
 test("blocked executable names, absolute paths and Windows extensions are case-sensitive", () => {
   for (const tool of [
@@ -135,6 +205,42 @@ test("env long options and short clusters preserve command and operand boundarie
       JSON.stringify(flags),
     ).toBeUndefined();
   }
+});
+
+test.each([
+  [["env", "-iS", "adb devices"], "adb"],
+  [["env", "-S", "adb devices"], "adb"],
+  [["env", "-iSadb", "devices"], "adb"],
+  [["env", "-iSadb devices"], "adb"],
+  [["env", "-Sadb devices"], "adb"],
+  [["env", "--split-string=adb devices"], "adb"],
+  [["env", "-u", "FOO", "adb"], "adb"],
+  [["env", "-iu", "FOO", "-iS", "adb devices"], "adb"],
+  [["env", "-uS", "echo", "hi"], undefined],
+  [["env", "-i", "true"], undefined],
+] satisfies [string[], string | undefined][])("env split/operand boundary %j", (argv, tool) => {
+  expect(blockedToolForArgv(argv)).toBe(tool);
+});
+
+test.each([
+  ['FOO="hello world" adb devices', "adb"],
+  ["FOO='a b' xcrun simctl list", "xcrun"],
+  ['FOO="a b" echo hi', undefined],
+  ['FOO="a adb', "adb"],
+  ["$(adb devices)", "adb"],
+  ['echo "$(adb devices)"', "adb"],
+  ["echo `adb devices`", "adb"],
+  ["FOO=hello\\ world adb devices", "adb"],
+  ['FOO="escaped\\\" value" adb devices', "adb"],
+  ["a\\db devices", "adb"],
+  ['echo "adb"', undefined],
+  ["echo 'adb devices'", undefined],
+  ['echo "hello; adb devices"', undefined],
+  ["echo '$(adb devices)'", undefined],
+  ['echo "unbalanced adb', "adb"],
+  ['echo "unbalanced myadb', undefined],
+] satisfies [string, string | undefined][])("shell token boundary %j", (command, tool) => {
+  expect(blockedToolForArgv(["sh", "-c", command])).toBe(tool);
 });
 
 test("wrapper option operands are skipped before recursively checking commands", () => {

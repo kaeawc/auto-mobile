@@ -4,6 +4,7 @@ import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyC
 import type { BootedDevice } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { clearCtrlProxyRegistries } from "./ctrlProxyRegistryCleanup";
 
 const androidDevice: BootedDevice = {
   deviceId: "preload-reset-android",
@@ -18,10 +19,9 @@ const iosDevice: BootedDevice = {
   name: "Fake iPhone",
 };
 
-describe.serial("CtrlProxy unit-test preload registry cleanup", () => {
-  // These registration/absence pairs intentionally depend on declaration order:
-  // the preload's afterEach must clear A's client before B runs.
-  test("Android client is registered in the current test", () => {
+describe("CtrlProxy unit-test preload registry cleanup", () => {
+  // Exercise the exact hook function without relying on other files' order.
+  test("Android cleanup clears a registered client", () => {
     const timer = new FakeTimer();
     const client = AndroidCtrlProxyClient.createForTesting(
       androidDevice,
@@ -34,13 +34,11 @@ describe.serial("CtrlProxy unit-test preload registry cleanup", () => {
 
     AndroidCtrlProxyClient.registerForTesting(client, androidDevice.deviceId);
     expect(AndroidCtrlProxyClient.getExistingInstance(androidDevice.deviceId)).toBe(client);
-  });
-
-  test("Android client registered by the prior test was cleared", () => {
+    clearCtrlProxyRegistries();
     expect(AndroidCtrlProxyClient.getExistingInstance(androidDevice.deviceId)).toBeNull();
   });
 
-  test("iOS client is registered in the current test", () => {
+  test("iOS cleanup clears a registered client", () => {
     const timer = new FakeTimer();
     const client = IOSCtrlProxyClient.createForTesting(
       iosDevice,
@@ -53,9 +51,7 @@ describe.serial("CtrlProxy unit-test preload registry cleanup", () => {
 
     IOSCtrlProxyClient.registerForTesting(client, iosDevice.deviceId);
     expect(IOSCtrlProxyClient.getExistingInstance(iosDevice.deviceId)).toBe(client);
-  });
-
-  test("iOS client registered by the prior test was cleared", () => {
+    clearCtrlProxyRegistries();
     expect(IOSCtrlProxyClient.getExistingInstance(iosDevice.deviceId)).toBeNull();
   });
 });

@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { FakePlanExecutionLock } from "../fakes/FakePlanExecutionLock";
@@ -138,3 +139,10 @@ describe("Plan execution lock", () => {
     }
   });
 });
+
+// App-resource registration starts device discovery independently of deviceTools.
+let restoreHermeticServer: () => void;
+beforeAll(() => {
+  restoreHermeticServer = installHermeticServerFixture();
+});
+afterAll(() => restoreHermeticServer());

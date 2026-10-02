@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   resetDeviceToolsDependencies,
@@ -8,8 +9,13 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { DeviceInfo } from "../../../src/models";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
+import { FakeAvdManager } from "../../fakes/FakeAvdManager";
 import { compileJsonSchema } from "../../helpers/jsonSchemaCompile";
 import { z } from "zod/v4";
+
+// Collection-time registration below needs the fake before any server is created.
+const restoreHermeticServer = installHermeticServerFixture();
+afterAll(() => restoreHermeticServer());
 
 // Issue #4181, rank 5 (R1): populate the registry at MODULE scope so a
 // collection-time test.each iterates over real advertised tools. Building the
@@ -47,6 +53,7 @@ describe("MCP Tools Schema", () => {
     fakeDeviceUtils.setDeviceImages("android", androidDevices);
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
+      avdManagerFactory: () => new FakeAvdManager(),
     });
 
     fixture = new McpTestFixture();

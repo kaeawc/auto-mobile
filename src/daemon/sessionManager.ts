@@ -100,6 +100,14 @@ interface NetworkConditionRestoreTarget {
 
 /** Original auto-time value recorded before the first session clock write. */
 export type ClockSessionState = DeviceClockRestoreState;
+interface PendingClockRestore {
+  state: ClockSessionState;
+  removed: boolean;
+  controller: AbortController;
+  clear: () => void;
+  result: Promise<{ pending: Promise<void> | null }>;
+}
+
 export interface ClockRestorer {
   restore(state: ClockSessionState, signal?: AbortSignal): Promise<void>;
 }
@@ -775,7 +783,7 @@ export class SessionManager {
   private readonly clockRestorerFactory: (device: BootedDevice) => ClockRestorer;
   private readonly pendingClockRestores = new Map<
     string,
-    { state: ClockSessionState; removed: boolean; controller: AbortController; clear: () => void }
+    Map<ClockSessionState, PendingClockRestore>
   >();
   private readonly clockRemovalGenerations = new Map<string, number>();
   private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
@@ -3095,29 +3103,60 @@ export class SessionManager {
     if (!state) {
       return { pending: null };
     }
-    const device: BootedDevice = {
-      name: session.assignedDevice,
-      deviceId: session.assignedDevice,
-      platform: "android",
-    };
-    const target = {
+    const deviceId = session.assignedDevice;
+    let targets = this.pendingClockRestores.get(deviceId);
+    const existing = targets?.get(state);
+    if (existing) {
+      return existing.result;
+    }
+    if (!targets) {
+      targets = new Map();
+      this.pendingClockRestores.set(deviceId, targets);
+    }
+    const result = Promise.withResolvers<{ pending: Promise<void> | null }>();
+    const target: PendingClockRestore = {
       state,
       removed: false,
       controller: new AbortController(),
+      result: result.promise,
       clear: () => {
         if (session.cacheData.clock === state) {
           delete session.cacheData.clock;
         }
       },
     };
-    this.pendingClockRestores.set(device.deviceId, target);
-    const restore = async () => {
-      await this.clockRestorerFactory(device).restore(state, target.controller.signal);
-      target.clear();
-      if (this.pendingClockRestores.get(device.deviceId) === target) {
-        this.pendingClockRestores.delete(device.deviceId);
-      }
-    };
+    // Publish the join point before starting any asynchronous restore work.
+    targets.set(state, target);
+    void this.startClockRestoration(deviceId, target).then(result.resolve, result.reject);
+    return target.result;
+  }
+
+  private async startClockRestoration(
+    deviceId: string,
+    target: PendingClockRestore,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
+    const signal = defaultDeviceClockRestoreRegistry.signal(deviceId);
+    const restore = () =>
+      defaultDeviceClockRestoreRegistry.runExclusive(
+        deviceId,
+        async () => {
+          target.controller.signal.throwIfAborted();
+          await this.clockRestorerFactory(device).restore(target.state, target.controller.signal);
+          target.controller.signal.throwIfAborted();
+          defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
+          target.clear();
+          const targets = this.pendingClockRestores.get(deviceId);
+          if (targets?.get(target.state) === target) {
+            targets.delete(target.state);
+            if (targets.size === 0) {
+              this.pendingClockRestores.delete(deviceId);
+            }
+          }
+        },
+        undefined,
+        signal,
+      );
     const restoration = restore().then(
       () => ({ outcome: "restored" as const }),
       (error: unknown) => ({ outcome: "failed" as const, error }),
@@ -3137,9 +3176,7 @@ export class SessionManager {
     if (result.outcome === "restored") {
       return { pending: null };
     }
-    logger.warn(
-      `Clock restore ${result.outcome} for ${session.sessionId}; quarantining ${device.deviceId}`,
-    );
+    logger.warn(`Clock restore ${result.outcome}; quarantining ${device.deviceId}`);
     const pending = raceWithDeadline(
       this.retryClockRestore(device.deviceId, target, restoration, restore),
       {
@@ -3162,12 +3199,7 @@ export class SessionManager {
    */
   private async retryClockRestore(
     deviceId: string,
-    target: {
-      state: ClockSessionState;
-      removed: boolean;
-      controller: AbortController;
-      clear: () => void;
-    },
+    target: PendingClockRestore,
     restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
     restore: () => Promise<void>,
   ): Promise<void> {
@@ -3193,15 +3225,15 @@ export class SessionManager {
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
   retireClockRestoration(deviceId: string): void {
     defaultDeviceClockRestoreRegistry.retire(deviceId);
-    const target = this.pendingClockRestores.get(deviceId);
+    const targets = this.pendingClockRestores.get(deviceId);
     this.clockRemovalGenerations.set(
       deviceId,
       (this.clockRemovalGenerations.get(deviceId) ?? 0) + 1,
     );
-    if (target) {
+    for (const target of targets?.values() ?? []) {
       target.removed = true;
-      target.clear();
       target.controller.abort();
+      target.clear();
     }
     this.pendingClockRestores.delete(deviceId);
   }
@@ -3879,10 +3911,12 @@ export class SessionManager {
         if ((this.clockRemovalGenerations.get(deviceId) ?? 0) !== generation) {
           delete session.cacheData.clock;
         } else if (this.sessions.get(session.sessionId) !== session && session.cacheData.clock) {
-          // Baseline capture can finish after the bounded release removed this
-          // session. Restore its newly recorded slot before tracked setup settles.
+          // Baseline capture can finish after bounded release. Hand unbounded
+          // retries to device quarantine so the setup/tool request can settle.
           const restoration = await this.getPendingClockRestoration(session, null);
-          await restoration.pending;
+          if (restoration.pending) {
+            this.trackPendingDeviceCleanup(deviceId, [restoration.pending]);
+          }
         }
       }
     });

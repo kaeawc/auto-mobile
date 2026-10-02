@@ -1,3 +1,4 @@
+import { Mutex } from "async-mutex";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -9,8 +10,8 @@ import { ensureAndroidRoot } from "../../utils/android-cmdline-tools/ensureAndro
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 
-export const MIN_DEVICE_CLOCK_INSTANT_MS = Date.parse("2000-01-01T00:00:00Z");
-export const MAX_DEVICE_CLOCK_INSTANT_MS = Date.parse("2100-01-01T00:00:00Z");
+import { clockInstantInWindow, clockInstantTextInWindow } from "../../models/DeviceClock";
+export { MIN_DEVICE_CLOCK_INSTANT_MS, MAX_DEVICE_CLOCK_INSTANT_MS } from "../../models/DeviceClock";
 /** Ten 365-day years; independent of calendar leap years. */
 export const MAX_DEVICE_CLOCK_ADVANCE_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 /** Epoch-second commands lose at most 999ms; allow one additional second of execution. */
@@ -22,7 +23,7 @@ export const deviceClockInputSchema = z.union([
       instant: z.iso
         .datetime({ offset: true })
         .refine(
-          (value) => clockInstantInWindow(Date.parse(value)),
+          (value) => clockInstantTextInWindow(value),
           "Clock instant must be within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z",
         ),
     })
@@ -71,38 +72,117 @@ export interface DeviceClockRestoreSlot {
   clear(): void;
 }
 
-/** Sessionless callers retain ownership until explicit reset or device removal. */
-export class DeviceClockRestoreRegistry {
-  private readonly devices = new Map<string, { state?: DeviceClockRestoreState }>();
+interface DeviceClockEntry {
+  state?: DeviceClockRestoreState;
+  sessionless: boolean;
+  sessions: Set<DeviceClockRestoreSlot>;
+  controller: AbortController;
+  mutex: Mutex;
+}
 
-  slot(deviceId: string): DeviceClockRestoreSlot {
+/** One queue, incarnation and original ownership baseline per device. */
+export class DeviceClockRestoreRegistry {
+  private readonly devices = new Map<string, DeviceClockEntry>();
+
+  private entry(deviceId: string): DeviceClockEntry {
     let entry = this.devices.get(deviceId);
     if (!entry) {
-      entry = {};
+      entry = {
+        sessionless: false,
+        sessions: new Set(),
+        controller: new AbortController(),
+        mutex: new Mutex(),
+      };
       this.devices.set(deviceId, entry);
     }
-    const captured = entry;
+    return entry;
+  }
+
+  signal(deviceId: string): AbortSignal {
+    return this.entry(deviceId).controller.signal;
+  }
+
+  slot(deviceId: string): DeviceClockRestoreSlot {
+    return this.ownershipSlot(deviceId, this.entry(deviceId));
+  }
+
+  private ownershipSlot(
+    deviceId: string,
+    entry: DeviceClockEntry,
+    session?: DeviceClockRestoreSlot,
+  ): DeviceClockRestoreSlot {
     return {
-      get: () => captured.state,
+      get: () => entry.state ?? session?.get(),
       record: (state) => {
-        // A removed device must not regain ownership from a late mutation.
-        if (this.devices.get(deviceId) === captured) {
-          captured.state = state;
+        if (this.devices.get(deviceId) !== entry) {
+          return;
+        }
+        entry.state ??= state;
+        if (session) {
+          entry.sessions.add(session);
+          session.record(entry.state);
+        } else {
+          entry.sessionless = true;
         }
       },
       clear: () => {
-        captured.state = undefined;
-        if (this.devices.get(deviceId) === captured) {
-          this.devices.delete(deviceId);
+        entry.state = undefined;
+        entry.sessionless = false;
+        for (const slot of entry.sessions) {
+          slot.clear();
         }
+        entry.sessions.clear();
+        session?.clear();
       },
     };
+  }
+
+  async runExclusive<T>(
+    deviceId: string,
+    mutation: (slot: DeviceClockRestoreSlot, signal: AbortSignal) => Promise<T>,
+    session?: DeviceClockRestoreSlot,
+    expectedSignal?: AbortSignal,
+  ): Promise<T> {
+    const entry = this.entry(deviceId);
+    const signal = entry.controller.signal;
+    expectedSignal?.throwIfAborted();
+    if (expectedSignal && expectedSignal !== signal) {
+      throw new ActionableError("Device clock incarnation was replaced.");
+    }
+    return entry.mutex.runExclusive(async () => {
+      signal.throwIfAborted();
+      return mutation(this.ownershipSlot(deviceId, entry, session), signal);
+    });
+  }
+
+  /** Lifecycle restore clears session claims but keeps explicit sessionless ownership. */
+  restored(deviceId: string, state: DeviceClockRestoreState): void {
+    const entry = this.devices.get(deviceId);
+    if (entry?.state !== state) {
+      return;
+    }
+    for (const slot of entry.sessions) {
+      slot.clear();
+    }
+    entry.sessions.clear();
+    state.rootedByUs = false;
+    if (!entry.sessionless) {
+      entry.state = undefined;
+    }
   }
 
   retire(deviceId: string): void {
     const entry = this.devices.get(deviceId);
     if (entry) {
+      // Abort before dropping ownership. Old queued/in-flight work keeps this
+      // signal and cannot acquire the replacement serial's incarnation.
+      entry.controller.abort();
+      entry.mutex.cancel();
       entry.state = undefined;
+      for (const slot of entry.sessions) {
+        slot.clear();
+      }
+      entry.sessions.clear();
       this.devices.delete(deviceId);
     }
   }
@@ -112,7 +192,9 @@ export const defaultDeviceClockRestoreRegistry = new DeviceClockRestoreRegistry(
 export interface DeviceClockDependencies {
   hostClock: Pick<Timer, "now">;
   invalidate(deviceId: string): void;
-  restoreRegistry?: Pick<DeviceClockRestoreRegistry, "slot">;
+  restoreRegistry?: DeviceClockRestoreRegistry;
+  /** Supplied only while the registry's device critical section is held. */
+  mutationSignal?: AbortSignal;
 }
 export interface PreparedDeviceClock {
   targetMs: number;
@@ -122,9 +204,6 @@ const defaultDependencies: DeviceClockDependencies = {
   hostClock: defaultTimer,
   invalidate: () => {},
 };
-function clockInstantInWindow(value: number): boolean {
-  return value >= MIN_DEVICE_CLOCK_INSTANT_MS && value <= MAX_DEVICE_CLOCK_INSTANT_MS;
-}
 /** Read-only preflight: cumulative bounds must be checked before ANY field is applied. */
 export async function prepareDeviceClock(
   device: BootedDevice,
@@ -170,6 +249,12 @@ export class AndroidDeviceClockAdapter implements DeviceClockAdapter {
     const before = await this.command("shell id");
     if (before.includes("uid=0(root)")) {
       return { success: true, rootedByUs: false };
+    }
+    if ((await this.command("shell getprop ro.debuggable")) !== "1") {
+      return {
+        success: false,
+        error: "Non-debuggable/Play Store emulator does not allow root ADB.",
+      };
     }
     const result = await ensureAndroidRoot(this.adb, this.signal);
     return result.success ? { success: true, rootedByUs: true } : result;
@@ -325,6 +410,28 @@ async function unwindUnrecordedRoot(context: ClockMutationContext): Promise<void
     await unrootBestEffort(context.adapter, context.device.deviceId);
   }
 }
+/** Also guards injected adapters between awaits; the Android adapter passes this signal to ADB. */
+export function cancellableDeviceClockAdapter(
+  adapter: DeviceClockAdapter,
+  signal: AbortSignal,
+): DeviceClockAdapter {
+  const command = async <T>(operation: () => Promise<T>): Promise<T> => {
+    signal.throwIfAborted();
+    const result = await operation();
+    signal.throwIfAborted();
+    return result;
+  };
+  return {
+    canRoot: () => command(() => adapter.canRoot()),
+    ensureRoot: () => command(() => adapter.ensureRoot()),
+    unroot: () => command(() => adapter.unroot()),
+    readInstantMs: () => command(() => adapter.readInstantMs()),
+    readAutomaticTime: () => command(() => adapter.readAutomaticTime()),
+    setAutomaticTime: (value) => command(() => adapter.setAutomaticTime(value)),
+    setInstantMs: (value) => command(() => adapter.setInstantMs(value)),
+  };
+}
+
 export async function writeDeviceClock(
   device: BootedDevice,
   adapter: DeviceClockAdapter,
@@ -338,11 +445,25 @@ export async function writeDeviceClock(
   if (limitation) {
     return limitation;
   }
-  slot ??= (dependencies.restoreRegistry ?? defaultDeviceClockRestoreRegistry).slot(
-    device.deviceId,
-  );
+  if (!dependencies.mutationSignal) {
+    const registry = dependencies.restoreRegistry ?? defaultDeviceClockRestoreRegistry;
+    return registry.runExclusive(
+      device.deviceId,
+      (ownership, signal) =>
+        writeDeviceClock(
+          device,
+          cancellableDeviceClockAdapter(adapter, signal),
+          input,
+          ownership,
+          { ...dependencies, mutationSignal: signal },
+          prepared,
+        ),
+      slot,
+    );
+  }
+  dependencies.mutationSignal.throwIfAborted();
   // Presence comes before rooting: ownership makes refused root a pending restore failure.
-  const recorded = slot.get();
+  const recorded = slot?.get();
   const preflight = await resolveClockPreflight(device, adapter, input, prepared);
   if (preflight.failure) {
     return preflight.failure;
@@ -424,7 +545,7 @@ async function applyDeviceClock(
   prepared?: PreparedDeviceClock,
 ): Promise<DeviceClockState> {
   const { device, adapter, recorded, slot, dependencies, rootedByUs } = context;
-  const target = prepared ?? (await prepareDeviceClock(device, adapter, input));
+  const target = input.mode === "set" ? await prepareDeviceClock(device, adapter, input) : prepared;
   if (!target) {
     throw new ActionableError("Device clock target could not be prepared");
   }
@@ -441,21 +562,33 @@ async function applyDeviceClock(
   };
   slot?.record(state);
   await adapter.setAutomaticTime(0);
+  // Preflight rejects cheap cumulative bounds before combined fields. Rooting,
+  // other fields and auto_time can take seconds: advance from a fresh read now.
+  const freshTarget =
+    input.mode === "advance" ? { startMs: await adapter.readInstantMs(), targetMs: 0 } : target;
+  if (input.mode === "advance") {
+    freshTarget.targetMs = freshTarget.startMs + input.byMs;
+  }
+  if (!clockInstantInWindow(freshTarget.targetMs)) {
+    throw new DeviceClockValidationError(
+      "Requested clock instant must be within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive).",
+    );
+  }
   try {
-    await adapter.setInstantMs(target.targetMs);
+    await adapter.setInstantMs(freshTarget.targetMs);
   } finally {
     // A rejected date command can still have changed the device clock.
     dependencies.invalidate(device.deviceId);
   }
   const result = await readDeviceClock(device, adapter);
-  const verified = clockWriteVerified(result, input, target);
+  const verified = clockWriteVerified(result, input, freshTarget);
   return {
     ...result,
     mode: input.mode,
     outcome: "changed",
     verified,
-    requestedInstant: new Date(target.targetMs).toISOString(),
-    appliedInstant: new Date(Math.floor(target.targetMs / 1000) * 1000).toISOString(),
+    requestedInstant: new Date(freshTarget.targetMs).toISOString(),
+    appliedInstant: new Date(Math.floor(freshTarget.targetMs / 1000) * 1000).toISOString(),
     toleranceMs: DEVICE_CLOCK_TOLERANCE_MS,
     ...(!verified
       ? {

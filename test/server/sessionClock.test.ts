@@ -3,7 +3,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { retireShutdownOwnership } from "../../src/server/deviceToolsShutdown";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import {
@@ -68,6 +68,223 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
 }
 
 describe("session clock restoration", () => {
+  beforeEach(() => defaultDeviceClockRestoreRegistry.retire(device.deviceId));
+  afterEach(() => defaultDeviceClockRestoreRegistry.retire(device.deviceId));
+
+  test.each(["sessionless", "mixed", "two sessions"])(
+    "device queue adds concurrent advances across %s callers",
+    async (callers) => {
+      const h = harness();
+      const second = new DeviceState(device, {
+        timer: h.timer,
+        clockAdapter: h.adapter,
+        clockMutation: (mutation) =>
+          runSessionClockMutation(
+            callers === "two sessions" ? h.manager : undefined,
+            callers === "two sessions" ? "second-session" : undefined,
+            device.deviceId,
+            mutation,
+          ),
+      });
+      const first = callers === "sessionless" ? second : h.state;
+      const start = h.adapter.instantMs;
+      try {
+        await h.manager.createSession("clock-session", device.deviceId, "android");
+        await h.manager.createSession("second-session", device.deviceId, "android");
+        const results = await Promise.all([
+          first.setState({ clock: { mode: "advance", byMs: 60_000 } }),
+          second.setState({ clock: { mode: "advance", byMs: 60_000 } }),
+        ]);
+        expect(results.every((result) => result.clock?.verified)).toBe(true);
+        expect(h.adapter.instantMs).toBe(start + 120_000);
+      } finally {
+        h.manager.stopCleanupTimer();
+      }
+    },
+  );
+
+  test.each(["sessionless first", "session first"])(
+    "mixed ownership inherits original auto time and root (%s)",
+    async (order) => {
+      const h = harness();
+      const sessionless = new DeviceState(device, { timer: h.timer, clockAdapter: h.adapter });
+      try {
+        await h.manager.createSession("clock-session", device.deviceId, "android");
+        const states =
+          order === "sessionless first" ? [sessionless, h.state] : [h.state, sessionless];
+        await states[0].setState({ clock: set });
+        h.adapter.rootedByUs = false;
+        await states[1].setState({ clock: { mode: "advance", byMs: 1000 } });
+        expect(h.manager.getClock("clock-session")).toMatchObject({
+          initialAutomaticTime: 1,
+          rootedByUs: true,
+        });
+        expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()).toMatchObject({
+          initialAutomaticTime: 1,
+          rootedByUs: true,
+        });
+        await h.manager.releaseSession("clock-session");
+        expect(h.adapter.automaticTime).toBe(1);
+        expect(h.adapter.instantMs).toBe(h.timer.now());
+        expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()).toBeDefined();
+        await sessionless.setState({ clock: { mode: "reset" } });
+        expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()).toBeUndefined();
+      } finally {
+        h.manager.stopCleanupTimer();
+      }
+    },
+  );
+
+  test("late setup settles within the drain bound while failed restore retries in background", async () => {
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    class LateSetup extends FakeDeviceClockAdapter {
+      override async ensureRoot() {
+        started.resolve();
+        await finish.promise;
+        return super.ensureRoot();
+      }
+      override async setInstantMs(value: number) {
+        if (value < Date.parse("2030-01-01T00:00:00Z")) {
+          throw new Error("restore unavailable");
+        }
+        await super.setInstantMs(value);
+      }
+    }
+    const h = harness(new LateSetup());
+    let settled = false;
+    try {
+      await h.manager.createSession("clock-session", device.deviceId, "android");
+      const changing = h.state.setState({ clock: set }).then(() => {
+        settled = true;
+      });
+      await started.promise;
+      let released = false;
+      const release = h.manager.releaseSession("clock-session").then(() => {
+        released = true;
+      });
+      await flush();
+      h.timer.advanceTime(1000);
+      await flush();
+      expect(released).toBe(true);
+      await release;
+      finish.resolve();
+      await flush();
+      h.timer.advanceTime(1000);
+      await flush();
+      expect(settled).toBe(true);
+      expect(h.manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();
+      h.manager.retireClockRestoration(device.deviceId);
+      await changing;
+    } finally {
+      finish.resolve();
+      h.manager.retireClockRestoration(device.deviceId);
+      h.timer.advanceTime(1000);
+      await flush();
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("duplicate clock restoration joins one pending promise and removal stops retries", async () => {
+    const h = harness();
+    try {
+      await h.manager.createSession("clock-session", device.deviceId, "android");
+      await h.state.setState({ clock: set });
+      h.adapter.writeError = new Error("restore unavailable");
+      const session = h.manager.getSession("clock-session")!;
+      const first = await h.manager["getPendingClockRestoration"](session, null);
+      const second = await h.manager["getPendingClockRestoration"](session, null);
+      expect(second.pending).toBe(first.pending);
+      expect(h.restored).toHaveLength(1);
+      h.manager.retireClockRestoration(device.deviceId);
+      expect(h.restoreSignals.every((signal) => signal?.aborted)).toBe(true);
+      const calls = h.adapter.calls.length;
+      h.timer.advanceTime(1000);
+      await flush();
+      expect(h.adapter.calls).toHaveLength(calls);
+      await Promise.all([first.pending, second.pending]);
+    } finally {
+      h.manager.retireClockRestoration(device.deviceId);
+      h.timer.advanceTime(1000);
+      await flush();
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("retirement cancels every distinct restore state on the same device", async () => {
+    const h = harness();
+    try {
+      await h.manager.createSession("clock-session", device.deviceId, "android");
+      await h.manager.createSession("second-session", device.deviceId, "android");
+      h.manager.setClock(h.manager.getSession("clock-session")!, {
+        initialAutomaticTime: 1,
+        clockChangedByUs: true,
+        rootedByUs: true,
+      });
+      h.manager.setClock(h.manager.getSession("second-session")!, {
+        initialAutomaticTime: 0,
+        clockChangedByUs: true,
+        rootedByUs: false,
+      });
+      h.adapter.writeError = new Error("restore unavailable");
+      const first = await h.manager["getPendingClockRestoration"](
+        h.manager.getSession("clock-session")!,
+        null,
+      );
+      const second = await h.manager["getPendingClockRestoration"](
+        h.manager.getSession("second-session")!,
+        null,
+      );
+      h.manager.retireClockRestoration(device.deviceId);
+      expect(h.restoreSignals).toHaveLength(2);
+      expect(h.restoreSignals.every((signal) => signal?.aborted)).toBe(true);
+      const calls = h.adapter.calls.length;
+      h.timer.advanceTime(1000);
+      await flush();
+      expect(h.adapter.calls).toHaveLength(calls);
+      await Promise.all([first.pending, second.pending]);
+    } finally {
+      h.manager.retireClockRestoration(device.deviceId);
+      h.timer.advanceTime(1000);
+      await flush();
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("pool removal cancels a sessionless mutation before replacement serial writes", async () => {
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    class DelayedRoot extends FakeDeviceClockAdapter {
+      override async ensureRoot() {
+        started.resolve();
+        await finish.promise;
+        return super.ensureRoot();
+      }
+    }
+    const h = harness(new DelayedRoot());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(h.manager, "clock-idle-removal", { timer: h.timer }),
+    );
+    const state = new DeviceState(device, { timer: h.timer, clockAdapter: h.adapter });
+    try {
+      await pool.initializeWithDevices([device]);
+      const changing = state.setState({ clock: set });
+      await started.promise;
+      await pool.removeDevice(device.deviceId);
+      await pool.initializeWithDevices([device]);
+      finish.resolve();
+      const result = await changing;
+      expect(result.clock?.verified).toBe(false);
+      expect(
+        h.adapter.calls.some((call) => call.startsWith("auto:") || call.startsWith("instant:")),
+      ).toBe(false);
+      expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()).toBeUndefined();
+    } finally {
+      finish.resolve();
+      h.manager.stopCleanupTimer();
+    }
+  });
+
   test("queued advance bounds reject before combined biometric mutation", async () => {
     const h = harness();
     h.adapter.instantMs = MAX_DEVICE_CLOCK_INSTANT_MS - 1000;

@@ -1,6 +1,8 @@
 import { invalidateDisplayCaches } from "../observe/DisplayTransition";
 import {
   AndroidDeviceClockAdapter,
+  cancellableDeviceClockAdapter,
+  defaultDeviceClockRestoreRegistry,
   readDeviceClock,
   writeDeviceClock,
   validateDeviceClockInput,
@@ -1295,19 +1297,28 @@ export class DeviceState {
   private consoleFactory: EmulatorConsoleClientFactory;
   private routeRegistry: LocationRouteRegistry;
   private readonly clockAdapter: DeviceClockAdapter;
-  private readonly clockRestoreRegistry?: DeviceClockRestoreRegistry;
+  private readonly clockRestoreRegistry: DeviceClockRestoreRegistry;
+  private readonly clockSignal: AbortSignal;
   private readonly clockMutation: NonNullable<DeviceStateDependencies["clockMutation"]>;
   private readonly invalidateClockCaches: (deviceId: string) => void;
 
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
-    this.clockRestoreRegistry = dependencies.clockRestoreRegistry;
+    this.clockRestoreRegistry =
+      dependencies.clockRestoreRegistry ?? defaultDeviceClockRestoreRegistry;
+    this.clockSignal = this.clockRestoreRegistry.signal(device.deviceId);
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
-    this.clockAdapter =
+    this.clockAdapter = cancellableDeviceClockAdapter(
       dependencies.clockAdapter ??
-      new AndroidDeviceClockAdapter({
-        executeCommand: (...args) => this.adbFactory.create(this.device).executeCommand(...args),
-      });
+        new AndroidDeviceClockAdapter(
+          {
+            executeCommand: (...args) =>
+              this.adbFactory.create(this.device).executeCommand(...args),
+          },
+          this.clockSignal,
+        ),
+      this.clockSignal,
+    );
     this.timer = dependencies.timer ?? defaultTimer;
     this.clockMutation = dependencies.clockMutation ?? ((mutation) => mutation());
     this.invalidateClockCaches =
@@ -1434,12 +1445,20 @@ export class DeviceState {
     input: SetDeviceStateInput,
   ): Promise<RequestedDeviceStates> {
     try {
-      return await this.clockMutation(async (slot) => {
-        // Read the advance baseline only after acquiring the session queue, and
-        // reject cumulative bounds before any combined field can mutate.
-        const preflight = await this.preflightClock(input.clock);
-        return this.writeRequestedStates(input, preflight.prepared, preflight.failure, slot);
-      });
+      // Track session setup before taking the device lock. Release drains those
+      // setups first, then takes this same lock for restoration.
+      return await this.clockMutation((sessionSlot) =>
+        this.clockRestoreRegistry.runExclusive(
+          this.device.deviceId,
+          async (slot) => {
+            const preflight = await this.preflightClock(input.clock);
+            this.clockSignal.throwIfAborted();
+            return this.writeRequestedStates(input, preflight.prepared, preflight.failure, slot);
+          },
+          sessionSlot,
+          this.clockSignal,
+        ),
+      );
     } catch (error) {
       if (error instanceof DeviceClockValidationError) {
         throw error;
@@ -1499,6 +1518,7 @@ export class DeviceState {
           hostClock: this.timer,
           invalidate: this.invalidateClockCaches,
           restoreRegistry: this.clockRestoreRegistry,
+          mutationSignal: this.clockSignal,
         },
         prepared,
       );

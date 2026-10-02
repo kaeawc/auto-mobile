@@ -2,7 +2,7 @@ import type { SessionManager } from "../daemon/sessionManager";
 import type { DeviceClockRestoreSlot } from "../features/utility/DeviceClock";
 import { ActionableError } from "../models/ActionableError";
 
-/** Serialize clock writes and bind their original auto_time to the existing setup/release lifecycle. */
+/** Track setup before DeviceState takes the shared device clock lock; teardown drains setup first. */
 export async function runSessionClockMutation<T>(
   manager: SessionManager | undefined,
   sessionUuid: string | undefined,

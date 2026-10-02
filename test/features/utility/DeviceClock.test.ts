@@ -121,6 +121,37 @@ describe("device clock", () => {
     },
   );
 
+  test("advance reads fresh time after combined fields, root, and automatic-time writes", async () => {
+    class SlowRoot extends FakeDeviceClockAdapter {
+      override async ensureRoot() {
+        const result = await super.ensureRoot();
+        this.instantMs += 180_000;
+        return result;
+      }
+      override async setAutomaticTime(value: 0 | 1) {
+        await super.setAutomaticTime(value);
+        this.instantMs += 120_000;
+      }
+    }
+    const adapter = new SlowRoot();
+    const start = adapter.instantMs;
+    const state = new DeviceState(android, { clockAdapter: adapter, timer: new FakeTimer() });
+    const biometrics = spyOn(state, "setBiometricEnrollmentState").mockImplementation(async () => {
+      adapter.instantMs += 120_000;
+      return { supported: true, enrollment: "enrolled", verified: true };
+    });
+    try {
+      const result = await state.setState({
+        biometrics: { enrollment: "enrolled" },
+        clock: { mode: "advance", byMs: 60_000 },
+      });
+      expect(result.clock?.verified).toBe(true);
+      expect(adapter.instantMs).toBe(start + 480_000);
+    } finally {
+      biometrics.mockRestore();
+    }
+  });
+
   test("restore snapshots host time after disabling automatic time", async () => {
     const h = harness();
     class SlowAutomaticTime extends FakeDeviceClockAdapter {
@@ -382,6 +413,19 @@ describe("device clock", () => {
     expect(h.adapter.calls).toEqual([]);
     expect(adb.getExecutedCommands()).toEqual([]);
   });
+  test("runtime instant window preserves submillisecond upper-bound precision", () => {
+    for (const instant of ["2100-01-01T00:00:00.0001Z", "2100-01-01T01:00:00.0001+01:00"]) {
+      expect(setDeviceStateSchema.safeParse({ clock: { mode: "set", instant } }).success).toBe(
+        false,
+      );
+    }
+    expect(
+      setDeviceStateSchema.safeParse({
+        clock: { mode: "set", instant: "1999-12-31T23:00:00.0001-01:00" },
+      }).success,
+    ).toBe(true);
+  });
+
   test("schema accepts offsets and clock read selection", () => {
     expect(
       setDeviceStateSchema.safeParse({
@@ -412,18 +456,38 @@ describe("device clock", () => {
     ).toEqual(["clock"]);
     expect(h.adapter.calls).toEqual([]);
   });
+  test.each(["set", "advance", "reset"] as const)(
+    "non-debuggable emulator refuses %s before root or settings commands",
+    async (mode) => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("shell id", response("uid=2000(shell)"));
+      adb.setCommandResponse("shell getprop ro.debuggable", response("0"));
+      const input: SetDeviceClockInput =
+        mode === "set" ? { mode, instant } : mode === "advance" ? { mode, byMs: 1000 } : { mode };
+      const result = await writeDeviceClock(android, new AndroidDeviceClockAdapter(adb), input);
+      expect(result.supported).toBe(false);
+      expect(
+        adb
+          .getExecutedCommands()
+          .every((command) => ["shell id", "shell getprop ro.debuggable"].includes(command)),
+      ).toBe(true);
+    },
+  );
+
   test("adapter uses bounded epoch commands and probes id before root", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandResponseSequence("shell id", [
       response("uid=2000(shell)"),
       response("uid=0(root)"),
     ]);
+    adb.setCommandResponse("shell getprop ro.debuggable", response("1"));
     const adapter = new AndroidDeviceClockAdapter(adb);
     expect(await adapter.ensureRoot()).toEqual({ success: true, rootedByUs: true });
     await adapter.setInstantMs(Date.parse(instant));
     await adapter.unroot();
     expect(adb.getExecutedCommands()).toEqual([
       "shell id",
+      "shell getprop ro.debuggable",
       "root",
       "wait-for-device",
       "shell id",

@@ -1,3 +1,4 @@
+import { AndroidDeviceResourceReader } from "./androidDeviceResourceReader";
 import type { DeviceResourceController, DeviceResourceRequest } from "./deviceResourceController";
 import type {
   ConfigurableDeviceResource,
@@ -9,14 +10,13 @@ import {
   defaultAdbClientFactory,
   type AdbClientFactory,
 } from "./android-cmdline-tools/AdbClientFactory";
-import type { AdbExecuteOptions } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
   androidDeviceResourceCatalog,
   androidResourceSettings,
 } from "./androidDeviceResourceCatalog";
-import { shellQuote } from "./shellQuote";
 import { errorMessage } from "./describeUnknownError";
+import { logger } from "./logger";
 
 type Entry = AndroidResourceRestoration["entries"][number];
 interface Run {
@@ -41,9 +41,12 @@ const packageVerbs = [
 /** Reads native state before and after writes. Requested state never substitutes for observation. */
 export class AndroidDeviceResourceController implements DeviceResourceController {
   constructor(
-    private readonly adbFactory: Pick<AdbClientFactory, "create"> = defaultAdbClientFactory,
-    private readonly timer: Pick<Timer, "now"> = defaultTimer,
-  ) {}
+    adbFactory: Pick<AdbClientFactory, "create"> = defaultAdbClientFactory,
+    timer: Pick<Timer, "now"> = defaultTimer,
+  ) {
+    this.reader = new AndroidDeviceResourceReader({ adbFactory, timer });
+  }
+  private readonly reader: AndroidDeviceResourceReader;
 
   async setResources(request: DeviceResourceRequest): Promise<DeviceResourceConfigurationResult> {
     const result: DeviceResourceConfigurationResult = {
@@ -101,28 +104,7 @@ export class AndroidDeviceResourceController implements DeviceResourceController
     result: DeviceResourceConfigurationResult,
     supported: ConfigurableDeviceResource[],
   ): Promise<DeviceResourceConfigurationResult> {
-    const adb = this.adbFactory.create(request.device);
-    const run: Run = {
-      request,
-      result,
-      user: "",
-      command: async (args) => {
-        request.signal?.throwIfAborted();
-        const timeoutMs = request.deadlineMs - this.timer.now();
-        if (timeoutMs <= 0) {
-          throw new Error("Android resource configuration deadline expired");
-        }
-        const options: AdbExecuteOptions = {
-          timeoutMs,
-          signal: request.signal,
-          noRetry: true,
-          waitForProcessSettlementAfterAbort: true,
-        };
-        const output = await adb.execute(["shell", args.map(shellQuote).join(" ")], options);
-        request.signal?.throwIfAborted();
-        return output.stdout.trim();
-      },
-    };
+    const run: Run = { ...this.reader.createRun(request), request, result };
     try {
       await this.identifyRun(run);
       for (const resource of supported) {
@@ -130,6 +112,7 @@ export class AndroidDeviceResourceController implements DeviceResourceController
       }
     } catch (error) {
       request.signal?.throwIfAborted();
+      logger.warn(`Android resource configuration failed: ${errorMessage(error)}`, error);
       for (const resource of supported) {
         result.resources[resource] ??= { state: "unknown", reason: errorMessage(error) };
       }
@@ -142,14 +125,7 @@ export class AndroidDeviceResourceController implements DeviceResourceController
   }
 
   private async identifyRun(run: Run): Promise<void> {
-    run.user = await run.command(["am", "get-current-user"]);
-    if (!/^\d+$/.test(run.user)) {
-      throw new Error("Cannot determine Android foreground user");
-    }
-    const bootId = await run.command(["cat", "/proc/sys/kernel/random/boot_id"]);
-    if (!/^[a-f\d]{8}-(?:[a-f\d]{4}-){3}[a-f\d]{12}$/i.test(bootId)) {
-      throw new Error("Cannot identify this Android boot");
-    }
+    const bootId = await this.reader.identifyRun(run);
     const { request } = run;
     run.result.restore = {
       deviceId: request.device.deviceId,
@@ -183,7 +159,7 @@ export class AndroidDeviceResourceController implements DeviceResourceController
     try {
       const entries = request.restore
         ? request.restore.entries.filter((entry) => entry.resource === resource)
-        : await this.discover(run, resource);
+        : await this.reader.discover(run, resource);
       if (!entries.length) {
         result.resources[resource] = {
           state: "unsupported",
@@ -209,6 +185,7 @@ export class AndroidDeviceResourceController implements DeviceResourceController
       };
     } catch (error) {
       request.signal?.throwIfAborted();
+      logger.warn(`Android resource configuration failed: ${errorMessage(error)}`, error);
       result.resources[resource] = { state: "unknown", reason: errorMessage(error) };
       result.success = false;
     }
@@ -225,7 +202,7 @@ export class AndroidDeviceResourceController implements DeviceResourceController
   }
 
   private async configureEntry(run: Run, entry: Entry): Promise<DeviceResourceStatus> {
-    const before = await this.read(run, entry);
+    const before = await this.reader.read(run, entry);
     const desired = this.desiredValue(run, entry);
     const resource = entry.resource as ConfigurableDeviceResource;
     if (before !== desired) {
@@ -235,12 +212,12 @@ export class AndroidDeviceResourceController implements DeviceResourceController
       }
       await this.write(run, entry, desired);
     }
-    const after = await this.read(run, entry);
+    const after = await this.reader.read(run, entry);
     if (after !== desired) {
       throw new Error(`Native state for ${entry.target} did not match requested value`);
     }
     return {
-      state: this.state(entry, after),
+      state: this.reader.state(entry, after),
       reason: `Verified value ${after ?? "default"} for user ${run.user}.`,
     };
   }
@@ -265,32 +242,6 @@ export class AndroidDeviceResourceController implements DeviceResourceController
       setting.keys.includes(entry.target) &&
       (entry.value === null || /^(?:\d+(?:\.\d+)?|\.\d+)$/.test(entry.value))
     );
-  }
-
-  private async discover(run: Run, resource: ConfigurableDeviceResource): Promise<Entry[]> {
-    const packages = packageCatalog[resource];
-    if (packages) {
-      const output = await run.command(["pm", "list", "packages", "-s", "--user", run.user]);
-      const installed = new Set(
-        output
-          .split(/\r?\n/)
-          .filter((line) => line.startsWith("package:"))
-          .map((line) => line.slice(8)),
-      );
-      return packages
-        .filter((name) => installed.has(name))
-        .map((target) => ({ resource, kind: "package", target, value: null }));
-    }
-    const settings = settingsCatalog[resource];
-    if (settings) {
-      return settings.keys.map((target) => ({
-        resource,
-        kind: settings.namespace,
-        target,
-        value: null,
-      }));
-    }
-    return [{ resource, kind: "backup", target: "backup", value: null }];
   }
 
   private async protectActivePackages(run: Run, entries: Entry[]): Promise<void> {
@@ -348,51 +299,6 @@ export class AndroidDeviceResourceController implements DeviceResourceController
     }
   }
 
-  private async read(run: Run, entry: Entry): Promise<string | null> {
-    if (entry.kind === "package") {
-      const output = await run.command(["dumpsys", "package", entry.target]);
-      const lines = output
-        .split("\n")
-        .filter(
-          (line) => line.trimStart().startsWith(`User ${run.user}:`) && /\binstalled=/.test(line),
-        );
-      const match = lines.length === 1 ? /\benabled=([0-4])\b/.exec(lines[0]!) : null;
-      if (
-        !match ||
-        !/\binstalled=true\b/.test(lines[0]!) ||
-        /\b(?:hidden|suspended)=true\b/.test(lines[0]!)
-      ) {
-        throw new Error(`Cannot verify installed package override for ${entry.target}`);
-      }
-      return match[1]!;
-    }
-    if (entry.kind === "backup") {
-      const output = await run.command(["bmgr", "--user", run.user, "enabled"]);
-      if (output === "Backup Manager currently enabled") {
-        return "1";
-      }
-      if (output === "Backup Manager currently disabled") {
-        return "0";
-      }
-      throw new Error("Cannot verify Backup Manager state");
-    }
-    const value = await run.command([
-      "settings",
-      "--user",
-      run.user,
-      "get",
-      entry.kind,
-      entry.target,
-    ]);
-    if (value === "null") {
-      return null;
-    }
-    if (!/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(value)) {
-      throw new Error(`Cannot verify setting ${entry.target}`);
-    }
-    return value;
-  }
-
   private async write(run: Run, entry: Entry, value: string | null): Promise<void> {
     if (entry.kind === "package") {
       await run.command(["pm", packageVerbs[Number(value)]!, "--user", run.user, entry.target]);
@@ -409,12 +315,5 @@ export class AndroidDeviceResourceController implements DeviceResourceController
         ...(value === null ? [] : [value]),
       ]);
     }
-  }
-
-  private state(entry: Entry, value: string | null): DeviceResourceStatus["state"] {
-    if (entry.kind === "package") {
-      return value === "1" ? "enabled" : value === "0" ? "unknown" : "disabled";
-    }
-    return value === null ? "unknown" : Number(value) === 0 ? "disabled" : "enabled";
   }
 }

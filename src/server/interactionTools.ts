@@ -2928,7 +2928,10 @@ export function registerInteractionTools() {
         ? "Device unlocked"
         : "Device awake"
       : `Failed to unlock device: ${result.error ?? "unknown error"}`;
-    return createJSONToolResponse({ message, ...result });
+    return createJSONToolResponse({
+      message: result.warning ? `${message}. Warning: ${result.warning}` : message,
+      ...result,
+    });
   };
 
   // Open link handler

@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../../src/utils/logger";
 import { WakeAndUnlock } from "../../../src/features/action/WakeAndUnlock";
 import type {
   DeviceLockType,
@@ -49,11 +50,15 @@ class FakeIosUnlocker implements IosScreenUnlocker {
 
 class FakeIosLockProbe implements IosLockStateProbe {
   reads = 0;
-  states: Array<DeviceLockState | undefined> = [];
+  states: Array<DeviceLockState | undefined | Error> = [];
   state: DeviceLockState | undefined = LOCKED_SWIPE;
   async read(): Promise<DeviceLockState | undefined> {
     this.reads++;
-    return this.states.length > 0 ? this.states.shift() : this.state;
+    const state = this.states.length > 0 ? this.states.shift() : this.state;
+    if (state instanceof Error) {
+      throw state;
+    }
+    return state;
   }
 }
 
@@ -144,6 +149,228 @@ describe("WakeAndUnlock", () => {
   function android(): WakeAndUnlock {
     return new WakeAndUnlock(androidDevice, adb, { timer, credentialStore: store });
   }
+
+  function recoveringIos(outcome: "timed_out" | "failed" | "not_recovering" = "timed_out") {
+    const ios = new FakeIosUnlocker();
+    const lock = new FakeIosLockProbe();
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = [outcome];
+    const action = new WakeAndUnlock(iosDevice, adb, {
+      timer,
+      wallClockNow: () => 10_000,
+      iosUnlocker: ios,
+      iosLockStateProbe: lock,
+      iosRunnerRecovery: recovery,
+    });
+    return { action, ios, lock, recovery };
+  }
+
+  describe("recovery failure lock-state recheck", () => {
+    let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+    beforeEach(() => {
+      warn = spyOn(logger, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    test.each(["timed_out", "failed", "not_recovering"] as const)(
+      "%s recovery accepts unlocked state without a swipe",
+      async (outcome) => {
+        const { action, ios, lock } = recoveringIos(outcome);
+        lock.states = [LOCKED_SWIPE, UNLOCKED];
+        const result = await action.execute();
+        expect(result).toMatchObject({ success: true, unlocked: true, wasLocked: true });
+        expect(result).toHaveProperty("warning");
+        const warning = result.warning;
+        expect(warning).toContain(`runner recovery ${outcome}`);
+        expect(warning).toContain("next observe");
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(warning));
+        expect(ios.calls).toBe(0);
+        expect(lock.reads).toBe(2);
+      },
+    );
+
+    test.each([LOCKED_SWIPE, undefined])(
+      "timeout preserves failure for state %j",
+      async (state) => {
+        const { action, ios, lock } = recoveringIos();
+        lock.states = [LOCKED_SWIPE, state];
+        await expect(action.execute()).rejects.toThrow(
+          "wakeAndUnlock: iOS runner recovery timed_out while lock state is locked; retry after the runner reconnects",
+        );
+        expect(lock.reads).toBe(2);
+        expect(ios.calls).toBe(0);
+      },
+    );
+
+    test("timeout preserves recovery error and warns when the recheck throws", async () => {
+      const { action, ios, lock } = recoveringIos();
+      const probeError = new Error("probe unavailable");
+      lock.states = [LOCKED_SWIPE, probeError];
+      await expect(action.execute()).rejects.toThrow("runner recovery timed_out");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("probe unavailable"), probeError);
+      expect(lock.reads).toBe(2);
+      expect(ios.calls).toBe(0);
+    });
+
+    test("deadline rejection accepts unlocked state after the full recovery wait", async () => {
+      const { action, ios, lock, recovery } = recoveringIos();
+      lock.states = [LOCKED_SWIPE, UNLOCKED];
+      recovery.recoveryDelayMs = 21_000;
+      recovery.timer = timer;
+      const result = await action.execute();
+      expect(result).toMatchObject({ success: true, unlocked: true, wasLocked: true });
+      expect(result.warning).toContain("timed out after 20000ms");
+      expect(recovery.budgets).toEqual([20_000]);
+      expect(timer.now()).toBe(20_000);
+      expect(ios.calls).toBe(0);
+    });
+
+    test("exhausted transport budget permits one bounded unlocked recheck", async () => {
+      const { action, ios, lock, recovery } = recoveringIos();
+      lock.states = [LOCKED_SWIPE, UNLOCKED];
+      recovery.recoveryDelayMs = 21_000;
+      recovery.timer = timer;
+      const result = await action.execute(undefined, 14_000);
+      expect(result).toMatchObject({ success: true, unlocked: true, wasLocked: true });
+      expect(lock.reads).toBe(2);
+      expect(recovery.budgets[0]).toBeLessThanOrEqual(1_000);
+      expect(ios.calls).toBe(0);
+    });
+
+    test("exhausted recheck is bounded to 250ms and preserves recovery failure", async () => {
+      const { action, ios, lock, recovery } = recoveringIos();
+      recovery.recoveryDelayMs = 21_000;
+      recovery.timer = timer;
+      let reads = 0;
+      const read = spyOn(lock, "read").mockImplementation(async () => {
+        reads++;
+        return reads === 1 ? LOCKED_SWIPE : new Promise(() => {});
+      });
+      try {
+        await expect(action.execute(undefined, 14_000)).rejects.toThrow(
+          /runner recovery.*timed out/,
+        );
+        expect(reads).toBe(2);
+        expect(timer.now()).toBe((recovery.budgets[0] ?? 0) + 250);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining("probe"),
+          expect.any(ActionableError),
+        );
+        expect(ios.calls).toBe(0);
+      } finally {
+        read.mockRestore();
+      }
+    });
+
+    test("reconnection budget exhaustion accepts unlocked state", async () => {
+      const { action, ios, lock, recovery } = recoveringIos("not_recovering");
+      lock.states = [LOCKED_SWIPE, UNLOCKED];
+      const connect = spyOn(recovery, "ensureConnected").mockImplementation(async () => {
+        timer.setCurrentTime(20_000);
+        return false;
+      });
+      try {
+        const result = await action.execute();
+        expect(result.success).toBe(true);
+        expect(result.warning).toContain("recovery budget exhausted before swipe");
+        expect(ios.calls).toBe(0);
+      } finally {
+        connect.mockRestore();
+      }
+    });
+
+    test("caller abort during recovery skips the unlocked recheck", async () => {
+      const { action, ios, lock, recovery } = recoveringIos();
+      lock.states = [LOCKED_SWIPE, UNLOCKED];
+      const controller = new AbortController();
+      recovery.timer = timer;
+      recovery.recoveryDelayMs = 1_000;
+      const wait = spyOn(recovery, "awaitRecovery").mockImplementation(async () => {
+        timer.setTimeout(() => controller.abort(), 10);
+        await timer.sleep(1_000);
+        return "timed_out";
+      });
+      try {
+        await expect(action.execute(undefined, undefined, controller.signal)).rejects.toThrow(
+          "cancelled",
+        );
+        expect(lock.reads).toBe(1);
+        expect(ios.calls).toBe(0);
+      } finally {
+        wait.mockRestore();
+      }
+    });
+
+    test("caller abort during the unlocked recheck cannot return success", async () => {
+      const { action, ios, lock } = recoveringIos();
+      const controller = new AbortController();
+      let reads = 0;
+      const read = spyOn(lock, "read").mockImplementation(async () => {
+        if (++reads === 1) {
+          return LOCKED_SWIPE;
+        }
+        controller.abort();
+        return UNLOCKED;
+      });
+      try {
+        await expect(action.execute(undefined, undefined, controller.signal)).rejects.toThrow(
+          "cancelled",
+        );
+        expect(reads).toBe(2);
+        expect(ios.calls).toBe(0);
+      } finally {
+        read.mockRestore();
+      }
+    });
+
+    test("Android wake and swipe unlock never invokes iOS recovery or probe", async () => {
+      adb.setScreenState(false, "Asleep");
+      adb.setDeviceLockSequence([LOCKED_SWIPE, UNLOCKED]);
+      const ios = new FakeIosUnlocker();
+      const lock = new FakeIosLockProbe();
+      const recovery = new FakeIosRecovery();
+      recovery.connected = false;
+      const result = await new WakeAndUnlock(androidDevice, adb, {
+        timer,
+        iosUnlocker: ios,
+        iosLockStateProbe: lock,
+        iosRunnerRecovery: recovery,
+      }).execute();
+      expect(result).toMatchObject({
+        success: true,
+        wasAsleep: true,
+        wasLocked: true,
+        unlocked: true,
+      });
+      expect(adb.getExecutedCommands()).toEqual([
+        "shell input keyevent KEYCODE_WAKEUP",
+        "shell wm dismiss-keyguard",
+      ]);
+      expect(result.warning).toBeUndefined();
+      expect([ios.calls, lock.reads, recovery.starts]).toEqual([0, 0, 0]);
+    });
+
+    test("successful recovery still swipes then confirms without a warning", async () => {
+      const { action, ios, lock, recovery } = recoveringIos();
+      recovery.outcomes = ["recovered"];
+      lock.states = [LOCKED_SWIPE, UNLOCKED];
+      const swipe = spyOn(ios, "wakeAndDismiss").mockImplementation(async () => {
+        expect(recovery.connected).toBe(true);
+        expect(lock.reads).toBe(1);
+        return { success: true };
+      });
+      try {
+        const result = await action.execute();
+        expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+        expect(result.warning).toBeUndefined();
+        expect(swipe).toHaveBeenCalledTimes(1);
+        expect(lock.reads).toBe(2);
+      } finally {
+        swipe.mockRestore();
+      }
+    });
+  });
 
   test("awake and unlocked: reports success without sending any input", async () => {
     adb.setScreenState(true, "Awake");

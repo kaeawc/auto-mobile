@@ -9,6 +9,7 @@ import { RecentApps } from "../../src/features/action/RecentApps";
 import { Clipboard } from "../../src/features/action/Clipboard";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import { IosLockScreenUnlocker } from "../../src/features/action/IosLockScreenUnlocker";
+import { getStructuredPayload } from "../../src/utils/toolUtils";
 import {
   setShakeFactory,
   resetShakeFactory,
@@ -51,6 +52,29 @@ describe("slice 2 registered handler cancellation", () => {
     resetClipboardFactory();
     resetWakeAndUnlockFactory();
     ToolRegistry.clearTools();
+  });
+
+  test("wakeAndUnlock includes recovery warning in its payload and message", async () => {
+    const warning = "iOS runner had not finished recovering; next observe may need a moment";
+    setWakeAndUnlockFactory(() => ({
+      execute: async () => ({
+        success: true,
+        platform: "ios",
+        wasAsleep: false,
+        wasLocked: true,
+        unlocked: true,
+        warning,
+      }),
+    }));
+    const response = await handler("wakeAndUnlock")(devices[1]!, {});
+    expect(getStructuredPayload(response)).toMatchObject({
+      warning,
+      message: `Device unlocked. Warning: ${warning}`,
+    });
+    expect(response.content).toContainEqual({
+      type: "text",
+      text: expect.stringContaining(`Device unlocked. Warning: ${warning}`),
+    });
   });
 
   for (const device of devices) {

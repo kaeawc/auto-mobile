@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -422,6 +422,277 @@ describe("deviceSnapshotManager", () => {
     // Reported evicted names equal the rows actually removed — no phantoms, no omissions.
     expect(rowsRemoved).toEqual(["s1", "s2"]);
     expect(evictedUnion).toEqual(["s1", "s2"]);
+  });
+
+  test.each([
+    {
+      deviceId: "UDID-A",
+      name: "iPhone A",
+      platform: "ios" as const,
+      options: { platform: "ios" as const, deviceId: "UDID-A" },
+    },
+    {
+      deviceId: "emulator-5554",
+      name: "Pixel_A",
+      platform: "android" as const,
+      options: { platform: "android" as const, avdName: "Pixel_A" },
+    },
+  ])(
+    "restore recovers the record's scoped data before constructing the provider ($platform)",
+    async (device) => {
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: "recover-before-restore",
+        timestamp,
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: device.platform,
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        ...manifest,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 0,
+        manifest,
+      });
+      await setDeviceSnapshotManagerDependencies({
+        createRestoreProvider: () => {
+          expect(store.recoveryCalls).toEqual([
+            { snapshotName: manifest.snapshotName, options: device.options },
+          ]);
+          return { restore: async () => ({ snapshotType: "adb", restoredAt: timestamp }) };
+        },
+      });
+      await restoreDeviceSnapshot(device, { snapshotName: manifest.snapshotName });
+    },
+  );
+
+  test("restore rejects recovery failure without constructing the provider", async () => {
+    await captureDeviceSnapshot(TEST_DEVICE, { snapshotName: "broken-recovery" });
+    store.queueRecoveryFailure(new Error("archive recovery failed"));
+    let providerConstructed = false;
+    await setDeviceSnapshotManagerDependencies({
+      createRestoreProvider: () => {
+        providerConstructed = true;
+        return {
+          restore: async () => ({ snapshotType: "adb", restoredAt: new Date(0).toISOString() }),
+        };
+      },
+    });
+    const restoring = restoreDeviceSnapshot(TEST_DEVICE, { snapshotName: "broken-recovery" });
+    await expect(restoring).rejects.toBeInstanceOf(ActionableError);
+    await expect(restoring).rejects.toThrow(/archive recovery failed/);
+    expect(providerConstructed).toBe(false);
+    expect(restoreCalls).toEqual([]);
+  });
+
+  test.each(["flat", "scoped"])(
+    "legacy scan skips a %s capture's in-flight directory",
+    async (layout) => {
+      const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-inflight-"));
+      const gate = Promise.withResolvers<void>();
+      const written = Promise.withResolvers<void>();
+      let capturing: Promise<unknown> | undefined;
+      try {
+        const realStore = new DeviceSnapshotStore(
+          tempRoot,
+          noOpSnapshotDirectorySync,
+          noOpSnapshotFileSync,
+        );
+        const device =
+          layout === "flat"
+            ? TEST_DEVICE
+            : { ...TEST_DEVICE, deviceId: "emulator-5554", name: "Pixel_A" };
+        const options =
+          layout === "flat" ? undefined : { platform: "android" as const, avdName: device.name };
+        const orphanDir = realStore.getSnapshotPathWithOptions("unlocked-orphan", options);
+        await fs.mkdir(orphanDir, { recursive: true });
+        await fs.writeFile(path.join(orphanDir, "settings.json"), "{}");
+        await setDeviceSnapshotManagerDependencies({
+          snapshotStore: realStore,
+          createCaptureProvider: () => ({
+            capture: async (args) => {
+              const captureDir = realStore.getSnapshotPathWithOptions(args.snapshotName, options);
+              await fs.mkdir(captureDir, { recursive: true });
+              await fs.writeFile(path.join(captureDir, "settings.json"), "{}");
+              written.resolve();
+              await gate.promise;
+              throw new Error("capture failed after settings write");
+            },
+          }),
+        });
+        capturing = captureDeviceSnapshot(device, {
+          snapshotName: "inflight-new",
+          useVmSnapshot: false,
+        });
+        await written.promise;
+        const { snapshots } = await listDeviceSnapshots();
+        const imported = await repository.getSnapshot("inflight-new");
+        gate.resolve();
+        await expect(capturing).rejects.toThrow("capture failed after settings write");
+        expect(imported).toBeNull();
+        expect(snapshots.map((record) => record.snapshotName)).toEqual(["unlocked-orphan"]);
+        expect(await realStore.snapshotDirectoryExists("inflight-new", options)).toBe(false);
+        await listDeviceSnapshots();
+        expect(await repository.getSnapshot("inflight-new")).toBeNull();
+        expect(await repository.getSnapshot("unlocked-orphan")).not.toBeNull();
+      } finally {
+        gate.resolve();
+        // allSettled consumes the intentionally failed capture before removing its temp archive.
+        if (capturing) {
+          await Promise.allSettled([capturing]);
+        }
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.each([
+    {
+      platform: "ios" as const,
+      oldId: "UDID-A",
+      newId: "UDID-B",
+      oldName: "iPhone A",
+      newName: "iPhone B",
+      expectedDeletes: [{ platform: "ios" as const, deviceId: "UDID-A" }],
+    },
+    {
+      platform: "android" as const,
+      oldId: "emulator-5554",
+      newId: "emulator-5556",
+      oldName: "Pixel_A",
+      newName: "Pixel_B",
+      expectedDeletes: [{ platform: "android" as const, avdName: "Pixel_A" }, undefined],
+    },
+    {
+      platform: "android" as const,
+      oldId: "emulator-5554",
+      newId: "physical-b",
+      oldName: "Pixel_A",
+      newName: "Phone B",
+      expectedDeletes: [{ platform: "android" as const, avdName: "Pixel_A" }],
+    },
+  ])(
+    "successful cross-device overwrite retires only prior archive paths ($oldId -> $newId)",
+    async (scenario) => {
+      const prior: BootedDevice = {
+        platform: scenario.platform,
+        deviceId: scenario.oldId,
+        name: scenario.oldName,
+      };
+      const current: BootedDevice = {
+        platform: scenario.platform,
+        deviceId: scenario.newId,
+        name: scenario.newName,
+      };
+      await setDeviceSnapshotManagerDependencies({
+        createCaptureProvider: (device) => ({
+          capture: async (args) => {
+            const timestamp = new Date(fakeTimer.now()).toISOString();
+            const manifest: DeviceSnapshotManifest = {
+              snapshotName: args.snapshotName,
+              timestamp,
+              deviceId: device.deviceId,
+              deviceName: device.name,
+              platform: device.platform,
+              snapshotType: "adb",
+              includeAppData: false,
+              includeSettings: true,
+            };
+            return { snapshotName: args.snapshotName, timestamp, snapshotType: "adb", manifest };
+          },
+        }),
+      });
+      await captureDeviceSnapshot(prior, { snapshotName: "cross-device", useVmSnapshot: false });
+      const priorRecord = await repository.getSnapshot("cross-device");
+      await setDeviceSnapshotManagerDependencies({
+        createCaptureProvider: () => ({
+          capture: async () => {
+            throw new Error("replacement failed");
+          },
+        }),
+      });
+      await expect(
+        captureDeviceSnapshot(current, { snapshotName: "cross-device", useVmSnapshot: false }),
+      ).rejects.toThrow("replacement failed");
+      expect(store.deleteCalls).toEqual([]);
+      expect(await repository.getSnapshot("cross-device")).toEqual(priorRecord);
+      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+
+      await setDeviceSnapshotManagerDependencies({
+        createCaptureProvider: (device) => ({
+          capture: async (args) => {
+            const timestamp = new Date(fakeTimer.now()).toISOString();
+            const manifest: DeviceSnapshotManifest = {
+              snapshotName: args.snapshotName,
+              timestamp,
+              deviceId: device.deviceId,
+              deviceName: device.name,
+              platform: device.platform,
+              snapshotType: "adb",
+              includeAppData: false,
+              includeSettings: true,
+            };
+            return { snapshotName: args.snapshotName, timestamp, snapshotType: "adb", manifest };
+          },
+        }),
+      });
+      await captureDeviceSnapshot(current, { snapshotName: "cross-device", useVmSnapshot: false });
+      expect(store.deleteCalls).toEqual(
+        scenario.expectedDeletes.map((options) => ({ snapshotName: "cross-device", options })),
+      );
+      expect((await repository.getSnapshot("cross-device"))?.deviceId).toBe(current.deviceId);
+      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+      const deletionCount = store.deleteCalls.length;
+      await captureDeviceSnapshot(current, { snapshotName: "cross-device", useVmSnapshot: false });
+      expect(store.deleteCalls).toHaveLength(deletionCount);
+      expect(await store.snapshotDirectoryExists("cross-device")).toBe(true);
+    },
+  );
+
+  test("archive retirement failure leaves the successful replacement usable", async () => {
+    const timestamp = new Date(fakeTimer.now()).toISOString();
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "retirement-failure",
+      timestamp,
+      deviceId: "UDID-A",
+      deviceName: "iPhone A",
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: true,
+      includeSettings: false,
+    };
+    await repository.insertSnapshot({
+      ...manifest,
+      createdAt: timestamp,
+      lastAccessedAt: timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    const deletion = spyOn(store, "deleteSnapshotData").mockRejectedValueOnce(
+      new Error("retirement denied"),
+    );
+    try {
+      const { result } = await captureDeviceSnapshot(TEST_DEVICE, {
+        snapshotName: manifest.snapshotName,
+      });
+      expect(result.snapshotName).toBe(manifest.snapshotName);
+      expect(deletion).toHaveBeenCalledWith(manifest.snapshotName, {
+        platform: "ios",
+        deviceId: "UDID-A",
+      });
+      expect((await repository.getSnapshot(manifest.snapshotName))?.deviceId).toBe(
+        TEST_DEVICE.deviceId,
+      );
+      expect(await store.snapshotDirectoryExists(manifest.snapshotName)).toBe(true);
+      await restoreDeviceSnapshot(TEST_DEVICE, { snapshotName: manifest.snapshotName });
+      expect(restoreCalls).toHaveLength(1);
+    } finally {
+      deletion.mockRestore();
+    }
   });
 
   test("restoreDeviceSnapshot touches lastAccessedAt and forwards manifest", async () => {

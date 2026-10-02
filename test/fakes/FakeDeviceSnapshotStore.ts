@@ -1,11 +1,13 @@
 import * as os from "os";
 import * as path from "path";
-import type { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
+import { DeviceSnapshotStore, type SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
 
 type DeviceSnapshotStoreContract = Pick<
   DeviceSnapshotStore,
   | "getBasePath"
   | "getSnapshotPath"
+  | "getSnapshotPathWithOptions"
+  | "recoverSnapshotData"
   | "generateSnapshotName"
   | "snapshotDirectoryExists"
   | "getSnapshotSizeBytes"
@@ -22,6 +24,10 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
   private deleted = new Set<string>();
   private generatedNames: string[] = [];
   private nameCounter = 0;
+  private readonly activePaths = new Map<string, string>();
+  readonly deleteCalls: Array<{ snapshotName: string; options?: SnapshotPathOptions }> = [];
+  readonly recoveryCalls: Array<{ snapshotName: string; options?: SnapshotPathOptions }> = [];
+  private readonly recoveryFailures: Error[] = [];
 
   constructor(basePath?: string) {
     this.basePath = basePath ?? path.join(os.tmpdir(), "auto-mobile-fake-snapshots");
@@ -33,6 +39,22 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   getSnapshotPath(snapshotName: string): string {
     return path.join(this.basePath, snapshotName);
+  }
+
+  getSnapshotPathWithOptions(snapshotName: string, options?: SnapshotPathOptions): string {
+    return new DeviceSnapshotStore(this.basePath).getSnapshotPathWithOptions(snapshotName, options);
+  }
+
+  queueRecoveryFailure(error: Error): void {
+    this.recoveryFailures.push(error);
+  }
+
+  async recoverSnapshotData(snapshotName: string, options?: SnapshotPathOptions): Promise<void> {
+    this.recoveryCalls.push({ snapshotName, options });
+    const failure = this.recoveryFailures.shift();
+    if (failure) {
+      throw failure;
+    }
   }
 
   setSnapshotSize(snapshotName: string, sizeBytes: number | null): void {
@@ -86,7 +108,7 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   async replaceSnapshotData<T>(
     snapshotName: string,
-    _options: unknown,
+    options: SnapshotPathOptions | undefined,
     capture: () => Promise<T>,
   ): Promise<T> {
     // The fresh capture replaces any prior on-disk data for this name. On
@@ -97,6 +119,7 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     try {
       const result = await capture();
       this.existing.add(snapshotName);
+      this.activePaths.set(snapshotName, this.getSnapshotPathWithOptions(snapshotName, options));
       return result;
     } catch (error) {
       if (priorExists) {
@@ -106,8 +129,14 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     }
   }
 
-  async deleteSnapshotData(snapshotName: string): Promise<void> {
+  async deleteSnapshotData(snapshotName: string, options?: SnapshotPathOptions): Promise<void> {
+    this.deleteCalls.push({ snapshotName, options });
     this.deleted.add(snapshotName);
+    const activePath = this.activePaths.get(snapshotName);
+    if (activePath && activePath !== this.getSnapshotPathWithOptions(snapshotName, options)) {
+      return;
+    }
+    this.activePaths.delete(snapshotName);
     this.existing.delete(snapshotName);
     this.sizes.delete(snapshotName);
   }

@@ -48,6 +48,14 @@ export interface DisplayTransitionSink {
   notifyAndroidTransition(deviceId: string, event: PushedDisplayTransition): void;
 }
 
+/** Read-only transition seam for coordinate-action fences. */
+export interface DisplayTransitionReader {
+  revision(deviceId: string): number;
+  identityRevision(deviceId: string): number;
+  sameIdentitySince(deviceId: string, renderedRevision: number): boolean;
+  currentObservedPanel(deviceId: string): Pick<DisplayRef, "key" | "role"> | undefined;
+}
+
 /** Tracker provenance captured before asynchronous observation work starts. */
 export interface DisplayCaptureStart {
   revision: number;
@@ -88,7 +96,7 @@ function samePushedPanel(
   );
 }
 
-export class DisplayTransitionTracker implements DisplayTransitionSink {
+export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayTransitionReader {
   private readonly panels = new Map<string, PanelGeometry>();
   private readonly observationIds = new Map<string, string>();
   private readonly panelRevisions = new Map<string, number>();

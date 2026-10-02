@@ -116,6 +116,7 @@ export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
   lastObserveTime?: number; // Timestamp of last hierarchy observation
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
+  lastRenderedDisplayGeneration?: number; // Last caller-visible display.generation; survives invalidation
   lastRenderedDisplayRevision?: number; // Caller-visible display revision; survives panel cache invalidation
   lastRenderedDisplayKey?: string; // Caller-visible panel, independent of the diff baseline
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
@@ -3528,6 +3529,7 @@ export class SessionManager {
   ): void {
     this.updateSessionCache(sessionId, {
       lastRenderedObservation: observation,
+      lastRenderedDisplayGeneration: observation.display?.generation,
       lastRenderedDisplayKey: observation.display?.key,
       ...(displayRevision === undefined ? {} : { lastRenderedDisplayRevision: displayRevision }),
     });
@@ -3550,11 +3552,21 @@ export class SessionManager {
   }
 
   /** Keep the caller's revision even when a fold clears the hierarchy and diff baseline. */
-  setLastRenderedDisplayRevision(sessionId: string, revision: number, key?: string): void {
+  setLastRenderedDisplayRevision(
+    sessionId: string,
+    revision: number,
+    key?: string,
+    generation?: number,
+  ): void {
     this.updateSessionCache(sessionId, {
       lastRenderedDisplayRevision: revision,
+      lastRenderedDisplayGeneration: generation,
       ...(key === undefined ? {} : { lastRenderedDisplayKey: key }),
     });
+  }
+
+  getLastRenderedDisplayGeneration(sessionId: string): number | undefined {
+    return this.getSession(sessionId)?.cacheData.lastRenderedDisplayGeneration;
   }
 
   getLastRenderedDisplayKey(sessionId: string): string | undefined {

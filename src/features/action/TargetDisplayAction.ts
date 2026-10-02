@@ -3,14 +3,15 @@ import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer } from "../../utils/SystemTimer";
 import { DaemonState } from "../../daemon/daemonState";
-import { displayTransitions } from "../observe/DisplayTransition";
+import { staleDisplayError } from "../../models/StaleDisplayError";
+import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import { resolveTargetDisplay } from "../observe/DisplaySelection";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 
 export type RenderedObservationReader = (deviceId: string) =>
   | {
-      display: { key: string; posture?: ObserveResult["display"]["posture"] };
+      display: { key: string; generation?: number; posture?: ObserveResult["display"]["posture"] };
       displayRevision?: number;
     }
   | undefined;
@@ -30,7 +31,10 @@ export function sessionRenderedObservation(
   const key = sessions.getLastRenderedDisplayKey(sessionId);
   return key === undefined
     ? undefined
-    : { display: { key }, displayRevision: sessions.getLastRenderedDisplayRevision(sessionId) };
+    : {
+        display: { key, generation: sessions.getLastRenderedDisplayGeneration(sessionId) },
+        displayRevision: sessions.getLastRenderedDisplayRevision(sessionId),
+      };
 }
 
 function renderedRevision(
@@ -46,10 +50,32 @@ function renderedRevision(
   return sessionId ? sessions.getLastRenderedDisplayRevision(sessionId) : previous.displayRevision;
 }
 
-function assertTargetRevision(deviceId: string, revision: number, key: string): void {
-  if (displayTransitions.revision(deviceId) !== revision) {
-    throw new ActionableError(`Display changed. Re-observe display "${key}" and retry.`);
-  }
+/** Keep resolving and dispatch checks bound to the same action-start stamp. */
+function targetRevisionFence(
+  deviceId: string,
+  revision: number,
+  previous: ReturnType<RenderedObservationReader>,
+  transitions: DisplayTransitionReader,
+) {
+  // Missing caller stamp: only in-flight fences use the action-start identity generation.
+  const observedGeneration = previous?.display.generation ?? transitions.identityRevision(deviceId);
+  const stale = () =>
+    staleDisplayError(
+      observedGeneration,
+      transitions.identityRevision(deviceId),
+      transitions.currentObservedPanel(deviceId)?.key,
+    );
+  const assertCurrent = () => {
+    if (transitions.revision(deviceId) !== revision) {
+      throw stale();
+    }
+  };
+  const assertCallerCurrent = (callerRevision: number | undefined) => {
+    if (callerRevision !== undefined && callerRevision !== revision) {
+      throw stale();
+    }
+  };
+  return { stale, assertCurrent, assertCallerCurrent };
 }
 
 async function inputDisplayId(
@@ -68,6 +94,7 @@ async function inputDisplayId(
 }
 
 /** Resolve explicit action targeting against the caller's last visible panel. */
+// oxlint-disable-next-line max-params -- Append the injectable tracker without breaking existing positional reader/signal callers.
 export async function prepareTargetDisplayAction(
   device: BootedDevice,
   display: string,
@@ -75,8 +102,16 @@ export async function prepareTargetDisplayAction(
   adb: Pick<AdbExecutor, "executeCommand">,
   lastRenderedObservation: RenderedObservationReader = sessionRenderedObservation,
   signal?: AbortSignal,
+  transitions: DisplayTransitionReader = displayTransitions,
 ): Promise<{ observation: ObserveResult; displayId?: number; assertCurrent: () => void }> {
   const previous = lastRenderedObservation(device.deviceId);
+  const revision = transitions.revision(device.deviceId);
+  const { stale, assertCurrent, assertCallerCurrent } = targetRevisionFence(
+    device.deviceId,
+    revision,
+    previous,
+    transitions,
+  );
   const panel = resolveTargetDisplay(device.displays, display, {
     focusedPanelKey: previous?.display.key,
     activePanelKey: previous?.display.key,
@@ -93,22 +128,19 @@ export async function prepareTargetDisplayAction(
       `Coordinates for display "${panel.key}" require a prior observation of that panel. Re-observe display "${panel.key}" and retry.`,
     );
   }
-  const revision = displayTransitions.revision(device.deviceId);
   const callerRevision = renderedRevision(device.deviceId, previous);
-  if (callerRevision !== undefined && callerRevision !== revision) {
-    throw new ActionableError(`Display changed. Re-observe display "${panel.key}" and retry.`);
-  }
+  assertCallerCurrent(callerRevision);
   const observation =
     iosObservation ?? (await observe.execute({ display, freshness: "cached-ok", signal }));
-  assertTargetRevision(device.deviceId, revision, panel.key);
+  assertCurrent();
   if (observation.display.key !== panel.key) {
-    throw new ActionableError(`Display changed. Re-observe display "${panel.key}" and retry.`);
+    throw stale();
   }
   const displayId = await inputDisplayId(device, adb, panel.key, signal);
-  assertTargetRevision(device.deviceId, revision, panel.key);
+  assertCurrent();
   return {
     observation,
     displayId,
-    assertCurrent: () => assertTargetRevision(device.deviceId, revision, panel.key),
+    assertCurrent,
   };
 }

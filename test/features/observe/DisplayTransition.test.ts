@@ -635,7 +635,7 @@ describe("display transitions", () => {
       screenSize: { width: 200, height: 200 },
     });
     await expect(tap.refreshViewHierarchy(10, { width: 200, height: 200 })).rejects.toThrow(
-      "Display changed during tap preparation",
+      "Display changed since these coordinates were chosen",
     );
     expect(displayTransitions.revision(device.deviceId)).toBe(1);
   });
@@ -739,7 +739,7 @@ describe("display transitions", () => {
     });
     try {
       await expect(tap.refreshViewHierarchy(10, { width: 200, height: 200 })).rejects.toThrow(
-        "Display changed during tap preparation",
+        "Display changed since these coordinates were chosen",
       );
       expect(displayTransitions.revision(sameSized.deviceId)).toBe(1);
     } finally {

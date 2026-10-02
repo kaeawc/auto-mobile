@@ -1,3 +1,6 @@
+import type { BaseActionResult } from "../../models/BaseActionResult";
+import { withStaleDisplay } from "../../models/StaleDisplayError";
+import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
 import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -146,7 +149,7 @@ export interface SendKeysClearCommand {
 
 export type SendKeysCommand = SendKeysTypeCommand | SendKeysKeyCommand | SendKeysClearCommand;
 
-export interface SendKeysCommandResult {
+export interface SendKeysCommandResult extends BaseActionResult {
   index: number;
   action: SendKeysCommand["action"];
   success: boolean;
@@ -167,7 +170,7 @@ export interface SendKeysCommandResult {
   keyboard?: KeyboardIdentity;
 }
 
-export interface SendKeysResult {
+export interface SendKeysResult extends BaseActionResult {
   success: boolean;
   completedCommands: number;
   failedIndex?: number;
@@ -215,6 +218,7 @@ export interface SendKeysTimestampProvider {
 }
 
 export interface SendKeysDependencies {
+  displayTransitions?: DisplayTransitionReader;
   lastRenderedObservation?: RenderedObservationReader;
   executor?: SendKeysCommandExecutor;
   focuser?: SendKeysTargetFocuser;
@@ -1689,6 +1693,7 @@ export class SendKeys {
   private readonly timestampProvider: SendKeysTimestampProvider;
   private readonly timer: Timer;
   private readonly lastRenderedObservation?: RenderedObservationReader;
+  private readonly displayTransitionReader: DisplayTransitionReader;
 
   constructor(
     private readonly device: BootedDevice,
@@ -1697,6 +1702,7 @@ export class SendKeys {
   ) {
     this.timer = dependencies.timer ?? defaultTimer;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
+    this.displayTransitionReader = dependencies.displayTransitions ?? displayTransitions;
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
     this.timestampProvider =
       dependencies.timestampProvider ??
@@ -1753,13 +1759,16 @@ export class SendKeys {
         assertCurrent = target.assertCurrent;
       } catch (error) {
         logger.warn(`sendKeys display routing failed: ${errorMessage(error)}`, error);
-        return {
-          success: false,
-          completedCommands: 0,
-          failedIndex: 0,
-          commands: [],
-          error: errorMessage(error),
-        };
+        return withStaleDisplay(
+          {
+            success: false,
+            completedCommands: 0,
+            failedIndex: 0,
+            commands: [],
+            error: errorMessage(error),
+          },
+          error,
+        );
       }
     }
     const semanticKey =
@@ -1792,6 +1801,7 @@ export class SendKeys {
       this.adbFactory.create(this.device),
       this.lastRenderedObservation,
       signal,
+      this.displayTransitionReader,
     );
     if (
       this.device.platform === "android" &&
@@ -1987,12 +1997,15 @@ export class SendKeys {
       } catch (error) {
         signal?.throwIfAborted();
         logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
-        result = {
-          index,
-          action: command.action,
-          success: false,
-          error: errorMessage(error),
-        };
+        result = withStaleDisplay(
+          {
+            index,
+            action: command.action,
+            success: false,
+            error: errorMessage(error),
+          },
+          error,
+        );
       }
       result.index = index;
       routing.onCommandResult?.(result);
@@ -2000,7 +2013,10 @@ export class SendKeys {
       if (!result.success) {
         return {
           results,
-          failure: { index, error: result.error ?? `sendKeys command ${index} failed` },
+          failure: {
+            index,
+            error: result.error ?? `sendKeys command ${index} failed`,
+          },
         };
       }
     }
@@ -2014,6 +2030,7 @@ export class SendKeys {
   ): SendKeysResult {
     const warnings = results.filter((result) => result.warning).map((result) => result.warning);
     if (failure) {
+      const staleDisplay = results[failure.index]?.staleDisplay;
       return {
         success: false,
         completedCommands: results.filter((result) => result.success).length,
@@ -2021,6 +2038,7 @@ export class SendKeys {
         commands: results,
         observation,
         error: failure.error,
+        ...(staleDisplay ? { staleDisplay } : {}),
         ...(warnings.length ? { warning: warnings.join(" ") } : {}),
       };
     }

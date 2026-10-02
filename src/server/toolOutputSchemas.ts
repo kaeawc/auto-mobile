@@ -1,6 +1,13 @@
 import { z } from "zod/v4";
 import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
 
+const staleDisplaySchema = z.object({
+  observedGeneration: z.number().int().nonnegative(),
+  currentGeneration: z.number().int().nonnegative(),
+  currentDisplayKey: z.string().optional(),
+  retry: z.literal("observe"),
+});
+
 /** A successful openurl may still need a foreground confirmation before the next action. */
 export const openLinkResultSchema = z
   .object({
@@ -52,10 +59,12 @@ export const keyboardResultSchema = z
 /** IME fields live on each command result, never on the sendKeys envelope. */
 export const sendKeysResultSchema = z
   .object({
+    staleDisplay: staleDisplaySchema.optional(),
     commands: z
       .array(
         z
           .object({
+            staleDisplay: staleDisplaySchema.optional(),
             backend: z.literal("autoMobileIme").optional(),
             capability: z.literal("semanticText").optional(),
             keyboard: keyboardIdentitySchema.optional(),
@@ -1217,6 +1226,7 @@ export const tapOnResultSchema = z
     selectedElements: z.array(selectedElementSchema).optional(),
     skipped: z.literal("already-checked").optional(),
     error: z.string().optional(),
+    staleDisplay: staleDisplaySchema.optional(),
     pressRecognized: z.boolean().optional(),
     contextMenuOpened: z.boolean().optional(),
     selectionStarted: z.boolean().optional(),

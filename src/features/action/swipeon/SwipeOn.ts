@@ -1,3 +1,4 @@
+import { withStaleDisplay, StaleDisplayError } from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { BaseVisualChange, ProgressCallback } from "../BaseVisualChange";
@@ -119,7 +120,7 @@ export class SwipeOn extends BaseVisualChange {
     adb: AdbClient | null = null,
     dependencies: SwipeOnDependencies = {},
   ) {
-    super(device, adb, undefined, dependencies.renderedDisplayRevision);
+    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
     this.skipCallerDisplayFence = dependencies.skipCallerDisplayFence ?? false;
     this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
     this.iosGestureTimeoutMs = dependencies.iosGestureTimeoutMs;
@@ -335,6 +336,7 @@ export class SwipeOn extends BaseVisualChange {
           this.adb,
           this.lastRenderedObservation,
           signal,
+          this.displayTransitionReader,
         );
         throwIfAborted(signal);
         if (this.device.platform === "android") {
@@ -343,7 +345,7 @@ export class SwipeOn extends BaseVisualChange {
       } catch (error) {
         throwIfAborted(signal);
         logger.warn(`swipeOn display routing failed: ${errorMessage(error)}`, error);
-        return this.createErrorResult(errorMessage(error));
+        return withStaleDisplay(this.createErrorResult(errorMessage(error)), error);
       }
     }
     return undefined;
@@ -468,6 +470,11 @@ export class SwipeOn extends BaseVisualChange {
     } catch (error) {
       perf.end();
       throwIfAborted(signal);
+
+      logger.warn(`Swipe failed: ${errorMessage(error)}`, error);
+      if (error instanceof StaleDisplayError) {
+        return withStaleDisplay(this.createErrorResult(error.message), error);
+      }
 
       // Build debug context if debug mode is enabled and we have search criteria
       const debugContext =

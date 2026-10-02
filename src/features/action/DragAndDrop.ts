@@ -1,3 +1,5 @@
+import type { DisplayFenceDependencies } from "./BaseVisualChange";
+import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import {
@@ -50,7 +52,7 @@ const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
 // A shorter timeout would fall back to the (possibly stale) observe cache on slow screens.
 const IOS_HIERARCHY_REFRESH_TIMEOUT_MS = 15000;
 
-interface DragAndDropDeps {
+interface DragAndDropDeps extends DisplayFenceDependencies {
   lastRenderedObservation?: RenderedObservationReader;
   hierarchyCapture?: HierarchyCapture;
   selector?: ElementSelector;
@@ -75,7 +77,7 @@ export class DragAndDrop extends BaseVisualChange {
     timer: Timer = defaultTimer,
     deps: DragAndDropDeps = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, timer, deps.renderedDisplayRevision, deps);
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.selector = deps.selector ?? new ResolverElementSelector();
     this.hierarchyCapture =
@@ -142,13 +144,17 @@ export class DragAndDrop extends BaseVisualChange {
           this.adb,
           this.lastRenderedObservation,
           signal,
+          this.displayTransitionReader,
         );
         if (this.device.platform === "android") {
           return await this.executeOnAndroidDisplay(options, target, signal);
         }
       } catch (error) {
         logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
-        return { success: false, duration: 0, distance: 0, error: errorMessage(error) };
+        return withStaleDisplay(
+          { success: false, duration: 0, distance: 0, error: errorMessage(error) },
+          error,
+        );
       }
     }
     return undefined;
@@ -284,6 +290,10 @@ export class DragAndDrop extends BaseVisualChange {
     } catch (error) {
       perf.end();
 
+      logger.warn(`Drag and drop failed: ${errorMessage(error)}`, error);
+      if (error instanceof StaleDisplayError) {
+        return withStaleDisplay({ success: false, duration: 0, distance: 0 }, error);
+      }
       const baseErrorMessage = errorMessage(error);
       let finalErrorMessage = `Failed to perform drag and drop: ${baseErrorMessage}`;
 

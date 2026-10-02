@@ -1,3 +1,5 @@
+import type { DisplayFenceDependencies } from "./BaseVisualChange";
+import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
   DefaultHierarchyCapture,
@@ -66,7 +68,7 @@ import {
   type TalkBackNavigationDriverFactory,
 } from "../talkback/TalkBackNavigationDriver";
 
-interface TapAnyElementDependencies {
+interface TapAnyElementDependencies extends DisplayFenceDependencies {
   hierarchyCapture?: HierarchyCapture;
   timer?: Timer;
   elementSelector?: ElementSelector;
@@ -424,7 +426,7 @@ export class TapAnyElement extends BaseVisualChange {
     adb: AdbClient | null = null,
     options: TapAnyElementDependencies = {},
   ) {
-    super(device, adb, options.timer);
+    super(device, adb, options.timer, options.renderedDisplayRevision, options);
     this.geometry = new DefaultElementGeometry();
     this.elementSelector = options.elementSelector ?? new ResolverElementSelector();
     this.finder = new DefaultElementFinder();
@@ -1390,6 +1392,9 @@ export class TapAnyElement extends BaseVisualChange {
       perf.end();
       const errorMsg = errorMessage(error);
       logger.warn(`[TapAnyElement] Tap failed: ${errorMsg}`, error);
+      if (error instanceof StaleDisplayError) {
+        return withStaleDisplay(this.createErrorResult(options.action, error.message), error);
+      }
       return {
         success: false,
         action: options.action,

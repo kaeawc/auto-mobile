@@ -1,3 +1,7 @@
+import type { Timer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
+import type { DisplayFenceDependencies } from "./BaseVisualChange";
+import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -42,7 +46,8 @@ type PinchTarget = {
   warning?: string;
 };
 
-interface PinchOnDependencies {
+interface PinchOnDependencies extends DisplayFenceDependencies {
+  timer?: Timer;
   lastRenderedObservation?: RenderedObservationReader;
   resolver?: Pick<ElementResolver, "resolve">;
   capture?: HierarchyCapture;
@@ -88,7 +93,7 @@ export class PinchOn extends BaseVisualChange {
   private visionAnalyzer: VisionAnalyzer | undefined;
 
   constructor(device: BootedDevice, adb: AdbClient | null = null, deps: PinchOnDependencies = {}) {
-    super(device, adb);
+    super(device, adb, deps.timer, deps.renderedDisplayRevision, deps);
     this.lastRenderedObservation = deps.lastRenderedObservation;
     this.resolver = deps.resolver ?? new ElementResolver();
     this.capture =
@@ -131,6 +136,7 @@ export class PinchOn extends BaseVisualChange {
           this.adb,
           this.lastRenderedObservation,
           signal,
+          this.displayTransitionReader,
         );
         throwIfAborted(signal);
         if (this.device.platform === "android") {
@@ -140,8 +146,9 @@ export class PinchOn extends BaseVisualChange {
           );
         }
       } catch (error) {
+        logger.warn(`Pinch display routing failed: ${errorMessage(error)}`, error);
         throwIfAborted(signal);
-        return this.createErrorResult(errorMessage(error), options);
+        return withStaleDisplay(this.createErrorResult(errorMessage(error), options), error);
       }
     }
     const perf = createGlobalPerformanceTracker();
@@ -323,6 +330,10 @@ export class PinchOn extends BaseVisualChange {
     } catch (error) {
       perf.end();
       throwIfAborted(signal);
+      logger.warn(`Pinch failed: ${errorMessage(error)}`, error);
+      if (error instanceof StaleDisplayError) {
+        return withStaleDisplay(this.createErrorResult(error.message, options), error);
+      }
       const baseErrorMessage = errorMessage(error);
       let finalErrorMessage = `Failed to perform pinch: ${baseErrorMessage}`;
 

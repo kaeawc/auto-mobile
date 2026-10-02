@@ -18,15 +18,14 @@ import type { Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
-import { displayTransitions } from "../observe/DisplayTransition";
+import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { executeTouchscreenInput } from "./touchscreenInput";
 import {
   BaseVisualChange,
-  STALE_DISPLAY_COORDINATES_ERROR,
+  type DisplayFenceDependencies,
   type ProgressCallback,
-  type RenderedDisplayRevisionReader,
 } from "./BaseVisualChange";
 import {
   type CoordinateTapClient,
@@ -247,9 +246,8 @@ function hasSameTapTargetingLayout(previous: ObserveResult, refreshed: ObserveRe
   );
 }
 
-export interface TapAtCoordinateDependencies {
+export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   timer?: Timer;
-  renderedDisplayRevision?: RenderedDisplayRevisionReader;
   androidClient?: CoordinateTapClient;
   iosClient?: CoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
@@ -274,7 +272,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     dependencies: TapAtCoordinateDependencies = {},
   ) {
-    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision);
+    super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
     this.androidClient =
       dependencies.androidClient ?? AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.iosClient = dependencies.iosClient ?? IOSCtrlProxyClient.getInstance(device);
@@ -301,6 +299,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       this.adb,
       this.lastRenderedObservation,
       signal,
+      this.displayTransitionReader,
     );
     const stale = this.staleSnapshotReason(options, observation);
     if (stale) {
@@ -348,21 +347,26 @@ export class TapAtCoordinate extends BaseVisualChange {
     perf.serial("tapAt");
     let dispatchedCoordinates: { x: number; y: number } | undefined;
     let iosDispatchTimestamp: number | undefined;
-    const transitionRevision = this.currentActionRevision();
+    const transitionRevision = {
+      revision: this.currentActionRevision(),
+      // With no caller stamp, in-flight fences report the action-start identity generation.
+      observedGeneration:
+        this.renderedDisplayGeneration(this.device.deviceId) ??
+        this.displayTransitionReader.identityRevision(this.device.deviceId),
+    };
 
     try {
       throwIfAborted(signal);
       if (options.display !== undefined) {
         return await this.executeOnDisplay(options, options.display, signal);
       }
-      if (this.hasStaleCallerRevision(displayTransitions.revision(this.device.deviceId))) {
-        return {
-          success: false,
-          x: options.x,
-          y: options.y,
-          action,
-          error: STALE_DISPLAY_COORDINATES_ERROR,
-        };
+      if (
+        this.hasStaleCallerRevision(this.displayTransitionReader.revision(this.device.deviceId))
+      ) {
+        return withStaleDisplay(
+          { success: false, x: options.x, y: options.y, action },
+          this.staleDisplay(transitionRevision.observedGeneration),
+        );
       }
       return await this.observedInteraction(
         async () => {
@@ -373,14 +377,11 @@ export class TapAtCoordinate extends BaseVisualChange {
             signal,
             perf,
           });
-          if (this.currentActionRevision() !== transitionRevision) {
-            return {
-              success: false,
-              x: options.x,
-              y: options.y,
-              action,
-              error: STALE_DISPLAY_COORDINATES_ERROR,
-            };
+          if (this.currentActionRevision() !== transitionRevision.revision) {
+            return withStaleDisplay(
+              { success: false, x: options.x, y: options.y, action },
+              this.staleDisplay(transitionRevision.observedGeneration),
+            );
           }
           const stale = this.staleSnapshotReason(options, observeResult);
           if (stale) {
@@ -471,17 +472,20 @@ export class TapAtCoordinate extends BaseVisualChange {
       );
     } catch (error) {
       logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
-      return {
-        success: false,
-        x:
-          dispatchedCoordinates?.x ??
-          (this.device.platform === "android" ? Math.round(options.x) : options.x),
-        y:
-          dispatchedCoordinates?.y ??
-          (this.device.platform === "android" ? Math.round(options.y) : options.y),
-        error: `Failed to tap at coordinates: ${errorMessage(error)}`,
-        action,
-      };
+      return withStaleDisplay(
+        {
+          success: false,
+          x:
+            dispatchedCoordinates?.x ??
+            (this.device.platform === "android" ? Math.round(options.x) : options.x),
+          y:
+            dispatchedCoordinates?.y ??
+            (this.device.platform === "android" ? Math.round(options.y) : options.y),
+          error: `Failed to tap at coordinates: ${errorMessage(error)}`,
+          action,
+        },
+        error,
+      );
     } finally {
       perf.end();
     }
@@ -491,7 +495,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     resolved: { x: number; y: number },
     observeResult: ObserveResult,
-    transitionRevision: number,
+    transitionRevision: { revision: number; observedGeneration: number },
     perf: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<string | undefined> {
@@ -551,16 +555,19 @@ export class TapAtCoordinate extends BaseVisualChange {
     }
   }
 
-  private assertDisplayRevisionCurrent(revision: number): void {
-    if (this.currentActionRevision() !== revision) {
-      throw new ActionableError(STALE_DISPLAY_COORDINATES_ERROR);
+  private assertDisplayRevisionCurrent(fence: {
+    revision: number;
+    observedGeneration: number;
+  }): void {
+    if (this.currentActionRevision() !== fence.revision) {
+      throw this.staleDisplay(fence.observedGeneration);
     }
   }
 
   private currentActionRevision(): number {
     return this.device.platform === "ios"
-      ? displayTransitions.identityRevision(this.device.deviceId)
-      : displayTransitions.revision(this.device.deviceId);
+      ? this.displayTransitionReader.identityRevision(this.device.deviceId)
+      : this.displayTransitionReader.revision(this.device.deviceId);
   }
 
   private staleSnapshotReason(
@@ -597,7 +604,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       return false;
     }
     return this.device.platform === "ios"
-      ? !displayTransitions.sameIdentitySince(this.device.deviceId, callerRevision)
+      ? !this.displayTransitionReader.sameIdentitySince(this.device.deviceId, callerRevision)
       : callerRevision !== revision;
   }
 
@@ -605,7 +612,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     frameContext: string | undefined,
-    revision: number,
+    revision: { revision: number; observedGeneration: number },
     signal?: AbortSignal,
   ): Promise<void> {
     if (options.action !== "doubleTap") {
@@ -629,7 +636,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     options: TapAtOptions,
     point: { x: number; y: number },
     frameContext: string | undefined,
-    revision: number,
+    revision: { revision: number; observedGeneration: number },
     signal?: AbortSignal,
   ): Promise<void> {
     if (options.action !== "doubleTap") {

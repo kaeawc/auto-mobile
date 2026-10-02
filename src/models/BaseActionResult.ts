@@ -1,3 +1,4 @@
+import type { StaleDisplayDetails } from "./StaleDisplayError";
 import { ObserveResult } from "./ObserveResult";
 
 /**
@@ -11,6 +12,7 @@ export interface BaseActionResult {
   success: boolean;
   observation?: ObserveResult;
   error?: string;
+  staleDisplay?: StaleDisplayDetails;
   /**
    * Advisory notes about a SUCCESSFUL action: a best-effort post-action epilogue
    * (keyboard dismissal, cleanup) that failed without preventing the primary

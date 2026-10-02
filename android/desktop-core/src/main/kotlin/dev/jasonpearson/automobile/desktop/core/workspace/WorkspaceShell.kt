@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -50,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
@@ -122,6 +124,8 @@ fun WorkspaceShell(
   updateStatus: UpdateStatus = UpdateStatus.Idle,
   onUpdateClick: () -> Unit = {},
   onOpenPalette: () -> Unit = {},
+  // The host re-keys column state when a live stream reports a replacement device epoch.
+  onDeviceSessionSuperseded: (DeviceStreamEvent.DeviceSessionSuperseded) -> Unit = {},
   // A host request for the named pane to use its existing Screenshot capture path. The token
   // changes on each request; null leaves all panes inert.
   externalCaptureRequest: Pair<String, Int>? = null,
@@ -182,78 +186,80 @@ fun WorkspaceShell(
   // or an assistive-tech swipe can't reach the visually-dimmed controls behind the overlay. Mirror
   // the exact render conditions below so isolation tracks the overlays one-for-one.
   val overlayActive = showHealthSheet || (showCompare && comparePair != null) || showOfflineBrowse
-  Box(modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
-      TopBar(
-        status = status,
-        statusDetail = statusDetail,
-        updateStatus = updateStatus,
-        onUpdateClick = onUpdateClick,
-        onOpenPicker = onOpenPicker,
-        onOpenPalette = onOpenPalette,
-        onStatusClick = { showHealthSheet = true },
-        canCompare = comparePair != null,
-        onCompare = { showCompare = true },
-      )
-      when (state) {
-        is WorkspaceUiState.Empty ->
-          EmptyState(
-            onOpenPicker = onOpenPicker,
-            onBrowseHistory = { showOfflineBrowse = true },
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-          )
-        is WorkspaceUiState.Content ->
-          Row(Modifier.weight(1f).fillMaxWidth()) {
-            val canDiff = state.columns.size > 1
-            val displayNames =
-              disambiguateLabels(state.columns, DeviceColumn::deviceId, DeviceColumn::name)
-            state.columns.forEach { column ->
-              // Key by deviceId so a surviving pane keeps its own remembered state + facet
-              // connection when another pane closes (unkeyed = positional identity churns
-              // survivors).
-              key(column.deviceId) {
-                DeviceColumnView(
-                  column = column,
-                  displayName = displayNames.getValue(column.deviceId),
-                  focused = column.deviceId == state.focusedDeviceId,
-                  onAction = onAction,
-                  facetContent = facetContent,
-                  inspectContent = inspectContent,
-                  streamContent = streamContent,
-                  observationStreamFactory = observationStreamFactory,
-                  screenshotSaver = screenshotSaver,
-                  externalCaptureRequest = externalCaptureRequest,
-                  canDiff = canDiff,
-                  modifier = Modifier.weight(1f).fillMaxHeight(),
-                )
+  CompositionLocalProvider(LocalDeviceSessionSupersededHandler provides onDeviceSessionSuperseded) {
+    Box(modifier.fillMaxSize()) {
+      Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
+        TopBar(
+          status = status,
+          statusDetail = statusDetail,
+          updateStatus = updateStatus,
+          onUpdateClick = onUpdateClick,
+          onOpenPicker = onOpenPicker,
+          onOpenPalette = onOpenPalette,
+          onStatusClick = { showHealthSheet = true },
+          canCompare = comparePair != null,
+          onCompare = { showCompare = true },
+        )
+        when (state) {
+          is WorkspaceUiState.Empty ->
+            EmptyState(
+              onOpenPicker = onOpenPicker,
+              onBrowseHistory = { showOfflineBrowse = true },
+              modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+          is WorkspaceUiState.Content ->
+            Row(Modifier.weight(1f).fillMaxWidth()) {
+              val canDiff = state.columns.size > 1
+              val displayNames =
+                disambiguateLabels(state.columns, DeviceColumn::deviceId, DeviceColumn::name)
+              state.columns.forEach { column ->
+                // Key by deviceId so a surviving pane keeps its own remembered state + facet
+                // connection when another pane closes (unkeyed = positional identity churns
+                // survivors).
+                key(column.deviceId) {
+                  DeviceColumnView(
+                    column = column,
+                    displayName = displayNames.getValue(column.deviceId),
+                    focused = column.deviceId == state.focusedDeviceId,
+                    onAction = onAction,
+                    facetContent = facetContent,
+                    inspectContent = inspectContent,
+                    streamContent = streamContent,
+                    observationStreamFactory = observationStreamFactory,
+                    screenshotSaver = screenshotSaver,
+                    externalCaptureRequest = externalCaptureRequest,
+                    canDiff = canDiff,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                  )
+                }
               }
             }
-          }
+        }
       }
-    }
-    if (showHealthSheet) {
-      HealthSheetOverlay(
-        status = status,
-        bootstrapState = bootstrapState,
-        onRecoverDaemon = onRecoverDaemon,
-        recovering = recovering,
-        onDismiss = { showHealthSheet = false },
-        content = healthSheetContent,
-      )
-    }
-    if (showCompare && comparePair != null) {
-      CompareOverlay(
-        columnA = comparePair.first,
-        columnB = comparePair.second,
-        onDismiss = { showCompare = false },
-        content = compareContent,
-      )
-    }
-    if (showOfflineBrowse) {
-      OfflineBrowseOverlay(
-        onDismiss = { showOfflineBrowse = false },
-        content = offlineBrowseContent,
-      )
+      if (showHealthSheet) {
+        HealthSheetOverlay(
+          status = status,
+          bootstrapState = bootstrapState,
+          onRecoverDaemon = onRecoverDaemon,
+          recovering = recovering,
+          onDismiss = { showHealthSheet = false },
+          content = healthSheetContent,
+        )
+      }
+      if (showCompare && comparePair != null) {
+        CompareOverlay(
+          columnA = comparePair.first,
+          columnB = comparePair.second,
+          onDismiss = { showCompare = false },
+          content = compareContent,
+        )
+      }
+      if (showOfflineBrowse) {
+        OfflineBrowseOverlay(
+          onDismiss = { showOfflineBrowse = false },
+          content = offlineBrowseContent,
+        )
+      }
     }
   }
 }

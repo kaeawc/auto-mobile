@@ -27,6 +27,7 @@ import {
   projectActionableHierarchy,
 } from "./HierarchyNormalization";
 import type { SettleObserve } from "./interfaces/SettleObserve";
+import type { HierarchySyncDiagnostics } from "./android/types";
 
 /** Dynamic platform bridge: normalizers own the raw response shape. */
 export interface HierarchySyncClient {
@@ -35,7 +36,7 @@ export interface HierarchySyncClient {
     disableAllFiltering: boolean,
     signal: AbortSignal | undefined,
     timeoutMs: number,
-    diagnostics?: unknown,
+    diagnostics?: HierarchySyncDiagnostics,
     displayId?: number,
   ): Promise<{ hierarchy: unknown; frameContext?: ViewHierarchyResult["frameContext"] } | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
@@ -72,26 +73,38 @@ function normalizeSyncedIosHierarchy(
   };
 }
 
-function requestSyncHierarchy(
+async function requestSyncHierarchy(
   client: HierarchySyncClient,
   request: HierarchyCaptureRequest,
-  timeoutMs: number,
-): ReturnType<HierarchySyncClient["requestHierarchySync"]> {
+  options: { timeoutMs: number; deviceId: string; owned: boolean },
+): Promise<NonNullable<Awaited<ReturnType<HierarchySyncClient["requestHierarchySync"]>>>> {
+  const diagnostics: HierarchySyncDiagnostics = {};
   const args = [
     new NoOpPerformanceTracker(),
     request.searchRaw === true,
     request.signal,
-    timeoutMs,
+    options.timeoutMs,
   ] as const;
+  let synced: Awaited<ReturnType<HierarchySyncClient["requestHierarchySync"]>>;
   if (request.observerMode) {
     if (!client.requestHierarchySyncForObserver) {
       throw new ActionableError("Observer hierarchy read is unavailable for this client");
     }
-    return client.requestHierarchySyncForObserver(...args, request.displayId);
+    synced = await client.requestHierarchySyncForObserver(...args, request.displayId);
+  } else {
+    synced = await client.requestHierarchySync(...args, diagnostics, request.displayId);
   }
-  return request.displayId === undefined
-    ? client.requestHierarchySync(...args)
-    : client.requestHierarchySync(...args, undefined, request.displayId);
+  if (!synced) {
+    const detail =
+      diagnostics.failureReason ??
+      (diagnostics.runnerError ? `runner error: ${diagnostics.runnerError}` : undefined);
+    const message =
+      !request.observerMode || options.owned
+        ? `Device ${options.deviceId} hierarchy service did not answer`
+        : `Device ${options.deviceId} has no reachable hierarchy service`;
+    throw new ActionableError(detail ? `${message}: ${detail}` : message);
+  }
+  return synced;
 }
 
 function existingHierarchyClient(
@@ -242,14 +255,11 @@ export function createDeviceHierarchyCapture(
         if (remaining <= 0) {
           throw new ActionableError(`Device ${device.deviceId} hierarchy read timed out`);
         }
-        const synced = await requestSyncHierarchy(syncClient, request, remaining);
-        if (!synced) {
-          throw new ActionableError(
-            owned
-              ? `Device ${device.deviceId} hierarchy service did not answer`
-              : `Device ${device.deviceId} has no reachable hierarchy service`,
-          );
-        }
+        const synced = await requestSyncHierarchy(syncClient, request, {
+          timeoutMs: remaining,
+          deviceId: device.deviceId,
+          owned,
+        });
         return normalizeSyncedHierarchy({
           device,
           dependencies,

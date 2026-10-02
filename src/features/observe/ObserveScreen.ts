@@ -1142,7 +1142,11 @@ export class RealObserveScreen implements ObserveScreen {
 
       let capturedHierarchy: ViewHierarchyResult | undefined;
       const captureRequest = {
-        freshness: options?.freshness ?? ("fresh" as const),
+        // The cached reader is not display-scoped; explicit Android panels require a routed sync.
+        freshness:
+          requestedDisplayId !== undefined && options?.freshness === "cached-ok"
+            ? ("fresh" as const)
+            : (options?.freshness ?? ("fresh" as const)),
         observerMode,
         minTimestamp: minTimestamp > 0 ? minTimestamp : undefined,
         signal,

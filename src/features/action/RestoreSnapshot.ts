@@ -41,6 +41,26 @@ import {
   type EmulatorConsoleBusyRegistry,
 } from "../../utils/android-cmdline-tools/EmulatorConsoleBusyRegistry";
 
+/** Parse only complete iOS snapshot version shapes; patch versions do not affect compatibility. */
+export function parseIosSnapshotOsVersion(
+  version: string,
+): { major: number; minor?: number } | null {
+  const value = version.trim();
+  const match =
+    value.match(/^(\d+)(?:\.(\d+))?(?:\.\d+)?$/) ??
+    value.match(/^[iI][oO][sS][- _]?(\d+)(?:[.\-_ ](\d+))?(?:[.\-_ ]\d+)?$/) ??
+    value.match(/^com\.apple\.CoreSimulator\.SimRuntime\.[iI][oO][sS]-(\d+)(?:-(\d+))?(?:-\d+)?$/);
+  if (!match) {
+    return null;
+  }
+
+  const major = Number(match[1]);
+  const minor = match[2] === undefined ? undefined : Number(match[2]);
+  return Number.isFinite(major) && (minor === undefined || Number.isFinite(minor))
+    ? { major, minor }
+    : null;
+}
+
 export interface RestoreSnapshotArgs {
   snapshotName: string;
   manifest: DeviceSnapshotManifest;
@@ -621,18 +641,26 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       return;
     }
 
+    const snapshotVersion = parseIosSnapshotOsVersion(manifest.osVersion);
+    if (!snapshotVersion) {
+      throw new ActionableError(
+        `Snapshot manifest osVersion '${manifest.osVersion}' is not an iOS version. ` +
+          "Expected an iOS version such as '26.5', 'iOS 26.5' or 'com.apple.CoreSimulator.SimRuntime.iOS-26-5'.",
+      );
+    }
+
     const deviceOsVersion = await this.getIosDeviceOsVersion();
     if (!deviceOsVersion) {
       logger.warn("[iOS] Unable to read simulator OS version; skipping compatibility check");
       return;
     }
 
-    const snapshotVersion = this.parseIosOsVersion(manifest.osVersion);
-    const targetVersion = this.parseIosOsVersion(deviceOsVersion);
-
-    if (!snapshotVersion || !targetVersion) {
-      logger.warn("[iOS] Unable to parse OS versions for compatibility check; proceeding");
-      return;
+    const targetVersion = parseIosSnapshotOsVersion(deviceOsVersion);
+    if (!targetVersion) {
+      throw new ActionableError(
+        `Simulator OS version '${deviceOsVersion}' is not an iOS version. ` +
+          "Expected an iOS version such as '26.5', 'iOS 26.5' or 'com.apple.CoreSimulator.SimRuntime.iOS-26-5'.",
+      );
     }
 
     if (snapshotVersion.major !== targetVersion.major) {
@@ -662,23 +690,6 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       logger.warn(`[iOS] Failed to read simulator OS version: ${error}`);
       return undefined;
     }
-  }
-
-  private parseIosOsVersion(version: string): { major: number; minor?: number } | null {
-    const runtimeMatch = version.match(/iOS[-\s_]?(\d+)(?:[.\-_](\d+))?/i);
-    const match = runtimeMatch ?? version.match(/(\d+)(?:\.(\d+))?/);
-    if (!match) {
-      return null;
-    }
-
-    const major = Number(match[1]);
-    if (!Number.isFinite(major)) {
-      return null;
-    }
-
-    const minorValue = match[2];
-    const minor = minorValue !== undefined ? Number(minorValue) : undefined;
-    return Number.isFinite(minor) || minor === undefined ? { major, minor } : { major };
   }
 
   private async getInstalledIosBundleIds(): Promise<Set<string>> {

@@ -1,3 +1,4 @@
+import { drainUntil, drainMicrotasks, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import { afterEach, describe, expect, test, beforeEach } from "bun:test";
@@ -3325,7 +3326,9 @@ describe("DevicePool", () => {
         );
         await persistence.waitForUpsert();
         manager.childProcess.emit("exit", 0, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => devicePool.getDevice(replacement.deviceId) === null, {
+          description: "replacement eviction during persistence",
+        });
         persistence.finishUpsert();
 
         await expect(handoff).rejects.toThrow(
@@ -3906,7 +3909,9 @@ describe("DevicePool", () => {
         undefined,
         true,
       );
-      await new Promise((resolve) => setImmediate(resolve));
+      await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+        description: "identity recovery retry sleep",
+      });
 
       expect(fakeTimer.getPendingSleeps()).toEqual([1000]);
       expect(releaseReasons).toEqual([]);
@@ -3998,7 +4003,9 @@ describe("DevicePool", () => {
           undefined,
           true,
         );
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+          description: "absent target recovery retry sleep",
+        });
 
         expect(fakeTimer.getPendingSleeps()).toEqual([1000]);
         expect(releaseReasons).toEqual([]);
@@ -4299,17 +4306,14 @@ describe("DevicePool", () => {
         error = e as Error;
       });
 
-      // Advance time past the 60 second timeout with multiple iterations
-      // Each iteration advances time, resolves any pending sleeps, and yields
-      for (let i = 0; i < 70; i++) {
-        fakeTimer.advanceTime(1000); // Advance 1 second at a time
-        await new Promise((resolve) => setImmediate(resolve));
-        if (error) {
-          break;
-        }
-      }
-
-      await assignPromise;
+      await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+        description: "busy-device retry sleep",
+      });
+      await settleWithFakeTime(fakeTimer, assignPromise, {
+        stepMs: 1000,
+        maxSteps: 70,
+        description: "busy-device allocation timeout",
+      });
 
       expect(error).not.toBeNull();
       expect(error!.message).toContain("Timed out waiting for device");
@@ -4326,16 +4330,22 @@ describe("DevicePool", () => {
 
       // Advance time a few iterations
       for (let i = 0; i < 5; i++) {
+        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+          description: "busy-device retry sleep",
+        });
+        expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
         fakeTimer.advanceTime(1000);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+          description: "next busy-device retry sleep",
+        });
       }
 
       // Release the device
       await devicePool.releaseDevice(device1, "session-1");
 
       // Advance time to allow the retry
+      expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
       fakeTimer.advanceTime(1000);
-      await new Promise((resolve) => setImmediate(resolve));
 
       // Now the assignment should succeed
       const device2 = await assignPromise;
@@ -5088,7 +5098,12 @@ describe("DevicePool", () => {
       expect(assignments.get("session-1")).toBe("emulator-5554");
 
       manager.childProcess.emit("exit", 0, null);
-      await new Promise((resolve) => setImmediate(resolve));
+      await drainUntil(
+        () =>
+          devicePool.getDevice("emulator-5554") === null &&
+          sessionManager.getSession("session-1") === null,
+        { description: "process-exit eviction and session release" },
+      );
 
       expect(releaseCalls).toHaveLength(1);
       expect(releaseCalls[0]).toEqual({
@@ -5133,7 +5148,8 @@ describe("DevicePool", () => {
 
       try {
         manager.childProcess.emit("exit", 0, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        // The ignored exit has no completion signal. Drain its bounded microtask work.
+        await drainMicrotasks(1_000);
 
         expect(releaseCalls).toEqual([]);
         expect(devicePool.getDevice("emulator-5554")).toBe(reservation.device);
@@ -5169,7 +5185,9 @@ describe("DevicePool", () => {
       const assignment = devicePool.assignMultipleDevices(["session-1"], 1000, "android");
       await persistence.waitForUpsert();
       manager.childProcess.emit("exit", 0, null);
-      await new Promise((resolve) => setImmediate(resolve));
+      // Exit cleanup can wait for the in-flight session write; there is no
+      // completion signal while that gate is held.
+      await drainMicrotasks(1_000);
       persistence.finishUpsert();
 
       await expect(assignment).rejects.toThrow("disconnected while its session was being created");
@@ -5210,7 +5228,12 @@ describe("DevicePool", () => {
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         manager.bootedDevices = [];
         manager.childProcess.emit("exit", 1, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(
+          () =>
+            devicePool.getDevice("emulator-5554") === null &&
+            sessionManager.getSession("session-1") === null,
+          { description: "disabled-recovery eviction and release" },
+        );
 
         await expect(
           devicePool.assignMultipleDevices(["session-2"], 1000, "android"),
@@ -5273,7 +5296,12 @@ describe("DevicePool", () => {
         manager.bootedDevices = [];
 
         manager.childProcess.emit("exit", 1, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(
+          () =>
+            sessionManager.getSession("session-1")?.assignedDevice === "Pixel 8" &&
+            !devicePool.isSessionRecoveryInFlight("session-1"),
+          { description: "recovery rebound and incident settlement" },
+        );
 
         expect(manager.startedDevices.map((device) => device.name)).toEqual(["Pixel 8", "Pixel 8"]);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
@@ -5323,6 +5351,7 @@ describe("DevicePool", () => {
       );
       const openStarted = Promise.withResolvers<void>();
       const releaseOpen = Promise.withResolvers<void>();
+      let incidentCompleted = false;
       const incidents: EmulatorLossIncidentStore = {
         async open(input) {
           openStarted.resolve();
@@ -5334,6 +5363,7 @@ describe("DevicePool", () => {
         },
         async completeRecovery(incidentId, outcome, settlement) {
           await backingStore.completeRecovery(incidentId, outcome, settlement);
+          incidentCompleted = true;
         },
         async get(incidentId) {
           return await backingStore.get(incidentId);
@@ -5374,9 +5404,10 @@ describe("DevicePool", () => {
       ];
       await devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android", images[0]);
       releaseOpen.resolve();
-      for (let attempt = 0; attempt < 10 && (await backingStore.list()).length === 0; attempt++) {
-        await new Promise((resolve) => setImmediate(resolve));
-      }
+      await drainUntil(
+        () => incidentCompleted && !devicePool.isSessionRecoveryInFlight("session-1"),
+        { description: "superseded process-exit incident settlement" },
+      );
       expect(devicePool.isSessionRecoveryInFlight("session-1")).toBe(false);
       expect(sessionManager.getSession("session-2")?.assignedDevice).toBe("emulator-5554");
       expect(devicePool.getDevice("emulator-5554")).toMatchObject({
@@ -5640,7 +5671,12 @@ describe("DevicePool", () => {
       await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
       manager.bootedDevices = [];
       manager.childProcesses[0]!.emit("exit", 1, null);
-      await new Promise((resolve) => setImmediate(resolve));
+      await drainUntil(
+        () =>
+          sessionManager.getSession("session-1") === null &&
+          !devicePool.isSessionRecoveryInFlight("session-1"),
+        { description: "failed recovery exhaustion and release" },
+      );
 
       const [incident] = await incidents.list();
       expect(incident?.recovery).toEqual({
@@ -5657,7 +5693,9 @@ describe("DevicePool", () => {
         stable_device_id: "Pixel 8",
       });
       const resume = sessionManager.getOrCreateSession("session-1", devicePool, "android");
-      await new Promise((resolve) => setImmediate(resolve));
+      await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+        description: "restart recovery retry sleep",
+      });
       expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
       fakeTimer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
       await expect(resume).rejects.toThrow("recovery reason: target-absent");
@@ -5689,7 +5727,12 @@ describe("DevicePool", () => {
         await devicePool.assignMultipleDevices(["session-1"], 1000, "android");
         devicePool.markIntentionalShutdown("emulator-5554");
         manager.childProcess.emit("exit", 1, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(
+          () =>
+            devicePool.getDevice("emulator-5554") === null &&
+            !devicePool.isSessionRecoveryInFlight("session-1"),
+          { description: "intentional shutdown eviction" },
+        );
 
         expect(manager.startedDevices).toHaveLength(1);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
@@ -5729,7 +5772,12 @@ describe("DevicePool", () => {
         devicePool.markIntentionalShutdown("emulator-5554");
         devicePool.clearIntentionalShutdown("emulator-5554");
         manager.childProcess.emit("exit", 1, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(
+          () =>
+            manager.startedDevices.length === 2 &&
+            !devicePool.isSessionRecoveryInFlight("session-1"),
+          { description: "cleared shutdown recovery completion" },
+        );
 
         expect(manager.startedDevices).toHaveLength(2);
       } finally {
@@ -5771,7 +5819,8 @@ describe("DevicePool", () => {
         await devicePool.assignMultipleDevices(["session-2"], 1000, "android");
 
         manager.childProcesses[0]!.emit("exit", 1, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        // The ignored exit has no completion signal. Drain its bounded microtask work.
+        await drainMicrotasks(1_000);
 
         expect(devicePool.getDevice("emulator-5554")?.sessionId).toBe("session-2");
         expect(sessionManager.getSession("session-2")).not.toBeNull();
@@ -5809,9 +5858,17 @@ describe("DevicePool", () => {
 
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);
-        await new Promise((resolve) => setImmediate(resolve));
-        fakeTimer.resolveAll();
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+          description: "failed recovery retry sleep",
+        });
+        expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
+        fakeTimer.advanceTime(1_000);
+        await drainUntil(
+          () =>
+            manager.childProcesses.length === 3 &&
+            !devicePool.isSessionRecoveryInFlight("session-1"),
+          { description: "replacement recovery completion" },
+        );
 
         expect(manager.childProcesses).toHaveLength(3);
         expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
@@ -5886,9 +5943,17 @@ describe("DevicePool", () => {
 
         await devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
         manager.childProcesses[0]!.emit("exit", 1, null);
-        await new Promise((resolve) => setImmediate(resolve));
-        fakeTimer.resolveAll();
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+          description: "failed recovery retry sleep",
+        });
+        expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
+        fakeTimer.advanceTime(1_000);
+        await drainUntil(
+          () =>
+            manager.childProcesses.length === 3 &&
+            !devicePool.isSessionRecoveryInFlight("session-1"),
+          { description: "replacement recovery completion" },
+        );
 
         expect(manager.childProcesses).toHaveLength(3);
         expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
@@ -5902,12 +5967,6 @@ describe("DevicePool", () => {
     });
 
     test("does not launch an AVD while recovery already owns its boot", async () => {
-      const drainUntil = async (predicate: () => boolean): Promise<void> => {
-        for (let turn = 0; turn < 1_000 && !predicate(); turn++) {
-          await Promise.resolve();
-        }
-        expect(predicate()).toBe(true);
-      };
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
       const manager = new DeferredRecoveryDeviceManager();
@@ -5955,19 +6014,24 @@ describe("DevicePool", () => {
 
         // The allocation has completed its launch decision and is waiting while
         // recovery readiness is still gated, so this launch count is meaningful.
-        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0);
+        await drainUntil(() => fakeTimer.getPendingSleepCount() > 0, {
+          description: "allocation retry while recovery owns boot",
+        });
         expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
         expect(devicePool.getRecoveringAndroidTargets().names.has("pixel_8_api_35")).toBe(true);
         expect(manager.childProcesses).toHaveLength(2);
         manager.releaseRecovery();
         await drainUntil(
           () => !devicePool.getRecoveringAndroidTargets().names.has("pixel_8_api_35"),
+          { description: "owned AVD recovery settlement" },
         );
 
         for (let step = 0; step < 4; step++) {
           expect(fakeTimer.getPendingSleeps()).toEqual([1_000]);
           fakeTimer.advanceTime(1_000);
-          await drainUntil(() => allocationSettled || fakeTimer.getPendingSleepCount() > 0);
+          await drainUntil(() => allocationSettled || fakeTimer.getPendingSleepCount() > 0, {
+            description: "allocation settlement or next retry sleep",
+          });
         }
         expect(allocationSettled).toBe(true);
         await expect(allocation).rejects.toThrow("Timed out allocating devices");
@@ -5978,6 +6042,7 @@ describe("DevicePool", () => {
         try {
           await drainUntil(
             () => !devicePool.getRecoveringAndroidTargets().names.has("pixel_8_api_35"),
+            { description: "owned AVD recovery settlement" },
           );
         } finally {
           if (originalRebootOnDeath === undefined) {
@@ -6130,7 +6195,9 @@ describe("DevicePool", () => {
         expect(manager.childProcesses).toHaveLength(2);
       } finally {
         manager.releaseRecovery();
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
+          description: "owned recovery settlement",
+        });
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
         } else {
@@ -6171,7 +6238,9 @@ describe("DevicePool", () => {
         expect(manager.childProcesses).toHaveLength(2);
       } finally {
         manager.releaseRecovery();
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
+          description: "owned recovery settlement",
+        });
         if (originalRebootOnDeath === undefined) {
           delete process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
         } else {
@@ -6208,7 +6277,9 @@ describe("DevicePool", () => {
 
         devicePool.markIntentionalShutdown("emulator-5554");
         manager.releaseRecovery();
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
+          description: "owned recovery settlement",
+        });
 
         expect(manager.childProcesses).toHaveLength(2);
         expect(manager.childProcesses[1]!.killCount).toBe(1);
@@ -6324,9 +6395,15 @@ describe("DevicePool", () => {
             return lease;
           });
         await manager.recoveryChild.sigtermSent.promise;
-        await fakeTimer.advanceTimeAsync(1_000);
-        await manager.recoveryChild.sigkillSent.promise;
-        await fakeTimer.advanceTimeAsync(1_000);
+        expect(fakeTimer.getPendingTimeouts()).toContain(1_000);
+        fakeTimer.advanceTime(1_000);
+        await drainUntil(
+          () =>
+            manager.recoveryChild.signals.includes("SIGKILL") &&
+            fakeTimer.getPendingTimeouts().includes(1_000),
+          { description: "SIGKILL exit timeout parked" },
+        );
+        fakeTimer.advanceTime(1_000);
 
         await expect(recovery).rejects.toThrow("did not exit after SIGKILL");
         expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
@@ -6350,7 +6427,6 @@ describe("DevicePool", () => {
     test("does not re-terminate a recovery child that already exited by signal", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
-      fakeTimer.enableAutoAdvance();
       const manager = new DeferredRecoveryDeviceManager();
       manager.deviceImages = [
         {
@@ -6398,7 +6474,6 @@ describe("DevicePool", () => {
     test("does not retry recovery when cancelling the owned child fails", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
-      fakeTimer.enableAutoAdvance();
       const manager = new DeferredRecoveryDeviceManagerWithStubbornChild();
       manager.deviceImages = [
         {
@@ -6426,13 +6501,21 @@ describe("DevicePool", () => {
         devicePool.markIntentionalShutdown("emulator-5554");
         manager.releaseRecovery();
 
-        await expect(recovery).rejects.toThrow("did not exit after SIGKILL");
+        await expect(
+          settleWithFakeTime(fakeTimer, recovery, {
+            stepMs: 1000,
+            maxSteps: 2,
+            description: "owned child bounded stop",
+          }),
+        ).rejects.toThrow("did not exit after SIGKILL");
         expect(manager.childProcesses).toHaveLength(2);
         expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
         manager.recoveryChild.exitCode = 0;
         manager.recoveryChild.emit("exit", 0, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
+          description: "late exit releases retained recovery lease",
+        });
       } finally {
         manager.releaseRecovery();
         if (originalRebootOnDeath === undefined) {
@@ -6446,7 +6529,6 @@ describe("DevicePool", () => {
     test("stops the owned child when cancellation coincides with readiness failure", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
-      fakeTimer.enableAutoAdvance();
       const manager = new DeferredRecoveryDeviceManagerWithStubbornFailingReadiness();
       manager.deviceImages = [
         {
@@ -6474,13 +6556,21 @@ describe("DevicePool", () => {
         devicePool.markIntentionalShutdown("emulator-5554");
         manager.releaseRecovery();
 
-        await expect(recovery).rejects.toThrow("did not exit after SIGKILL");
+        await expect(
+          settleWithFakeTime(fakeTimer, recovery, {
+            stepMs: 1000,
+            maxSteps: 2,
+            description: "owned child bounded stop",
+          }),
+        ).rejects.toThrow("did not exit after SIGKILL");
         expect(manager.childProcesses).toHaveLength(2);
         expect(manager.recoveryChild.signals).toEqual(["SIGTERM", "SIGKILL"]);
         expect(devicePool.getDevice("emulator-5554")).toBeNull();
         manager.recoveryChild.exitCode = 0;
         manager.recoveryChild.emit("exit", 0, null);
-        await new Promise((resolve) => setImmediate(resolve));
+        await drainUntil(() => devicePool.getRecoveringAndroidTargets().names.size === 0, {
+          description: "late exit releases retained recovery lease",
+        });
       } finally {
         manager.releaseRecovery();
         if (originalRebootOnDeath === undefined) {
@@ -6494,7 +6584,6 @@ describe("DevicePool", () => {
     test("does not relaunch an AVD while its old emulator process survives SIGKILL", async () => {
       const originalRebootOnDeath = process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH;
       process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
-      fakeTimer.enableAutoAdvance();
       const manager = new FakeDeviceManagerWithStubbornProcess([
         {
           name: "Pixel 8",
@@ -6520,7 +6609,11 @@ describe("DevicePool", () => {
         await devicePool.releaseDevice("emulator-5554", "session-1");
         manager.bootedDevices = [];
 
-        await devicePool.removeDisconnectedDevice("emulator-5554", false);
+        await settleWithFakeTime(
+          fakeTimer,
+          devicePool.removeDisconnectedDevice("emulator-5554", false),
+          { stepMs: 1000, maxSteps: 2, description: "stubborn process bounded stop" },
+        );
 
         expect(manager.startedDevices).toHaveLength(1);
         expect(manager.childProcess.signals).toEqual(["SIGTERM", "SIGKILL"]);
@@ -6715,11 +6808,22 @@ describe("DevicePool", () => {
         () => undefined,
         (error: unknown) => error,
       );
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await drainUntil(
+        () =>
+          manager.childProcess.signals.includes("SIGTERM") &&
+          fakeTimer.getPendingTimeouts().includes(1_000),
+        { description: "pool-start SIGTERM exit timeout parked" },
+      );
       expect(manager.childProcess.signals).toEqual(["SIGTERM"]);
-      await fakeTimer.advanceTimeAsync(1_000);
+      fakeTimer.advanceTime(1_000);
+      await drainUntil(
+        () =>
+          manager.childProcess.signals.includes("SIGKILL") &&
+          fakeTimer.getPendingTimeouts().includes(1_000),
+        { description: "pool-start SIGKILL exit timeout parked" },
+      );
       expect(manager.childProcess.signals).toEqual(["SIGTERM", "SIGKILL"]);
-      await fakeTimer.advanceTimeAsync(1_000);
+      fakeTimer.advanceTime(1_000);
       expect(await allocationOutcome).toBeInstanceOf(Error);
 
       const teardown = lifecycleCoordinator.reserve(
@@ -6760,7 +6864,15 @@ describe("DevicePool", () => {
 
       const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "android");
 
-      await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow();
+      await settleWithFakeTime(
+        fakeTimer,
+        allocation.then(
+          () => undefined,
+          () => undefined,
+        ),
+        { stepMs: 100, maxSteps: 10, description: "pool cold-boot allocation deadline" },
+      );
+      await expect(allocation).rejects.toThrow();
       expect(fakeTimer.now()).toBe(1_000);
       expect(manager.childProcess.killCount).toBe(1);
     });
@@ -6785,7 +6897,15 @@ describe("DevicePool", () => {
 
       const allocation = devicePool.assignMultipleDevices(["session-1"], 1_000, "ios");
 
-      await expect(fakeTimer.resolvePromise(allocation, 100)).rejects.toThrow();
+      await settleWithFakeTime(
+        fakeTimer,
+        allocation.then(
+          () => undefined,
+          () => undefined,
+        ),
+        { stepMs: 100, maxSteps: 10, description: "pool cold-boot allocation deadline" },
+      );
+      await expect(allocation).rejects.toThrow();
       expect(manager.startObservedAbort).toBe(true);
     });
 

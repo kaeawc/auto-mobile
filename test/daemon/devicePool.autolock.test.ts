@@ -1,3 +1,4 @@
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -630,13 +631,9 @@ describe("DevicePool autolock", () => {
         );
 
         finishRestore();
-        for (
-          let attempt = 0;
-          attempt < 10 && restoringPool.getDevice("emulator-5554")?.status !== "idle";
-          attempt++
-        ) {
-          await new Promise<void>((resolve) => setImmediate(resolve));
-        }
+        await drainUntil(() => restoringPool.getDevice("emulator-5554")?.status === "idle", {
+          description: "deferred expiry publishes idle device",
+        });
         expect(restoringPool.getDevice("emulator-5554")).toMatchObject({
           sessionId: null,
           status: "idle",

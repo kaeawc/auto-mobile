@@ -1,5 +1,6 @@
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
+import type { SessionReleaseSnapshot } from "../daemon/sessionManager";
 
 /**
  * The tools that acquire a device and mint a device session, returning its
@@ -37,6 +38,22 @@ export const DEVICE_SESSION_RECOVERY_PROMPT = `Call ${
     ? `${DEVICE_SESSION_RECOVERY_TOOLS.slice(0, -1).join(", ")}, or ${DEVICE_SESSION_RECOVERY_TOOLS[DEVICE_SESSION_RECOVERY_TOOLS.length - 1]}`
     : DEVICE_SESSION_RECOVERY_TOOLS.join(" or ")
 } to acquire a new device session.`;
+
+/** Append the recorded heartbeat leash only when heartbeat expiry caused the release. */
+export function appendHeartbeatExpiryMessage(
+  message: string,
+  release?: SessionReleaseSnapshot,
+): string {
+  if (
+    !release ||
+    (release.releaseReason !== "heartbeat-timeout" &&
+      release.releaseReason !== "missing-first-heartbeat")
+  ) {
+    return message;
+  }
+  const { ageMs, timeoutMs } = release.heartbeat;
+  return `${message} No heartbeat for ${ageMs} ms (limit ${timeoutMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
+}
 
 /** Whether `name` is a device-session acquisition tool (see above). */
 export function isDeviceSessionAcquisitionTool(name: string): boolean {

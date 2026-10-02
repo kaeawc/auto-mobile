@@ -8,6 +8,46 @@ import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionRe
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { appendHeartbeatExpiryMessage } from "../../src/server/deviceSessionResult";
+import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+
+describe("appendHeartbeatExpiryMessage", () => {
+  const release: SessionReleaseSnapshot = {
+    sessionId: "session-123",
+    deviceId: "emulator-5554",
+    releaseReason: "heartbeat-timeout",
+    releasedAtMs: 20_000,
+    terminal: true,
+    heartbeat: {
+      lastHeartbeatMs: 9_000,
+      hasReceivedHeartbeat: true,
+      timeoutMs: 20_000,
+      ageMs: 21_001,
+    },
+  };
+
+  test.each(["heartbeat-timeout", "missing-first-heartbeat"])(
+    "formats the recorded leash and age for %s",
+    (releaseReason) => {
+      expect(appendHeartbeatExpiryMessage("Ownership lost.", { ...release, releaseReason })).toBe(
+        "Ownership lost. No heartbeat for 21001 ms (limit 20000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
+      );
+    },
+  );
+
+  test("preserves the message without a release snapshot", () => {
+    expect(appendHeartbeatExpiryMessage("Ownership lost.")).toBe("Ownership lost.");
+  });
+
+  test.each(["device-killed", "rehydration-owner-timeout", "cli-idle-timeout"])(
+    "preserves the message for %s despite heartbeat diagnostics",
+    (releaseReason) => {
+      expect(appendHeartbeatExpiryMessage("Ownership lost.", { ...release, releaseReason })).toBe(
+        "Ownership lost.",
+      );
+    },
+  );
+});
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
 
@@ -49,99 +89,103 @@ describe("proxy server session ownership errors", () => {
     }
   });
 
-  test("returns machine-readable ownership loss as an error CallToolResult", async () => {
-    isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
-    const fakeClient = new FakeDaemonClient({
-      daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
-    });
-    const daemonManager = new FakeDaemonManager();
-    daemonManager.statusResult = {
-      ...daemonManager.statusResult,
-      version: DAEMON_VERSION,
-    };
-    const { server, proxy } = createProxyMcpServer({
-      proxyConfig: {
-        timer: new FakeTimer(),
-        initialSessionUuid: "session-123",
-        clientFactory: () => fakeClient,
-        daemonManager,
-        autoStartDaemon: false,
-      },
-    });
-    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
-    const client = new Client({ name: "ownership-test-client", version: "0.0.1" });
-
-    try {
-      await server.connect(serverTransport);
-      await client.connect(clientTransport);
-      await proxy.listTools();
-      fakeClient.emitNotification(
-        SESSION_RELEASED_NOTIFICATION_METHOD,
-        "session-123",
-        "heartbeat-timeout",
-        {
-          sessionId: "session-123",
-          deviceId: "emulator-5554",
-          releaseReason: "heartbeat-timeout",
-          releasedAtMs: 20_000,
-          terminal: true,
-          heartbeat: {
-            lastHeartbeatMs: 9_000,
-            hasReceivedHeartbeat: true,
-            timeoutMs: 10_000,
-            ageMs: 11_000,
-          },
-        },
-      );
-
-      const result = await client.callTool({
-        name: "observe",
-        arguments: { deviceId: "emulator-5554" },
+  test.each(["heartbeat-timeout", "missing-first-heartbeat"])(
+    "returns machine-readable %s ownership loss as an error CallToolResult",
+    async (releaseReason) => {
+      isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
       });
+      const daemonManager = new FakeDaemonManager();
+      daemonManager.statusResult = {
+        ...daemonManager.statusResult,
+        version: DAEMON_VERSION,
+      };
+      const { server, proxy } = createProxyMcpServer({
+        proxyConfig: {
+          timer: new FakeTimer(),
+          initialSessionUuid: "session-123",
+          clientFactory: () => fakeClient,
+          daemonManager,
+          autoStartDaemon: false,
+        },
+      });
+      const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+      const client = new Client({ name: "ownership-test-client", version: "0.0.1" });
 
-      expect(result).toEqual({
-        content: [
+      try {
+        await server.connect(serverTransport);
+        await client.connect(clientTransport);
+        await proxy.listTools();
+        fakeClient.emitNotification(
+          SESSION_RELEASED_NOTIFICATION_METHOD,
+          "session-123",
+          releaseReason,
           {
-            type: "text",
-            text: JSON.stringify({
-              error: {
-                code: "session_ownership_lost",
-                message:
-                  "Session ownership lost for session-123: heartbeat-timeout. " +
-                  "Call getAndroid or getApple to acquire a new device session.",
-                sessionUuid: "session-123",
-                reason: "heartbeat-timeout",
-                retryable: true,
-                recovery: {
-                  action: "acquire_replacement_session",
-                  tools: ["getAndroid", "getApple"],
-                },
-                release: {
-                  sessionId: "session-123",
-                  deviceId: "emulator-5554",
-                  releaseReason: "heartbeat-timeout",
-                  releasedAtMs: 20_000,
-                  terminal: true,
-                  heartbeat: {
-                    lastHeartbeatMs: 9_000,
-                    hasReceivedHeartbeat: true,
-                    timeoutMs: 10_000,
-                    ageMs: 11_000,
+            sessionId: "session-123",
+            deviceId: "emulator-5554",
+            releaseReason,
+            releasedAtMs: 20_000,
+            terminal: true,
+            heartbeat: {
+              lastHeartbeatMs: 9_000,
+              hasReceivedHeartbeat: releaseReason === "heartbeat-timeout",
+              timeoutMs: 10_000,
+              ageMs: 11_000,
+            },
+          },
+        );
+
+        const result = await client.callTool({
+          name: "observe",
+          arguments: { deviceId: "emulator-5554" },
+        });
+
+        expect(result).toEqual({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                error: {
+                  code: "session_ownership_lost",
+                  message:
+                    `Session ownership lost for session-123: ${releaseReason}. ` +
+                    "Call getAndroid or getApple to acquire a new device session. " +
+                    "No heartbeat for 11000 ms (limit 10000 ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).",
+                  sessionUuid: "session-123",
+                  reason: releaseReason,
+                  retryable: true,
+                  recovery: {
+                    action: "acquire_replacement_session",
+                    tools: ["getAndroid", "getApple"],
+                  },
+                  release: {
+                    sessionId: "session-123",
+                    deviceId: "emulator-5554",
+                    releaseReason,
+                    releasedAtMs: 20_000,
+                    terminal: true,
+                    heartbeat: {
+                      lastHeartbeatMs: 9_000,
+                      hasReceivedHeartbeat: releaseReason === "heartbeat-timeout",
+                      timeoutMs: 10_000,
+                      ageMs: 11_000,
+                    },
                   },
                 },
-              },
-            }),
-          },
-        ],
-        isError: true,
-      });
-      expect(fakeClient.callToolCalls).toEqual([]);
-    } finally {
-      await client.close();
-      await server.close();
-      await proxy.close();
-    }
-  });
+              }),
+            },
+          ],
+          isError: true,
+        });
+        expect(fakeClient.callToolCalls).toEqual([]);
+      } finally {
+        await client.close();
+        await server.close();
+        await proxy.close();
+      }
+    },
+  );
 
   test("preserves machine-readable ownership loss across discovery errors", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);

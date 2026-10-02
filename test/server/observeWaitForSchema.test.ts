@@ -1,4 +1,3 @@
-import { ActionableError } from "../../src/models/ActionableError";
 import Ajv2020 from "ajv/dist/2020";
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
@@ -7,7 +6,12 @@ import {
   shouldSkipObserveWaitForScreenshot,
 } from "../../src/features/observe/automaticScreenshotPolicy";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
-import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../src/models";
+import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
+import {
+  classifyDisplayInventory,
+  type DisplayInventoryClassification,
+} from "../../src/utils/deviceMatcher";
 import type {
   ObserveScreen,
   ObserveScreenExecuteOptions,
@@ -45,6 +49,51 @@ const makeHierarchy = (
 });
 
 const originalWaitForScreenshotPolicy = process.env[OBSERVE_WAIT_FOR_SKIP_SCREENSHOT_ENV];
+
+describe("posture wait inventory classification", () => {
+  const panel = { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } } as const;
+  const cases: Array<
+    [
+      string,
+      Pick<BootedDevice, "displays" | typeof displayInventoryOutcome>,
+      DisplayInventoryClassification,
+    ]
+  > = [
+    ["not hydrated", {}, "unavailable"],
+    ["empty panels", { displays: { panels: [], postures: [] } }, "unavailable"],
+    ["multi outcome", { [displayInventoryOutcome]: { kind: "multi" } }, "multi"],
+    ["single outcome", { [displayInventoryOutcome]: { kind: "single" } }, "single"],
+    [
+      "unreadable outcome",
+      { [displayInventoryOutcome]: { kind: "unreadable", reason: "failed" } },
+      "unavailable",
+    ],
+    ["one panel", { displays: { panels: [panel], postures: [] } }, "single"],
+    [
+      "two panels",
+      {
+        displays: {
+          panels: [panel, { ...panel, key: "cover", role: "cover" }],
+          postures: ["closed", "opened"],
+        },
+      },
+      "multi",
+    ],
+  ];
+  test.each(cases)("classifies %s from authoritative inventory", (_name, device, expected) => {
+    expect(classifyDisplayInventory(device)).toBe(expected);
+  });
+  test("screen dimensions alone do not prove a single-panel inventory", () => {
+    const device: BootedDevice = {
+      platform: "ios",
+      name: "Duo",
+      deviceId: "fake",
+      screenWidth: 200,
+      screenHeight: 200,
+    };
+    expect(classifyDisplayInventory(device)).toBe("unavailable");
+  });
+});
 
 afterEach(() => {
   if (originalWaitForScreenshotPolicy === undefined) {
@@ -1171,7 +1220,7 @@ describe("waitForObservation activeWindow", () => {
     display: { key: "inner", role: "inner", posture, generation: 0 },
   });
 
-  test("posture waits reject the no-inventory stub after exactly one observation", async () => {
+  test("single-panel posture waits fail after exactly one observation", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const screen = new FakeObserveScreen();
@@ -1180,11 +1229,204 @@ describe("waitForObservation activeWindow", () => {
       display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     });
     await expect(
-      waitForObservation(screen, { posture: "closed", timeout: 500 }, undefined, false, timer),
-    ).rejects.toBeInstanceOf(ActionableError);
+      waitForObservation(
+        screen,
+        { posture: "closed", timeout: 500 },
+        undefined,
+        false,
+        timer,
+        undefined,
+        undefined,
+        undefined,
+        "single",
+      ),
+    ).rejects.toThrow(
+      "Cannot wait for posture: this device has no display inventory. Select a device that reports display panels and posture and retry.",
+    );
     expect(screen.getExecuteCallCount()).toBe(1);
     expect(timer.now()).toBe(0);
   });
+
+  for (const platform of ["ios", "android"] as const) {
+    const noHierarchy: ObserveResult = {
+      ...postureObservation("unknown"),
+      viewHierarchy: undefined,
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    };
+
+    test(`${platform} multi-panel posture wait retries a first capture without hierarchy`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveSequence([noHierarchy, postureObservation("closed")]);
+      const outcome = await waitForObservation(
+        screen,
+        { posture: "closed", timeout: 200 },
+        undefined,
+        false,
+        timer,
+        platform,
+        undefined,
+        undefined,
+        "multi",
+      );
+      expect(outcome.matched).toBe(true);
+      expect(outcome.timedOut).toBe(false);
+      expect(outcome.observation.display?.posture).toBe("closed");
+      expect(screen.getExecuteCallCount()).toBe(2);
+    });
+
+    test(`${platform} multi-panel posture timeout explains that no hierarchy was captured`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult(noHierarchy);
+      const outcome = await waitForObservation(
+        screen,
+        { posture: "closed", timeout: 200 },
+        undefined,
+        false,
+        timer,
+        platform,
+        undefined,
+        undefined,
+        "multi",
+      );
+      expect(outcome.timedOut).toBe(true);
+      expect(outcome.timeoutReason).toBe(
+        'Timed out after 200 ms waiting for posture "closed"; posture was never observable because no hierarchy was captured',
+      );
+      expect(screen.getExecuteCallCount()).toBe(3);
+    });
+
+    test(`${platform} unavailable inventory polls and explains unconfirmed posture support`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult(noHierarchy);
+      const outcome = await waitForObservation(
+        screen,
+        { posture: "closed", timeout: 200 },
+        undefined,
+        false,
+        timer,
+        platform,
+        undefined,
+        undefined,
+        "unavailable",
+      );
+      expect(outcome.timedOut).toBe(true);
+      expect(outcome.timeoutReason).toBe(
+        'Timed out after 200 ms waiting for posture "closed"; display inventory was unavailable so posture support was never confirmed',
+      );
+      expect(screen.getExecuteCallCount()).toBe(3);
+    });
+  }
+
+  test("omitted inventory classification behaves as unavailable", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult({
+      ...postureObservation("unknown"),
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    });
+    const outcome = await waitForObservation(
+      screen,
+      { posture: "closed", timeout: 200 },
+      undefined,
+      false,
+      timer,
+    );
+    expect(outcome.timedOut).toBe(true);
+    expect(outcome.timeoutReason).toContain("display inventory was unavailable");
+    expect(screen.getExecuteCallCount()).toBe(3);
+  });
+
+  test("single-panel inventory rejects posture even when the stamp would match", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(postureObservation("closed"));
+    await expect(
+      waitForObservation(
+        screen,
+        { posture: "closed" },
+        undefined,
+        false,
+        timer,
+        "android",
+        undefined,
+        undefined,
+        "single",
+      ),
+    ).rejects.toThrow("Cannot wait for posture: this device has no display inventory.");
+    expect(screen.getExecuteCallCount()).toBe(1);
+  });
+
+  for (const inventory of ["multi", "unavailable"] as const) {
+    test(`${inventory} inventory retries transient failures before any known posture`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult((index) => {
+        if (index === 1) {
+          throw new Error("fold temporarily interrupted observation");
+        }
+        return {
+          ...postureObservation(index === 2 ? "closed" : "unknown"),
+          viewHierarchy: undefined,
+          ...(index === 0
+            ? {
+                display: {
+                  key: "0",
+                  role: "unknown" as const,
+                  posture: "unknown" as const,
+                  generation: 0,
+                },
+              }
+            : {}),
+        };
+      });
+      const outcome = await waitForObservation(
+        screen,
+        { posture: "closed", timeout: 300 },
+        undefined,
+        false,
+        timer,
+        "ios",
+        undefined,
+        undefined,
+        inventory,
+      );
+      expect(outcome.matched).toBe(true);
+      expect(screen.getExecuteCallCount()).toBe(3);
+    });
+
+    test(`${inventory} inventory preserves the last-posture diagnostic once posture was known`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveSequence([
+        { ...postureObservation("opened"), viewHierarchy: undefined },
+        { ...postureObservation("unknown"), viewHierarchy: undefined },
+      ]);
+      const outcome = await waitForObservation(
+        screen,
+        { posture: "closed", timeout: 200 },
+        undefined,
+        false,
+        timer,
+        "ios",
+        undefined,
+        undefined,
+        inventory,
+      );
+      expect(outcome.timeoutReason).toBe(
+        'Timed out after 200 ms waiting for posture "closed"; last observed posture "unknown"',
+      );
+    });
+  }
 
   test("posture waits tolerate missing hierarchy and transient execute failure after support", async () => {
     const timer = new FakeTimer();

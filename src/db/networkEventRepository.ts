@@ -104,7 +104,10 @@ function mapRow(r: any): NetworkEventWithId {
     requestId: r.request_id,
     connectionId: r.connection_id,
     direction: r.direction,
-    metadata: JSON.parse(String(r.metadata_json)) as Record<string, string> | null,
+    metadata:
+      r.metadata_json !== null && r.metadata_json !== undefined
+        ? (JSON.parse(r.metadata_json) as Record<string, string>)
+        : null,
     sequenceNumber: r.sequence_number,
     host: r.host,
     path: r.path,

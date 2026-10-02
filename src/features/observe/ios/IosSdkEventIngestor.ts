@@ -15,6 +15,7 @@
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getFailureRecorder } from "../../failures/FailureRecorder";
 import type { FailureRecorderService } from "../../failures/interfaces/FailureRecorderService";
+import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 import { logger } from "../../../utils/logger";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
@@ -24,6 +25,11 @@ import { buildNavigationNodeScreenshotUri } from "../../../utils/navigationResou
 import type { ViewHierarchyResult } from "../../../models";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "./types";
+import { decodeSdkNetworkVersion, IOS_SDK_NETWORK_DIAGNOSTIC_TAG } from "./IosSdkNetworkWire";
+
+export const IOS_SDK_NETWORK_DIAGNOSTIC_WINDOW_MS = 10 * 60 * 1000;
+const MAX_NETWORK_DIAGNOSTIC_KEYS = 64;
+const MAX_RECEIVED_VERSION_LENGTH = 32;
 
 /**
  * The subset of `TelemetryRecorder` the ingestor depends on. Narrow so tests can
@@ -67,6 +73,7 @@ export interface IosSdkEventIngestor extends SdkEventIngestor {
 export interface IosSdkEventIngestorDeps {
   /** The iOS device/simulator UDID that owns these events. */
   deviceId: string;
+  timer?: Timer;
   /** Returns the navigation graph for the current session (session-bound). */
   getNavigationGraphManager: () => NavigationEventSink;
   /** Capture a screenshot for navigation-node association. */
@@ -86,6 +93,11 @@ export interface IosSdkEventIngestorDeps {
 
 export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly deviceId: string;
+  private readonly timer: Timer;
+  private readonly networkDiagnostics = new Map<
+    string,
+    { emittedAt: number; suppressedCount: number }
+  >();
   private readonly getNavigationGraphManager: () => NavigationEventSink;
   private readonly captureScreenshot: (timeoutMs: number) => Promise<CtrlProxyScreenshotResult>;
   private readonly telemetryRecorderOverride?: IosTelemetryRecorder;
@@ -98,6 +110,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
 
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
+    this.timer = deps.timer ?? defaultTimer;
     this.getNavigationGraphManager = deps.getNavigationGraphManager;
     this.captureScreenshot = deps.captureScreenshot;
     this.telemetryRecorderOverride = deps.telemetryRecorder;
@@ -130,6 +143,15 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
       const p = event.payload;
 
       try {
+        // Reach the recorder's context snapshot without yielding on accepted versions.
+        const version =
+          event.type === "network_request" ? this.acceptNetworkVersion(event, applicationId) : null;
+        if (version?.accepted === false && version.diagnosticLog) {
+          await recorder.recordLogEvent(version.diagnosticLog);
+        }
+        if (version?.accepted === false) {
+          return;
+        }
         switch (event.type) {
           case "network_request":
             // URLSession's adapter emits task metrics in metadata.duration_ms.
@@ -391,9 +413,68 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
         // Restore previous context so Android events aren't affected
         recorder.setContext(prevContext.deviceId, prevContext.sessionId);
       }
-    } catch {
-      // Non-fatal
+    } catch (error) {
+      logger.warn("[IosSdkEventIngestor] Failed to record SDK event", error);
     }
+  }
+
+  private acceptNetworkVersion(
+    event: SdkEvent,
+    applicationId: string | null,
+  ):
+    | { accepted: true }
+    | {
+        accepted: false;
+        diagnosticLog?: Parameters<IosTelemetryRecorder["recordLogEvent"]>[0];
+      } {
+    const version = decodeSdkNetworkVersion(event.payload, applicationId);
+    if (version.success) {
+      return { accepted: true };
+    }
+    const diagnostic = version.diagnostic;
+    diagnostic.receivedVersion = this.boundedReceivedVersion(diagnostic.receivedVersion);
+    let key = JSON.stringify([this.deviceId, applicationId, diagnostic.receivedVersion]);
+    // Reserve the final slot for all new keys once full; no eviction-based flood bypass.
+    if (
+      !this.networkDiagnostics.has(key) &&
+      this.networkDiagnostics.size >= MAX_NETWORK_DIAGNOSTIC_KEYS - 1
+    ) {
+      key = "overflow";
+    }
+    const now = this.timer.now();
+    const previous = this.networkDiagnostics.get(key);
+    if (previous && now - previous.emittedAt < IOS_SDK_NETWORK_DIAGNOSTIC_WINDOW_MS) {
+      previous.suppressedCount += 1;
+      return { accepted: false };
+    }
+    if (previous) {
+      diagnostic.suppressedCount = previous.suppressedCount;
+    }
+    this.networkDiagnostics.set(key, { emittedAt: now, suppressedCount: 0 });
+    logger.warn("[IosSdkEventIngestor] Unsupported network schema", diagnostic);
+    return {
+      accepted: false,
+      diagnosticLog: {
+        timestamp: event.timestamp,
+        applicationId,
+        level: 5,
+        tag: IOS_SDK_NETWORK_DIAGNOSTIC_TAG,
+        message: JSON.stringify(diagnostic),
+        filterName: "sdk_network_schema_unsupported",
+      },
+    };
+  }
+
+  private boundedReceivedVersion(received: unknown): unknown {
+    // Keep scalar diagnostics intact; never serialize an untrusted object into a log/key.
+    if (typeof received !== "string" && (typeof received !== "object" || received === null)) {
+      return received;
+    }
+    const text =
+      typeof received === "string" ? received : Array.isArray(received) ? "[array]" : "[object]";
+    return text.length > MAX_RECEIVED_VERSION_LENGTH
+      ? `${text.slice(0, MAX_RECEIVED_VERSION_LENGTH - 1)}…`
+      : text;
   }
 
   private async findNavigationNodeId(

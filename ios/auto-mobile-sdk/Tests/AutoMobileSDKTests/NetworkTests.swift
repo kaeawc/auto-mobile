@@ -73,7 +73,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertEqual(event?.method, "GET")
         XCTAssertEqual(event?.statusCode, 200)
         XCTAssertEqual(event?.durationMs, 150.0)
-        XCTAssertEqual(event?.requestHeaders?["Authorization"], "Bearer token")
+        XCTAssertEqual(event?.requestHeaders?["Authorization"], "<redacted>")
         XCTAssertEqual(event?.host, "api.example.com")
         XCTAssertEqual(event?.path, "/users")
     }
@@ -141,7 +141,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertEqual(event?.method, "GET")
         XCTAssertEqual(event?.statusCode, 200)
         XCTAssertEqual(event?.durationMs, 150.0)
-        XCTAssertEqual(event?.requestHeaders?["Authorization"], "Bearer token")
+        XCTAssertEqual(event?.requestHeaders?["Authorization"], "<redacted>")
     }
 
     func testHeadersNotCapturedByDefault() {
@@ -218,7 +218,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertEqual(event?.method, "POST")
         XCTAssertNotNil(event?.error)
         XCTAssertNil(event?.statusCode)
-        XCTAssertEqual(event?.requestHeaders?["Authorization"], "Bearer token")
+        XCTAssertEqual(event?.requestHeaders?["Authorization"], "<redacted>")
         XCTAssertNotNil(event?.durationMs)
         XCTAssertGreaterThan(event?.durationMs ?? 0, 0)
     }
@@ -768,6 +768,41 @@ final class AutoMobileNetworkTests: XCTestCase {
 }
 
 final class NetworkCaptureRecorderTests: XCTestCase {
+    func testNetworkWireVersionEncodingAndLegacyDecoding() throws {
+        let event = SdkNetworkRequestEvent(timestamp: 123, url: "https://example.com", method: "GET")
+        let encoded = try JSONEncoder().encode(event)
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(payload["schemaVersion"] as? Int, SdkNetworkRequestEvent.currentSchemaVersion)
+        XCTAssertEqual(try JSONDecoder().decode(SdkNetworkRequestEvent.self, from: encoded).schemaVersion, 1)
+        payload.removeValue(forKey: "schemaVersion")
+        let legacy = try JSONSerialization.data(withJSONObject: payload)
+        XCTAssertEqual(try JSONDecoder().decode(SdkNetworkRequestEvent.self, from: legacy).schemaVersion, 0)
+    }
+
+    func testSharedEmissionRedactsManualHeadersAndBoundsBodies() throws {
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 10, flushIntervalMs: 60000) { collector.collect($0) }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+        defer { AutoMobileNetwork.shared.reset() }
+        AutoMobileNetwork.shared.setCaptureHeaders(true)
+        AutoMobileNetwork.shared.setCaptureBodies(true)
+        AutoMobileNetwork.shared.setMaxBodyBytes(4)
+        AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+            url: "https://example.com", method: "POST",
+            requestHeaders: ["Authorization": "secret"], requestBodySize: 12,
+            responseHeaders: ["Set-Cookie": "secret"], responseBodySize: 12,
+            requestBody: "hello world!", responseBody: "hello world!"
+        ))
+        buffer.flush()
+        let event = try XCTUnwrap(collector.events.first as? SdkNetworkRequestEvent)
+        XCTAssertEqual(event.requestHeaders?["Authorization"], "<redacted>")
+        XCTAssertEqual(event.responseHeaders?["Set-Cookie"], "<redacted>")
+        XCTAssertEqual(event.requestBody, "hell")
+        XCTAssertEqual(event.responseBody, "hell")
+        XCTAssertEqual(event.requestBodySize, 12)
+        XCTAssertEqual(event.responseBodySize, 12)
+    }
+
     func testWritesSerializedNetworkCaptureFixtures() throws {
         guard let outputDirectory = ProcessInfo.processInfo.environment["AUTOMOBILE_FIXTURE_OUT_DIR"] else { return }
 
@@ -778,10 +813,13 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         AutoMobileNetwork.shared.initialize(bundleId: "fixture.app", buffer: buffer)
         defer { AutoMobileNetwork.shared.reset() }
         AutoMobileNetwork.shared.setCaptureHeaders(true)
+        AutoMobileNetwork.shared.setCaptureBodies(true)
+        AutoMobileNetwork.shared.setMaxBodyBytes(16)
 
         let records = NetworkRecordCollector()
         let recorder = NetworkCaptureRecorder(
             emit: { records.append($0) },
+            maxBodyBytes: 32,
             idGenerator: { "fixture-request" }
         )
         let session = URLSessionNetworkCaptureAdapter(recorder: recorder)
@@ -811,14 +849,52 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         connection.didSend(requestId: connectionId, bytes: 3)
         connection.didCancel(requestId: connectionId)
 
-        XCTAssertEqual(records.records.count, 3)
-        for record in records.records {
+        // Host delegate callbacks supply timing/content type alongside the adapter record.
+        // A failure after receiving a response also retains its observed HTTP status.
+        for failed in [false, true] {
+            let requestId = session.begin(
+                url: "https://api.example.com/v1/full?token=<redacted>",
+                method: "POST",
+                connectionId: "full-session",
+                requestHeaders: ["Authorization": "Bearer secret", "Content-Type": "text/plain"]
+            )
+            recorder.recordRequestBodyChunk(requestId: requestId, bytes: 64, text: String(repeating: "q", count: 64))
+            session.didReceiveResponseHeaders(
+                requestId: requestId, headers: ["Set-Cookie": "secret", "Content-Type": "text/plain"]
+            )
+            session.didReceiveBody(requestId: requestId, bytes: 64, text: String(repeating: "r", count: 64))
+            session.didReceiveMetrics(requestId: requestId, durationMs: 12.5)
+            if failed {
+                session.didFail(requestId: requestId, error: URLError(.timedOut))
+            } else {
+                session.didComplete(requestId: requestId, statusCode: 201)
+            }
+        }
+
+        XCTAssertEqual(records.records.count, 5)
+        for (index, original) in records.records.enumerated() {
+            var record = original
+            if index == 1 {
+                record.statusCode = 101 // Host-observed WebSocket handshake status.
+            }
+            if index >= 3 {
+                record.durationMs = 22.5
+                record.contentType = "text/plain"
+                if index == 4 { record.statusCode = 502 }
+            }
             AutoMobileNetwork.shared.recordRequest(record)
         }
         buffer.flush()
-        XCTAssertEqual(collector.events.count, 3)
+        XCTAssertEqual(collector.events.count, 5)
+        let full = try XCTUnwrap(collector.events.last as? SdkNetworkRequestEvent)
+        XCTAssertEqual(full.requestBody, String(repeating: "q", count: 16))
+        XCTAssertEqual(full.responseBody, String(repeating: "r", count: 16))
+        XCTAssertEqual(full.requestBodySize, 64)
+        XCTAssertEqual(full.responseBodySize, 64)
+        XCTAssertEqual(full.responseHeaders?["Set-Cookie"], "<redacted>")
+        XCTAssertNotNil(full.error)
 
-        let names = ["urlsession", "websocket", "nwconnection"]
+        let names = ["urlsession", "websocket", "nwconnection", "urlsession-full", "urlsession-error"]
         try FileManager.default.createDirectory(
             atPath: outputDirectory, withIntermediateDirectories: true
         )

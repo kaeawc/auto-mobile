@@ -223,10 +223,20 @@ export function aggregateStatsByHost(events: NetworkEventWithId[]): Record<strin
   return byHost;
 }
 
-async function handleTrafficQuery(params: Record<string, string>): Promise<ResourceContent> {
+export interface NetworkResourceRepository {
+  getNetworkEvents: typeof getNetworkEvents;
+  getNetworkEventById: typeof getNetworkEventById;
+}
+
+const defaultRepository: NetworkResourceRepository = { getNetworkEvents, getNetworkEventById };
+
+async function handleTrafficQuery(
+  params: Record<string, string>,
+  repository: NetworkResourceRepository,
+): Promise<ResourceContent> {
   try {
     const query = parseTrafficParams(params);
-    const events = await getNetworkEvents(query);
+    const events = await repository.getNetworkEvents(query);
 
     if (query.bucketSeconds) {
       const buckets = bucketEvents(events, query.bucketSeconds);
@@ -265,14 +275,16 @@ async function handleTrafficQuery(params: Record<string, string>): Promise<Resou
   }
 }
 
-export function registerNetworkResources(): void {
+export function registerNetworkResources(
+  repository: NetworkResourceRepository = defaultRepository,
+): void {
   // Base traffic resource (no filters, returns latest 50)
   ResourceRegistry.register(
     NETWORK_RESOURCE_URIS.TRAFFIC,
     "Network Traffic",
     "Query captured network traffic. Use query parameters to filter by host, method, statusCode, since, limit, deviceId.",
     "application/json",
-    () => handleTrafficQuery({}),
+    () => handleTrafficQuery({}, repository),
   );
 
   ResourceRegistry.registerTemplate(
@@ -280,7 +292,7 @@ export function registerNetworkResources(): void {
     "Network Traffic",
     "Query captured network traffic with optional filters.",
     "application/json",
-    async (params) => handleTrafficQuery(params),
+    async (params) => handleTrafficQuery(params, repository),
   );
 
   // Single request detail by ID
@@ -300,7 +312,7 @@ export function registerNetworkResources(): void {
       }
 
       try {
-        const event = await getNetworkEventById(requestId);
+        const event = await repository.getNetworkEventById(requestId);
         if (!event) {
           return {
             uri: `automobile:network/request/${requestId}`,
@@ -331,7 +343,7 @@ export function registerNetworkResources(): void {
     "Real-time captured network traffic. Subscribe to receive notifications on new requests.",
     "application/json",
     async () => {
-      const events = await getNetworkEvents({ limit: 20 });
+      const events = await repository.getNetworkEvents({ limit: 20 });
       return {
         uri: NETWORK_RESOURCE_URIS.LIVE,
         mimeType: "application/json",
@@ -346,7 +358,7 @@ export function registerNetworkResources(): void {
     "Recent network errors (4xx/5xx responses). Subscribe to receive notifications on new errors.",
     "application/json",
     async () => {
-      const errors = await getNetworkEvents({ minStatusCode: 400, limit: 20 });
+      const errors = await repository.getNetworkEvents({ minStatusCode: 400, limit: 20 });
       return {
         uri: NETWORK_RESOURCE_URIS.ERRORS,
         mimeType: "application/json",
@@ -361,7 +373,7 @@ export function registerNetworkResources(): void {
     "Aggregate network statistics with p50/p95 latency. Subscribe to receive notifications when error rate crosses threshold.",
     "application/json",
     async () => {
-      const events = await getNetworkEvents({ limit: 200 });
+      const events = await repository.getNetworkEvents({ limit: 200 });
       const totalRequests = events.length;
       const errorCount = events.filter((e) => e.statusCode >= 400).length;
       const errorRate = totalRequests > 0 ? errorCount / totalRequests : 0;
@@ -397,7 +409,7 @@ export function registerNetworkResources(): void {
     async () => {
       const state = NetworkState.getInstance();
       const thresholdMs = state.slowThresholdMs;
-      const events = await getNetworkEvents({ limit: 200 });
+      const events = await repository.getNetworkEvents({ limit: 200 });
       const slow = events.filter((e) => e.durationMs >= thresholdMs);
       return {
         uri: NETWORK_RESOURCE_URIS.SLOW,

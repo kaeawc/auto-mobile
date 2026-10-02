@@ -126,6 +126,9 @@ generate_api() {
 
     while IFS= read -r line; do
       local stripped="${line#"${line%%[![:space:]]*}"}"
+      if [[ "$stripped" =~ ^(@discardableResult[[:space:]]+)?override[[:space:]]+public[[:space:]]+(.*)$ ]]; then
+        stripped="${BASH_REMATCH[1]}public override ${BASH_REMATCH[2]}"
+      fi
       # Fast path: most source lines contain no lexical tokens to remove.
       if [[ "$in_block_comment" == true || "$in_multiline_string" == true || "$line" == *\"* || "$line" == */* ]]; then
         scan_scope_code "$line"

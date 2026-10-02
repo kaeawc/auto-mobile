@@ -122,6 +122,18 @@ setup() {
   diff -u "$FIXTURES/legacy.api" "$AUTOMOBILE_IOS_API_FILE"
 }
 
+@test "public overrides retain their API signatures regardless of modifier order" {
+  export AUTOMOBILE_IOS_API_SOURCES="$FIXTURES/override-order"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" | grep -Fx '  public override func startLoading()'
+  printf '%s\n' "$output" | grep -Fx '  public override func stopLoading()'
+  printf '%s\n' "$output" | grep -Fx '  public override class func canInit( with request: URLRequest ) -> Bool'
+  printf '%s\n' "$output" | grep -Fx '  @discardableResult public override func loadCount() -> Int'
+  [[ "$output" != *'hidden'* ]]
+  [[ "$output" != *'override public'* ]]
+}
+
 @test "the system bash produces the same fixture baseline without diagnostics" {
   bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
   # macOS /bin/bash is 3.2; Linux also exercises the system interpreter.

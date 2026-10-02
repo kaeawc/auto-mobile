@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../src/models";
 import {
   buildConditionPredicate,
   observeSchema,
@@ -11,6 +11,13 @@ import { ElementResolver } from "../../src/features/utility/ElementResolver";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+import { observedIosDisplay } from "../../src/features/observe/ObservationDisplay";
+import { loadDuoEnumerate } from "../fixtures/loadDuoEnumerate";
+import {
+  parseSimulatorDisplays,
+  simulatorDeviceDisplays,
+} from "../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 
 /**
  * Tests for the observe `waitFor` predicate DSL and the standalone
@@ -457,6 +464,38 @@ describe("waitForObservation DSL branch", () => {
 });
 
 describe("display stamp waitFor conditions", () => {
+  for (const [posture, pixelWidth, pixelHeight] of [
+    ["closed", 1398, 2034],
+    ["opened", 2007, 2853],
+  ] as const) {
+    test(`iOS Duo waitFor posture matches its inferred ${posture} stamp`, async () => {
+      const device: BootedDevice = {
+        name: "iPhone Duo",
+        platform: "ios",
+        deviceId: "34C35F33-224C-4E74-B8C0-668FF03E49F5",
+        displays: simulatorDeviceDisplays(
+          parseSimulatorDisplays(loadDuoEnumerate()),
+          "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+        ),
+      };
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult({
+        ...makeObservation([]),
+        display: observedIosDisplay(device, { pixelWidth, pixelHeight }),
+      });
+      const outcome = await waitForObservation(
+        screen,
+        { posture },
+        undefined,
+        false,
+        new FakeTimer(),
+      );
+      expect(outcome.matched).toBe(true);
+      expect(outcome.observation.display.posture).toBe(posture);
+      expect(screen.getExecuteCallCount()).toBe(1);
+    });
+  }
+
   test("runtime schema accepts standalone posture and activeDisplay waits", () => {
     expect(observeSchema.parse({ waitFor: { posture: "closed" } }).waitFor).toMatchObject({
       posture: "closed",

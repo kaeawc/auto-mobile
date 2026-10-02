@@ -6,7 +6,10 @@ import {
   DisplayTransitionTracker,
   type DisplayTransitionSink,
 } from "../../../src/features/observe/DisplayTransition";
-import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
+import {
+  observedIosDisplay,
+  ObservedAndroidDisplayCache,
+} from "../../../src/features/observe/ObservationDisplay";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -542,6 +545,8 @@ describe("SetPosture", () => {
     const tracker = new DisplayTransitionTracker(() => {});
     const transitionSink: DisplayTransitionSink = {
       identityRevision: (deviceId) => tracker.identityRevision(deviceId),
+      rememberIosPosture: (device, display, posture) =>
+        tracker.rememberIosPosture(device, display, posture),
       notifyAndroidTransition: () => {},
       notifyTransition: (deviceId, reason) => {
         tracker.notifyTransition(deviceId, reason);
@@ -565,6 +570,109 @@ describe("SetPosture", () => {
     return { feature, client, timer, sequence, getObserveCount: () => observeCount };
   }
 
+  for (const invalidation of [
+    "transition",
+    "release",
+    "device change",
+    "panel mismatch",
+  ] as const) {
+    test(`remembers settled iOS half_opened until ${invalidation}`, async () => {
+      const tracker = new DisplayTransitionTracker(() => {});
+      const inner = { pixelWidth: 2007, pixelHeight: 2853 };
+      const cover = { pixelWidth: 1398, pixelHeight: 2034 };
+      const client = new FakeIOSCtrlProxy();
+      const feature = new SetPosture(duo, {
+        iosClientProvider: () => client,
+        transitionSink: tracker,
+        timer: new FakeTimer(),
+        observeFactory: () =>
+          ({
+            execute: async () => {
+              const result = {
+                ...observation,
+                display: observedIosDisplay(duo, inner),
+                screenSize: { width: 669, height: 951 },
+              };
+              tracker.record(duo.deviceId, result, "ios");
+              return result;
+            },
+          }) as ObserveScreen,
+      });
+      try {
+        const result = await feature.execute("half_opened");
+        expect(result).toMatchObject({
+          posture: "half_opened",
+          display: { posture: "half_opened" },
+        });
+        const next = observedIosDisplay(duo, inner);
+        expect(next.posture).toBe("half_opened");
+        const generation = tracker.identityRevision(duo.deviceId);
+        expect(tracker.checkIdentity(duo.deviceId, next, "ios")).toBe(false);
+        expect(
+          tracker.checkIosGeometry(duo.deviceId, { width: 669, height: 951 }, undefined, next),
+        ).toBe(false);
+        expect(
+          tracker.record(
+            duo.deviceId,
+            { display: next, screenSize: { width: 669, height: 951 } },
+            "ios",
+          ),
+        ).toBe(false);
+        expect(tracker.identityRevision(duo.deviceId)).toBe(generation);
+        if (invalidation === "transition") {
+          tracker.notifyTransition(duo.deviceId, "rotation");
+        } else if (invalidation === "release") {
+          tracker.reset(duo.deviceId);
+        } else if (invalidation === "device change") {
+          ObservedAndroidDisplayCache.clear(duo.deviceId);
+        } else {
+          expect(observedIosDisplay(duo, cover).posture).toBe("closed");
+        }
+        expect(observedIosDisplay(duo, inner).posture).toBe("opened");
+      } finally {
+        tracker.reset(duo.deviceId);
+      }
+    });
+  }
+
+  test("a cancelled or failed iOS hinge request clears the remembered posture", async () => {
+    const inner = { pixelWidth: 2007, pixelHeight: 2853 };
+    for (const failure of ["abort", "runner failure"] as const) {
+      ObservedAndroidDisplayCache.release(duo.deviceId);
+      const { feature, client } = makeIosFeature(duo, [
+        {
+          ...observation,
+          display: observedIosDisplay(duo, inner),
+          screenSize: { width: 669, height: 951 },
+        },
+      ]);
+      try {
+        await feature.execute("half_opened");
+        expect(observedIosDisplay(duo, inner).posture).toBe("half_opened");
+        if (failure === "abort") {
+          const pending = spyOn(client, "requestSetHingeAngle").mockImplementation(
+            () => new Promise(() => {}),
+          );
+          try {
+            const controller = new AbortController();
+            const attempt = feature.execute("opened", undefined, controller.signal);
+            expect(pending).toHaveBeenCalledWith(180);
+            controller.abort();
+            await expect(attempt).rejects.toThrow();
+          } finally {
+            pending.mockRestore();
+          }
+        } else {
+          client.setHingeAngleResult({ success: false, error: "hinge failed", totalTimeMs: 0 });
+          await expect(feature.execute("opened")).rejects.toThrow("hinge failed");
+        }
+        expect(observedIosDisplay(duo, inner).posture).toBe("opened");
+      } finally {
+        ObservedAndroidDisplayCache.release(duo.deviceId);
+      }
+    }
+  });
+
   test("sets each iPhone Duo simulator posture and observes its display", async () => {
     for (const [posture, angle] of [
       ["closed", 0],
@@ -575,6 +683,7 @@ describe("SetPosture", () => {
         ...display,
         key: posture === "closed" ? "primary" : "primary-1",
         role: posture === "closed" ? "cover" : "inner",
+        posture,
       };
       const { feature, client, getObserveCount } = makeIosFeature(duo, [
         {
@@ -604,7 +713,7 @@ describe("SetPosture", () => {
     ]);
     expect(await feature.execute("closed")).toEqual({
       posture: "closed",
-      display: { ...laterDisplay, generation: 2 },
+      display: { ...laterDisplay, posture: "closed", generation: 2 },
       locked: true,
     });
     expect(getObserveCount()).toBe(3);
@@ -628,7 +737,7 @@ describe("SetPosture", () => {
     };
     const { feature, getObserveCount, timer } = makeIosFeature(duo, [cover, swapped, inner]);
     expect(await feature.execute("opened")).toMatchObject({
-      display: { ...inner.display, generation: 2 },
+      display: { ...inner.display, posture: "opened", generation: 2 },
     });
     expect(getObserveCount()).toBe(2);
     expect(timer.getSleepHistory()).toEqual([250]);
@@ -693,7 +802,7 @@ describe("SetPosture", () => {
     ]);
     expect(await feature.execute("closed")).toEqual({
       posture: "closed",
-      display: { ...expectedDisplay, generation: 2 },
+      display: { ...expectedDisplay, posture: "closed", generation: 2 },
       locked: true,
     });
     expect(sequence).toEqual([

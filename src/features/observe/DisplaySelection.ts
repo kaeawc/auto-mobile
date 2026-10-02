@@ -1,4 +1,5 @@
 import type { DeviceDisplays, DisplayPanel, Posture } from "../../models/DisplayPanel";
+import { POSTURE_PANEL_ROLES } from "../../models/DisplayPanel";
 import { ActionableError } from "../../models/ActionableError";
 
 /** Selection errors are returned directly to the tool caller. */
@@ -33,13 +34,7 @@ function selectExplicitPanel(panels: readonly DisplayPanel[], request: string): 
 }
 
 function postureDefault(posture: Posture | undefined): DisplayPanel["role"] | undefined {
-  if (posture === "closed") {
-    return "cover";
-  }
-  if (posture === "opened" || posture === "rear_display") {
-    return "inner";
-  }
-  return undefined;
+  return POSTURE_PANEL_ROLES.find(([defaultPosture]) => defaultPosture === posture)?.[1];
 }
 
 /** Pure per-call panel selection. Inventory order is the stable final fallback. */

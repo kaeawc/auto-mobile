@@ -480,6 +480,7 @@ export class SetPosture {
       );
     }
     throwIfAborted(signal);
+    ObservedAndroidDisplayCache.clear(this.device.deviceId);
     const result = await awaitWhileRequestIsLive(
       this.iosClientProvider(this.device).requestSetHingeAngle(angle),
       signal,
@@ -505,10 +506,15 @@ export class SetPosture {
       this.device.deviceId,
       "setPosture settled on the iPhone Duo display",
     );
+    const display = this.transitionSink.rememberIosPosture(
+      this.device,
+      observation.display,
+      requested,
+    );
     return {
       posture: requested,
       display: {
-        ...observation.display,
+        ...display,
         generation: this.transitionSink.identityRevision(this.device.deviceId),
       },
       ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),

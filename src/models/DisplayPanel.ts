@@ -11,6 +11,13 @@ export type Posture =
   | "tent"
   | "unknown";
 
+/** Ordered defaults: the first posture for each role is its inferred posture. */
+export const POSTURE_PANEL_ROLES = [
+  ["closed", "cover"],
+  ["opened", "inner"],
+  ["rear_display", "inner"],
+] as const satisfies readonly (readonly [Posture, PanelRole])[];
+
 export interface DisplayPanel {
   key: string;
   role: PanelRole;

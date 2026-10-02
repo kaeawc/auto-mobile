@@ -80,6 +80,7 @@ import {
   waitForSchema,
 } from "./observeTools";
 import { defaultTimer } from "../utils/SystemTimer";
+import { classifyDisplayInventory } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import {
   createJSONToolResponse,
@@ -2885,6 +2886,9 @@ export function registerInteractionTools() {
           false,
           defaultTimer,
           device.platform,
+          undefined,
+          undefined,
+          classifyDisplayInventory(device),
         )
       : null;
 

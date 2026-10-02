@@ -4409,7 +4409,8 @@
             },
             "posture": {
               "type": "string",
-              "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+              "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"],
+              "description": "Wait for the observed device posture. Single-panel inventory fails immediately; multi-panel or unavailable inventory keeps polling. Timeout diagnostics distinguish unobservable posture (no hierarchy captured), unavailable inventory, and the last observed posture."
             },
             "activeDisplay": {
               "type": "string",
@@ -8464,7 +8465,8 @@
             },
             "posture": {
               "type": "string",
-              "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+              "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"],
+              "description": "Wait for the observed device posture. Single-panel inventory fails immediately; multi-panel or unavailable inventory keeps polling. Timeout diagnostics distinguish unobservable posture (no hierarchy captured), unavailable inventory, and the last observed posture."
             },
             "activeDisplay": {
               "type": "string",

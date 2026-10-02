@@ -1,5 +1,9 @@
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
+import {
+  classifyDisplayInventory,
+  type DisplayInventoryClassification,
+} from "../utils/deviceMatcher";
 import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
@@ -140,11 +144,14 @@ const absentPredicatePresenceSchema = z.union([
 
 const absentPredicateSchema = absentPredicateBaseSchema.and(absentPredicatePresenceSchema);
 
+const POSTURE_WAIT_DESCRIPTION =
+  "Wait for the observed device posture. Single-panel inventory fails immediately; multi-panel or unavailable inventory keeps polling. Timeout diagnostics distinguish unobservable posture (no hierarchy captured), unavailable inventory, and the last observed posture.";
+
 const waitForCommonShape = {
   posture: z
     .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent"])
     .optional()
-    .describe("Wait for the observed device posture"),
+    .describe(POSTURE_WAIT_DESCRIPTION),
   activeDisplay: z.string().min(1).optional().describe("Wait for a panel key or role"),
   activeWindow: activeWindowWaitForSchema.optional().describe("Foreground app/window predicates"),
   absent: absentPredicateSchema
@@ -398,6 +405,7 @@ const COMPACT_WAITFOR_ADVERTISED_SCHEMA: Record<string, unknown> = {
     posture: {
       type: "string",
       enum: ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"],
+      description: POSTURE_WAIT_DESCRIPTION,
     },
     activeDisplay: { type: "string", description: "Physical panel key or role" },
     absent: ABSENT_PREDICATE_ADVERTISED_SCHEMA,
@@ -1294,6 +1302,29 @@ export const hashHierarchyForSettle = (viewHierarchy?: ViewHierarchyResult): str
   }
 };
 
+interface PostureWaitEvidence {
+  lastObservedPosture: string;
+  knownPostureObserved: boolean;
+  hierarchyCaptured: boolean;
+}
+
+function postureTimeoutReason(
+  posture: string,
+  duration: number,
+  inventory: DisplayInventoryClassification,
+  evidence: PostureWaitEvidence,
+): string {
+  let reason = `last observed posture "${evidence.lastObservedPosture}"`;
+  if (!evidence.knownPostureObserved) {
+    if (inventory === "unavailable") {
+      reason = "display inventory was unavailable so posture support was never confirmed";
+    } else if (!evidence.hierarchyCaptured) {
+      reason = "posture was never observable because no hierarchy was captured";
+    }
+  }
+  return `Timed out after ${duration} ms waiting for posture "${posture}"; ${reason}`;
+}
+
 export const waitForObservation = async (
   observeScreen: ObserveScreen,
   waitFor: WaitForWithSettled,
@@ -1303,14 +1334,23 @@ export const waitForObservation = async (
   platform?: BootedDevice["platform"],
   screenshot?: ScreenshotMode,
   screenshotOptions?: z.infer<typeof screenshotOptionsSchema>,
+  displayInventory: DisplayInventoryClassification = "unavailable",
 ): Promise<WaitForObservationOutcome> => {
-  let lastObservedPosture = "unknown";
-  let postureSupported = false;
+  const postureEvidence: PostureWaitEvidence = {
+    lastObservedPosture: "unknown",
+    knownPostureObserved: false,
+    hierarchyCaptured: false,
+  };
   const complete = async (
     outcome: WaitForObservationOutcome,
   ): Promise<WaitForObservationOutcome> => {
     if (outcome.timedOut && waitFor.posture !== undefined) {
-      outcome.timeoutReason = `Timed out after ${outcome.awaitDuration} ms waiting for posture "${waitFor.posture}"; last observed posture "${lastObservedPosture}"`;
+      outcome.timeoutReason = postureTimeoutReason(
+        waitFor.posture,
+        outcome.awaitDuration,
+        displayInventory,
+        postureEvidence,
+      );
     }
     const mode = resolveScreenshotMode(screenshot);
     if (
@@ -1368,34 +1408,28 @@ export const waitForObservation = async (
       skipScreenshot: true,
       skipAccessibilityAudit: true,
     });
-    lastObservedPosture = observation.display?.posture ?? lastObservedPosture;
-    if (
-      observation.display &&
-      (observation.display.key !== "0" ||
-        observation.display.role !== "unknown" ||
-        observation.display.posture !== "unknown")
-    ) {
-      postureSupported = true;
-    }
+    postureEvidence.lastObservedPosture =
+      observation.display?.posture ?? postureEvidence.lastObservedPosture;
+    postureEvidence.knownPostureObserved ||=
+      observation.display !== undefined && observation.display.posture !== "unknown";
+    postureEvidence.hierarchyCaptured ||= observation.viewHierarchy !== undefined;
     return observation;
   };
 
-  const checkDisplaySupport = (observation: ObserveResult, first: boolean): void => {
-    // The no-inventory stub is shared with activeDisplay. A known panel whose
-    // posture is temporarily unknown still establishes support for polling.
-    const unsupportedCondition =
-      waitFor.activeDisplay !== undefined
-        ? "activeDisplay"
-        : first && waitFor.posture !== undefined && observation.display?.posture === "unknown"
-          ? "posture"
-          : undefined;
+  const checkDisplaySupport = (observation: ObserveResult): void => {
+    // activeDisplay retains its observation-stub check; posture uses inventory.
     if (
-      unsupportedCondition &&
+      waitFor.activeDisplay !== undefined &&
       observation.display?.key === "0" &&
       observation.display.role === "unknown"
     ) {
       throw new ActionableError(
-        `Cannot wait for ${unsupportedCondition}: this device has no display inventory. Select a device that reports display panels and posture and retry.`,
+        "Cannot wait for activeDisplay: this device has no display inventory. Select a device that reports display panels and posture and retry.",
+      );
+    }
+    if (waitFor.posture !== undefined && displayInventory === "single") {
+      throw new ActionableError(
+        "Cannot wait for posture: this device has no display inventory. Select a device that reports display panels and posture and retry.",
       );
     }
   };
@@ -1424,7 +1458,7 @@ export const waitForObservation = async (
   // Evaluate the current cache on the first poll, then use its device-clock
   // timestamp to request a strictly newer hierarchy on later polls.
   let observation = await observeOnce(0);
-  checkDisplaySupport(observation, true);
+  checkDisplaySupport(observation);
   const baselineTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
   // A posture-only stamp is read independently of hierarchy capture, including
   // while folding locks the device. UI predicates/settling still need a fresh tree.
@@ -1487,21 +1521,20 @@ export const waitForObservation = async (
     } catch (error) {
       if (
         waitFor.posture === undefined ||
-        !postureSupported ||
         signal?.aborted ||
         (error instanceof Error && error.name === "AbortError")
       ) {
         logger.debug("[observe] Wait observation failed", error);
         throw error;
       }
-      // A fold may lock/disconnect hierarchy capture after support was established.
+      // A fold may lock/disconnect capture before posture is observable; retry within the deadline.
       logger.debug("[observe] Posture transition interrupted observation; retrying", error);
       waitEvaluation = { matched: false };
       matchedHash = null;
       continue;
     }
     throwIfAborted(signal);
-    checkDisplaySupport(observation, false);
+    checkDisplaySupport(observation);
     const observedTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
     // A timed-out delegate may return its old cache despite the requested
     // floor. It must not satisfy waitFor as post-invocation evidence.
@@ -1707,7 +1740,6 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     _progress?: unknown,
     signal?: AbortSignal,
   ): Promise<ObserveResponse> => {
-    const waitFor = args.waitFor;
     const deviceRead = getToolSelectionContext()?.explicitObserveDeviceRead === true;
     // #6154 follow-up: `platform` is optional on the wire, so the schema's
     // iOS-rejects-activityName check (which runs against the raw request
@@ -1724,16 +1756,17 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       // source, so every observation reaching here is already platform-validated
       // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome =
-        !deviceRead && waitFor
+        !deviceRead && args.waitFor
           ? await waitForObservation(
               observeScreen,
-              { ...waitFor, settled: args.settled },
+              { ...args.waitFor, settled: args.settled },
               signal,
               args.skipBackStack ?? false,
               defaultTimer,
               device.platform,
               screenshotMode,
               args.screenshotOptions,
+              classifyDisplayInventory(device),
             )
           : null;
       const result = deviceRead

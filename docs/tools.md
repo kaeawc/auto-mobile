@@ -643,12 +643,13 @@ panel key or a role. These conditions compare the returned observation's
 `display` stamp. Posture waits accept only known postures; `unknown` remains a
 possible observation stamp but cannot be requested as a wait condition. Posture
 waits need a device that reports posture: supported Android foldables and iPhone
-Duo report it in the display stamp. A no-inventory stamp (key `"0"`, role
-`"unknown"`, posture `"unknown"`) fails immediately on the first observation
-with an actionable error. A known panel with temporarily `unknown` posture
-keeps polling. After the first observation establishes support, posture waits
-also tolerate missing/unavailable hierarchy and transient observation failures
-during a fold; cancellation still propagates.
+Duo report it in the display stamp. Posture waits fail immediately with an
+actionable error only when hydrated display inventory confirms a single panel.
+Multi-panel or unavailable inventory keeps polling, including a first capture
+with no hierarchy and an unknown display stamp. Posture waits also tolerate
+transient observation failures after the first capture during a fold;
+cancellation still propagates. `activeDisplay` retains its no-inventory stamp
+check (key `"0"`, role `"unknown"`).
 
 Posture-only waits use the independently read display stamp without requiring a
 new hierarchy timestamp. Combined text/element predicates and settling retain
@@ -656,6 +657,10 @@ the hierarchy freshness requirement, and all specified predicates must match.
 On timeout, the last observation is returned with `timedOut: true` and
 `awaitTimeout: true`, plus `timeoutReason`, for example:
 `Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"`.
+If posture was never known on a multi-panel device and no hierarchy was captured,
+the reason ends with `posture was never observable because no hierarchy was captured`.
+If inventory was unavailable and posture was never known, it ends with
+`display inventory was unavailable so posture support was never confirmed`.
 An action-observation diff includes `displayChanged: { from, to }` when the
 panel key, role, or posture changes. Capture generation alone does not create a
 display change entry.

@@ -9,6 +9,26 @@ import type {
 import { CTRL_PROXY_APK_MIN_SDK, parseAndroidApiLevelBound } from "./androidVersionBounds";
 import { defaultRandom, type Random } from "./Random";
 
+export type DisplayInventoryClassification = "multi" | "single" | "unavailable";
+
+/** Use hydrated inventory evidence, never an observation stamp or screen-size guess. */
+export function classifyDisplayInventory(
+  device: Pick<BootedDevice, "displays" | typeof displayInventoryOutcome>,
+): DisplayInventoryClassification {
+  const outcome = device[displayInventoryOutcome];
+  if (outcome?.kind === "unreadable") {
+    return "unavailable";
+  }
+  const panelCount = device.displays?.panels.length ?? 0;
+  if (panelCount >= 2 || outcome?.kind === "multi") {
+    return "multi";
+  }
+  if (panelCount === 1 || outcome?.kind === "single") {
+    return "single";
+  }
+  return "unavailable";
+}
+
 /** Selects a booted device or device image for one boot request. */
 export interface DeviceMatcher {
   matchBootedDevice(

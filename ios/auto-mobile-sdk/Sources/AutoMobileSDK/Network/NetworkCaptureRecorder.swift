@@ -29,7 +29,7 @@ public final class NetworkCaptureRecorder: Sendable {
         var requestBodySize: Int?
         var requestBody: String?
         var responseHeaders: [String: String]?
-        var responseBodySize: Int = 0
+        var responseBodySize = 0
         var responseBody: String?
         var terminal = false
         let sampled: Bool
@@ -53,7 +53,7 @@ public final class NetworkCaptureRecorder: Sendable {
         isEnabled: @escaping @Sendable () -> Bool = { true },
         isBodyCaptureEnabled: @escaping @Sendable () -> Bool = { true },
         samplingRate: Double = 1,
-        sampler: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) },
+        sampler: @escaping @Sendable () -> Double = { Double.random(in: 0 ..< 1) },
         headerRedactor: @escaping @Sendable ([String: String]) -> [String: String] = {
             NetworkCaptureRecorder.redactHeaders($0)
         }
@@ -78,7 +78,9 @@ public final class NetworkCaptureRecorder: Sendable {
         requestHeaders: [String: String]? = nil,
         requestBodySize: Int? = nil,
         requestBody: String? = nil
-    ) -> String {
+    )
+        -> String
+    {
         let requestId = nextRequestId()
         let sampled = isEnabled() && sampler() < samplingRate
         let request = InFlightRequest(
@@ -323,17 +325,19 @@ public final class URLSessionNetworkCaptureAdapter: Sendable {
     }
 
     #if DEBUG
-    public func evaluateFault(for task: URLSessionTask, sessionId: String? = nil) -> NetworkMockRuleStore.FaultDecision? {
-        let request = task.originalRequest ?? task.currentRequest
-        guard let url = request?.url, AutoMobileSDK.shared.isEnabled else { return nil }
-        return NetworkMockRuleStore.shared.evaluate(.init(
-            transport: .urlSession, host: url.host, port: url.port, scheme: url.scheme,
-            path: url.path, method: request?.httpMethod ?? "GET",
-            headers: request?.allHTTPHeaderFields ?? [:],
-            origin: request?.value(forHTTPHeaderField: "Origin"),
-            connectionId: nil, sessionId: sessionId
-        ))
-    }
+        public func evaluateFault(for task: URLSessionTask, sessionId: String? = nil) -> NetworkMockRuleStore
+            .FaultDecision?
+        {
+            let request = task.originalRequest ?? task.currentRequest
+            guard let url = request?.url, AutoMobileSDK.shared.isEnabled else { return nil }
+            return NetworkMockRuleStore.shared.evaluate(.init(
+                transport: .urlSession, host: url.host, port: url.port, scheme: url.scheme,
+                path: url.path, method: request?.httpMethod ?? "GET",
+                headers: request?.allHTTPHeaderFields ?? [:],
+                origin: request?.value(forHTTPHeaderField: "Origin"),
+                connectionId: nil, sessionId: sessionId
+            ))
+        }
     #endif
 
     @discardableResult
@@ -343,7 +347,9 @@ public final class URLSessionNetworkCaptureAdapter: Sendable {
         connectionId: String? = nil,
         requestHeaders: [String: String]? = nil,
         requestBodySize: Int? = nil
-    ) -> String {
+    )
+        -> String
+    {
         recorder.beginRequest(
             url: url,
             method: method,
@@ -357,7 +363,9 @@ public final class URLSessionNetworkCaptureAdapter: Sendable {
     public func begin(
         task: URLSessionTask,
         connectionId: String? = nil
-    ) -> String {
+    )
+        -> String
+    {
         let request = task.originalRequest ?? task.currentRequest
         return begin(
             url: request?.url?.absoluteString ?? "",
@@ -406,19 +414,21 @@ public final class WebSocketNetworkCaptureAdapter: Sendable {
     }
 
     #if DEBUG
-    public func evaluateFault(
-        url: String,
-        connectionId: String?,
-        direction: NetworkCaptureDirection,
-        sessionId: String? = nil
-    ) -> NetworkMockRuleStore.FaultDecision? {
-        guard AutoMobileSDK.shared.isEnabled, let parsed = URL(string: url) else { return nil }
-        return NetworkMockRuleStore.shared.evaluate(.init(
-            transport: .webSocket, host: parsed.host, port: parsed.port, scheme: parsed.scheme,
-            path: parsed.path, method: direction == .sent ? "SEND" : "RECEIVE",
-            headers: [:], origin: nil, connectionId: connectionId, sessionId: sessionId
-        ))
-    }
+        public func evaluateFault(
+            url: String,
+            connectionId: String?,
+            direction: NetworkCaptureDirection,
+            sessionId: String? = nil
+        )
+            -> NetworkMockRuleStore.FaultDecision?
+        {
+            guard AutoMobileSDK.shared.isEnabled, let parsed = URL(string: url) else { return nil }
+            return NetworkMockRuleStore.shared.evaluate(.init(
+                transport: .webSocket, host: parsed.host, port: parsed.port, scheme: parsed.scheme,
+                path: parsed.path, method: direction == .sent ? "SEND" : "RECEIVE",
+                headers: [:], origin: nil, connectionId: connectionId, sessionId: sessionId
+            ))
+        }
     #endif
 
     public func recordFrame(
@@ -447,25 +457,29 @@ public final class NWConnectionNetworkCaptureAdapter: Sendable {
     }
 
     #if DEBUG
-    public func evaluateFault(
-        endpoint: String,
-        connectionId: String,
-        sessionId: String? = nil
-    ) -> NetworkMockRuleStore.FaultDecision? {
-        guard AutoMobileSDK.shared.isEnabled, let parsed = URL(string: endpoint) else { return nil }
-        return NetworkMockRuleStore.shared.evaluate(.init(
-            transport: .nwConnection, host: parsed.host, port: parsed.port, scheme: parsed.scheme,
-            path: parsed.path, method: "CONNECTION", headers: [:], origin: nil,
-            connectionId: connectionId, sessionId: sessionId
-        ))
-    }
+        public func evaluateFault(
+            endpoint: String,
+            connectionId: String,
+            sessionId: String? = nil
+        )
+            -> NetworkMockRuleStore.FaultDecision?
+        {
+            guard AutoMobileSDK.shared.isEnabled, let parsed = URL(string: endpoint) else { return nil }
+            return NetworkMockRuleStore.shared.evaluate(.init(
+                transport: .nwConnection, host: parsed.host, port: parsed.port, scheme: parsed.scheme,
+                path: parsed.path, method: "CONNECTION", headers: [:], origin: nil,
+                connectionId: connectionId, sessionId: sessionId
+            ))
+        }
     #endif
 
     @discardableResult
     public func begin(
         endpoint: String,
         connectionId: String
-    ) -> String {
+    )
+        -> String
+    {
         recorder.beginRequest(
             url: endpoint,
             method: "CONNECTION",

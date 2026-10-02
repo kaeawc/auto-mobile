@@ -7,6 +7,8 @@ import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { runDaemonCommand } from "../../src/daemon/manager";
 import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
+import { FakeAbsentDaemonIdentity } from "../fakes/FakeAbsentDaemonIdentity";
+import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   createDefaultDaemonProcessFinder,
@@ -3265,7 +3267,11 @@ describe("Daemon manager process detection", () => {
 
   function managerWithProcesses(
     records: DaemonProcessRecord[],
-    options: { livePids?: Set<number>; pidFilePath?: string } = {},
+    options: {
+      livePids?: Set<number>;
+      pidFilePath?: string;
+      identityRecoveryIO?: IdentityRecoveryIO;
+    } = {},
   ): DaemonManager {
     return new DaemonManager(
       undefined,
@@ -3276,6 +3282,16 @@ describe("Daemon manager process detection", () => {
       undefined,
       new FakeDaemonProcessFinder(records, options.livePids),
       undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      options.identityRecoveryIO,
     );
   }
 
@@ -3660,7 +3676,7 @@ describe("Daemon manager process detection", () => {
           command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
         },
       ],
-      { livePids: new Set([201]) },
+      { livePids: new Set([201]), identityRecoveryIO: new FakeAbsentDaemonIdentity() },
     );
 
     expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
@@ -3680,7 +3696,7 @@ describe("Daemon manager process detection", () => {
           command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
         },
       ],
-      { livePids: new Set([201]) },
+      { livePids: new Set([201]), identityRecoveryIO: new FakeAbsentDaemonIdentity() },
     );
 
     expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
@@ -5313,6 +5329,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       new FakeDaemonPortAvailabilityChecker(),
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -5368,6 +5387,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       new FakeDaemonPortAvailabilityChecker(),
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -5555,6 +5577,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       new FakeDaemonPortAvailabilityChecker(),
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
@@ -5583,6 +5608,9 @@ describe("Daemon manager process detection", () => {
   });
 
   test("explicit restart bounds recorded and namespace-orphan shutdown in one cleanup window", async () => {
+    // Recorded-daemon stop cleans up files outside the identity IO seam.
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-restart-cleanup-window-"));
+    const socketPath = join(directory, "daemon.sock");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const recordedPid = 451;
@@ -5593,7 +5621,7 @@ describe("Daemon manager process detection", () => {
         [recordedPid, crossNamespacePid].map((pid) => ({
           pid,
           ppid: 1,
-          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
+          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(socketPath)}`,
           startedAt: pid * 1_000,
           processGenerationToken: `generation-${pid}`,
         })),
@@ -5615,9 +5643,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       fakeTimer,
-      undefined,
-      undefined,
-      undefined,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      socketPath,
       processFinder,
       undefined,
       undefined,
@@ -5627,11 +5655,14 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       new FakeDaemonPortAvailabilityChecker(),
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
-      socketPath: SOCKET_PATH,
+      socketPath,
       processStartedAt: recordedPid * 1_000,
       processGenerationToken: `generation-${recordedPid}`,
     });
@@ -5662,6 +5693,7 @@ describe("Daemon manager process detection", () => {
       killSpy.mockRestore();
       startSpy.mockRestore();
       statusSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 
@@ -5699,6 +5731,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       new FakeDaemonPortAvailabilityChecker(),
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
@@ -5779,6 +5814,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       new FakeDaemonPortAvailabilityChecker(),
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -5853,6 +5891,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       new FakeDaemonPortAvailabilityChecker(),
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -5915,6 +5956,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       portChecker,
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -5976,6 +6020,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       portChecker,
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({ running: false });
     const startSpy = spyOn(manager, "start").mockResolvedValue(undefined);
@@ -6021,6 +6068,9 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       portChecker,
+      undefined,
+      undefined,
+      new FakeAbsentDaemonIdentity(),
     );
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,

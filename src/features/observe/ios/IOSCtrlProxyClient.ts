@@ -797,6 +797,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return IOSCtrlProxyClient.instances.get(deviceId) ?? null;
   }
 
+  /** @internal Test seam matching AndroidCtrlProxyClient.registerForTesting. */
+  public static registerForTesting(client: IOSCtrlProxyClient, deviceId: string): void {
+    IOSCtrlProxyClient.instances.set(deviceId, client);
+  }
+
+  /**
+   * @internal Clear registry entries for isolated tests only. This closes
+   * nothing and resets no ports, observers, or retired-device state. Unlike
+   * resetInstances(), it avoids fire-and-forget close() cleanup that can run
+   * real socket work and leaves IOSCtrlProxyManager's retired-device state
+   * untouched.
+   */
+  public static clearInstanceRegistryForTesting(): void {
+    IOSCtrlProxyClient.instances.clear();
+  }
+
   /** Permanently retire the registered client for one device incarnation. */
   public static async retireInstance(deviceId: string): Promise<void> {
     IOSCtrlProxyManager.retireDevice(deviceId);

@@ -13,9 +13,11 @@
  * default before every unit test also covers files whose afterEach restores the
  * real checker with setPortAvailabilityCheckerForTesting(null).
  */
-import { beforeEach } from "bun:test";
+import { afterEach, beforeEach } from "bun:test";
 import { FakePortAvailabilityChecker } from "../fakes/FakePortAvailabilityChecker";
 import { PortManager } from "../../src/utils/PortManager";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 
 const testFile = (process.argv[1] ?? "").replaceAll("\\", "/");
 const isUnitTest =
@@ -30,4 +32,13 @@ if (isUnitTest) {
 
   installFake();
   beforeEach(installFake);
+
+  // Clear only the singleton registries. The explicit test APIs avoid the
+  // fire-and-forget close() cleanup in resetInstances(), which can run real
+  // adb/socket work; Android resetInstances() also resets PortManager's clock
+  // and allocations configured by some files in beforeAll.
+  afterEach(() => {
+    AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
+    IOSCtrlProxyClient.clearInstanceRegistryForTesting();
+  });
 }

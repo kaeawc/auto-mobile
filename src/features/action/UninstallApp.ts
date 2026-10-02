@@ -43,6 +43,14 @@ import {
 const ANDROID_UNINSTALL_TIMEOUT_MS = 20_000;
 const ANDROID_UNINSTALL_RECOVERY_TIMEOUT_MS = 5_000;
 
+export interface UninstallAppOptions {
+  simctl?: SimCtlClient;
+  deviceAppUninstaller?: DeviceAppUninstaller;
+  installedAppsRepository?: InstalledAppsStore;
+  performanceTrackerFactory?: () => PerformanceTracker;
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
+}
+
 export class UninstallApp {
   private device: BootedDevice;
   private adbFactory: AdbClientFactory;
@@ -53,24 +61,22 @@ export class UninstallApp {
   private createPerformanceTracker: () => PerformanceTracker;
   private cacheInvalidator: DeviceWindowCacheInvalidator;
 
-  // oxlint-disable-next-line max-params -- Required trailing invalidator preserves the existing constructor parameter order.
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    simctl: SimCtlClient | null = null,
-    deviceAppUninstaller: DeviceAppUninstaller | null = null,
-    installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository(),
-    performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
-    cacheInvalidator: DeviceWindowCacheInvalidator | null = null,
+    options: UninstallAppOptions = {},
   ) {
+    const installedAppsRepository =
+      options.installedAppsRepository ?? new InstalledAppsRepository();
     this.device = device;
     this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
-    this.simctl = simctl || new SimCtlClient(device);
-    this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppManager();
+    this.simctl = options.simctl ?? new SimCtlClient(device);
+    this.deviceAppUninstaller = options.deviceAppUninstaller ?? new DeviceAppManager();
     this.installedAppsRepository = installedAppsRepository;
-    this.createPerformanceTracker = performanceTrackerFactory;
-    this.cacheInvalidator = cacheInvalidator || new DefaultDeviceWindowCacheInvalidator();
+    this.createPerformanceTracker =
+      options.performanceTrackerFactory ?? createGlobalPerformanceTracker;
+    this.cacheInvalidator = options.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   }
 
   /**

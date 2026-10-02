@@ -1,3 +1,9 @@
+import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
+import { PlistClient } from "../../../src/utils/ios-cmdline-tools/PlistClient";
+import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
+import { DefaultAndroidBuildToolsLocator } from "../../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   InstallApp as ProductionInstallApp,
@@ -34,36 +40,11 @@ const playgroundBadgingOutput = readFileSync(
 // scenario does not need to inspect stale-marker rows explicitly.
 class InstallApp extends ProductionInstallApp {
   constructor(...args: ConstructorParameters<typeof ProductionInstallApp>) {
-    const [
-      device,
-      adbFactory,
-      hostExecutor,
-      buildToolsLocator,
-      performanceTrackerFactory,
-      simctl,
-      deviceAppInstaller,
-      plist,
-      repository,
-      physicalAppLister,
-      timer,
-      iosInstallBackendResolver,
-      cacheInvalidator,
-    ] = args;
-    super(
-      device,
-      adbFactory,
-      hostExecutor,
-      buildToolsLocator,
-      performanceTrackerFactory,
-      simctl,
-      deviceAppInstaller,
-      plist,
-      repository ?? new FakeInstalledAppsRepository(),
-      physicalAppLister,
-      timer,
-      iosInstallBackendResolver,
-      cacheInvalidator,
-    );
+    const [device, adbFactory, options = {}] = args;
+    super(device, adbFactory, {
+      ...options,
+      installedAppsRepository: options.installedAppsRepository ?? new FakeInstalledAppsRepository(),
+    });
   }
 }
 
@@ -236,6 +217,17 @@ describe("InstallApp", () => {
     tempDirs.length = 0;
   });
 
+  test("preserves default dependency implementations with omitted options", () => {
+    const app = new ProductionInstallApp(device, fakeAdbFactory);
+    expect(app["cacheInvalidatorOverride"]).toBeUndefined();
+    expect(app["cacheInvalidator"]).toBeInstanceOf(DefaultDeviceWindowCacheInvalidator);
+    expect(app["deviceAppInstaller"]).toBeInstanceOf(DeviceAppManager);
+    expect(app["simctl"]).toBeInstanceOf(SimCtlClient);
+    expect(app["plist"]).toBeInstanceOf(PlistClient);
+    expect(app["hostExecutor"]).toBeInstanceOf(DefaultHostCommandExecutor);
+    expect(app["buildToolsLocator"]).toBeInstanceOf(DefaultAndroidBuildToolsLocator);
+  });
+
   test("installs using aapt2 and targets work profile user", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
@@ -253,7 +245,11 @@ describe("InstallApp", () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 10", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 10 -r "${apkPath}"`, createExecResult("Success"));
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
 
     const result = await installApp.execute(apkPath);
 
@@ -294,9 +290,11 @@ describe("InstallApp", () => {
     ]);
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
-      createPerformanceTracker(false, fakeTimer),
-    );
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+    });
 
     await expect(installApp.execute(apkPath)).rejects.toThrow(
       `aapt reported "${parsedPackageName}", but the device reported "${installedPackageName}"`,
@@ -315,9 +313,11 @@ describe("InstallApp", () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
-    const result = await new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
-      createPerformanceTracker(true, fakeTimer),
-    ).execute(apkPath);
+    const result = await new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+    }).execute(apkPath);
 
     expect(result.perfTiming).toBeDefined();
     expect((result.perfTiming as TimingEntry[])[0]?.name).toBe("installApp");
@@ -334,9 +334,11 @@ describe("InstallApp", () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
-    const result = await new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () =>
-      createPerformanceTracker(false, fakeTimer),
-    ).execute(apkPath);
+    const result = await new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+    }).execute(apkPath);
 
     expect(result).toEqual({
       success: true,
@@ -362,17 +364,12 @@ describe("InstallApp", () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
-    const installApp = new InstallApp(
-      device,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      () => createPerformanceTracker(true, fakeTimer),
-      null,
-      null,
-      undefined,
-      repo,
-    );
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      installedAppsRepository: repo,
+    });
 
     await installApp.execute(apkPath);
 
@@ -422,9 +419,11 @@ describe("InstallApp", () => {
     const installApp = new InstallApp(
       device,
       { create: () => sequencedAdb },
-      fakeHost,
-      fakeLocator,
-      () => perf,
+      {
+        hostExecutor: fakeHost,
+        buildToolsLocator: fakeLocator,
+        performanceTrackerFactory: () => perf,
+      },
     );
 
     const result = await installApp.execute(apkPath);
@@ -447,17 +446,12 @@ describe("InstallApp", () => {
 
     fakeLocator.setTool(null);
 
-    const installApp = new InstallApp(
-      device,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      () => perf,
-      null,
-      null,
-      undefined,
-      repo,
-    );
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+      installedAppsRepository: repo,
+    });
 
     const result = await installApp.execute(apkPath);
 
@@ -501,13 +495,12 @@ describe("InstallApp", () => {
     const installApp = new InstallApp(
       device,
       { create: () => adb },
-      fakeHost,
-      fakeLocator,
-      () => createPerformanceTracker(true, fakeTimer),
-      null,
-      null,
-      undefined,
-      repo,
+      {
+        hostExecutor: fakeHost,
+        buildToolsLocator: fakeLocator,
+        performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+        installedAppsRepository: repo,
+      },
     );
 
     await expect(installApp.execute(apkPath)).rejects.toThrow("ADB disconnected after install");
@@ -527,17 +520,12 @@ describe("InstallApp", () => {
     const repo = new FakeInstalledAppsRepository();
     await repo.upsertInstalledApp(iosSimulatorDevice.deviceId, 0, "com.example.old", false, 1_000);
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      null,
-      () => perf,
-      sequencedSimctl,
-      null,
-      undefined,
-      repo,
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      performanceTrackerFactory: () => perf,
+      simctl: sequencedSimctl,
+      installedAppsRepository: repo,
+    });
 
     const result = await installApp.execute(appPath);
 
@@ -555,19 +543,14 @@ describe("InstallApp", () => {
       const device = transport === "simulator" ? iosSimulatorDevice : iosPhysicalDevice;
       const artifactPath = transport === "simulator" ? "/tmp/MyApp.app" : ipaWithBundleId();
       const calls: string[] = [];
-      const installApp = new InstallApp(
-        device,
-        fakeAdbFactory,
-        null,
-        null,
-        () => createPerformanceTracker(false, fakeTimer),
-        new FakeSimctl(),
-        new FakeDeviceAppInstaller(),
-        fakePlist("com.example.app"),
-        new FakeInstalledAppsRepository(),
-        undefined,
-        fakeTimer,
-        (deviceId) => {
+      const installApp = new InstallApp(device, fakeAdbFactory, {
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        simctl: new FakeSimctl(),
+        deviceAppInstaller: new FakeDeviceAppInstaller(),
+        plist: fakePlist("com.example.app"),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: fakeTimer,
+        iosInstallBackendResolver: (deviceId) => {
           calls.push(`resolve:${deviceId}`);
           return {
             kind: transport === "simulator" ? "simulator" : "physical",
@@ -580,7 +563,7 @@ describe("InstallApp", () => {
             },
           };
         },
-      );
+      });
 
       await installApp.execute(artifactPath);
       expect(calls).toEqual(
@@ -597,11 +580,11 @@ describe("InstallApp", () => {
     const action = new InstallApp(
       { ...iosPhysicalDevice, deviceId: "unrecognized-device" },
       fakeAdbFactory,
-      null,
-      null,
-      () => createPerformanceTracker(false, fakeTimer),
-      simctl,
-      installer,
+      {
+        performanceTrackerFactory: () => createPerformanceTracker(false, fakeTimer),
+        simctl: simctl,
+        deviceAppInstaller: installer,
+      },
     );
     await expect(action.execute("/tmp/MyApp.app")).rejects.toThrow(
       "iOS physical devices do not support .app bundles. Use a signed .ipa file instead.",
@@ -615,15 +598,10 @@ describe("InstallApp", () => {
     const perf = createPerformanceTracker(true, fakeTimer);
     const fakeInstaller = new FakeDeviceAppInstaller();
 
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf,
-      undefined,
-      fakeInstaller,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+      deviceAppInstaller: fakeInstaller,
+    });
 
     const result = await installApp.execute(ipaPath);
 
@@ -640,19 +618,13 @@ describe("InstallApp", () => {
     const lister: IosPhysicalAppLister = {
       listInstalledApps: async () => [{ bundleIdentifier: "com.example.app" }],
     };
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => createPerformanceTracker(true, fakeTimer),
-      undefined,
-      fakeInstaller,
-      fakePlist("com.example.app"),
-      undefined,
-      lister,
-      fakeTimer,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      deviceAppInstaller: fakeInstaller,
+      plist: fakePlist("com.example.app"),
+      physicalAppLister: lister,
+      timer: fakeTimer,
+    });
 
     const result = await installApp.execute(ipaPath);
 
@@ -670,19 +642,13 @@ describe("InstallApp", () => {
         return [];
       },
     };
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => createPerformanceTracker(true, fakeTimer),
-      undefined,
-      new FakeDeviceAppInstaller(),
-      fakePlist("com.example.app"),
-      undefined,
-      lister,
-      fakeTimer,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      deviceAppInstaller: new FakeDeviceAppInstaller(),
+      plist: fakePlist("com.example.app"),
+      physicalAppLister: lister,
+      timer: fakeTimer,
+    });
 
     await expect(installApp.execute(ipaPath)).rejects.toThrow(
       "bundle com.example.app was not present",
@@ -700,19 +666,13 @@ describe("InstallApp", () => {
         return queries === 2 ? [{ bundleIdentifier: "com.example.app" }] : [];
       },
     };
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => createPerformanceTracker(true, fakeTimer),
-      undefined,
-      new FakeDeviceAppInstaller(),
-      fakePlist("com.example.app"),
-      undefined,
-      lister,
-      fakeTimer,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      deviceAppInstaller: new FakeDeviceAppInstaller(),
+      plist: fakePlist("com.example.app"),
+      physicalAppLister: lister,
+      timer: fakeTimer,
+    });
 
     const result = await installApp.execute(ipaPath);
 
@@ -734,19 +694,13 @@ describe("InstallApp", () => {
         return [];
       },
     };
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => createPerformanceTracker(true, fakeTimer),
-      undefined,
-      new FakeDeviceAppInstaller(),
-      fakePlist("com.example.app"),
-      undefined,
-      lister,
-      fakeTimer,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      deviceAppInstaller: new FakeDeviceAppInstaller(),
+      plist: fakePlist("com.example.app"),
+      physicalAppLister: lister,
+      timer: fakeTimer,
+    });
 
     await expect(installApp.execute(ipaPath, undefined, controller.signal)).rejects.toThrow();
     expect(queries).toBe(1);
@@ -760,19 +714,13 @@ describe("InstallApp", () => {
         throw new Error("device disconnected");
       },
     };
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => createPerformanceTracker(true, fakeTimer),
-      undefined,
-      new FakeDeviceAppInstaller(),
-      fakePlist("com.example.app"),
-      undefined,
-      lister,
-      fakeTimer,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      deviceAppInstaller: new FakeDeviceAppInstaller(),
+      plist: fakePlist("com.example.app"),
+      physicalAppLister: lister,
+      timer: fakeTimer,
+    });
 
     try {
       const result = await installApp.execute(ipaPath);
@@ -794,19 +742,13 @@ describe("InstallApp", () => {
       listInstalledApps: () => new Promise(() => {}),
     };
     const warning = spyOn(logger, "warn").mockImplementation(() => {});
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => createPerformanceTracker(true, fakeTimer),
-      undefined,
-      new FakeDeviceAppInstaller(),
-      fakePlist("com.example.app"),
-      undefined,
-      lister,
-      fakeTimer,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+      deviceAppInstaller: new FakeDeviceAppInstaller(),
+      plist: fakePlist("com.example.app"),
+      physicalAppLister: lister,
+      timer: fakeTimer,
+    });
 
     try {
       const result = await installApp.execute(ipaPath);
@@ -851,7 +793,11 @@ describe("InstallApp", () => {
 
     test.each(androidRejections)("Android rejects a %s", async (_name, artifactPath) => {
       const perf = createPerformanceTracker(true, fakeTimer);
-      const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+      const installApp = new InstallApp(device, fakeAdbFactory, {
+        hostExecutor: fakeHost,
+        buildToolsLocator: fakeLocator,
+        performanceTrackerFactory: () => perf,
+      });
 
       await expect(installApp.execute(artifactPath)).rejects.toThrow(
         `Android devices only support .apk files, but got "${androidExpectedExt[artifactPath]}" file. Use an .apk file for Android installation.`,
@@ -892,13 +838,9 @@ describe("InstallApp", () => {
       "iOS simulator rejects a %s",
       async (_name, artifactPath, expectedMessage) => {
         const perf = createPerformanceTracker(true, fakeTimer);
-        const installApp = new InstallApp(
-          iosSimulatorDevice,
-          fakeAdbFactory,
-          null,
-          null,
-          () => perf,
-        );
+        const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+          performanceTrackerFactory: () => perf,
+        });
 
         await expect(installApp.execute(artifactPath)).rejects.toThrow(expectedMessage);
       },
@@ -922,13 +864,9 @@ describe("InstallApp", () => {
       "iOS physical device rejects a %s",
       async (_name, artifactPath, expectedMessage) => {
         const perf = createPerformanceTracker(true, fakeTimer);
-        const installApp = new InstallApp(
-          iosPhysicalDevice,
-          fakeAdbFactory,
-          null,
-          null,
-          () => perf,
-        );
+        const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+          performanceTrackerFactory: () => perf,
+        });
 
         await expect(installApp.execute(artifactPath)).rejects.toThrow(expectedMessage);
       },
@@ -951,7 +889,11 @@ describe("InstallApp", () => {
       createExecResult("Success"),
     );
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
     const result = await installApp.execute(path.join("relative", "path", "app.apk"));
 
     expect(result.success).toBe(true);
@@ -977,7 +919,11 @@ describe("InstallApp", () => {
       createExecResult("Success"),
     );
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
     const result = await installApp.execute(path.join("relative", "path", "app.apk"));
 
     expect(result.success).toBe(true);
@@ -993,14 +939,10 @@ describe("InstallApp", () => {
       [{ bundleId: "com.example.app", bundlePath: "/tmp/MyApp.app" }],
     ]);
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf,
-      sequencedSimctl,
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+      simctl: sequencedSimctl,
+    });
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -1018,14 +960,10 @@ describe("InstallApp", () => {
       [{ bundleId: "com.example.pathmatched", bundlePath: "/tmp/MyApp.app" }],
     ]);
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf,
-      sequencedSimctl,
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+      simctl: sequencedSimctl,
+    });
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -1043,16 +981,12 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      null,
-      () => perf,
-      sequencedSimctl,
-      null,
-      fakePlist(""),
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      performanceTrackerFactory: () => perf,
+      simctl: sequencedSimctl,
+      plist: fakePlist(""),
+    });
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -1070,16 +1004,12 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      null,
-      () => perf,
-      sequencedSimctl,
-      null,
-      fakePlist(""),
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      performanceTrackerFactory: () => perf,
+      simctl: sequencedSimctl,
+      plist: fakePlist(""),
+    });
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -1094,16 +1024,12 @@ describe("InstallApp", () => {
     sequencedSimctl.setListResponses([[], []]);
     fakeHost.setCommandResponse("plutil", createExecResult("com.example.app\n"));
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      null,
-      () => perf,
-      sequencedSimctl,
-      null,
-      fakePlist("com.example.app\n"),
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      performanceTrackerFactory: () => perf,
+      simctl: sequencedSimctl,
+      plist: fakePlist("com.example.app\n"),
+    });
 
     await expect(installApp.execute(appPath)).rejects.toThrow(
       "Install reported success, but bundle com.example.app was not present",
@@ -1116,15 +1042,10 @@ describe("InstallApp", () => {
     const fakeInstaller = new FakeDeviceAppInstaller();
     fakeInstaller.shouldThrow = new Error("devicectl: device not paired");
 
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf,
-      undefined,
-      fakeInstaller,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+      deviceAppInstaller: fakeInstaller,
+    });
 
     await expect(installApp.execute(ipaPath)).rejects.toThrow("devicectl: device not paired");
   });
@@ -1135,7 +1056,9 @@ describe("InstallApp", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+    });
 
     await expect(installApp.execute(appPath, undefined, controller.signal)).rejects.toThrow(
       "Operation cancelled",
@@ -1149,15 +1072,10 @@ describe("InstallApp", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf,
-      undefined,
-      fakeInstaller,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+      deviceAppInstaller: fakeInstaller,
+    });
 
     await expect(installApp.execute(ipaPath, undefined, controller.signal)).rejects.toThrow(
       "Operation cancelled",
@@ -1184,7 +1102,11 @@ describe("InstallApp", () => {
 
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
     try {
       const result = await installApp.execute(apkPath);
 
@@ -1215,7 +1137,11 @@ describe("InstallApp", () => {
     );
     fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
     const result = await installApp.execute(apkPath);
 
     expect(result.success).toBe(true);
@@ -1234,7 +1160,11 @@ describe("InstallApp", () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 0", createExecResult(""));
     fakeAdb.setCommandResponse('install --user 0 -r "/tmp/app.APK"', createExecResult("Success"));
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
     const result = await installApp.execute("/tmp/app.APK");
 
     expect(result.success).toBe(true);
@@ -1245,15 +1175,10 @@ describe("InstallApp", () => {
     const perf = createPerformanceTracker(true, fakeTimer);
     const fakeInstaller = new FakeDeviceAppInstaller();
 
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf,
-      undefined,
-      fakeInstaller,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+      deviceAppInstaller: fakeInstaller,
+    });
     const result = await installApp.execute(ipaPath);
 
     expect(result.warning).toContain("installation was not verified");
@@ -1280,17 +1205,12 @@ describe("InstallApp", () => {
     ]);
     const repo = new CountingInstalledAppsRepository();
 
-    const installApp = new InstallApp(
-      device,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      () => perf,
-      null,
-      null,
-      undefined,
-      repo,
-    );
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+      installedAppsRepository: repo,
+    });
     const result = await installApp.execute(apkPath);
 
     expect(result.success).toBe(true);
@@ -1331,17 +1251,12 @@ describe("InstallApp", () => {
       createExecResult("", "Failure [INSTALL_FAILED_INVALID_APK]"),
     ]);
 
-    const installApp = new InstallApp(
-      device,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      () => perf,
-      null,
-      null,
-      undefined,
-      repo,
-    );
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+      installedAppsRepository: repo,
+    });
 
     const result = await installApp.execute(apkPath);
 
@@ -1359,7 +1274,11 @@ describe("InstallApp", () => {
       createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
     );
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
 
     await expect(installApp.execute(apkPath)).rejects.toThrow("INSTALL_FAILED_VERSION_DOWNGRADE");
     expect(fakeAdb.wasCommandExecuted("uninstall")).toBe(false);
@@ -1380,7 +1299,11 @@ describe("InstallApp", () => {
       new Error("Failure [INSTALL_FAILED_INVALID_APK]"),
     );
 
-    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const installApp = new InstallApp(device, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      performanceTrackerFactory: () => perf,
+    });
 
     await expect(installApp.execute(apkPath)).rejects.toThrow("INSTALL_FAILED_INVALID_APK");
     expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(false);
@@ -1399,16 +1322,12 @@ describe("InstallApp", () => {
     ]);
     fakeHost.setCommandResponse("plutil", createExecResult("com.example.app\n"));
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      null,
-      () => perf,
-      simctl,
-      null,
-      fakePlist("com.example.app\n"),
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      performanceTrackerFactory: () => perf,
+      simctl: simctl,
+      plist: fakePlist("com.example.app\n"),
+    });
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -1424,17 +1343,13 @@ describe("InstallApp", () => {
     const simctl = new SequencedFakeSimctl();
     simctl.setStrictListResponses([[], new Error("simctl listapps temporarily unavailable")]);
     const appPath = "/tmp/MyApp.app";
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      undefined,
-      simctl,
-      undefined,
-      fakePlist("com.example.app"),
-      new FakeInstalledAppsRepository(),
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      simctl: simctl,
+      plist: fakePlist("com.example.app"),
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+    });
 
     const result = await installApp.execute(appPath);
 
@@ -1450,17 +1365,13 @@ describe("InstallApp", () => {
       new Error("first listapps failure"),
       new Error("second listapps failure"),
     ]);
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      fakeLocator,
-      undefined,
-      simctl,
-      undefined,
-      fakePlist("com.example.app"),
-      new FakeInstalledAppsRepository(),
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      buildToolsLocator: fakeLocator,
+      simctl: simctl,
+      plist: fakePlist("com.example.app"),
+      installedAppsRepository: new FakeInstalledAppsRepository(),
+    });
 
     await expect(installApp.execute("/tmp/MyApp.app")).rejects.toThrow("second listapps failure");
     expect(simctl.strictListCalls).toBe(2);
@@ -1475,16 +1386,12 @@ describe("InstallApp", () => {
     simctl.setListResponses([[], []]);
     fakeHost.setCommandResponse("plutil", createExecResult("")); // empty → unresolved bundle id
 
-    const installApp = new InstallApp(
-      iosSimulatorDevice,
-      fakeAdbFactory,
-      fakeHost,
-      null,
-      () => perf,
-      simctl,
-      null,
-      fakePlist(""),
-    );
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, {
+      hostExecutor: fakeHost,
+      performanceTrackerFactory: () => perf,
+      simctl: simctl,
+      plist: fakePlist(""),
+    });
 
     await expect(installApp.execute(appPath)).rejects.toThrow(
       "bundle identifier could not be read",
@@ -1500,15 +1407,10 @@ describe("InstallApp", () => {
       "Unable to Install. A newer version of this application is already installed.",
     );
 
-    const installApp = new InstallApp(
-      iosPhysicalDevice,
-      fakeAdbFactory,
-      null,
-      null,
-      () => perf,
-      undefined,
-      fakeInstaller,
-    );
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, {
+      performanceTrackerFactory: () => perf,
+      deviceAppInstaller: fakeInstaller,
+    });
 
     await expect(installApp.execute(ipaPath)).rejects.toThrow(
       "Uninstall the app first with uninstallApp",

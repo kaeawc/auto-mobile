@@ -26,9 +26,13 @@ function fakeDevice(deviceId: string, platform: "android" | "ios" = "android"): 
 }
 
 class FakeHasher implements AppContentHasher {
-  public calls: Array<{ deviceId: string; packageId: string; versionCode: number }> = [];
+  public calls: Array<{ deviceId: string; packageId: string; versionCode: number | string }> = [];
   constructor(private readonly bytesByInstall: Map<string, string>) {}
-  async computeHash(device: BootedDevice, packageId: string, versionCode: number): Promise<string> {
+  async computeHash(
+    device: BootedDevice,
+    packageId: string,
+    versionCode: number | string,
+  ): Promise<string> {
     this.calls.push({ deviceId: device.deviceId, packageId, versionCode });
     const key = `${device.deviceId}::${packageId}::${versionCode}`;
     const bytes = this.bytesByInstall.get(key);
@@ -43,6 +47,28 @@ class FakeHasher implements AppContentHasher {
 const DIGEST_A = "a".repeat(64);
 const DIGEST_B = "b".repeat(64);
 const DIGEST_Z = "f".repeat(64);
+
+test("string version cache keys stay distinct from numeric keys and invalidate per package", async () => {
+  const bytes = new Map([
+    ["emu-1::app::1.2.3", "dotted"],
+    ["emu-1::app::0", "numeric"],
+    ["emu-1::app::1.2.4", "other"],
+  ]);
+  const hasher = new FakeHasher(bytes);
+  const provider = new CachingContentHashProvider(hasher);
+  const device = fakeDevice("emu-1", "ios");
+  expect(await provider.resolveContentHash(device, "app", "1.2.3")).toBe("sha256:dotted");
+  expect(await provider.resolveContentHash(device, "app", 0)).toBe("sha256:numeric");
+  expect(await provider.resolveContentHash(device, "app", "1.2.4")).toBe("sha256:other");
+  await provider.resolveContentHash(device, "app", "1.2.3");
+  expect(hasher.calls).toHaveLength(3);
+  bytes.set("emu-1::app::1.2.3", "reinstalled");
+  provider.invalidate(device.deviceId, "app");
+  expect(await provider.resolveContentHash(device, "app", "1.2.3")).toBe("sha256:reinstalled");
+  await provider.resolveContentHash(device, "app", 0);
+  await provider.resolveContentHash(device, "app", "1.2.4");
+  expect(hasher.calls).toHaveLength(6);
+});
 
 describe("combineApkDigests", () => {
   test("is order-independent and content-derived (split APKs)", () => {

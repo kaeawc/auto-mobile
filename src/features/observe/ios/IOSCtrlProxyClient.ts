@@ -144,6 +144,21 @@ interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
   retryExecutor?: RetryExecutor;
 }
 
+/** Validate the platform version before it becomes a wire/cache key. */
+function iosBuildVersion(raw: string): { versionCode: number; versionKey?: string } | null {
+  const trimmed = raw.trim();
+  // 64 characters accommodates build labels while bounding wire/cache keys.
+  // Metadata and provenance share the trimmed platform value.
+  if (!trimmed || trimmed.length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) {
+    return null;
+  }
+  const numeric = Number(trimmed);
+  if (/^\d+$/.test(trimmed) && Number.isSafeInteger(numeric)) {
+    return { versionCode: numeric };
+  }
+  return { versionCode: 0, versionKey: trimmed };
+}
+
 interface IosBuildContextAttempt {
   generation: number;
   controller: AbortController;
@@ -1273,11 +1288,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return { kind: "failed" };
     }
     const buildNumber = metadata.buildNumber.trim();
-    const versionCode = Number(buildNumber);
-    if (!buildNumber || !/^\d+$/.test(buildNumber) || !Number.isSafeInteger(versionCode)) {
+    const version = iosBuildVersion(buildNumber);
+    if (version === null) {
       return {
         kind: "terminal",
-        reason: `CFBundleVersion ${JSON.stringify(buildNumber)} is not a safe plain integer`,
+        reason: `CFBundleVersion ${JSON.stringify(buildNumber)} is blank, over 64 characters, or contains controls`,
       };
     }
     this.contentHashProvider ??= createContentHashProvider(
@@ -1288,14 +1303,19 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     const contentHash = await this.contentHashProvider.resolveContentHash(
       this.device,
       appId,
-      versionCode,
+      version.versionKey ?? version.versionCode,
     );
     if (contentHash === null) {
       return { kind: "failed" };
     }
     return {
       kind: "resolved",
-      context: { appId, deviceId: this.device.deviceId, versionCode, contentHash },
+      context: {
+        appId,
+        deviceId: this.device.deviceId,
+        ...version,
+        contentHash,
+      },
     };
   }
 

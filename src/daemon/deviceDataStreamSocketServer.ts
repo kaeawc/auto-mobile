@@ -88,6 +88,14 @@ export interface PerformanceStreamData {
   recompositionRate: number | null;
 }
 
+/** Package build identity carried by device build-context updates. */
+export interface DeviceBuildKey {
+  packageId: string;
+  versionCode: number;
+  versionKey?: string;
+  contentHash: string;
+}
+
 /**
  * Response/push message format
  */
@@ -99,6 +107,7 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
     | "hierarchy_update"
     | "screenshot_update"
     | "navigation_update"
+    | "device_build_context"
     | "performance_update"
     | "storage_update"
     | "storage_reconciliation_required"
@@ -110,6 +119,9 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
   success?: boolean;
   error?: string;
   packageName?: string;
+  /** Present only on device_build_context; null clears this package's key. */
+  buildKey?: DeviceBuildKey | null;
+  packageId?: string;
   fileName?: string;
   deviceId?: string;
   /**
@@ -444,6 +456,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected override deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  private readonly buildKeysByDevice = new Map<
+    string,
+    { deviceSessionUuid: string; keys: Map<string, DeviceBuildKey> }
+  >();
   private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
   private readonly initialFrameWaiters = new Map<string, AbortController>();
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
@@ -533,6 +549,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       return 0;
     }
     const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
+    if (message.type === "device_build_context" && !target) {
+      this.cacheBuildContext(deviceId, deviceSessionUuid, message);
+    }
     return this.pushToSubscribers({
       message: { ...message, deviceSessionUuid },
       targetDeviceSessionUuid: deviceSessionUuid,
@@ -829,12 +848,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * device-scoped pane and an all-device hub observe the transition.
    */
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
+    this.buildKeysByDevice.delete(record.deviceId);
     // Full: registry epoch start/replacement binds a new connection/incarnation.
     this.invalidateDeviceFrames(record.deviceId);
     this.pushDeviceSessionLifecycle("device_session_started", record);
   }
 
   pushDeviceSessionEnded(record: DeviceSessionRecord, options?: DeviceSessionEndOptions): void {
+    this.buildKeysByDevice.delete(record.deviceId);
     // Full: epoch retirement/replacement ends trust in this connection/incarnation.
     this.invalidateDeviceFrames(record.deviceId);
     this.pushDeviceSessionLifecycle("device_session_ended", record, options);
@@ -1230,6 +1251,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   protected onSubscribed(subscriptionId: string, filter: DeviceDataFilter, _socket: Socket): void {
     const controller = new AbortController();
     this.initialFrameWaiters.set(subscriptionId, controller);
+    this.replayBuildContexts({ subscriptionId, signal: controller.signal, replay: true });
     try {
       // Base registration calls this synchronously, before processLine yields. Android client
       // creation must still precede immediately-following subscribe_storage commands.
@@ -1239,6 +1261,77 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         `[DeviceDataStream] Error in onSubscriberConnected callback: ${errorMessage(error)}`,
         error,
       );
+    }
+  }
+
+  /** Lightweight provenance updates reuse the device-stamping path; unknown keys are omitted. */
+  pushBuildContextUpdate(
+    deviceId: string,
+    packageId: string,
+    buildKey: DeviceBuildKey | null,
+  ): void {
+    if (buildKey?.contentHash === "") {
+      if (!this.buildKeysByDevice.get(deviceId)?.keys.has(packageId)) {
+        return;
+      }
+      buildKey = null;
+    }
+    this.pushForDevice(deviceId, {
+      type: "device_build_context",
+      deviceId,
+      packageId,
+      timestamp: this.timer.now(),
+      buildKey: buildKey === null ? null : { ...buildKey, packageId },
+    });
+  }
+
+  private cacheBuildContext(
+    deviceId: string,
+    deviceSessionUuid: string | null,
+    message: DeviceDataStreamMessage,
+  ): void {
+    const previous = this.buildKeysByDevice.get(deviceId);
+    if (previous?.deviceSessionUuid !== deviceSessionUuid) {
+      this.buildKeysByDevice.delete(deviceId);
+    }
+    // Unbound serials still reach all-device subscribers but never seed replay for a future epoch.
+    if (deviceSessionUuid === null || !message.packageId) {
+      return;
+    }
+    const entry = this.buildKeysByDevice.get(deviceId) ?? {
+      deviceSessionUuid,
+      keys: new Map<string, DeviceBuildKey>(),
+    };
+    if (message.buildKey) {
+      entry.keys.set(message.packageId, { ...message.buildKey });
+    } else {
+      entry.keys.delete(message.packageId);
+    }
+    if (entry.keys.size > 0) {
+      this.buildKeysByDevice.set(deviceId, entry);
+    } else {
+      this.buildKeysByDevice.delete(deviceId);
+    }
+  }
+
+  private replayBuildContexts(target: InitialFrameSubscriber): void {
+    for (const [deviceId, entry] of this.buildKeysByDevice) {
+      if (this.deviceSessionResolver.resolveUuid(deviceId) !== entry.deviceSessionUuid) {
+        continue;
+      }
+      for (const [packageId, buildKey] of entry.keys) {
+        this.pushForDevice(
+          deviceId,
+          {
+            type: "device_build_context",
+            deviceId,
+            packageId,
+            timestamp: this.timer.now(),
+            buildKey,
+          },
+          target,
+        );
+      }
     }
   }
 

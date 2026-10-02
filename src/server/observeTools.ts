@@ -1,4 +1,5 @@
 import { screenshotPathProtection } from "../features/observe/ScreenshotPathProtection";
+import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import {
   SCREENSHOT_MIN_LIFETIME_MS,
   SCREENSHOT_STALE_AGE_MS,
@@ -2084,8 +2085,8 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     args: IdentifyInteractionsOptions,
   ) => {
     try {
-      const observeScreen = new RealObserveScreen(device);
-      const cachedResult = await observeScreen.getMostRecentCachedObserveResult();
+      const observeScreen = dependencies.createScreen?.(device) ?? new RealObserveScreen(device);
+      const cachedResult = await readObservationForInteractions(observeScreen);
       const navigationGraph = args.sessionUuid
         ? NavigationGraphManager.getInstanceForSession(args.sessionUuid)
         : NavigationGraphManager.getInstance();

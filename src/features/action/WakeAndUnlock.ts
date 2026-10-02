@@ -46,7 +46,10 @@ export interface LockCredentialStore {
 export interface IosUnlockOptions {
   remainingMs: () => number;
   signal?: AbortSignal;
-  readUnlocked?: () => Promise<boolean | undefined>;
+  readUnlocked?: (options?: {
+    signal?: AbortSignal;
+    phase?: "afterWake" | "afterSwipe";
+  }) => Promise<boolean | undefined>;
 }
 
 export interface IosScreenUnlocker {
@@ -432,9 +435,14 @@ export class WakeAndUnlock {
         signal,
         ...(simulator
           ? {
-              readUnlocked: async () => {
-                const lock = await this.readIosLockState(deadline, signal);
-                stageLock = lock;
+              readUnlocked: async (options) => {
+                const probeSignal = options?.signal ?? signal;
+                const lock = await this.readIosLockState(deadline, probeSignal);
+                // A timed-out pre-swipe read must not overwrite a later stage's state.
+                throwIfAborted(probeSignal);
+                if (options?.phase !== "afterWake" || lock?.locked === false) {
+                  stageLock = lock;
+                }
                 return lock ? !lock.locked : undefined;
               },
             }

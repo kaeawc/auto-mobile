@@ -264,6 +264,14 @@ final class GesturePhaseDiagnostics: Sendable {
         var phaseAtBound: String?
         var elapsedAtBoundMs: Int64?
         var finished: PerfTiming?
+        var swipeDispatch: String?
+        var trackedApp: String?
+
+        var annotations: String {
+            guard let swipeDispatch else { return "" }
+            let entered = phase == "xcuitestGesture" || phases.contains { $0.name == "xcuitestGesture" }
+            return " dispatch=\(swipeDispatch) trackedApp=\(trackedApp ?? "none") xcuitestEntered=\(entered)"
+        }
     }
 
     private let state: OSAllocatedUnfairLock<State>
@@ -300,23 +308,32 @@ final class GesturePhaseDiagnostics: Sendable {
 
     var currentPhase: String { state.withLock { $0.phase } }
 
+    func annotateSwipe(dispatch: SwipeDispatchMode, trackedApp: String?) {
+        guard command == "request_swipe" else { return }
+        state.withLock {
+            guard $0.finished == nil else { return }
+            $0.swipeDispatch = dispatch == .xcuitest ? "xcuitest" : "synthesizedLockScreen"
+            $0.trackedApp = trackedApp
+        }
+    }
+
     /// Elapsed time includes queue wait, matching the final gesturePhases total.
     @discardableResult
     func markBoundExceeded(boundMs: Int64) -> (phase: String, elapsedMs: Int64) {
         let time = now()
-        let (phase, elapsed, shouldLog) = state.withLock { value -> (String, Int64, Bool) in
+        let (phase, elapsed, shouldLog, annotations) = state.withLock { value -> (String, Int64, Bool, String) in
             if let phase = value.phaseAtBound, let elapsed = value.elapsedAtBoundMs {
-                return (phase, elapsed, false)
+                return (phase, elapsed, false, value.annotations)
             }
             let elapsed = time - receivedAtMs
             value.phaseAtBound = value.phase
             value.elapsedAtBoundMs = elapsed
-            return (value.phase, elapsed, true)
+            return (value.phase, elapsed, true, value.annotations)
         }
         if shouldLog {
             let remaining = deadlineMs.map { String($0 - time) } ?? "none"
             sink.warning(
-                "gesture_phases command=\(command) boundHit=true phaseAtBound=\(phase) boundMs=\(boundMs) elapsedMs=\(elapsed) deadlineRemainingMs=\(remaining) (still running)"
+                "gesture_phases command=\(command) boundHit=true phaseAtBound=\(phase) boundMs=\(boundMs) elapsedMs=\(elapsed) deadlineRemainingMs=\(remaining)\(annotations) (still running)"
             )
         }
         return (phase, elapsed)
@@ -327,15 +344,21 @@ final class GesturePhaseDiagnostics: Sendable {
     @discardableResult
     func finish() -> PerfTiming {
         let time = now()
-        let (timing, shouldLog, phaseAtBound) = state.withLock { value -> (PerfTiming, Bool, String?) in
-            if let finished = value.finished { return (finished, false, value.phaseAtBound) }
+        let (timing, shouldLog, phaseAtBound, annotations) = state.withLock { value -> (
+            PerfTiming,
+            Bool,
+            String?,
+            String
+        ) in
+            if let finished = value.finished { return (finished, false, value.phaseAtBound, value.annotations) }
             value.phases.append(.timing(value.phase, durationMs: time - value.phaseStarted))
             let timing = PerfTiming(name: "gesturePhases", durationMs: time - receivedAtMs, children: value.phases)
             value.finished = timing
             return (
                 timing,
                 value.deadlineExceeded || timing.durationMs > Self.slowGestureThresholdMs || value.phaseAtBound != nil,
-                value.phaseAtBound
+                value.phaseAtBound,
+                value.annotations
             )
         }
         if shouldLog {
@@ -344,7 +367,7 @@ final class GesturePhaseDiagnostics: Sendable {
             let remaining = deadlineMs.map { String($0 - time) } ?? "none"
             sink
                 .warning(
-                    "gesture_phases command=\(command) \(phases) totalMs=\(timing.durationMs) deadlineRemainingMs=\(remaining)\(bound)"
+                    "gesture_phases command=\(command) \(phases) totalMs=\(timing.durationMs) deadlineRemainingMs=\(remaining)\(bound)\(annotations)"
                 )
         }
         return timing

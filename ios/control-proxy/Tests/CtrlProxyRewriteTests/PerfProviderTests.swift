@@ -275,6 +275,56 @@ final class FakeGestureLogSink: GestureLogSink, Sendable {
 }
 
 extension PerfProviderTests {
+    func testSwipeAnnotationsRenderAtBoundAndFinishFromCurrentAndCompletedPhases() {
+        let cases: [(SwipeDispatchMode, String?, String, Bool)] = [
+            (.xcuitest, "com.test.playground", "xcuitestGesture", true),
+            (.xcuitest, nil, "coordinateResolution", false),
+            (.synthesizedLockScreen, nil, "synthesizedGesture", false),
+            // Missing synthesis symbols can reach the ordinary XCUITest call.
+            (.synthesizedLockScreen, "com.test.playground", "xcuitestGesture", true),
+        ]
+        for (dispatch, trackedApp, phase, entered) in cases {
+            let clock = FakeMonotonicClock()
+            let sink = FakeGestureLogSink()
+            let diagnostics = GesturePhaseDiagnostics(
+                command: "request_swipe", receivedAtMs: 0, deadlineMs: 5000,
+                now: { clock.now() }, sink: sink
+            )
+            diagnostics.annotateSwipe(dispatch: dispatch, trackedApp: trackedApp)
+            diagnostics.begin(phase)
+            clock.advance(by: 250)
+            diagnostics.markBoundExceeded(boundMs: 250)
+            diagnostics.begin("postGesture")
+            clock.advance(by: 50)
+            diagnostics.finish()
+            diagnostics.finish()
+            let mode = dispatch == .xcuitest ? "xcuitest" : "synthesizedLockScreen"
+            let fields = " dispatch=\(mode) trackedApp=\(trackedApp ?? "none") xcuitestEntered=\(entered)"
+            XCTAssertEqual(sink.lines, [
+                "gesture_phases command=request_swipe boundHit=true phaseAtBound=\(phase) boundMs=250 elapsedMs=250 deadlineRemainingMs=4750\(fields) (still running)",
+                "gesture_phases command=request_swipe queueWaitMs=0 \(phase)Ms=250 postGestureMs=50 totalMs=300 deadlineRemainingMs=4700 phaseAtBound=\(phase)\(fields)",
+            ])
+        }
+    }
+
+    func testSwipeAnnotationsAreAbsentForOtherCommands() {
+        let clock = FakeMonotonicClock()
+        let sink = FakeGestureLogSink()
+        let diagnostics = GesturePhaseDiagnostics(
+            command: "request_tap_coordinates", receivedAtMs: 0, deadlineMs: nil,
+            now: { clock.now() }, sink: sink
+        )
+        diagnostics.annotateSwipe(dispatch: .xcuitest, trackedApp: "com.test.app")
+        diagnostics.begin("xcuitestGesture")
+        clock.advance(by: 250)
+        diagnostics.markBoundExceeded(boundMs: 250)
+        diagnostics.finish()
+        XCTAssertEqual(sink.lines, [
+            "gesture_phases command=request_tap_coordinates boundHit=true phaseAtBound=xcuitestGesture boundMs=250 elapsedMs=250 deadlineRemainingMs=none (still running)",
+            "gesture_phases command=request_tap_coordinates queueWaitMs=0 xcuitestGestureMs=250 totalMs=250 deadlineRemainingMs=none phaseAtBound=xcuitestGesture",
+        ])
+    }
+
     func testBoundRecordsEveryRunningPhaseAndLogsImmediateAndFinalOnce() {
         for phase in [
             "queueWait",

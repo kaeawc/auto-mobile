@@ -44,6 +44,7 @@ final class SwipeDeadlineTests: XCTestCase {
 
     private func server(
         gestures: RewriteFakeGesturePerformer, clock: FakeMonotonicClock,
+        elementLocator: RewriteFakeElementLocator = RewriteFakeElementLocator(),
         logSink: any GestureLogSink = SystemGestureLogSink(),
         timings: [PerfTiming]? = nil,
         timer: any ProxyTimer = FakeProxyTimer(mode: .manual),
@@ -56,7 +57,7 @@ final class SwipeDeadlineTests: XCTestCase {
         WebSocketServer(
             commandHandler: DeadlineForwardingHandler(
                 swipeHandler: CommandHandler(
-                    elementLocator: RewriteFakeElementLocator(), gesturePerformer: gestures,
+                    elementLocator: elementLocator, gesturePerformer: gestures,
                     perf: FakePerfTracking(flushResult: nil)
                 ), other: other
             ),
@@ -109,6 +110,41 @@ final class SwipeDeadlineTests: XCTestCase {
                 RequestSwipe.self,
                 from: swipe("bad", timeout: ",\"lockScreen\":\(invalid)")
             ))
+        }
+    }
+
+    func testSwipeHandlerAnnotatesCachedTrackerAndDispatchOnBoundAndFinalLines() async throws {
+        for field in ["", ",\"lockScreen\":false", ",\"lockScreen\":true"] {
+            let synthesized = field.contains("true")
+            let clock = FakeMonotonicClock()
+            let sink = FakeGestureLogSink()
+            let locator = RewriteFakeElementLocator()
+            locator.foregroundBundleId = "com.test.playground"
+            let gestures = RewriteFakeGesturePerformer()
+            gestures.onSwipe = {
+                GesturePhaseDiagnostics.current?.begin(synthesized ? "synthesizedGesture" : "xcuitestGesture")
+                clock.advance(by: 250)
+                GesturePhaseDiagnostics.current?.markBoundExceeded(boundMs: 250)
+                GesturePhaseDiagnostics.current?.begin("postGesture")
+            }
+            let server = server(gestures: gestures, clock: clock, elementLocator: locator, logSink: sink)
+            let done = expectation(description: "annotated swipe")
+            let responder = CapturingResponder(onEach: { done.fulfill() })
+            server.dispatchCommand(swipe("annotations", timeout: field), responder: responder)
+            await fulfillment(of: [done], timeout: 2)
+            XCTAssertEqual(try response(responder)["success"] as? Bool, true)
+            XCTAssertEqual(sink.lines.count, 2)
+            let dispatch = synthesized ? "synthesizedLockScreen" : "xcuitest"
+            for line in sink.lines {
+                XCTAssertTrue(
+                    line
+                        .contains(
+                            " dispatch=\(dispatch) trackedApp=com.test.playground xcuitestEntered=\(!synthesized)"
+                        )
+                )
+            }
+            XCTAssertTrue(sink.lines[0].contains("boundHit=true"))
+            XCTAssertTrue(sink.lines[1].contains("totalMs=250"))
         }
     }
 

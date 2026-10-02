@@ -59,6 +59,11 @@ export interface AcquireDeviceReadinessLockOptions {
   timeoutError?: () => unknown;
 }
 
+/** Read-only preflight; the holder re-check must not reject its own lock. */
+export function isDeviceReadinessLocked(key: string): boolean {
+  return readinessLocksByDevice.get(key)?.locked === true;
+}
+
 /**
  * Acquire the readiness lock for `key`, resolving with a release function.
  * Release exactly once (a `withDeviceReadinessLock` wrapper is provided for the

@@ -2434,3 +2434,37 @@ describe("RunnerReadinessService", () => {
     expect(healthDiagnosticCalls).toBe(0);
   });
 });
+
+test.each(["android", "ios"] as const)(
+  "locked admission hook aborts %s readiness before any setup and releases its turn",
+  async (platform) => {
+    const h = createService();
+    const device =
+      platform === "android"
+        ? androidDevice("admission-hook")
+        : { ...iosDevice, deviceId: "admission-hook" };
+    const error = new Error("ownership changed");
+    let checks = 0;
+    await expect(
+      h.service.ensureReady({
+        device,
+        requestedIdentity: device.deviceId,
+        totalDeadlineMs: h.timer.now() + 15000,
+        readinessTimeoutMs: 15000,
+        assertCanSetup: () => {
+          checks++;
+          throw error;
+        },
+      }),
+    ).rejects.toBe(error);
+    expect(checks).toBe(1);
+    expect(h.androidManager.setupCalls).toBe(0);
+    expect(h.androidManager.resetSetupStateCalls).toBe(0);
+    expect(h.iosManager.setupCalls).toBe(0);
+    expect(h.iosManager.startCalls).toBe(0);
+    const release = await acquireDeviceReadinessLock(
+      deviceReadinessLockKey(platform, device.deviceId),
+    );
+    release();
+  },
+);

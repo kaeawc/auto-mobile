@@ -344,3 +344,21 @@ describe("InMemoryVirtualDeviceLifecycleCoordinator", () => {
     owner.release();
   });
 });
+
+test("read-only lifecycle reservation query includes a waiting successor", async () => {
+  const coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(new FakeTimer());
+  const identity = {
+    kind: "stable",
+    platform: "android",
+    stableId: "observation-lease-query",
+  } as const;
+  expect(coordinator.isReserved(identity)).toBe(false);
+  const owner = await coordinator.reserve(identity, { operation: "start", deadlineMs: 100 });
+  const next = coordinator.reserve(identity, { operation: "recovery", deadlineMs: 100 });
+  expect(coordinator.isReserved(identity)).toBe(true);
+  owner.release();
+  expect(coordinator.isReserved(identity)).toBe(true);
+  const successor = await next;
+  successor.release();
+  expect(coordinator.isReserved(identity)).toBe(false);
+});

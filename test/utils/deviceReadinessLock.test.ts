@@ -180,3 +180,14 @@ describe("moveDeviceAcquisitionReadiness", () => {
     expect(getDeviceAcquisitionReadiness(fromKey)).toBeUndefined();
   });
 });
+
+test("read-only readiness lock query tracks holder and release", async () => {
+  const { acquireDeviceReadinessLock, isDeviceReadinessLocked } =
+    await import("../../src/utils/deviceReadinessLock");
+  const key = deviceReadinessLockKey("android", "observation-lock-query");
+  expect(isDeviceReadinessLocked(key)).toBe(false);
+  const release = await acquireDeviceReadinessLock(key);
+  expect(isDeviceReadinessLocked(key)).toBe(true);
+  release();
+  expect(isDeviceReadinessLocked(key)).toBe(false);
+});

@@ -432,9 +432,26 @@ the call is a session observe, and `deviceId` must match that session's device.
 
 #### Reading a device you do not own (`deviceId`)
 
-A deviceId read is connect-only: it never installs, enables, sets up, starts or
-restarts CtrlProxy or the iOS runner. Whether it may start a service is an open
-owner decision tracked in #8621. It does not acquire a session or change ownership.
+A session-less deviceId read may start the hierarchy service on an **unowned**
+booted device when its initial connection fails. It uses the session acquisition
+setup (including `--skip-ctrl-proxy-download`) within the read's own hierarchy
+deadline, serialized with acquisition by the per-device readiness lock. Setup
+requires an initialized daemon, an idle device with no session, and no ownership
+or pool transition; these conditions are checked before setup and again under
+the lock. Concurrent reads share one setup; each reader retains its own wait
+deadline and cancellation. The initiating read supplies the shared setup's deadline.
+
+On an **owned** device, a deviceId read never starts, restarts or reconfigures the
+service. A disconnected owner client stays connect-only with the recovery detail
+below. If ownership cannot be established (including an uninitialized daemon),
+the read stays connect-only. No session is created, no device is assigned, and an
+unowned device's pool status stays idle. A successful read that participated in
+starting the service includes `hierarchyServiceStarted: true`; otherwise that
+optional field is omitted. This does not degrade `freshness`.
+
+The started service and its resident singleton client remain running afterwards,
+as they do after a session ends. On iOS this includes the manager's runner process.
+There is no cleanup or idle teardown in this read path.
 
 Unavailable hierarchies have `freshness.category: "unavailable"`. The table shows
 exact `unavailableDetail` templates (`${deviceId}` and `${timeoutMs}` are replaced
@@ -443,7 +460,7 @@ The detail is also appended to `freshness.warning` and limited to 500 characters
 
 | `unavailableReason`  | `unavailableDetail`                                                                                                                                                                                                                                   | Caller recovery                                                                                                                                                               |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connection_lost`    | `Device ${deviceId} has no reachable hierarchy service`                                                                                                                                                                                               | An unowned device needs an already-running service; arrange setup through a session, then retry.                                                                              |
+| `connection_lost`    | `Device ${deviceId} has no reachable hierarchy service`                                                                                                                                                                                               | The read may append why starting the service failed or was declined; retry after the reported ownership/transition or setup problem clears.                                   |
 | `connection_lost`    | `Device ${deviceId} is session-owned and has no connected hierarchy service: the owning session's hierarchy client is disconnected. Run a session observe as the owner to reconnect it; a deviceId read only connects to an already-running service.` | The owner must run a session observe to reconnect. This read never creates a second client next to the owner's.                                                               |
 | `connection_lost`    | `Device ${deviceId} hierarchy service did not answer`                                                                                                                                                                                                 | The owned client's socket was connected but the read received no hierarchy; retry, or have the owner check the service through a session observe.                             |
 | `connection_lost`    | `Device ${deviceId} hierarchy read timed out`                                                                                                                                                                                                         | The connection consumed the hierarchy budget before extraction; retry.                                                                                                        |
@@ -456,7 +473,7 @@ The detail is also appended to `freshness.warning` and limited to 500 characters
 The observer's result does not update the owner's session baseline, snapshot
 references, observe cache or its generation, screenshot state, navigation graph,
 stream, active-window cache, or display-transition tracker. Android display/posture probes may read
-shared mappings but never populate or refresh them. Android device commands issued
+shared mappings but never populate or refresh them. Once hierarchy setup is complete or declined, Android observation commands issued
 through ADB are read-only (including streamed `screencap`, `dumpsys`, and display
 and device-state queries); they do not delay, abort, fail or reorder an ADB-driven
 owner action. A read during an action can show intermediate UI: it is not an
@@ -464,8 +481,8 @@ atomic snapshot of that action. Hierarchy reads queue behind requests tracked by
 the service client, within the hierarchy budget. Android still delivers a changed
 observer hierarchy frame through the normal native push path; those ordinary
 service updates can update the stream, navigation and display state independently
-of observation assembly. An unchanged observer frame skips that path. Unowned
-reads close their temporary client and release its host port forward/allocation.
+of observation assembly. An unchanged observer frame skips that path. Reads close any temporary client and release its host port forward/allocation; a
+resident client registered by successful readiness setup stays connected.
 
 Android ADB screenshots share a capture lock; the observer waits at most 10 seconds
 without cancelling the owner's capture. Android can capture without CtrlProxy,

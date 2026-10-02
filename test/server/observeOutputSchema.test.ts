@@ -1007,3 +1007,13 @@ describe("occlusionState/occludedBy/occludedByViewId: --no-occlusion (issue occl
     ).not.toThrow();
   });
 });
+
+test("observe advertises an optional boolean for a service started by a device read", () => {
+  const schema = toJSONSchema(observeResultSchema);
+  expect(schema.properties?.hierarchyServiceStarted).toMatchObject({ type: "boolean" });
+  expect(schema.required ?? []).not.toContain("hierarchyServiceStarted");
+  expect(observeToolResultSchema.safeParse({ hierarchyServiceStarted: true }).success).toBe(true);
+  expect(observeToolResultSchema.safeParse({ hierarchyServiceStarted: "true" }).success).toBe(
+    false,
+  );
+});

@@ -266,6 +266,8 @@ export interface RunnerReadinessRequest {
   perf?: PerformanceTracker;
   signal?: AbortSignal;
   onRunnerSetup?: () => void;
+  /** Synchronous admission check under the readiness lock, before any device work. */
+  assertCanSetup?: () => void;
 }
 
 interface ReadinessAttemptContext extends RunnerReadinessRequest {
@@ -327,6 +329,8 @@ export class RunnerReadinessService {
     const key = deviceReadinessLockKey(request.device.platform, request.device.deviceId);
     const release = await this.acquireReadinessTurn(context, key);
     try {
+      request.signal?.throwIfAborted();
+      request.assertCanSetup?.();
       await this.ensureReadyUncoordinated(context);
     } finally {
       release();

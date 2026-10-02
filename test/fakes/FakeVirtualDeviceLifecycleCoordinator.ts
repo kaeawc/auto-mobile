@@ -17,6 +17,10 @@ export class FakeVirtualDeviceLifecycleCoordinator implements VirtualDeviceLifec
   readonly reservations: RecordedLifecycleReservation[] = [];
   private readonly coordinator = new InMemoryVirtualDeviceLifecycleCoordinator(this.timer);
 
+  isReserved(identity: VirtualDeviceLifecycleIdentity): boolean {
+    return this.coordinator.isReserved(identity);
+  }
+
   async reserve(
     identity: VirtualDeviceLifecycleIdentity,
     options: VirtualDeviceLifecycleReservationOptions,

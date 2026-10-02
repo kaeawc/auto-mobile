@@ -795,7 +795,7 @@ export class RealObserveScreen implements ObserveScreen {
 
   // ---------- Public API ----------
 
-  /** Use the normal observation assembly with an isolated, read-only hierarchy capture. */
+  /** Use the normal observation assembly with an isolated observer hierarchy capture. */
   async executeDeviceRead(
     signal?: AbortSignal,
     screenshot: ScreenshotMode = "settled",
@@ -825,6 +825,10 @@ export class RealObserveScreen implements ObserveScreen {
       screenshot: "none",
       signal,
     });
+    if (result.viewHierarchy?.hierarchyServiceStarted) {
+      result.hierarchyServiceStarted = true;
+      delete result.viewHierarchy.hierarchyServiceStarted;
+    }
     if (screenshot === "none") {
       result.screenshotCaptureAttempted = false;
       return result;

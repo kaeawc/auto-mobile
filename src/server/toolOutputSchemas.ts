@@ -1007,6 +1007,12 @@ export const observationSummarySchema = z
     accessibilityFocusedElement: elementSchema.optional(),
     activeWindow: activeWindowSchema.optional(),
     screenIdentity: screenIdentitySchema.optional(),
+    hierarchyServiceStarted: z
+      .boolean()
+      .optional()
+      .describe(
+        "Present only when this session-less read started the hierarchy service on an unowned device.",
+      ),
     freshness: freshnessSchema.optional(),
     // Full/raw action projections place the raw ObserveResult (the observe tool's shape) under `.observation`.
     viewHierarchy: viewHierarchyResultSchema.optional(),
@@ -1764,6 +1770,12 @@ export const observeResultSchema = z
     waitMs: z.number().nonnegative().optional(),
     matchedElement: elementSchema.optional(),
     candidates: z.array(elementSchema).optional(),
+    hierarchyServiceStarted: z
+      .boolean()
+      .optional()
+      .describe(
+        "Present only when this session-less read started the hierarchy service on an unowned device.",
+      ),
     freshness: freshnessSchema.optional(),
     predictions: predictionsSchema.optional(),
     accessibilityState: accessibilityStateSchema.optional(),

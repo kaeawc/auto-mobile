@@ -28,6 +28,12 @@ import {
 } from "./HierarchyNormalization";
 import type { SettleObserve } from "./interfaces/SettleObserve";
 import type { HierarchySyncDiagnostics, ObserverHierarchyRequestOptions } from "./android/types";
+import {
+  existingHierarchyClient,
+  getObservationReadServiceStart,
+  type ObservationReadServiceStart,
+} from "./ObservationReadServiceStart";
+import { errorMessage } from "../../utils/describeUnknownError";
 
 /** Dynamic platform bridge: normalizers own the raw response shape. */
 export interface HierarchySyncClient {
@@ -58,6 +64,12 @@ export interface DeviceHierarchyCaptureDependencies {
   viewHierarchy?: Pick<ViewHierarchyReader, "getViewHierarchy">;
   timer?: Timer;
   ids?: IdGenerator;
+  observationServiceStart?: Pick<ObservationReadServiceStart, "start">;
+  observationClientResolver?: (device: BootedDevice) => {
+    syncClient: HierarchySyncClient;
+    transient: boolean;
+    owned: boolean;
+  };
 }
 
 function normalizeSyncedIosHierarchy(
@@ -110,14 +122,6 @@ async function requestSyncHierarchy(
     throw new ActionableError(detail ? `${message}: ${detail}` : message);
   }
   return synced;
-}
-
-function existingHierarchyClient(
-  device: BootedDevice,
-): AndroidCtrlProxyClient | IOSCtrlProxyClient | null {
-  return device.platform === "ios"
-    ? IOSCtrlProxyClient.getExistingInstance(device.deviceId)
-    : AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
 }
 
 function newHierarchyClient(
@@ -173,6 +177,80 @@ function resolveHierarchyClient(
     transient: true,
     owned: false,
   };
+}
+
+interface HierarchyConnection {
+  syncClient: HierarchySyncClient;
+  transient: boolean;
+  owned: boolean;
+}
+
+function resolveCaptureClient(options: {
+  device: BootedDevice;
+  dependencies: DeviceHierarchyCaptureDependencies;
+  observerMode: boolean;
+}): HierarchyConnection {
+  const { device, dependencies, observerMode } = options;
+  if (observerMode && dependencies.observationClientResolver) {
+    return dependencies.observationClientResolver(device);
+  }
+  return resolveHierarchyClient(device, dependencies, observerMode);
+}
+
+interface ObserverConnectionOptions {
+  device: BootedDevice;
+  dependencies: DeviceHierarchyCaptureDependencies;
+  connection: HierarchyConnection;
+  request: HierarchyCaptureRequest;
+  timer: Timer;
+  deadline: number;
+}
+
+async function dialObservationReader(options: ObserverConnectionOptions): Promise<boolean> {
+  const { connection, request, timer, deadline, device } = options;
+  return await raceWithDeadline(
+    () => connection.syncClient.connectForObservationRead?.() ?? Promise.resolve(false),
+    {
+      timer,
+      timeoutMs: Math.max(0, deadline - timer.now()),
+      signal: request.signal,
+      label: `Observer hierarchy connection for ${device.deviceId}`,
+    },
+  );
+}
+
+/** Returns true only for readers that joined successful start-on-read setup. */
+async function connectObserverHierarchy(options: ObserverConnectionOptions): Promise<boolean> {
+  const { connection, request, timer, deadline, device, dependencies } = options;
+  if (!connection.transient || (await dialObservationReader(options))) {
+    return false;
+  }
+  // Release the failed reader's forwarding lease before resident setup.
+  await connection.syncClient.close?.();
+  connection.transient = false;
+  let serviceStarted: boolean;
+  try {
+    serviceStarted = await (
+      dependencies.observationServiceStart ?? getObservationReadServiceStart(timer)
+    ).start({
+      device,
+      deadlineMs: deadline,
+      signal: request.signal,
+    });
+  } catch (error) {
+    request.signal?.throwIfAborted();
+    throw new ActionableError(
+      `Device ${device.deviceId} has no reachable hierarchy service; read tried to start the service: ${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+  Object.assign(connection, resolveCaptureClient({ device, dependencies, observerMode: true }));
+  if (connection.transient && !(await dialObservationReader(options))) {
+    throw new ActionableError(
+      `Device ${device.deviceId} has no reachable hierarchy service; read started the service but could not connect`,
+    );
+  }
+  return serviceStarted;
 }
 
 async function normalizeSyncedHierarchy(options: {
@@ -235,37 +313,41 @@ export function createDeviceHierarchyCapture(
       const timer = dependencies.timer ?? defaultTimer;
       const timeoutMs = request.timeoutMs ?? 15000;
       const deadline = timer.now() + timeoutMs;
-      const { syncClient, transient, owned } = resolveHierarchyClient(
+      request.signal?.throwIfAborted();
+      const connection = resolveCaptureClient({
         device,
         dependencies,
-        request.observerMode === true,
-      );
+        observerMode: request.observerMode === true,
+      });
       try {
-        if (transient) {
-          const connected =
-            syncClient.connectForObservationRead &&
-            (await raceWithDeadline(syncClient.connectForObservationRead(), {
-              timer,
-              timeoutMs,
-              signal: request.signal,
-              label: `Observer hierarchy connection for ${device.deviceId}`,
-            }));
-          if (!connected) {
-            throw new ActionableError(
-              `Device ${device.deviceId} has no reachable hierarchy service`,
-            );
-          }
-        }
+        const serviceStarted = await connectObserverHierarchy({
+          device,
+          dependencies,
+          connection,
+          request,
+          timer,
+          deadline,
+        });
+        const { syncClient, owned } = connection;
         const remaining = deadline - timer.now();
         if (remaining <= 0) {
           throw new ActionableError(`Device ${device.deviceId} hierarchy read timed out`);
         }
-        const synced = await requestSyncHierarchy(syncClient, request, {
-          timeoutMs: remaining,
-          deviceId: device.deviceId,
-          owned,
-        });
-        return normalizeSyncedHierarchy({
+        const read = () =>
+          requestSyncHierarchy(syncClient, request, {
+            timeoutMs: remaining,
+            deviceId: device.deviceId,
+            owned,
+          });
+        const synced = request.observerMode
+          ? await raceWithDeadline(read, {
+              timer,
+              timeoutMs: remaining,
+              signal: request.signal,
+              label: `Device ${device.deviceId} hierarchy read`,
+            })
+          : await read();
+        const hierarchy = await normalizeSyncedHierarchy({
           device,
           dependencies,
           syncClient,
@@ -275,9 +357,20 @@ export function createDeviceHierarchyCapture(
           timer,
           observerMode: request.observerMode,
         });
+        // Action captures may carry native timestamp provenance in a WeakMap.
+        // Only observer captures need call-scoped start metadata.
+        if (!request.observerMode) {
+          return hierarchy;
+        }
+        const result = { ...hierarchy };
+        delete result.hierarchyServiceStarted;
+        if (serviceStarted) {
+          result.hierarchyServiceStarted = true;
+        }
+        return result;
       } finally {
-        if (transient) {
-          await syncClient.close?.();
+        if (connection.transient) {
+          await connection.syncClient.close?.();
         }
       }
     },

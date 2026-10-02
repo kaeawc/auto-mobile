@@ -218,7 +218,7 @@ test.each(["android", "ios"] as const)(
 );
 
 test.each(["android", "ios"] as const)(
-  "unowned %s observer reads through a transient when the singleton is disconnected",
+  "unowned %s connect-only observer reads through a transient when the singleton is disconnected",
   async (platform) => {
     const device = { deviceId: `${platform}-idle-disconnected`, name: platform, platform };
     const daemon = DaemonState.getInstance();
@@ -809,7 +809,7 @@ test.each(["android", "ios"] as const)(
 );
 
 test.each(["android", "ios"] as const)(
-  "%s unowned observer closes a failed transient dial without service setup or singleton",
+  "%s observer without a safe initialized idle pool closes its failed transient without setup or singleton",
   async (platform) => {
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
     const timer = new FakeTimer();

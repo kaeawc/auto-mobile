@@ -34,6 +34,8 @@ export type CtrlProxyIncompleteReason = "null_root" | "discarded_windows" | "ext
  * Represents the ViewHierarchy dump result from a device.
  */
 export interface ViewHierarchyResult {
+  /** Internal capture metadata, promoted to the observation result for device reads. */
+  hierarchyServiceStarted?: boolean;
   displayId?: number | null;
   panelUniqueId?: string | null;
   /** Daemon-assigned sequence if this exact hierarchy was forwarded to the observation stream. */

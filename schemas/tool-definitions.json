@@ -5390,6 +5390,10 @@
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
                 },
+                "hierarchyServiceStarted": {
+                  "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
+                  "type": "boolean"
+                },
                 "freshness": {
                   "type": "object",
                   "properties": {
@@ -8044,7 +8048,7 @@
   },
   {
     "name": "observe",
-    "description": "Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for 30 seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after 24 hours on capture construction. Copy files needed longer.",
+    "description": "Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for 30 seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after 24 hours on capture construction. Copy files needed longer.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -12753,6 +12757,10 @@
             "additionalProperties": {}
           }
         },
+        "hierarchyServiceStarted": {
+          "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
+          "type": "boolean"
+        },
         "freshness": {
           "type": "object",
           "properties": {
@@ -16049,6 +16057,10 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "hierarchyServiceStarted": {
+                  "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
+                  "type": "boolean"
                 },
                 "freshness": {
                   "type": "object",
@@ -20785,6 +20797,10 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "hierarchyServiceStarted": {
+                  "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
+                  "type": "boolean"
                 },
                 "freshness": {
                   "type": "object",
@@ -27731,6 +27747,10 @@
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
                 },
+                "hierarchyServiceStarted": {
+                  "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
+                  "type": "boolean"
+                },
                 "freshness": {
                   "type": "object",
                   "properties": {
@@ -31328,6 +31348,10 @@
                   },
                   "required": ["platform", "source", "confidence", "key", "components"],
                   "additionalProperties": {}
+                },
+                "hierarchyServiceStarted": {
+                  "description": "Present only when this session-less read started the hierarchy service on an unowned device.",
+                  "type": "boolean"
                 },
                 "freshness": {
                   "type": "object",

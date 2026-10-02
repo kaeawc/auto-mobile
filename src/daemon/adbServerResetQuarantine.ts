@@ -505,7 +505,7 @@ export class AdbServerResetQuarantine {
     });
   }
 
-  private isLeasedForAndroidStartup(avdName: string): boolean {
+  isLeasedForAndroidStartup(avdName: string): boolean {
     return Array.from(this.pool.getAndroidStartupLeases().values()).some((request) =>
       this.androidStartupRequestMatchesAvd(request, avdName),
     );

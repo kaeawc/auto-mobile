@@ -1,3 +1,4 @@
+import { ActionableError } from "../../models/ActionableError";
 import type { BaseActionResult } from "../../models/BaseActionResult";
 import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { displayTransitions, type DisplayTransitionReader } from "../observe/DisplayTransition";
@@ -35,6 +36,9 @@ import {
   type ImeSubtypeSnapshot,
   type KeyboardIdentity,
 } from "./AndroidImeCatalog";
+
+export const SEND_KEYS_MAX_COMMANDS = 100;
+export const SEND_KEYS_MAX_MODIFIERS = 4;
 
 class ImeRestorationError extends Error {}
 import {
@@ -1810,11 +1814,11 @@ export class SendKeys {
     signal?: AbortSignal,
     display?: string,
   ): Promise<SendKeysResult> {
+    const preflight = this.preflightCommands(commands);
     this.executor.resetCaretState?.();
     let displayId: number | undefined;
     let assertCurrent: (() => void) | undefined;
     if (display !== undefined) {
-      const preflight = this.preflightCommands(commands);
       if (preflight) {
         return {
           success: false,
@@ -2005,6 +2009,18 @@ export class SendKeys {
   private preflightCommands(
     commands: SendKeysCommand[],
   ): { results: SendKeysCommandResult[]; failure: SendKeysFailure } | undefined {
+    if (commands.length > SEND_KEYS_MAX_COMMANDS) {
+      throw new ActionableError(
+        `sendKeys commands must contain at most ${SEND_KEYS_MAX_COMMANDS} entries`,
+      );
+    }
+    for (const [index, command] of commands.entries()) {
+      if (command.action === "key" && (command.modifiers?.length ?? 0) > SEND_KEYS_MAX_MODIFIERS) {
+        throw new ActionableError(
+          `sendKeys commands[${index}].modifiers must contain at most ${SEND_KEYS_MAX_MODIFIERS} entries`,
+        );
+      }
+    }
     for (const [index, command] of commands.entries()) {
       if (command.action !== "type") {
         continue;

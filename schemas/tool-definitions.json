@@ -12384,8 +12384,10 @@
           "exclusiveMinimum": 0
         },
         "duration": {
-          "description": "Gesture duration (ms)",
-          "type": "number"
+          "description": "Gesture duration (integer 1-10000 ms, default: 300)",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
         },
         "rotationDegrees": {
           "description": "Degrees the two-finger axis rotates during the pinch (default: 0). The axis starts horizontal and ends rotated by this amount — a combined pinch+rotate, not a pinch along a fixed rotated axis. Same convention on Android and iOS.",
@@ -20306,7 +20308,7 @@
                     ]
                   },
                   "modifiers": {
-                    "description": "Raw-key modifier chord: shift, ctrl, alt, or meta",
+                    "description": "Raw-key modifier chord: shift, ctrl, alt, or meta (maximum 4 entries, including duplicates)",
                     "maxItems": 4,
                     "type": "array",
                     "items": {
@@ -23175,7 +23177,7 @@
           "enum": ["tap", "doubleTap", "longPress"]
         },
         "duration": {
-          "description": "Long press duration (ms)",
+          "description": "Long press duration (ms; maximum for action 'longPress': 2147323897 ms after rounding)",
           "type": "number",
           "minimum": 0
         },

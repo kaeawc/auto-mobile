@@ -164,7 +164,9 @@ dispatches to the main queue, which a synchronous XCUITest call can block. The
 unstructured handler/watchdog Tasks inherit gesture and perf TaskLocals. XCUITest
 is main-thread-confined and cannot be cancelled mid-call, so the serial chain and
 in-flight guard stay held until the real handler returns; `runner_busy` continues
-to name the blocker. Tap/drag/pinch have no wire deadline and remain unbounded.
+to name the blocker. Tap/drag/pinch have no wire execution deadline. Separately,
+the host `pinchOn` tool limits requested duration to an integer from 1 to 10000 ms
+(default: 300 ms).
 
 At the bound an immediate `gesture_phases ... boundHit=true phaseAtBound=...`
 line records the running phase and elapsed time (including queue wait), and the

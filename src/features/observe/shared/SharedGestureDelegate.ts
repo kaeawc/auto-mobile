@@ -37,6 +37,13 @@ export class SharedGestureDelegate {
     return this.config.roundCoordinates ? Math.round(v) : v;
   }
 
+  /** Android overrides this optional-field seam; other platforms keep their existing wire. */
+  protected gestureDisplayParams(
+    _displayId?: number,
+  ): { displayId?: number } | Promise<{ displayId?: number }> {
+    return {};
+  }
+
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -46,12 +53,21 @@ export class SharedGestureDelegate {
     frameContext?: string,
     signal?: AbortSignal,
     onDispatch?: () => void,
+    displayId?: number,
   ): Promise<BaseResult> {
     return sendCommand<BaseResult>(this.context, {
       idPrefix: "tap",
       responseType: "tap_coordinates",
       messageType: "request_tap_coordinates",
-      params: { x: this.coord(x), y: this.coord(y), duration, frameContext },
+      params: {
+        x: this.coord(x),
+        y: this.coord(y),
+        duration,
+        frameContext,
+        ...(displayId === undefined || displayId === 0
+          ? {}
+          : await this.gestureDisplayParams(displayId)),
+      },
       timeoutMs,
       perf,
       errorLabel: "Tap",
@@ -76,6 +92,7 @@ export class SharedGestureDelegate {
     frameContext?: string,
     onDispatch?: () => void,
     signal?: AbortSignal,
+    displayId?: number,
   ): Promise<GestureTimingResult> {
     const result = await sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "swipe",
@@ -89,6 +106,9 @@ export class SharedGestureDelegate {
         duration,
         frameContext,
         ...(this.config.includeSwipeTimeoutMs ? { timeoutMs } : {}),
+        ...(displayId === undefined || displayId === 0
+          ? {}
+          : await this.gestureDisplayParams(displayId)),
       },
       timeoutMs,
       perf,
@@ -112,6 +132,7 @@ export class SharedGestureDelegate {
     holdDurationMs: number,
     timeoutMs: number,
     frameContext?: string,
+    displayId?: number,
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "drag",
@@ -126,6 +147,9 @@ export class SharedGestureDelegate {
         dragDurationMs,
         holdDurationMs,
         frameContext,
+        ...(displayId === undefined || displayId === 0
+          ? {}
+          : await this.gestureDisplayParams(displayId)),
       },
       timeoutMs,
       errorLabel: "Drag",
@@ -146,6 +170,7 @@ export class SharedGestureDelegate {
     duration: number = 300,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "pinch",
@@ -158,6 +183,9 @@ export class SharedGestureDelegate {
         distanceEnd: this.coord(distanceEnd),
         rotationDegrees,
         duration,
+        ...(displayId === undefined || displayId === 0
+          ? {}
+          : await this.gestureDisplayParams(displayId)),
       },
       timeoutMs,
       perf,

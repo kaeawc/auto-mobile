@@ -1033,6 +1033,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     frameContext?: string,
     onDispatch?: () => void,
+    signal?: AbortSignal,
+    displayId?: number,
   ): Promise<A11ySwipeResult>;
 
   requestTapCoordinates(
@@ -1043,6 +1045,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     frameContext?: string,
     onDispatch?: () => void,
+    displayId?: number,
   ): Promise<A11yTapCoordinatesResult>;
 
   requestDrag(
@@ -1055,6 +1058,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     holdDurationMs: number,
     timeoutMs: number,
     frameContext?: string,
+    displayId?: number,
   ): Promise<A11yDragResult>;
 
   requestPinch(
@@ -1066,6 +1070,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<A11yPinchResult>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
@@ -2947,6 +2952,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
     frameContext?: string,
     onDispatch?: () => void,
+    signal?: AbortSignal,
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
     return this.gestures.requestSwipe(
       x1,
@@ -2958,6 +2965,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       perf,
       frameContext,
       onDispatch,
+      signal,
+      displayId,
     );
   }
 
@@ -2972,6 +2981,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
     frameContext?: string,
     onDispatch?: () => void,
+    displayId?: number,
   ): Promise<A11yTapCoordinatesResult> {
     return this.gestures.requestTapCoordinates(
       x,
@@ -2982,6 +2992,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       frameContext,
       undefined,
       onDispatch,
+      displayId,
     );
   }
 
@@ -2994,8 +3005,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     offset?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestTwoFingerSwipe(x1, y1, x2, y2, duration, offset, timeoutMs, perf);
+    return this.gestures.requestTwoFingerSwipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      offset,
+      timeoutMs,
+      perf,
+      displayId,
+    );
   }
 
   async requestDrag(
@@ -3008,6 +3030,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     holdDurationMs: number,
     timeoutMs: number,
     frameContext?: string,
+    displayId?: number,
   ): Promise<A11yDragResult> {
     return this.gestures.requestDrag(
       x1,
@@ -3019,6 +3042,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       holdDurationMs,
       timeoutMs,
       frameContext,
+      displayId,
     );
   }
 
@@ -3031,6 +3055,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<A11yPinchResult> {
     return this.gestures.requestPinch(
       centerX,
@@ -3041,6 +3066,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       duration,
       timeoutMs,
       perf,
+      displayId,
     );
   }
 
@@ -3052,8 +3078,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     y: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
-    return this.gestures.requestGestureStart(gestureId, x, y, timeoutMs, perf);
+    return this.gestures.requestGestureStart(gestureId, x, y, timeoutMs, perf, displayId);
   }
 
   async requestGestureMove(

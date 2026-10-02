@@ -22,6 +22,16 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     super(context, { logTag: "ACCESSIBILITY_SERVICE", roundCoordinates: true });
   }
 
+  protected override async gestureDisplayParams(
+    displayId?: number,
+  ): Promise<{ displayId?: number }> {
+    if (displayId === undefined || displayId === 0) {
+      return {};
+    }
+    const commands = await this.context.getSupportedCommands?.();
+    return commands?.includes("gesture_display_id_v1") ? { displayId } : {};
+  }
+
   /**
    * Request a two-finger swipe gesture for TalkBack mode. Android-only.
    *
@@ -39,6 +49,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     offset: number = 100,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
     // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
     // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
@@ -55,6 +66,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
         y2: this.coord(y2),
         duration,
         offset,
+        ...(await this.gestureDisplayParams(displayId)),
       },
       timeoutMs,
       perf,
@@ -75,12 +87,18 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     y: number,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_start",
       responseType: "swipe",
       messageType: "request_gesture_start",
-      params: { gestureId, x: this.coord(x), y: this.coord(y) },
+      params: {
+        gestureId,
+        x: this.coord(x),
+        y: this.coord(y),
+        ...(await this.gestureDisplayParams(displayId)),
+      },
       timeoutMs,
       perf,
       errorLabel: "Gesture start",

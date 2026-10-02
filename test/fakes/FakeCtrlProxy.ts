@@ -2,6 +2,7 @@ import {
   AndroidCtrlProxy,
   ScreenshotResult,
   A11yDragResult,
+  A11yTapCoordinatesResult,
   A11yPinchResult,
   A11ySwipeResult,
   A11ySetTextResult,
@@ -25,6 +26,36 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * Tracks method calls for test assertions
  */
 export class FakeCtrlProxy implements AndroidCtrlProxy {
+  private readonly supportedCommands = new Set<string>();
+  setSupportedCommands(commands: readonly string[]): void {
+    this.supportedCommands.clear();
+    for (const command of commands) {
+      this.supportedCommands.add(command);
+    }
+  }
+  async supportsCommand(name: string): Promise<boolean> {
+    return this.supportedCommands.has(name);
+  }
+  private tapHistory: Array<{ x: number; y: number; duration: number; displayId?: number }> = [];
+  getTapHistory() {
+    return [...this.tapHistory];
+  }
+  async requestTapCoordinates(
+    x: number,
+    y: number,
+    duration = 10,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+    _frameContext?: string,
+    onDispatch?: () => void,
+    displayId?: number,
+  ): Promise<A11yTapCoordinatesResult> {
+    this.checkFailure("tap");
+    this.tapHistory.push({ x, y, duration, ...(displayId === undefined ? {} : { displayId }) });
+    onDispatch?.();
+    return { success: true, totalTimeMs: duration };
+  }
+
   // Session binding (matches CtrlProxyClient.bindSession for test compatibility)
   private boundSessionId: string | null = null;
 
@@ -57,6 +88,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     x2: number;
     y2: number;
     duration: number;
+    displayId?: number;
   }> = [];
 
   private dragHistory: Array<{
@@ -68,6 +100,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     dragDurationMs: number;
     holdDurationMs: number;
     timeoutMs: number;
+    displayId?: number;
   }> = [];
 
   private pinchHistory: Array<{
@@ -78,6 +111,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     rotationDegrees: number;
     duration?: number;
     timeoutMs?: number;
+    displayId?: number;
   }> = [];
 
   private twoFingerSwipeHistory: Array<{
@@ -88,6 +122,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     duration: number;
     offset: number;
     timeoutMs: number;
+    displayId?: number;
   }> = [];
 
   private actionHistory: Array<{
@@ -387,6 +422,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
    * Clear all call history
    */
   clearHistory(): void {
+    this.tapHistory = [];
     this.swipeHistory = [];
     this.dragHistory = [];
     this.setTextHistory = [];
@@ -511,6 +547,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     frameContext?: string,
     onDispatch?: () => void,
+    _signal?: AbortSignal,
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
     await this.applyDelay("swipe");
     if (this.swipeDispatchesBeforeResult) {
@@ -518,7 +556,14 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     }
     this.checkFailure("swipe");
 
-    this.swipeHistory.push({ x1, y1, x2, y2, duration });
+    this.swipeHistory.push({
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      ...(displayId === undefined ? {} : { displayId }),
+    });
 
     if (this.swipeResult) {
       return this.swipeResult;
@@ -541,6 +586,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     dragDurationMs: number,
     holdDurationMs: number,
     timeoutMs: number,
+    frameContext?: string,
+    displayId?: number,
   ): Promise<A11yDragResult> {
     await this.applyDelay("drag");
     this.checkFailure("drag");
@@ -554,6 +601,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       dragDurationMs,
       holdDurationMs,
       timeoutMs,
+      ...(displayId === undefined ? {} : { displayId }),
     });
 
     if (this.dragResult) {
@@ -581,6 +629,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<A11yPinchResult> {
     await this.applyDelay("pinch");
     this.checkFailure("pinch");
@@ -593,6 +642,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       rotationDegrees,
       duration,
       timeoutMs,
+      ...(displayId === undefined ? {} : { displayId }),
     });
 
     if (this.pinchResult) {
@@ -786,11 +836,21 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     offset: number = 100,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
     await this.applyDelay("requestTwoFingerSwipe");
     this.checkFailure("requestTwoFingerSwipe");
 
-    this.twoFingerSwipeHistory.push({ x1, y1, x2, y2, duration, offset, timeoutMs });
+    this.twoFingerSwipeHistory.push({
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      offset,
+      timeoutMs,
+      ...(displayId === undefined ? {} : { displayId }),
+    });
 
     if (this.twoFingerSwipeResult) {
       return this.twoFingerSwipeResult;

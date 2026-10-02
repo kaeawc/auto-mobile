@@ -105,7 +105,7 @@ import type {
 import { hierarchyUpdatedAtToMillis } from "../observe/observeTimestamp";
 import { sequenceBackoff } from "../../utils/Backoff";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
-import { executeTouchscreenInput } from "./touchscreenInput";
+import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import {
   checkAndroidTapHierarchyChange,
@@ -2819,20 +2819,43 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throw new ActionableError("Matched element has no visible tap area on selected display");
     }
     const { x, y } = point;
-    const tap = `tap ${x} ${y}`;
-    target.assertCurrent();
-    if (options.action === "longPress") {
-      await executeTouchscreenInput(
-        this.adb,
-        `swipe ${x} ${y} ${x} ${y} ${options.duration ?? 800}`,
-        target.displayId,
-        signal,
-      );
-    } else {
-      await executeTouchscreenInput(this.adb, tap, target.displayId, signal);
-      if (options.action === "doubleTap") {
-        await executeTouchscreenInput(this.adb, tap, target.displayId, signal);
+    const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
+      this.accessibilityService,
+      target.displayId,
+    );
+    const dispatch = async () => {
+      throwIfAborted(signal);
+      target.assertCurrent();
+      const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
+      if (useCtrlProxy) {
+        const result = await this.accessibilityService.requestTapCoordinates(
+          x,
+          y,
+          duration,
+          duration > 3000 ? duration + 2000 : undefined,
+          undefined,
+          undefined,
+          undefined,
+          target.displayId === 0 ? undefined : target.displayId,
+        );
+        throwIfAborted(signal);
+        if (!result.success) {
+          throw new ActionableError(result.error ?? "Android tap failed");
+        }
+      } else {
+        await executeTouchscreenInput(
+          this.adb,
+          options.action === "longPress"
+            ? `swipe ${x} ${y} ${x} ${y} ${duration}`
+            : `tap ${x} ${y}`,
+          target.displayId,
+          signal,
+        );
       }
+    };
+    await dispatch();
+    if (options.action === "doubleTap") {
+      await dispatch();
     }
     const after = await this.observeScreen.execute({
       display: options.display,

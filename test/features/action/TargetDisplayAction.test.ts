@@ -106,12 +106,19 @@ function adb(): FakeAdbExecutor {
 }
 
 describe("explicit action display", () => {
+  let capabilitySpy: ReturnType<typeof spyOn>;
   beforeEach(() => {
+    capabilitySpy = spyOn(AndroidCtrlProxyClient.prototype, "supportsCommand").mockResolvedValue(
+      false,
+    );
     displayTransitions.reset(android.deviceId);
     displayTransitions.reset(ios.deviceId);
   });
 
-  afterEach(() => DaemonState.getInstance().reset());
+  afterEach(() => {
+    capabilitySpy.mockRestore();
+    DaemonState.getInstance().reset();
+  });
 
   test("flag-off observe records the rendered panel for the real session reader", async () => {
     const originalDiff = serverConfig.isActionsDiffObserveEnabled();
@@ -967,4 +974,279 @@ describe("explicit action display", () => {
     expect(typed).toEqual(["hello"]);
     expect(observe.getExecuteOptions().at(-1)?.display).toBe("external");
   });
+});
+
+describe("CtrlProxy display-targeted action routing", () => {
+  const gestures = [
+    "tapAt",
+    "longPressAt",
+    "tapOn",
+    "longPressOn",
+    "doubleTapOn",
+    "swipe",
+    "drag",
+    "pinch",
+  ] as const;
+  for (const gesture of gestures) {
+    for (const flag of [false, true]) {
+      for (const panel of ["internal", "external"]) {
+        for (const failure of flag && panel === "external" ? [false, true] : [false]) {
+          test(`${gesture}: flag=${flag}, panel=${panel}, serviceFailure=${failure}`, async () => {
+            displayTransitions.reset(android.deviceId);
+            const observation = screen(panel);
+            const observe = new FakeObserveScreen();
+            observe.setObserveResult(observation);
+            const executor = adb();
+            const timer = new FakeTimer();
+            timer.enableAutoAdvance();
+            const response = {
+              success: !failure,
+              totalTimeMs: 0,
+              ...(failure ? { error: "Display 2 dispatch is unavailable on this API" } : {}),
+            };
+            const commands = spyOn(
+              AndroidCtrlProxyClient.prototype,
+              "supportsCommand",
+            ).mockResolvedValue(flag);
+            const tap = spyOn(
+              AndroidCtrlProxyClient.prototype,
+              "requestTapCoordinates",
+            ).mockResolvedValue(response);
+            const swipe = spyOn(AndroidCtrlProxyClient.prototype, "requestSwipe").mockResolvedValue(
+              response,
+            );
+            const drag = spyOn(AndroidCtrlProxyClient.prototype, "requestDrag").mockResolvedValue(
+              response,
+            );
+            const pinch = spyOn(AndroidCtrlProxyClient.prototype, "requestPinch").mockResolvedValue(
+              response,
+            );
+            const manager = spyOn(
+              AndroidCtrlProxyManager.prototype,
+              "isAvailable",
+            ).mockResolvedValue(true);
+            const deps = { timer, lastRenderedObservation: () => observation };
+            try {
+              let result: { success: boolean; error?: string };
+              if (gesture === "tapAt" || gesture === "longPressAt") {
+                const action = new TapAtCoordinate(android, executor, deps);
+                action.observeScreen = observe;
+                result = await action.execute({
+                  x: 40,
+                  y: 50,
+                  display: panel,
+                  action: gesture === "longPressAt" ? "longPress" : "tap",
+                });
+              } else if (
+                gesture === "tapOn" ||
+                gesture === "longPressOn" ||
+                gesture === "doubleTapOn"
+              ) {
+                const action = new TapOnElement(android, executor as unknown as AdbClient, deps);
+                action.observeScreen = observe;
+                result = await action.execute({
+                  text: "Settings",
+                  display: panel,
+                  action:
+                    gesture === "longPressOn"
+                      ? "longPress"
+                      : gesture === "doubleTapOn"
+                        ? "doubleTap"
+                        : "tap",
+                });
+              } else if (gesture === "swipe") {
+                const action = new SwipeOn(android, executor as unknown as AdbClient, {
+                  ...deps,
+                  observeScreen: observe,
+                });
+                result = await action.execute({ direction: "up", display: panel });
+              } else if (gesture === "drag") {
+                const action = new DragAndDrop(
+                  android,
+                  executor as unknown as AdbClient,
+                  timer,
+                  deps,
+                );
+                action.observeScreen = observe;
+                result = await action.execute({
+                  source: { text: "Settings" },
+                  target: { text: "Settings" },
+                  display: panel,
+                });
+              } else {
+                const action = new PinchOn(android, executor as unknown as AdbClient, deps);
+                action.observeScreen = observe;
+                Object.assign(action, {
+                  observedInteraction: async (run: () => Promise<object>) => run(),
+                });
+                result = await action.execute({
+                  direction: "in",
+                  display: panel,
+                  autoTarget: false,
+                });
+              }
+              const calls = [
+                ...tap.mock.calls,
+                ...swipe.mock.calls,
+                ...drag.mock.calls,
+                ...pinch.mock.calls,
+              ];
+              const inputs = executor
+                .getExecutedCommands()
+                .filter((command) => command.startsWith("shell input"));
+              if (flag || panel === "internal") {
+                expect(result.success).toBe(!failure);
+                if (failure) {
+                  expect(result.error).toContain(response.error!);
+                }
+                expect(calls).toHaveLength(gesture === "doubleTapOn" && !failure ? 2 : 1);
+                expect(calls[0].at(-1)).toBe(panel === "external" ? 2 : undefined);
+                expect(inputs).toEqual([]);
+                if (gesture === "longPressAt") {
+                  expect(tap.mock.calls[0][2]).toBe(1000);
+                }
+                if (gesture === "longPressOn") {
+                  expect(tap.mock.calls[0][2]).toBe(800);
+                }
+                if (gesture === "pinch") {
+                  expect(pinch.mock.calls[0].slice(0, 2)).toEqual([100, 100]);
+                }
+              } else if (gesture === "pinch") {
+                expect(result.error).toBe(
+                  "Android CtrlProxy does not expose per-display pinch dispatch; a targeted two-finger gesture requires CtrlProxy displayId support.",
+                );
+                expect(calls).toEqual([]);
+                expect(inputs).toEqual([]);
+              } else {
+                expect(result.success).toBe(true);
+                expect(calls).toEqual([]);
+                expect(inputs.length).toBeGreaterThan(0);
+                expect(
+                  inputs.every((command) => command.startsWith("shell input touchscreen -d 2 ")),
+                ).toBe(true);
+              }
+            } finally {
+              for (const spy of [commands, tap, swipe, drag, pinch, manager]) {
+                spy.mockRestore();
+              }
+            }
+          });
+        }
+      }
+    }
+  }
+});
+
+describe("display routing capability lookup fences", () => {
+  for (const gesture of ["tapAt", "tapOn", "swipe", "drag", "pinch"] as const) {
+    for (const interrupt of ["transition", "cancel"] as const) {
+      test(`${gesture} rechecks ${interrupt} after capability lookup`, async () => {
+        displayTransitions.reset(android.deviceId);
+        const observation = screen("external");
+        const observe = new FakeObserveScreen();
+        observe.setObserveResult(observation);
+        const executor = adb();
+        const timer = new FakeTimer();
+        const controller = new AbortController();
+        const capability = spyOn(
+          AndroidCtrlProxyClient.prototype,
+          "supportsCommand",
+        ).mockImplementation(async () => {
+          if (interrupt === "transition") {
+            displayTransitions.notifyTransition(android.deviceId, "fold");
+          } else {
+            controller.abort(new Error("Cancelled during capability lookup"));
+          }
+          return true;
+        });
+        const tap = spyOn(
+          AndroidCtrlProxyClient.prototype,
+          "requestTapCoordinates",
+        ).mockResolvedValue({ success: true, totalTimeMs: 0 });
+        const swipe = spyOn(AndroidCtrlProxyClient.prototype, "requestSwipe").mockResolvedValue({
+          success: true,
+          totalTimeMs: 0,
+        });
+        const drag = spyOn(AndroidCtrlProxyClient.prototype, "requestDrag").mockResolvedValue({
+          success: true,
+          totalTimeMs: 0,
+        });
+        const pinch = spyOn(AndroidCtrlProxyClient.prototype, "requestPinch").mockResolvedValue({
+          success: true,
+          totalTimeMs: 0,
+        });
+        const deps = { timer, lastRenderedObservation: () => observation };
+        try {
+          let pending: Promise<{ success: boolean; staleDisplay?: unknown; error?: string }>;
+          if (gesture === "tapAt") {
+            const action = new TapAtCoordinate(android, executor, deps);
+            action.observeScreen = observe;
+            pending = action.execute(
+              { x: 40, y: 50, display: "external" },
+              undefined,
+              controller.signal,
+            );
+          } else if (gesture === "tapOn") {
+            const action = new TapOnElement(android, executor as unknown as AdbClient, deps);
+            action.observeScreen = observe;
+            pending = action.execute(
+              { text: "Settings", display: "external" },
+              undefined,
+              controller.signal,
+            );
+          } else if (gesture === "swipe") {
+            const action = new SwipeOn(android, executor as unknown as AdbClient, {
+              ...deps,
+              observeScreen: observe,
+            });
+            pending = action.execute(
+              { direction: "up", display: "external" },
+              undefined,
+              controller.signal,
+            );
+          } else if (gesture === "drag") {
+            const action = new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+            action.observeScreen = observe;
+            pending = action.execute(
+              { source: { text: "Settings" }, target: { text: "Settings" }, display: "external" },
+              undefined,
+              controller.signal,
+            );
+          } else {
+            const action = new PinchOn(android, executor as unknown as AdbClient, deps);
+            action.observeScreen = observe;
+            pending = action.execute(
+              { direction: "in", display: "external" },
+              undefined,
+              controller.signal,
+            );
+          }
+          if (interrupt === "cancel") {
+            if (gesture === "swipe" || gesture === "pinch") {
+              await expect(pending).rejects.toThrow("Operation cancelled");
+            } else {
+              const result = await pending;
+              expect(result.success).toBe(false);
+              expect(result.error).toContain("Operation cancelled");
+            }
+          } else {
+            const result = await pending;
+            expect(result.success).toBe(false);
+            expect(result.staleDisplay).toBeDefined();
+          }
+          for (const spy of [tap, swipe, drag, pinch]) {
+            expect(spy).not.toHaveBeenCalled();
+          }
+          expect(
+            executor.getExecutedCommands().filter((command) => command.startsWith("shell input")),
+          ).toEqual([]);
+        } finally {
+          for (const spy of [capability, tap, swipe, drag, pinch]) {
+            spy.mockRestore();
+          }
+          displayTransitions.reset(android.deviceId);
+        }
+      });
+    }
+  }
 });

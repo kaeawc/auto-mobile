@@ -437,6 +437,7 @@ class WebSocketServer(
                               "request_insert_text_state",
                               "request_commit_text",
                               "ime_key_events_v1",
+                              "gesture_display_id_v1",
                               "request_cancel_ime_commit",
                               "request_set_keyboard_profile",
                               "request_list_keyboard_profiles",

@@ -1,3 +1,4 @@
+import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import type { DisplayFenceDependencies } from "./BaseVisualChange";
@@ -17,7 +18,11 @@ import {
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ElementResolver } from "../utility/ElementResolver";
-import type { HierarchyCapture, HierarchySnapshot } from "../observe/HierarchyCapture";
+import {
+  identifyObservedHierarchy,
+  type HierarchyCapture,
+  type HierarchySnapshot,
+} from "../observe/HierarchyCapture";
 import { extractHierarchyScreenSize } from "../observe/hierarchyScreenSize";
 import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -127,24 +132,10 @@ export class PinchOn extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<PinchOnResult> {
     throwIfAborted(signal);
+    let displayTarget: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     if (options.display !== undefined) {
       try {
-        await prepareTargetDisplayAction(
-          this.device,
-          options.display,
-          this.observeScreen,
-          this.adb,
-          this.lastRenderedObservation,
-          signal,
-          this.displayTransitionReader,
-        );
-        throwIfAborted(signal);
-        if (this.device.platform === "android") {
-          return this.createErrorResult(
-            "Android CtrlProxy does not expose per-display pinch dispatch; a targeted two-finger gesture requires CtrlProxy displayId support.",
-            options,
-          );
-        }
+        displayTarget = await this.prepareDisplayTarget(options, signal);
       } catch (error) {
         logger.warn(`Pinch display routing failed: ${errorMessage(error)}`, error);
         throwIfAborted(signal);
@@ -210,7 +201,9 @@ export class PinchOn extends BaseVisualChange {
     }
 
     try {
-      const target = await perf.track("resolveTarget", () => this.resolveTarget(options, signal));
+      const target = await perf.track("resolveTarget", () =>
+        this.resolveTarget(options, signal, displayTarget?.observation),
+      );
       const { centerX, centerY } = this.getCenter(target.bounds);
       let { distanceStart, distanceEnd, scale } = this.resolveDistances(options, target.bounds);
       if (this.device.platform === "ios") {
@@ -222,62 +215,86 @@ export class PinchOn extends BaseVisualChange {
       const rotationDegrees = options.rotationDegrees ?? 0;
       let iosDispatchTimestamp: number | undefined;
 
-      const pinchResult = await this.observedInteraction(
-        async () => {
-          throwIfAborted(signal);
-          if (this.device.platform === "ios") {
-            const result = await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
-              centerX,
-              centerY,
-              distanceStart,
-              distanceEnd,
-              rotationDegrees,
-              duration,
-              5000,
-              perf,
-            );
-            if (result.success) {
-              iosDispatchTimestamp = this.timer.now();
-              IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-            }
-            return result;
-          }
-
-          return await AndroidCtrlProxyClient.getInstance(
-            this.device,
-            this.adbFactory,
-          ).requestPinch(
-            centerX,
-            centerY,
-            distanceStart,
-            distanceEnd,
-            rotationDegrees,
-            duration,
-            5000,
-            perf,
-          );
-        },
-        {
-          changeExpected: false,
-          timeoutMs: 8000,
-          progress,
+      const dispatchAndroidPinch = async () => {
+        throwIfAborted(signal);
+        displayTarget?.assertCurrent();
+        const result = await AndroidCtrlProxyClient.getInstance(
+          this.device,
+          this.adbFactory,
+        ).requestPinch(
+          centerX,
+          centerY,
+          distanceStart,
+          distanceEnd,
+          rotationDegrees,
+          duration,
+          5000,
           perf,
+          displayTarget?.displayId === 0 ? undefined : displayTarget?.displayId,
+        );
+        throwIfAborted(signal);
+        displayTarget?.assertCurrent();
+        return result;
+      };
+      const dispatchDisplayPinch = async () => {
+        const result = await dispatchAndroidPinch();
+        if (!result.success) {
+          return result;
+        }
+        const observation = await this.observeScreen.execute({
+          display: options.display,
+          freshness: "fresh",
           signal,
-          observationTimestampProvider: () => iosDispatchTimestamp,
-          predictionContext: {
-            toolName: "pinchOn",
-            toolArgs: {
-              ...options,
-              centerX,
-              centerY,
-              distanceStart,
-              distanceEnd,
-              rotationDegrees,
-              duration,
+        });
+        return { ...result, observation };
+      };
+      const displayPinchResult = displayTarget ? await dispatchDisplayPinch() : undefined;
+      const pinchResult =
+        displayPinchResult ??
+        (await this.observedInteraction(
+          async () => {
+            throwIfAborted(signal);
+            if (this.device.platform === "ios") {
+              const result = await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
+                centerX,
+                centerY,
+                distanceStart,
+                distanceEnd,
+                rotationDegrees,
+                duration,
+                5000,
+                perf,
+              );
+              if (result.success) {
+                iosDispatchTimestamp = this.timer.now();
+                IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+              }
+              return result;
+            }
+
+            return dispatchAndroidPinch();
+          },
+          {
+            changeExpected: false,
+            timeoutMs: 8000,
+            progress,
+            perf,
+            signal,
+            observationTimestampProvider: () => iosDispatchTimestamp,
+            predictionContext: {
+              toolName: "pinchOn",
+              toolArgs: {
+                ...options,
+                centerX,
+                centerY,
+                distanceStart,
+                distanceEnd,
+                rotationDegrees,
+                duration,
+              },
             },
           },
-        },
-      );
+        ));
       throwIfAborted(signal);
 
       perf.end();
@@ -361,25 +378,39 @@ export class PinchOn extends BaseVisualChange {
     }
   }
 
-  private async resolveTarget(options: PinchOnOptions, signal?: AbortSignal): Promise<PinchTarget> {
-    throwIfAborted(signal);
-    let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
-    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
-      throwIfAborted(signal);
-      observeResult = await this.observeScreen.execute({ freshness: "cached-ok", signal });
-    }
-
-    throwIfAborted(signal);
-    const snapshot = await this.capture.capture({
-      freshness: "fresh",
-      searchRaw: serverConfig.isRawElementSearchEnabled(),
+  private async prepareDisplayTarget(options: PinchOnOptions, signal?: AbortSignal) {
+    const prepared = await prepareTargetDisplayAction(
+      this.device,
+      options.display!,
+      this.observeScreen,
+      this.adb,
+      this.lastRenderedObservation,
       signal,
-    });
-    observeResult = this.withCaptureGeometry(observeResult, snapshot);
+      this.displayTransitionReader,
+    );
 
-    if (!observeResult.viewHierarchy || !observeResult.screenSize) {
-      throw new ActionableError("Unable to resolve target without a view hierarchy");
+    throwIfAborted(signal);
+    if (this.device.platform !== "android") {
+      return undefined;
     }
+    const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const supported = await supportsCtrlProxyGestureDisplay(client, prepared.displayId);
+    throwIfAborted(signal);
+    prepared.assertCurrent();
+    if (!supported) {
+      throw new ActionableError(
+        "Android CtrlProxy does not expose per-display pinch dispatch; a targeted two-finger gesture requires CtrlProxy displayId support.",
+      );
+    }
+    return prepared;
+  }
+
+  private async resolveTarget(
+    options: PinchOnOptions,
+    signal?: AbortSignal,
+    displayObservation?: ObserveResult,
+  ): Promise<PinchTarget> {
+    const { observeResult, snapshot } = await this.pinchTargetHierarchy(signal, displayObservation);
 
     const screenBounds = this.getScreenBounds(observeResult, options.includeSystemInsets);
 
@@ -414,6 +445,37 @@ export class PinchOn extends BaseVisualChange {
       bounds: screenBounds,
       targetType: "screen",
     };
+  }
+
+  private async pinchTargetHierarchy(signal?: AbortSignal, displayObservation?: ObserveResult) {
+    throwIfAborted(signal);
+    let observeResult =
+      displayObservation ?? (await this.observeScreen.getMostRecentCachedObserveResult());
+    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
+      if (displayObservation) {
+        throw new ActionableError("Selected display has no usable view hierarchy");
+      }
+      throwIfAborted(signal);
+      observeResult = await this.observeScreen.execute({ freshness: "cached-ok", signal });
+    }
+
+    throwIfAborted(signal);
+    const snapshot = displayObservation?.viewHierarchy
+      ? identifyObservedHierarchy("android", displayObservation.viewHierarchy, "fresh", this.timer)
+      : await this.capture.capture({
+          freshness: "fresh",
+          searchRaw: serverConfig.isRawElementSearchEnabled(),
+          signal,
+        });
+    if (!displayObservation) {
+      observeResult = this.withCaptureGeometry(observeResult, snapshot);
+    }
+
+    if (!observeResult.viewHierarchy || !observeResult.screenSize) {
+      throw new ActionableError("Unable to resolve target without a view hierarchy");
+    }
+
+    return { observeResult, snapshot };
   }
 
   private withCaptureGeometry(

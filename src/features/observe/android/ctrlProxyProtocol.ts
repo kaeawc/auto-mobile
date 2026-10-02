@@ -86,6 +86,7 @@ export interface RequestTapCoordinatesMessage {
   x: number;
   y: number;
   duration: number;
+  displayId?: number;
 }
 
 /** `@SerialName("request_swipe")` → `RequestSwipe` */
@@ -97,6 +98,7 @@ export interface RequestSwipeMessage {
   x2: number;
   y2: number;
   duration: number;
+  displayId?: number;
 }
 
 /** `@SerialName("request_two_finger_swipe")` → `RequestTwoFingerSwipe` */
@@ -109,6 +111,7 @@ export interface RequestTwoFingerSwipeMessage {
   y2: number;
   duration: number;
   offset: number;
+  displayId?: number;
 }
 
 /** `@SerialName("request_drag")` → `RequestDrag` (legacy holdTime/duration fields not sent) */
@@ -122,6 +125,7 @@ export interface RequestDragMessage {
   pressDurationMs: number;
   dragDurationMs: number;
   holdDurationMs: number;
+  displayId?: number;
 }
 
 /** `@SerialName("request_pinch")` → `RequestPinch` */
@@ -134,6 +138,7 @@ export interface RequestPinchMessage {
   distanceEnd: number;
   rotationDegrees: number;
   duration: number;
+  displayId?: number;
 }
 
 // =============================================================================
@@ -152,6 +157,7 @@ export interface RequestGestureStartMessage {
   gestureId: string;
   x: number;
   y: number;
+  displayId?: number;
 }
 
 /** `@SerialName("request_gesture_move")` → `RequestGestureMove` (incremental travel) */
@@ -732,7 +738,11 @@ export const ANDROID_CAPABILITY_REQUEST_TYPES = [
 ] as const satisfies readonly CtrlProxyRequestType[];
 
 /** Capability flags in the handshake that are never sent as wire requests. */
-export const ANDROID_CAPABILITY_FLAGS = ["node_selector_actions", "ime_key_events_v1"] as const;
+export const ANDROID_CAPABILITY_FLAGS = [
+  "node_selector_actions",
+  "ime_key_events_v1",
+  "gesture_display_id_v1",
+] as const;
 
 export const ANDROID_CAPABILITY_GATED_COMMANDS: ReadonlySet<string> = new Set([
   ...ANDROID_CAPABILITY_REQUEST_TYPES,

@@ -24,7 +24,7 @@ import { AndroidCtrlProxyManager } from "../../ctrlProxy/CtrlProxyManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
-import { executeTouchscreenInput } from "./touchscreenInput";
+import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { logger } from "../../utils/logger";
 import { serverConfig } from "../../utils/ServerConfig";
 import {
@@ -105,13 +105,39 @@ export class DragAndDrop extends BaseVisualChange {
     const start = this.geometry.getElementCenter(source);
     const end = this.geometry.getElementCenter(destination);
     const duration = options.dragDurationMs ?? 600;
-    target.assertCurrent();
-    await executeTouchscreenInput(
-      this.adb,
-      `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
+    const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
+      this.accessibilityService,
       target.displayId,
-      signal,
     );
+    target.assertCurrent();
+    throwIfAborted(signal);
+    if (useCtrlProxy) {
+      const pressDurationMs = this.getPressDurationMs(options);
+      const holdDurationMs = this.getHoldDurationMs(options);
+      const result = await this.accessibilityService.requestDrag(
+        start.x,
+        start.y,
+        end.x,
+        end.y,
+        pressDurationMs,
+        duration,
+        holdDurationMs,
+        this.getDragTimeoutMs(pressDurationMs, duration, holdDurationMs),
+        undefined,
+        target.displayId === 0 ? undefined : target.displayId,
+      );
+      throwIfAborted(signal);
+      if (!result.success) {
+        throw new ActionableError(result.error ?? "Android drag failed");
+      }
+    } else {
+      await executeTouchscreenInput(
+        this.adb,
+        `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
+        target.displayId,
+        signal,
+      );
+    }
     const after = await this.observeScreen.execute({
       display: options.display,
       freshness: "fresh",

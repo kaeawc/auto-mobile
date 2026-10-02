@@ -1,3 +1,5 @@
+import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { describe, it, expect } from "bun:test";
 import { CtrlProxyGestures } from "../../../../src/features/observe/android/CtrlProxyGestures";
 import type { DelegateContext } from "../../../../src/features/observe/shared/types";
@@ -240,4 +242,186 @@ describe("CtrlProxyGestures.requestTwoFingerSwipe (#2988)", () => {
     expect(result.error).toBe("Not connected");
     expect(sent.length).toBe(0);
   });
+});
+
+describe("gesture displayId wire compatibility", () => {
+  const cases = [
+    {
+      name: "tap",
+      legacy:
+        '{"type":"request_tap_coordinates","requestId":"request","x":10,"y":20,"duration":10}',
+      send: (g: CtrlProxyGestures, id?: number) =>
+        g.requestTapCoordinates(10, 20, 10, 5000, undefined, undefined, undefined, undefined, id),
+    },
+    {
+      name: "long press",
+      legacy:
+        '{"type":"request_tap_coordinates","requestId":"request","x":10,"y":20,"duration":800}',
+      send: (g: CtrlProxyGestures, id?: number) =>
+        g.requestTapCoordinates(10, 20, 800, 5000, undefined, undefined, undefined, undefined, id),
+    },
+    {
+      name: "swipe",
+      legacy:
+        '{"type":"request_swipe","requestId":"request","x1":10,"y1":20,"x2":30,"y2":40,"duration":300}',
+      send: (g: CtrlProxyGestures, id?: number) =>
+        g.requestSwipe(10, 20, 30, 40, 300, 5000, undefined, undefined, undefined, undefined, id),
+    },
+    {
+      name: "two-finger swipe",
+      legacy:
+        '{"type":"request_two_finger_swipe","requestId":"request","x1":10,"y1":20,"x2":30,"y2":40,"duration":300,"offset":100}',
+      send: (g: CtrlProxyGestures, id?: number) =>
+        g.requestTwoFingerSwipe(10, 20, 30, 40, 300, 100, 5000, undefined, id),
+    },
+    {
+      name: "drag",
+      legacy:
+        '{"type":"request_drag","requestId":"request","x1":10,"y1":20,"x2":30,"y2":40,"pressDurationMs":600,"dragDurationMs":300,"holdDurationMs":100}',
+      send: (g: CtrlProxyGestures, id?: number) =>
+        g.requestDrag(10, 20, 30, 40, 600, 300, 100, 5000, undefined, id),
+    },
+    {
+      name: "pinch",
+      legacy:
+        '{"type":"request_pinch","requestId":"request","centerX":10,"centerY":20,"distanceStart":30,"distanceEnd":40,"rotationDegrees":0,"duration":300}',
+      send: (g: CtrlProxyGestures, id?: number) =>
+        g.requestPinch(10, 20, 30, 40, 0, 300, 5000, undefined, id),
+    },
+    {
+      name: "gesture start",
+      legacy:
+        '{"type":"request_gesture_start","requestId":"request","gestureId":"finger","x":10,"y":20}',
+      send: (g: CtrlProxyGestures, id?: number) =>
+        g.requestGestureStart("finger", 10, 20, 5000, undefined, id),
+    },
+  ];
+  for (const { name, send, legacy } of cases) {
+    for (const supported of [false, true]) {
+      it(`${name}: flag ${supported} gates only the non-default display field`, async () => {
+        const { context, sent, requestManager } = createFakeContext({
+          getSupportedCommands: async () => (supported ? ["gesture_display_id_v1"] : []),
+        });
+        const gestures = new CtrlProxyGestures(context);
+        const wires: string[] = [];
+        for (const id of [undefined, 0, 2]) {
+          const pending = send(gestures, id);
+          await flush();
+          const raw = sent.at(-1)!;
+          const message = JSON.parse(raw) as { requestId: string; displayId?: number };
+          expect(message.displayId).toBe(supported && id === 2 ? 2 : undefined);
+          wires.push(raw.replace(message.requestId, "request"));
+          requestManager.resolve(message.requestId, {
+            success: false,
+            totalTimeMs: 0,
+            error: "Invalid display 2",
+          });
+          expect((await pending).error).toBe("Invalid display 2");
+        }
+        expect(wires[0]).toBe(legacy);
+        expect(wires[1]).toBe(wires[0]);
+        expect(wires[2]).toBe(supported ? wires[0].slice(0, -1) + ',"displayId":2}' : wires[0]);
+        expect(sent).toHaveLength(3);
+      });
+    }
+  }
+});
+
+describe("Android client forwards gesture displayId", () => {
+  it("forwards swipe displayId and abort signal independently", async () => {
+    const { context, sent, requestManager, timer } = createFakeContext({
+      getSupportedCommands: async () => ["gesture_display_id_v1"],
+    });
+    const client = AndroidCtrlProxyClient.createForTesting(
+      { deviceId: "client-swipe-cancel", platform: "android", name: "Fake" },
+      new FakeAdbExecutor(),
+      undefined,
+      timer,
+    );
+    client["_gestures"] = new CtrlProxyGestures(context);
+    const controller = new AbortController();
+    const pending = client.requestSwipe(
+      1,
+      2,
+      3,
+      4,
+      300,
+      5000,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+      2,
+    );
+    await flush();
+
+    const message = JSON.parse(sent.at(-1)!) as { type: string; displayId: number };
+    expect(message.type).toBe("request_swipe");
+    expect(message.displayId).toBe(2);
+    expect(requestManager.getPendingCount()).toBe(1);
+
+    controller.abort(new Error("swipe caller cancelled"));
+    expect(requestManager.getPendingCount()).toBe(0);
+    await expect(pending).rejects.toThrow("swipe caller cancelled");
+    expect(sent).toHaveLength(1);
+    expect(timer.getCurrentTime()).toBe(0);
+  });
+
+  const cases = [
+    {
+      name: "tap",
+      send: (c: AndroidCtrlProxyClient) =>
+        c.requestTapCoordinates(1, 2, 10, 5000, undefined, undefined, undefined, 2),
+    },
+    {
+      name: "long press",
+      send: (c: AndroidCtrlProxyClient) =>
+        c.requestTapCoordinates(1, 2, 800, 5000, undefined, undefined, undefined, 2),
+    },
+    {
+      name: "swipe",
+      send: (c: AndroidCtrlProxyClient) =>
+        c.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, undefined, undefined, 2),
+    },
+    {
+      name: "two-finger swipe",
+      send: (c: AndroidCtrlProxyClient) =>
+        c.requestTwoFingerSwipe(1, 2, 3, 4, 300, 100, 5000, undefined, 2),
+    },
+    {
+      name: "drag",
+      send: (c: AndroidCtrlProxyClient) =>
+        c.requestDrag(1, 2, 3, 4, 600, 300, 100, 5000, undefined, 2),
+    },
+    {
+      name: "pinch",
+      send: (c: AndroidCtrlProxyClient) => c.requestPinch(1, 2, 3, 4, 0, 300, 5000, undefined, 2),
+    },
+    {
+      name: "gesture start",
+      send: (c: AndroidCtrlProxyClient) =>
+        c.requestGestureStart("finger", 1, 2, 5000, undefined, 2),
+    },
+  ];
+  for (const { name, send } of cases) {
+    it(name, async () => {
+      const { context, sent, requestManager, timer } = createFakeContext({
+        getSupportedCommands: async () => ["gesture_display_id_v1"],
+      });
+      const client = AndroidCtrlProxyClient.createForTesting(
+        { deviceId: "client-forward", platform: "android", name: "Fake" },
+        new FakeAdbExecutor(),
+        undefined,
+        timer,
+      );
+      client["_gestures"] = new CtrlProxyGestures(context);
+      const pending = send(client);
+      await flush();
+      const message = JSON.parse(sent.at(-1)!) as { requestId: string; displayId: number };
+      expect(message.displayId).toBe(2);
+      requestManager.resolve(message.requestId, { success: true, totalTimeMs: 0 });
+      expect((await pending).success).toBe(true);
+      expect(sent).toHaveLength(1);
+    });
+  }
 });

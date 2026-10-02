@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { join, posix, resolve, win32 } from "node:path";
+import { isAbsolute, join, posix, relative, resolve, win32 } from "node:path";
+import { homedir } from "node:os";
 import { runBenchmark, type BenchmarkDeps } from "../../scripts/benchmark-settled-screenshot";
 import {
   assertPrivateDaemonNamespace,
   assertServerBuilt,
   buildBenchmarkChildEnv,
-  isPrivateDaemonStartRefusal,
   type BenchmarkChildEnv,
 } from "../../scripts/benchmarkSettledScreenshotEnv";
 import {
@@ -35,8 +35,6 @@ const expectedPaths: Record<string, string> = {
   AUTOMOBILE_DAEMON_LAUNCH_CWD: runDir,
 };
 const success = { structuredContent: { success: true, observation: { platform: "ios" } } };
-const refusal =
-  "Found live AutoMobile daemon process(es) (123) but none became reachable within 100ms. Refusing to terminate a live daemon during start";
 const options = () =>
   parseBenchmarkArgs([
     "--platform",
@@ -146,12 +144,70 @@ describe("benchmark namespace isolation", () => {
     expect(buildBenchmarkChildEnv({}, runDir)).toEqual(expectedPaths);
   });
 
-  test("different run dirs have disjoint selectors and sockets must fit, including auxiliary sockets", () => {
-    const first = buildBenchmarkChildEnv({}, runDir);
-    const second = buildBenchmarkChildEnv({}, `${runDir}-2`);
+  test("every daemon path stays inside the run dir and replaces resident paths", () => {
+    const directory = resolve("/fake/tmp/am-bench-ABC123");
+    const residentDir = join(homedir(), ".auto-mobile");
+    const parent: BenchmarkChildEnv = {
+      AUTOMOBILE_COORDINATION_DIR: resolve("/fake/resident/coordination"),
+    };
     for (const key of Object.keys(expectedPaths)) {
-      expect(first[key]).not.toBe(second[key]);
+      parent[key] = join(residentDir, key);
     }
+    parent.AUTOMOBILE_DAEMON_SOCKET_PATH = "/tmp/auto-mobile-daemon-501.sock";
+    parent.AUTOMOBILE_DAEMON_PID_FILE_PATH = "/tmp/auto-mobile-daemon-501.pid";
+    parent.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = "/tmp/auto-mobile-daemon-501.lock";
+    parent.AUTOMOBILE_AUX_SOCKET_DIR = parent.AUTOMOBILE_COORDINATION_DIR;
+    for (const env of [
+      buildBenchmarkChildEnv({}, directory),
+      buildBenchmarkChildEnv(parent, directory),
+    ]) {
+      for (const key of Object.keys(expectedPaths)) {
+        const value = env[key];
+        expect(value).toBeDefined();
+        if (value === undefined) {
+          throw new Error(`Missing daemon path: ${key}`);
+        }
+        const withinRun = relative(directory, value);
+        expect(withinRun.startsWith("..")).toBe(false);
+        expect(isAbsolute(withinRun)).toBe(false);
+        const withinResident = relative(residentDir, value);
+        expect(withinResident.startsWith("..") || isAbsolute(withinResident)).toBe(true);
+        expect(value.startsWith("/tmp/auto-mobile-daemon-")).toBe(false);
+        expect(value).not.toBe(parent[key]);
+        expect(value).not.toBe(parent.AUTOMOBILE_COORDINATION_DIR);
+      }
+    }
+  });
+
+  for (const count of [2, 3]) {
+    test(`${count} concurrent namespaces have no equal or nested daemon paths`, () => {
+      const environments = ["ABC123", "DEF456", "GHI789"]
+        .slice(0, count)
+        .map((suffix) => buildBenchmarkChildEnv({}, resolve(`/fake/tmp/am-bench-${suffix}`)));
+      for (const [index, env] of environments.entries()) {
+        for (const other of environments.slice(index + 1)) {
+          for (const key of Object.keys(expectedPaths)) {
+            for (const otherKey of Object.keys(expectedPaths)) {
+              const value = env[key];
+              const otherValue = other[otherKey];
+              if (value === undefined || otherValue === undefined) {
+                throw new Error(`Missing daemon paths: ${key}, ${otherKey}`);
+              }
+              expect(value).not.toBe(otherValue);
+              for (const displacement of [
+                relative(value, otherValue),
+                relative(otherValue, value),
+              ]) {
+                expect(displacement.startsWith("..") || isAbsolute(displacement)).toBe(true);
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  test("sockets must fit, including auxiliary sockets", () => {
     expect(() => buildBenchmarkChildEnv({}, join(runDir, "a".repeat(80)))).toThrow(
       "shorter than 100 bytes",
     );
@@ -353,30 +409,40 @@ describe("benchmark injectable lifecycle", () => {
     expect(fake.logs.join("\n")).toContain("remove failed");
   });
 
-  test("daemon refusal in warmup error envelopes and thrown calls aborts immediately", async () => {
+  test("private daemon start failures are measured normally, exclude warmup and still clean up", async () => {
+    const message =
+      "Found live AutoMobile daemon process(es) (123) but none became reachable within 100ms. Refusing to terminate a live daemon during start";
     for (const respond of [
-      () => ({ isError: true, content: [{ type: "text", text: refusal }] }),
-      () => ({ structuredContent: { success: false, error: { message: refusal } } }),
-      () => ({
-        structuredContent: { error: "generic" },
-        content: [{ type: "text", text: refusal }],
-      }),
+      () => ({ isError: true, content: [{ type: "text", text: message }] }),
+      () => ({ structuredContent: { success: false, error: { message } } }),
       () => {
-        throw new Error(refusal);
+        throw new Error(message);
       },
     ]) {
       const fake = harness(respond);
-      await expect(runBenchmark({ ...options(), iterations: 30 }, fake.deps)).rejects.toThrow(
-        "Wait for the #8749 fix, or stop the resident daemon yourself",
+      const report = await runBenchmark(options(), fake.deps);
+      expect(fake.calls()).toBe(12); // Four series, each with one warmup and two measured calls.
+      for (const series of Object.values(report.results)) {
+        for (const metric of Object.values(series)) {
+          expect(metric).toEqual({
+            invalid: true,
+            sampleSize: 2,
+            failures: 2,
+            screenshotSettledFalse: 0,
+            failureReasons: [{ message, count: 2 }],
+          });
+        }
+      }
+      expect(report.settledVsAsync).toEqual({});
+      expect(JSON.parse(formatReportJson(report)).results).toEqual(report.results);
+      expect(formatReportTable(report)).toContain("INVALID");
+      expect(formatReportTable(report)).toContain(
+        "observe/settled (2/2): 2x Found live AutoMobile",
       );
-      expect(fake.calls()).toBe(1);
+      expect(benchmarkExitCode(report, { allowFailures: false })).toBe(1);
+      expect(benchmarkExitCode(report, { allowFailures: true })).toBe(0);
       expect(fake.events).toEqual(["make", "create", "close", "stop", "remove"]);
     }
-    expect(isPrivateDaemonStartRefusal(refusal)).toBe(true);
-    expect(isPrivateDaemonStartRefusal("Refusing to terminate a live daemon during start")).toBe(
-      true,
-    );
-    expect(isPrivateDaemonStartRefusal("simulator rejected volume_up")).toBe(false);
   });
 
   test("ordinary thrown calls are counted, warmup excluded, partial failures keep latency", async () => {

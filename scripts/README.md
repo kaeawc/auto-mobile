@@ -260,11 +260,10 @@ logs a warning and retains the directory and PID record for the operator;
 cleanup errors do not replace the primary error. Stop waits are bounded at 30
 seconds without signalling any process.
 
-True coexistence with a live resident daemon depends on #8749: while that
-manager bug remains, another live AutoMobile daemon process can cause private
-startup to be refused. The script aborts immediately on that refusal, including
-during warmup, and explains that the operator must wait for the fix or stop
-the resident daemon themselves. It will not stop or reuse the resident daemon.
+Private-namespace start/stop no longer interacts with a resident daemon (#8762).
+A private daemon startup failure is reported like any other failed call, with
+its error message in JSON and the table; an all-failed series is INVALID and
+exits non-zero unless `--allow-failures` is passed.
 `AUTOMOBILE_COORDINATION_DIR` remains inherited: device coordination is shared,
 not a daemon selector. The fresh private data directory can require fetching
 CtrlProxy/video assets again. `pressButton volume_up` is valid on both Android

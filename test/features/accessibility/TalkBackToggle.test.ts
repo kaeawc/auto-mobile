@@ -1,10 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { TalkBackToggle } from "../../../src/features/accessibility/TalkBackToggle";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  TalkBackToggle,
+  isTalkBackRuntimePermissionPrompt,
+} from "../../../src/features/accessibility/TalkBackToggle";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSecureSettingsRpc } from "../../fakes/FakeSecureSettingsRpc";
 import type { BootedDevice } from "../../../src/models";
+
+import { logger } from "../../../src/utils/logger";
 
 const ANDROID_DEVICE: BootedDevice = {
   deviceId: "emulator-5554",
@@ -82,6 +87,207 @@ describe("TalkBackToggle", () => {
     fakeAdb.clearHistory();
     fakeDetector.reset();
     fakeTimer.reset();
+  });
+
+  describe("system runtime permission prompt", () => {
+    test("reports API 36 foreground prompt without dispatching any input", async () => {
+      fakeAdb.setForegroundApp({
+        packageName: "com.google.android.permissioncontroller",
+        userId: 0,
+        activityName:
+          "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+      });
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(true);
+        expect(result).toMatchObject({
+          supported: true,
+          applied: true,
+          currentState: true,
+          blockingPrompt: {
+            kind: "runtime-permission",
+            package: "com.google.android.permissioncontroller",
+            activity:
+              "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+          },
+          warning: expect.stringContaining("Nothing was tapped"),
+        });
+        expect(result.reason).toBeUndefined();
+        expect(foreground).toHaveBeenCalledTimes(1);
+        expect(fakeAdb.getCommandCalls().filter((c) => c.command.includes("input"))).toEqual([]);
+        expect(warn.mock.calls.some(([message]) => message.includes("dialog not found"))).toBe(
+          false,
+        );
+      } finally {
+        foreground.mockRestore();
+        warn.mockRestore();
+      }
+    });
+
+    test.each([
+      ["normal app", { packageName: "com.example.home", userId: 0 }],
+      ["null foreground", null],
+    ])("no prompt for %s preserves the result", async (_name, app) => {
+      fakeAdb.setForegroundApp(app);
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(true);
+        expect(result).toEqual({ supported: true, applied: true, currentState: true });
+        if (app === null) {
+          expect(
+            debug.mock.calls.some(([message]) => message.includes("Foreground app unavailable")),
+          ).toBe(true);
+        }
+      } finally {
+        debug.mockRestore();
+      }
+    });
+
+    test("dismissed consent dialog is followed by one foreground read", async () => {
+      fakeAdb.setCommandResponseSequence("shell cat /sdcard/window_dump.xml", [
+        makeExecResult(DIALOG_XML_WITH_BUTTON1),
+        makeExecResult(""),
+      ]);
+      fakeAdb.setForegroundApp({ packageName: "com.example.home", userId: 0 });
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      try {
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(true);
+        expect(result).toEqual({ supported: true, applied: true, currentState: true });
+        expect(foreground).toHaveBeenCalledTimes(1);
+        expect(
+          fakeAdb.getCommandCalls().filter((c) => c.command.startsWith("shell input")),
+        ).toHaveLength(1);
+      } finally {
+        foreground.mockRestore();
+      }
+    });
+
+    test("a runtime prompt following dismissed consent is reported", async () => {
+      fakeAdb.setCommandResponseSequence("shell cat /sdcard/window_dump.xml", [
+        makeExecResult(DIALOG_XML_WITH_BUTTON1),
+        makeExecResult(""),
+      ]);
+      fakeAdb.setForegroundApp({
+        packageName: "com.android.permissioncontroller",
+        userId: 0,
+        activityName: "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+      });
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+      const result = await new TalkBackToggle(
+        ANDROID_DEVICE,
+        fakeAdb,
+        fakeDetector,
+        fakeTimer,
+        fakeSecureSettings,
+      ).toggle(true);
+      expect(result.applied).toBe(true);
+      expect(result.blockingPrompt?.kind).toBe("runtime-permission");
+      expect(
+        fakeAdb.getCommandCalls().filter((c) => c.command.startsWith("shell input")),
+      ).toHaveLength(1);
+    });
+
+    test("persisting consent returns before reading foreground", async () => {
+      fakeAdb.setCommandResponse(
+        "shell cat /sdcard/window_dump.xml",
+        makeExecResult(DIALOG_XML_WITH_BUTTON1),
+      );
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      try {
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(true);
+        expect(result).toEqual({
+          supported: true,
+          applied: false,
+          currentState: false,
+          reason: "TalkBack permission dialog dismissal could not be confirmed",
+        });
+        expect(foreground).not.toHaveBeenCalled();
+      } finally {
+        foreground.mockRestore();
+      }
+    });
+
+    test("disabling does not read or report a foreground prompt", async () => {
+      fakeAdb.setForegroundApp({
+        packageName: "com.google.android.permissioncontroller",
+        userId: 0,
+        activityName:
+          "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+      });
+      fakeDetector.enqueueDetectMethodResults("talkback", "unknown");
+      const foreground = spyOn(fakeAdb, "getForegroundApp");
+      try {
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(false);
+        expect(result).toEqual({ supported: true, applied: true, currentState: false });
+        expect(foreground).not.toHaveBeenCalled();
+      } finally {
+        foreground.mockRestore();
+      }
+    });
+
+    test("foreground read failure is advisory and debug logged", async () => {
+      fakeDetector.enqueueDetectMethodResults("unknown", "talkback");
+      const foreground = spyOn(fakeAdb, "getForegroundApp").mockRejectedValue(
+        new Error("foreground unavailable"),
+      );
+      const debug = spyOn(logger, "debug").mockImplementation(() => {});
+      try {
+        const result = await new TalkBackToggle(
+          ANDROID_DEVICE,
+          fakeAdb,
+          fakeDetector,
+          fakeTimer,
+          fakeSecureSettings,
+        ).toggle(true);
+        expect(result).toEqual({ supported: true, applied: true, currentState: true });
+        expect(foreground).toHaveBeenCalledTimes(1);
+        expect(
+          debug.mock.calls.some(
+            ([message, detail]) =>
+              message.includes("Foreground prompt read failed") &&
+              detail === "foreground unavailable",
+          ),
+        ).toBe(true);
+      } finally {
+        foreground.mockRestore();
+        debug.mockRestore();
+      }
+    });
   });
 
   describe("enable TalkBack", () => {
@@ -850,5 +1056,34 @@ describe("TalkBackToggle", () => {
         ).toBe(true);
       },
     );
+  });
+});
+
+describe("isTalkBackRuntimePermissionPrompt", () => {
+  test.each([
+    [
+      "com.google.android.permissioncontroller",
+      "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+      true,
+    ],
+    [
+      "com.android.permissioncontroller",
+      "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+      true,
+    ],
+    [
+      "com.google.android.permissioncontroller",
+      "com.google.android.permissioncontroller.OtherActivity",
+      false,
+    ],
+    [
+      "com.google.android.permissioncontroller",
+      "com.google.android.permissioncontroller.NotGrantPermissionsActivity",
+      false,
+    ],
+    ["com.example.app", "com.example.app.GrantPermissionsActivity", false],
+    ["com.android.permissioncontroller", undefined, false],
+  ])("%s / %s matches: %s", (packageName, activityName, expected) => {
+    expect(isTalkBackRuntimePermissionPrompt({ packageName, activityName })).toBe(expected);
   });
 });

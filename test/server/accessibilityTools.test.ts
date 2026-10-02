@@ -4,6 +4,10 @@ import {
   accessibilitySchema,
 } from "../../src/server/accessibilityTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { TalkBackToggle } from "../../src/features/accessibility/TalkBackToggle";
+import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { accessibilityStateSchema } from "../../src/server/toolOutputSchemas";
 import { VoiceOverToggle } from "../../src/features/accessibility/VoiceOverToggle";
 import type { BootedDevice } from "../../src/models";
 import type { VoiceOverResult } from "../../src/models/AccessibilityResult";
@@ -88,6 +92,56 @@ describe("accessibilityTools", () => {
       await expect(accessibilityHandler()(IOS_DEVICE, { voiceover: false })).rejects.toThrow(
         "VoiceOver state could not be confirmed within 10000ms",
       );
+    });
+  });
+
+  describe("TalkBack prompt reporting", () => {
+    test.each([true, false])(
+      "threads optional prompt fields when present: %s",
+      async (hasPrompt) => {
+        const blockingPrompt = {
+          kind: "runtime-permission" as const,
+          package: "com.google.android.permissioncontroller",
+          activity:
+            "com.google.android.permissioncontroller.permission.ui.GrantPermissionsActivity",
+        };
+        const promptFields = hasPrompt
+          ? { warning: "System permission prompt; nothing was tapped", blockingPrompt }
+          : {};
+        const factory = spyOn(defaultAdbClientFactory, "create").mockReturnValue(
+          new FakeAdbExecutor(),
+        );
+        const toggle = spyOn(TalkBackToggle.prototype, "toggle").mockResolvedValue({
+          supported: true,
+          applied: true,
+          currentState: true,
+          ...promptFields,
+        });
+        try {
+          registerAccessibilityTools();
+          const response = await accessibilityHandler()(ANDROID_DEVICE, { talkback: true });
+          expect(response).toMatchObject({
+            structuredContent: { enabled: true, service: "talkback", ...promptFields },
+          });
+          const expected = { enabled: true, service: "talkback", ...promptFields };
+          expect(response).toHaveProperty("structuredContent", expected);
+          expect(accessibilityStateSchema.parse(expected)).toEqual(expected);
+        } finally {
+          toggle.mockRestore();
+          factory.mockRestore();
+        }
+      },
+    );
+
+    test.each([
+      { warning: 42 },
+      { blockingPrompt: { kind: "notification-permission", package: "p", activity: "a" } },
+      { blockingPrompt: { kind: "runtime-permission", package: "p" } },
+    ])("validates optional prompt fields: %j", (fields) => {
+      expect(
+        accessibilityStateSchema.safeParse({ enabled: true, service: "talkback", ...fields })
+          .success,
+      ).toBe(false);
     });
   });
 

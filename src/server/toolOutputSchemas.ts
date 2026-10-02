@@ -548,6 +548,14 @@ export const accessibilityStateSchema = z
   .object({
     enabled: z.boolean(),
     service: z.enum(["talkback", "voiceover", "unknown"]),
+    warning: z.string().optional(),
+    blockingPrompt: z
+      .object({
+        kind: z.literal("runtime-permission"),
+        package: z.string(),
+        activity: z.string(),
+      })
+      .optional(),
   })
   .passthrough();
 

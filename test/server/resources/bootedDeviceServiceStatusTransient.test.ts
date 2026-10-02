@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { createInstantFailureWebSocketFactory } from "../../fakes/FakeWebSocket";
 import {
   enrichDeviceServiceStatuses,
   probeServiceStatusWithBudget,
@@ -11,6 +12,86 @@ import type { DeviceServiceStatus } from "../../../src/server/bootedDeviceResour
 import { describeDevice } from "../../../src/server/deviceDescription";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
 import { logger } from "../../../src/utils/logger";
+import {
+  IOSCtrlProxyClient,
+  IOS_RUNNER_FEATURE_COMMANDS,
+  IOS_RUNNER_FEATURE_FLAGS,
+} from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import {
+  IOS_RUNNER_COMMAND_APPLICABILITY,
+  getMissingIosRunnerFeatureCommands,
+} from "../../../src/features/observe/ios/iosRunnerFeatureCommands";
+
+describe("iOS service status command applicability", () => {
+  for (const isVirtual of [true, false, undefined]) {
+    for (const missing of ["set_hinge_angle", "set_voiceover_state", "request_shake"] as const) {
+      test(`missing ${missing} with isVirtual=${isVirtual}`, async () => {
+        const timer = new FakeTimer();
+        const device = {
+          name: "iPhone",
+          platform: "ios" as const,
+          deviceId: "00000000-0000-0000-0000-000000008547",
+          source: "local" as const,
+          isVirtual,
+        };
+        const manager = IOSCtrlProxyManager.getInstance(device, timer);
+        const client = IOSCtrlProxyClient.createForTesting(
+          device,
+          18547,
+          createInstantFailureWebSocketFactory(),
+          timer,
+        );
+        const installed = spyOn(manager, "isInstalled").mockResolvedValue(true);
+        const running = spyOn(manager, "checkRunningWithReason").mockResolvedValue({ ok: true });
+        const cachedClient = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue(
+          client,
+        );
+        const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_hinge_angle", "set_voiceover_state"];
+        const advertised = commands.filter((command) => command !== missing);
+        const cachedCommands = spyOn(client, "getCachedSupportedCommands").mockReturnValue(
+          advertised,
+        );
+        const cachedFeatures = spyOn(client, "getCachedSupportedFeatures").mockReturnValue([
+          ...IOS_RUNNER_FEATURE_FLAGS,
+        ]);
+        const requirements = {
+          requiredCommands: commands,
+          applicability: IOS_RUNNER_COMMAND_APPLICABILITY,
+        };
+        const environment =
+          isVirtual === undefined ? undefined : isVirtual ? "simulator" : "physical";
+        const complete =
+          missing !== "request_shake" &&
+          !(missing === "set_hinge_angle" && isVirtual === true) &&
+          !(missing === "set_voiceover_state" && isVirtual === false);
+        try {
+          const status = await queryDeviceServiceStatus(
+            device,
+            undefined,
+            { getVersion: async () => undefined },
+            timer,
+            { runnerCommandRequirements: requirements },
+          );
+          expect(status?.supportedCommandsComplete).toBe(complete);
+          expect(status?.isCompatible).toBe(complete);
+          // Doctor and the resource share this primitive; missing commands mean stale in both.
+          expect(
+            getMissingIosRunnerFeatureCommands(new Set(advertised), environment, requirements)
+              .length === 0,
+          ).toBe(complete);
+        } finally {
+          installed.mockRestore();
+          running.mockRestore();
+          cachedClient.mockRestore();
+          cachedCommands.mockRestore();
+          cachedFeatures.mockRestore();
+          await client.close();
+          IOSCtrlProxyManager.resetInstances();
+        }
+      });
+    }
+  }
+});
 
 // A booted iOS simulator entry as the resource builds it from discovery, before service-status
 // enrichment. `readiness.unknown` and `capabilities.automation === null` are the freshly-discovered
@@ -45,6 +126,20 @@ const neverSettles: ServiceStatusProbe = () => new Promise<never>(() => {});
 describe("booted iOS service-status transient handling (#7053)", () => {
   afterEach(() => {
     setServiceStatusProbe(null);
+  });
+
+  test("enrichment preserves simulator and physical environments in probe targets", async () => {
+    const observed: (boolean | undefined)[] = [];
+    setServiceStatusProbe(async (device) => {
+      observed.push(device.isVirtual);
+      return readyServiceStatus;
+    });
+    const devices = [
+      { ...bootedIosDevice("SIM-A"), isVirtual: true },
+      { ...bootedIosDevice("PHYSICAL-A"), isVirtual: false },
+    ];
+    await enrichDeviceServiceStatuses(devices, new FakeTimer());
+    expect(observed).toEqual([true, false]);
   });
 
   test("omits iOS version identity when installation is unconfirmed despite a running tunnel", async () => {

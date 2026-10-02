@@ -43,9 +43,12 @@ import type { CtrlProxyHealthCheckResult } from "../ctrlProxy/ios/IosCtrlProxyHe
 import { IosCtrlProxyBuilder } from "../ctrlProxy/IosCtrlProxyBuilder";
 import {
   IOSCtrlProxyClient,
-  IOS_RUNNER_FEATURE_COMMANDS,
   getRequiredIosRunnerFeatureFlags,
 } from "../features/observe/ios/IOSCtrlProxyClient";
+import {
+  getMissingIosRunnerFeatureCommands,
+  type IosRunnerCommandRequirements,
+} from "../features/observe/ios/iosRunnerFeatureCommands";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -207,6 +210,7 @@ interface BootedDeviceInfo extends BootedDeviceDescription {
 }
 
 type BootedDeviceProbeTarget = {
+  isVirtual?: boolean;
   name: string;
   platform: Platform;
   deviceId: string;
@@ -215,6 +219,7 @@ type BootedDeviceProbeTarget = {
 
 function probeTarget(device: BootedDeviceInfo): BootedDeviceProbeTarget {
   return {
+    isVirtual: device.isVirtual,
     name: device.name,
     platform: device.platform,
     deviceId: device.runtime.deviceId ?? device.identity.stableId,
@@ -1434,12 +1439,26 @@ async function getCtrlProxyVersion(
   }
 }
 
+function iosRunnerCommandsComplete(
+  device: BootedDeviceProbeTarget,
+  advertised: ReadonlySet<string>,
+  options: { runnerCommandRequirements?: IosRunnerCommandRequirements },
+): boolean {
+  const environment =
+    device.isVirtual === undefined ? undefined : device.isVirtual ? "simulator" : "physical";
+  return (
+    getMissingIosRunnerFeatureCommands(advertised, environment, options.runnerCommandRequirements)
+      .length === 0
+  );
+}
+
 // Query service status for a single booted device
 export async function queryDeviceServiceStatus(
   device: BootedDeviceProbeTarget,
   androidLookup: AndroidServiceStatusLookup = defaultAndroidServiceStatusLookup,
   versionLookup?: CtrlProxyVersionLookup,
   timer: Timer = defaultTimer,
+  options: { runnerCommandRequirements?: IosRunnerCommandRequirements } = {},
 ): Promise<DeviceServiceStatus | undefined> {
   const bootedDevice: BootedDevice = {
     name: device.name,
@@ -1531,9 +1550,7 @@ export async function queryDeviceServiceStatus(
         const cached = client?.getCachedSupportedCommands() ?? null;
         if (cached !== null) {
           const advertised = new Set(cached);
-          supportedCommandsComplete = IOS_RUNNER_FEATURE_COMMANDS.every((command) =>
-            advertised.has(command),
-          );
+          supportedCommandsComplete = iosRunnerCommandsComplete(device, advertised, options);
         }
         const requiredFeatures = getRequiredIosRunnerFeatureFlags();
         const cachedFeatures = client?.getCachedSupportedFeatures() ?? null;

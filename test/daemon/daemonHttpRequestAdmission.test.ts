@@ -217,7 +217,7 @@ describe("HTTP heartbeat during release", () => {
       const h = releasingSessionHarness();
       const heartbeat = spyOn(h.manager, "recordHeartbeat");
       try {
-        await h.create();
+        const session = await h.create();
         const { server } = await harness(h.manager);
         const send = () =>
           server.dispatch(
@@ -232,6 +232,8 @@ describe("HTTP heartbeat during release", () => {
         expect(heartbeat).toHaveBeenCalledTimes(1);
         heartbeat.mockClear();
         const finish = await h.beginRelease(phase);
+        const writes = h.persistence.activityWrites;
+        const lastHeartbeat = session.lastHeartbeat;
         const response = await send();
         const called = heartbeat.mock.calls.length;
         await finish();
@@ -244,6 +246,12 @@ describe("HTTP heartbeat during release", () => {
         expect(after.statusCode).toBe(200);
         expect(after.body).toBe('{"status":"ok"}');
         expect(heartbeat).toHaveBeenCalledTimes(1);
+        // The legacy unknown-session HTTP acknowledgement is a liveness no-op,
+        // including when the missing UUID has an explicit terminal snapshot.
+        expect(h.persistence.activityWrites).toBe(writes);
+        expect(session.lastHeartbeat).toBe(lastHeartbeat);
+        expect(h.manager.getSession(releasingSessionId)).toBeNull();
+        expect(h.manager.isAdmittedForAutomation(session)).toBe(false);
       } finally {
         heartbeat.mockRestore();
         h.dispose();

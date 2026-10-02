@@ -481,6 +481,69 @@ describe("requests during device session release", () => {
     expect(assignments).toBe(1);
   });
 
+  for (const phase of ["A", "B"] as const) {
+    for (const method of ["getOrCreateSession", "admitIssuedSessionForAutomation"] as const) {
+      test(`Phase ${phase}: ${method} refuses explicit release with a retained persisted row`, async () => {
+        const h = releasingSessionHarness();
+        let assignments = 0;
+        let settled = false;
+        const pool = {
+          assignDeviceToSession: async () => {
+            assignments++;
+            return "unexpected-device";
+          },
+        };
+        const admit = () =>
+          method === "getOrCreateSession"
+            ? h.manager.getOrCreateSession(sessionId, pool, "android", undefined, true)
+            : h.manager.admitIssuedSessionForAutomation(sessionId);
+        try {
+          const session = await h.create();
+          const finish = await h.beginRelease(phase);
+          const admission = admit().then(
+            (result) => {
+              settled = true;
+              return result;
+            },
+            (error: unknown) => {
+              settled = true;
+              return error;
+            },
+          );
+          expect(await h.request("daemon/heartbeat")).toEqual(notFound);
+          if (phase === "A") {
+            expect(settled).toBe(false);
+          }
+          expect(assignments).toBe(0);
+          await finish();
+          const error = await admission;
+          expect(error).toBeInstanceOf(TerminalSessionError);
+          expect(error).toHaveProperty(
+            "message",
+            `Session ${sessionId} was released and cannot be reused. Acquire a new device with getAndroid or getApple.`,
+          );
+          await expect(admit()).rejects.toThrow(TerminalSessionError);
+          await expect(
+            h.manager.admitIssuedSessionForAutomation(sessionId, undefined, {
+              access: "read-only",
+            }),
+          ).rejects.toThrow("was released");
+          expect(assignments).toBe(0);
+          expect(h.manager.isAdmittedForAutomation(session)).toBe(false);
+          expect(h.manager.getSession(sessionId)).toBeNull();
+          expect(h.manager.getSessionForDevice(session.assignedDevice)).toBeNull();
+          expect(await h.request("daemon/heartbeat")).toEqual(notFound);
+          expect(await h.persistence.getSession?.(sessionId)).toMatchObject({
+            status: "released",
+            release_reason: "explicit-release",
+          });
+        } finally {
+          h.dispose();
+        }
+      });
+    }
+  }
+
   test("non-releasing heartbeat succeeds and extends deadlines", async () => {
     const session = await manager.createSession(sessionId, deviceId, "android");
     const expiresAt = session.expiresAt;

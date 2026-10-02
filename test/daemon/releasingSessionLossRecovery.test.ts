@@ -95,8 +95,18 @@ for (const booted of [android, ios]) {
         expect(perform).not.toHaveBeenCalled();
         expect(pool.isSessionRecoveryInFlight(sessionId)).toBe(false);
         expect(sessions.getSession(sessionId)).toBeNull();
+        expect(sessions.getTerminalReleaseSnapshot(sessionId)).toMatchObject({
+          releaseReason: reason,
+          terminal: true,
+        });
         expect(await persistence.getSession?.(sessionId)).toMatchObject({ release_reason: reason });
         expect(finishIncident).toHaveBeenCalledWith(incidentId, "not-attempted");
+        // A later loss probe has no release to join and still cannot start recovery.
+        expect(await pool.recoverSessionBoundDeviceAfterLoss(device.id, incidentId, device)).toBe(
+          "not-attempted",
+        );
+        expect(perform).not.toHaveBeenCalled();
+        expect(finishIncident).toHaveBeenCalledTimes(1);
         if (incidentId) {
           const settled = await pool.waitForEmulatorLossIncident(incidentId, 0);
           expect(settled).toMatchObject({

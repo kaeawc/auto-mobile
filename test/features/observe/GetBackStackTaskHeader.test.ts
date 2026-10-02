@@ -112,6 +112,9 @@ describe("modern Task{...} header (#4223)", () => {
     );
 
     expect(result.tasks.map((task) => task.userId)).toEqual([10, 0]);
+    // Activities retain their own uNN token, even when a header disagrees.
+    expect(result.activities.map((activity) => activity.userId)).toEqual([0, 0, 0]);
+    expect(result.currentActivity?.userId).toBe(0);
   });
 
   test("reads the affinity from the header's A= token", async () => {

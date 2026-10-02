@@ -2971,6 +2971,7 @@ describe("LaunchApp", () => {
       deviceId: string;
       launchResult?: { success: boolean; pid?: number; error?: string };
       clearResult?: { success: boolean; packageName: string; error?: string };
+      terminateError?: Error;
     }) {
       const iosDevice: BootedDevice = {
         name: "test-ios",
@@ -2986,6 +2987,7 @@ describe("LaunchApp", () => {
       } as unknown as IOSCtrlProxyManager);
 
       const simctlCalls: string[] = [];
+      const terminateCalls: Array<{ bundleId: string; deviceId: string | undefined }> = [];
       const simctlLaunchArguments: Array<string[] | undefined> = [];
       const fakeSimctl = {
         launchApp: async (id: string, options?: { launchArguments?: string[] }) => {
@@ -2993,8 +2995,12 @@ describe("LaunchApp", () => {
           simctlLaunchArguments.push(options?.launchArguments);
           return { success: true, pid: 999 };
         },
-        terminateApp: async (id: string) => {
+        terminateApp: async (id: string, deviceId?: string) => {
           simctlCalls.push(`terminate:${id}`);
+          terminateCalls.push({ bundleId: id, deviceId });
+          if (opts.terminateError) {
+            throw opts.terminateError;
+          }
         },
       };
 
@@ -3025,6 +3031,7 @@ describe("LaunchApp", () => {
       const installedApps = new FakeInstalledAppsProvider(fakeTimer, {
         installedApps: [userBundleId],
       });
+      const performanceTracker = new DefaultPerformanceTracker(fakeTimer);
 
       const iosLaunchApp = new LaunchApp(
         iosDevice,
@@ -3035,6 +3042,7 @@ describe("LaunchApp", () => {
           installedAppsProvider: installedApps,
           deviceAppLauncher,
           clearAppDataFactory,
+          performanceTrackerFactory: () => performanceTracker,
         },
       );
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
@@ -3046,8 +3054,10 @@ describe("LaunchApp", () => {
         iosLaunchApp,
         deviceAppLauncher,
         simctlCalls,
+        terminateCalls,
         simctlLaunchArguments,
         clearCalls,
+        performanceTracker,
         cleanup: () => {
           ctrlProxySpy.mockRestore();
           managerSpy.mockRestore();
@@ -3132,9 +3142,10 @@ describe("LaunchApp", () => {
 
     test("cold boot on a device issues no separate terminate — --terminate-existing carries cold-boot semantics", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, deviceAppLauncher, simctlCalls, cleanup } = createDeviceHarness({
-        deviceId: physicalUdid,
-      });
+      const { iosLaunchApp, deviceAppLauncher, simctlCalls, performanceTracker, cleanup } =
+        createDeviceHarness({
+          deviceId: physicalUdid,
+        });
       try {
         await iosLaunchApp.execute(userBundleId, false, true);
         // Exactly one devicectl round-trip: the launch (with --terminate-existing).
@@ -3142,6 +3153,38 @@ describe("LaunchApp", () => {
         expect(deviceAppLauncher.launchCalls).toHaveLength(1);
         expect(deviceAppLauncher.launchCalls[0].terminateExisting).toBe(true);
         expect(simctlCalls).toEqual([]);
+        expect(JSON.stringify(performanceTracker.getTimings())).not.toContain(
+          '"name":"terminateApp"',
+        );
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("cold boot on a simulator terminates once without a device argument", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, terminateCalls, cleanup } = createDeviceHarness({
+        deviceId: simulatorUdid,
+      });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        expect(result.success).toBe(true);
+        expect(terminateCalls).toEqual([{ bundleId: userBundleId, deviceId: undefined }]);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("simulator cold-start termination errors are swallowed and launch proceeds", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, simctlCalls, cleanup } = createDeviceHarness({
+        deviceId: simulatorUdid,
+        terminateError: new Error("not running"),
+      });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, false, true);
+        expect(result.success).toBe(true);
+        expect(simctlCalls).toEqual([`terminate:${userBundleId}`, `launch:${userBundleId}`]);
       } finally {
         cleanup();
       }

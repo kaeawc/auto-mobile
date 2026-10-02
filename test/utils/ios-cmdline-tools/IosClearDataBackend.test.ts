@@ -5,7 +5,6 @@ import {
   PhysicalIosClearDataBackend,
   SimulatorIosClearDataBackend,
   resolveIosClearDataBackend,
-  resolveIosColdStartTerminator,
   type IosClearDataBackendDeps,
   type IosClearDataReinstaller,
 } from "../../../src/utils/ios-cmdline-tools/IosDeviceBackend";
@@ -187,30 +186,5 @@ describe("iOS clear-data backends", () => {
     );
     expect(await action.execute(bundleId)).toEqual({ success: true, packageName: bundleId });
     expect(h.reinstaller.calls).toEqual([[simulatorId, bundleId]]);
-  });
-});
-
-describe("iOS cold-start terminator", () => {
-  test("simulator delegates without an explicit device argument", async () => {
-    const simctl = new FakeSimCtlClient();
-    const terminator = resolveIosColdStartTerminator(simulatorId, { simctl });
-    expect(terminator).not.toBeNull();
-    await terminator?.terminate(bundleId);
-    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: undefined }]);
-  });
-
-  test("physical devices resolve to null without simulator operations", () => {
-    const simctl = new FakeSimCtlClient();
-    expect(resolveIosColdStartTerminator(physicalId, { simctl })).toBeNull();
-    expect(simctl.getMethodCalls("terminateApp")).toHaveLength(0);
-  });
-
-  test("termination errors propagate for LaunchApp to swallow", async () => {
-    const simctl = new FakeSimCtlClient();
-    simctl.terminateApp = async () => {
-      throw new Error("not running");
-    };
-    const terminator = resolveIosColdStartTerminator(simulatorId, { simctl });
-    await expect(terminator?.terminate(bundleId)).rejects.toThrow("not running");
   });
 });

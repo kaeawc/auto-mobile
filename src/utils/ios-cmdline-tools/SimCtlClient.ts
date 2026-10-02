@@ -106,6 +106,38 @@ export interface SimCtlFileSystem {
   rm(path: string, options: { recursive: boolean; force: boolean }): Promise<void>;
 }
 
+export type SimctlScreenshotFailureReason =
+  | "empty-output"
+  | "non-image-output"
+  | "aborted-by-caller"
+  | "aborted-by-timeout"
+  | "non-zero-exit";
+
+export class SimctlScreenshotError extends Error {
+  readonly reason: SimctlScreenshotFailureReason;
+  readonly exitCode: number | null;
+  readonly stderrExcerpt: string;
+  readonly byteLength: number;
+
+  constructor(
+    reason: SimctlScreenshotFailureReason,
+    message: string,
+    options: {
+      exitCode?: number | null;
+      stderr?: string;
+      byteLength?: number;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "SimctlScreenshotError";
+    this.reason = reason;
+    this.exitCode = options.exitCode ?? null;
+    this.stderrExcerpt = (options.stderr ?? "").slice(0, 300);
+    this.byteLength = options.byteLength ?? 0;
+  }
+}
+
 const defaultSimCtlFileSystem: SimCtlFileSystem = {
   mkdtemp: (prefix) => fsPromises.mkdtemp(prefix),
   writeFile: (path, data, encoding) => fsPromises.writeFile(path, data, encoding),
@@ -2707,7 +2739,13 @@ export class SimCtlClient implements SimCtl {
     const args = ["simctl", "io", deviceId, "screenshot", `--display=${display}`, "-"];
     const timeout = new AbortController();
     const handle = this.timer.setTimeout(
-      () => timeout.abort(new Error("simctl screenshot timed out")),
+      () =>
+        timeout.abort(
+          new SimctlScreenshotError(
+            "aborted-by-timeout",
+            `simctl screenshot timed out after ${this.timer.now() - startedAt}ms`,
+          ),
+        ),
       10_000,
     );
     const captureSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
@@ -2724,18 +2762,32 @@ export class SimCtlClient implements SimCtl {
       const errors: Buffer[] = [];
       child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
       child.stderr?.on("data", (chunk: Buffer) => errors.push(chunk));
-      child.once("error", (error) => {
-        this.timer.clearTimeout(handle);
+      const stderrText = (): string => Buffer.concat(errors).toString();
+      const outputLength = (): number => chunks.reduce((length, chunk) => length + chunk.length, 0);
+      const abortFailure = (cause?: unknown): SimctlScreenshotError => {
         const elapsed = this.timer.now() - startedAt;
         if (timeout.signal.aborted) {
-          reject(new Error(`simctl screenshot timed out after ${elapsed}ms`, { cause: error }));
-        } else if (signal?.aborted) {
-          reject(
-            new Error(
-              `simctl screenshot cancelled by the caller after ${elapsed}ms: ${errorMessage(signal.reason)}`,
-              { cause: error },
-            ),
+          return new SimctlScreenshotError(
+            "aborted-by-timeout",
+            `simctl screenshot timed out after ${elapsed}ms`,
+            {
+              stderr: stderrText(),
+              byteLength: outputLength(),
+              cause: cause ?? timeout.signal.reason,
+            },
           );
+        }
+        const callerReason = signal?.reason;
+        return new SimctlScreenshotError(
+          "aborted-by-caller",
+          `simctl screenshot cancelled by the caller after ${elapsed}ms: ${errorMessage(callerReason)}`,
+          { stderr: stderrText(), byteLength: outputLength(), cause: cause ?? callerReason },
+        );
+      };
+      child.once("error", (error) => {
+        this.timer.clearTimeout(handle);
+        if (timeout.signal.aborted || signal?.aborted) {
+          reject(abortFailure(error));
         } else {
           reject(error);
         }
@@ -2743,11 +2795,29 @@ export class SimCtlClient implements SimCtl {
       child.once("close", (code) => {
         this.timer.clearTimeout(handle);
         if (captureSignal.aborted) {
-          reject(captureSignal.reason ?? new Error("simctl screenshot aborted"));
+          reject(abortFailure(captureSignal.reason));
         } else if (code === 0) {
-          resolve(Buffer.concat(chunks));
+          const output = Buffer.concat(chunks);
+          if (output.length === 0) {
+            reject(
+              new SimctlScreenshotError("empty-output", "simctl screenshot returned empty output", {
+                exitCode: 0,
+                stderr: stderrText(),
+                byteLength: 0,
+              }),
+            );
+          } else {
+            resolve(output);
+          }
         } else {
-          reject(new Error(`simctl screenshot failed: ${Buffer.concat(errors).toString()}`));
+          const stderr = stderrText();
+          reject(
+            new SimctlScreenshotError("non-zero-exit", `simctl screenshot failed: ${stderr}`, {
+              exitCode: code,
+              stderr,
+              byteLength: outputLength(),
+            }),
+          );
         }
       });
     });

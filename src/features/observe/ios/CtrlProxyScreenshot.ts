@@ -9,9 +9,13 @@ import type { DelegateContext, CtrlProxyScreenshotResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import type { BootedDevice } from "../../../models";
 import type { XCTestHierarchy } from "./types";
+import { SimctlScreenshotError } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 import { observedIosDisplay } from "../ObservationDisplay";
-import { readImageHeaderDimensions } from "../../../utils/screenshot/imageHeaderDimensions";
+import {
+  detectImageMimeType,
+  readImageHeaderDimensions,
+} from "../../../utils/screenshot/imageHeaderDimensions";
 import { logger } from "../../../utils/logger";
 import type { DisplayPanel } from "../../../models/DisplayPanel";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -49,13 +53,25 @@ async function captureSelectedPanel(
   try {
     const png = await simctl.screenshot(deviceId, panel.key, signal);
     const dimensions = readImageHeaderDimensions(png);
+    if (png.length === 0 || dimensions === null || detectImageMimeType(png) === null) {
+      const reason = png.length === 0 ? "empty-output" : "non-image-output";
+      const magic = png.subarray(0, 16).toString("hex");
+      logger.warn(
+        `[SCREENSHOT] iOS panel ${panel.key} capture unidentifiable (reason=${reason}): bytes=${png.length} magic=${magic} display=${panel.key} exit=0 stderr=n/a callerAborted=${signal?.aborted === true} device=${deviceId}; using runner capture`,
+      );
+      return runnerCapture();
+    }
     if (matchesPanelPixels(dimensions, panel)) {
       return { success: true, data: png.toString("base64"), format: "png" };
     }
     logger.warn(unexpectedDimensionsMessage(panel, dimensions, hierarchy));
   } catch (error) {
+    const diagnostics =
+      error instanceof SimctlScreenshotError
+        ? ` reason=${error.reason} exit=${error.exitCode ?? "n/a"} stderr="${error.stderrExcerpt}" bytes=${error.byteLength} display=${panel.key} timeoutAborted=${error.reason === "aborted-by-timeout"}`
+        : "";
     logger.warn(
-      `[SCREENSHOT] iOS panel ${panel.key} capture failed; using runner capture: ${errorMessage(error)} (caller signal aborted: ${signal?.aborted === true})`,
+      `[SCREENSHOT] iOS panel ${panel.key} capture failed; using runner capture: ${errorMessage(error)} (caller signal aborted: ${signal?.aborted === true})${diagnostics}`,
     );
   }
   return runnerCapture();

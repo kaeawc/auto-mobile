@@ -101,8 +101,6 @@ import {
 import { DaemonState } from "../../daemon/daemonState";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
 import { displayTransitions } from "./DisplayTransition";
-import { readFile } from "node:fs/promises";
-import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 import {
   assertAllDisplayObserveSupported,
   DisplaySelectionError,

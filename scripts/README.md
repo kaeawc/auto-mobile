@@ -288,6 +288,54 @@ Root-level validation scripts:
 
 Run `scripts/<category>/validate_*.sh` for validation or `scripts/<category>/apply_*.sh` for auto-formatting.
 
+#### Unit-test device-spawn guard
+
+Unit tests must inject process/device fakes instead of spawning real `adb`,
+`xcrun`, `xcodebuild`, `simctl`, `devicectl`, `emulator`, `avdmanager`,
+`sdkmanager`, `ffmpeg`, or `curl`. The Bun preload guards `Bun.spawn` and
+`Bun.spawnSync`, including `node:child_process` APIs on Bun 1.3.14, tool lookups,
+and simple shell commands (including `;`, `&&`, `||`, and `|` segments).
+The guard unwraps `sh`/`bash`/`zsh`/`dash -c`, `cmd /c`, `env`, `exec`,
+`command`, `timeout`, `nice`, `nohup`, and leading `NAME=VALUE` assignments;
+`which`/`where` lookups also detect guarded tools. It does not unwrap `stdbuf`,
+`setsid`, or `sudo`. `xcrun` is blocked directly. Swallowed
+errors still fail via `afterEach` and a final `afterAll` drain. The allow-list in
+`scripts/unit-test-device-spawn-allowlist.txt` may only shrink; listed tests keep
+their existing process behavior. The list loads only on a blocked-tool hit.
+
+Use `--isolate` for reliable file attribution. Integration and stress tests are
+exempt; Windows is skipped because its unit runner drops isolation. `Bun.$`,
+functions captured from `Bun` before patching, grandchildren, complex shell
+syntax, and uppercase executable names are outside this guard. Windows `cmd`
+classification is unit-tested but actual Windows process interception is unverified.
+
+```bash
+# Check existing exceptions; --update removes files that no longer spawn.
+bash scripts/prune-unit-test-device-spawn-allowlist.sh
+bash scripts/prune-unit-test-device-spawn-allowlist.sh --update
+# Initial census only: two sequential passes over all unit files, unioned.
+bash scripts/prune-unit-test-device-spawn-allowlist.sh --update --allow-grow
+# Preview or restrict a run; restricted updates preserve unscanned entries.
+bash scripts/prune-unit-test-device-spawn-allowlist.sh --dry-run
+bash scripts/prune-unit-test-device-spawn-allowlist.sh --file-list scratch/unit-files.txt --repeat 2 --batch-log-dir scratch/spawn-census
+```
+
+Census records TSV and blocks launches with an ENOENT-coded error, even for
+allow-listed files. Batches contain at most 20 files, run with `bun test --isolate
+--timeout 20000`, and use the portable 300-second timeout helper. Failed batches
+are rerun one file per process. Logs, exit statuses, and per-file/tool counts stay
+in the batch log directory (`AUTOMOBILE_SPAWN_GUARD_BATCH_LOG_DIR` also supported).
+For isolated script tests, `AUTOMOBILE_SPAWN_GUARD_ALLOWLIST` overrides the
+allow-list path and `AUTOMOBILE_SPAWN_GUARD_TEST_RUNNER` selects one executable
+path (no command-string evaluation). That executable receives only the selected
+repo-relative file arguments and the census-file environment variable. Defaults
+remain the checked-in allow-list and `bun test --isolate --timeout 20000`.
+A failed single-file run without a recorded hit makes the census incomplete and
+prevents rewriting the list. This script is not part of prepush; never inject
+preloads through `BUN_OPTIONS` or route this census through `test-ts.sh`. After an
+initial census, the maintainer runs the normal full unit gate in enforce mode to
+catch files whose later spawns were unreachable during census.
+
 ### iOS Video Recording Integration
 
 Run the real iOS simulator `videoRecording` start -> stop regression test:

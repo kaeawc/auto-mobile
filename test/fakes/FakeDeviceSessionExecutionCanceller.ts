@@ -1,8 +1,12 @@
 import type { DeviceSessionExecutionCanceller } from "../../src/daemon/devicePool";
 import type { ExecutionTracker } from "../../src/server/executionTracker";
 
+type DeviceSessionExecutionCancellerContract = {
+  readonly cancel: DeviceSessionExecutionCanceller;
+};
+
 /** Records both scopes and delegates cancellation to an injected in-memory tracker. */
-export class FakeDeviceSessionExecutionCanceller {
+export class FakeDeviceSessionExecutionCanceller implements DeviceSessionExecutionCancellerContract {
   readonly sessions: string[] = [];
   readonly devices: string[] = [];
   readonly cancel: DeviceSessionExecutionCanceller;

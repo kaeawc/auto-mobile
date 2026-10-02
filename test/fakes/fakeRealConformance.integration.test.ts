@@ -20,6 +20,8 @@ const EXPECTED_CONTRACT_TYPES: Record<string, string> = {
   "FakeDeviceSnapshotConfigRepository.ts:FakeDeviceSnapshotConfigRepository": "ConfigRepository",
   "FakeDeviceSnapshotRepository.ts:FakeDeviceSnapshotRepository": "DeviceSnapshotRepository",
   "FakeDeviceSnapshotStore.ts:FakeDeviceSnapshotStore": "DeviceSnapshotStore",
+  "FakeDeviceSessionExecutionCanceller.ts:FakeDeviceSessionExecutionCanceller":
+    "DeviceSessionExecutionCanceller",
   "FakeDeviceSessionRepository.ts:FakeDeviceSessionRepository": "DeviceSessionRepository",
   "FakeDeviceStateCollector.ts:FakeDeviceStateCollector": "DeviceStateCollector",
   "FakeHighlightClient.ts:FakeHighlightClient": "VisualHighlightClient",

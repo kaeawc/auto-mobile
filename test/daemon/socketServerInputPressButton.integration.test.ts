@@ -164,7 +164,12 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "volume_up",
     });
-    expect(press).toHaveBeenCalledWith("volume_up", expect.any(Number), undefined, undefined);
+    expect(press).toHaveBeenCalledWith(
+      "volume_up",
+      expect.any(Number),
+      undefined,
+      expect.any(AbortSignal),
+    );
     expect(createMcpClient).not.toHaveBeenCalled();
   });
 
@@ -194,7 +199,7 @@ describe("UnixSocketServer input/pressButton", () => {
     });
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("back", 30_000, "frame-1", undefined);
+    expect(press).toHaveBeenCalledWith("back", 30_000, "frame-1", expect.any(AbortSignal));
   });
 
   test("routes iOS button presses through the existing pressButton implementation", async () => {
@@ -227,7 +232,12 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "home",
     });
-    expect(press).toHaveBeenCalledWith("home", expect.any(Number), undefined, undefined);
+    expect(press).toHaveBeenCalledWith(
+      "home",
+      expect.any(Number),
+      undefined,
+      expect.any(AbortSignal),
+    );
   });
 
   test("threads the client-supplied timeout budget into the button implementation", async () => {
@@ -260,7 +270,7 @@ describe("UnixSocketServer input/pressButton", () => {
     );
 
     expect(response.success).toBe(true);
-    expect(press).toHaveBeenCalledWith("home", 500, undefined, undefined);
+    expect(press).toHaveBeenCalledWith("home", 500, undefined, expect.any(AbortSignal));
   });
 
   test("maps the socket app_switch contract name to the existing recent button implementation", async () => {
@@ -293,7 +303,12 @@ describe("UnixSocketServer input/pressButton", () => {
       success: true,
       button: "app_switch",
     });
-    expect(press).toHaveBeenCalledWith("recent", expect.any(Number), undefined, undefined);
+    expect(press).toHaveBeenCalledWith(
+      "recent",
+      expect.any(Number),
+      undefined,
+      expect.any(AbortSignal),
+    );
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
@@ -340,7 +355,12 @@ describe("UnixSocketServer input/pressButton", () => {
       deviceId: "emulator-5554",
       button: "back",
     });
-    expect(press).toHaveBeenCalledWith("back", expect.any(Number), undefined, undefined);
+    expect(press).toHaveBeenCalledWith(
+      "back",
+      expect.any(Number),
+      undefined,
+      expect.any(AbortSignal),
+    );
   });
 
   test("propagates clear unsupported platform-gap errors from the button implementation", async () => {
@@ -368,7 +388,12 @@ describe("UnixSocketServer input/pressButton", () => {
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("iOS has no menu hardware button");
-    expect(press).toHaveBeenCalledWith("menu", expect.any(Number), undefined, undefined);
+    expect(press).toHaveBeenCalledWith(
+      "menu",
+      expect.any(Number),
+      undefined,
+      expect.any(AbortSignal),
+    );
   });
 
   test("forwards the tracked session abort signal to press on the bound-session path (#6289)", async () => {

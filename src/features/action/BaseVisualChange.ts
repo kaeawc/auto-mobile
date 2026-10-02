@@ -70,6 +70,10 @@ const COORDINATE_ACTIONS = new Set([
 
 export type RenderedDisplayRevisionReader = (deviceId: string) => number | undefined;
 
+export interface DisplayFence {
+  assertCurrent(): void;
+}
+
 export interface DisplayFenceDependencies {
   displayTransitions?: DisplayTransitionReader;
   renderedDisplayRevision?: RenderedDisplayRevisionReader;
@@ -212,13 +216,32 @@ export class BaseVisualChange {
     );
   }
 
+  protected captureDisplayFence(): DisplayFence {
+    const deviceId = this.device.deviceId;
+    const currentRevision = () =>
+      this.device.platform === "ios"
+        ? this.displayTransitionReader.identityRevision(deviceId)
+        : this.displayTransitionReader.revision(deviceId);
+    const revision = currentRevision();
+    const observedGeneration =
+      this.renderedDisplayGeneration(deviceId) ??
+      this.displayTransitionReader.identityRevision(deviceId);
+    return {
+      assertCurrent: () => {
+        if (currentRevision() !== revision) {
+          throw this.staleDisplay(observedGeneration);
+        }
+      },
+    };
+  }
+
   /**
    * Execute a block of code and wait for UI to stabilize with optional observation
    * @param block - Block of code to execute which should have a visual change.
    * @param options - Options controlling observation behavior
    */
   async observedInteraction(
-    block: (observeResult: ObserveResult) => Promise<any>,
+    block: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<any>,
     options: ObservedChangeOptions,
   ): Promise<any> {
     const timeoutMs = options.timeoutMs || 12000;
@@ -227,6 +250,7 @@ export class BaseVisualChange {
     const actionDisplayRevision = (): number =>
       this.displayTransitionReader.identityRevision(this.device.deviceId);
     const displayRevision = actionDisplayRevision();
+    const fence = this.captureDisplayFence();
     // Without a stored caller stamp, in-flight fences use the action-start identity generation.
     const observedGeneration =
       this.renderedDisplayGeneration(this.device.deviceId) ?? displayRevision;
@@ -318,7 +342,7 @@ export class BaseVisualChange {
       if (coordinateAction && actionDisplayRevision() !== displayRevision) {
         throw this.staleDisplay(observedGeneration);
       }
-      return block(previousObserveResult!);
+      return block(previousObserveResult!, fence);
     });
 
     if (options.display !== undefined) {

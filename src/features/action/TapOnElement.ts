@@ -1,5 +1,5 @@
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
-import type { DisplayFenceDependencies } from "./BaseVisualChange";
+import type { DisplayFence, DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
@@ -1840,6 +1840,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         })
       ).hierarchy;
     } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
       throwIfAborted(signal);
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
@@ -2916,7 +2919,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throwIfAborted(signal);
       // Tap on the calculated point using observedChange
       const result = await this.observedInteraction(
-        async (observeResult: ObserveResult) => {
+        async (observeResult: ObserveResult, fence) => {
           previousObserveResult = observeResult;
           throwIfAborted(signal);
 
@@ -3196,6 +3199,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   signal,
                   options,
                   isAccessibilityServiceEnabled,
+                  fence,
                 );
                 break;
               case "ios":
@@ -3206,6 +3210,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   longPressDuration,
                   tapElement,
                   isAccessibilityServiceEnabled,
+                  fence,
                 );
                 break;
               default:
@@ -3228,6 +3233,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               observeResult.screenSize,
               signal,
               finalSelection,
+              fence,
             );
           }
 
@@ -3368,6 +3374,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @param options - Tap options (for focusFirst parameter)
    */
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   async executeAndroidTap(
     action: string,
     x: number,
@@ -3377,11 +3384,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     signal?: AbortSignal,
     options?: TapOnElementOptions,
     isTalkBackEnabled?: boolean,
+    fence?: DisplayFence,
   ): Promise<ScreenReaderNavigationResult | undefined> {
     // XML-only candidates have no CtrlProxy node identity, even if their resource
     // ID also exists in the incomplete native tree. Never retarget semantic actions.
     if (element["hierarchy-source"] === "uiautomator") {
-      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true);
+      await this.executeAndroidTapWithCoordinates(
+        action,
+        x,
+        y,
+        durationMs,
+        element,
+        signal,
+        true,
+        fence,
+      );
       return undefined;
     }
 
@@ -3403,10 +3420,20 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         durationMs,
         options,
         signal,
+        fence,
       );
     }
 
-    await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+    await this.executeAndroidTapWithCoordinates(
+      action,
+      x,
+      y,
+      durationMs,
+      element,
+      signal,
+      false,
+      fence,
+    );
     return undefined;
   }
 
@@ -3422,6 +3449,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     signal?: AbortSignal,
     skipSemanticLongPress: boolean = false,
+    fence?: DisplayFence,
   ): Promise<void> {
     if (action === "tap") {
       if (
@@ -3430,13 +3458,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ) {
         return;
       }
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, fence);
     } else if (action === "longPress") {
-      await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticLongPress);
+      await this.executeAndroidLongPress(
+        x,
+        y,
+        durationMs,
+        element,
+        signal,
+        skipSemanticLongPress,
+        fence,
+      );
     } else if (action === "doubleTap") {
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, fence);
       await this.timer.sleep(200);
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal);
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, fence);
     }
   }
 
@@ -3471,6 +3507,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throwIfAborted(signal);
       return result.success;
     } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
       throwIfAborted(signal);
       logger.warn(`[TapOnElement] DocumentsUI row activation failed: ${error}`);
       return false;
@@ -3483,10 +3522,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     y: number,
     element: Element,
     signal?: AbortSignal,
+    fence?: DisplayFence,
   ): Promise<void> {
     throwIfAborted(signal);
     const requiresAdbInput = isAndroidDocumentsUiRow(element);
     if (!requiresAdbInput) {
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       await dispatchAndroidCoordinateTap(
         this.accessibilityService,
         this.adb,
@@ -3499,6 +3541,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return;
     }
     logger.info(`[TapOnElement] Using ADB input recovery for DocumentsUI row at (${x}, ${y})`);
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence?.assertCurrent();
     await executeTouchscreenInput(this.adb, `tap ${x} ${y}`, undefined, signal);
   }
 
@@ -3565,6 +3609,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
+  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   async retryTapIfNoChange(
     preTapHash: string,
     tapPoint: { x: number; y: number },
@@ -3576,6 +3621,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
     selection?: ElementSelectionResult,
+    fence?: DisplayFence,
   ): Promise<void> {
     const probe = await checkAndroidTapHierarchyChange(
       this.timer,
@@ -3658,6 +3704,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       signal,
       options,
       isTalkBackEnabled,
+      fence,
     );
   }
 
@@ -3691,6 +3738,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     options?: TapOnElementOptions,
     signal?: AbortSignal,
+    fence?: DisplayFence,
   ): Promise<ScreenReaderNavigationResult | undefined> {
     const driver = this.talkBackDriverFactory.createDriver(this.device);
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
@@ -3703,6 +3751,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         durationMs,
         element,
         driver,
+        fence,
       );
 
       if (!longPressResult.success) {
@@ -3715,7 +3764,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           `[TapOnElement] Long press accessibility methods failed (${longPressResult.error}), ` +
             `falling back to ADB tap at (${x}, ${y})`,
         );
-        await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+        await this.executeAndroidTapWithCoordinates(
+          action,
+          x,
+          y,
+          durationMs,
+          element,
+          signal,
+          false,
+          fence,
+        );
       }
       return undefined;
     }
@@ -3724,7 +3782,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (this.isScreenReaderNavigationEnabled(options)) {
       // Opt-in fidelity mode (#3937): drive the TalkBack cursor by swipe
       // navigation to the target, then activate.
-      const result = await this.talkBackStrategy.executeTap(this.device.deviceId, element, driver);
+      const result = await this.talkBackStrategy.executeTap(
+        this.device.deviceId,
+        element,
+        driver,
+        fence,
+      );
 
       if (result.success) {
         return result.screenReaderNavigation;
@@ -3754,7 +3817,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     // DocumentsUI item gestures can be acknowledged without activation, including
     // this TalkBack fallback path. Use the same row activation/input recovery.
     if (isAndroidDocumentsUiRow(element)) {
-      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+      await this.executeAndroidTapWithCoordinates(
+        action,
+        x,
+        y,
+        durationMs,
+        element,
+        signal,
+        false,
+        fence,
+      );
       return screenReaderNavigation;
     }
 
@@ -3762,13 +3834,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const fallbackAction = action as "tap" | "doubleTap" | "longPress";
     const fallbackResult =
       fallbackAction === "tap"
-        ? await this.talkBackStrategy.executePreciseTap(x, y, driver)
+        ? await this.talkBackStrategy.executePreciseTap(x, y, driver, fence)
         : await this.talkBackStrategy.executeCoordinateFallback(
             x,
             y,
             fallbackAction,
             durationMs,
             driver,
+            fence,
           );
 
     if (!fallbackResult.success) {
@@ -3776,7 +3849,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         `[TapOnElement] Accessibility coordinate tap failed (${fallbackResult.error}), ` +
           `falling back to ADB tap at (${x}, ${y})`,
       );
-      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
+      await this.executeAndroidTapWithCoordinates(
+        action,
+        x,
+        y,
+        durationMs,
+        element,
+        signal,
+        false,
+        fence,
+      );
     }
     return screenReaderNavigation;
   }
@@ -3790,6 +3872,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * @param element - The target element (for VoiceOver label resolution)
    * @param isVoiceOverEnabled - Whether VoiceOver is active
    */
+  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   private async executeiOSTap(
     action: string,
     x: number,
@@ -3797,13 +3880,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element?: Element,
     isVoiceOverEnabled?: boolean,
+    fence?: DisplayFence,
   ): Promise<void> {
     if (isVoiceOverEnabled && element) {
-      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs);
+      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fence);
       return;
     }
 
-    await this.executeiOSTapWithCoordinates(action, x, y, durationMs);
+    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fence);
   }
 
   /**
@@ -3814,6 +3898,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
+    fence?: DisplayFence,
   ): Promise<void> {
     // Use short duration (50ms) for tap/doubleTap, full duration for longPress
     const tapDuration = action === "longPress" ? durationMs : 50;
@@ -3822,15 +3907,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     if (action === "doubleTap") {
       // Double tap - perform two taps
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       await dispatchIosCoordinateTap(client, x, y, tapDuration);
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
 
       await this.timer.sleep(200);
 
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       await dispatchIosCoordinateTap(client, x, y, tapDuration, undefined, "second tap");
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } else {
       // Single tap or long press
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       await dispatchIosCoordinateTap(client, x, y, tapDuration);
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     }
@@ -3858,6 +3949,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
+    fence?: DisplayFence,
   ): Promise<void> {
     // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
     const label =
@@ -3869,7 +3961,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     if (!label) {
       logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs);
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fence);
       return;
     }
 
@@ -3896,7 +3988,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
           `falling back to coordinate tap at (${x}, ${y})`,
       );
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs);
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fence);
     }
   }
 
@@ -3907,6 +3999,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.strategy.longPressDurationMs;
   }
 
+  // oxlint-disable-next-line max-params -- Preserve positional callers by appending the optional display fence.
   private async executeAndroidLongPress(
     x: number,
     y: number,
@@ -3914,6 +4007,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     signal?: AbortSignal,
     skipSemanticAction: boolean = false,
+    fence?: DisplayFence,
   ): Promise<void> {
     throwIfAborted(signal);
     if (!skipSemanticAction) {
@@ -3925,6 +4019,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     const longPressTimeoutMs = Math.min(durationMs + 2_000, MAX_SETTIMEOUT_DELAY_MS);
     try {
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       await this.adb.executeCommand(
         `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
         longPressTimeoutMs,
@@ -3933,7 +4029,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         signal,
       );
     } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
       logger.warn(`[TapOnElement] touch input swipe failed, falling back to input swipe: ${error}`);
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       await this.adb.executeCommand(
         `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
         longPressTimeoutMs,

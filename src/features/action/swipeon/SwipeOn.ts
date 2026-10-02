@@ -6,7 +6,6 @@ import {
   ActionableError,
   BootedDevice,
   Element,
-  GestureOptions,
   ObserveResult,
   SwipeDirection,
   SwipeOnOptions,
@@ -20,7 +19,7 @@ import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry"
 import { DefaultElementFinder } from "../../utility/ElementFinder";
 import { DefaultElementGeometry } from "../../utility/ElementGeometry";
 import { DefaultElementParser } from "../../utility/ElementParser";
-import { ExecuteGesture } from "../ExecuteGesture";
+import { ExecuteGesture, type FencedGestureOptions } from "../ExecuteGesture";
 import { logger } from "../../../utils/logger";
 import {
   createGlobalPerformanceTracker,
@@ -180,6 +179,7 @@ export class SwipeOn extends BaseVisualChange {
       resolveBoomerangConfig: this.resolveBoomerangConfig.bind(this),
       buildPredictionArgs: this.buildPredictionArgs.bind(this),
       observedInteraction: this.observedInteraction.bind(this),
+      captureDisplayFence: () => this.captureDisplayFence(),
       captureTerminalObservationScreenshot: this.captureTerminalObservationScreenshot.bind(this),
     });
   }
@@ -640,7 +640,7 @@ export class SwipeOn extends BaseVisualChange {
     let iosDispatchTimestamp: number | undefined;
 
     return this.observedInteraction(
-      async (observeResult: ObserveResult) => {
+      async (observeResult: ObserveResult, fence) => {
         throwIfAborted(signal);
         if (!observeResult.screenSize) {
           throw new ActionableError("Could not determine screen size");
@@ -659,7 +659,8 @@ export class SwipeOn extends BaseVisualChange {
 
         const duration = this.getDuration(options);
         const boomerang = this.resolveBoomerangConfig(options);
-        const gestureOptions: GestureOptions = {
+        const gestureOptions: FencedGestureOptions = {
+          displayFence: fence,
           duration,
           scrollMode: options.scrollMode,
           timeoutMs: this.iosGestureTimeoutMs?.(),
@@ -746,7 +747,7 @@ export class SwipeOn extends BaseVisualChange {
     let iosDispatchTimestamp: number | undefined;
 
     return this.observedInteraction(
-      async (observeResult: ObserveResult) => {
+      async (observeResult: ObserveResult, fence) => {
         throwIfAborted(signal);
         const viewHierarchy = observeResult.viewHierarchy;
         if (!viewHierarchy) {
@@ -768,7 +769,8 @@ export class SwipeOn extends BaseVisualChange {
 
         const duration = this.getDuration(options);
         const boomerang = this.resolveBoomerangConfig(options);
-        const gestureOptions: GestureOptions = {
+        const gestureOptions: FencedGestureOptions = {
+          displayFence: fence,
           duration,
           scrollMode: options.scrollMode,
         };

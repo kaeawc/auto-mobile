@@ -1,4 +1,5 @@
-import { BootedDevice, Element, GestureOptions, SwipeDirection } from "../../../models";
+import type { FencedGestureOptions } from "../ExecuteGesture";
+import { BootedDevice, Element, SwipeDirection } from "../../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { BoomerangConfig, GestureExecutor, VoiceOverSwipeRunner } from "./types";
@@ -58,7 +59,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     y2: number,
     _direction: SwipeDirection,
     _containerElement: Element | null,
-    gestureOptions?: GestureOptions,
+    gestureOptions?: FencedGestureOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     boomerang?: BoomerangConfig,
     signal?: AbortSignal,
@@ -136,7 +137,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     y1: number,
     x2: number,
     y2: number,
-    gestureOptions: GestureOptions | undefined,
+    gestureOptions: FencedGestureOptions | undefined,
     boomerang: BoomerangConfig,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
@@ -222,7 +223,10 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     return Math.max(1, Math.round(forwardDuration / returnSpeed));
   }
 
-  private buildGestureOptions(base: GestureOptions | undefined, duration: number): GestureOptions {
+  private buildGestureOptions(
+    base: FencedGestureOptions | undefined,
+    duration: number,
+  ): FencedGestureOptions {
     return {
       ...(base ?? {}),
       duration,

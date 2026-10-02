@@ -1,3 +1,5 @@
+import type { DisplayFence } from "../action/BaseVisualChange";
+import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Element } from "../../models/Element";
 import { logger } from "../../utils/logger";
@@ -143,6 +145,7 @@ export class TalkBackTapStrategy {
     deviceId: string,
     element: Element,
     driver: TalkBackNavigationDriver,
+    fence?: DisplayFence,
   ): Promise<TalkBackTapResult> {
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
     const resourceId = element?.["resource-id"] as string | undefined;
@@ -239,6 +242,7 @@ export class TalkBackTapStrategy {
         targetSelector,
         navigationPath,
         {
+          displayFence: fence,
           maxSwipes: 100,
           // Fidelity assertions need every focused node, not periodic samples.
           verificationInterval: 1,
@@ -261,9 +265,12 @@ export class TalkBackTapStrategy {
       logger.info(`[TalkBackTapStrategy] Focus navigation successful, activating element`);
 
       // Activate the focused element with double-tap gesture
-      const activationResult = await this.activateElement(element, driver);
+      const activationResult = await this.activateElement(element, driver, fence);
       return { ...activationResult, screenReaderNavigation: navigationResult };
     } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
       const errorMsg = errorMessage(error);
       logger.warn(`[TalkBackTapStrategy] Focus navigation failed: ${errorMsg}`);
       return {
@@ -374,11 +381,14 @@ export class TalkBackTapStrategy {
     action: TalkBackFallbackAction,
     durationMs: number,
     driver: TalkBackNavigationDriver,
+    fence?: DisplayFence,
   ): Promise<TalkBackTapResult> {
     const tapDuration = action === "longPress" ? durationMs : 50;
 
     if (action === "doubleTap") {
       // First tap
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       const firstResult = await driver.requestTapCoordinates(x, y, tapDuration);
       if (!firstResult.success) {
         return {
@@ -393,6 +403,8 @@ export class TalkBackTapStrategy {
       await this.timer.sleep(200);
 
       // Second tap
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       const secondResult = await driver.requestTapCoordinates(x, y, tapDuration);
       if (!secondResult.success) {
         return {
@@ -408,6 +420,8 @@ export class TalkBackTapStrategy {
 
     // A single touch only moves TalkBack's accessibility focus; it does not
     // activate the focused element. Let callers continue to their last resort.
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence?.assertCurrent();
     const result = await driver.requestTapCoordinates(x, y, tapDuration);
     if (!result.success) {
       return {
@@ -437,7 +451,10 @@ export class TalkBackTapStrategy {
     x: number,
     y: number,
     driver: TalkBackNavigationDriver,
+    fence?: DisplayFence,
   ): Promise<TalkBackTapResult> {
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence?.assertCurrent();
     const focusResult = await driver.requestTapCoordinates(x, y, 50);
     if (!focusResult.success) {
       return {
@@ -451,7 +468,14 @@ export class TalkBackTapStrategy {
 
     // Keep the focus tap outside TalkBack's activation double-tap window.
     await this.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
-    const activationResult = await this.executeCoordinateFallback(x, y, "doubleTap", 50, driver);
+    const activationResult = await this.executeCoordinateFallback(
+      x,
+      y,
+      "doubleTap",
+      50,
+      driver,
+      fence,
+    );
     return {
       ...activationResult,
       focusCompleted: true,
@@ -479,6 +503,7 @@ export class TalkBackTapStrategy {
     durationMs: number,
     element: Element,
     driver: TalkBackNavigationDriver,
+    fence?: DisplayFence,
   ): Promise<TalkBackTapResult> {
     const selector = stableNodeSelectorForElement(element);
 
@@ -487,7 +512,7 @@ export class TalkBackTapStrategy {
         logger.info(
           "[TalkBackTapStrategy] Runner does not support stable node selectors; using coordinate long press",
         );
-        return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver);
+        return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, fence);
       }
       const longClickResult = requiresNodeSelector(selector)
         ? await driver.requestNodeAction("long_click", selector)
@@ -510,7 +535,7 @@ export class TalkBackTapStrategy {
       );
     }
 
-    return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver);
+    return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, fence);
   }
 
   /**
@@ -519,6 +544,7 @@ export class TalkBackTapStrategy {
   private async activateElement(
     element: Element,
     driver: TalkBackNavigationDriver,
+    fence: DisplayFence = { assertCurrent: () => {} },
   ): Promise<TalkBackTapResult> {
     const resourceId = element["resource-id"] as string | undefined;
     // Activate against the node TalkBack actually focused (live bounds), not the
@@ -552,6 +578,8 @@ export class TalkBackTapStrategy {
     }
 
     // First tap of double-tap activation
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence.assertCurrent();
     const firstTap = await driver.requestTapCoordinates(center.x, center.y, tapDuration);
 
     if (!firstTap.success) {
@@ -580,6 +608,8 @@ export class TalkBackTapStrategy {
     await this.timer.sleep(200);
 
     // Second tap
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence.assertCurrent();
     const secondTap = await driver.requestTapCoordinates(center.x, center.y, tapDuration);
 
     if (!secondTap.success) {
@@ -641,6 +671,9 @@ export class TalkBackTapStrategy {
         return this.getElementCenter(focused);
       }
     } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
       // Live-focus read is best-effort; fall back to the caller's element bounds.
       logger.debug(`[TalkBackTapStrategy] Could not read current focus for activation: ${error}`);
     }

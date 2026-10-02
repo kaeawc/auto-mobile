@@ -68,6 +68,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         undefined,
         true,
+        undefined,
       );
     },
   );
@@ -107,6 +108,8 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         element,
         undefined,
+        false,
+        undefined,
       );
 
       executeAndroidTapWithCoordinates.mockClear();
@@ -120,6 +123,8 @@ describe("TapOnElement TalkBack mode detection", () => {
         1000,
         element,
         undefined,
+        false,
+        undefined,
       );
 
       executeAndroidTapWithCoordinates.mockClear();
@@ -132,6 +137,8 @@ describe("TapOnElement TalkBack mode detection", () => {
         50,
         500,
         element,
+        undefined,
+        false,
         undefined,
       );
     });
@@ -169,6 +176,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         options,
         undefined,
+        undefined,
       );
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
@@ -201,6 +209,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         500,
         options,
+        undefined,
         undefined,
       );
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
@@ -236,6 +245,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         options,
         undefined,
+        undefined,
       );
     });
 
@@ -269,6 +279,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         {},
         undefined,
+        undefined,
       );
 
       executeAndroidTapWithAccessibility.mockClear();
@@ -291,6 +302,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         1000,
         {},
         undefined,
+        undefined,
       );
 
       executeAndroidTapWithAccessibility.mockClear();
@@ -312,6 +324,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         500,
         {},
+        undefined,
         undefined,
       );
     });
@@ -720,6 +733,8 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         500,
         element,
         undefined,
+        false,
+        undefined,
       );
     });
 
@@ -850,6 +865,8 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         500,
         element,
         undefined,
+        false,
+        undefined,
       );
     });
   });
@@ -964,6 +981,8 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         50,
         1000,
         element,
+        undefined,
+        false,
         undefined,
       );
     });

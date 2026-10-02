@@ -1,10 +1,6 @@
-import {
-  ActionableError,
-  BootedDevice,
-  Element,
-  GestureOptions,
-  SwipeDirection,
-} from "../../../models";
+import { StaleDisplayError } from "../../../models/StaleDisplayError";
+import type { FencedGestureOptions } from "../ExecuteGesture";
+import { ActionableError, BootedDevice, Element, SwipeDirection } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
@@ -60,7 +56,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     y2: number,
     direction: SwipeDirection,
     containerElement: Element | null,
-    gestureOptions?: GestureOptions,
+    gestureOptions?: FencedGestureOptions,
     perf?: PerformanceTracker,
     boomerang?: BoomerangConfig,
     signal?: AbortSignal,
@@ -157,7 +153,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     y1: number,
     x2: number,
     y2: number,
-    gestureOptions: GestureOptions | undefined,
+    gestureOptions: FencedGestureOptions | undefined,
     boomerang: BoomerangConfig,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
@@ -233,7 +229,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     x2: number,
     y2: number,
     containerElement: Element | null,
-    gestureOptions?: GestureOptions,
+    gestureOptions?: FencedGestureOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
@@ -290,7 +286,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     y2: number,
     direction: SwipeDirection,
     containerElement: Element | null,
-    gestureOptions?: GestureOptions,
+    gestureOptions?: FencedGestureOptions,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
@@ -328,6 +324,9 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
           );
         }
       } catch (error) {
+        if (error instanceof StaleDisplayError) {
+          throw error;
+        }
         throwIfAborted(signal);
         logger.warn(`[SwipeOn] ACTION_SCROLL error: ${error}, falling back to two-finger swipe`);
       }
@@ -341,6 +340,8 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     const offset = 100; // Fixed offset as per design doc
 
     throwIfAborted(signal);
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    gestureOptions?.displayFence?.assertCurrent();
     const a11yResult = await this.accessibilityService.requestTwoFingerSwipe(
       x1,
       y1,
@@ -367,7 +368,10 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     }
   }
 
-  buildGestureOptions(base: GestureOptions | undefined, duration: number): GestureOptions {
+  buildGestureOptions(
+    base: FencedGestureOptions | undefined,
+    duration: number,
+  ): FencedGestureOptions {
     return {
       ...(base ?? {}),
       duration,

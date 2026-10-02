@@ -1,7 +1,7 @@
+import type { FencedGestureOptions } from "../ExecuteGesture";
 import type { Timer } from "../../../utils/SystemTimer";
 import {
   Element,
-  GestureOptions,
   ObserveResult,
   SwipeDirection,
   SwipeOnOptions,
@@ -37,7 +37,7 @@ export interface VoiceOverSwipeRunner {
     y2: number,
     direction: SwipeDirection,
     containerElement: Element | null,
-    gestureOptions?: GestureOptions,
+    gestureOptions?: FencedGestureOptions,
     perf?: PerformanceTracker,
     boomerang?: BoomerangConfig,
     signal?: AbortSignal,
@@ -66,7 +66,7 @@ export interface TalkBackSwipeRunner {
     y2: number,
     direction: SwipeDirection,
     containerElement: Element | null,
-    gestureOptions?: GestureOptions,
+    gestureOptions?: FencedGestureOptions,
     perf?: PerformanceTracker,
     boomerang?: BoomerangConfig,
     signal?: AbortSignal,
@@ -93,7 +93,7 @@ export interface GestureExecutor {
     y1: number,
     x2: number,
     y2: number,
-    options?: GestureOptions,
+    options?: FencedGestureOptions,
     perf?: PerformanceTracker,
     signal?: AbortSignal,
   ): Promise<SwipeResult>;

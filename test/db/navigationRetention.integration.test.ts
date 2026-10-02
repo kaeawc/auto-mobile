@@ -152,7 +152,8 @@ describe("NavigationRetention prune", () => {
 
   function retention(
     config = CONFIG,
-    yieldBetweenBatches?: () => Promise<void>,
+    // These tests drive batch boundaries explicitly; no host I/O scheduling needed.
+    yieldBetweenBatches: () => Promise<void> = async () => {},
     protectedBuildKeyResolver?: typeof computeProtectedBuildKeyIds,
   ): NavigationRetention {
     return new NavigationRetention(
@@ -1213,14 +1214,26 @@ describe("eviction active-row exclusion is relational (bounded bind params)", ()
 describe("prune releases the connection between chunks (issue #6650)", () => {
   let db: Kysely<Database>;
   let repo: NavigationRepository;
+  let pending: Promise<unknown>[];
 
   beforeEach(async () => {
+    pending = [];
     db = await createTestDatabase({ foreignKeys: true });
     repo = new NavigationRepository(db);
   });
   afterEach(async () => {
+    // A failed assertion or test timeout must not close a still-running pass's DB.
+    // A pass can start its interleaved read while cleanup is already waiting.
+    while (pending.length > 0) {
+      await Promise.allSettled(pending.splice(0));
+    }
     await db.destroy();
   });
+
+  function track<T>(promise: Promise<T>): Promise<T> {
+    pending.push(promise);
+    return promise;
+  }
 
   /**
    * Seeds one app, one (protected) build key, and `count` node observations on
@@ -1238,20 +1251,26 @@ describe("prune releases the connection between chunks (issue #6650)", () => {
   }
 
   test("opens more than one transaction for a multi-batch pass (was: one txn for the whole pass)", async () => {
-    // 40 rows over budget (cap 1) with chunk 2 forces ~20 eviction batches, and
+    // Five rows (cap 1) with chunk 2 force two eviction batches, and
     // the TTL / orphan-sweep tiers each need their own transaction too.
-    await seedOverflowingApp(40);
-    const retention = new NavigationRetention(db, {
-      ...CONFIG,
-      structureTtlMs: 10_000_000,
-      perAppMaxObservations: 1,
-      evictionChunkSize: 2,
-    });
+    await seedOverflowingApp(5);
+    const retention = new NavigationRetention(
+      db,
+      {
+        ...CONFIG,
+        structureTtlMs: 10_000_000,
+        perAppMaxObservations: 1,
+        evictionChunkSize: 2,
+      },
+      undefined,
+      undefined,
+      async () => {},
+    );
 
     const transactionSpy = spyOn(db, "transaction");
-    const summary = await retention.prune(1_000_000);
+    const summary = await track(retention.prune(1_000_000));
 
-    expect(summary.nodeObservationsDeleted).toBe(39);
+    expect(summary.nodeObservationsDeleted).toBe(4);
     // A single-transaction pass (the pre-#6650 shape) calls db.transaction()
     // exactly once for the whole pass. The chunked pass opens one short
     // transaction per tier/batch, so this count must be > 1.
@@ -1259,51 +1278,67 @@ describe("prune releases the connection between chunks (issue #6650)", () => {
   });
 
   test("an unrelated read interleaves mid-pass instead of parking for the whole pass", async () => {
-    // A large overflow with a tiny chunk size makes the pass take many
-    // sequential eviction batches -- long enough that a bounded microtask
-    // drain (no real timers/sleeps) can reliably catch it still mid-flight.
-    await seedOverflowingApp(200);
-    const retention = new NavigationRetention(db, {
-      ...CONFIG,
-      structureTtlMs: 10_000_000,
-      perAppMaxObservations: 1,
-      evictionChunkSize: 1,
-    });
-
+    // Three rows (cap 1, chunk 1) force two batches. The first yield occurs
+    // after s0 is evicted, while s1 and the active s2 still reference their key.
+    await seedOverflowingApp(3);
     let pruneSettled = false;
-    const prunePromise = retention.prune(1_000_000).then((summary) => {
-      pruneSettled = true;
-      return summary;
-    });
-
-    let readSettled = false;
-    const readPromise = db
-      .selectFrom("navigation_build_keys")
-      .selectAll()
-      .execute()
-      .then((rows) => {
-        readSettled = true;
-        return rows;
-      });
-
-    // Bounded drain: give both promise chains a fixed number of microtask
-    // turns to progress, with no real timer/sleep involved. If the whole pass
-    // held one transaction (the bug), the read would still be parked behind
-    // it after this many turns, since 200 sequential eviction batches vastly
-    // outlast a single chunk's worth of turns (empirically: the read settles
-    // by turn ~96 once chunked, while the 200-batch pass itself is nowhere
-    // close to done at turn 150, let alone 5000 -- turn count here is a
-    // deliberately generous multiple of that observed margin, not a tuned
-    // exact threshold).
-    for (let i = 0; i < 150; i++) {
-      await Promise.resolve();
-    }
-
-    expect(readSettled).toBe(true); // the connection was released mid-pass
-    expect(pruneSettled).toBe(false); // ...while the pass itself keeps working
-
+    let readSettledMidPass = false;
+    let yields = 0;
+    let yieldsAtRead = 0;
+    let observedRows: { version_code: number; session_uuid: string }[] = [];
+    let readPromise: Promise<void> | undefined;
+    const retention = new NavigationRetention(
+      db,
+      {
+        ...CONFIG,
+        structureTtlMs: 10_000_000,
+        perAppMaxObservations: 1,
+        evictionChunkSize: 1,
+      },
+      undefined,
+      undefined,
+      async () => {
+        yields += 1;
+        if (yields === 1) {
+          // Queue the read before the next batch, but do not await it here:
+          // a pass holding one transaction would park it until commit. Letting
+          // prune finish makes that regression fail the snapshot assertions
+          // below instead of deadlocking inside this yield.
+          readPromise = track(
+            db
+              .selectFrom("navigation_build_keys")
+              .innerJoin(
+                "navigation_node_observations",
+                "navigation_node_observations.build_key_id",
+                "navigation_build_keys.id",
+              )
+              .select(["version_code", "session_uuid"])
+              .orderBy("session_uuid")
+              .execute()
+              .then((rows) => {
+                observedRows = rows;
+                readSettledMidPass = !pruneSettled;
+                yieldsAtRead = yields;
+              }),
+          );
+        }
+      },
+    );
+    const prunePromise = track(
+      retention.prune(1_000_000).then((summary) => {
+        pruneSettled = true;
+        return summary;
+      }),
+    );
     const summary = await prunePromise;
+    expect(readPromise).toBeDefined();
     await readPromise;
-    expect(summary.nodeObservationsDeleted).toBe(199);
+    expect(readSettledMidPass).toBe(true);
+    expect(yieldsAtRead).toBe(1);
+    expect(observedRows).toEqual([
+      { version_code: 1, session_uuid: "s1" },
+      { version_code: 1, session_uuid: "s2" },
+    ]);
+    expect(summary.nodeObservationsDeleted).toBe(2);
   });
 });

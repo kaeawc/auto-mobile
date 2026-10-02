@@ -30,6 +30,7 @@ count_paren_depth() {
 normalize_accessors() {
   local rest="$1" word attribute last_accessor="" waiting=false seen=false
   local i depth ch
+  local typed_throws_pattern='^throws[[:space:]]*\('
   accessor_list_valid=false
   accessor_text=""
   while [[ -n "$rest" ]]; do
@@ -43,7 +44,9 @@ normalize_accessors() {
       waiting=true
       continue
     fi
-    if [[ "$rest" == throws\(* ]]; then
+    if [[ "$rest" =~ $typed_throws_pattern ]]; then
+      local throws_prefix="${BASH_REMATCH[0]}"
+      rest="throws(${rest:${#throws_prefix}}"
       # Keep the complete type verbatim, including spaces in generic arguments
       # and nested parentheses, rather than splitting it into whitespace tokens.
       i=6
@@ -88,13 +91,23 @@ normalize_accessors() {
 # The result is assigned to stripped_signature to avoid a per-member subshell.
 strip_body_brace() {
   local s="$1"
+  local brace_code="$s"
+  if [[ "${2:-}" == protocol ]]; then
+    # Scan the whole signature before finding bounds. Both outputs have the
+    # same length, so neutralized brace indices also index retained strings.
+    local block_comment_depth=0 in_multiline_string=false
+    local scope_code="" signature_code=""
+    scan_scope_code "$s"
+    s="$signature_code"
+    brace_code="$scope_code"
+  fi
   local depth=0
   local i=0
   local len=${#s}
   local last_open_at=-1
   local group_close_at=-1
   while (( i < len )); do
-    local ch="${s:i:1}"
+    local ch="${brace_code:i:1}"
     if [[ "$ch" == "{" ]]; then
       if (( depth == 0 )); then
         last_open_at=$i
@@ -114,12 +127,7 @@ strip_body_brace() {
     # Protocol accessor requirements use the same normalization as collected
     # multi-line blocks; computed-property bodies remain declaration-only.
     if [[ "${2:-}" == protocol ]] && (( group_close_at > last_open_at )); then
-      # Shadow the caller's scanner state: only this brace group's comments
-      # are removed, and strings in attributes retain their original contents.
-      local in_block_comment=false in_multiline_string=false
-      local scope_code="" signature_code=""
-      scan_scope_code "${s:last_open_at+1:group_close_at-last_open_at-1}"
-      normalize_accessors "$signature_code"
+      normalize_accessors "${s:last_open_at+1:group_close_at-last_open_at-1}"
       if [[ "$accessor_list_valid" == true ]]; then
         stripped_signature="${stripped_signature%"${stripped_signature##*[![:space:]]}"} { $accessor_text }${s:group_close_at+1}"
       fi
@@ -132,22 +140,28 @@ strip_body_brace() {
 # Remove comments and string contents for scope tracking only; emitted signatures
 # still use the original text. signature_code also removes comments but keeps
 # ordinary quoted strings for accessor attributes. This is a source scanner,
-# not a Swift parser:
-# nested block comments, string interpolation and custom raw-string delimiters
-# are not interpreted. Ordinary escaped strings and triple-quoted strings cover
-# the SDK's current sources. Conditional-compilation branches are all scanned.
+# not a Swift parser. Nested block comments are tracked across lines; string
+# interpolation and custom raw-string delimiters are not interpreted. Escaped
+# and triple-quoted strings cover the SDK's current sources. All conditional-
+# compilation branches are scanned.
 scan_scope_code() {
   local rest="$1" token prefix
+  local comment_pattern='(/\*|\*/)'
   local token_pattern='("""|"([^"\\]|\\.)*"|//.*|/\*)'
   scope_code=""
   signature_code=""
   while [[ -n "$rest" ]]; do
-    if [[ "$in_block_comment" == true ]]; then
-      if [[ "$rest" != *\*/* ]]; then
+    if (( block_comment_depth > 0 )); then
+      if [[ ! "$rest" =~ $comment_pattern ]]; then
         break
       fi
-      rest="${rest#*\*/}"
-      in_block_comment=false
+      token="${BASH_REMATCH[0]}"
+      rest="${rest#*"$token"}"
+      if [[ "$token" == '/*' ]]; then
+        block_comment_depth=$((block_comment_depth + 1))
+      else
+        block_comment_depth=$((block_comment_depth - 1))
+      fi
     elif [[ "$in_multiline_string" == true ]]; then
       if [[ "$rest" != *\"\"\"* ]]; then
         break
@@ -157,14 +171,16 @@ scan_scope_code() {
     elif [[ "$rest" =~ $token_pattern ]]; then
       token="${BASH_REMATCH[0]}"
       prefix="${rest%%"$token"*}"
-      scope_code="$scope_code$prefix "
+      scope_code="$scope_code$prefix"
       signature_code="$signature_code$prefix"
       rest="${rest#*"$token"}"
       case "$token" in
         //*) break ;;
-        '/*') in_block_comment=true; signature_code="$signature_code " ;;
+        '/*') block_comment_depth=1; scope_code="$scope_code "; signature_code="$signature_code " ;;
         '"""') in_multiline_string=true ;;
-        *) signature_code="$signature_code$token" ;;
+        # Pad retained strings to keep both outputs indexed identically in
+        # bytes in C locale and characters in UTF-8 locale.
+        *) scope_code="$scope_code${token//?/ }"; signature_code="$signature_code$token" ;;
       esac
     else
       scope_code="$scope_code$rest"
@@ -193,10 +209,10 @@ generate_api() {
   while IFS= read -r swift_file; do
     [[ -n "$swift_file" ]] || continue
     local brace_depth=0 scope_code="" signature_code=""
-    local in_block_comment=false in_multiline_string=false
+    local block_comment_depth=0 in_multiline_string=false
     while IFS= read -r line; do
       local stripped="${line#"${line%%[![:space:]]*}"}"
-      if [[ "$in_block_comment" == true || "$in_multiline_string" == true || "$line" == *\"* || "$line" == */* ]]; then
+      if [[ "$block_comment_depth" -gt 0 || "$in_multiline_string" == true || "$line" == *\"* || "$line" == */* ]]; then
         scan_scope_code "$stripped"
       else
         scope_code="$stripped"
@@ -242,7 +258,7 @@ generate_api() {
     local pending_default_public=false
     local pending_attributes=""
     local held_member="" held_indent=""
-    local scope_code="" signature_code="" in_block_comment=false in_multiline_string=false
+    local scope_code="" signature_code="" block_comment_depth=0 in_multiline_string=false
     local accessor_pending=false collecting_accessors=false accessor_depth=0
     local accessor_buffer="" requirement_accessors=false
     local member_pattern='^((static|class|mutating|nonmutating|optional|override|final|convenience|required|nonisolated|indirect)[[:space:]]+)*(func|var|let|init[?!]?|subscript|associatedtype|typealias)([[:space:](<]|$)'
@@ -254,7 +270,7 @@ generate_api() {
         stripped="${BASH_REMATCH[1]}public override ${BASH_REMATCH[2]}"
       fi
       # Fast path: most source lines contain no lexical tokens to remove.
-      if [[ "$in_block_comment" == true || "$in_multiline_string" == true || "$line" == *\"* || "$line" == */* ]]; then
+      if [[ "$block_comment_depth" -gt 0 || "$in_multiline_string" == true || "$line" == *\"* || "$line" == */* ]]; then
         scan_scope_code "$stripped"
       else
         scope_code="$stripped"
@@ -276,14 +292,15 @@ generate_api() {
           accessor_line_consumed=true
           if (( brace_depth + ${#opens} - ${#closes} < accessor_depth )); then
             strip_body_brace "$held_member $accessor_line" protocol
-            held_member="$stripped_signature"
+            held_member="${stripped_signature%"${stripped_signature##*[![:space:]]}"}"
             collecting_accessors=false
           fi
         fi
       elif [[ "$collecting_accessors" == true ]]; then
         accessor_line_consumed=true
         if (( brace_depth + ${#opens} - ${#closes} < accessor_depth )); then
-          accessor_buffer="$accessor_buffer ${signature_code%%\}*}"
+          local before_close="${scope_code%%\}*}"
+          accessor_buffer="$accessor_buffer ${signature_code:0:${#before_close}}"
           normalize_accessors "$accessor_buffer"
           if [[ "$accessor_list_valid" == true ]]; then
             held_member="$held_member { $accessor_text }"
@@ -301,7 +318,7 @@ generate_api() {
         local where_continuation=false
         if [[ -n "$held_member" ]]; then
           if [[ "$declaration" =~ ^where([[:space:]]|$) ]]; then
-            strip_body_brace "$stripped"
+            strip_body_brace "$stripped" "$kind"
             local where_words=()
             read -r -a where_words <<< "$stripped_signature"
             held_member="$held_member ${where_words[*]}"
@@ -362,7 +379,11 @@ generate_api() {
         if [[ "$where_continuation" == true ]]; then
           :
         elif [[ "$collecting_multiline" == true ]]; then
-          multiline_buffer="$multiline_buffer $stripped"
+          if [[ "$kind" == protocol ]]; then
+            multiline_buffer="$multiline_buffer ${signature_code%"${signature_code##*[![:space:]]}"}"
+          else
+            multiline_buffer="$multiline_buffer $stripped"
+          fi
           count_paren_depth "$scope_code"
           paren_depth=$(( paren_depth + paren_delta ))
           local continuation_code="${scope_code%"${scope_code##*[![:space:]]}"}"
@@ -404,7 +425,11 @@ generate_api() {
             local case_code="${scope_code%"${scope_code##*[![:space:]]}"}"
             if [[ $paren_depth -gt 0 || ( "$collecting_case" == true && "$case_code" == *, ) ]]; then
               collecting_multiline=true
-              multiline_buffer="$stripped"
+              if [[ "$kind" == protocol ]]; then
+                multiline_buffer="${signature_code%"${signature_code##*[![:space:]]}"}"
+              else
+                multiline_buffer="$stripped"
+              fi
             else
               signature="$stripped"
             fi

@@ -44,6 +44,8 @@ export interface KeyValueEntry {
   value: string | null;
   /** Type of the stored value */
   type: KeyValueType;
+  /** iOS SDK only: present when the value was redacted; otherwise omitted. */
+  redacted?: true;
 }
 
 /**

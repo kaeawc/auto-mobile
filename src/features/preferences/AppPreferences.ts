@@ -895,9 +895,11 @@ function iosSdkPreferenceValue(
 ): Pick<PreferenceResult, "value" | "type" | "redacted" | "valueFormat" | "warning"> {
   const type = iosPreferenceType(entry.type);
   const value = entry.value;
-  // SDK-only: the protocol cannot distinguish a real STRING "[REDACTED]" from
-  // its sentinel. Treat it as redacted for every type before scalar conversion.
-  if (value === IOS_SDK_REDACTED_VALUE) {
+  // Honor explicit SDK redaction before scalar conversion, regardless of value.
+  // Without a flag, retain the older SDK sentinel fallback for every type. New
+  // SDKs also omit the flag for literal "[REDACTED]" strings; no SDK/schema version
+  // is carried in preference responses to distinguish those from old redactions.
+  if (entry.redacted === true || value === IOS_SDK_REDACTED_VALUE) {
     return { type, value: null, redacted: true };
   }
   if (value !== null && (type === "array" || type === "dictionary")) {
@@ -909,7 +911,7 @@ function iosSdkPreferenceValue(
       value,
       valueFormat: "sdk-description",
       warning:
-        "The SDK could not encode this collection as canonical JSON (nested Date/Data values or unsafe integers can cause this). The raw SDK description may be lossy; the container-plist route, used when the SDK is not connected, returns recursive JSON with ISO/base64 leaves and exact integer strings.",
+        "The SDK could not encode this collection as canonical JSON (older SDKs can fall back for nested Date/Data; unsafe integers are also non-canonical). The raw SDK description may be lossy; the container-plist route, used when the SDK is not connected, returns recursive JSON with ISO/base64 leaves and exact integer strings.",
     };
   }
   return {
@@ -927,7 +929,8 @@ function iosSdkPreferenceValue(
   };
 }
 
-// UserDefaultsInspector.encode uses JSONSerialization or Swift interpolation.
+// Current SDKs recursively encode Date/Data and non-finite leaves as JSON strings.
+// Older SDKs can fall back to Swift interpolation instead.
 // Interpolated Optional(...), [key: value], and NSDictionary { key = value; }
 // descriptions fail JSON parsing/shape checks. Do not reject those words inside
 // valid JSON strings: they can be legitimate collection contents.

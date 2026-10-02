@@ -384,6 +384,27 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
+  test("get_preference_result preserves explicit redaction", () => {
+    const response = {
+      type: "get_preference_result",
+      success: true,
+      found: true,
+      key: "token",
+      value: "hunter2",
+      valueType: "STRING",
+      redacted: true,
+    } as const;
+    expect(decodeCtrlProxyMessage(msg(response))?.result).toMatchObject({
+      entry: { key: "token", value: "hunter2", type: "STRING", redacted: true },
+    });
+  });
+
+  test("preferences preserves explicit entry redaction", () => {
+    const entries = [{ key: "token", value: "42", type: "INT", redacted: true }] as const;
+    const response = { type: "preferences", success: true, entries };
+    expect(decodeCtrlProxyMessage(msg(response))?.result).toMatchObject({ entries });
+  });
+
   test("get_preference_result entry undefined when not found", () => {
     const decoded = decodeCtrlProxyMessage(
       msg({ type: "get_preference_result", found: false } as never),

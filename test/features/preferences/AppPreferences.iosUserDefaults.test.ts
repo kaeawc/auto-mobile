@@ -705,6 +705,87 @@ describe("real plutil fixtures and route type consistency", () => {
 });
 
 describe("SDK redaction and collection encoding", () => {
+  for (const [sdkType, value, type] of [
+    ["STRING", IOS_SDK_REDACTED_VALUE, "string"],
+    ["STRING", "hunter2", "string"],
+    ["INT", "42", "int"],
+    ["INT", "not-an-integer", "int"],
+  ] as const) {
+    test(`${sdkType} explicit redaction flag hides ${value} before parsing`, async () => {
+      const { sdk, preferences } = harness();
+      sdk.entry = { key: input.key, type: sdkType, value, redacted: true };
+      expect(await preferences.getPreference(input)).toMatchObject({
+        found: true,
+        success: true,
+        type,
+        value: null,
+        redacted: true,
+        storeRoute: "sdk",
+      });
+    });
+  }
+
+  test("absent redaction flag preserves a normal SDK value", async () => {
+    const { sdk, preferences } = harness();
+    sdk.entry = { key: input.key, type: "INT", value: "42" };
+    const result = await preferences.getPreference(input);
+    expect(result).toMatchObject({ success: true, found: true, type: "int", value: 42 });
+    expect(result.redacted).toBeUndefined();
+  });
+
+  test("flagged non-sentinel read-back reports written but not compared", async () => {
+    const { sdk, preferences, simctl } = harness();
+    sdk.onRead = () => {
+      sdk.entry = { key: input.key, type: "INT", value: "42", redacted: true };
+    };
+    const result = await preferences.setPreference({ ...input, type: "int", value: 42 });
+    expect(result).toMatchObject({
+      success: true,
+      found: true,
+      type: "int",
+      redacted: true,
+      value: null,
+      verified: false,
+    });
+    expect(result.warning).toContain(
+      "value was written; value redacted by the SDK so not compared",
+    );
+    expect(sdk.calls.map((call) => call.operation)).toEqual(["set", "get"]);
+    expect(simctl.calls).toEqual([]);
+  });
+
+  // Mirror StorageTests.swift's date/data and non-finite collection encodings.
+  for (const [name, array, dictionary] of [
+    [
+      "nested date",
+      '[{"date":"2023-11-14T22:13:20.123Z"}]',
+      '{"outer":[{"date":"2023-11-14T22:13:20.123Z"}]}',
+    ],
+    [
+      "nested data",
+      '[{"data":"AQID","date":"2023-11-14T22:13:20.123Z"}]',
+      '{"outer":[{"data":"AQID","date":"2023-11-14T22:13:20.123Z"}]}',
+    ],
+    [
+      "non-finite strings",
+      '["nan","inf","-inf","nan","inf","-inf"]',
+      '{"outer":["nan","inf","-inf"]}',
+    ],
+  ] as const) {
+    for (const [sdkType, type, value] of [
+      ["ARRAY", "array", array],
+      ["DICTIONARY", "dictionary", dictionary],
+    ] as const) {
+      test(`new SDK ${sdkType} ${name} retains canonical JSON`, async () => {
+        const { sdk, preferences } = harness();
+        sdk.entry = { key: input.key, type: sdkType, value };
+        const result = await preferences.getPreference(input);
+        expect(result).toMatchObject({ value, type, valueFormat: "canonical-json" });
+        expect(result.warning).toBeUndefined();
+      });
+    }
+  }
+
   for (const [type, value] of [
     ["ARRAY", '[{"nested":[9007199254740993]}]'],
     ["DICTIONARY", '{"nested":[[-9223372036854775808]]}'],
@@ -799,7 +880,9 @@ describe("SDK redaction and collection encoding", () => {
   });
   for (const [type, canonicalType, value] of [
     ["ARRAY", "array", '[1,"Optional(date)",true]'],
+    ["ARRAY", "array", '["2023-11-14T22:13:20.123Z","AQID"]'],
     ["DICTIONARY", "dictionary", '{"nested":{"data":"aGVsbG8="}}'],
+    ["DICTIONARY", "dictionary", '{"data":"AQID","date":"2023-11-14T22:13:20.123Z"}'],
   ] as const) {
     test(`${type} canonical JSON retains collection type`, async () => {
       const { sdk, preferences } = harness();
@@ -809,7 +892,7 @@ describe("SDK redaction and collection encoding", () => {
       expect(result.warning).toBeUndefined();
     });
   }
-  // Constructed from reading UserDefaultsInspector.encode's "\(value)" fallback;
+  // Constructed from older UserDefaultsInspector.encode's "\(value)" fallback;
   // Swift Array/Dictionary interpolation and Foundation NSDictionary descriptions.
   for (const [type, value] of [
     ["ARRAY", "[2026-10-01 12:34:56 +0000, 5 bytes]"],

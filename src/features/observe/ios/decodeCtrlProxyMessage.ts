@@ -258,13 +258,20 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       break;
 
     case "get_preference_result": {
-      const msg = message as { found?: boolean; key?: string; value?: string; valueType?: string };
+      const msg = message as {
+        found?: boolean;
+        key?: string;
+        value?: string;
+        valueType?: string;
+        redacted?: true;
+      };
       const entry =
         msg.found && msg.key
           ? {
               key: msg.key,
               value: msg.value ?? null,
               type: msg.valueType ?? "UNKNOWN",
+              ...(msg.redacted === true ? { redacted: true } : {}),
             }
           : undefined;
       result = {

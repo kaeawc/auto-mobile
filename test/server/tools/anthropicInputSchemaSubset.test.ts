@@ -1,16 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerBarrierTools } from "../../../src/server/barrierTools";
 import { registerCriticalSectionTools } from "../../../src/server/criticalSectionTools";
 import { createMcpServer } from "../../../src/server";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 
-// Populate at module scope because test definitions are collected before hooks
-// run. The daemon-only tools are included to cover the generator's complete
-// complete catalog rather than this test process's stdio-only default registry.
-createMcpServer();
-registerCriticalSectionTools();
-registerBarrierTools();
-const ADVERTISED_TOOLS = ToolRegistry.getToolDefinitions({ includeUnavailable: true });
+let ADVERTISED_TOOLS: ReturnType<typeof ToolRegistry.getToolDefinitions>;
 const ROOT_FORBIDDEN_KEYWORDS = ["anyOf", "allOf", "oneOf", "not", "if", "then", "else"];
 const NESTED_FORBIDDEN_KEYWORDS = ["oneOf", "not", "if", "then", "else"];
 
@@ -45,6 +40,18 @@ function findForbiddenSchemaKeyword(
 }
 
 describe("Anthropic input_schema subset", () => {
+  let restoreHermeticServer: () => void;
+
+  beforeAll(() => {
+    restoreHermeticServer = installHermeticServerFixture();
+    createMcpServer();
+    registerCriticalSectionTools();
+    registerBarrierTools();
+    ADVERTISED_TOOLS = ToolRegistry.getToolDefinitions({ includeUnavailable: true });
+  });
+
+  afterAll(() => restoreHermeticServer());
+
   test("normalizes every advertised tool input schema", () => {
     expect(ADVERTISED_TOOLS).toHaveLength(86);
 

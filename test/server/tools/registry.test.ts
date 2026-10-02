@@ -1,10 +1,16 @@
-import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { serverConfig } from "../../../src/utils/ServerConfig";
 
 describe("MCP Tools Registry", () => {
+  let restoreHermeticServer: () => void;
+
+  afterAll(() => restoreHermeticServer());
+
   beforeAll(() => {
+    restoreHermeticServer = installHermeticServerFixture();
     createMcpServer();
   });
 

@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
@@ -5,8 +6,10 @@ import { z } from "zod/v4";
 
 describe("MCP Resources List", () => {
   let fixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
   });
@@ -15,6 +18,7 @@ describe("MCP Resources List", () => {
     if (fixture) {
       await fixture.teardown();
     }
+    restoreHermeticServer();
   });
 
   test("should return observation resources", async function () {

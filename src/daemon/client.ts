@@ -36,6 +36,7 @@ import {
 import { McpOverloadError, McpTimeoutError, sanitizeMcpOverloadFailure } from "./McpTimeoutError";
 import { DaemonDisconnectError } from "./DaemonDisconnectError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import {
   DeviceControlTransportError,
@@ -337,6 +338,7 @@ export class DaemonClient {
   private buffer: string = "";
   private decoder = new TextDecoder();
   private connected: boolean = false;
+  private connectInFlight: Promise<void> | null = null;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
   private connectionClosedHandlers: Set<() => void> = new Set();
   private recoveryOptions: DaemonClientRecoveryOptions;
@@ -532,12 +534,47 @@ export class DaemonClient {
       return;
     }
 
-    const deadline = this.timer.now() + timeoutMs;
+    if (this.connectInFlight) {
+      try {
+        await raceWithDeadline(this.connectInFlight, {
+          timer: this.timer,
+          timeoutMs,
+          signal,
+          label: "Daemon connection attempt",
+          timeoutError: () =>
+            this.annotateStaleSocketHint(
+              new DaemonUnavailableError(`Failed to connect to daemon within ${timeoutMs}ms`),
+            ),
+        });
+        return;
+      } catch (error) {
+        if (signal?.aborted && error === signal.reason) {
+          throw this.annotateStaleSocketHint(
+            new DaemonUnavailableError("Daemon connection attempt aborted", {
+              cause: signal.reason,
+            }),
+          );
+        }
+        // Shared attempt and deadline failures are already typed and annotated.
+        throw error;
+      }
+    }
+
+    // The initiating caller owns cancellation of the transport. Joiners only
+    // race the shared result against their own budgets, never cancel the socket.
+    const attempt = (async () => {
+      const deadline = this.timer.now() + timeoutMs;
+      try {
+        await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
+      } catch (error) {
+        throw this.annotateStaleSocketHint(error);
+      }
+    })();
+    this.connectInFlight = attempt;
     try {
-      await this.connectOnce(this.remainingConnectTimeout(deadline, timeoutMs), signal);
-      return;
-    } catch (error) {
-      throw this.annotateStaleSocketHint(error);
+      await attempt;
+    } finally {
+      this.connectInFlight = null;
     }
   }
 
@@ -622,13 +659,14 @@ export class DaemonClient {
       };
 
       const fail = (error: Error) => {
+        if (isStaleSocket()) {
+          return;
+        }
         this.timer.clearTimeout(timeout);
         removeAbortListener();
         this.connected = false;
-        if (this.socket) {
-          this.socket.destroy();
-          this.socket = null;
-        }
+        this.socket = null;
+        socket.destroy();
         // Type the transport failure so the proxy can recover sibling sessions
         // wedged by a daemon restart (#2599/#2737) instead of surfacing a raw
         // ECONNRESET/EPIPE/"socket hang up" that its recovery does not match.
@@ -657,7 +695,11 @@ export class DaemonClient {
         removeAbortListener = () => signal.removeEventListener("abort", onAbort);
       }
 
-      this.socket = createConnection(this.socketPath, () => {
+      const isStaleSocket = () => this.socket !== null && this.socket !== socket;
+      const socket = createConnection(this.socketPath, () => {
+        if (settled || socket.destroyed || isStaleSocket()) {
+          return;
+        }
         this.timer.clearTimeout(timeout);
         removeAbortListener();
         this.buffer = "";
@@ -669,17 +711,29 @@ export class DaemonClient {
           resolve();
         }
       });
+      this.socket = socket;
 
-      this.socket.on("data", (data) => {
-        this.handleData(data);
+      socket.on("data", (data) => {
+        if (isStaleSocket()) {
+          return;
+        }
+        this.handleData(typeof data === "string" ? Buffer.from(data) : data);
       });
 
-      this.socket.on("error", (error) => {
+      socket.on("error", (error) => {
+        if (isStaleSocket()) {
+          return;
+        }
         logger.error(`Daemon socket error: ${error.message}`);
         fail(error);
       });
 
-      this.socket.on("close", () => {
+      socket.on("close", () => {
+        // fail() clears this.socket before destroy emits close. Preserve that
+        // notification path; only a different installed socket makes this stale.
+        if (isStaleSocket()) {
+          return;
+        }
         this.connected = false;
         this.socket = null;
         this.buffer = "";

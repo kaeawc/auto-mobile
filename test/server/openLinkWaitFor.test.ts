@@ -543,6 +543,8 @@ describe("buildOpenLinkPayload", () => {
     expect(payload.observation).toBe(openResult.observation);
     expect("awaitTimeout" in payload).toBe(false);
     expect("awaitedElement" in payload).toBe(false);
+    expect("timeoutReason" in payload).toBe(false);
+    expect(payload).toEqual({ message: "Opened link slack://open", ...openResult });
   });
 
   test("failure message describes the open error", () => {
@@ -552,6 +554,24 @@ describe("buildOpenLinkPayload", () => {
       null,
     );
     expect(payload.message).toBe("Failed to open automobile://playground: no app handles this URL");
+  });
+
+  test("surfaces the timeout reason when the integrated posture wait times out", () => {
+    const timeoutReason =
+      'Timed out after 5000 ms waiting for posture "closed"; last observed posture "opened"';
+    const payload = buildOpenLinkPayload("slack://open", openResult, {
+      observation: makeObservation("opened"),
+      awaitDuration: 5000,
+      awaitTimeout: true,
+      matched: false,
+      timedOut: true,
+      timeoutReason,
+      polls: 3,
+      waitMs: 5000,
+      candidates: [],
+    });
+    expect(payload.timeoutReason).toBe(timeoutReason);
+    expect(payload.timedOut).toBe(true);
   });
 
   test("surfaces the awaited observation and await fields when a wait occurred", () => {

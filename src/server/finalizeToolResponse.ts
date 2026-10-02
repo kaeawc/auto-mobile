@@ -92,6 +92,7 @@ const OBSERVE_WAIT_METADATA_KEYS = [
   "matched",
   "settled",
   "timedOut",
+  "timeoutReason",
   "polls",
   "waitMs",
   "matchedElement",

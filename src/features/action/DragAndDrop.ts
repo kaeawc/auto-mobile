@@ -38,6 +38,8 @@ import {
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
 
+// Minimums also match the documented defaults (press 600, drag 300, hold 100 ms)
+// shared by default-display, explicit-display CtrlProxy/adb (drag only), and iOS paths.
 export const PRESS_DURATION_MIN_MS = 600;
 export const PRESS_DURATION_MAX_MS = 3000;
 export const DRAG_DURATION_MIN_MS = 300;
@@ -108,7 +110,7 @@ export class DragAndDrop extends BaseVisualChange {
     const destination = this.resolveTarget(hierarchy, options.target, "target");
     const start = this.geometry.getElementCenter(source);
     const end = this.geometry.getElementCenter(destination);
-    const duration = options.dragDurationMs ?? 600;
+    const duration = this.getDragDurationMs(options);
     const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
       this.accessibilityService,
       target.displayId,

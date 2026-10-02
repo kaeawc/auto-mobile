@@ -872,7 +872,7 @@ describe("explicit action display", () => {
 
     expect(result.success).toBe(true);
     expect(fakeAdb.getAllCommands()).toContain(
-      "shell input touchscreen -d 2 draganddrop 50 40 150 140 600",
+      "shell input touchscreen -d 2 draganddrop 50 40 150 140 300",
     );
   });
 

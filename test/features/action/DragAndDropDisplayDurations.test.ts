@@ -91,6 +91,18 @@ afterEach(() => {
 const endpoints = { source: { text: "Source" }, target: { text: "Target" } };
 
 describe("dragAndDrop display durations", () => {
+  for (const display of [undefined, "external"]) {
+    test(`CtrlProxy ${display ?? "default"} display uses the documented default durations`, async () => {
+      const { action, adb, drag } = fixture({ supportsDisplay: true, display });
+      const result = await action.execute({ ...endpoints, display });
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(300);
+      expect(drag).toHaveBeenCalledTimes(1);
+      expect(drag.mock.calls[0]?.slice(4, 7)).toEqual([600, 300, 100]);
+      expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
+    });
+  }
+
   for (const durations of [
     { pressDurationMs: 700 },
     { holdDurationMs: 200 },
@@ -111,7 +123,7 @@ describe("dragAndDrop display durations", () => {
         150,
         140,
         durations.pressDurationMs ?? 600,
-        durations.dragDurationMs ?? 600,
+        durations.dragDurationMs ?? 300,
         durations.holdDurationMs ?? 100,
         expect.any(Number),
         undefined,
@@ -142,21 +154,33 @@ describe("dragAndDrop display durations", () => {
     expect(result.success).toBe(true);
     expect(drag).not.toHaveBeenCalled();
     expect(adb.getAllCommands()).toContain(
-      "shell input touchscreen -d 2 draganddrop 50 40 150 140 600",
+      "shell input touchscreen -d 2 draganddrop 50 40 150 140 300",
     );
   });
 
-  test("ordinary default display forwards press and hold without a display id", async () => {
+  test("adb external display forwards an explicit drag duration", async () => {
+    const { action, adb, drag } = fixture({ supportsDisplay: false, display: "external" });
+    const result = await action.execute({ ...endpoints, display: "external", dragDurationMs: 500 });
+    expect(result.success).toBe(true);
+    expect(result.duration).toBe(500);
+    expect(drag).not.toHaveBeenCalled();
+    expect(adb.getAllCommands()).toContain(
+      "shell input touchscreen -d 2 draganddrop 50 40 150 140 500",
+    );
+  });
+
+  test("ordinary default display forwards explicit durations without a display id", async () => {
     const { action, adb, drag } = fixture({ supportsDisplay: false });
     const result = await action.execute({
       ...endpoints,
       pressDurationMs: 700,
+      dragDurationMs: 500,
       holdDurationMs: 200,
     });
     expect(result.success).toBe(true);
     expect(drag).toHaveBeenCalledTimes(1);
     const args = drag.mock.calls[0];
-    expect(args?.slice(0, 7)).toEqual([50, 40, 150, 140, 700, 300, 200]);
+    expect(args?.slice(0, 7)).toEqual([50, 40, 150, 140, 700, 500, 200]);
     expect(args?.[10]).toBeUndefined();
     expect(adb.wasCommandExecuted("touchscreen")).toBe(false);
   });

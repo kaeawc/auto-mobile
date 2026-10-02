@@ -1,5 +1,6 @@
 import { ActionableError } from "../../../models/ActionableError";
 import type { ElementBounds } from "../../../models/ElementBounds";
+import { nativeBoundsInRaster, snapRasterBounds, RASTER_SCALE_TOLERANCE } from "./rasterGeometry";
 import type { ImageBackend } from "../../../utils/image/backend/ImageBackend";
 
 export interface SnapshotGeometry {
@@ -71,36 +72,17 @@ export async function cropSnapshot(
   const nativeHeight = quarterTurn ? width : height;
   const scaleX = metadata.width / nativeWidth;
   const scaleY = metadata.height / nativeHeight;
-  if (Math.abs(scaleX - scaleY) > 0.02) {
+  if (Math.abs(scaleX - scaleY) > RASTER_SCALE_TOLERANCE) {
     throw new ActionableError(
       `${label} screenshot and screen geometry have incompatible aspect ratios`,
     );
   }
-  const corners = [
-    [clippedBounds.left, clippedBounds.top],
-    [clippedBounds.right, clippedBounds.top],
-    [clippedBounds.left, clippedBounds.bottom],
-    [clippedBounds.right, clippedBounds.bottom],
-  ].map(([x, y]) => {
-    if (quarterTurn && geometry.rotation === 1) {
-      return [y, width - x];
-    }
-    if (quarterTurn) {
-      return [height - y, x];
-    }
-    if (halfTurn) {
-      return [width - x, height - y];
-    }
-    return [x, y];
-  });
-  const xs = corners.map(([x]) => x * scaleX);
-  const ys = corners.map(([, y]) => y * scaleY);
-  const rasterBounds = {
-    left: Math.max(0, Math.floor(Math.min(...xs))),
-    top: Math.max(0, Math.floor(Math.min(...ys))),
-    right: Math.min(metadata.width, Math.ceil(Math.max(...xs))),
-    bottom: Math.min(metadata.height, Math.ceil(Math.max(...ys))),
-  };
+  const turn = quarterTurn || halfTurn ? geometry.rotation! : 0;
+  const rasterBounds = snapRasterBounds(
+    nativeBoundsInRaster(clippedBounds, geometry.screenSize, turn),
+    { x: scaleX, y: scaleY },
+    metadata,
+  );
   const imageSize = {
     width: rasterBounds.right - rasterBounds.left,
     height: rasterBounds.bottom - rasterBounds.top,
@@ -121,8 +103,8 @@ export async function cropSnapshot(
     pixelsPerNativeUnit: { x: scaleX, y: scaleY },
     scaleProvenance:
       geometry.nativeScale !== undefined &&
-      Math.abs(geometry.nativeScale - scaleX) <= 0.02 &&
-      Math.abs(geometry.nativeScale - scaleY) <= 0.02
+      Math.abs(geometry.nativeScale - scaleX) <= RASTER_SCALE_TOLERANCE &&
+      Math.abs(geometry.nativeScale - scaleY) <= RASTER_SCALE_TOLERANCE
         ? "native-scale-confirmed"
         : "raster-dimensions",
     clipped:

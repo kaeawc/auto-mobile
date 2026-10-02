@@ -23227,6 +23227,274 @@
           "description": "Device label",
           "type": "string"
         },
+        "image": {
+          "description": "Screenshot-relative point; mutually exclusive with outer x, y, and coordinateSpace. Without image, x and y are required.",
+          "type": "object",
+          "properties": {
+            "unit": {
+              "description": "Use normalized image fractions (preferred); pixels means the real file raster, never a resized preview",
+              "type": "string",
+              "enum": ["normalized", "pixels"]
+            },
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "crop": {
+                      "description": "Pass the whole observe.crop object from the referenced image",
+                      "type": "object",
+                      "properties": {
+                        "cropPath": {
+                          "type": "string"
+                        },
+                        "unit": {
+                          "type": "string",
+                          "enum": ["pixels", "points"]
+                        },
+                        "requestedBounds": {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["left", "top", "right", "bottom"],
+                          "additionalProperties": false
+                        },
+                        "clippedBounds": {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["left", "top", "right", "bottom"],
+                          "additionalProperties": false
+                        },
+                        "clipped": {
+                          "type": "boolean"
+                        },
+                        "screenSize": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "height": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "imageSize": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "height": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "pixelsPerNativeUnit": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "y": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": ["x", "y"],
+                          "additionalProperties": false
+                        },
+                        "scaleProvenance": {
+                          "type": "string",
+                          "enum": ["raster-dimensions", "native-scale-confirmed"]
+                        },
+                        "rasterBounds": {
+                          "type": "object",
+                          "properties": {
+                            "left": {
+                              "type": "number"
+                            },
+                            "top": {
+                              "type": "number"
+                            },
+                            "right": {
+                              "type": "number"
+                            },
+                            "bottom": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["left", "top", "right", "bottom"],
+                          "additionalProperties": false
+                        },
+                        "screenshotOrientation": {
+                          "type": "string",
+                          "enum": ["display", "native"]
+                        }
+                      },
+                      "required": [
+                        "unit",
+                        "requestedBounds",
+                        "clippedBounds",
+                        "clipped",
+                        "screenSize",
+                        "imageSize",
+                        "pixelsPerNativeUnit",
+                        "scaleProvenance",
+                        "rasterBounds",
+                        "screenshotOrientation"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "rotation": {
+                      "description": "observe.rotation; required for native screenshot orientation",
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "const": 0
+                        },
+                        {
+                          "type": "number",
+                          "const": 1
+                        },
+                        {
+                          "type": "number",
+                          "const": 2
+                        },
+                        {
+                          "type": "number",
+                          "const": 3
+                        }
+                      ]
+                    }
+                  },
+                  "required": ["crop"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "screenshot": {
+                      "type": "object",
+                      "properties": {
+                        "screenSize": {
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            },
+                            "height": {
+                              "type": "number",
+                              "exclusiveMinimum": 0
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "screenshotOrientation": {
+                          "type": "string",
+                          "enum": ["display", "native"]
+                        },
+                        "rotation": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "const": 0
+                            },
+                            {
+                              "type": "number",
+                              "const": 1
+                            },
+                            {
+                              "type": "number",
+                              "const": 2
+                            },
+                            {
+                              "type": "number",
+                              "const": 3
+                            }
+                          ]
+                        },
+                        "imageSize": {
+                          "description": "Real file raster dimensions; required for pixels",
+                          "type": "object",
+                          "properties": {
+                            "width": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "height": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": ["width", "height"],
+                          "additionalProperties": false
+                        },
+                        "nativeScale": {
+                          "description": "Optional provenance only; never screenScale",
+                          "type": "number",
+                          "exclusiveMinimum": 0
+                        }
+                      },
+                      "required": ["screenSize", "screenshotOrientation"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["screenshot"],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": ["unit", "x", "y", "source"],
+          "additionalProperties": false
+        },
         "action": {
           "description": "Coordinate gesture (default: tap)",
           "type": "string",
@@ -23239,9 +23507,8 @@
           "maximum": 10000
         }
       },
-      "required": ["x", "y"],
       "additionalProperties": false,
-      "description": "Tap, long press, or double tap a screen point. Bare x/y use the platform-native coordinate space returned by observe."
+      "description": "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates; image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop."
     }
   },
   {

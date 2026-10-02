@@ -1,3 +1,5 @@
+import { normalizedAxis } from "./coordinateAxis";
+import { resolveImageRelativePoint } from "./imageRelativePoint";
 import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -82,7 +84,30 @@ function gestureOptionError(options: TapAtOptions): string | undefined {
   return undefined;
 }
 
+function inputPoint(options: TapAtOptions): { x: number; y: number } {
+  return options.image ?? { x: options.x, y: options.y };
+}
+
+function failurePoint(
+  options: TapAtOptions,
+  platform: BootedDevice["platform"],
+): { x: number; y: number } {
+  const point = inputPoint(options);
+  return platform === "android" && !options.image
+    ? { x: Math.round(point.x), y: Math.round(point.y) }
+    : point;
+}
+
+function imageOptionError(options: TapAtOptions): string | undefined {
+  return options.x !== undefined || options.y !== undefined || options.coordinateSpace !== undefined
+    ? "tapAt image is mutually exclusive with x, y, and coordinateSpace"
+    : undefined;
+}
+
 function coordinateOptionError(options: TapAtOptions): string | undefined {
+  if (options.image !== undefined) {
+    return imageOptionError(options);
+  }
   const { x, y } = options;
   const space = options.coordinateSpace ?? "absolute";
   if (space !== "absolute" && space !== "normalized" && space !== "percent") {
@@ -107,7 +132,7 @@ function resolveAxis(value: number, size: number, space: TapAtOptions["coordinat
   if (max === undefined) {
     return value;
   }
-  return value === max ? size * (1 - Number.EPSILON) : (value / max) * size;
+  return normalizedAxis(value / max, size);
 }
 
 function hasPositiveScreenSize(screenSize: ObserveResult["screenSize"] | undefined): boolean {
@@ -122,14 +147,24 @@ function hasPositiveScreenSize(screenSize: ObserveResult["screenSize"] | undefin
   );
 }
 
+/** Android rounds to integer raster pixels; keep crop endpoints on the final included pixel. */
+function androidIntegerLimits(
+  options: TapAtOptions,
+  screenSize: ObserveResult["screenSize"],
+): { width: number; height: number } {
+  const source = options.image?.source;
+  return source && "crop" in source
+    ? { width: source.crop.rasterBounds.right, height: source.crop.rasterBounds.bottom }
+    : screenSize;
+}
+
 /** Shared native point resolution for coordinate dispatch and hierarchy preview. */
 export function resolveTapAtCoordinates(
   options: TapAtOptions,
   observeResult: ObserveResult,
   platform: BootedDevice["platform"],
 ): { x: number; y: number } | { x: number; y: number; error: string } {
-  const rawX = options.x;
-  const rawY = options.y;
+  const { x: rawX, y: rawY } = inputPoint(options);
   const optionError = coordinateOptionError(options);
   if (optionError) {
     return { x: rawX, y: rawY, error: optionError };
@@ -144,8 +179,13 @@ export function resolveTapAtCoordinates(
       error: "tapAt requires a positive screenSize from a fresh observation",
     };
   }
-  const resolvedX = resolveAxis(rawX, screenSize.width, space);
-  const resolvedY = resolveAxis(rawY, screenSize.height, space);
+  const point = options.image
+    ? resolveImageRelativePoint(options.image, platform === "ios" ? "ios" : "android", screenSize)
+    : {
+        x: resolveAxis(rawX, screenSize.width, space),
+        y: resolveAxis(rawY, screenSize.height, space),
+      };
+  const { x: resolvedX, y: resolvedY } = point;
   if (
     resolvedX < 0 ||
     resolvedX >= screenSize.width ||
@@ -158,13 +198,14 @@ export function resolveTapAtCoordinates(
       error: `tapAt coordinates (${rawX}, ${rawY}) are outside screen bounds [0, ${screenSize.width}) x [0, ${screenSize.height})`,
     };
   }
+  const limits = androidIntegerLimits(options, screenSize);
   const x =
     platform === "android"
-      ? Math.min(Math.round(resolvedX), Math.ceil(screenSize.width) - 1)
+      ? Math.min(Math.round(resolvedX), Math.ceil(limits.width) - 1)
       : resolvedX;
   const y =
     platform === "android"
-      ? Math.min(Math.round(resolvedY), Math.ceil(screenSize.height) - 1)
+      ? Math.min(Math.round(resolvedY), Math.ceil(limits.height) - 1)
       : resolvedY;
   return { x, y };
 }
@@ -307,8 +348,8 @@ export class TapAtCoordinate extends BaseVisualChange {
     if (stale) {
       return {
         success: false,
-        x: options.x,
-        y: options.y,
+        x: inputPoint(options).x,
+        y: inputPoint(options).y,
         action,
         error: stale,
       };
@@ -372,7 +413,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         this.hasStaleCallerRevision(this.displayTransitionReader.revision(this.device.deviceId))
       ) {
         return withStaleDisplay(
-          { success: false, x: options.x, y: options.y, action },
+          { success: false, x: inputPoint(options).x, y: inputPoint(options).y, action },
           this.staleDisplay(transitionRevision.observedGeneration),
         );
       }
@@ -387,7 +428,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           });
           if (this.currentActionRevision() !== transitionRevision.revision) {
             return withStaleDisplay(
-              { success: false, x: options.x, y: options.y, action },
+              { success: false, x: inputPoint(options).x, y: inputPoint(options).y, action },
               this.staleDisplay(transitionRevision.observedGeneration),
             );
           }
@@ -395,8 +436,8 @@ export class TapAtCoordinate extends BaseVisualChange {
           if (stale) {
             return {
               success: false,
-              x: options.x,
-              y: options.y,
+              x: inputPoint(options).x,
+              y: inputPoint(options).y,
               action,
               error: stale,
             };
@@ -461,8 +502,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           predictionContext: {
             toolName: "tapAt",
             toolArgs: {
-              x: options.x,
-              y: options.y,
+              ...options,
               action,
               platform: this.device.platform,
             },
@@ -471,15 +511,12 @@ export class TapAtCoordinate extends BaseVisualChange {
       );
     } catch (error) {
       logger.warn(`tapAt dispatch failed: ${errorMessage(error)}`, error);
+      const point = dispatchedCoordinates ?? failurePoint(options, this.device.platform);
       return withStaleDisplay(
         {
           success: false,
-          x:
-            dispatchedCoordinates?.x ??
-            (this.device.platform === "android" ? Math.round(options.x) : options.x),
-          y:
-            dispatchedCoordinates?.y ??
-            (this.device.platform === "android" ? Math.round(options.y) : options.y),
+          x: point.x,
+          y: point.y,
           error: `Failed to tap at coordinates: ${errorMessage(error)}`,
           action,
         },
@@ -693,7 +730,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   ): { x: number; y: number } | { x: number; y: number; error: string } {
     const gestureError = gestureOptionError(options);
     if (gestureError) {
-      return { x: options.x, y: options.y, error: gestureError };
+      return { x: inputPoint(options).x, y: inputPoint(options).y, error: gestureError };
     }
     return resolveTapAtCoordinates(options, observeResult, this.device.platform);
   }

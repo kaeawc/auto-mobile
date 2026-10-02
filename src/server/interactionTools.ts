@@ -1,3 +1,4 @@
+import { imageRelativePointSchema } from "./imageRelativePointSchema";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
 import { toActionableError } from "../models/ActionableError";
 import { nodeAttributes } from "../models/ViewHierarchyResult";
@@ -519,7 +520,10 @@ const coordinatePointInputSchema = () =>
 
 type CoordinatePointInput = z.infer<ReturnType<typeof coordinatePointInputSchema>>;
 
-function validateCoordinateRange(value: CoordinatePointInput, context: z.RefinementCtx): void {
+function validateCoordinateRange(
+  value: { x?: number; y?: number; coordinateSpace?: CoordinatePointInput["coordinateSpace"] },
+  context: z.RefinementCtx,
+): void {
   const max =
     value.coordinateSpace === "normalized"
       ? 1
@@ -530,7 +534,12 @@ function validateCoordinateRange(value: CoordinatePointInput, context: z.Refinem
     return;
   }
   for (const axis of ["x", "y"] as const) {
-    if (!Number.isFinite(value[axis]) || value[axis] < 0 || value[axis] > max) {
+    if (
+      value[axis] === undefined ||
+      !Number.isFinite(value[axis]) ||
+      value[axis] < 0 ||
+      value[axis] > max
+    ) {
       context.addIssue({
         code: "custom",
         message: `${axis} must be between 0 and ${max}`,
@@ -543,6 +552,13 @@ function validateCoordinateRange(value: CoordinatePointInput, context: z.Refinem
 export const tapAtSchema = withJsonSchemaOverride(
   coordinatePointInputSchema()
     .extend({
+      x: coordinatePointInputSchema().shape.x.optional(),
+      y: coordinatePointInputSchema().shape.y.optional(),
+      image: imageRelativePointSchema
+        .optional()
+        .describe(
+          "Screenshot-relative point; mutually exclusive with outer x, y, and coordinateSpace. Without image, x and y are required.",
+        ),
       action: z
         .enum(["tap", "longPress", "doubleTap"])
         .optional()
@@ -565,15 +581,34 @@ export const tapAtSchema = withJsonSchemaOverride(
           path: ["durationMs"],
         });
       }
-      validateCoordinateRange(value, context);
+      if (value.image !== undefined) {
+        if (value.x !== undefined || value.y !== undefined || value.coordinateSpace !== undefined) {
+          context.addIssue({
+            code: "custom",
+            message: "image is mutually exclusive with x, y, and coordinateSpace",
+            path: ["image"],
+          });
+        }
+      } else {
+        for (const axis of ["x", "y"] as const) {
+          if (value[axis] === undefined) {
+            context.addIssue({
+              code: "custom",
+              message: `${axis} is required without image`,
+              path: [axis],
+            });
+          }
+        }
+        validateCoordinateRange(value, context);
+      }
     }),
   (js) => {
     js.description =
-      "Tap, long press, or double tap a screen point. Bare x/y use the platform-native coordinate space returned by observe.";
+      "Tap, long press, or double tap a screen point. Bare x/y use platform-native observe coordinates; image uses explicit normalized fractions (preferred) or real raster pixels from a screenshot or observe.crop.";
   },
 );
 
-/** The preview takes the same coordinate target as tapAt without dispatching input. */
+/** The preview retains the bare coordinate target without dispatching input. */
 export const hitTestSchema = withJsonSchemaOverride(
   coordinatePointInputSchema().superRefine(validateCoordinateRange),
   (js) => {
@@ -1916,11 +1951,11 @@ export async function tapAtHandler(
   RecompositionTracker.getInstance().recordInteraction();
   const result = await tapAtElementFactory(device).execute(
     {
-      x: args.x,
-      y: args.y,
+      ...(args.image !== undefined
+        ? { image: args.image }
+        : { x: args.x, y: args.y, coordinateSpace: args.coordinateSpace }),
       display: args.display,
       snapshotId: args.snapshotId,
-      coordinateSpace: args.coordinateSpace,
       action: args.action,
       durationMs: args.durationMs,
     },

@@ -19,7 +19,6 @@ import android.graphics.Point
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
-import android.os.HandlerThread
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.Spanned
@@ -573,22 +572,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * `StrokeDescription.continueStroke` must be issued promptly after the previous stroke completes
    * or the framework cancels the continued gesture; the main thread runs the accessibility-event
    * and hierarchy work (e.g. a ~460ms `hierarchyDebouncer` pass) that would stall a continuation
-   * posted there long enough to trip that cancel. A private [HandlerThread] keeps the continuation
-   * cadence off that contention. The gesture state machine is single-threaded, so every gesture
-   * mutation and pump is funnelled onto this one thread (see [GestureStreamSession]); WebSocket
-   * requests arrive on [serviceScope]'s IO threads and hand their work here.
+   * posted there long enough to trip that cancel. A private [HandlerGestureThread] keeps the
+   * continuation cadence off that contention. The gesture state machine is single-threaded, so
+   * every gesture mutation and pump is funnelled onto this one thread (see [GestureStreamSession]);
+   * WebSocket requests arrive on [serviceScope]'s IO threads and hand their work here.
    */
-  private val gestureHandlerThread = HandlerThread("automobile-gesture-dispatch").apply { start() }
-  private val gestureHandler = Handler(gestureHandlerThread.looper)
+  // Android constructs services without arguments. Resolve this after construction so tests can
+  // supply a deterministic queue before onCreate, without starting a real HandlerThread.
+  internal var gestureThreadFactory: () -> GestureThread = ::HandlerGestureThread
+  private val gestureThread by lazy { gestureThreadFactory() }
+  private val gestureHandler: Handler
+    get() = gestureThread.handler
 
   private val gestureStreamRouter =
     GestureStreamRouter(
-      runOnGestureThread = { gestureHandler.post(it) },
+      runOnGestureThread = { gestureThread.post(it) },
       newSession = { onFinished ->
         GestureStreamSession(
           coordinator = GestureStreamCoordinator(),
           dispatcher = AccessibilityStrokeDispatcher(),
-          runOnGestureThread = { gestureHandler.post(it) },
+          runOnGestureThread = { gestureThread.post(it) },
           onFinished = onFinished,
         )
       },
@@ -1260,6 +1263,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       }
     }
 
+  override fun onCreate() {
+    super.onCreate()
+    // Keep the production queue running from service creation, before any connection or request.
+    gestureThread
+  }
+
   override fun onServiceConnected() {
     super.onServiceConnected()
     Log.d(TAG, "onServiceConnected")
@@ -1708,7 +1717,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // pending end results, and it ignores any late callback.
     teardownGestures(
       close = gestureStreamRouter::close,
-      quitThread = { gestureHandlerThread.quitSafely() },
+      quitThread = { gestureThread.quitSafely() },
       cancelScope = { serviceScope.cancel() },
       onCloseFailure = { Log.w(TAG, "Failed to close streamed gestures", it) },
     )

@@ -1,29 +1,47 @@
 import Foundation
 import os
 
-/// MCP client over the StreamableHTTP transport (JSON-RPC 2.0). Concurrency (closes race #3): the
-/// reference mutated `sessionId`/`requestId` on both the caller thread and the `URLSession` completion
-/// thread, ordered only by the request semaphore. Here they are **lock-confined**
-/// (`OSAllocatedUnfairLock`), so every read/write is atomic. `@unchecked Sendable` only because the
-/// stored `URLSession` is not `Sendable` (it is documented thread-safe; used read-only after init).
-public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Sendable {
+/// StreamableHTTP JSON-RPC client. Short-held locks confine ids and session state; independent
+/// requests may execute concurrently. Deadline losers never reach the session-header update.
+public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
     private struct State: Sendable {
         var sessionId: String?
         var requestId: Int64 = 0
+        var generation: UInt64 = 0
+    }
+
+    /// Internal injected seams keep the public URLSession initializer unchanged.
+    struct Options: Sendable {
+        var logger: any AutoMobileLogger = StdoutLogger()
+        var scheduler: any DeadlineScheduler = SystemDeadlineScheduler()
     }
 
     private let state = OSAllocatedUnfairLock<State>(initialState: State())
     private let endpoint: URL
-    private let logger: AutoMobileLogger
-    private let session: URLSession
+    private let logger: any AutoMobileLogger
+    private let performer: any HTTPRequestPerforming
+    private let scheduler: any DeadlineScheduler
 
-    public init(endpoint: URL, logger: AutoMobileLogger = StdoutLogger(), session: URLSession = .shared) throws {
-        guard endpoint.scheme != nil else {
-            throw MCPClientError.invalidEndpoint(endpoint.absoluteString)
-        }
+    public convenience init(
+        endpoint: URL,
+        logger: AutoMobileLogger = StdoutLogger(),
+        session: URLSession = .shared
+    )
+        throws
+    {
+        try self.init(
+            endpoint: endpoint,
+            performer: URLSessionRequestPerformer(session: session),
+            options: Options(logger: logger)
+        )
+    }
+
+    init(endpoint: URL, performer: any HTTPRequestPerforming, options: Options = Options()) throws {
+        guard endpoint.scheme != nil else { throw MCPClientError.invalidEndpoint(endpoint.absoluteString) }
         self.endpoint = endpoint
-        self.logger = logger
-        self.session = session
+        logger = options.logger
+        self.performer = performer
+        scheduler = options.scheduler
     }
 
     /// The frozen `initialize` params — `clientInfo.name` is a name-sensitive wire contract.
@@ -49,85 +67,116 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
         return try? JSONSerialization.data(withJSONObject: payload, options: [])
     }
 
+    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
+    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
+    /// The operation must not need the main actor; its own deadline bounds the blocking wait.
     public func initialize(timeout: TimeInterval) throws {
-        _ = try sendRequest(method: "initialize", params: Self.initializeParams(), timeout: timeout)
+        try BlockingAsyncCall.run { try await self.initialize(timeout: timeout) }
     }
 
+    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
+    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
+    /// The operation must not need the main actor; its own deadline bounds the blocking wait.
     public func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
-        if state.withLock({ $0.sessionId }) == nil {
-            try initialize(timeout: timeout)
-        }
-
-        let params: [String: Any] = [
-            "name": name,
-            "arguments": arguments,
-        ]
-
-        do {
-            let result = try sendRequest(method: "tools/call", params: params, timeout: timeout)
-            let text = try extractTextContent(from: result)
-            return MCPToolResponse(text: text)
-        } catch let error as MCPClientError where error == .sessionExpired {
-            resetSession()
-            try initialize(timeout: timeout)
-            let result = try sendRequest(method: "tools/call", params: params, timeout: timeout)
-            let text = try extractTextContent(from: result)
-            return MCPToolResponse(text: text)
-        }
+        let params = try encodeParams(["name": name, "arguments": arguments])
+        return try BlockingAsyncCall.run { try await self.callTool(params: params, timeout: timeout) }
     }
 
+    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
+    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
+    /// The operation must not need the main actor; its own deadline bounds the blocking wait.
     public func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
-        if state.withLock({ $0.sessionId }) == nil {
-            try initialize(timeout: timeout)
-        }
+        try BlockingAsyncCall.run { try await self.readResource(uri: uri, timeout: timeout) }
+    }
 
-        let params: [String: Any] = [
-            "uri": uri,
-        ]
+    public func initialize(timeout: TimeInterval) async throws {
+        PerfTimer.log("HTTPClient.initialize START")
+        _ = try await sendRequest(method: "initialize", params: encodeParams(Self.initializeParams()), timeout: timeout)
+        PerfTimer.log("HTTPClient.initialize END")
+    }
 
+    public func callTool(
+        name: String,
+        arguments: [String: Any],
+        timeout: TimeInterval
+    )
+        async throws -> MCPToolResponse
+    {
+        let params = try encodeParams(["name": name, "arguments": arguments])
+        return try await callTool(params: params, timeout: timeout)
+    }
+
+    private func callTool(params: Data, timeout: TimeInterval) async throws -> MCPToolResponse {
+        PerfTimer.log("HTTPClient.callTool START")
+        let result = try await requestWithSession(method: "tools/call", params: params, timeout: timeout)
+        let text = try extractTextContent(from: result)
+        PerfTimer.log("HTTPClient.callTool END: responseLength=\(text.count)")
+        return MCPToolResponse(text: text)
+    }
+
+    public func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
+        let params = try encodeParams(["uri": uri])
+        PerfTimer.log("HTTPClient.readResource START: uri=\(uri)")
+        let result = try await requestWithSession(method: "resources/read", params: params, timeout: timeout)
+        let text = try extractResourceTextContent(from: result)
+        PerfTimer.log("HTTPClient.readResource END: responseLength=\(text.count)")
+        return MCPResourceResponse(text: text)
+    }
+
+    private func requestWithSession(method: String, params: Data, timeout: TimeInterval) async throws -> [String: Any] {
+        try Task.checkCancellation()
+        if state.withLock({ $0.sessionId }) == nil { try await initialize(timeout: timeout) }
         do {
-            let result = try sendRequest(method: "resources/read", params: params, timeout: timeout)
-            let text = try extractResourceTextContent(from: result)
-            return MCPResourceResponse(text: text)
+            return try await sendRequest(method: method, params: params, timeout: timeout)
         } catch let error as MCPClientError where error == .sessionExpired {
             resetSession()
-            try initialize(timeout: timeout)
-            let result = try sendRequest(method: "resources/read", params: params, timeout: timeout)
-            let text = try extractResourceTextContent(from: result)
-            return MCPResourceResponse(text: text)
+            try await initialize(timeout: timeout)
+            return try await sendRequest(method: method, params: params, timeout: timeout)
         }
     }
 
     public func resetSession() {
-        state.withLock { $0.sessionId = nil }
+        state.withLock {
+            $0.sessionId = nil
+            $0.generation &+= 1
+        }
     }
 
-    private func sendRequest(method: String, params: [String: Any], timeout: TimeInterval) throws -> [String: Any] {
-        let id = state.withLock { current -> Int64 in
-            current.requestId += 1
-            return current.requestId
-        }
-        guard let data = Self.encodeJSONRPCBody(id: id, method: method, params: params) else {
+    private func encodeParams(_ params: [String: Any]) throws -> Data {
+        // Foundation can raise an Objective-C exception for unsupported values, outside Swift's
+        // throws mechanism. Validate first so encoding failure remains a recoverable client error.
+        guard JSONSerialization.isValidJSONObject(params),
+              let data = try? JSONSerialization.data(withJSONObject: params)
+        else {
             throw MCPClientError.requestFailed("Failed to encode MCP request")
         }
+        return data
+    }
+
+    private func sendRequest(method: String, params: Data, timeout: TimeInterval) async throws -> [String: Any] {
+        try Task.checkCancellation()
+        let snapshot = state.withLock { current in
+            current.requestId += 1
+            return (current.requestId, current.sessionId, current.generation)
+        }
+        let id = snapshot.0
+        guard let params = try JSONSerialization.jsonObject(with: params) as? [String: Any],
+              let data = Self.encodeJSONRPCBody(id: id, method: method, params: params)
+        else { throw MCPClientError.requestFailed("Failed to encode MCP request") }
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.httpBody = data
+        // URLSession's timeout and our cancellable deadline race at the same interval. Either winner
+        // maps to requestFailed("Request timed out"); the former semaphore's +1 grace is unnecessary.
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json, text/event-stream", forHTTPHeaderField: "Accept")
-        if let sessionId = state.withLock({ $0.sessionId }) {
-            request.setValue(sessionId, forHTTPHeaderField: "MCP-Session-Id")
-        }
-
-        let body = try performRequest(request: request, timeout: timeout)
+        if let sessionId = snapshot.1 { request.setValue(sessionId, forHTTPHeaderField: "MCP-Session-Id") }
+        let body = try await performRequest(request: request, timeout: timeout, generation: snapshot.2)
         let response = try Self.decodeResponse(body, id: id)
-
         if let error = response["error"] as? [String: Any] {
-            let message = error["message"] as? String ?? "Unknown MCP error"
-            throw MCPClientError.serverError(message)
+            throw MCPClientError.serverError(error["message"] as? String ?? "Unknown MCP error")
         }
-
         guard let result = response["result"] as? [String: Any] else {
             throw MCPClientError.invalidResponse("Missing result in MCP response")
         }
@@ -231,57 +280,44 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
         return data.count > limit ? "\(escaped)…" : escaped
     }
 
-    private func performRequest(request: URLRequest, timeout: TimeInterval) throws -> HTTPResponseBody {
-        let semaphore = DispatchSemaphore(value: 0)
-        let box = HTTPResultBox()
-
-        let task = session.dataTask(with: request) { [weak self] data, response, error in
-            defer { semaphore.signal() }
-
-            if let error = error {
-                box.result = .failure(MCPClientError.requestFailed(error.localizedDescription))
-                return
+    private func performRequest(
+        request: URLRequest,
+        timeout: TimeInterval,
+        generation: UInt64
+    )
+        async throws -> HTTPResponseBody
+    {
+        let response: (Data, URLResponse)
+        do {
+            response = try await withDeadline(
+                seconds: timeout, scheduler: scheduler,
+                timeoutError: MCPClientError.requestFailed("Request timed out")
+            ) {
+                try Task.checkCancellation()
+                return try await self.performer.perform(request)
             }
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                box.result = .failure(MCPClientError.invalidResponse("Missing HTTP response"))
-                return
+        } catch {
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            if let error = error as? MCPClientError { throw error }
+            if let error = error as? URLError, error.code == .timedOut {
+                throw MCPClientError.requestFailed("Request timed out")
             }
-
-            if httpResponse.statusCode == 404 {
-                box.result = .failure(MCPClientError.sessionExpired)
-                return
-            }
-
-            if let self = self, let sessionHeader = Self.extractSessionId(from: httpResponse) {
-                self.state.withLock { $0.sessionId = sessionHeader }
-            }
-
-            guard let data = data else {
-                box.result = .failure(MCPClientError.invalidResponse("Empty response body"))
-                return
-            }
-            box.result = .success(HTTPResponseBody(
-                data: data,
-                contentType: httpResponse.value(forHTTPHeaderField: "Content-Type")
-            ))
+            throw MCPClientError.requestFailed(error.localizedDescription)
         }
-        task.resume()
-
-        let timeoutResult = semaphore.wait(timeout: .now() + timeout + 1)
-        if timeoutResult == .timedOut {
-            task.cancel()
-            throw MCPClientError.requestFailed("Request timed out")
+        guard let httpResponse = response.1 as? HTTPURLResponse else {
+            throw MCPClientError.invalidResponse("Missing HTTP response")
         }
-
-        switch box.result {
-        case let .success(body):
-            return body
-        case let .failure(error):
-            throw error
-        case .none:
-            throw MCPClientError.requestFailed("Request failed without response")
+        if httpResponse.statusCode == 404 { throw MCPClientError.sessionExpired }
+        // This runs only for the winning response, never inside the deadline child. A reset also
+        // invalidates the snapshot, so an older in-flight response cannot restore a cleared session.
+        if let sessionHeader = Self.extractSessionId(from: httpResponse) {
+            state.withLock { current in
+                if current.generation == generation { current.sessionId = sessionHeader }
+            }
         }
+        return HTTPResponseBody(
+            data: response.0, contentType: httpResponse.value(forHTTPHeaderField: "Content-Type")
+        )
     }
 
     private static func extractSessionId(from response: HTTPURLResponse) -> String? {
@@ -326,10 +362,4 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, @unchecked Send
 struct HTTPResponseBody: Sendable {
     let data: Data
     let contentType: String?
-}
-
-/// Thread-crossing result slot for the `URLSession` completion handler. `@unchecked Sendable`: the
-/// handler writes it before `signal()`, read only after a successful `wait()` — semaphore-ordered.
-private final class HTTPResultBox: @unchecked Sendable {
-    var result: Result<HTTPResponseBody, Error>?
 }

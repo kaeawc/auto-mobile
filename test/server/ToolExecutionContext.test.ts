@@ -19,6 +19,7 @@ import {
 } from "../../src/utils/deviceReadinessLock";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { getAbortSignal } from "../../src/utils/AbortContext";
@@ -470,6 +471,7 @@ describe("ToolExecutionContext", () => {
         timer: fakeTimer,
         installedAppsRepository: fakeAppsRepo,
         deviceManager: staleDeviceManager,
+        retryExecutor: new DefaultRetryExecutor(fakeTimer),
       }),
     );
     await stalePool.initializeWithDevices([createBootedDevice("emulator-5554")]);

@@ -26,6 +26,7 @@ import {
 } from "../devices/deviceUtils";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { SingleFlight } from "../utils/cache/SingleFlight";
 import { type IdGenerator, defaultIdGenerator } from "../utils/IdGenerator";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
@@ -83,7 +84,7 @@ import {
   type EmulatorLossRecoverySettlement,
 } from "./emulatorLossIncident";
 import { EmulatorLossIncidentLedger } from "./emulatorLossIncidentLedger";
-import { IdleDeviceReaper } from "./idleDeviceReaper";
+import { IdleDeviceReaper, type IosLivenessSnapshot } from "./idleDeviceReaper";
 import {
   DeviceRecoveryCoordinator,
   type SessionPreservingRecovery,
@@ -405,9 +406,18 @@ export interface ShutdownIdentityReservation {
   releaseSession: (() => void) | undefined;
 }
 
+const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
+
+interface AllocationDiscoverySnapshots {
+  capturedEntries: ReadonlySet<PooledDevice>;
+  iosLiveness?: IosLivenessSnapshot;
+  androidPresence?: BootedDeviceDiscovery;
+}
+
 interface AssignableIdleDeviceSelection {
   device?: PooledDevice;
   livenessUnknown: boolean;
+  snapshotStale: boolean;
 }
 
 interface DeviceDisconnectSessionReleaser {
@@ -685,6 +695,7 @@ export class DevicePool {
   private readonly emulatorProcessLifecycle: EmulatorProcessLifecycle;
   private readonly missingDeviceLiveness: MissingDeviceLiveness;
   private readonly refreshCoordinator: DevicePoolRefresh;
+  private readonly allocationRefresh = new SingleFlight<"allocation", DevicePoolRefreshResult>();
   private readonly runtimeIdentity: DeviceRuntimeIdentity;
   private readonly shutdownReservationCoordinator: DeviceShutdownReservations;
   private readonly startedDeviceProcesses: Map<string, ChildProcess> = new Map();
@@ -3948,151 +3959,211 @@ export class DevicePool {
     livenessUnknown?: boolean;
     refreshCompleteness?: DiscoveryCompleteness;
   }> {
-    return await this.assignmentMutex.runExclusive(async () => {
-      let candidates = selectCandidates();
-      let totalDevices = candidates.length;
-      let livenessUnknown = false;
-      let refreshCompleteness: DiscoveryCompleteness | undefined;
+    let livenessUnknown = false;
+    let refreshCompleteness: DiscoveryCompleteness | undefined;
+    let refreshed = false;
+    let refreshInconclusive = false;
+    let staleRetries = 0;
 
-      let selection = await this.selectAssignableIdleDevice(candidates);
-      let device = selection.device;
-      livenessUnknown ||= selection.livenessUnknown;
-      candidates = selectCandidates();
-      totalDevices = candidates.length;
+    while (true) {
+      throwIfRequestAborted();
+      const candidatesBeforeDiscovery = selectCandidates();
+      // Only entries idle before discovery may be judged by this pass. A newly
+      // released, added or replaced entry needs its own fresh snapshot.
+      const capturedEntries = new Set(
+        candidatesBeforeDiscovery.filter((device) => device.status === "idle"),
+      );
+      const [iosLiveness, androidPresence] = await raceWithDeadline(
+        () =>
+          Promise.all([
+            candidatesBeforeDiscovery.some(
+              (device) => device.status === "idle" && device.platform === "ios",
+            )
+              ? this.idleDeviceReaper.getIosLivenessSnapshot()
+              : undefined,
+            candidatesBeforeDiscovery.some(
+              (device) =>
+                device.status === "idle" && this.shouldValidatePooledDevicePresence(device),
+            )
+              ? this.takeFreshPresenceDiscovery("android")
+              : undefined,
+          ]),
+        { timer: this.timer, signal: getAbortSignal(), label: "Device allocation discovery" },
+      );
+      const snapshots = { capturedEntries, iosLiveness, androidPresence };
 
-      this.assertHealthyAllocationPossible(candidates, device);
+      // Platform snapshots and refresh discovery are outside this boundary.
+      // In-memory validation and short local DB/incident-ledger writes stay inside.
+      // Shared identity reconciliation retains its bounded unreadable-AVD retries:
+      // splitting its confirmed-identity/quarantine transition needs its own fence.
+      const result = await this.assignmentMutex.runExclusive(async () => {
+        throwIfRequestAborted();
+        let candidates = selectCandidates();
+        let selection = await this.selectAssignableIdleDevice(candidates, snapshots);
+        let device = selection.device;
+        let snapshotStale = selection.snapshotStale;
+        livenessUnknown ||= selection.livenessUnknown;
+        candidates = selectCandidates();
 
-      // If no devices available and pool is empty, try to refresh
-      // This handles race conditions during daemon startup
-      const busyDevicesBeforeRefresh = candidates.filter(
-        (device) => device.status === "busy" || this.isReservedForAssignment(device),
-      ).length;
-      if (
-        !device &&
-        (this.devices.size === 0 || totalDevices === 0 || busyDevicesBeforeRefresh === 0)
-      ) {
-        const refreshReason =
-          this.devices.size === 0
-            ? "empty pool"
-            : totalDevices === 0
-              ? emptyCandidatePoolReason
-              : "no idle usable devices";
-        logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
-        const refreshResult = await this.refreshDevicesInternal(true);
-        refreshCompleteness = refreshResult.completeness;
+        // Selection can await local persistence, and release does not take this
+        // mutex. Revalidate after that await; skip invalid entries without I/O.
+        while (device && !this.isCurrentIdleDeviceAssignable(device)) {
+          snapshotStale = true;
+          candidates = candidates.filter((candidate) => candidate !== device);
+          selection = await this.selectAssignableIdleDevice(candidates, snapshots);
+          device = selection.device;
+          livenessUnknown ||= selection.livenessUnknown;
+        }
+
+        let totalDevices = selectCandidates().length;
+        if (device) {
+          // No await between the final validation above and claim's field writes.
+          const assignment = await this.claimSelectedDeviceForSession(
+            sessionId,
+            device,
+            recoveryTarget,
+          );
+          logger.info(`Assigned device ${device.id} to session ${sessionId}`);
+          return {
+            success: true,
+            deviceId: assignment.deviceId,
+            session: assignment.session,
+            shouldWait: false,
+            totalDevices,
+            shouldRefresh: false,
+            snapshotStale,
+          };
+        }
+
         candidates = selectCandidates();
         totalDevices = candidates.length;
-        selection = await this.selectAssignableIdleDevice(candidates);
-        device = selection.device;
-        livenessUnknown ||= selection.livenessUnknown;
-        if (!device) {
-          candidates = selectCandidates();
-          totalDevices = candidates.length;
-        }
-      }
-
-      if (!device) {
-        // No idle device - check if devices exist but are busy
+        this.assertHealthyAllocationPossible(candidates, device);
         const busyDevices = candidates.filter(
           (candidate) => candidate.status === "busy" || this.isReservedForAssignment(candidate),
         ).length;
-
+        const shouldRefresh =
+          !refreshed && (this.devices.size === 0 || totalDevices === 0 || busyDevices === 0);
+        if (shouldRefresh) {
+          const refreshReason =
+            this.devices.size === 0
+              ? "empty pool"
+              : totalDevices === 0
+                ? emptyCandidatePoolReason
+                : "no idle usable devices";
+          logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
+        }
         return {
           success: false,
           shouldWait: this.shouldWaitForDevice(busyDevices, hasPendingRecovery()),
           totalDevices,
           livenessUnknown,
           refreshCompleteness,
+          shouldRefresh,
+          snapshotStale,
         };
+      });
+      const { shouldRefresh, snapshotStale, ...assignment } = result;
+      if (assignment.success) {
+        return assignment;
       }
+      if (shouldRefresh) {
+        refreshed = true;
+        // Allocation waiters share discovery outside the mutex. The shared task
+        // must not inherit one caller's cancellation; each waiter can stop alone.
+        const refreshResult = await this.allocationRefresh.run(
+          "allocation",
+          () => runWithAbortSignal(undefined, () => this.refreshDevicesInternal(false)),
+          getAbortSignal(),
+        );
+        refreshCompleteness = refreshResult.completeness;
+        // A background refresh can still supersede this flight. Its discarded
+        // result (or failed discovery) cannot establish authoritative absence,
+        // including for exact recovery targets; let the public retry bound it.
+        refreshInconclusive = refreshCompleteness === undefined;
+        continue;
+      }
+      if (refreshInconclusive) {
+        return { ...assignment, shouldWait: true };
+      }
+      if (!snapshotStale) {
+        return assignment;
+      }
+      if (staleRetries++ >= ALLOCATION_SNAPSHOT_STALE_RETRIES) {
+        // Let the existing allocation timeout/retry loop bound sustained churn.
+        return { ...assignment, shouldWait: true };
+      }
+    }
+  }
 
-      const assignment = await this.claimSelectedDeviceForSession(
-        sessionId,
-        device,
-        recoveryTarget,
-      );
-
-      logger.info(`Assigned device ${device.id} to session ${sessionId}`);
-
-      return {
-        success: true,
-        deviceId: assignment.deviceId,
-        session: assignment.session,
-        shouldWait: false,
-        totalDevices,
-      };
-    });
+  private isCurrentIdleDeviceAssignable(device: PooledDevice): boolean {
+    return (
+      this.devices.get(device.id) === device &&
+      device.sessionId === null &&
+      this.selectIdleDevice([device]) === device &&
+      this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)
+    );
   }
 
   private async selectAssignableIdleDevice(
     candidates: PooledDevice[],
+    { capturedEntries, iosLiveness, androidPresence }: AllocationDiscoverySnapshots,
   ): Promise<AssignableIdleDeviceSelection> {
-    const iosLiveness = candidates.some(
-      (device) => device.status === "idle" && device.platform === "ios",
-    )
-      ? await this.idleDeviceReaper.getIosLivenessSnapshot()
-      : undefined;
     let device = this.selectIdleDevice(candidates);
     let livenessUnknown = false;
-    // One fresh Android sweep per selection pass, mirroring the iOS snapshot
-    // above: it already answers presence for every candidate, so a rejected
-    // candidate must not cost another cache-busted `adb devices -l` while
-    // assignmentMutex is held (#6546). Taken lazily, inside the mutex, so it is
-    // never older than the candidate entries it judges.
-    let androidPresence: BootedDeviceDiscovery | undefined;
-
+    let snapshotStale = [...capturedEntries].some(
+      (entry) =>
+        this.devices.get(entry.id) !== entry ||
+        entry.status !== "idle" ||
+        entry.sessionId !== null ||
+        this.isReservedForAssignment(entry),
+    );
+    // One fresh Android sweep per pass (#6546), now taken outside the mutex.
+    // Entry identity fences older snapshots from newer pool incarnations (#8130).
     while (device) {
       const skippedDeviceId = device.id;
-      if (this.devices.get(device.id) !== device) {
-        candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
-        device = this.selectIdleDevice(candidates);
-        continue;
-      }
-      // Quarantined: the serial is there, but which AVD answers on it is not
-      // known, so handing it to a session would bind that session to a runtime the
-      // pool cannot name. Checked here as well as inside the shared gate below so
-      // an already-quarantined entry is skipped without a discovery round trip
-      // (#6863 review).
-      if (!this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)) {
-        candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
-        device = this.selectIdleDevice(candidates);
-        continue;
-      }
-      if (this.shouldValidatePooledDevicePresence(device)) {
-        androidPresence ??= await this.takeFreshPresenceDiscovery("android");
-        if (
+      if (!capturedEntries.has(device)) {
+        snapshotStale = true;
+      } else if (!this.runtimeIdentity.isPooledDeviceIdentityAssignable(device)) {
+        // Quarantined serial identity is not assignable, even if it is present.
+      } else if (!this.isCurrentIdleDeviceAssignable(device)) {
+        snapshotStale = true;
+      } else if (this.shouldValidatePooledDevicePresence(device)) {
+        if (!androidPresence) {
+          // An entry that became idle after discovery needs a fresh pass.
+          snapshotStale = true;
+        } else if (!androidPresence.devices.some((booted) => booted.deviceId === skippedDeviceId)) {
+          // Pre-lock absence may already be stale on this same entry. Skip it;
+          // fenced refresh/monitor miss thresholds alone own missing eviction.
+          snapshotStale = true;
+        } else if (
           await this.ensurePooledDevicePresentForUse(device, true, true, false, androidPresence)
         ) {
-          return { device, livenessUnknown };
+          return { device, livenessUnknown, snapshotStale };
+        } else {
+          // Reconciliation may have removed or replaced this captured entry.
+          // A replacement needs its own pass before it can be handed out.
+          snapshotStale ||= this.devices.get(device.id) !== device;
         }
-        candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
-        device = this.selectIdleDevice(candidates);
-        continue;
-      }
-
-      const status = this.idleDeviceReaper.getIdleDeviceLivenessStatus(device, iosLiveness);
-      if (status === "assignable") {
-        return { device, livenessUnknown };
-      }
-
-      if (status === "stale") {
-        logger.warn(
-          `[DevicePool] Removing idle iOS ${this.idleDeviceReaper.iosDeviceNoun(device.id)} ${device.id}: ` +
-            "iOS discovery no longer reports it as booted",
-        );
-        await this.removeDevice(device.id, true, device);
       } else {
-        livenessUnknown = true;
-        logger.warn(
-          `[DevicePool] Cannot assign idle iOS ${this.idleDeviceReaper.iosDeviceNoun(device.id)} ${device.id}: ` +
-            "its iOS liveness discovery source failed",
-        );
+        const status = this.idleDeviceReaper.getIdleDeviceLivenessStatus(device, iosLiveness);
+        if (status === "assignable") {
+          return { device, livenessUnknown, snapshotStale };
+        }
+        if (status === "stale") {
+          // As with Android, absence before the lock cannot retire this entry.
+          snapshotStale = true;
+        } else {
+          livenessUnknown = true;
+          logger.warn(
+            `[DevicePool] Cannot assign idle iOS ${this.idleDeviceReaper.iosDeviceNoun(device.id)} ${device.id}: ` +
+              "its iOS liveness discovery source failed",
+          );
+        }
       }
       candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
       device = this.selectIdleDevice(candidates);
     }
-
-    return { livenessUnknown };
+    return { livenessUnknown, snapshotStale };
   }
 
   private async claimSelectedDeviceForSession(

@@ -54,11 +54,18 @@ describe("DevicePool idle selection Android presence sweep", () => {
     expect(fakeDeviceUtils.getCallCount("getBootedDevices")).toBe(1);
   });
 
-  it("still evicts candidates absent from the snapshot", async () => {
+  it("skips absent candidates until fenced refresh misses confirm eviction", async () => {
     await assignWithLiveDevices(1);
 
     const pooledIds = pool.getAllDevices().map((device) => device.id);
     expect(pooledIds).toContain("emulator-5560");
+    for (const staleId of ["emulator-5554", "emulator-5556", "emulator-5558"]) {
+      expect(pool.getDevice(staleId)?.sessionId).toBeNull();
+      expect(pool.getDevice(staleId)?.status).toBe("idle");
+    }
+    for (let miss = 0; miss < 3; miss++) {
+      await pool.refreshDevices();
+    }
     for (const staleId of ["emulator-5554", "emulator-5556", "emulator-5558"]) {
       const entry = pool.getAllDevices().find((device) => device.id === staleId);
       expect(entry === undefined || entry.status === "error").toBe(true);

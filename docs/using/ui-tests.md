@@ -299,7 +299,10 @@ profiles.
 
 Before creating either AVD, the lane prints cmdline-tools/emulator versions and
 `avdmanager list device -c`, updates `cmdline-tools;latest`, then checks the
-device list again. A missing requested profile fails early with the available
+device list again. If the update installs newer tools into `cmdline-tools/latest-*`,
+the prepare step promotes the newest revision to `latest` and parks the previous
+install outside `cmdline-tools/` so subsequent AVD creation uses the updated tools.
+A missing requested profile fails early with the available
 fold profiles. There is no silent fallback: the test requires the exact profile
 and its panel sizes.
 

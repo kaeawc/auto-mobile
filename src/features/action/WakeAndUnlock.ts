@@ -3,6 +3,7 @@ import { ActionableError, BootedDevice, type DeviceLockState } from "../../model
 import { logger } from "../../utils/logger";
 import { defaultTimer, Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { errorMessage } from "../../utils/describeUnknownError";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   NotifyutilIosLockStateProbe,
@@ -71,6 +72,8 @@ export interface WakeAndUnlockResult {
   /** True when a secure device was unlocked using a previously-remembered PIN. */
   usedRecordedCredential?: boolean;
   error?: string;
+  /** Device unlocked, but the iOS runner may still need time before the next observe. */
+  warning?: string;
 }
 
 export interface WakeAndUnlockOptions {
@@ -97,6 +100,9 @@ const IOS_UNLOCK_TOTAL_MS = 25_000;
 // Match SetUIState RESPONSE_HEADROOM_MS for response serialization/delivery.
 const IOS_UNLOCK_RESPONSE_HEADROOM_MS = 3_000;
 const IOS_RECOVERY_WAIT_MS = 20_000;
+// One final simulator probe can use a small part of the response headroom when
+// recovery consumes the unlock deadline. Never extend gesture/recovery budgets.
+const IOS_RECOVERY_LOCK_PROBE_GRACE_MS = 250;
 const IOS_UNLOCK_POLL_INTERVAL_MS = 250;
 const IOS_UNLOCK_POLL_MAX_MS = 2_500;
 
@@ -408,21 +414,9 @@ export class WakeAndUnlock {
       }
     }
 
-    const recovery = this.iosRunnerRecovery;
-    if (recovery && !recovery.isConnected()) {
-      await awaitWhileRequestIsLive(
-        this.waitForIosRunner(
-          recovery,
-          Math.min(deadline, this.timer.now() + IOS_RECOVERY_WAIT_MS),
-          signal,
-        ),
-        signal,
-      );
-    }
-    if (this.timer.now() >= deadline) {
-      throw new ActionableError(
-        "wakeAndUnlock: iOS unlock budget exhausted before swipe; retry after the runner reconnects",
-      );
+    const recoveryResult = await this.prepareIosUnlock(deadline, simulator, signal);
+    if (recoveryResult) {
+      return recoveryResult;
     }
     throwIfAborted(signal);
     const result = await awaitWhileRequestIsLive(
@@ -440,6 +434,54 @@ export class WakeAndUnlock {
       ? undefined
       : (result.error ?? "iOS lock-screen swipe failed");
     return this.confirmIosSimulatorUnlocked(deadline, swipeFailure, signal);
+  }
+
+  private async prepareIosUnlock(
+    deadline: number,
+    simulator: boolean,
+    signal?: AbortSignal,
+  ): Promise<WakeAndUnlockResult | undefined> {
+    try {
+      const recovery = this.iosRunnerRecovery;
+      if (recovery && !recovery.isConnected()) {
+        await awaitWhileRequestIsLive(
+          this.waitForIosRunner(
+            recovery,
+            Math.min(deadline, this.timer.now() + IOS_RECOVERY_WAIT_MS),
+            signal,
+          ),
+          signal,
+        );
+      }
+      if (this.timer.now() >= deadline) {
+        throw new ActionableError(
+          "wakeAndUnlock: iOS unlock budget exhausted before swipe; retry after the runner reconnects",
+        );
+      }
+      return undefined;
+    } catch (error) {
+      throwIfAborted(signal);
+      if (!simulator) {
+        throw error;
+      }
+      // Runner relaunch can unlock a simulator without our gesture. Only a
+      // readable unlocked state makes it safe to return success with a warning.
+      const probeDeadline =
+        this.timer.now() < deadline
+          ? deadline
+          : this.timer.now() + IOS_RECOVERY_LOCK_PROBE_GRACE_MS;
+      const lock = await this.readIosLockState(probeDeadline, signal);
+      throwIfAborted(signal);
+      if (!lock || lock.locked) {
+        logger.warn(`[WakeAndUnlock] iOS runner recovery failed: ${errorMessage(error)}`, error);
+        throw error;
+      }
+      const warning =
+        `iOS runner had not finished recovering (${errorMessage(error)}); ` +
+        "the device is unlocked, but the next observe may need a moment";
+      logger.warn(`[WakeAndUnlock] ${warning}`);
+      return { ...this.iosResult(true, true), warning };
+    }
   }
 
   private async confirmIosSimulatorUnlocked(

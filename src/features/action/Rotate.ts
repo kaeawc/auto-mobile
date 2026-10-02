@@ -49,6 +49,7 @@ interface RotationSettingCleanup {
 }
 
 const ROTATION_SETTING_CLEANUP_TIMEOUT_MS = 1000;
+const ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS = 1000;
 
 type AlreadyAppliedOrientationDecision =
   | { kind: "handled"; result: RotateResult }
@@ -287,7 +288,7 @@ export class Rotate extends BaseVisualChange {
       return parseWindowManagerRotation(stdout);
     } catch (error) {
       throwIfAborted(signal);
-      logger.debug(`[Rotate] Failed to read live rotation via dumpsys window: ${error}`);
+      logger.warn("[Rotate] Failed to read live rotation via dumpsys window", error);
       return null;
     }
   }
@@ -1135,7 +1136,7 @@ export class Rotate extends BaseVisualChange {
       // Rotation animations are incorrectly detected as unstable by gfxinfo.
       skipUiStability: true,
     };
-    return this.observedInteraction(
+    const result: RotateResult = await this.observedInteraction(
       // The read-auto-rotate -> disable -> rotate -> restore-auto-rotate
       // sequence below must run atomically per device: interleaving it with
       // a concurrent rotation on the same device would let one call observe
@@ -1170,6 +1171,62 @@ export class Rotate extends BaseVisualChange {
       },
       observationOptions,
     );
+    return this.confirmAndroidOrientationAtReturn({ result, orientation, signal });
+  }
+
+  private async readRotationAtReturn(options: { signal?: AbortSignal }): Promise<number | null> {
+    const { signal } = options;
+    try {
+      const rotation = await raceWithDeadline(() => this.readLiveRotation(signal), {
+        timer: this.timer,
+        timeoutMs: ROTATION_RETURN_CONFIRMATION_TIMEOUT_MS,
+        signal,
+        label: "Confirm end-of-call rotation",
+      });
+      throwIfAborted(signal);
+      return rotation;
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("[Rotate] Failed to confirm end-of-call orientation", error);
+      return null;
+    }
+  }
+
+  private async confirmAndroidOrientationAtReturn(options: {
+    result: RotateResult;
+    orientation: "portrait" | "landscape";
+    signal?: AbortSignal;
+  }): Promise<RotateResult> {
+    const { result, orientation, signal } = options;
+    if (!result.success || result.currentOrientation !== orientation) {
+      return result;
+    }
+    // Read after the complete observation epilogue: its hierarchy rotation may
+    // be cached, and the sensor can revert a direct rotation while it runs.
+    const rotation = await this.readRotationAtReturn({ signal });
+    if (rotation === null) {
+      const warning = `The end-of-call orientation could not be confirmed (live rotation read failed); the requested ${orientation} orientation may not be held.`;
+      return {
+        ...result,
+        currentOrientation: "unknown",
+        warning: [result.warning, warning].filter(Boolean).join(" "),
+        message: warning,
+      };
+    }
+    const actual = rotation === 0 || rotation === 2 ? "portrait" : "landscape";
+    if (actual === orientation) {
+      return result;
+    }
+    const confirmed =
+      result.rotationPerformed === false
+        ? `was already in ${orientation}`
+        : `rotated to ${orientation}`;
+    const cause =
+      result.orientationLockState === "unlocked"
+        ? `The device ${confirmed} and then returned to ${actual} because automatic rotation is on.`
+        : `The device left the requested ${orientation} orientation after the call confirmed it.`;
+    const error = `${cause} The device is in ${actual} at the time the call returned. Pass lockOrientation: true, or use a device session, to keep the requested orientation.`;
+    return { ...result, success: false, currentOrientation: actual, error, message: error };
   }
 
   private async captureSessionRotationOriginals(options: {

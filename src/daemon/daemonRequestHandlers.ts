@@ -1,3 +1,4 @@
+import { isSessionReleasing } from "./sessionReleaseState";
 import { z } from "zod";
 import {
   MAX_OBSERVER_CLIENT_NAME_LENGTH,
@@ -37,7 +38,6 @@ export interface DaemonStateAccess {
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
-    isAdmittedForAutomation?(session: Session): boolean;
     getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
@@ -214,7 +214,7 @@ export async function handleDaemonRequest(
       }
       const manager = state.getSessionManager();
       const session = manager.getSession(sessionId);
-      if (!session || manager.isAdmittedForAutomation?.(session) === false) {
+      if (!session || isSessionReleasing(manager, sessionId, session)) {
         if (
           typeof sessionId === "string" &&
           state.getObserverSessionRegistry?.()?.heartbeat(sessionId)
@@ -357,15 +357,15 @@ export async function handleDaemonRequest(
           lastUsedAt: session.lastUsedAt,
           expiresAt: session.expiresAt,
           cacheSize: JSON.stringify(session.cacheData).length,
-          ...(manager.isAdmittedForAutomation?.(session) === false ? { releasing: true } : {}),
+          ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
         },
       };
     }
     case "daemon/activeSessions": {
       const manager = state.getSessionManager();
       const sessions = manager.getAllSessions?.() ?? [];
-      const releasingSessions = sessions.filter(
-        (session) => manager.isAdmittedForAutomation?.(session) === false,
+      const releasingSessions = sessions.filter((session) =>
+        isSessionReleasing(manager, session.sessionId, session),
       ).length;
       return {
         success: true,

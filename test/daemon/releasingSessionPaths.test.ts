@@ -50,6 +50,98 @@ describe("remaining paths during session release", () => {
     });
   }
 
+  test("sessionInfo does not flag an unregistered non-releasing object", async () => {
+    await h.createUnregisteredSession();
+    const response = await h.request("daemon/sessionInfo");
+    expect(response.success).toBe(true);
+    expect(response.result).not.toHaveProperty("releasing");
+  });
+
+  for (const kind of ["unregistered", "terminal-fenced"] as const) {
+    test(`activeSessions does not count ${kind} sessions as releasing`, async () => {
+      if (kind === "unregistered") {
+        await h.createUnregisteredSession();
+      } else {
+        const session = await h.create();
+        h.holdTerminalFence(session);
+        expect(h.manager.getSession(sessionId)).toBeNull();
+        expect(h.manager.getAllSessions()).toEqual([session]);
+      }
+      expect(await h.request("daemon/activeSessions")).toEqual({
+        success: true,
+        result: { activeSessions: 1, activeExecutions: 0 },
+      });
+    });
+  }
+
+  test("daemon heartbeat accepts an unregistered non-releasing object", async () => {
+    await h.createUnregisteredSession();
+    const heartbeat = spyOn(h.manager, "recordHeartbeat");
+    try {
+      expect((await h.request("daemon/heartbeat")).success).toBe(true);
+      expect(heartbeat).toHaveBeenCalledWith(sessionId);
+      // SessionManager's pre-existing admission guard still suppresses persistence.
+      expect(h.persistence.activityWrites).toBe(0);
+    } finally {
+      heartbeat.mockRestore();
+    }
+  });
+
+  test("device-control target owner accepts an unregistered non-releasing object", async () => {
+    const session = await h.createUnregisteredSession();
+    expect(
+      isDeviceControlTargetOwnerValid(h.manager, {
+        sessionUuid: sessionId,
+        sessionIncarnation: session,
+        deviceId,
+      }),
+    ).toBe(true);
+  });
+
+  test("device-control routing accepts an unregistered non-releasing object", async () => {
+    const session = await h.createUnregisteredSession();
+    expect(
+      isDeviceControlRoutingSessionValid(h.manager, {
+        sessionUuid: "other",
+        routingSessionUuid: sessionId,
+        routingSessionIncarnation: session,
+      }),
+    ).toBe(true);
+  });
+
+  test("CLI heartbeat accepts an unregistered non-releasing object", async () => {
+    await h.createUnregisteredSession();
+    const heartbeat = spyOn(h.manager, "recordHeartbeat");
+    const log = spyOn(console, "log").mockImplementation(() => {});
+    const error = spyOn(console, "error").mockImplementation(() => {});
+    const exit = spyOn(process, "exit").mockImplementation((): never => {
+      throw new Error("CLI exit");
+    });
+    try {
+      await runDaemonCommand("heartbeat", [sessionId], {
+        stateProvider: () => ({
+          isInitialized: () => true,
+          getSessionManager: () => h.manager,
+          getDevicePool: (): never => {
+            throw new Error("Unused pool");
+          },
+          getDeviceSessionRegistry: (): never => {
+            throw new Error("Unused registry");
+          },
+        }),
+      });
+      expect(log).toHaveBeenCalledWith(`Session ${sessionId} heartbeat recorded`);
+      expect(heartbeat).toHaveBeenCalledWith(sessionId);
+      expect(h.persistence.activityWrites).toBe(0);
+      expect(error).not.toHaveBeenCalled();
+    } finally {
+      heartbeat.mockRestore();
+      log.mockRestore();
+      error.mockRestore();
+      exit.mockRestore();
+    }
+  });
+
   test("auth-disabled mode stays admitted during release", async () => {
     await h.create();
     const finish = await h.beginRelease();
@@ -178,6 +270,34 @@ describe("remaining paths during session release", () => {
     device.status = "assigned";
     return { pool, device, port };
   }
+
+  test("pool recovery target accepts an unregistered non-releasing object", async () => {
+    const { pool, device } = await poolHarness();
+    const session = { ...h.manager.getSession(sessionId)! };
+    h.manager.getSession = (id) => (id === sessionId ? session : null);
+    expect(h.manager.isAdmittedForAutomation(session)).toBe(false);
+    expect(h.manager.getReleasingSession(sessionId)).toBeNull();
+    const preparation = pool.prepareSessionPreservingRecovery(deviceId, device);
+    pool.finishSessionPreservingRecoveryPreparation(preparation);
+    expect(preparation?.sessionId).toBe(sessionId);
+  });
+
+  test("pool missing-device preservation accepts an unregistered non-releasing object", async () => {
+    const { pool, device, port } = await poolHarness();
+    const session = { ...h.manager.getSession(sessionId)! };
+    h.manager.getSession = (id) => (id === sessionId ? session : null);
+    expect(h.manager.isAdmittedForAutomation(session)).toBe(false);
+    expect(h.manager.getReleasingSession(sessionId)).toBeNull();
+    const recovery = spyOn(pool, "recoverSessionBoundDeviceAfterLoss").mockResolvedValue(
+      "deferred",
+    );
+    try {
+      expect(await port.tryPreserveSessionForMissingDevice(device, true, undefined)).toBe(true);
+      expect(recovery).toHaveBeenCalledTimes(1);
+    } finally {
+      recovery.mockRestore();
+    }
+  });
 
   test("pool recovery target is unavailable during release while ordinary and awaiting-owner sessions qualify", async () => {
     const { pool, device } = await poolHarness();

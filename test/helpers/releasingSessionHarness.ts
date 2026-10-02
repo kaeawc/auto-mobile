@@ -3,7 +3,11 @@ import {
   handleDaemonRequest,
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  type Session,
+  type SessionReleaseSnapshot,
+} from "../../src/daemon/sessionManager";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -101,6 +105,40 @@ export function releasingSessionHarness() {
     request,
     async create() {
       return await manager.createSession(releasingSessionId, releasingDeviceId, "android");
+    },
+    async createUnregisteredSession() {
+      const registered = await manager.createSession(
+        releasingSessionId,
+        releasingDeviceId,
+        "android",
+      );
+      const session = { ...registered };
+      manager.getSession = (id) => (id === releasingSessionId ? session : null);
+      manager.getAllSessions = () => [session];
+      expect(manager.isAdmittedForAutomation(session)).toBe(false);
+      expect(manager.getReleasingSession(releasingSessionId)).toBeNull();
+      return session;
+    },
+    holdTerminalFence(session: Session) {
+      // Model a failed terminal persistence attempt awaiting retry, with no release in flight.
+      const internals = manager as unknown as {
+        terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot>;
+      };
+      internals.terminalReleaseSnapshots.set(session.sessionId, {
+        sessionId: session.sessionId,
+        deviceId: session.assignedDevice!,
+        releaseReason: "heartbeat-timeout",
+        releasedAtMs: timer.now(),
+        terminal: true,
+        heartbeat: {
+          lastHeartbeatMs: session.lastHeartbeat,
+          hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+          timeoutMs: session.heartbeatTimeoutMs,
+          ageMs: 0,
+        },
+      });
+      expect(manager.isAdmittedForAutomation(session)).toBe(false);
+      expect(manager.getReleasingSession(session.sessionId)).toBeNull();
     },
     async beginRelease(phase: "A" | "B" = "A") {
       manager.setKeepScreenAwake(releasingSessionId, { applied: true });

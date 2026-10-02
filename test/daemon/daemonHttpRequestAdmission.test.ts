@@ -276,3 +276,24 @@ describe("HTTP heartbeat during release", () => {
     }
   });
 });
+
+test("HTTP heartbeat accepts an unregistered non-releasing object", async () => {
+  const h = releasingSessionHarness();
+  const heartbeat = spyOn(h.manager, "recordHeartbeat");
+  try {
+    await h.createUnregisteredSession();
+    const { server } = await harness(h.manager);
+    const response = await server.dispatch(
+      { host: `127.0.0.1:${port}` },
+      "POST",
+      "/heartbeat",
+      JSON.stringify({ sessionId: releasingSessionId }),
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe('{"status":"ok"}');
+    expect(heartbeat).toHaveBeenCalledWith(releasingSessionId);
+  } finally {
+    heartbeat.mockRestore();
+    h.dispose();
+  }
+});

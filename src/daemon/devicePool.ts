@@ -1,3 +1,4 @@
+import { isSessionReleasing } from "./sessionReleaseState";
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
@@ -2541,8 +2542,9 @@ export class DevicePool {
     const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
     if (
       !attemptDeviceLossRecovery ||
+      !sessionId ||
       !session ||
-      !this.sessionManager.isAdmittedForAutomation(session) ||
+      isSessionReleasing(this.sessionManager, sessionId, session) ||
       !this.isSessionPreservingBinding(device, session)
     ) {
       return false;
@@ -2838,7 +2840,7 @@ export class DevicePool {
     const session = this.sessionManager.getSession(sessionId);
     if (
       !session ||
-      !this.sessionManager.isAdmittedForAutomation(session) ||
+      isSessionReleasing(this.sessionManager, sessionId, session) ||
       !this.isEligibleSessionPreservingRecoveryTarget(device, session)
     ) {
       return undefined;

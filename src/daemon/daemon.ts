@@ -1,3 +1,4 @@
+import { isSessionReleasing } from "./sessionReleaseState";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { republishOwnedIdentity } from "./identityRecovery";
@@ -1071,7 +1072,7 @@ export class Daemon {
         const session =
           this.sessionManager.getSession(sessionId) ??
           this.sessionManager.getReleasingSession(sessionId);
-        if (session && !this.sessionManager.isAdmittedForAutomation(session)) {
+        if (session && isSessionReleasing(this.sessionManager, sessionId, session)) {
           res.writeHead(404, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
           return;

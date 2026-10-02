@@ -1,8 +1,9 @@
+import { isSessionReleasing } from "./sessionReleaseState";
 import type { Session } from "./sessionManager";
 
 interface DeviceControlSessionManager {
   getSession(id: string): Session | null;
-  isAdmittedForAutomation?(session: Session): boolean;
+  getReleasingSession?(sessionId: string): unknown | null;
 }
 
 interface DeviceControlSessionIdentity {
@@ -24,7 +25,7 @@ export function isDeviceControlTargetOwnerValid(
   return Boolean(
     session &&
     session === identity.sessionIncarnation &&
-    manager.isAdmittedForAutomation?.(session) !== false &&
+    !isSessionReleasing(manager, identity.sessionUuid, session) &&
     (!identity.deviceId || session.assignedDevice === identity.deviceId),
   );
 }
@@ -40,6 +41,6 @@ export function isDeviceControlRoutingSessionValid(
   return Boolean(
     session &&
     session === identity.routingSessionIncarnation &&
-    manager.isAdmittedForAutomation?.(session) !== false,
+    !isSessionReleasing(manager, identity.routingSessionUuid, session),
   );
 }

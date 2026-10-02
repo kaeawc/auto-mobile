@@ -576,7 +576,7 @@ describe("ObserveScreen", function () {
         expect(result.screenIdentity?.components.navigationTitle).toBe("New Reminder");
         expect(result.screenIdentity?.components.focusedElementId).toBe("Quick Entry Title Field");
         expect(result.systemInsets).toEqual({ top: 59, right: 0, bottom: 34, left: 0 });
-        expect(result.rotation).toBe(1);
+        expect(result.rotation).toBe(0);
         expect(result.insets?.displayCutoutInfo).toEqual({ classification: "unknown" });
       } finally {
         resetObserveCacheStore();

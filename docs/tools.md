@@ -130,9 +130,19 @@ When a session `observe` cannot produce a reference, it returns
 `snapshotReferenceUnavailable`, a `string[]` naming the missing capture
 preconditions: `display`, `screenSize`, `rotation`, `nativeScale`, `frameContext`
 (in that order). This field is absent when a reference is returned and on
-`deviceId` reads, which never return a reference. On iOS, a simulator/device whose
-orientation is unknown reports `rotation` as missing because the runner omits
-`rotation` when device orientation is unknown or unstable.
+`deviceId` reads, which never return a reference. On iOS, `observe.rotation` uses
+runner-reported interface orientation when known; otherwise the settled screen
+shape supplies 0 for portrait (`width < height`) or 1 for landscape (including
+square screens). This fallback cannot distinguish upside-down portrait or
+landscape direction. Runner landscape on a fixed portrait display resolves to 0;
+runner portrait on a landscape-shaped unfolded panel is preserved.
+
+Rotation values are 0 portrait; 1 landscape with the device top toward the left
+(counter-clockwise, iOS `.landscapeLeft`, Android `ROTATION_90`); 2 portrait upside
+down; 3 landscape right (iOS `.landscapeRight`, Android `ROTATION_270`). Values 2
+and 3 on iOS require runner evidence. The host fallback affects only
+`observe.rotation`, preserving the runner's `viewHierarchy.rotation` for screenshot
+crop direction.
 
 This reference covers the full screen; it does not convert screenshot pixels
 into native coordinates or account for a crop. Unchanged geometry and window

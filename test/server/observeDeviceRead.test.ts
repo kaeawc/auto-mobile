@@ -1,3 +1,4 @@
+import { resolveIosObserveRotation } from "../../src/features/observe/iosObserveRotation";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -413,9 +414,10 @@ describe("session-free observe device read", () => {
     }
   });
 
-  test.each([true, false])(
-    "iOS session reference diagnostics with rotation present: %s",
-    async (hasRotation) => {
+  test.each(["runner", "fallback", "missing"] as const)(
+    "iOS session reference diagnostics with %s rotation",
+    async (rotationSource) => {
+      const hasRotation = rotationSource !== "missing";
       const iosDevice: BootedDevice = {
         deviceId: "ios-test-device",
         name: "iPhone",
@@ -444,7 +446,12 @@ describe("session-free observe device read", () => {
           ...fixture,
           observationId: "ios-capture",
           displayRevision: 0,
-          rotation: hasRotation ? 0 : undefined,
+          rotation:
+            rotationSource === "fallback"
+              ? resolveIosObserveRotation(undefined, fixture.screenSize)
+              : hasRotation
+                ? 0
+                : undefined,
           snapshotReferenceUnavailable: ["old-diagnostic"],
           activeWindow: { appId: "com.apple.reminders", activityName: "", layoutSeqSum: 0 },
           viewHierarchy: {
@@ -453,7 +460,7 @@ describe("session-free observe device read", () => {
             nativeScale: 3,
             pixelWidth: 1179,
             pixelHeight: 2556,
-            rotation: hasRotation ? 0 : undefined,
+            rotation: rotationSource === "runner" ? 0 : undefined,
           },
         };
         registerObserveTools({
@@ -471,6 +478,10 @@ describe("session-free observe device read", () => {
           sessionUuid,
         });
         if (hasRotation) {
+          expect(getStructuredField(response, "rotation")).toBe(0);
+          expect(observation.viewHierarchy?.rotation).toBe(
+            rotationSource === "runner" ? 0 : undefined,
+          );
           expect(getStructuredField(response, "snapshotReference")).toMatchObject({
             snapshotId: expect.any(String),
             expiresAt: expect.any(Number),

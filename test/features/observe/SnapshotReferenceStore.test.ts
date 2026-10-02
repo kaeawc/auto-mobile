@@ -1,3 +1,4 @@
+import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   SnapshotReferenceStore,
@@ -401,4 +402,26 @@ describe("SnapshotReferenceStore", () => {
     });
     expect(observation).not.toHaveProperty("snapshotReferenceUnavailable");
   });
+});
+
+test("iOS size fallback mints references without synthesizing hierarchy rotation", () => {
+  const fixture = loadIosFractionalObserve();
+  const ios = {
+    ...fixture,
+    rotation: resolveIosObserveRotation(undefined, fixture.screenSize),
+    viewHierarchy: {
+      ...fixture.viewHierarchy!,
+      rotation: undefined,
+      nativeScale: 3,
+      frameContext: `${androidEpoch}:1:abc`,
+    },
+  };
+  const store = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+  expect(snapshotReferenceUnavailable(ios)).toEqual([]);
+  const ref = captureReference(store, "ios-fallback", ios);
+  expect(store.staleReason(ref.snapshotId, "ios-fallback", ios)).toBeUndefined();
+  expect(store.staleReason(ref.snapshotId, "ios-fallback", { ...ios, rotation: 1 })).toContain(
+    "rotation",
+  );
+  expect(ios.viewHierarchy.rotation).toBeUndefined();
 });

@@ -1,4 +1,5 @@
 import { supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
+import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import type { DisplayFenceDependencies } from "./BaseVisualChange";
@@ -481,6 +482,9 @@ export class PinchOn extends BaseVisualChange {
       ...observeResult,
       viewHierarchy: snapshot.hierarchy,
       screenSize: freshSize,
+      ...(this.device.platform === "ios"
+        ? { rotation: resolveIosObserveRotation(snapshot.hierarchy.rotation, freshSize) }
+        : {}),
       // Insets belong to a coordinate space: never apply portrait edges to a
       // fresh landscape capture when the runner did not supply rotated insets.
       systemInsets:

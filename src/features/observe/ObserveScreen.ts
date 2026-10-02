@@ -1,3 +1,4 @@
+import { resolveIosObserveRotation } from "./iosObserveRotation";
 import { createDeviceHierarchyCapture } from "./DeviceHierarchyCapture";
 import { ObserverPendingRequestTimeoutError } from "./DeviceServiceClient";
 import {
@@ -957,7 +958,17 @@ export class RealObserveScreen implements ObserveScreen {
     const startTime = this.timer.now();
     try {
       logger.debug("[OBSERVE_CACHE] Getting most recent cached observe result");
-      const cached = await getObserveCacheStore().getMostRecent(this.device.deviceId);
+      const stored = await getObserveCacheStore().getMostRecent(this.device.deviceId);
+      const cached =
+        stored && this.device.platform === "ios"
+          ? {
+              ...stored,
+              rotation: resolveIosObserveRotation(
+                stored.viewHierarchy?.rotation,
+                stored.screenSize,
+              ),
+            }
+          : stored;
       const duration = this.timer.now() - startTime;
       if (cached) {
         logger.debug(`[OBSERVE_CACHE] Found recent result in cache (${duration}ms)`);
@@ -2027,9 +2038,10 @@ export class RealObserveScreen implements ObserveScreen {
         if (result.viewHierarchy?.systemInsets) {
           result.systemInsets = result.viewHierarchy.systemInsets;
         }
-        if (result.viewHierarchy?.rotation !== undefined) {
-          result.rotation = result.viewHierarchy.rotation;
-        }
+        result.rotation = resolveIosObserveRotation(
+          result.viewHierarchy?.rotation,
+          result.screenSize,
+        );
 
         // Use the same iOS visibility projection as action and diagnostic captures.
         if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
@@ -2692,7 +2704,12 @@ export class RealObserveScreen implements ObserveScreen {
     if (hierarchy.screenWidth && hierarchy.screenHeight) {
       result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
     }
-    result.rotation = hierarchy.rotation;
+    if (this.device.platform === "ios") {
+      result.screenSize = this.extractScreenSizeFromHierarchy(hierarchy) ?? result.screenSize;
+      result.rotation = resolveIosObserveRotation(hierarchy.rotation, result.screenSize);
+    } else {
+      result.rotation = hierarchy.rotation;
+    }
     result.systemInsets = hierarchy.systemInsets ?? { top: 0, right: 0, bottom: 0, left: 0 };
     result.insets = hierarchy.insets ?? {
       available: false,

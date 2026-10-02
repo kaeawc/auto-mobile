@@ -95,6 +95,7 @@ function displaySwipeCoordinates(
 export class SwipeOn extends BaseVisualChange {
   private readonly skipCallerDisplayFence: boolean;
   private readonly stopAfterIosGestureFailure: boolean;
+  private readonly iosLockScreenSwipe?: boolean;
   private readonly iosGestureTimeoutMs?: () => number;
   private readonly lastRenderedObservation?: RenderedObservationReader;
   private executeGesture: GestureExecutor;
@@ -122,6 +123,7 @@ export class SwipeOn extends BaseVisualChange {
     super(device, adb, dependencies.timer, dependencies.renderedDisplayRevision, dependencies);
     this.skipCallerDisplayFence = dependencies.skipCallerDisplayFence ?? false;
     this.stopAfterIosGestureFailure = dependencies.stopAfterIosGestureFailure ?? false;
+    this.iosLockScreenSwipe = dependencies.iosLockScreenSwipe;
     this.iosGestureTimeoutMs = dependencies.iosGestureTimeoutMs;
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
@@ -664,6 +666,7 @@ export class SwipeOn extends BaseVisualChange {
           duration,
           scrollMode: options.scrollMode,
           timeoutMs: this.iosGestureTimeoutMs?.(),
+          lockScreen: this.iosLockScreenSwipe,
         };
         if (gestureOptions.timeoutMs !== undefined && gestureOptions.timeoutMs <= 0) {
           throw new ActionableError("iOS swipe budget exhausted before gesture dispatch");

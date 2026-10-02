@@ -66,6 +66,7 @@ import {
   type DeviceConnectionLostNotifier,
 } from "../DeviceConnectionLostNotifier";
 import type { BaseResult } from "../shared/types";
+import type { SwipeRequestOptions } from "../shared/types";
 import type { SetTextOptions } from "../DeviceService";
 import type { SimulatedErrorType } from "../../../server/NetworkState";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
@@ -314,7 +315,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    frameContext?: string,
+    contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
   ): Promise<CtrlProxySwipeResult>;
 
@@ -3192,7 +3193,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     duration?: number,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-    frameContext?: string,
+    contextOptions?: string | SwipeRequestOptions,
     signal?: AbortSignal,
   ): Promise<CtrlProxySwipeResult> {
     return this.gestures.requestSwipe(
@@ -3203,7 +3204,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       duration,
       timeoutMs,
       perf,
-      frameContext,
+      contextOptions,
       undefined,
       signal,
     );

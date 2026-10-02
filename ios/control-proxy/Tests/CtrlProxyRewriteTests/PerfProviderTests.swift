@@ -275,6 +275,50 @@ final class FakeGestureLogSink: GestureLogSink, Sendable {
 }
 
 extension PerfProviderTests {
+    func testBoundRecordsEveryRunningPhaseAndLogsImmediateAndFinalOnce() {
+        for phase in [
+            "queueWait",
+            "executionPreparation",
+            "targetResolution",
+            "coordinateResolution",
+            "xcuitestGesture",
+            "synthesizedGesture",
+            "postGesture",
+        ] {
+            let clock = FakeMonotonicClock()
+            let sink = FakeGestureLogSink()
+            let diagnostics = GesturePhaseDiagnostics(
+                command: "request_swipe",
+                receivedAtMs: 0,
+                deadlineMs: 5000,
+                now: { clock.now() },
+                sink: sink
+            )
+            diagnostics.begin(phase)
+            clock.advance(by: 250)
+            XCTAssertEqual(diagnostics.currentPhase, phase)
+            let hit = diagnostics.markBoundExceeded(boundMs: 250)
+            XCTAssertEqual(hit.phase, phase)
+            XCTAssertEqual(hit.elapsedMs, 250)
+            XCTAssertEqual(
+                sink.lines,
+                [
+                    "gesture_phases command=request_swipe boundHit=true phaseAtBound=\(phase) boundMs=250 elapsedMs=250 deadlineRemainingMs=4750 (still running)",
+                ]
+            )
+            diagnostics.begin("postGesture")
+            diagnostics.markBoundExceeded(boundMs: 250)
+            XCTAssertEqual(sink.lines.count, 1)
+            clock.advance(by: 50)
+            let timing = diagnostics.finish()
+            diagnostics.finish()
+            XCTAssertEqual(timing.durationMs, 300)
+            XCTAssertEqual(sink.lines.count, 2)
+            XCTAssertTrue(sink.lines[1].contains("phaseAtBound=\(phase)"))
+            XCTAssertTrue(sink.lines[1].contains("totalMs=300"))
+        }
+    }
+
     func testGesturePhasesSumToTotalAndEncodeThroughRealResponse() throws {
         let clock = FakeMonotonicClock()
         let sink = FakeGestureLogSink()

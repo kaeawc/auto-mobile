@@ -261,6 +261,8 @@ final class GesturePhaseDiagnostics: Sendable {
         var phaseStarted: Int64
         var phases: [PerfTiming] = []
         var deadlineExceeded = false
+        var phaseAtBound: String?
+        var elapsedAtBoundMs: Int64?
         var finished: PerfTiming?
     }
 
@@ -296,24 +298,53 @@ final class GesturePhaseDiagnostics: Sendable {
         }
     }
 
+    var currentPhase: String { state.withLock { $0.phase } }
+
+    /// Elapsed time includes queue wait, matching the final gesturePhases total.
+    @discardableResult
+    func markBoundExceeded(boundMs: Int64) -> (phase: String, elapsedMs: Int64) {
+        let time = now()
+        let (phase, elapsed, shouldLog) = state.withLock { value -> (String, Int64, Bool) in
+            if let phase = value.phaseAtBound, let elapsed = value.elapsedAtBoundMs {
+                return (phase, elapsed, false)
+            }
+            let elapsed = time - receivedAtMs
+            value.phaseAtBound = value.phase
+            value.elapsedAtBoundMs = elapsed
+            return (value.phase, elapsed, true)
+        }
+        if shouldLog {
+            let remaining = deadlineMs.map { String($0 - time) } ?? "none"
+            sink.warning(
+                "gesture_phases command=\(command) boundHit=true phaseAtBound=\(phase) boundMs=\(boundMs) elapsedMs=\(elapsed) deadlineRemainingMs=\(remaining) (still running)"
+            )
+        }
+        return (phase, elapsed)
+    }
+
     func markDeadlineExceeded() { state.withLock { $0.deadlineExceeded = true } }
 
     @discardableResult
     func finish() -> PerfTiming {
         let time = now()
-        let (timing, shouldLog) = state.withLock { value -> (PerfTiming, Bool) in
-            if let finished = value.finished { return (finished, false) }
+        let (timing, shouldLog, phaseAtBound) = state.withLock { value -> (PerfTiming, Bool, String?) in
+            if let finished = value.finished { return (finished, false, value.phaseAtBound) }
             value.phases.append(.timing(value.phase, durationMs: time - value.phaseStarted))
             let timing = PerfTiming(name: "gesturePhases", durationMs: time - receivedAtMs, children: value.phases)
             value.finished = timing
-            return (timing, value.deadlineExceeded || timing.durationMs > Self.slowGestureThresholdMs)
+            return (
+                timing,
+                value.deadlineExceeded || timing.durationMs > Self.slowGestureThresholdMs || value.phaseAtBound != nil,
+                value.phaseAtBound
+            )
         }
         if shouldLog {
+            let bound = phaseAtBound.map { " phaseAtBound=\($0)" } ?? ""
             let phases = (timing.children ?? []).map { "\($0.name)Ms=\($0.durationMs)" }.joined(separator: " ")
             let remaining = deadlineMs.map { String($0 - time) } ?? "none"
             sink
                 .warning(
-                    "gesture_phases command=\(command) \(phases) totalMs=\(timing.durationMs) deadlineRemainingMs=\(remaining)"
+                    "gesture_phases command=\(command) \(phases) totalMs=\(timing.durationMs) deadlineRemainingMs=\(remaining)\(bound)"
                 )
         }
         return timing

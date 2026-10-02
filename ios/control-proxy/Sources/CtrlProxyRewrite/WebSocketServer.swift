@@ -30,6 +30,63 @@ func admissionDecision(
         : .queue
 }
 
+enum GestureExecutionBound {
+    static let minBoundMs: Int64 = 250
+    static let responseReserveMs: Int64 = 500
+}
+
+/// Only request_swipe carries a wire deadline today. Tap/drag/pinch can legitimately
+/// run long and have no wire deadline; extending the bound to them is a follow-up.
+func gestureExecutionBoundMs(deadlineMs: Int64?, executionStartedAtMs: Int64) -> Int64? {
+    guard let deadlineMs else { return nil }
+    return max(
+        GestureExecutionBound.minBoundMs,
+        deadlineMs - executionStartedAtMs - GestureExecutionBound.responseReserveMs
+    )
+}
+
+private enum GestureExecutionWinner: Sendable {
+    case handler
+    case bound(phase: String, elapsedMs: Int64)
+}
+
+/// Exactly one racer resumes the continuation; losing tasks never send a response.
+private final class GestureExecutionResolution: Sendable {
+    private struct State {
+        var winner: GestureExecutionWinner?
+        var continuation: CheckedContinuation<GestureExecutionWinner, Never>?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    func wait() async -> GestureExecutionWinner {
+        await withCheckedContinuation { continuation in
+            let winner = state.withLock { state -> GestureExecutionWinner? in
+                if let winner = state.winner { return winner }
+                state.continuation = continuation
+                return nil
+            }
+            if let winner { continuation.resume(returning: winner) }
+        }
+    }
+
+    func resolve(_ value: @Sendable () -> GestureExecutionWinner) {
+        let result = state.withLock { state -> (
+            GestureExecutionWinner,
+            CheckedContinuation<GestureExecutionWinner, Never>?
+        )? in
+            guard state.winner == nil else { return nil }
+            // Compute only for the first resolver, including bound diagnostics/logging.
+            let winner = value()
+            state.winner = winner
+            let continuation = state.continuation
+            state.continuation = nil
+            return (winner, continuation)
+        }
+        if let (winner, continuation) = result { continuation?.resume(returning: winner) }
+    }
+}
+
 /// Coordinates failures recorded while one WebSocket command is in flight.
 ///
 /// The server executes commands serially, so one lock-confined slot is sufficient. The
@@ -169,6 +226,7 @@ final class WebSocketServer: @unchecked Sendable {
     /// the main-thread wedge this guards against lasted 45-51s, so >10s is pathological.
     static let defaultBusyBudgetMs: Int64 = 10000
     private let busyBudgetMs: Int64
+    private let timer: any ProxyTimer
     private let gestureLogSink: any GestureLogSink
     private let monotonicNowMs: @Sendable () -> Int64
     private let commandState = OSAllocatedUnfairLock<CommandState>(initialState: CommandState())
@@ -201,6 +259,7 @@ final class WebSocketServer: @unchecked Sendable {
             Int64(ProcessInfo.processInfo.systemUptime * 1000)
         },
         gestureLogSink: any GestureLogSink = SystemGestureLogSink(),
+        timer: any ProxyTimer = SystemTimer(),
         listenerFactory: @escaping @Sendable (UInt16) throws -> any ServerListening = {
             try WebSocketServer.makeLoopbackListener(port: $0)
         }
@@ -218,6 +277,7 @@ final class WebSocketServer: @unchecked Sendable {
         self.busyBudgetMs = busyBudgetMs
         self.monotonicNowMs = monotonicNowMs
         self.gestureLogSink = gestureLogSink
+        self.timer = timer
     }
 
     var isRunning: Bool {
@@ -425,6 +485,7 @@ final class WebSocketServer: @unchecked Sendable {
         let executionStartedAtMs = monotonicNowMs()
         let inFlightRequestId = failureCoordinator == nil ? nil : WireError.extractRequestId(from: data)
         failureCoordinator?.begin(requestId: inFlightRequestId)
+        let earlyResponseSent = OSAllocatedUnfairLock(initialState: false)
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
             print(
@@ -447,20 +508,42 @@ final class WebSocketServer: @unchecked Sendable {
                 try await perf.withScope {
                     self.perf.serial("handleRequest:\(request.typeString)")
                     let startTime = Date()
-                    let response = await self.commandHandler.handle(
-                        request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs
-                    )
+                    let response: any WebSocketResponsePayload
+                    if let boundMs = gestureExecutionBoundMs(
+                        deadlineMs: deadlineMs, executionStartedAtMs: executionStartedAtMs
+                    ) {
+                        let result = await self.handleBoundedCommand(
+                            request, deadlineMs: deadlineMs, boundMs: boundMs,
+                            executionStartedAtMs: executionStartedAtMs,
+                            diagnostics: diagnostics, responder: responder
+                        )
+                        response = result.response
+                        earlyResponseSent.withLock { $0 = result.boundHit }
+                    } else {
+                        response = await self.commandHandler.handle(
+                            request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs
+                        )
+                    }
                     let totalTimeMs = Int64(Date().timeIntervalSince(startTime) * 1000)
                     self.perf.end()
 
                     _ = diagnostics?.finish()
                     let flushed = self.flushPerfTiming()
                     let perfTiming = diagnostics?.attaching(to: flushed) ?? flushed
-                    let data = try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
+                    let data: Data
+                    if earlyResponseSent.withLock({ $0 }) {
+                        data = Data()
+                    } else {
+                        data = try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
+                    }
                     return (response, data)
                 }
             }
             let deflectedFailures = failureCoordinator?.finish() ?? []
+            if earlyResponseSent.withLock({ $0 }) {
+                onCompleted()
+                return
+            }
             if deflectedFailures.isEmpty {
                 onCompleted()
                 responder.send(responseData)
@@ -510,7 +593,65 @@ final class WebSocketServer: @unchecked Sendable {
             }
             let requestId = WireError.extractRequestId(from: data)
             onCompleted()
-            responder.send(ErrorResponse.build(requestId: requestId, error: responseError))
+            if !earlyResponseSent.withLock({ $0 }) {
+                responder.send(ErrorResponse.build(requestId: requestId, error: responseError))
+            }
+        }
+    }
+
+    /// XCUITest is main-thread-confined: its synchronous swipe cannot be cancelled and
+    /// blocks the main actor. Keep the serial chain and in-flight guard held until it
+    /// returns; releasing them early would silently pile commands onto the blocked actor.
+    /// The timeout is a response bound, not an interruption of the underlying call.
+    private func handleBoundedCommand(
+        _ request: WebSocketRequest, deadlineMs: Int64?, boundMs: Int64, executionStartedAtMs: Int64,
+        diagnostics: GesturePhaseDiagnostics?, responder: any WebSocketResponding
+    )
+        async -> (response: any WebSocketResponsePayload, boundHit: Bool)
+    {
+        // Unstructured Tasks inherit gesture/perf TaskLocals without a task group's
+        // mandatory child join preventing the early timeout response.
+        let resolution = GestureExecutionResolution()
+        let handler = Task {
+            let response = await self.commandHandler.handle(
+                request, deadlineMs: deadlineMs, monotonicNowMs: self.monotonicNowMs
+            )
+            resolution.resolve { .handler }
+            return response
+        }
+        let watchdog = Task {
+            // SystemTimer.schedule dispatches to the BLOCKED main queue: it cannot
+            // be a watchdog. ProxyTimer.wait uses Task.sleep on the cooperative pool.
+            let remainingMs = max(0, boundMs - (self.monotonicNowMs() - executionStartedAtMs))
+            await self.timer.wait(milliseconds: remainingMs)
+            guard !Task.isCancelled else { return }
+            resolution.resolve {
+                let hit = diagnostics?.markBoundExceeded(boundMs: boundMs)
+                return .bound(phase: hit?.phase ?? "executionPreparation", elapsedMs: hit?.elapsedMs ?? boundMs)
+            }
+        }
+        // The lock stores an early winner if either task finishes before wait registers.
+        let winner = await resolution.wait()
+        switch winner {
+        case .handler:
+            watchdog.cancel()
+            return (await handler.value, false)
+        case let .bound(phase, elapsedMs):
+            let error = CommandError.gestureBoundExceeded(
+                command: request.typeString, phase: phase, boundMs: boundMs, elapsedMs: elapsedMs
+            )
+            let response = WebSocketResponse.error(
+                type: request.requestType.responseType.rawValue,
+                requestId: request.requestId, error: error.errorDescription ?? "Gesture execution bound exceeded"
+            )
+            do {
+                try responder.send(JSONEncoder().encode(response))
+            } catch {
+                print("[WebSocketServer] Failed to encode gesture bound response: \(error)")
+            }
+            // Await the real task and discard its late response. The caller still flushes
+            // perf, finishes diagnostics/failure coordination, then clears the busy guard.
+            return (await handler.value, true)
         }
     }
 

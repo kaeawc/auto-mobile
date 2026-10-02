@@ -121,6 +121,8 @@ export interface SwipeOnDependencies extends DisplayFenceDependencies {
   skipCallerDisplayFence?: boolean;
   /** Avoid post-action runner reads after an iOS lock-screen gesture fails. */
   stopAfterIosGestureFailure?: boolean;
+  /** Only the unlocker opts into an app-independent iOS swipe. */
+  iosLockScreenSwipe?: boolean;
   /** Cap the iOS gesture request inside a caller's remaining action budget. */
   iosGestureTimeoutMs?: () => number;
   lastRenderedObservation?: RenderedObservationReader;

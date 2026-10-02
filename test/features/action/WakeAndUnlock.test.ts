@@ -603,6 +603,7 @@ describe("WakeAndUnlock", () => {
 
     expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
     expect(result.error).toBeUndefined();
+    expect(result.warning).toBeUndefined();
     expect(ios.calls).toBe(1);
     expect(lock.reads).toBe(2);
   });
@@ -775,7 +776,7 @@ describe("WakeAndUnlock", () => {
       iosRunnerRecovery: recovery,
     });
     await expect(action.execute()).rejects.toThrow(/could not read.*after the swipe/);
-    expect(calls).toEqual([2_000, 4_500]);
+    expect(calls).toEqual([2_000, 2_250, 2_250]);
     expect(timer.now()).toBe(25_000);
     expect(lock.reads).toBeGreaterThan(1);
   });
@@ -809,6 +810,7 @@ describe("WakeAndUnlock", () => {
     }).execute();
     expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
     expect(result.error).toBeUndefined();
+    expect(result.warning).toContain(ios.result.error);
     expect(ios.calls).toBe(1);
   });
 
@@ -857,7 +859,7 @@ describe("WakeAndUnlock", () => {
       iosLockStateProbe: new FakeIosLockProbe(),
     }).execute(undefined, transportDeadline);
     await expect(failure).rejects.toThrow(/still locked.*swipe failed/);
-    expect(budgets).toEqual([2_000, 5_000]);
+    expect(budgets).toEqual([2_000, 2_500, 2_500]);
     expect(timer.now()).toBe(9_000);
     expect(wallClockStart + timer.now()).toBe(transportDeadline - 3_000);
   });
@@ -898,7 +900,7 @@ describe("WakeAndUnlock", () => {
     }).execute();
     expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
     expect(result.error).toBeUndefined();
-    expect(swipes).toBe(1);
+    expect(swipes).toBe(2);
     expect(timer.now()).toBeGreaterThanOrEqual(19_000);
     expect(timer.now()).toBeLessThan(25_000);
   });
@@ -939,13 +941,154 @@ describe("WakeAndUnlock", () => {
     }).execute();
     expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
     expect(result.error).toBeUndefined();
+    expect(result.warning).toContain("swipe did not complete");
+    expect(result.warning).toContain("timed out after 2500ms");
     expect(swipes).toBe(1);
     expect(lock.reads).toBe(2);
     expect(recovery.starts).toBe(0);
     expect(recovery.connects).toBe(0);
     expect(recovery.budgets).toEqual([]);
-    expect(timer.now()).toBe(5_000);
+    expect(timer.now()).toBe(2_500);
   });
+});
+
+describe("iOS two-stage unlock", () => {
+  for (const fastUnlocks of [true, false]) {
+    test(`fast swipe ${fastUnlocks ? "unlocks without fallback" : "has no effect and legacy fallback unlocks"}`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const lock = new FakeIosLockProbe();
+      lock.states = fastUnlocks ? [LOCKED_SWIPE, UNLOCKED] : [LOCKED_SWIPE, LOCKED_SWIPE, UNLOCKED];
+      const flags: Array<true | undefined> = [];
+      const budgets: number[] = [];
+      const actions: IosUnlockActions = {
+        async pressHome() {
+          return { success: true };
+        },
+        async swipeUp(timeoutMs, options) {
+          budgets.push(timeoutMs);
+          flags.push(options?.lockScreen);
+          return { success: true };
+        },
+      };
+      const result = await new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+        timer,
+        iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+        iosLockStateProbe: lock,
+      }).execute();
+      expect(result.unlocked).toBe(true);
+      expect(flags).toEqual(fastUnlocks ? [true] : [true, undefined]);
+      expect(budgets).toEqual(fastUnlocks ? [2500] : [2500, 5000]);
+      expect(result.warning).toBe(
+        fastUnlocks
+          ? undefined
+          : "unlocked by the fallback swipe after the fast swipe had no effect",
+      );
+    });
+  }
+
+  for (const throws of [false, true]) {
+    test(`non-busy fast failure still falls back (throws=${throws})`, async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const lock = new FakeIosLockProbe();
+      lock.states = [LOCKED_SWIPE, undefined, UNLOCKED];
+      const flags: Array<true | undefined> = [];
+      const actions: IosUnlockActions = {
+        async pressHome() {
+          return { success: true };
+        },
+        async swipeUp(_timeoutMs, options) {
+          flags.push(options?.lockScreen);
+          if (flags.length === 1) {
+            if (throws) {
+              throw new Error("fast gesture failed");
+            }
+            return { success: false, error: "fast gesture failed" };
+          }
+          return { success: true };
+        },
+      };
+      const result = await new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+        timer,
+        iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+        iosLockStateProbe: lock,
+      }).execute();
+      expect(flags).toEqual([true, undefined]);
+      expect(result.warning).toContain("fallback swipe");
+      expect(result.unlocked).toBe(true);
+    });
+  }
+
+  test("stage-1 probe consumes swipe budget: no fallback and existing still-locked failure", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let probes = 0;
+    const lock: IosLockStateProbe = {
+      async read() {
+        if (++probes === 2) {
+          await timer.sleep(5000);
+        }
+        return LOCKED_SWIPE;
+      },
+    };
+    let swipes = 0;
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        return { success: true };
+      },
+      async swipeUp() {
+        swipes++;
+        return { success: true };
+      },
+    };
+    await expect(
+      new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+        timer,
+        iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+        iosLockStateProbe: lock,
+      }).execute(),
+    ).rejects.toThrow(/still locked/);
+    expect(swipes).toBe(1);
+    expect(timer.now()).toBeLessThanOrEqual(25000);
+  });
+
+  for (const error of [
+    "Command request_swipe exceeded execution bound 2500ms in phase gesture after 2500ms; XCUITest call is still executing and the runner stays busy until it returns",
+    "iOS runner is busy executing request_swipe for 2.5s; retry shortly",
+    "runner_busy",
+    "Swipe timed out after 2500ms",
+  ]) {
+    for (const throws of [false, true]) {
+      test(`busy/transport error prevents fallback (${error}, throws=${throws})`, async () => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const lock = new FakeIosLockProbe();
+        let swipes = 0;
+        const actions: IosUnlockActions = {
+          async pressHome() {
+            return { success: true };
+          },
+          async swipeUp() {
+            swipes++;
+            if (throws) {
+              throw new ActionableError(error);
+            }
+            return { success: false, error };
+          },
+        };
+        await expect(
+          new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+            timer,
+            iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+            iosLockStateProbe: lock,
+          }).execute(),
+        ).rejects.toThrow(error);
+        expect(swipes).toBe(1);
+        expect(timer.now()).toBe(25000);
+      });
+    }
+  }
 });
 
 // Validate the actual fake-backed branch results before and after finalization.

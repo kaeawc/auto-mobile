@@ -425,10 +425,10 @@ const options15 = call15.bind(
   args15[4],
   args15[5],
   args15[6],
-  args15[7],
 );
 void options15();
 void options15({ displayFence: fence });
+void options15({ displayFence: fence, lockScreen: true, timeoutMs: 5000 });
 // @ts-expect-error A fence must implement assertCurrent(): void.
 void options15({ displayFence: [] });
 // @ts-expect-error A fence must implement assertCurrent(): void.

@@ -24,7 +24,8 @@ final class FakeProxyTimer: ProxyTimer {
     private struct State {
         var currentTime: Int64
         var pendingCallbacks: [(time: Int64, callback: @Sendable () -> Void)] = []
-        var pendingWaiters: [CheckedContinuation<Void, Never>] = []
+        var pendingWaiters: [(id: UUID, time: Int64, continuation: CheckedContinuation<Void, Never>)] = []
+        var cancelledWaits = 0
     }
 
     private let mode: Mode
@@ -45,8 +46,24 @@ final class FakeProxyTimer: ProxyTimer {
             state.withLock { $0.currentTime += milliseconds }
 
         case .manual:
-            await withCheckedContinuation { continuation in
-                state.withLock { $0.pendingWaiters.append(continuation) }
+            guard milliseconds > 0 else { return }
+            let id = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    let cancelled = state.withLock { value -> Bool in
+                        if Task.isCancelled { return true }
+                        value.pendingWaiters.append((id, value.currentTime + milliseconds, continuation))
+                        return false
+                    }
+                    if cancelled { continuation.resume() }
+                }
+            } onCancel: {
+                let waiter = self.state.withLock { value -> CheckedContinuation<Void, Never>? in
+                    value.cancelledWaits += 1
+                    guard let index = value.pendingWaiters.firstIndex(where: { $0.id == id }) else { return nil }
+                    return value.pendingWaiters.remove(at: index).continuation
+                }
+                waiter?.resume()
             }
 
         case let .delayed(delay):
@@ -75,8 +92,8 @@ final class FakeProxyTimer: ProxyTimer {
             s.currentTime += milliseconds
             let due = s.pendingCallbacks.filter { $0.time <= s.currentTime }
             s.pendingCallbacks.removeAll { $0.time <= s.currentTime }
-            let waiters = s.pendingWaiters
-            s.pendingWaiters.removeAll()
+            let waiters = s.pendingWaiters.filter { $0.time <= s.currentTime }.map(\.continuation)
+            s.pendingWaiters.removeAll { $0.time <= s.currentTime }
             return (due, waiters)
         }
 
@@ -98,7 +115,7 @@ final class FakeProxyTimer: ProxyTimer {
         let waiters: [CheckedContinuation<Void, Never>] = state.withLock { s in
             s.currentTime = 0
             s.pendingCallbacks.removeAll()
-            let waiters = s.pendingWaiters
+            let waiters = s.pendingWaiters.map(\.continuation)
             s.pendingWaiters.removeAll()
             return waiters
         }
@@ -111,6 +128,8 @@ final class FakeProxyTimer: ProxyTimer {
     var pendingCallbackCount: Int {
         state.withLock { $0.pendingCallbacks.count }
     }
+
+    var cancelledWaitCount: Int { state.withLock { $0.cancelledWaits } }
 
     /// Count of pending waiters.
     var pendingWaiterCount: Int {

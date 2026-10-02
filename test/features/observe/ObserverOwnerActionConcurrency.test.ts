@@ -246,7 +246,8 @@ test.each(["finish", "timeout", "cancel"] as const)(
     const recorder = new FakeAdbExecutor();
     const commandProbe = screenshot(recorder, timer, new CountingIdGenerator("captures"));
     recorder.setCommandResponse("screencap", { stdout: png, stderr: "" });
-    await commandProbe.capture.executeObservationRead({ format: "png", displayId: 0 });
+    await commandProbe.capture.startTrackedCapture({ format: "png", displayId: 0 }).promise;
+    ScreenshotJobTracker.clear();
     const command = recorder.getExecutedCommands().find((value) => value.includes("screencap"))!;
     const adb = new HoldingAdb(command);
     const ownerShot = screenshot(adb, timer, ids);

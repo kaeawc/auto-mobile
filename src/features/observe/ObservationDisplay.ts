@@ -130,7 +130,10 @@ export class ObservedAndroidDisplayCache {
     return panel === undefined ? undefined : remembered.posture;
   }
 
-  constructor(private readonly timer: Pick<Timer, "now">) {}
+  constructor(
+    private readonly timer: Pick<Timer, "now">,
+    private readonly readOnly = false,
+  ) {}
 
   /** Resolve a physical panel to its current Android logical display id. */
   async logicalIdForPanel(
@@ -201,7 +204,9 @@ export class ObservedAndroidDisplayCache {
       return cached.posture;
     }
     const posture = await readAndroidPosture(adb, signal);
-    androidPostureCache.set(device.deviceId, { inventory, at: this.timer.now(), posture });
+    if (!this.readOnly) {
+      androidPostureCache.set(device.deviceId, { inventory, at: this.timer.now(), posture });
+    }
     return posture;
   }
 
@@ -231,12 +236,14 @@ export class ObservedAndroidDisplayCache {
       lastKnownAndroidDisplay.get(device.deviceId),
     );
     signal?.throwIfAborted();
-    lastKnownAndroidDisplay.set(device.deviceId, value);
-    androidDisplayCache.set(device.deviceId, {
-      inventory,
-      value: { ...value, display: { ...value.display } },
-      at: this.timer.now(),
-    });
+    if (!this.readOnly) {
+      lastKnownAndroidDisplay.set(device.deviceId, value);
+      androidDisplayCache.set(device.deviceId, {
+        inventory,
+        value: { ...value, display: { ...value.display } },
+        at: this.timer.now(),
+      });
+    }
     return value;
   }
 }

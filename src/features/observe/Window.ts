@@ -33,6 +33,8 @@ export interface GetActiveOptions {
   signal?: AbortSignal;
   /** Per-read deadline in ms. Defaults to {@link DEFAULT_GET_ACTIVE_TIMEOUT_MS}. */
   timeoutMs?: number;
+  /** Device observer reads must not populate the shared device-keyed disk cache. */
+  cacheResult?: boolean;
 }
 
 /**
@@ -269,10 +271,11 @@ export class Window implements WindowInterface {
 
       const result = { appId: packageName, activityName, layoutSeqSum };
 
-      // Cache the result
-      this.cachedActiveWindow = result;
-      await this.writeCacheToDisk(result);
-      logger.info("[WINDOW] Cached new active window information");
+      if (options.cacheResult !== false) {
+        this.cachedActiveWindow = result;
+        await this.writeCacheToDisk(result);
+        logger.info("[WINDOW] Cached new active window information");
+      }
 
       if (!packageName || !activityName) {
         const sample = stdout.trim().slice(0, 200);

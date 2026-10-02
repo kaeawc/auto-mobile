@@ -84,17 +84,14 @@ function androidInstallHarness(output = "Success") {
     new InstallApp(
       android,
       { create: () => adb },
-      host,
-      tools,
-      () => createPerformanceTracker(false, timer),
-      null,
-      null,
-      undefined,
-      new FakeInstalledAppsRepository(),
-      undefined,
-      timer,
-      undefined,
-      invalidator,
+      {
+        hostExecutor: host,
+        buildToolsLocator: tools,
+        performanceTrackerFactory: () => createPerformanceTracker(false, timer),
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: timer,
+        cacheInvalidator: invalidator,
+      },
     );
   return { events, adb, timer, makeAction };
 }
@@ -135,17 +132,17 @@ function iosInstallHarness(device = simulator, downgrade = false) {
     new InstallApp(
       device,
       { create: () => new FakeAdbExecutor() },
-      new FakeHostCommandExecutor(),
-      new FakeAndroidBuildToolsLocator(),
-      () => createPerformanceTracker(false, timer),
-      simctl,
-      null,
-      plist,
-      new FakeInstalledAppsRepository(),
-      undefined,
-      timer,
-      () => backend,
-      invalidator,
+      {
+        hostExecutor: new FakeHostCommandExecutor(),
+        buildToolsLocator: new FakeAndroidBuildToolsLocator(),
+        performanceTrackerFactory: () => createPerformanceTracker(false, timer),
+        simctl: simctl,
+        plist: plist,
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        timer: timer,
+        iosInstallBackendResolver: () => backend,
+        cacheInvalidator: invalidator,
+      },
     );
   return { events, makeAction };
 }

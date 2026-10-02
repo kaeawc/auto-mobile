@@ -72,7 +72,6 @@
 1	src/features/action/HomeScreen.ts	auto-mobile(catch-convention)
 1	src/features/action/InputText.ts	eslint(complexity)
 1	src/features/action/InstallApp.ts	eslint(max-lines-per-function)
-1	src/features/action/InstallApp.ts	eslint(max-params)
 1	src/features/action/Keyboard.ts	eslint(max-params)
 1	src/features/action/LaunchApp.ts	auto-mobile(no-raw-promise-race)
 1	src/features/action/PinchOn.ts	eslint(max-lines-per-function)

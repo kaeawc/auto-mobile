@@ -82,7 +82,7 @@ describe("app ID device-shell boundaries", () => {
       );
       adb.setForegroundApp({ packageName: appId, userId: 0 });
 
-      await new TerminateApp(device, adb as any, null, new FakeTimer()).execute(appId, {
+      await new TerminateApp(device, adb as any, { timer: new FakeTimer() }).execute(appId, {
         skipObservation: true,
       });
 

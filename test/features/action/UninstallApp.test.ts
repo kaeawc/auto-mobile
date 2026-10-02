@@ -1,3 +1,7 @@
+import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
+import { DefaultDeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
+import { InstalledAppsRepository } from "../../../src/db/installedAppsRepository";
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import {
   UninstallApp as ProductionUninstallApp,
@@ -24,24 +28,11 @@ import { ActionableError } from "../../../src/models/ActionableError";
 // scenario does not need to inspect stale-marker rows explicitly.
 class UninstallApp extends ProductionUninstallApp {
   constructor(...args: ConstructorParameters<typeof ProductionUninstallApp>) {
-    const [
-      device,
-      adbFactory,
-      simctl,
-      deviceAppUninstaller,
-      repository,
-      trackerFactory,
-      cacheInvalidator,
-    ] = args;
-    super(
-      device,
-      adbFactory,
-      simctl,
-      deviceAppUninstaller,
-      repository ?? new FakeInstalledAppsRepository(),
-      trackerFactory,
-      cacheInvalidator,
-    );
+    const [device, adbFactory, options = {}] = args;
+    super(device, adbFactory, {
+      ...options,
+      installedAppsRepository: options.installedAppsRepository ?? new FakeInstalledAppsRepository(),
+    });
   }
 }
 
@@ -79,6 +70,14 @@ describe("UninstallApp (iOS simulator)", () => {
     setDebugPerfEnabled(false);
   });
 
+  test("preserves default dependency implementations with omitted options", () => {
+    const app = new ProductionUninstallApp(iosSimDevice, nullAdbFactory);
+    expect(app["cacheInvalidator"]).toBeInstanceOf(DefaultDeviceWindowCacheInvalidator);
+    expect(app["deviceAppUninstaller"]).toBeInstanceOf(DeviceAppManager);
+    expect(app["simctl"]).toBeInstanceOf(SimCtlClient);
+    expect(app["installedAppsRepository"]).toBeInstanceOf(InstalledAppsRepository);
+  });
+
   test("uninstalls installed simulator app", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
@@ -90,13 +89,11 @@ describe("UninstallApp (iOS simulator)", () => {
 
     const repo = new FakeInstalledAppsRepository();
     await repo.upsertInstalledApp(iosSimDevice.deviceId, 0, "com.example.app", false, 1_000);
-    const uninstall = new UninstallApp(
-      iosSimDevice,
-      nullAdbFactory,
-      fakeSimctl,
-      fakeUninstaller,
-      repo,
-    );
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+      installedAppsRepository: repo,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -111,7 +108,10 @@ describe("UninstallApp (iOS simulator)", () => {
   test("returns success when app is not installed", async () => {
     fakeSimctl.setInstalledApps([]);
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -124,14 +124,11 @@ describe("UninstallApp (iOS simulator)", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
-    const result = await new UninstallApp(
-      iosSimDevice,
-      nullAdbFactory,
-      fakeSimctl,
-      fakeUninstaller,
-      undefined,
-      () => createPerformanceTracker(true, fakeTimer),
-    ).execute("com.example.app");
+    const result = await new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+      performanceTrackerFactory: () => createPerformanceTracker(true, fakeTimer),
+    }).execute("com.example.app");
 
     expect(result.perfTiming).toBeDefined();
     expect((result.perfTiming as TimingEntry[])[0]?.name).toBe("uninstallApp");
@@ -143,14 +140,11 @@ describe("UninstallApp (iOS simulator)", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const outer = createPerformanceTracker(true, fakeTimer);
-    const uninstall = new UninstallApp(
-      iosSimDevice,
-      nullAdbFactory,
-      fakeSimctl,
-      fakeUninstaller,
-      undefined,
-      () => createPerformanceTracker(true, new FakeTimer()),
-    );
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+      performanceTrackerFactory: () => createPerformanceTracker(true, new FakeTimer()),
+    });
 
     await runWithPerfTracker(outer, () => uninstall.execute("com.example.app"));
 
@@ -167,12 +161,10 @@ describe("UninstallApp (iOS simulator)", () => {
   test("omits perfTiming when --debug-perf is disabled", async () => {
     fakeSimctl.setInstalledApps([]);
 
-    const result = await new UninstallApp(
-      iosSimDevice,
-      nullAdbFactory,
-      fakeSimctl,
-      fakeUninstaller,
-    ).execute("com.example.app");
+    const result = await new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    }).execute("com.example.app");
 
     expect(result).toEqual({
       success: true,
@@ -187,7 +179,10 @@ describe("UninstallApp (iOS simulator)", () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
     // Don't clear installed apps — simulates failed uninstall
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(false);
@@ -199,7 +194,10 @@ describe("UninstallApp (iOS simulator)", () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
     fakeUninstaller.shouldThrow = new Error("simctl uninstall failed");
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(false);
@@ -207,7 +205,10 @@ describe("UninstallApp (iOS simulator)", () => {
   });
 
   test("returns failure for empty package name", async () => {
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("");
 
     expect(result.success).toBe(false);
@@ -221,7 +222,10 @@ describe("UninstallApp (iOS simulator)", () => {
       fakeSimctl.setInstalledApps([]);
     };
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     // iOS cannot keep app data during uninstall — the request must be ignored.
     const result = await uninstall.execute("com.example.app", true);
 
@@ -238,12 +242,10 @@ describe("UninstallApp (unsupported platform)", () => {
       platform: "web",
     } as unknown as BootedDevice;
 
-    const uninstall = new UninstallApp(
-      webDevice,
-      nullAdbFactory,
-      new FakeSimctl(),
-      new FakeDeviceAppUninstaller(),
-    );
+    const uninstall = new UninstallApp(webDevice, nullAdbFactory, {
+      simctl: new FakeSimctl(),
+      deviceAppUninstaller: new FakeDeviceAppUninstaller(),
+    });
 
     const error = await uninstall.execute("com.example.app").catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ActionableError);
@@ -274,12 +276,10 @@ describe("UninstallApp (iOS physical device)", () => {
       fakeSimctl.setInstalledApps([]);
     };
 
-    const uninstall = new UninstallApp(
-      iosPhysicalDevice,
-      nullAdbFactory,
-      fakeSimctl,
-      fakeUninstaller,
-    );
+    const uninstall = new UninstallApp(iosPhysicalDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -312,15 +312,9 @@ describe("UninstallApp (Android)", () => {
     adb: FakeAdbClient,
     cacheInvalidator: DeviceWindowCacheInvalidator,
   ): UninstallApp {
-    return new UninstallApp(
-      androidDevice,
-      fakeAdbFactory(adb),
-      null,
-      null,
-      undefined,
-      undefined,
-      cacheInvalidator,
-    );
+    return new UninstallApp(androidDevice, fakeAdbFactory(adb), {
+      cacheInvalidator: cacheInvalidator,
+    });
   }
 
   beforeEach(() => {
@@ -424,7 +418,9 @@ describe("UninstallApp (Android)", () => {
       { stdout: "package:com.android.settings" },
     ]);
 
-    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), null, null, repo);
+    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), {
+      installedAppsRepository: repo,
+    });
 
     await uninstall.execute("com.example.app");
 
@@ -457,7 +453,9 @@ describe("UninstallApp (Android)", () => {
     await repo.upsertInstalledApp(androidDevice.deviceId, 0, "com.example.previous", false, 1_000);
     adb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
 
-    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(adb), null, null, repo);
+    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(adb), {
+      installedAppsRepository: repo,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(false);
@@ -696,7 +694,9 @@ describe("UninstallApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     setupNoApp(fakeAdb, 0);
 
-    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), null, null, repo);
+    const uninstall = new UninstallApp(androidDevice, fakeAdbFactory(fakeAdb), {
+      installedAppsRepository: repo,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -759,7 +759,10 @@ describe("UninstallApp (iOS listing failure)", () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
     fakeSimctl.setListAppsError(new Error("Unable to boot device in current state"));
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(false);
@@ -772,7 +775,10 @@ describe("UninstallApp (iOS listing failure)", () => {
   test("preserves the not-installed result when the listing succeeds and the app is absent", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.other" }]);
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);
@@ -787,7 +793,10 @@ describe("UninstallApp (iOS listing failure)", () => {
       fakeSimctl.setInstalledApps([]);
     };
 
-    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, fakeSimctl, fakeUninstaller);
+    const uninstall = new UninstallApp(iosSimDevice, nullAdbFactory, {
+      simctl: fakeSimctl,
+      deviceAppUninstaller: fakeUninstaller,
+    });
     const result = await uninstall.execute("com.example.app");
 
     expect(result.success).toBe(true);

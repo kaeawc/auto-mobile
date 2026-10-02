@@ -63,6 +63,13 @@ registerDeviceIncarnationListener({
     }),
 });
 
+export interface TerminateAppOptions {
+  simctl?: SimCtlClient;
+  timer?: Timer;
+  deviceTerminator?: DeviceAppTerminator;
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
+}
+
 export class TerminateApp extends BaseVisualChange {
   private simctl: SimCtlClient;
   private deviceTerminator: DeviceAppTerminator;
@@ -72,23 +79,18 @@ export class TerminateApp extends BaseVisualChange {
    * Create an TerminateApp instance
    * @param device - Optional device
    * @param adb - Optional AdbClient instance for testing
-   * @param simctl - Optional SimCtlClient instance for testing
-   * @param timer - Optional Timer instance for testing
-   * @param deviceTerminator - Optional physical-device terminator for testing
+   * @param options - Optional simulator, timer, physical-device terminator, and cache invalidator dependencies
    */
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
-    simctl: SimCtlClient | null = null,
-    timer: Timer = defaultTimer,
-    deviceTerminator: DeviceAppTerminator | null = null,
-    cacheInvalidator: DeviceWindowCacheInvalidator | null = null,
+    options: TerminateAppOptions = {},
   ) {
-    super(device, adb, timer);
+    super(device, adb, options.timer ?? defaultTimer);
     this.device = device;
-    this.simctl = simctl || new SimCtlClient(device);
-    this.deviceTerminator = deviceTerminator || new DeviceAppManager();
-    this.cacheInvalidator = cacheInvalidator || new DefaultDeviceWindowCacheInvalidator();
+    this.simctl = options.simctl ?? new SimCtlClient(device);
+    this.deviceTerminator = options.deviceTerminator ?? new DeviceAppManager();
+    this.cacheInvalidator = options.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   }
 
   /**

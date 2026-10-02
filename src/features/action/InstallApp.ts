@@ -57,6 +57,20 @@ export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
 }
 
+export interface InstallAppOptions {
+  hostExecutor?: HostCommandExecutor;
+  buildToolsLocator?: AndroidBuildToolsLocator;
+  performanceTrackerFactory?: () => PerformanceTracker;
+  simctl?: SimCtlClient;
+  deviceAppInstaller?: DeviceAppInstaller;
+  plist?: PlistReader;
+  installedAppsRepository?: InstalledAppsStore;
+  physicalAppLister?: IosPhysicalAppLister;
+  timer?: Timer;
+  iosInstallBackendResolver?: typeof resolveIosInstallBackend;
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
+}
+
 export class InstallApp {
   private adb: AdbExecutor;
   private hostExecutor: HostCommandExecutor;
@@ -68,36 +82,30 @@ export class InstallApp {
   private physicalAppLister?: IosPhysicalAppLister;
   private timer?: Timer;
   private plist: PlistReader;
+  private readonly iosInstallBackendResolver?: typeof resolveIosInstallBackend;
   private cacheInvalidatorOverride?: DeviceWindowCacheInvalidator;
   private installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository();
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    hostExecutor: HostCommandExecutor | null = null,
-    buildToolsLocator: AndroidBuildToolsLocator | null = null,
-    performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
-    simctl: SimCtlClient | null = null,
-    deviceAppInstaller: DeviceAppInstaller | null = null,
-    plist: PlistReader = new PlistClient(),
-    installedAppsRepository?: InstalledAppsStore,
-    physicalAppLister?: IosPhysicalAppLister,
-    timer?: Timer,
-    private readonly iosInstallBackendResolver?: typeof resolveIosInstallBackend,
-    cacheInvalidator?: DeviceWindowCacheInvalidator,
+    options: InstallAppOptions = {},
   ) {
+    const plist = options.plist ?? new PlistClient();
+    this.iosInstallBackendResolver = options.iosInstallBackendResolver;
     this.device = device;
     this.adb = adbFactory.create(device);
-    this.hostExecutor = hostExecutor || new DefaultHostCommandExecutor();
-    this.buildToolsLocator = buildToolsLocator || new DefaultAndroidBuildToolsLocator();
-    this.createPerformanceTracker = performanceTrackerFactory;
-    this.simctl = simctl || new SimCtlClient(device);
-    this.deviceAppInstaller = deviceAppInstaller || new DeviceAppManager();
-    this.physicalAppLister = physicalAppLister;
-    this.timer = timer;
+    this.hostExecutor = options.hostExecutor ?? new DefaultHostCommandExecutor();
+    this.buildToolsLocator = options.buildToolsLocator ?? new DefaultAndroidBuildToolsLocator();
+    this.createPerformanceTracker =
+      options.performanceTrackerFactory ?? createGlobalPerformanceTracker;
+    this.simctl = options.simctl ?? new SimCtlClient(device);
+    this.deviceAppInstaller = options.deviceAppInstaller ?? new DeviceAppManager();
+    this.physicalAppLister = options.physicalAppLister;
+    this.timer = options.timer;
     this.plist = plist;
-    this.cacheInvalidatorOverride = cacheInvalidator;
-    this.setInstalledAppsRepository(installedAppsRepository);
+    this.cacheInvalidatorOverride = options.cacheInvalidator;
+    this.setInstalledAppsRepository(options.installedAppsRepository);
   }
 
   private get cacheInvalidator(): DeviceWindowCacheInvalidator {

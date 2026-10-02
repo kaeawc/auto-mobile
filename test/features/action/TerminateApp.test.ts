@@ -1,3 +1,5 @@
+import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import {
   beforeEach as beforeOutputSchema,
   afterEach as afterOutputSchema,
@@ -43,6 +45,13 @@ describe("TerminateApp (iOS)", () => {
     fakeTimer.enableAutoAdvance();
   });
 
+  test("preserves default dependency implementations with omitted options", () => {
+    const app = new TerminateApp(iosDevice, new FakeAdbClient() as unknown as AdbClient);
+    expect(app["cacheInvalidator"]).toBeInstanceOf(DefaultDeviceWindowCacheInvalidator);
+    expect(app["deviceTerminator"]).toBeInstanceOf(DeviceAppManager);
+    expect(app["simctl"]).toBeInstanceOf(SimCtlClient);
+  });
+
   test("clears an existing iOS CtrlProxy hierarchy cache", () => {
     const clearCache = spyOn({ clearCache: () => {} }, "clearCache");
     const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
@@ -61,7 +70,11 @@ describe("TerminateApp (iOS)", () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
     const terminator = new FakeDeviceAppTerminator();
-    const terminateApp = new TerminateApp(iosDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(iosDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(fakeSimctl.getMethodCalls("terminateApp")).toEqual([
@@ -86,7 +99,10 @@ describe("TerminateApp (iOS)", () => {
     const noProcessSimctl = new NoProcessSimctl();
     noProcessSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
-    const terminateApp = new TerminateApp(iosDevice, null, noProcessSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosDevice, null, {
+      simctl: noProcessSimctl,
+      timer: fakeTimer,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -105,7 +121,10 @@ describe("TerminateApp (iOS)", () => {
     const notRunningSimctl = new NotRunningSimctl();
     notRunningSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
-    const terminateApp = new TerminateApp(iosDevice, null, notRunningSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosDevice, null, {
+      simctl: notRunningSimctl,
+      timer: fakeTimer,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -124,7 +143,10 @@ describe("TerminateApp (iOS)", () => {
     const deviceDownSimctl = new DeviceDownSimctl();
     deviceDownSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
-    const terminateApp = new TerminateApp(iosDevice, null, deviceDownSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosDevice, null, {
+      simctl: deviceDownSimctl,
+      timer: fakeTimer,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     // A device-level failure is a real error, not an already-terminated app.
@@ -136,7 +158,10 @@ describe("TerminateApp (iOS)", () => {
   test("returns not installed when bundle id is missing", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.other" }]);
 
-    const terminateApp = new TerminateApp(iosDevice, null, fakeSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -152,7 +177,10 @@ describe("TerminateApp (iOS)", () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
     fakeSimctl.setListAppsError(new Error("Unable to boot device in current state"));
 
-    const terminateApp = new TerminateApp(iosDevice, null, fakeSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(false);
@@ -165,7 +193,10 @@ describe("TerminateApp (iOS)", () => {
   test("detects install when bundleIdentifier is provided", async () => {
     fakeSimctl.setInstalledApps([{ bundleIdentifier: "com.example.app" }]);
 
-    const terminateApp = new TerminateApp(iosDevice, null, fakeSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -196,13 +227,11 @@ describe("TerminateApp (iOS physical device)", () => {
       result: { wasInstalled: true, wasRunning: true },
     });
 
-    const terminateApp = new TerminateApp(
-      iosPhysicalDevice,
-      null,
-      fakeSimctl,
-      fakeTimer,
-      terminator,
-    );
+    const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -223,13 +252,11 @@ describe("TerminateApp (iOS physical device)", () => {
       result: { wasInstalled: true, wasRunning: false },
     });
 
-    const terminateApp = new TerminateApp(
-      iosPhysicalDevice,
-      null,
-      fakeSimctl,
-      fakeTimer,
-      terminator,
-    );
+    const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -243,13 +270,11 @@ describe("TerminateApp (iOS physical device)", () => {
       result: { wasInstalled: false, wasRunning: false },
     });
 
-    const terminateApp = new TerminateApp(
-      iosPhysicalDevice,
-      null,
-      fakeSimctl,
-      fakeTimer,
-      terminator,
-    );
+    const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -262,13 +287,11 @@ describe("TerminateApp (iOS physical device)", () => {
     const terminator = new FakeDeviceAppTerminator();
     terminator.setError(new Error("Physical iOS device app termination requires macOS"));
 
-    const terminateApp = new TerminateApp(
-      iosPhysicalDevice,
-      null,
-      fakeSimctl,
-      fakeTimer,
-      terminator,
-    );
+    const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(false);
@@ -290,7 +313,11 @@ describe("TerminateApp (iOS physical device)", () => {
     const terminator = new FakeDeviceAppTerminator();
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
-    const terminateApp = new TerminateApp(simDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(simDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -326,7 +353,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -342,10 +369,9 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app");
     fakeAdb.setCommandResult("shell dumpsys activity processes", "no processes");
 
-    await new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, null, fakeTimer).execute(
-      "com.example.app",
-      { skipObservation: true },
-    );
+    await new TerminateApp(androidDevice, fakeAdb as unknown as AdbClient, {
+      timer: fakeTimer,
+    }).execute("com.example.app", { skipObservation: true });
 
     expect(fakeAdb.getCommandCalls()).toContainEqual(
       expect.objectContaining({
@@ -369,7 +395,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.android.settings'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
     const result = await terminateApp.execute("com.android.settings", { skipObservation: true });
 
     expect(result.wasRunning).toBe(true);
@@ -396,14 +422,10 @@ describe("TerminateApp (Android)", () => {
       },
     };
 
-    const terminateApp = new TerminateApp(
-      androidDevice,
-      fakeAdb as any,
-      null,
-      fakeTimer,
-      null,
-      cacheInvalidator,
-    );
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+      timer: fakeTimer,
+      cacheInvalidator: cacheInvalidator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -431,14 +453,10 @@ describe("TerminateApp (Android)", () => {
       },
     };
 
-    const terminateApp = new TerminateApp(
-      androidDevice,
-      fakeAdb as any,
-      null,
-      fakeTimer,
-      null,
-      cacheInvalidator,
-    );
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+      timer: fakeTimer,
+      cacheInvalidator: cacheInvalidator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.wasRunning).toBe(false);
@@ -459,14 +477,10 @@ describe("TerminateApp (Android)", () => {
       },
     };
 
-    const terminateApp = new TerminateApp(
-      androidDevice,
-      fakeAdb as any,
-      null,
-      fakeTimer,
-      null,
-      cacheInvalidator,
-    );
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, {
+      timer: fakeTimer,
+      cacheInvalidator: cacheInvalidator,
+    });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.wasInstalled).toBe(false);
@@ -478,7 +492,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult("shell pm list packages --user 0", "package:com.example.app2");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -504,7 +518,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3271:com.example.other/u0a123");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result).toEqual({
@@ -527,7 +541,7 @@ describe("TerminateApp (Android)", () => {
     );
     fakeAdb.setCommandError("shell dumpsys activity processes", new Error("dumpsys unavailable"));
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
 
     await expect(
       terminateApp.execute("com.example.app", { skipObservation: true }),
@@ -544,7 +558,7 @@ describe("TerminateApp (Android)", () => {
       new Error("Command failed with exit code 1"),
     );
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -669,7 +683,10 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   test("iOS simulator: terminates via simctl and produces a well-formed perf tree", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
-    const terminateApp = new TerminateApp(iosSimDevice, null, fakeSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosSimDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+    });
     wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
@@ -683,7 +700,10 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   test("iOS simulator (not installed): still nests the perf tree correctly", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.other" }]);
 
-    const terminateApp = new TerminateApp(iosSimDevice, null, fakeSimctl, fakeTimer);
+    const terminateApp = new TerminateApp(iosSimDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+    });
     wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
@@ -699,13 +719,11 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       result: { wasInstalled: true, wasRunning: true },
     });
 
-    const terminateApp = new TerminateApp(
-      iosPhysicalDevice,
-      null,
-      fakeSimctl,
-      fakeTimer,
-      terminator,
-    );
+    const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
@@ -723,13 +741,11 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminator = new FakeDeviceAppTerminator();
     terminator.setError(new Error("Physical iOS device app termination requires macOS"));
 
-    const terminateApp = new TerminateApp(
-      iosPhysicalDevice,
-      null,
-      fakeSimctl,
-      fakeTimer,
-      terminator,
-    );
+    const terminateApp = new TerminateApp(iosPhysicalDevice, null, {
+      simctl: fakeSimctl,
+      timer: fakeTimer,
+      deviceTerminator: terminator,
+    });
     wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
@@ -749,7 +765,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 'com.example.app'", "");
 
-    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, { timer: fakeTimer });
     wireDeps(terminateApp);
     // skipUiStability keeps the Android gfxinfo path out of the test; the perf
     // ownership under observedInteraction is what we are covering here.

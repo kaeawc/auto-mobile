@@ -30,6 +30,7 @@ internal interface StrokeDispatcher<S> {
     stroke: S,
     onComplete: () -> Unit,
     onFailed: (error: String) -> Unit,
+    displayId: Int? = null,
   )
 }
 
@@ -58,6 +59,7 @@ internal class GestureStreamSession<S>(
 ) {
   private var previousStroke: S? = null
   private var terminal = false
+  private var displayId: Int? = null
 
   // The pump loop parks here when the coordinator returns Wait (touch held, no fresh move). A later
   // move/end resumes it. Without this, an idle drag would either dispatch a cancel-inducing hold or
@@ -65,7 +67,10 @@ internal class GestureStreamSession<S>(
   private var waiting = false
 
   /** Begin the gesture at ([x], [y]) and dispatch the initial press. Call once. */
-  fun start(x: Float, y: Float) = runOnGestureThread { drive(coordinator.start(x, y)) }
+  fun start(x: Float, y: Float, displayId: Int? = null) = runOnGestureThread {
+    this.displayId = displayId
+    drive(coordinator.start(x, y))
+  }
 
   /** Feed a new move target. Safe to call from any thread; a no-op after the gesture finished. */
   fun move(x: Float, y: Float) = runOnGestureThread {
@@ -117,6 +122,7 @@ internal class GestureStreamSession<S>(
         // input).
         dispatcher.dispatch(
           stroke = stroke,
+          displayId = displayId,
           onComplete = { pump() },
           onFailed = { error -> finish(success = false, error = error) },
         )

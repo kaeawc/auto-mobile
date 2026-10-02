@@ -72,6 +72,7 @@ data class RequestTapCoordinates(
   val y: Double,
   val duration: Long = 10L,
   val frameContext: String? = null,
+  val displayId: Int? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -84,6 +85,7 @@ data class RequestSwipe(
   val y2: Double,
   val duration: Long = 300L,
   val frameContext: String? = null,
+  val displayId: Int? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -96,6 +98,7 @@ data class RequestTwoFingerSwipe(
   val y2: Double,
   val duration: Long = 300L,
   val offset: Int = 100,
+  val displayId: Int? = null,
 ) : WebSocketRequest()
 
 @Serializable
@@ -113,6 +116,7 @@ data class RequestDrag(
   // Legacy field names for backward compatibility
   val holdTime: Long? = null,
   val duration: Long? = null,
+  val displayId: Int? = null,
 ) : WebSocketRequest() {
   /** Resolved press duration, using legacy holdTime as fallback */
   val resolvedPressDurationMs: Long
@@ -138,6 +142,7 @@ data class RequestPinch(
    */
   val rotationDegrees: Float = 0f,
   val duration: Long = 300L,
+  val displayId: Int? = null,
 ) : WebSocketRequest()
 
 // =============================================================================
@@ -160,6 +165,8 @@ data class RequestGestureStart(
   val gestureId: String,
   val x: Double,
   val y: Double,
+  /** Fixed for the entire stream; move/end inherit this display from the session. */
+  val displayId: Int? = null,
 ) : WebSocketRequest()
 
 @Serializable

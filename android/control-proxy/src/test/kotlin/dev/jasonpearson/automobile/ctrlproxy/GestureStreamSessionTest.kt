@@ -14,10 +14,45 @@ import org.junit.Test
  */
 class GestureStreamSessionTest {
 
+  @Test
+  fun `router forwards the start display through queued continuations`() {
+    val h = RouterHarness()
+    h.router.start("start", "g", 1f, 2f, 7)
+    h.drain()
+    h.router.move("move", "g", 3f, 4f)
+    h.drain()
+    val dispatcher = h.dispatchers.single()
+    dispatcher.completeLast()
+    h.router.end("end", "g", 5f, 6f, false)
+    h.drain()
+    dispatcher.completeLast()
+    dispatcher.completeLast()
+    assertEquals(listOf(7, 7, 7), dispatcher.displays)
+    assertEquals(Ack("end", true, null), h.acks.last())
+  }
+
+  @Test
+  fun `start display is retained through move end and cancellation`() {
+    for (displayId in listOf(null, 0, 7)) {
+      for (cancel in listOf(false, true)) {
+        val runner = Session()
+        runner.session.start(1f, 2f, displayId)
+        runner.session.move(3f, 4f)
+        runner.dispatcher.completeLast()
+        runner.session.end(5f, 6f, cancel)
+        runner.dispatcher.completeLast()
+        runner.dispatcher.completeLast()
+        assertEquals(listOf(displayId, displayId, displayId), runner.dispatcher.displays)
+        assertEquals(true, runner.finishedSuccess)
+      }
+    }
+  }
+
   private class FakeStroke(val segment: GestureSegment)
 
   private class FakeStrokeDispatcher : StrokeDispatcher<FakeStroke> {
     val dispatched = mutableListOf<GestureSegment>()
+    val displays = mutableListOf<Int?>()
     var initialCount = 0
     var continueCount = 0
     private var pendingComplete: (() -> Unit)? = null
@@ -37,8 +72,10 @@ class GestureStreamSessionTest {
       stroke: FakeStroke,
       onComplete: () -> Unit,
       onFailed: (error: String) -> Unit,
+      displayId: Int?,
     ) {
       dispatched.add(stroke.segment)
+      displays.add(displayId)
       pendingComplete = onComplete
       pendingFail = onFailed
     }

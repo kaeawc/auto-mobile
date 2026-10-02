@@ -160,6 +160,55 @@ describe("IosLockScreenUnlocker", () => {
     expect(gestures).toBe(0);
   });
 
+  test("only the unlock swipe forwards the internal lock-screen option", async () => {
+    for (const lockScreen of [true, false]) {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const observe = new FakeObserveScreen();
+      observe.setObserveResult({
+        timestamp: 0,
+        screenSize: { width: 1000, height: 2000 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+        viewHierarchy: { hierarchy: { node: { $: { _id: "lock" } } } },
+      });
+      let captured:
+        | import("../../../src/features/action/ExecuteGesture").FencedGestureOptions
+        | undefined;
+      const dependencies: SwipeOnDependencies = {
+        timer,
+        observeScreen: observe,
+        skipCallerDisplayFence: true,
+        stopAfterIosGestureFailure: true,
+        voiceOverExecutor: {
+          async executeSwipeGesture(x1, y1, x2, y2, _direction, _container, options) {
+            captured = options;
+            return { success: false, x1, y1, x2, y2, duration: 300, error: "bounded" };
+          },
+        },
+      };
+      if (lockScreen) {
+        let reads = 0;
+        await new IosLockScreenUnlocker(
+          device,
+          undefined,
+          timer,
+          (d, internal) => new SwipeOn(d, null, { ...dependencies, ...internal }),
+        ).wakeAndDismiss(() => (reads++ === 0 ? 0 : 5000));
+      } else {
+        await new SwipeOn(device, null, dependencies).execute({
+          direction: "up",
+          autoTarget: false,
+        });
+      }
+      expect(captured).toBeDefined();
+      if (lockScreen) {
+        expect(captured?.lockScreen).toBe(true);
+      } else {
+        expect(captured?.lockScreen).toBeUndefined();
+      }
+    }
+  });
+
   test("unlocker builds its swipe with the internal flags", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -184,6 +233,7 @@ describe("IosLockScreenUnlocker", () => {
     await unlocker.wakeAndDismiss(() => (budgetReads++ === 0 ? 0 : 5_000));
     expect(captured?.skipCallerDisplayFence).toBe(true);
     expect(captured?.stopAfterIosGestureFailure).toBe(true);
+    expect(captured?.iosLockScreenSwipe).toBe(true);
     expect(captured?.iosGestureTimeoutMs).toBeInstanceOf(Function);
     expect(calls).toEqual([{ direction: "up", autoTarget: false }]);
   });
@@ -266,5 +316,70 @@ describe("IosLockScreenUnlocker", () => {
     expect(result).toMatchObject({ success: false, error: expect.stringContaining("timed out") });
     expect(gestures).toBe(1);
     expect(observe.getExecuteCallCount()).toBe(0);
+  });
+});
+
+describe("two-stage swipe budgets", () => {
+  test("stage-local timeout aborts fast swipe and gives legacy swipe only the remainder", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const budgets: number[] = [];
+    const signals: Array<AbortSignal | undefined> = [];
+    const flags: Array<true | undefined> = [];
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        return { success: true };
+      },
+      swipeUp(timeoutMs, options) {
+        budgets.push(timeoutMs);
+        signals.push(options?.signal);
+        flags.push(options?.lockScreen);
+        return new Promise(() => {});
+      },
+    };
+    const result = await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+      remainingMs: () => 5000 - timer.now(),
+      readUnlocked: async () => false,
+    });
+    expect(budgets).toEqual([2500, 2500]);
+    expect(flags).toEqual([true, undefined]);
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    expect(timer.now()).toBe(5000);
+    expect(result.success).toBe(false);
+  });
+
+  test("probe exhausting the swipe budget prevents fallback", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const actions = new FakeIosActions();
+    await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+      remainingMs: () => 5000 - timer.now(),
+      readUnlocked: async () => {
+        await timer.sleep(5000);
+        return false;
+      },
+    });
+    expect(actions.calls).toEqual(["home", "swipe"]);
+    expect(timer.now()).toBe(5000);
+  });
+
+  test("default swipe factory omits the lock-screen flag on legacy fallback", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const flags: Array<boolean | undefined> = [];
+    let reads = 0;
+    const unlocker = new IosLockScreenUnlocker(device, undefined, timer, (_device, deps) => {
+      flags.push(deps.iosLockScreenSwipe);
+      return {
+        async execute() {
+          return { success: true, duration: 300 };
+        },
+      };
+    });
+    await unlocker.wakeAndDismiss({
+      remainingMs: () => (reads++ === 0 ? 0 : 5000),
+      readUnlocked: async () => false,
+    });
+    expect(flags).toEqual([true, undefined]);
   });
 });

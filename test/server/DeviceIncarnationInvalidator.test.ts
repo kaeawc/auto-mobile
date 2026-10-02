@@ -103,6 +103,54 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
     warn.mockRestore();
   });
 
+  test("settles Android listeners independently and logs notification rejection", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const apps = new FakeInstalledAppsRepository();
+      const barrier = new FakeDbWriteBarrier();
+      const failure = new Error("notify failed");
+      const calls: string[] = [];
+      const invalidator = new DefaultDeviceIncarnationInvalidator([
+        createInstalledAppsDeviceIncarnationListener(
+          apps,
+          new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
+          barrier,
+          () => {},
+          async () => {
+            throw failure;
+          },
+        ),
+        {
+          name: "sync-failure",
+          onDeviceIncarnationChanged: () => {},
+          onIncarnationChangeSettled: () => {
+            throw new Error("sync failed");
+          },
+        },
+        {
+          name: "recordings",
+          onDeviceIncarnationChanged: () => {},
+          onIncarnationChangeSettled: (id, outcome) => {
+            calls.push(`${id}:${outcome.ready}`);
+          },
+        },
+      ]);
+      await expect(
+        invalidator.settleIncarnationChange(ANDROID_DEVICE, { ready: true }),
+      ).resolves.toBeUndefined();
+      expect(calls).toEqual([`${ANDROID_DEVICE.deviceId}:true`]);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("installed-apps"), failure);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("sync-failure"), expect.any(Error));
+      await invalidator.settleIncarnationChange(
+        { ...ANDROID_DEVICE, platform: "ios" },
+        { ready: false },
+      );
+      expect(calls).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("prepares recording cleanup before a VM load", async () => {
     const calls: string[] = [];
     const invalidator = new DefaultDeviceIncarnationInvalidator([
@@ -125,7 +173,7 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
     expect(calls).toEqual(["recordings"]);
   });
 
-  test("notifies installed-app resource subscribers after clearing incarnation caches", async () => {
+  test("notifies installed-app resource subscribers only on ready settlement", async () => {
     const installedApps = new FakeInstalledAppsRepository();
     const barrier = new FakeDbWriteBarrier();
     const calls: string[] = [];
@@ -148,6 +196,10 @@ describe("DefaultDeviceIncarnationInvalidator", () => {
 
     await listener.onDeviceIncarnationChanged(ANDROID_DEVICE.deviceId);
 
+    expect(calls).toEqual([`clear:${ANDROID_DEVICE.deviceId}`]);
+    await listener.onIncarnationChangeSettled?.(ANDROID_DEVICE.deviceId, { ready: false });
+    expect(calls).toEqual([`clear:${ANDROID_DEVICE.deviceId}`]);
+    await listener.onIncarnationChangeSettled?.(ANDROID_DEVICE.deviceId, { ready: true });
     expect(calls).toEqual([
       `clear:${ANDROID_DEVICE.deviceId}`,
       `notify:${ANDROID_DEVICE.deviceId}`,

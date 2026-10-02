@@ -269,3 +269,28 @@ Audio-dependent workflows can now run headless.
 
 Further Android work and the measurement protocol are tracked in
 [Android emulator optimization](android-emulator-optimization.md).
+
+## VM snapshot incarnation lifecycle
+
+Per-device host-state owners register a `DeviceIncarnationListener`.
+`prepareForIncarnationChange(deviceId)` runs before the VM load;
+`onDeviceIncarnationChanged(deviceId)` invalidates caches immediately after loading.
+The optional `onIncarnationChangeSettled(deviceId, { ready })` hook runs once on
+all exits after preparation, including preparation, load, and readiness failures.
+`ready: true` means the restore provider's guest readiness wait resolved. All
+three phases are independently best-effort, and rejected listeners are logged.
+
+Installed-app owners invalidate in-memory and persisted caches after load, but
+send their resource-updated notification only at ready settlement. Subscribers
+interpret this notification as an invitation to re-read; load/readiness failures
+therefore invalidate without notifying, so an unready guest cannot supply a
+fresh-looking empty app list in response to the notification.
+
+Recording preparation fences new starts for that device before listing or
+stopping existing recordings. Settlement releases the fence on success or
+failure, after the readiness wait. A replaceable, injected Timer expiry defaults
+to ten minutes (well above the default 30-second load plus 30-second readiness
+budgets) to recover from abandoned restore flows. Custom restores longer than
+that bound may outlive the fence. A start already reserved before preparation
+can still finish after the active-recording inventory was taken; the fence
+rejects new reservations and does not drain starts already in flight.

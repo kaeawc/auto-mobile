@@ -20,6 +20,8 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 export interface FencedGestureOptions extends GestureOptions {
+  /** Internal opt-in for the iOS lock-screen synthesized swipe. */
+  lockScreen?: boolean;
   displayFence?: DisplayFence;
 }
 
@@ -271,17 +273,7 @@ export class ExecuteGesture extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const duration = options.duration || 300;
-    return await this.executeXCTestSwipe(
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-      perf,
-      signal,
-      options.timeoutMs,
-      { displayFence: options.displayFence },
-    );
+    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf, signal, options);
   }
 
   /**
@@ -304,10 +296,9 @@ export class ExecuteGesture extends BaseVisualChange {
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
-    timeoutMs?: number,
-    fenceOptions: DisplayFenceOption = {},
+    options: FencedGestureOptions = {},
   ): Promise<SwipeResult> {
-    const fence = fenceOptions.displayFence;
+    const fence = options.displayFence;
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
@@ -321,8 +312,9 @@ export class ExecuteGesture extends BaseVisualChange {
         x2,
         y2,
         duration,
-        Math.min(5_000, timeoutMs ?? 5_000),
+        Math.min(5_000, options.timeoutMs ?? 5_000),
         perf,
+        options.lockScreen === true ? { lockScreen: true } : undefined,
       );
     });
     throwIfAborted(signal);

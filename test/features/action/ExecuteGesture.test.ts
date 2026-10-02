@@ -28,6 +28,20 @@ describe("ExecuteGesture", () => {
     AndroidCtrlProxyClient.resetInstances();
   });
 
+  test("iOS swipe forwards lockScreen through the existing context options slot", async () => {
+    const fakeClient = new FakeIOSCtrlProxy();
+    const requestSwipe = spyOn(fakeClient as unknown as IOSCtrlProxyClient, "requestSwipe");
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeClient as unknown as IOSCtrlProxyClient,
+    );
+    const gesture = new ExecuteGesture(iosDevice, null, new FakeTimer());
+    await gesture.swipe(1, 2, 3, 4, { lockScreen: true, timeoutMs: 4200 });
+    expect(requestSwipe.mock.calls[0]?.[5]).toBe(4200);
+    expect(requestSwipe.mock.calls[0]?.[7]).toEqual({ lockScreen: true });
+    await gesture.swipe(1, 2, 3, 4);
+    expect(requestSwipe.mock.calls[1]?.[7]).toBeUndefined();
+  });
+
   test("an already aborted gesture dispatches no device command", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();

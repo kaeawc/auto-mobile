@@ -328,10 +328,8 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       expect(h.timer.getSleepHistory()).toEqual([]);
     });
     for (const options of [
-      { lookFor: { text: "Found" } },
       { focusTarget: false },
       { autoTarget: false },
-      { includeSystemInsets: false },
       { scrollMode: "adb" },
     ] satisfies Array<Partial<SwipeOnOptions>>) {
       test(`still rejects ${Object.keys(options)[0]}`, async () => {

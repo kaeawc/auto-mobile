@@ -2310,6 +2310,8 @@ export async function restoreDeviceSnapshot(
     let prepared = false;
     let invalidated = false;
     let loaded = false;
+    let settled = false;
+    let ready = false;
     const prepareOnce = async (): Promise<void> => {
       if (
         prepared ||
@@ -2341,6 +2343,14 @@ export async function restoreDeviceSnapshot(
       await invalidateOnce();
     };
 
+    const settleOnce = async (): Promise<void> => {
+      if (!prepared || settled) {
+        return;
+      }
+      settled = true;
+      await deviceIncarnationInvalidator.settleIncarnationChange(device, { ready });
+    };
+
     let result: RestoreSnapshotResult;
     try {
       result = await restoreProvider.restore({
@@ -2351,6 +2361,8 @@ export async function restoreDeviceSnapshot(
         onBeforeVmSnapshotLoad: prepareOnce,
         onVmSnapshotLoaded: invalidateAfterLoad,
       });
+      ready = true;
+      await invalidateOnce();
     } catch (error) {
       const definitivePreLoadFailure =
         error instanceof Error &&
@@ -2360,8 +2372,9 @@ export async function restoreDeviceSnapshot(
         await invalidateOnce();
       }
       throw toActionableError(error, `Failed to restore snapshot '${record.snapshotName}'`);
+    } finally {
+      await settleOnce();
     }
-    await invalidateOnce();
 
     const timestamp = now().toISOString();
     await snapshotRepository.touchSnapshot(record.snapshotName, timestamp);

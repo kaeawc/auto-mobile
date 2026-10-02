@@ -25,6 +25,7 @@ interface ThresholdConfig {
   version: string;
   thresholds: {
     unpackedBytes: number;
+    warnHeadroomBytes?: number;
   };
   metadata?: {
     generatedAt?: string;
@@ -39,21 +40,35 @@ interface CategoryResult {
   usage: number;
 }
 
-interface BenchmarkReport {
-  timestamp: string;
+interface UnpackedSizeResult extends CategoryResult {
+  headroomBytes: number;
+  headroomPercent: number;
+  warning: boolean;
+  warnHeadroomBytes?: number;
+}
+
+interface SizeEvaluation {
   passed: boolean;
   results: {
-    unpackedSize: CategoryResult;
+    unpackedSize: UnpackedSizeResult;
   };
   thresholds: ThresholdConfig["thresholds"];
   package: {
+    largestFiles: { path: string; size: number }[];
+  };
+  violations: string[];
+  warnings: string[];
+}
+
+interface BenchmarkReport extends SizeEvaluation {
+  timestamp: string;
+  package: SizeEvaluation["package"] & {
     name: string;
     version: string;
     filename: string | null;
     tarballBytes: number | null;
     unpackedBytes: number;
   };
-  violations: string[];
 }
 
 interface CliOptions {
@@ -142,17 +157,82 @@ function loadThresholdConfig(configPath: string): ThresholdConfig {
 
   try {
     const content = fs.readFileSync(configPath, "utf-8");
-    const config = JSON.parse(content) as ThresholdConfig;
-
-    if (!config.thresholds || typeof config.thresholds.unpackedBytes !== "number") {
-      throw new Error("Missing or invalid unpackedBytes threshold");
-    }
-
-    return config;
+    return validateThresholdConfig(JSON.parse(content));
   } catch (error) {
     console.error(`Error loading threshold configuration: ${error}`);
     process.exit(1);
   }
+}
+
+export function validateThresholdConfig(value: unknown): ThresholdConfig {
+  const config = value as ThresholdConfig;
+  if (!config?.thresholds || typeof config.thresholds.unpackedBytes !== "number") {
+    throw new Error("Missing or invalid unpackedBytes threshold");
+  }
+  const warning = config.thresholds.warnHeadroomBytes;
+  if (
+    warning !== undefined &&
+    (typeof warning !== "number" || !Number.isFinite(warning) || warning < 0)
+  ) {
+    throw new Error("Invalid warnHeadroomBytes threshold");
+  }
+  return config;
+}
+
+export function evaluateUnpackedSize({
+  unpackedBytes,
+  files,
+  thresholds,
+}: {
+  unpackedBytes: number;
+  files: readonly { path: string; size: number }[];
+  thresholds: ThresholdConfig["thresholds"];
+}): SizeEvaluation {
+  const size = checkThreshold(unpackedBytes, thresholds.unpackedBytes);
+  const headroomBytes = thresholds.unpackedBytes - unpackedBytes;
+  // One decimal place; a zero/non-positive cap has no meaningful percentage.
+  const headroomPercent =
+    thresholds.unpackedBytes > 0
+      ? Math.round((headroomBytes / thresholds.unpackedBytes) * 1000) / 10
+      : 0;
+  const warning =
+    size.passed &&
+    thresholds.warnHeadroomBytes !== undefined &&
+    headroomBytes < thresholds.warnHeadroomBytes;
+  const violations = findPackedAssetViolations(files.map((file) => file.path));
+  if (!size.passed) {
+    violations.push(
+      `Unpacked size ${unpackedBytes} bytes exceeds threshold ${thresholds.unpackedBytes} bytes`,
+    );
+  }
+  const passed = violations.length === 0;
+  const largestFiles =
+    warning || !passed
+      ? files
+          .map(({ path, size }) => ({ path, size }))
+          .sort((a, b) => b.size - a.size || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+          .slice(0, 10)
+      : [];
+  return {
+    passed,
+    results: {
+      unpackedSize: {
+        ...size,
+        headroomBytes,
+        headroomPercent,
+        warning,
+        warnHeadroomBytes: thresholds.warnHeadroomBytes,
+      },
+    },
+    thresholds,
+    package: { largestFiles },
+    violations,
+    warnings: warning
+      ? [
+          `WARNING: npm unpacked size headroom ${headroomBytes} bytes (${headroomPercent}%) is below the ${thresholds.warnHeadroomBytes} byte warning threshold; the ${thresholds.unpackedBytes} byte cap blocks every PR when exceeded`,
+        ]
+      : [],
+  };
 }
 
 function checkThreshold(actual: number, threshold: number): CategoryResult {
@@ -256,47 +336,45 @@ function runBenchmark(config: ThresholdConfig, outputPath: string | null): Bench
     const packInfo = parsePackOutput(packResult.stdout);
     packFilename = packInfo.filename;
 
-    const result = checkThreshold(packInfo.unpackedBytes, config.thresholds.unpackedBytes);
-    const violations = findPackedAssetViolations(packInfo.files.map((file) => file.path));
-
-    if (!result.passed) {
-      violations.push(
-        `Unpacked size ${packInfo.unpackedBytes} bytes exceeds threshold ${config.thresholds.unpackedBytes} bytes`,
-      );
-    }
-
+    const evaluation = evaluateUnpackedSize({ ...packInfo, thresholds: config.thresholds });
     const report: BenchmarkReport = {
+      ...evaluation,
       timestamp: new Date().toISOString(),
-      passed: violations.length === 0,
-      results: {
-        unpackedSize: result,
-      },
-      thresholds: config.thresholds,
       package: {
         name: packInfo.name,
         version: packInfo.version,
         filename: packInfo.filename,
         tarballBytes: packInfo.tarballBytes,
         unpackedBytes: packInfo.unpackedBytes,
+        largestFiles: evaluation.package.largestFiles,
       },
-      violations,
     };
 
     if (outputPath) {
       writeReport(outputPath, report);
     }
 
-    if (!report.passed) {
-      const details =
-        report.violations.length > 0
-          ? `\n${report.violations.map((violation) => `- ${violation}`).join("\n")}`
-          : "";
-      throw new Error(`NPM unpacked size benchmark failed${details}`);
+    const result = report.results.unpackedSize;
+    const lines = [
+      `NPM unpacked size: ${result.actual} bytes (threshold: ${result.threshold} bytes; headroom: ${result.headroomBytes} bytes (${result.headroomPercent}%))`,
+      ...report.warnings,
+    ];
+    if (report.package.largestFiles.length > 0) {
+      lines.push(
+        "Largest packed files (up to 10):",
+        ...report.package.largestFiles.map((file) => `- ${file.path}: ${file.size} bytes`),
+      );
     }
-
-    console.log(
-      `NPM unpacked size: ${packInfo.unpackedBytes} bytes (threshold: ${config.thresholds.unpackedBytes} bytes)`,
-    );
+    if (!report.passed) {
+      throw new Error(
+        [
+          "NPM unpacked size benchmark failed",
+          ...lines,
+          ...report.violations.map((violation) => `- ${violation}`),
+        ].join("\n"),
+      );
+    }
+    console.log(lines.join("\n"));
 
     return report;
   } finally {

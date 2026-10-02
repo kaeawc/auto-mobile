@@ -91,3 +91,9 @@ export interface DelegateContext {
   /** Cancel any pending screenshot backoff captures */
   cancelScreenshotBackoff(): void;
 }
+
+/** Optional iOS swipe context; a legacy frame-context string remains accepted. */
+export interface SwipeRequestOptions {
+  frameContext?: string;
+  lockScreen?: boolean;
+}

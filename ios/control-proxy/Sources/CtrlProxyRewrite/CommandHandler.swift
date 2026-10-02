@@ -776,13 +776,20 @@ final class CommandHandler: CommandHandling {
         let duration = request.duration ?? 300
         try await performContextCheckedGesture(expected: request.frameContext, beforeOperation: checkDeadline) {
             try checkDeadline()
-            // XCUITest press is synchronous on the main actor and cannot be interrupted.
-            // Its app resolution/activation and idle waits may outlast the client deadline.
-            try self.gesturePerformer.swipe(
-                startX: request.x1, startY: request.y1,
-                endX: request.x2, endY: request.y2,
-                duration: TimeInterval(duration) / 1000.0
-            )
+            switch swipeDispatchMode(lockScreen: request.lockScreen) {
+            case .xcuitest:
+                try self.gesturePerformer.swipe(
+                    startX: request.x1, startY: request.y1,
+                    endX: request.x2, endY: request.y2,
+                    duration: TimeInterval(duration) / 1000.0
+                )
+            case .synthesizedLockScreen:
+                try self.gesturePerformer.lockScreenSwipe(
+                    startX: request.x1, startY: request.y1,
+                    endX: request.x2, endY: request.y2,
+                    duration: TimeInterval(duration) / 1000.0
+                )
+            }
             if let deadlineMs, monotonicNowMs() >= deadlineMs {
                 throw CommandError.deadlineExceeded(
                     command: "request_swipe", deadlineMs: deadlineMs, gestureCompleted: true

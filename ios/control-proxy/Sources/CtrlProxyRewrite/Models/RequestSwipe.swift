@@ -10,9 +10,11 @@ public struct RequestSwipe: Decodable, Sendable {
     public var frameContext: String?
     /// Optional client transport budget. Invalid or non-positive values leave the legacy path unchanged.
     public var timeoutMs: Int?
+    /// Explicit because the tracked application can be stale while the device is locked.
+    public var lockScreen: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case requestId, x1, y1, x2, y2, duration, frameContext, timeoutMs
+        case requestId, x1, y1, x2, y2, duration, frameContext, timeoutMs, lockScreen
     }
 
     public init(from decoder: Decoder) throws {
@@ -24,6 +26,7 @@ public struct RequestSwipe: Decodable, Sendable {
         y2 = try values.decode(Double.self, forKey: .y2)
         duration = try values.decodeIfPresent(Int.self, forKey: .duration)
         frameContext = try values.decodeIfPresent(String.self, forKey: .frameContext)
+        lockScreen = try values.decodeIfPresent(Bool.self, forKey: .lockScreen)
         let decodedTimeout = try? values.decode(Int.self, forKey: .timeoutMs)
         timeoutMs = decodedTimeout.flatMap { $0 > 0 ? $0 : nil }
     }

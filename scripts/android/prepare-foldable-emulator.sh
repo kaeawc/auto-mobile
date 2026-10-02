@@ -14,6 +14,7 @@ Updates cmdline-tools, verifies the requested AVD profile, and installs windowed
 runtime libraries for resizable. The library-check mode is diagnostic only.
 Overrides: FOLDABLE_SDK_ROOT, FOLDABLE_SDKMANAGER, FOLDABLE_AVDMANAGER,
 FOLDABLE_SUDO, FOLDABLE_APT_GET, FOLDABLE_LDD (executable paths).
+FOLDABLE_MV overrides forward promotion moves only; rollback uses system mv.
 Diagnostics: ${GITHUB_WORKSPACE:-$PWD}/scratch/foldable-lane/sdk-diagnostics.txt
 USAGE
 }
@@ -83,12 +84,72 @@ resolve_tools() {
 }
 
 read_revision() {
-  local properties="${sdk_root}/cmdline-tools/latest/source.properties"
+  local properties="${1:-${sdk_root}/cmdline-tools/latest}/source.properties"
   if [[ -f "${properties}" ]]; then
     sed -n 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "${properties}"
   else
     echo "unknown (source.properties missing)"
   fi
+}
+
+# Stable SDK revisions are numeric dotted versions. Compare components with
+# portable awk rather than relying on GNU sort -V or Bash 4 features.
+revision_newer() {
+  if [[ ! "$1" =~ ^[0-9]+(\.[0-9]+)*$ || ! "$2" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+    echo false
+    return 0
+  fi
+  awk -v candidate="$1" -v current="$2" 'BEGIN {
+    n = split(candidate, a, "."); m = split(current, b, ".")
+    for (i = 1; i <= n || i <= m; i++) {
+      if (a[i] + 0 > b[i] + 0) { print "true"; exit }
+      if (a[i] + 0 < b[i] + 0) { print "false"; exit }
+    }
+    print "false"
+  }'
+}
+
+promote_side_install() {
+  local candidate candidate_revision newest="" newest_revision current_revision is_newer
+  local latest="${sdk_root}/cmdline-tools/latest" previous promoted=false found=false
+  current_revision="$(read_revision)"
+  newest_revision="${current_revision}"
+  for candidate in "${sdk_root}/cmdline-tools/"latest-*; do
+    [[ -d "${candidate}" && -f "${candidate}/bin/avdmanager" && -f "${candidate}/source.properties" ]] || continue
+    candidate_revision="$(read_revision "${candidate}")"
+    [[ "${candidate_revision}" =~ ^[0-9]+(\.[0-9]+)*$ ]] || continue
+    found=true
+    is_newer="$(revision_newer "${candidate_revision}" "${newest_revision}")"
+    if [[ "${is_newer}" == true ]]; then
+      newest="${candidate}"
+      newest_revision="${candidate_revision}"
+    fi
+  done
+  # Preserve all existing output when sdkmanager did not leave a side install.
+  [[ "${found}" == true ]] || return 0
+  if [[ -n "${newest}" ]]; then
+    previous="${sdk_root}/.foldable-cmdline-tools-previous/latest-${current_revision}"
+    if ! mkdir -p "$(dirname "${previous}")" || ! rm -rf "${previous}"; then
+      echo "warning: could not prepare previous cmdline-tools directory; continuing to profile verification." >&2
+    elif ! "${FOLDABLE_MV:-mv}" "${latest}" "${previous}"; then
+      echo "warning: could not move previous cmdline-tools; continuing to profile verification." >&2
+    elif "${FOLDABLE_MV:-mv}" "${newest}" "${latest}"; then
+      promoted=true
+      printf 'cmdline_tools_promoted_from=%s\n' "${newest##*/}" >> "${summary}"
+    else
+      echo "warning: could not promote cmdline-tools; continuing to profile verification." >&2
+    fi
+    if [[ "${promoted}" == false && ! -d "${latest}" && -d "${previous}" ]]; then
+      # Recover after either forward move fails, including a command that moved
+      # the old install before returning failure. Do not use the injected forward-move command for recovery. Copy is a
+      # fallback if the system rename also fails, keeping latest available.
+      if ! mv "${previous}" "${latest}"; then
+        echo "warning: cmdline-tools rollback move failed; copying previous latest." >&2
+        cp -R "${previous}" "${latest}"
+      fi
+    fi
+  fi
+  printf 'cmdline_tools_promoted=%s\n' "${promoted}" >> "${summary}"
 }
 
 print_tool_versions() {
@@ -143,6 +204,8 @@ else
   update_status=$?
   echo "warning: cmdline-tools update failed (exit ${update_status}); continuing to profile verification." >&2
 fi
+
+promote_side_install
 
 # Resolve again so a newly installed latest/bin/avdmanager is used.
 resolve_tools

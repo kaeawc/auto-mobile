@@ -57,6 +57,12 @@ describe("VM restore incarnation listener registry", () => {
     },
   );
 
+  test.each(["recordings", "installed-apps"])("registers the settled hook for %s", (name) => {
+    expect(
+      getListeners().find((listener) => listener.name === name)?.onIncarnationChangeSettled,
+    ).toBeFunction();
+  });
+
   test("has unique live listener names", () => {
     const names = getListeners().map((listener) => listener.name);
     expect(new Set(names).size).toBe(names.length);

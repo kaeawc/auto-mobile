@@ -42,6 +42,9 @@ public protocol GesturePerforming: Sendable {
     /// Swipe from start to end coordinates
     func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws
 
+    /// Opt-in lock-screen seam; older conformers retain the ordinary swipe.
+    func lockScreenSwipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws
+
     /// Perform a simultaneous multi-finger swipe from start to end coordinates
     func multiFingerSwipe(
         startX: Double,
@@ -190,6 +193,14 @@ public protocol GesturePerforming: Sendable {
 extension GesturePerforming {
     public func invalidateCaretMemo() {}
 
+    public func lockScreenSwipe(
+        startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+    )
+        throws
+    {
+        try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+    }
+
     public func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {
         try tap(x: x, y: y, duration: TimeInterval(durationMs) / 1000.0)
         return TapDiagnostics(
@@ -215,4 +226,14 @@ extension GesturePerforming {
     public func getDisplayRotation() -> Int? {
         DeviceRotation.fromOrientationName(getOrientation())
     }
+}
+
+/// The tracked app cannot identify a locked screen reliably; only the explicit wire flag can.
+enum SwipeDispatchMode: Equatable {
+    case xcuitest
+    case synthesizedLockScreen
+}
+
+func swipeDispatchMode(lockScreen: Bool?) -> SwipeDispatchMode {
+    lockScreen == true ? .synthesizedLockScreen : .xcuitest
 }

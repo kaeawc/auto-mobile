@@ -136,7 +136,7 @@ class HierarchyCoalescingTest {
       assertEquals(2L, stats.extractions.get())
 
       state = 2
-      assertEquals("state-2", debouncer.extractNowBlocking(skipFlowEmit = true)?.packageName)
+      assertEquals("state-2", debouncer.extractImmediately(skipFlowEmit = true)?.packageName)
       assertEquals(3L, stats.extractions.get())
     }
 
@@ -225,9 +225,9 @@ class HierarchyCoalescingTest {
       )
     debouncer.onAccessibilityEvent()
     state = 1
-    assertEquals("state-1", debouncer.extractNowBlocking(skipFlowEmit = true)?.packageName)
+    assertEquals("state-1", debouncer.extractImmediately(skipFlowEmit = true)?.packageName)
     state = 2
-    assertEquals("state-2", debouncer.extractNowBlocking(skipFlowEmit = true)?.packageName)
+    assertEquals("state-2", debouncer.extractImmediately(skipFlowEmit = true)?.packageName)
     assertEquals(2L, stats.extractions.get())
   }
 
@@ -282,7 +282,7 @@ class HierarchyCoalescingTest {
     debouncer.onAccessibilityEvent()
     assertEquals(
       "explicit",
-      debouncer.extractNowBlocking(skipFlowEmit = true, disableAllFiltering = true)?.packageName,
+      debouncer.extractImmediately(skipFlowEmit = true, disableAllFiltering = true)?.packageName,
     )
     advanceTimeBy(5)
     runCurrent()

@@ -50,6 +50,32 @@ async function callAndResolve<T>(
 }
 
 describe("SharedGestureDelegate", () => {
+  it("only iOS opt-in swipes include lockScreen and false is byte-identical to absent", async () => {
+    const { context, sent } = createFakeContext();
+    const ios = new SharedGestureDelegate(context, {
+      logTag: "TEST",
+      roundCoordinates: false,
+      includeSwipeTimeoutMs: true,
+    });
+    const invoke = (lockScreen?: boolean) =>
+      callAndResolve(sent, context.requestManager, () =>
+        ios.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, { lockScreen, frameContext: "frame" }),
+      );
+    const absent = (await invoke()).sentMsg;
+    const disabled = (await invoke(false)).sentMsg;
+    const enabled = (await invoke(true)).sentMsg;
+    expect(absent).not.toHaveProperty("lockScreen");
+    expect(JSON.stringify({ ...disabled, requestId: "id" })).toBe(
+      JSON.stringify({ ...absent, requestId: "id" }),
+    );
+    expect(enabled).toMatchObject({ lockScreen: true, frameContext: "frame" });
+    const android = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: true });
+    const wire = await callAndResolve(sent, context.requestManager, () =>
+      android.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, { lockScreen: true }),
+    );
+    expect(wire.sentMsg).not.toHaveProperty("lockScreen");
+  });
+
   it("reports tap dispatch only after the request is sent", async () => {
     const { context, sent } = createFakeContext();
     const delegate = new SharedGestureDelegate(context, { logTag: "TEST", roundCoordinates: true });

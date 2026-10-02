@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { resolveImageRelativePoint as resolve } from "../../../src/features/action/imageRelativePoint";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -8,6 +8,8 @@ import type {
   ImageRotation,
 } from "../../../src/models/ImageRelativePoint";
 import { cropSource } from "../../helpers/imageRelativePoint";
+import { SharpBackend } from "../../../src/utils/image/backend/SharpBackend";
+import { loadSharp } from "../../../src/utils/image/loadSharp";
 
 const screen = { width: 100, height: 200 };
 const bounds = { left: 10, top: 20, right: 60, bottom: 100 };
@@ -84,24 +86,20 @@ describe("image-relative native coordinates", () => {
       const crop = await cropSource(geometry, rawSize, bounds);
       const fractions =
         rotation === 1
-          ? { x: 0.5, y: 0.75 }
+          ? { x: 0.5, y: 0.25 }
           : rotation === 3
-            ? { x: 0.5, y: 0.25 }
+            ? { x: 0.5, y: 0.75 }
             : rotation === 2
               ? { x: 0.75, y: 0.5 }
               : { x: 0.25, y: 0.5 };
-      expect(resolve(image(crop, fractions.x, fractions.y), "ios", screenSize)).toEqual({
+      // Crop output is upright for every source rotation.
+      expect(resolve(image(crop, 0.25, 0.5), "ios", screenSize)).toEqual({
         x: 22.5,
         y: 60,
       });
       expect(
         resolve(
-          image(
-            crop,
-            fractions.x * crop.crop.imageSize.width,
-            fractions.y * crop.crop.imageSize.height,
-            "pixels",
-          ),
+          image(crop, 0.25 * crop.crop.imageSize.width, 0.5 * crop.crop.imageSize.height, "pixels"),
           "ios",
           screenSize,
         ),
@@ -362,4 +360,189 @@ describe("image-relative native coordinates", () => {
       ),
     ).toThrow("requires observe.rotation");
   });
+  test("symmetric upright crops accept equivalent source mappings", async () => {
+    const screenSize = { width: 200, height: 100 };
+    const source = await cropSource(
+      { platform: "ios", screenSize, rotation: 1 },
+      { width: 200, height: 400 },
+      { left: 20, top: 20, right: 80, bottom: 80 },
+    );
+    expect(resolve(image(source, 2, 4, "pixels"), "ios", screenSize)).toEqual({ x: 21, y: 22 });
+  });
+  test("ambiguous fractional source padding fails pixels without blocking normalized coordinates", async () => {
+    const screenSize = { width: 400, height: 200 };
+    const source = await cropSource(
+      { platform: "ios", screenSize, rotation: 1 },
+      { width: 399, height: 800 },
+      { left: 40.12, top: 40.04, right: 159.96, bottom: 159.88 },
+    );
+    expect(source.crop.rasterBounds).toEqual({ left: 80, top: 80, right: 320, bottom: 320 });
+    expect(() => resolve(image(source, 0, 0, "pixels"), "ios", screenSize)).toThrow(
+      "pixel padding is ambiguous",
+    );
+    expect(resolve(image(source, 0, 0), "ios", screenSize)).toEqual({ x: 40.12, y: 40.04 });
+  });
+});
+
+describe("upright framebuffer crop pixels resolve in native display space", () => {
+  const backend = new SharpBackend();
+  let source: Buffer;
+  beforeAll(async () => {
+    const pixels = Buffer.alloc(8 * 12 * 4);
+    for (let y = 0; y < 12; y++) {
+      for (let x = 0; x < 8; x++) {
+        pixels.set([x * 16, y * 16, 0, 255], (y * 8 + x) * 4);
+      }
+    }
+    const sharp = await loadSharp();
+    source = await sharp(pixels, { raw: { width: 8, height: 12, channels: 4 } })
+      .png()
+      .toBuffer();
+  });
+  test.each([
+    [
+      1,
+      { left: 3, top: 1, right: 7, bottom: 7 },
+      [
+        [
+          [6, 1],
+          [6, 2],
+          [6, 3],
+          [6, 4],
+          [6, 5],
+          [6, 6],
+        ],
+        [
+          [5, 1],
+          [5, 2],
+          [5, 3],
+          [5, 4],
+          [5, 5],
+          [5, 6],
+        ],
+        [
+          [4, 1],
+          [4, 2],
+          [4, 3],
+          [4, 4],
+          [4, 5],
+          [4, 6],
+        ],
+        [
+          [3, 1],
+          [3, 2],
+          [3, 3],
+          [3, 4],
+          [3, 5],
+          [3, 6],
+        ],
+      ],
+    ],
+    [
+      3,
+      { left: 1, top: 5, right: 5, bottom: 11 },
+      [
+        [
+          [1, 10],
+          [1, 9],
+          [1, 8],
+          [1, 7],
+          [1, 6],
+          [1, 5],
+        ],
+        [
+          [2, 10],
+          [2, 9],
+          [2, 8],
+          [2, 7],
+          [2, 6],
+          [2, 5],
+        ],
+        [
+          [3, 10],
+          [3, 9],
+          [3, 8],
+          [3, 7],
+          [3, 6],
+          [3, 5],
+        ],
+        [
+          [4, 10],
+          [4, 9],
+          [4, 8],
+          [4, 7],
+          [4, 6],
+          [4, 5],
+        ],
+      ],
+    ],
+    [
+      2,
+      { left: 1, top: 7, right: 7, bottom: 11 },
+      [
+        [
+          [6, 10],
+          [5, 10],
+          [4, 10],
+          [3, 10],
+          [2, 10],
+          [1, 10],
+        ],
+        [
+          [6, 9],
+          [5, 9],
+          [4, 9],
+          [3, 9],
+          [2, 9],
+          [1, 9],
+        ],
+        [
+          [6, 8],
+          [5, 8],
+          [4, 8],
+          [3, 8],
+          [2, 8],
+          [1, 8],
+        ],
+        [
+          [6, 7],
+          [5, 7],
+          [4, 7],
+          [3, 7],
+          [2, 7],
+          [1, 7],
+        ],
+      ],
+    ],
+  ] as const)(
+    "real synthetic crop rotation %s preserves pixels and snapping",
+    async (rotation, rasterBounds, rows) => {
+      const screenSize = rotation === 2 ? { width: 4, height: 6 } : { width: 6, height: 4 };
+      const geometry = { platform: "ios" as const, screenSize, rotation };
+      let output = Buffer.alloc(0);
+      const crop = await cropSource(
+        geometry,
+        { width: 8, height: 12 },
+        { left: 0.75, top: 0.75, right: 3.25, bottom: 2.25 },
+        {
+          source,
+          backend,
+          onPng: (png) => {
+            output = png;
+          },
+        },
+      );
+      expect(crop.crop.rasterBounds).toEqual(rasterBounds);
+      expect(crop.crop.imageSize).toEqual({ width: 6, height: 4 });
+      expect(crop.crop.screenshotOrientation).toBe("display");
+      const raw = await backend.rawPixels(output);
+      expect({ width: raw.width, height: raw.height }).toEqual({ width: 6, height: 4 });
+      expect([...raw.data]).toEqual(rows.flat().flatMap(([x, y]) => [x * 16, y * 16, 0, 255]));
+      // Every turn snaps the upright native origin to (0.5, 0.5), at scale 2.
+      expect(resolve(image(crop, 0, 0, "pixels"), "ios", screenSize)).toEqual({ x: 0.5, y: 0.5 });
+      expect(resolve(image(crop, 2, 1, "pixels"), "ios", screenSize)).toEqual({ x: 1.5, y: 1 });
+      // Normalized coordinates span the clipped request, excluding raster padding.
+      expect(resolve(image(crop, 0.25, 0.5), "ios", screenSize)).toEqual({ x: 1.375, y: 1.5 });
+    },
+  );
 });

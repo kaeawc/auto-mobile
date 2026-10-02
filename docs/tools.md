@@ -39,7 +39,7 @@ and re-observe instruction in `error`. Android gestures use CtrlProxy with the
 selected panel's logical `displayId` when the APK advertises `gesture_display_id_v1`.
 Older APKs retain `input touchscreen -d` routing for taps, swipes, and drags;
 `pinchOn` on a non-default display reports the existing support limitation.
-`swipeOn` on a non-default Android display honours `speed`, `boomerang`, `apexPause`, and `returnSpeed` (each boomerang leg re-checks the display fence), while `lookFor`, `focusTarget`, `autoTarget`, `includeSystemInsets`, and `scrollMode` are still rejected with `display`.
+`swipeOn` on an Android display honours `speed`, `boomerang`, `apexPause`, and `returnSpeed` (each boomerang leg re-checks the display fence). Android also supports `lookFor` with `display`: scroll until found, observing and swiping the selected display on every iteration, with the display fence re-checked before each swipe. As on the default path, `boomerang` cannot be combined with `lookFor`. `includeSystemInsets` is supported only when the selected display reports its own available system insets; an explicit value fails before dispatch if those insets are unavailable. `false` excludes those insets and `true` uses the full rect. A plain display swipe with this option omitted retains its existing full-rect behaviour; a search excludes available selected-display insets and ignores unavailable inset values. `focusTarget`, `autoTarget`, and `scrollMode` remain rejected with `display`. On iOS, `lookFor` and `includeSystemInsets` remain rejected with `display`.
 Default-display gestures omit `displayId`. A CtrlProxy display-dispatch failure
 is returned directly without retrying through adb. iOS accepts only its live panel.
 On iOS, `tapOn`, `swipeOn`, `dragAndDrop`, and `pinchOn` validate the selected
@@ -251,15 +251,22 @@ crops its terminal observation. The original `screenshotPath` and
 - `unit`: `"pixels"` or `"points"`.
 - `requestedBounds`, `clippedBounds`: native `{ left, top, right, bottom }` bounds.
 - `clipped`: whether visible-screen clipping changed the requested bounds.
-- `screenSize`, `imageSize`: native screen dimensions and crop raster dimensions.
+- `screenSize`, `imageSize`: native screen dimensions and upright output crop PNG
+  dimensions.
 - `pixelsPerNativeUnit`: raster scale `{ x, y }`; actual raster dimensions handle
   Display Zoom and downsampled devices, with floor/ceil covering fractional points.
 - `scaleProvenance`: `"native-scale-confirmed"` or `"raster-dimensions"`.
-- `rasterBounds`: integer bounds in the captured raster.
-- `screenshotOrientation`: crop raster orientation, including iOS framebuffer
-  quarter turns and half turns. A raster already reported in display orientation
-  is not mapped through another rotation. No downscaling or orientation
-  normalization occurs.
+- `rasterBounds`: integer bounds read from the captured source raster before
+  orientation normalization.
+- `screenshotOrientation`: orientation of the output crop PNG (`"display"`).
+  Native iOS framebuffer crops are rotated upright: rotation 1 maps display
+  `(x, y)` to `(screenHeight - y, x)` and rotates the extracted pixels 270°
+  clockwise; rotation 3 maps to `(y, screenWidth - x)` and rotates 90° clockwise;
+  rotation 2 maps to `(screenWidth - x, screenHeight - y)` and rotates 180°.
+  A raster already reported in display orientation is neither remapped nor
+  rotated. No downscaling occurs. The full screenshot retains its own
+  `screenshotOrientation`. The same crop mapping and normalization apply to
+  `snapshotOf`.
 
 The hierarchy/elements are unchanged by crop. Element resolution uses the full
 filtered exposed hierarchy before raw append or skeleton projection; `raw` does

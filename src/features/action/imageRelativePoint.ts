@@ -85,7 +85,7 @@ function validateClippedBounds(crop: CropSource["crop"]): void {
     invalid("has inconsistent clippedBounds / requestedBounds");
   }
 }
-function validateCropRaster(crop: CropSource["crop"], turn: number): void {
+function cropRasterMatches(crop: CropSource["crop"], turn: number): boolean {
   const { screenSize, imageSize, pixelsPerNativeUnit: scale, rasterBounds } = crop;
   if (!finiteBounds(rasterBounds)) {
     invalid("requires finite nonempty rasterBounds");
@@ -97,18 +97,44 @@ function validateCropRaster(crop: CropSource["crop"], turn: number): void {
     { width: rawScreen.width * scale.x, height: rawScreen.height * scale.y },
   );
   // Reconstruct floor/ceil snapping, allowing only floating-point arithmetic noise.
-  if (
-    boundKeys.some(
+  const rasterWidth = rasterBounds.right - rasterBounds.left;
+  const rasterHeight = rasterBounds.bottom - rasterBounds.top;
+  const uprightQuarterTurn = crop.screenshotOrientation === "display" && (turn === 1 || turn === 3);
+  return (
+    !boundKeys.some(
       (key) =>
         !Number.isInteger(rasterBounds[key]) || Math.abs(expected[key] - rasterBounds[key]) > 1e-7,
-    ) ||
-    imageSize.width !== rasterBounds.right - rasterBounds.left ||
-    imageSize.height !== rasterBounds.bottom - rasterBounds.top
+    ) &&
+    imageSize.width === (uprightQuarterTurn ? rasterHeight : rasterWidth) &&
+    imageSize.height === (uprightQuarterTurn ? rasterWidth : rasterHeight)
+  );
+}
+function validateCropRaster(
+  source: CropSource,
+  platform: "android" | "ios",
+  turn: number,
+): number[] {
+  const crop = source.crop;
+  // Output orientation is independent of rasterBounds' source orientation. Retain
+  // display-capture support and infer a normalized framebuffer only from exact snapping.
+  const candidates = [turn];
+  if (
+    platform === "ios" &&
+    crop.screenshotOrientation === "display" &&
+    source.rotation !== undefined &&
+    (source.rotation === 2 ||
+      ((source.rotation === 1 || source.rotation === 3) &&
+        crop.screenSize.width > crop.screenSize.height))
   ) {
+    candidates.push(source.rotation);
+  }
+  const matches = candidates.filter((candidate) => cropRasterMatches(crop, candidate));
+  if (matches.length === 0) {
     invalid("has inconsistent rasterBounds, imageSize, scale, or clippedBounds");
   }
+  return matches;
 }
-function validateCrop(source: CropSource, platform: "android" | "ios", turn: number): void {
+function validateCrop(source: CropSource, platform: "android" | "ios", turn: number): number[] {
   const crop = source.crop;
   if (crop.unit !== (platform === "android" ? "pixels" : "points")) {
     invalid("crop unit does not match the platform");
@@ -127,7 +153,7 @@ function validateCrop(source: CropSource, platform: "android" | "ios", turn: num
     invalid("requires scaleProvenance");
   }
   validateClippedBounds(crop);
-  validateCropRaster(crop, turn);
+  return validateCropRaster(source, platform, turn);
 }
 function validateScreenshot(
   source: ScreenshotSource,
@@ -188,8 +214,59 @@ function insetReversedOrigin(point: ImagePoint, bounds: ElementBounds): void {
   }
 }
 
-function resolvePixels(point: ImageRelativePoint, screenSize: ImageSize, turn: number): ImagePoint {
+function uprightCropPixels(
+  point: ImageRelativePoint,
+  source: CropSource,
+  turns: number[],
+): ImagePoint {
+  const { crop } = source;
+  const { pixelsPerNativeUnit: scale, rasterBounds, screenSize } = crop;
+  const regions = turns.map((turn) => ({
+    bounds: rasterBoundsInNative(
+      {
+        left: rasterBounds.left / scale.x,
+        top: rasterBounds.top / scale.y,
+        right: rasterBounds.right / scale.x,
+        bottom: rasterBounds.bottom / scale.y,
+      },
+      screenSize,
+      turn,
+    ),
+    scale: turn === 1 || turn === 3 ? { x: scale.y, y: scale.x } : scale,
+  }));
+  const region = regions[0];
+  // Symmetric crops can match both source orientations. Accept only equivalent
+  // snapped native regions; metadata cannot disambiguate different pixel padding.
+  if (
+    regions.some(
+      (other) =>
+        boundKeys.some((key) => Math.abs(other.bounds[key] - region.bounds[key]) > 1e-7) ||
+        other.scale.x !== region.scale.x ||
+        other.scale.y !== region.scale.y,
+    )
+  ) {
+    invalid("crop pixel padding is ambiguous between source orientations");
+  }
+  const resolved = {
+    x: (region.bounds.left * region.scale.x + point.x) / region.scale.x,
+    y: (region.bounds.top * region.scale.y + point.y) / region.scale.y,
+  };
+  if (!withinScreen(resolved, screenSize)) {
+    invalid("pixels resolve outside native screen bounds");
+  }
+  return resolved;
+}
+
+function resolvePixels(
+  point: ImageRelativePoint,
+  screenSize: ImageSize,
+  turn: number,
+  cropTurns: number[],
+): ImagePoint {
   const { source } = point;
+  if ("crop" in source && source.crop.screenshotOrientation === "display") {
+    return uprightCropPixels(point, source, cropTurns);
+  }
   const rawScreen = rasterScreenSize(screenSize, turn);
   const scale =
     "crop" in source
@@ -242,14 +319,15 @@ export function resolveImageRelativePoint(
     invalid("source screenSize changed; observe again");
   }
   const turn = sourceTurn(source, platform);
+  let cropTurns: number[] = [];
   if ("crop" in source) {
-    validateCrop(source, platform, turn);
+    cropTurns = validateCrop(source, platform, turn);
   } else {
     validateScreenshot(source, rasterScreenSize(screenSize, turn), platform);
   }
   validatePoint(point, imageSize);
   if (point.unit === "pixels") {
-    return resolvePixels(point, screenSize, turn);
+    return resolvePixels(point, screenSize, turn, cropTurns);
   }
   const bounds =
     "crop" in source

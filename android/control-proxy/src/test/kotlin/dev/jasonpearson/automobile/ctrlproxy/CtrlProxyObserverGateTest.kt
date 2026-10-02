@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -80,14 +81,14 @@ class CtrlProxyObserverGateTest {
   }
 
   /**
-   * The pull path (request_hierarchy → extractNowBlocking) must produce a correct hierarchy without
+   * The pull path (request_hierarchy → extractImmediately) must produce a correct hierarchy without
    * any prior push activity: no onAccessibilityEvent() call, no frameContext bumps, a stale/zero
-   * structural hash. extractNowBlocking extracts the live tree directly and returns it, so it reads
+   * structural hash. extractImmediately extracts the live tree directly and returns it, so it reads
    * none of the push-path side effects the gate now skips. This mirrors
    * HierarchyDebouncerErrorEmitTest (no device required — the extractor is faked).
    */
   @Test
-  fun `pull path extracts a fresh hierarchy with zero prior push activity`() {
+  fun `pull path extracts a fresh hierarchy with zero prior push activity`() = runTest {
     val extractCalls = AtomicInteger(0)
     val expected = ViewHierarchy(packageName = "com.example.pull")
     val debouncer =
@@ -100,7 +101,7 @@ class CtrlProxyObserverGateTest {
       )
 
     // No onAccessibilityEvent() has ever run — the push path is fully idle/gated.
-    val pulled = debouncer.extractNowBlocking(skipFlowEmit = true)
+    val pulled = debouncer.extractImmediately(skipFlowEmit = true)
 
     assertNotNull("pull must return a hierarchy even with an idle push path", pulled)
     assertEquals("com.example.pull", pulled?.packageName)

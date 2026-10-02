@@ -717,7 +717,9 @@ export const swipeOnSchema = withJsonSchemaOverride(
         includeSystemInsets: z
           .boolean()
           .optional()
-          .describe("Use full screen including status/nav bars"),
+          .describe(
+            "Use full screen including status/nav bars; with display, requires the selected Android panel's own available insets",
+          ),
         container: elementContainerSchema.optional().describe("Scope search to a container"),
         autoTarget: z
           .boolean()
@@ -730,7 +732,11 @@ export const swipeOnSchema = withJsonSchemaOverride(
           .describe(
             "Finger direction or content scroll direction; default: swipeFingerTowardsDirection",
           ),
-        lookFor: swipeOnLookForSchema.optional().describe("Element to look for during swipe"),
+        lookFor: swipeOnLookForSchema
+          .optional()
+          .describe(
+            "Element to find by scrolling; with display, observes and swipes only the selected Android panel",
+          ),
         boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
         apexPause: z
           .number()

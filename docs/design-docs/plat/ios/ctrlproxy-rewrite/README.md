@@ -149,6 +149,31 @@ adds them to requested iOS swipe timing, includes a received swipe failure's
 summary in its error, and warns with phases when the pending request has already
 been removed. It does not extend deadlines or wait for late replies.
 
+The optional boolean `request_swipe.lockScreen` is sent only by the unlocker's
+swipe. Absent/false preserves the ordinary XCUITest swipe; older runners ignore
+the field. True reuses single-finger synthesized event delivery without resolving
+or activating the tracked app (which can be stale on the lock screen) or waiting
+for app idle. Its phase is `synthesizedGesture`. Missing synthesis symbols fall
+back to the ordinary swipe; other synthesis failures remain errors.
+
+A swipe carrying `timeoutMs` has an execution response bound of
+`max(250, deadlineRemainingAtExecutionStartMs - 500)` ms. The 500 ms reserve aims
+to deliver a typed `swipe_result` failure before the host transport deadline.
+The watchdog uses injected `ProxyTimer.wait`, never `schedule`: `SystemTimer.schedule`
+dispatches to the main queue, which a synchronous XCUITest call can block. The
+unstructured handler/watchdog Tasks inherit gesture and perf TaskLocals. XCUITest
+is main-thread-confined and cannot be cancelled mid-call, so the serial chain and
+in-flight guard stay held until the real handler returns; `runner_busy` continues
+to name the blocker. Tap/drag/pinch have no wire deadline and remain unbounded.
+
+At the bound an immediate `gesture_phases ... boundHit=true phaseAtBound=...`
+line records the running phase and elapsed time (including queue wait), and the
+phase appears in the timeout error. When the real call returns, its final phase
+line also includes `phaseAtBound=...`, even below the slow threshold. The late
+response is discarded, while perf and failure-coordinator cleanup still runs.
+A failed unlock swipe followed by a confirmed unlocked lock state returns success
+with a warning containing the swipe error.
+
 ## Opt-in tap diagnostics
 
 A private daemon running with `--debug` adds `diagnostics: true` to

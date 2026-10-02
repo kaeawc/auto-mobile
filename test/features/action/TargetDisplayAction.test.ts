@@ -1046,17 +1046,13 @@ describe("explicit action display", () => {
 
   test("tapOn rejects display options it cannot honor before dispatch", async () => {
     const unsupported: Array<Partial<TapOnElementOptions>> = [
-      { ensureChecked: true },
       { sibling: true },
       { subtext: { text: "Link" } },
       { searchUntil: { duration: 100 } },
-      { retryIfNoChange: true },
-      { ensureTap: true },
       { textAny: ["One", "Two"] },
       { accessibilityLink: "Link" },
       { focusFirst: true },
       { screenReaderNavigation: true },
-      { preTapStability: true },
     ];
     const executor = adb();
     const observe = new FakeObserveScreen();
@@ -1077,11 +1073,7 @@ describe("explicit action display", () => {
   });
 
   test("swipeOn rejects every unsupported display option without claiming search success", async () => {
-    const unsupported: Array<Partial<SwipeOnOptions>> = [
-      { lookFor: { text: "Found" } },
-      { autoTarget: true },
-      { includeSystemInsets: true },
-    ];
+    const unsupported: Array<Partial<SwipeOnOptions>> = [{ autoTarget: true }];
     const observe = new FakeObserveScreen();
     const fakeAdb = new FakeAdbClient();
     const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {

@@ -18,6 +18,57 @@ describe("PlanSchemaValidator", () => {
   });
 
   describe("Valid YAML", () => {
+    it("validates the effective params clock when it overrides an invalid inline clock", () => {
+      const result = validator.validateYaml(
+        JSON.stringify({
+          name: "clock-override",
+          steps: [
+            {
+              tool: "setDeviceState",
+              clock: { mode: "invalid" },
+              params: { clock: { mode: "reset" } },
+            },
+          ],
+        }),
+      );
+      expect(result.valid).toBe(true);
+    });
+
+    it.each(["inline", "params"])("validates clock-only setDeviceState steps (%s)", (form) => {
+      for (const clock of [
+        { mode: "set", instant: "2030-01-01T00:00:00Z" },
+        { mode: "advance", byMs: 60_000 },
+        { mode: "reset" },
+      ]) {
+        const fields = form === "inline" ? { clock } : { params: { clock } };
+        const result = validator.validateYaml(
+          JSON.stringify({ name: "clock", steps: [{ tool: "setDeviceState", ...fields }] }),
+        );
+        expect(result.valid).toBe(true);
+      }
+    });
+
+    it.each(["inline", "params"])(
+      "rejects invalid clock input in setDeviceState steps (%s)",
+      (form) => {
+        for (const clock of [
+          { mode: "set" },
+          { mode: "set", instant: "invalid" },
+          { mode: "advance", byMs: 999 },
+          { mode: "advance", byMs: 1000.5 },
+          { mode: "advance", byMs: 315360000001 },
+          { mode: "reset", byMs: 1000 },
+          { mode: "unknown" },
+        ]) {
+          const fields = form === "inline" ? { clock } : { params: { clock } };
+          const result = validator.validateYaml(
+            JSON.stringify({ name: "clock", steps: [{ tool: "setDeviceState", ...fields }] }),
+          );
+          expect(result.valid).toBe(false);
+        }
+      },
+    );
+
     it("should validate a minimal valid plan", () => {
       const yaml = `
 name: test-plan

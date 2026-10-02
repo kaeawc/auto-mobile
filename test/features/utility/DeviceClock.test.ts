@@ -1,9 +1,11 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { DeviceState } from "../../../src/features/utility/DeviceState";
 import {
   AndroidDeviceClockAdapter,
+  DeviceClockRestoreRegistry,
+  defaultDeviceClockRestoreRegistry,
   MAX_DEVICE_CLOCK_ADVANCE_MS,
   MIN_DEVICE_CLOCK_INSTANT_MS,
   MAX_DEVICE_CLOCK_INSTANT_MS,
@@ -17,6 +19,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeDeviceClockAdapter } from "../../fakes/FakeDeviceClockAdapter";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
 const android: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const instant = "2030-01-01T00:00:00Z";
@@ -53,6 +56,95 @@ function harness() {
   return { adapter, timer, slot, invalidations, dependencies, write };
 }
 describe("device clock", () => {
+  beforeEach(() => defaultDeviceClockRestoreRegistry.retire(android.deviceId));
+  afterEach(() => defaultDeviceClockRestoreRegistry.retire(android.deviceId));
+  test("retired sessionless slots cannot record or clear a replacement device's ownership", () => {
+    const registry = new DeviceClockRestoreRegistry();
+    const original = registry.slot(android.deviceId);
+    const ownership: DeviceClockRestoreState = {
+      rootedByUs: true,
+      clockChangedByUs: true,
+      initialAutomaticTime: 0,
+    };
+    original.record(ownership);
+    registry.retire(android.deviceId);
+    expect(original.get()).toBeUndefined();
+    original.record(ownership);
+    expect(original.get()).toBeUndefined();
+    const replacement = registry.slot(android.deviceId);
+    replacement.record(ownership);
+    original.clear();
+    expect(replacement.get()).toBe(ownership);
+  });
+  test("clock and public biometric enrollment strings apply together on iOS", async () => {
+    const device: BootedDevice = {
+      deviceId: "12345678-1234-1234-1234-123456789ABC",
+      name: "iPhone",
+      platform: "ios",
+      iosVersion: "17.5",
+    };
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `spawn ${device.deviceId} notifyutil -1 com.apple.BiometricKit.enrollmentChanged -s com.apple.BiometricKit.enrollmentChanged 1 -g com.apple.BiometricKit.enrollmentChanged -p com.apple.BiometricKit.enrollmentChanged`,
+      "com.apple.BiometricKit.enrollmentChanged 1\n",
+    );
+    const state = new DeviceState(device, { simctl, clockAdapter: new FakeDeviceClockAdapter() });
+    const result = await state.setState({
+      clock: { mode: "set", instant },
+      biometrics: { enrollment: "enrolled" },
+    });
+    expect(result.biometrics).toMatchObject({ enrollment: "enrolled", verified: true });
+    expect(result.clock?.supported).toBe(false);
+  });
+
+  test.each(["set", "advance"] as const)(
+    "sessionless %s retains acquired root until explicit reset across DeviceState instances",
+    async (mode) => {
+      const h = harness();
+      const dependencies = {
+        clockAdapter: h.adapter,
+        clockRestoreRegistry: new DeviceClockRestoreRegistry(),
+        timer: h.timer,
+        invalidateClockCaches: h.dependencies.invalidate,
+      };
+      const input: SetDeviceClockInput =
+        mode === "set" ? { mode, instant } : { mode, byMs: 60_000 };
+      await new DeviceState(android, dependencies).setState({ clock: input });
+      h.adapter.rootedByUs = false;
+      const reset = await new DeviceState(android, dependencies).setState({
+        clock: { mode: "reset" },
+      });
+      expect(reset.clock?.verified).toBe(true);
+      expect(h.adapter.calls.filter((call) => call === "unroot")).toHaveLength(1);
+      await new DeviceState(android, dependencies).setState({ clock: { mode: "reset" } });
+      expect(h.adapter.calls.filter((call) => call === "unroot")).toHaveLength(1);
+    },
+  );
+
+  test("restore snapshots host time after disabling automatic time", async () => {
+    const h = harness();
+    class SlowAutomaticTime extends FakeDeviceClockAdapter {
+      override async setAutomaticTime(value: 0 | 1) {
+        await super.setAutomaticTime(value);
+        if (value === 0) {
+          h.timer.setCurrentTime(h.timer.now() + 5000);
+        }
+      }
+    }
+    const adapter = new SlowAutomaticTime();
+    const result = await writeDeviceClock(
+      android,
+      adapter,
+      { mode: "reset" },
+      h.slot,
+      h.dependencies,
+    );
+    expect(result.verified).toBe(true);
+    expect(adapter.instantMs).toBe(h.timer.now());
+    expect(h.slot.get()).toBeUndefined();
+    expect(h.invalidations).toEqual([android.deviceId]);
+  });
+
   test("set records restoration ownership before clock mutation, and invalidates caches", async () => {
     const h = harness();
     const result = await h.write({ mode: "set", instant });

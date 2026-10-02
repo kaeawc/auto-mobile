@@ -3,12 +3,13 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { retireShutdownOwnership } from "../../src/server/deviceToolsShutdown";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import {
-  writeDeviceClock,
   restoreDeviceClock,
+  defaultDeviceClockRestoreRegistry,
+  MAX_DEVICE_CLOCK_INSTANT_MS,
   type SetDeviceClockInput,
 } from "../../src/features/utility/DeviceClock";
 import { runSessionClockMutation } from "../../src/server/sessionClock";
@@ -59,15 +60,75 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
   const state = new DeviceState(device, {
     timer,
     clockAdapter: adapter,
-    clockMutation: (input, clock, prepared) =>
-      runSessionClockMutation(manager, "clock-session", device.deviceId, (slot) =>
-        writeDeviceClock(device, clock, input, slot, dependencies, prepared),
-      ),
+    invalidateClockCaches: dependencies.invalidate,
+    clockMutation: (mutation) =>
+      runSessionClockMutation(manager, "clock-session", device.deviceId, mutation),
   });
-  return { timer, restored, manager, state, adapter, invalidations, restoreSignals };
+  return { timer, restored, manager, state, adapter, invalidations, restoreSignals, dependencies };
 }
 
 describe("session clock restoration", () => {
+  test("queued advance bounds reject before combined biometric mutation", async () => {
+    const h = harness();
+    h.adapter.instantMs = MAX_DEVICE_CLOCK_INSTANT_MS - 1000;
+    const biometrics = spyOn(h.state, "setBiometricEnrollmentState");
+    try {
+      await h.manager.createSession("clock-session", device.deviceId, "android");
+      const results = await Promise.allSettled([
+        h.state.setState({ clock: { mode: "advance", byMs: 1000 } }),
+        h.state.setState({
+          clock: { mode: "advance", byMs: 1000 },
+          biometrics: { enrollment: "enrolled" },
+        }),
+      ]);
+      expect(results.map((result) => result.status)).toEqual(["fulfilled", "rejected"]);
+      expect(biometrics).not.toHaveBeenCalled();
+      expect(h.adapter.instantMs).toBe(MAX_DEVICE_CLOCK_INSTANT_MS);
+      expect(h.invalidations).toEqual([device.deviceId]);
+    } finally {
+      biometrics.mockRestore();
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("device removal retires sessionless clock ownership through the existing hook", async () => {
+    const h = harness();
+    const state = new DeviceState(device, {
+      clockAdapter: h.adapter,
+      timer: h.timer,
+      invalidateClockCaches: h.dependencies.invalidate,
+    });
+    try {
+      await state.setState({ clock: set });
+      expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()?.rootedByUs).toBe(true);
+      h.manager.retireClockRestoration(device.deviceId);
+      expect(defaultDeviceClockRestoreRegistry.slot(device.deviceId).get()).toBeUndefined();
+      h.adapter.rootedByUs = false;
+      await state.setState({ clock: { mode: "reset" } });
+      expect(h.adapter.calls).not.toContain("unroot");
+    } finally {
+      defaultDeviceClockRestoreRegistry.retire(device.deviceId);
+      h.manager.stopCleanupTimer();
+    }
+  });
+
+  test("concurrent advances recompute device time inside the session queue", async () => {
+    const h = harness();
+    const start = h.adapter.instantMs;
+    try {
+      await h.manager.createSession("clock-session", device.deviceId, "android");
+      const results = await Promise.all([
+        h.state.setState({ clock: { mode: "advance", byMs: 60_000 } }),
+        h.state.setState({ clock: { mode: "advance", byMs: 60_000 } }),
+      ]);
+      expect(results.every((result) => result.clock?.verified)).toBe(true);
+      expect(h.adapter.instantMs).toBe(start + 120_000);
+      expect(h.invalidations).toEqual([device.deviceId, device.deviceId]);
+    } finally {
+      h.manager.stopCleanupTimer();
+    }
+  });
+
   test("release without a clock slot keeps the no-restore microtask budget and never quarantines", async () => {
     const h = harness();
     try {

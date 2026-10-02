@@ -734,6 +734,9 @@
                 "required": ["networkCondition"]
               },
               {
+                "required": ["clock"]
+              },
+              {
                 "required": ["params"]
               }
             ],
@@ -791,6 +794,25 @@
                   "properties": {
                     "biometrics": {
                       "$ref": "#/$defs/biometricStateInput"
+                    }
+                  }
+                }
+              },
+              {
+                "$comment": "params.clock overrides inline clock at normalization; validate only the effective inline value when params.clock is absent.",
+                "if": {
+                  "required": ["params"],
+                  "properties": {
+                    "params": {
+                      "required": ["clock"]
+                    }
+                  }
+                },
+                "then": true,
+                "else": {
+                  "properties": {
+                    "clock": {
+                      "$ref": "#/$defs/deviceClockStateInput"
                     }
                   }
                 }
@@ -1519,6 +1541,9 @@
         },
         "networkCondition": {
           "$ref": "#/$defs/networkConditionStateInput"
+        },
+        "clock": {
+          "$ref": "#/$defs/deviceClockStateInput"
         }
       },
       "anyOf": [
@@ -1530,9 +1555,60 @@
         },
         {
           "required": ["networkCondition"]
+        },
+        {
+          "required": ["clock"]
         }
       ],
       "description": "Parameters for setDeviceState"
+    },
+    "deviceClockStateInput": {
+      "description": "Set the real clock within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z, advance by integer byMs >= 1000 with second-level precision, or reset to host time and original auto_time (1 without a recorded slot). Rootable Android emulators only.",
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "set"
+            },
+            "instant": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-]\\d{2}:\\d{2})))$"
+            }
+          },
+          "required": ["mode", "instant"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "advance"
+            },
+            "byMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 315360000000
+            }
+          },
+          "required": ["mode", "byMs"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "reset"
+            }
+          },
+          "required": ["mode"],
+          "additionalProperties": false
+        }
+      ]
     },
     "networkConditionStateInput": {
       "type": "object",

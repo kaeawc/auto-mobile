@@ -2,6 +2,7 @@ import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
 import {
   AndroidDeviceClockAdapter,
   restoreDeviceClock,
+  defaultDeviceClockRestoreRegistry,
   type DeviceClockRestoreState,
 } from "../features/utility/DeviceClock";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -3191,6 +3192,7 @@ export class SessionManager {
 
   /** Removal retires in-memory ownership; no retries may target a replacement device. */
   retireClockRestoration(deviceId: string): void {
+    defaultDeviceClockRestoreRegistry.retire(deviceId);
     const target = this.pendingClockRestores.get(deviceId);
     this.clockRemovalGenerations.set(
       deviceId,

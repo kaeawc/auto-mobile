@@ -70,9 +70,49 @@ export interface DeviceClockRestoreSlot {
   record(value: DeviceClockRestoreState): void;
   clear(): void;
 }
+
+/** Sessionless callers retain ownership until explicit reset or device removal. */
+export class DeviceClockRestoreRegistry {
+  private readonly devices = new Map<string, { state?: DeviceClockRestoreState }>();
+
+  slot(deviceId: string): DeviceClockRestoreSlot {
+    let entry = this.devices.get(deviceId);
+    if (!entry) {
+      entry = {};
+      this.devices.set(deviceId, entry);
+    }
+    const captured = entry;
+    return {
+      get: () => captured.state,
+      record: (state) => {
+        // A removed device must not regain ownership from a late mutation.
+        if (this.devices.get(deviceId) === captured) {
+          captured.state = state;
+        }
+      },
+      clear: () => {
+        captured.state = undefined;
+        if (this.devices.get(deviceId) === captured) {
+          this.devices.delete(deviceId);
+        }
+      },
+    };
+  }
+
+  retire(deviceId: string): void {
+    const entry = this.devices.get(deviceId);
+    if (entry) {
+      entry.state = undefined;
+      this.devices.delete(deviceId);
+    }
+  }
+}
+export const defaultDeviceClockRestoreRegistry = new DeviceClockRestoreRegistry();
+
 export interface DeviceClockDependencies {
   hostClock: Pick<Timer, "now">;
   invalidate(deviceId: string): void;
+  restoreRegistry?: Pick<DeviceClockRestoreRegistry, "slot">;
 }
 export interface PreparedDeviceClock {
   targetMs: number;
@@ -294,12 +334,15 @@ export async function writeDeviceClock(
   prepared?: PreparedDeviceClock,
 ): Promise<DeviceClockState> {
   validateDeviceClockInput(input);
-  // Presence comes first: ownership makes refused root a pending restore failure.
-  const recorded = slot?.get();
   const limitation = clockWriteLimitation(device);
   if (limitation) {
     return limitation;
   }
+  slot ??= (dependencies.restoreRegistry ?? defaultDeviceClockRestoreRegistry).slot(
+    device.deviceId,
+  );
+  // Presence comes before rooting: ownership makes refused root a pending restore failure.
+  const recorded = slot.get();
   const preflight = await resolveClockPreflight(device, adapter, input, prepared);
   if (preflight.failure) {
     return preflight.failure;
@@ -444,8 +487,8 @@ export async function restoreDeviceClock(
   state: DeviceClockRestoreState,
   dependencies: DeviceClockDependencies,
 ): Promise<DeviceClockState> {
-  const target = dependencies.hostClock.now();
   await adapter.setAutomaticTime(0);
+  const target = dependencies.hostClock.now();
   try {
     await adapter.setInstantMs(target);
   } finally {

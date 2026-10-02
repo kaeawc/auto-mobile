@@ -1,10 +1,4 @@
-import { defaultTimer } from "../utils/SystemTimer";
-import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
-import {
-  deviceClockInputSchema,
-  writeDeviceClock,
-  validateDeviceClockInput,
-} from "../features/utility/DeviceClock";
+import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
 import { runSessionClockMutation } from "./sessionClock";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
@@ -13,6 +7,7 @@ import { ActionableError } from "../models/ActionableError";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
 import {
   DeviceState,
+  biometricEnrollmentSchema,
   DEVICE_STATE_READABLE_FIELDS,
   MAX_NETWORK_CONDITION_TTL_SECONDS,
   networkConditionInputDegrades,
@@ -158,9 +153,7 @@ const doNotDisturbStateInputSchema = z
   });
 
 const biometricStateInputSchema = z.object({
-  enrollment: z
-    .enum(["enrolled", "not_enrolled"])
-    .describe("Set iOS Simulator biometric enrollment state."),
+  enrollment: biometricEnrollmentSchema.describe("Set iOS Simulator biometric enrollment state."),
 });
 
 const connectivityStateInputSchema = z
@@ -850,20 +843,8 @@ export function registerUtilityTools() {
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
     const deviceState = new DeviceState(device, {
-      clockMutation: (input, adapter, prepared) =>
-        runSessionClockMutation(sessionManager, args.sessionUuid, device.deviceId, (slot) =>
-          writeDeviceClock(
-            device,
-            adapter,
-            input,
-            slot,
-            {
-              hostClock: defaultTimer,
-              invalidate: (deviceId) => invalidateDisplayCaches(deviceId, "Device clock changed"),
-            },
-            prepared,
-          ),
-        ),
+      clockMutation: (mutation) =>
+        runSessionClockMutation(sessionManager, args.sessionUuid, device.deviceId, mutation),
     });
     // Single decision for whether an applied networkCondition needs a session
     // restore slot: a degrading request on an Android emulator (issue #6012).

@@ -7,6 +7,7 @@ import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { ProviderUnavailableError } from "../../src/features/storage/ProviderUnavailableError";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { createExecResult } from "../../src/utils/execResult";
@@ -26,6 +27,7 @@ const ANDROID_SHARED_PREFERENCES_XML = readFileSync(
 // — no DB, no clock, no device, no sockets.
 describe("storageResources", () => {
   const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+  const originalIosGetInstance = IOSCtrlProxyClient.getInstance;
   beforeEach(() => {
     PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager([], []));
     registerStorageResources();
@@ -34,6 +36,7 @@ describe("storageResources", () => {
   afterEach(() => {
     PlatformDeviceManagerFactory.setInstance(null);
     AndroidCtrlProxyClient.getInstance = originalGetInstance;
+    IOSCtrlProxyClient.getInstance = originalIosGetInstance;
     setStorageResourcesAdbClientFactoryForTesting(null);
   });
 
@@ -96,6 +99,33 @@ describe("storageResources", () => {
     const body = JSON.parse(content.text ?? "{}");
     expect(content.mimeType).toBe("application/json");
     expect(body.error).toBe("Device not found or not booted: emulator-5554");
+  });
+
+  test("iOS storage-entries presents SDK redactions without parsing typed values", async () => {
+    PlatformDeviceManagerFactory.setInstance(
+      new FakeDeviceManager([], [{ deviceId: "ios-sim", name: "Test", platform: "ios" }]),
+    );
+    IOSCtrlProxyClient.getInstance = mock(() => ({
+      getPreferenceEntries: async () => [
+        { key: "flagged", type: "STRING", value: "private", redacted: true },
+        { key: "legacy", type: "STRING", value: "[REDACTED]" },
+        { key: "plain", type: "STRING", value: "visible" },
+        { key: "count", type: "INT", value: "not-an-int", redacted: true },
+        { key: "enabled", type: "BOOLEAN", value: "not-a-bool", redacted: true },
+      ],
+    })) as unknown as typeof IOSCtrlProxyClient.getInstance;
+
+    const content = await readResource(
+      "automobile:devices/ios-sim/storage/com.example.app/Standard/entries",
+    );
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.entries).toEqual([
+      { key: "flagged", type: "STRING", value: null, redacted: true },
+      { key: "legacy", type: "STRING", value: null, redacted: true },
+      { key: "plain", type: "STRING", value: "visible" },
+      { key: "count", type: "INT", value: null, redacted: true },
+      { key: "enabled", type: "BOOLEAN", value: null, redacted: true },
+    ]);
   });
 
   test("storage-entries falls back to run-as and reports its source", async () => {

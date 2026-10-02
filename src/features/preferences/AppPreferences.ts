@@ -890,18 +890,19 @@ export function isIosPreferenceSdkUnavailable(error: unknown): boolean {
   );
 }
 
+export function isIosSdkEntryRedacted(entry: KeyValueEntry): boolean {
+  return entry.redacted === true || entry.value === IOS_SDK_REDACTED_VALUE;
+}
+
 function iosSdkPreferenceValue(
   entry: KeyValueEntry,
 ): Pick<PreferenceResult, "value" | "type" | "redacted" | "valueFormat" | "warning"> {
-  const type = iosPreferenceType(entry.type);
   const value = entry.value;
   // Honor explicit SDK redaction before scalar conversion, regardless of value.
-  // Without a flag, retain the older SDK sentinel fallback for every type. New
-  // SDKs also omit the flag for literal "[REDACTED]" strings; no SDK/schema version
-  // is carried in preference responses to distinguish those from old redactions.
-  if (entry.redacted === true || value === IOS_SDK_REDACTED_VALUE) {
-    return { type, value: null, redacted: true };
+  if (isIosSdkEntryRedacted(entry)) {
+    return { type: iosPreferenceType(entry.type), value: null, redacted: true };
   }
+  const type = iosPreferenceType(entry.type);
   if (value !== null && (type === "array" || type === "dictionary")) {
     if (isCanonicalSdkCollection(value, type)) {
       return { type, value, valueFormat: "canonical-json" };

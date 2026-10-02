@@ -6,7 +6,15 @@ import {
   shouldSkipObserveWaitForScreenshot,
 } from "../../src/features/observe/automaticScreenshotPolicy";
 import { ElementResolver } from "../../src/features/utility/ElementResolver";
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../src/models";
+import { DefaultElementSelector } from "../../src/features/utility/DefaultElementSelector";
+import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
+import {
+  isElementCenterOffScreen,
+  resolveElementScreenSize,
+} from "../../src/features/utility/ElementGeometry";
+import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
+import type { ConditionResolver } from "../../src/features/observe/ConditionPredicates";
+import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import {
   canDisplayExist,
@@ -27,6 +35,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeElementFinder } from "../fakes/FakeElementFinder";
 
 const bounds = (left: number, top: number, right: number, bottom: number) => ({
   left,
@@ -656,6 +665,102 @@ describe("published observe waitFor input schema", () => {
   ])("runtime rejects invalid waitFor input: $label", ({ input }) => {
     expect(observeSchema.safeParse(input).success).toBe(false);
   });
+});
+
+describe("element center visibility consistency", () => {
+  const screen = { width: 200, height: 200 };
+  const cases = [
+    { name: "well inside", bounds: bounds(20, 20, 40, 40), screen, offScreen: false },
+    { name: "exactly on right edge", bounds: bounds(190, 20, 210, 40), screen, offScreen: false },
+    { name: "exactly on bottom edge", bounds: bounds(20, 190, 40, 210), screen, offScreen: false },
+    { name: "1px past right edge", bounds: bounds(191, 20, 211, 40), screen, offScreen: true },
+    { name: "1px past bottom edge", bounds: bounds(20, 191, 40, 211), screen, offScreen: true },
+    { name: "negative horizontal center", bounds: bounds(-11, 20, 9, 40), screen, offScreen: true },
+    { name: "negative vertical center", bounds: bounds(20, -11, 40, 9), screen, offScreen: true },
+    { name: "missing bounds", bounds: undefined, screen, offScreen: false },
+    {
+      name: "zero width",
+      bounds: bounds(220, 220, 240, 240),
+      screen: { width: 0, height: 200 },
+      offScreen: false,
+    },
+    {
+      name: "zero height",
+      bounds: bounds(220, 220, 240, 240),
+      screen: { width: 200, height: 0 },
+      offScreen: false,
+    },
+    {
+      name: "absent screen size",
+      bounds: bounds(220, 220, 240, 240),
+      screen: undefined,
+      offScreen: false,
+    },
+  ];
+
+  test.each(cases)(
+    "four consumers agree: $name",
+    ({ bounds: elementBounds, screen: size, offScreen }) => {
+      const element: Element = {
+        text: "Match",
+        clickable: true,
+        bounds: elementBounds ?? bounds(20, 20, 40, 40),
+      };
+      if (!elementBounds) {
+        Reflect.deleteProperty(element, "bounds");
+      }
+      const hierarchy = makeHierarchy([{ $: element }], size);
+      if (!size) {
+        delete hierarchy.screenWidth;
+        delete hierarchy.screenHeight;
+      }
+      const resolver = new ElementResolver(() => 0);
+      const projection = new SearchableHierarchy().project(hierarchy);
+      const snapshot = { id: "center-consistency", nodes: projection };
+      const sharedOffScreen = isElementCenterOffScreen(
+        element.bounds,
+        resolveElementScreenSize(hierarchy),
+      );
+
+      // Real parsers discard boundless Elements. Supply one at the existing injected
+      // boundaries to exercise the consumers' center policy rather than parsing.
+      const fakeFinder = new FakeElementFinder();
+      fakeFinder.nextElementsByText = [element];
+      const selector = new DefaultElementSelector(
+        elementBounds ? new DefaultElementFinder() : fakeFinder,
+        () => 0,
+      );
+      const waitResolver: ConditionResolver = elementBounds
+        ? resolver
+        : {
+            resolve: (capture, selector, intent) =>
+              resolver.resolve(
+                {
+                  ...capture,
+                  nodes: capture.nodes.map((node) => ({ ...node, element: node.properties })),
+                },
+                selector,
+                intent,
+              ),
+          };
+      const resolved = resolver.resolve(
+        snapshot,
+        { text: "Match", match: "exact" },
+        {
+          action: elementBounds ? "tap" : "inspect",
+          requireBounds: elementBounds !== undefined,
+          viewport: size,
+        },
+      );
+
+      expect(sharedOffScreen).toBe(offScreen);
+      expect(selector.selectByText(hierarchy, "Match").element !== null).toBe(!sharedOffScreen);
+      expect(
+        findWaitForElement(waitResolver, { text: "Match", textMatch: "exact" }, hierarchy) !== null,
+      ).toBe(!sharedOffScreen);
+      expect(resolved.chosen !== null).toBe(!sharedOffScreen);
+    },
+  );
 });
 
 describe("findWaitForElement textAny", () => {

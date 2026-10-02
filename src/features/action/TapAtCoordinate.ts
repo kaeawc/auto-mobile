@@ -1,5 +1,6 @@
 import { normalizedAxis } from "./coordinateAxis";
 import { resolveImageRelativePoint } from "./imageRelativePoint";
+import { resolveCoordinateTapCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { ActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -750,7 +751,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         point.x,
         point.y,
         duration,
-        duration > 3000 ? duration + 2000 : undefined,
+        resolveCoordinateTapCtrlProxyTimeoutMs(duration),
         undefined,
         undefined,
         undefined,

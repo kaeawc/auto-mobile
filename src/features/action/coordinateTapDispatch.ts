@@ -1,3 +1,4 @@
+import { resolveCoordinateTapCtrlProxyTimeoutMs } from "./gestureTransportTimeout";
 import { ActionableError } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
@@ -47,7 +48,7 @@ export async function dispatchAndroidCoordinateTap(
   // Only the Android client accepts a dispatch callback in position seven;
   // the iOS client uses that position for an abort signal.
   const androidService = accessibilityService as CoordinateTapClient<() => void>;
-  const timeoutMs = durationMs > 3000 ? durationMs + 2000 : undefined;
+  const timeoutMs = resolveCoordinateTapCtrlProxyTimeoutMs(durationMs);
   const result =
     frameContext === undefined
       ? await androidService.requestTapCoordinates(
@@ -112,7 +113,7 @@ export async function dispatchIosCoordinateTap(
   frameContext?: string,
   failureLabel: "tap" | "second tap" = "tap",
 ): Promise<void> {
-  const timeoutMs = durationMs > 3000 ? durationMs + 2000 : undefined;
+  const timeoutMs = resolveCoordinateTapCtrlProxyTimeoutMs(durationMs);
   const result =
     frameContext === undefined
       ? await client.requestTapCoordinates(x, y, durationMs, timeoutMs)

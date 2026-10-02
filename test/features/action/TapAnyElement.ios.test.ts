@@ -1,3 +1,4 @@
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../../../src/features/observe/shared/SharedGestureDelegate";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import {
   TapAnyElement,
@@ -517,8 +518,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(true);
     // Normalized to 1501ms — used verbatim for the request payload, and the
-    // timeout is sized from that same normalized value (1501 + 2000 headroom).
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1501, 3501, undefined, undefined, undefined);
+    // timeout preserves the default while covering that normalized press.
+    expect(tapSpy).toHaveBeenCalledWith(
+      42,
+      84,
+      1501,
+      DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1501 }]);
   });
 
@@ -535,8 +544,16 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
 
     expect(result.success).toBe(true);
     // Floored to 1ms — still a long press (duration > 0), not a tap — and the
-    // timeout is sized from that same floored value (1 + 2000 headroom).
-    expect(tapSpy).toHaveBeenCalledWith(42, 84, 1, 2001, undefined, undefined, undefined);
+    // timeout preserves the default while covering that floored press.
+    expect(tapSpy).toHaveBeenCalledWith(
+      42,
+      84,
+      1,
+      DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
+      undefined,
+      undefined,
+      undefined,
+    );
     expect(fakeIosClient.getTapHistory()).toEqual([{ x: 42, y: 84, duration: 1 }]);
   });
 
@@ -638,7 +655,7 @@ describe("TapAnyElement iOS gesture dispatch (public execute())", () => {
       "long_press",
       "com.test.app:id/submit_button",
       undefined,
-      3750,
+      DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
       undefined,
       { duration: 1750 },
     );

@@ -11,6 +11,9 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { DelegateContext, GestureTimingResult, BaseResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
+/** Default transport budget for coordinate taps and VoiceOver activation. */
+export const DEFAULT_GESTURE_REQUEST_TIMEOUT_MS = 5000;
+
 interface SharedGestureConfig {
   logTag: string;
   roundCoordinates: boolean;
@@ -51,7 +54,7 @@ export class SharedGestureDelegate {
     x: number,
     y: number,
     duration: number = 0,
-    timeoutMs: number = 5000,
+    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
     perf?: PerformanceTracker,
     frameContext?: string,
     signal?: AbortSignal,

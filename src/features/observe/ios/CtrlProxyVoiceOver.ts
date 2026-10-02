@@ -6,6 +6,7 @@
  * the result.
  */
 
+import { DEFAULT_GESTURE_REQUEST_TIMEOUT_MS } from "../shared/SharedGestureDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import type { DelegateContext, CtrlProxyVoiceOverResult, CtrlProxyActionResult } from "./types";
@@ -209,7 +210,7 @@ export class CtrlProxyVoiceOver {
   async requestVoiceOverActivate(
     label: string,
     action: "activate" | "long_press",
-    timeoutMs: number = 5000,
+    timeoutMs: number = DEFAULT_GESTURE_REQUEST_TIMEOUT_MS,
     perf?: PerformanceTracker,
     options?: VoiceOverActivationOptions,
   ): Promise<CtrlProxyActionResult> {

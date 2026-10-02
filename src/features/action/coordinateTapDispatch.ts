@@ -16,6 +16,7 @@ export interface CoordinateTapClient<Dispatch = never> {
     onDispatch?: Dispatch,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<{ success: boolean; error?: string }>;
 }
 
@@ -35,6 +36,7 @@ export async function dispatchAndroidCoordinateTap(
   durationMs: number,
   frameContext?: string,
   signal?: AbortSignal,
+  assertCurrent?: () => void,
 ): Promise<void> {
   throwIfAborted(signal);
   let dispatched = false;
@@ -56,6 +58,9 @@ export async function dispatchAndroidCoordinateTap(
           undefined,
           undefined,
           onDispatch,
+          signal,
+          undefined,
+          assertCurrent,
         )
       : await androidService.requestTapCoordinates(
           x,
@@ -65,7 +70,11 @@ export async function dispatchAndroidCoordinateTap(
           undefined,
           frameContext,
           onDispatch,
+          signal,
+          undefined,
+          assertCurrent,
         );
+  throwIfAborted(signal);
   if (result.success) {
     return;
   }
@@ -90,6 +99,7 @@ export async function dispatchAndroidCoordinateTap(
     durationMs >= 500 ? `swipe ${x} ${y} ${x} ${y} ${durationMs}` : `tap ${x} ${y}`,
     undefined,
     signal,
+    assertCurrent,
   );
 }
 

@@ -2756,6 +2756,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           undefined,
           signal,
           target.displayId === 0 ? undefined : target.displayId,
+          target.assertCurrent,
         );
         throwIfAborted(signal);
         if (!result.success) {
@@ -2769,6 +2770,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             : `tap ${x} ${y}`,
           target.displayId,
           signal,
+          target.assertCurrent,
         );
       }
     };

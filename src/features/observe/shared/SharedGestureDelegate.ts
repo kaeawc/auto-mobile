@@ -52,6 +52,7 @@ export class SharedGestureDelegate {
     signal?: AbortSignal,
     onDispatch?: () => void,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<BaseResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<BaseResult>(this.context, {
@@ -76,6 +77,7 @@ export class SharedGestureDelegate {
       // await and before dispatch, so an already-abandoned tap is never sent
       // to the device after the caller has given up (issue #6306 review).
       abortSignal: signal,
+      beforeSend,
       onDispatch,
     });
   }
@@ -92,6 +94,7 @@ export class SharedGestureDelegate {
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     const result = await sendCommand<GestureTimingResult>(this.context, {
@@ -114,6 +117,7 @@ export class SharedGestureDelegate {
       perf,
       errorLabel: "Swipe",
       abortSignal: signal,
+      beforeSend,
       onDispatch,
     });
     if (this.config.includeSwipeTimeoutMs && result.perfTiming) {
@@ -134,6 +138,7 @@ export class SharedGestureDelegate {
     frameContext?: string,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<GestureTimingResult>(this.context, {
@@ -156,6 +161,7 @@ export class SharedGestureDelegate {
       timeoutMs,
       errorLabel: "Drag",
       abortSignal: signal,
+      beforeSend,
     });
   }
 
@@ -175,6 +181,7 @@ export class SharedGestureDelegate {
     perf?: PerformanceTracker,
     signal?: AbortSignal,
     displayId?: number,
+    beforeSend?: () => void,
   ): Promise<GestureTimingResult> {
     const displayParams = this.gestureDisplayParams(displayId);
     return sendCommand<GestureTimingResult>(this.context, {
@@ -196,6 +203,7 @@ export class SharedGestureDelegate {
       perf,
       errorLabel: "Pinch",
       abortSignal: signal,
+      beforeSend,
     });
   }
 }

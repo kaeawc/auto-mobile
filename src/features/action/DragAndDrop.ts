@@ -126,6 +126,7 @@ export class DragAndDrop extends BaseVisualChange {
         undefined,
         signal,
         target.displayId === 0 ? undefined : target.displayId,
+        target.assertCurrent,
       );
       throwIfAborted(signal);
       if (!result.success) {
@@ -137,6 +138,7 @@ export class DragAndDrop extends BaseVisualChange {
         `draganddrop ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
         target.displayId,
         signal,
+        target.assertCurrent,
       );
     }
     return {

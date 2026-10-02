@@ -286,6 +286,7 @@ export class SwipeOn extends BaseVisualChange {
         undefined,
         signal,
         target.displayId === 0 ? undefined : target.displayId,
+        target.assertCurrent,
       );
       throwIfAborted(signal);
       if (!result.success) {
@@ -297,6 +298,7 @@ export class SwipeOn extends BaseVisualChange {
         `swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
         target.displayId,
         signal,
+        target.assertCurrent,
       );
     }
     return {

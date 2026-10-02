@@ -1,6 +1,8 @@
+import { FakeDisplayTransitionReader } from "../../../fakes/FakeDisplayTransitionReader";
+import { staleDisplayError } from "../../../../src/models/StaleDisplayError";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
-import { describe, it, expect } from "bun:test";
+import { describe, it, expect, spyOn } from "bun:test";
 import { CtrlProxyGestures } from "../../../../src/features/observe/android/CtrlProxyGestures";
 import type { DelegateContext } from "../../../../src/features/observe/shared/types";
 import type { A11ySwipeResult } from "../../../../src/features/observe/android/types";
@@ -511,4 +513,155 @@ describe("Android display gesture cancellation", () => {
       });
     }
   }
+});
+
+describe("gesture pre-send display fence during reconnect", () => {
+  const cases = [
+    {
+      name: "tap",
+      send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
+        c.requestTapCoordinates(1, 2, 10, 5000, undefined, undefined, undefined, signal, 2, guard),
+    },
+    {
+      name: "swipe",
+      send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
+        c.requestSwipe(1, 2, 3, 4, 300, 5000, undefined, undefined, undefined, signal, 2, guard),
+    },
+    {
+      name: "drag",
+      send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
+        c.requestDrag(1, 2, 3, 4, 600, 300, 100, 5000, undefined, signal, 2, guard),
+    },
+    {
+      name: "pinch",
+      send: (c: AndroidCtrlProxyClient, guard: () => void, signal?: AbortSignal) =>
+        c.requestPinch(1, 2, 30, 40, 0, 300, 5000, undefined, signal, 2, guard),
+    },
+    {
+      name: "two-finger swipe",
+      send: (c: AndroidCtrlProxyClient, guard: () => void) =>
+        c.requestTwoFingerSwipe(1, 2, 3, 4, 300, 100, 5000, undefined, 2, guard),
+    },
+    {
+      name: "gesture start",
+      send: (c: AndroidCtrlProxyClient, guard: () => void) =>
+        c.requestGestureStart("finger", 1, 2, 5000, undefined, 2, guard),
+    },
+  ];
+  for (const { name, send } of cases) {
+    for (const phase of ["transition", "unchanged", "abort"] as const) {
+      if (phase === "abort" && (name === "two-finger swipe" || name === "gesture start")) {
+        continue;
+      }
+      it(`${name}: ${phase} while ensureConnected is pending`, async () => {
+        const connecting = Promise.withResolvers<boolean>();
+        const transitions = new FakeDisplayTransitionReader();
+        const initialGeneration = transitions.generation;
+        const stale = staleDisplayError(initialGeneration, initialGeneration + 1, "cover");
+        const guard = spyOn(
+          {
+            check: () => {
+              if (transitions.generation !== initialGeneration) {
+                throw stale;
+              }
+            },
+          },
+          "check",
+        );
+        const { context, sent, requestManager, timer } = createFakeContext({
+          ensureConnected: () => connecting.promise,
+          isCommandSupported: () => true,
+        });
+        const client = AndroidCtrlProxyClient.createForTesting(
+          { deviceId: `pre-send-${name}-${phase}`, platform: "android", name: "Fake" },
+          new FakeAdbExecutor(),
+          undefined,
+          timer,
+        );
+        client["_gestures"] = new CtrlProxyGestures(context);
+        const controller = new AbortController();
+        const add = spyOn(controller.signal, "addEventListener");
+        const remove = spyOn(controller.signal, "removeEventListener");
+        const pending = send(client, guard, controller.signal).then(
+          (result) => ({ result, error: undefined }),
+          (error: unknown) => ({ result: undefined, error }),
+        );
+        await flush();
+        expect(sent).toHaveLength(0);
+        if (phase === "transition") {
+          transitions.transition();
+        }
+        if (phase === "abort") {
+          controller.abort(new Error("Operation cancelled"));
+        }
+        connecting.resolve(true);
+        await flush();
+        // Settle the unfixed implementation too, so failures never leave pending timers.
+        for (const id of requestManager.getPendingIds()) {
+          requestManager.resolve(id, { success: true, totalTimeMs: 0 });
+        }
+        const outcome = await pending;
+        expect(requestManager.getPendingCount()).toBe(0);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(remove.mock.calls.length).toBe(add.mock.calls.length);
+        if (phase === "transition") {
+          expect(sent).toHaveLength(0);
+          expect(outcome.error).toBe(stale);
+          expect(guard).toHaveBeenCalledTimes(1);
+        } else if (phase === "abort") {
+          expect(sent).toHaveLength(0);
+          expect(outcome.result?.success).toBe(false);
+          expect(outcome.result?.error).toBe("Request aborted before dispatch");
+        } else {
+          expect(sent).toHaveLength(1);
+          expect(outcome.result?.success).toBe(true);
+          expect(guard).toHaveBeenCalledTimes(1);
+        }
+        add.mockRestore();
+        remove.mockRestore();
+        guard.mockRestore();
+      });
+    }
+  }
+});
+
+it("tap cancellation inside the pre-send guard prevents dispatch and cleans registration", async () => {
+  const { context, sent, requestManager, timer } = createFakeContext({
+    isCommandSupported: () => true,
+  });
+  const client = AndroidCtrlProxyClient.createForTesting(
+    { deviceId: "cancel-at-send", platform: "android", name: "Fake" },
+    new FakeAdbExecutor(),
+    undefined,
+    timer,
+  );
+  client["_gestures"] = new CtrlProxyGestures(context);
+  const controller = new AbortController();
+  const reason = new Error("Operation cancelled at send");
+  const pending = client
+    .requestTapCoordinates(
+      1,
+      2,
+      10,
+      5000,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+      2,
+      () => controller.abort(reason),
+    )
+    .then(
+      (result) => ({ result, error: undefined }),
+      (error: unknown) => ({ result: undefined, error }),
+    );
+  await flush();
+  for (const id of requestManager.getPendingIds()) {
+    requestManager.resolve(id, { success: true, totalTimeMs: 0 });
+  }
+  const outcome = await pending;
+  expect(sent).toHaveLength(0);
+  expect(outcome.error).toBe(reason);
+  expect(requestManager.getPendingCount()).toBe(0);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
 });

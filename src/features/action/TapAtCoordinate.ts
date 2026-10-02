@@ -538,6 +538,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         tapDurationMs(options, "android"),
         frameContext,
         signal,
+        () => this.assertDisplayRevisionCurrent(transitionRevision),
       );
       return frameContext;
     } catch (error) {
@@ -579,6 +580,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         tapDurationMs(options, "android"),
         refreshedFrameContext,
         signal,
+        () => this.assertDisplayRevisionCurrent(transitionRevision),
       );
       return refreshedFrameContext;
     }
@@ -658,6 +660,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       tapDurationMs(options, "android"),
       frameContext,
       signal,
+      () => this.assertDisplayRevisionCurrent(revision),
     );
   }
 
@@ -716,6 +719,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         undefined,
         signal,
         displayId === 0 ? undefined : displayId,
+        assertCurrent,
       );
       throwIfAborted(signal);
       if (!result.success) {
@@ -724,7 +728,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     } else {
       throwIfAborted(signal);
       assertCurrent?.();
-      await executeTouchscreenInput(this.adb, command, displayId, signal);
+      await executeTouchscreenInput(this.adb, command, displayId, signal, assertCurrent);
     }
   }
 

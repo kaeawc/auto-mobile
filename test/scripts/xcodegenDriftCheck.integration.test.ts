@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
   chmodSync,
   cpSync,
@@ -19,6 +19,8 @@ const driftCheckScript = join(repoRoot, "scripts/ios/xcodegen-drift-check.sh");
 const versionScript = join(repoRoot, "scripts/ios/xcodegen_version.sh");
 const normalizeScript = join(repoRoot, "scripts/ios/pbxproj_normalize.sh");
 const tempDirs: string[] = [];
+// Covers a cold windows-latest Bash/MSYS start; this is a hook ceiling, not a per-test timeout.
+const WARM_UP_HOOK_TIMEOUT_MS = 60_000;
 
 // A minimal PBXProject `targets = (...)` block in two of the orders XcodeGen
 // 2.46.0 alternates between for the same spec (issue #4080). Same members, same
@@ -232,6 +234,23 @@ exit 2
 
   return tempDir;
 }
+
+beforeAll(() => {
+  expectExitStatus(spawnSync("bash", ["-c", "true"], { encoding: "utf8" }), 0);
+
+  const repoDir = createTempRepo();
+  try {
+    const result = spawnSync("bash", ["scripts/ios/xcodegen-drift-check.sh", "--ctrl-proxy"], {
+      cwd: repoDir,
+      encoding: "utf8",
+      env: fakeToolEnvironment(repoDir),
+    });
+    expectExitStatus(result, 0);
+  } finally {
+    rmSync(repoDir, { recursive: true, force: true });
+    tempDirs.splice(tempDirs.indexOf(repoDir), 1);
+  }
+}, WARM_UP_HOOK_TIMEOUT_MS);
 
 describe("xcodegen drift check", () => {
   test("script exists for CI and local validation", () => {

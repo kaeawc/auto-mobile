@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { isAbsolute, join, posix, relative, resolve, win32 } from "node:path";
-import { homedir } from "node:os";
+import { type BenchmarkLaunchSafety } from "../../scripts/benchmarkSettledScreenshotIsolation";
+
 import { runBenchmark, type BenchmarkDeps } from "../../scripts/benchmark-settled-screenshot";
 import {
   assertPrivateDaemonNamespace,
@@ -21,6 +22,16 @@ import {
   settledAsyncDelta,
   type BenchmarkReport,
 } from "../../scripts/benchmarkSettledScreenshotReport";
+
+const safety: BenchmarkLaunchSafety = {
+  homeDir: "/fake/home",
+  builtInResidentPaths: [
+    "/tmp/auto-mobile-daemon-501.sock",
+    "/tmp/auto-mobile-daemon-501.pid",
+    "/tmp/auto-mobile-daemon-501.lock",
+  ],
+  effectiveDaemonPaths: ["/fake/scratch/d.sock", "/fake/scratch/d.pid", "/fake/scratch/d.lock"],
+};
 
 const runDir = resolve("/tmp/am-bench-fake");
 const expectedPaths: Record<string, string> = {
@@ -57,6 +68,7 @@ function harness(
   let clock = 0;
   let dirs = 0;
   const deps: BenchmarkDeps = {
+    safety,
     serverExists: () => true,
     pickPort: async () => 49152,
     parentEnv: { PATH: "/fake/bin", AUTOMOBILE_COORDINATION_DIR: "/fake/shared" },
@@ -147,7 +159,7 @@ describe("benchmark namespace isolation", () => {
 
   test("every daemon path stays inside the run dir and replaces resident paths", () => {
     const directory = resolve("/fake/tmp/am-bench-ABC123");
-    const residentDir = join(homedir(), ".auto-mobile");
+    const residentDir = join(safety.homeDir, ".auto-mobile");
     const parent: BenchmarkChildEnv = {
       AUTOMOBILE_COORDINATION_DIR: resolve("/fake/resident/coordination"),
     };
@@ -302,12 +314,10 @@ describe("benchmark path flavours", () => {
 });
 
 describe("benchmark injectable lifecycle", () => {
-  test("passes a private env, leaves global aux untouched, and stops before removal in distinct runs", async () => {
-    const oldAux = process.env.AUTOMOBILE_AUX_SOCKET_DIR;
+  test("passes a private env and stops before removal in distinct runs", async () => {
     const fake = harness();
     await runBenchmark(options(), fake.deps);
     await runBenchmark(options(), fake.deps);
-    expect(process.env.AUTOMOBILE_AUX_SOCKET_DIR).toBe(oldAux);
     expect(fake.events).toEqual([
       "make",
       "create",

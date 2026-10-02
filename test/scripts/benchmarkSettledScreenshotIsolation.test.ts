@@ -3,6 +3,8 @@ import { type AddressInfo } from "node:net";
 import { join, resolve } from "node:path";
 import {
   assertPrivateBenchmarkLaunch,
+  assertPrivateBenchmarkRunDir,
+  buildLaunchSafety,
   buildPrivateBenchmarkLaunch,
   pickBenchmarkPort,
   stopPrivateDaemon,
@@ -19,17 +21,21 @@ import {
   type BenchmarkSignals,
 } from "../../scripts/benchmark-settled-screenshot";
 import { parseBenchmarkArgs } from "../../scripts/benchmarkSettledScreenshotReport";
-import {
-  DEFAULT_SOCKET_PATH,
-  DEFAULT_PID_FILE_PATH,
-  LOCK_FILE_PATH,
-} from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const runDir = resolve("/tmp/am-bench-isolation");
 const safety: BenchmarkLaunchSafety = {
   homeDir: resolve("/fake/home"),
-  defaultPaths: [DEFAULT_SOCKET_PATH, DEFAULT_PID_FILE_PATH, LOCK_FILE_PATH],
+  builtInResidentPaths: [
+    "/tmp/auto-mobile-daemon-501.sock",
+    "/tmp/auto-mobile-daemon-501.pid",
+    "/tmp/auto-mobile-daemon-501.lock",
+  ],
+  effectiveDaemonPaths: [
+    "/fake/scratch/gate-ns/d.sock",
+    "/fake/scratch/gate-ns/d.pid",
+    "/fake/scratch/gate-ns/d.lock",
+  ],
 };
 function launchOptions(): BenchmarkLaunchOptions {
   return {
@@ -137,10 +143,11 @@ function benchmarkHarness() {
   const logs: string[] = [];
   let port = 49152;
   const deps: BenchmarkDeps = {
+    safety,
     parentEnv: {
-      AUTOMOBILE_DAEMON_SOCKET_PATH: DEFAULT_SOCKET_PATH,
-      AUTOMOBILE_DAEMON_PID_FILE_PATH: DEFAULT_PID_FILE_PATH,
-      AUTOMOBILE_DAEMON_LOCK_FILE_PATH: LOCK_FILE_PATH,
+      AUTOMOBILE_DAEMON_SOCKET_PATH: "/tmp/auto-mobile-daemon-501.sock",
+      AUTOMOBILE_DAEMON_PID_FILE_PATH: "/tmp/auto-mobile-daemon-501.pid",
+      AUTOMOBILE_DAEMON_LOCK_FILE_PATH: "/tmp/auto-mobile-daemon-501.lock",
       AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH: join(safety.homeDir, ".auto-mobile", "resident.log"),
       AUTOMOBILE_DAEMON_STRAY: "resident",
       AUTO_MOBILE_DAEMON_STRAY: "resident",
@@ -243,6 +250,91 @@ describe("ephemeral benchmark port probe", () => {
 });
 
 describe("private namespace and argv guard", () => {
+  test("fixed guard decisions survive configured and unset daemon path env maps", () => {
+    const builtInPaths = [
+      "/tmp/auto-mobile-daemon-501.sock",
+      "/tmp/auto-mobile-daemon-501.pid",
+      "/tmp/auto-mobile-daemon-501.lock",
+    ] as const;
+    const configuredEnv = {
+      AUTOMOBILE_DAEMON_SOCKET_PATH: "/fake/scratch/gate-ns/d.sock",
+      AUTOMOBILE_DAEMON_PID_FILE_PATH: "/fake/scratch/gate-ns/d.pid",
+      AUTOMOBILE_DAEMON_LOCK_FILE_PATH: "/fake/scratch/gate-ns/d.lock",
+    };
+    const configured = buildLaunchSafety(configuredEnv, "/fake/home", builtInPaths);
+    const unset = buildLaunchSafety({}, "/fake/home", builtInPaths);
+    expect(configured).toEqual(safety);
+    expect(unset.effectiveDaemonPaths).toEqual(builtInPaths);
+    for (const guard of [safety, configured, unset]) {
+      for (const directory of [
+        "/fake/home/.auto-mobile",
+        "/fake/home/.auto-mobile/bench",
+        "/tmp/auto-mobile-daemon-501/bench",
+        "/private/tmp/auto-mobile-daemon-501/bench",
+        ...builtInPaths,
+      ]) {
+        expect(() => assertPrivateBenchmarkRunDir(directory, guard)).toThrow(
+          "resident namespace path",
+        );
+      }
+      for (const directory of [runDir, ...Object.values(configuredEnv)]) {
+        expect(() => assertPrivateBenchmarkRunDir(directory, guard)).not.toThrow();
+      }
+      expect(() => buildPrivateBenchmarkLaunch(launchOptions(), "client", guard)).not.toThrow();
+      for (const [index, key] of [
+        "AUTOMOBILE_DAEMON_SOCKET_PATH",
+        "AUTOMOBILE_DAEMON_PID_FILE_PATH",
+        "AUTOMOBILE_DAEMON_LOCK_FILE_PATH",
+      ].entries()) {
+        const options = launchOptions();
+        options.env[key] = builtInPaths[index];
+        expect(() => buildPrivateBenchmarkLaunch(options, "client", guard)).toThrow(
+          "Refusing benchmark child launch",
+        );
+      }
+      // These exact private paths pass assertPrivateDaemonNamespace, exercising the
+      // effective-path equality rule independently of its containment check.
+      for (const effectivePath of guard.effectiveDaemonPaths) {
+        if (builtInPaths.some((path) => path === effectivePath)) {
+          continue;
+        }
+        const directory = "/fake/scratch/gate-ns";
+        const options = {
+          ...launchOptions(),
+          runDir: directory,
+          env: buildBenchmarkChildEnv({}, directory),
+        };
+        const equalityGuard = { ...guard, effectiveDaemonPaths: [effectivePath] };
+        expect(() => buildPrivateBenchmarkLaunch(options, "client", equalityGuard)).toThrow(
+          "resident namespace path",
+        );
+      }
+    }
+  });
+
+  test("safety builder preserves daemon alias precedence and launch cwd resolution", () => {
+    const builtInPaths = ["/fake/default.sock", "/fake/default.pid", "/fake/default.lock"] as const;
+    const guard = buildLaunchSafety(
+      {
+        AUTOMOBILE_DAEMON_LAUNCH_CWD: "/fake/launch",
+        AUTOMOBILE_DAEMON_SOCKET_PATH: "canonical.sock",
+        AUTO_MOBILE_DAEMON_SOCKET_PATH: "ignored.sock",
+        AUTO_MOBILE_DAEMON_PID_FILE_PATH: "alias.pid",
+        AUTOMOBILE_DAEMON_LOCK_FILE_PATH: "",
+        AUTO_MOBILE_DAEMON_LOCK_FILE_PATH: "ignored.lock",
+      },
+      "/fake/home",
+      builtInPaths,
+    );
+    expect(guard.effectiveDaemonPaths).toEqual([
+      "/fake/launch/canonical.sock",
+      "/fake/launch/alias.pid",
+      "/fake/default.lock",
+    ]);
+    expect(() => assertPrivateBenchmarkRunDir("/fake/default.lock", guard)).toThrow(
+      "resident namespace path",
+    );
+  });
   test("derives guarded child args and private paths", () => {
     const options = launchOptions();
     const launch = buildPrivateBenchmarkLaunch(options, "client", safety);
@@ -251,9 +343,9 @@ describe("private namespace and argv guard", () => {
     expect(options.port).toBeGreaterThan(3010);
   });
   for (const [key, value] of [
-    ["AUTOMOBILE_DAEMON_SOCKET_PATH", DEFAULT_SOCKET_PATH],
-    ["AUTOMOBILE_DAEMON_PID_FILE_PATH", DEFAULT_PID_FILE_PATH],
-    ["AUTOMOBILE_DAEMON_LOCK_FILE_PATH", LOCK_FILE_PATH],
+    ["AUTOMOBILE_DAEMON_SOCKET_PATH", "/tmp/auto-mobile-daemon-501.sock"],
+    ["AUTOMOBILE_DAEMON_PID_FILE_PATH", "/tmp/auto-mobile-daemon-501.pid"],
+    ["AUTOMOBILE_DAEMON_LOCK_FILE_PATH", "/tmp/auto-mobile-daemon-501.lock"],
     ["AUTOMOBILE_DATA_DIR", join(safety.homeDir, ".auto-mobile")],
     ["AUTOMOBILE_DAEMON_STRAY", "parent-selector"],
     ["AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH", join(safety.homeDir, ".auto-mobile", "resident.log")],
@@ -274,9 +366,9 @@ describe("private namespace and argv guard", () => {
     "/tmp/auto-mobile-daemon-501",
     "/tmp/auto-mobile-daemon-501/bench",
     "/private/tmp/auto-mobile-daemon-501",
-    DEFAULT_SOCKET_PATH,
-    DEFAULT_PID_FILE_PATH,
-    LOCK_FILE_PATH,
+    "/tmp/auto-mobile-daemon-501.sock",
+    "/tmp/auto-mobile-daemon-501.pid",
+    "/tmp/auto-mobile-daemon-501.lock",
   ]) {
     test(`refuses resident run directory ${directory}`, async () => {
       const fake = stopHarness();
@@ -332,7 +424,7 @@ describe("private namespace and argv guard", () => {
     expect(() =>
       buildPrivateBenchmarkLaunch(options, "client", {
         ...safety,
-        defaultPaths: [join(runDir, "d.lock")],
+        builtInResidentPaths: [join(runDir, "d.lock")],
       }),
     ).toThrow("resident namespace path");
   });

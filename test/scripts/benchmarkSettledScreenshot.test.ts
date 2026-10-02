@@ -118,6 +118,20 @@ describe("benchmark-settled-screenshot pure logic", () => {
     }
     const fake = new FakeClient();
     const deps: BenchmarkDeps = {
+      parentEnv: {},
+      safety: {
+        homeDir: "/fake/home",
+        builtInResidentPaths: [
+          "/tmp/auto-mobile-daemon-501.sock",
+          "/tmp/auto-mobile-daemon-501.pid",
+          "/tmp/auto-mobile-daemon-501.lock",
+        ],
+        effectiveDaemonPaths: [
+          "/fake/scratch/d.sock",
+          "/fake/scratch/d.pid",
+          "/fake/scratch/d.lock",
+        ],
+      },
       createClient: async () => fake,
       pickPort: async () => 49152,
       now: (() => {

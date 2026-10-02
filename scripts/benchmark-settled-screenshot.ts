@@ -23,6 +23,7 @@ import {
   pickBenchmarkPort,
   stopPrivateDaemon,
   type BenchmarkLaunchOptions,
+  type BenchmarkLaunchSafety,
 } from "./benchmarkSettledScreenshotIsolation";
 import { errorMessage } from "../src/utils/describeUnknownError";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -63,6 +64,7 @@ export interface BenchmarkDeps {
   serverExists(path: string): boolean;
   stopPrivateDaemon(options: BenchmarkLaunchOptions): Promise<void>;
   parentEnv?: BenchmarkChildEnv;
+  safety?: BenchmarkLaunchSafety;
 }
 
 export interface BenchmarkSignals {
@@ -119,12 +121,12 @@ export async function runBenchmark(
   };
   try {
     try {
-      assertPrivateBenchmarkRunDir(runDir);
+      assertPrivateBenchmarkRunDir(runDir, deps.safety);
       const port = await deps.pickPort();
       assertRunning();
       const env = buildBenchmarkChildEnv(deps.parentEnv ?? process.env, runDir);
       launch = { serverPath, env, runDir, port };
-      buildPrivateBenchmarkLaunch(launch, "client");
+      buildPrivateBenchmarkLaunch(launch, "client", deps.safety);
       childAttempted = true;
       client = await deps.createClient(launch);
     } finally {
@@ -231,7 +233,7 @@ async function cleanupBenchmark(
   }
   if (childAttempted && launch) {
     try {
-      buildPrivateBenchmarkLaunch(launch, "stop");
+      buildPrivateBenchmarkLaunch(launch, "stop", deps.safety);
       await deps.stopPrivateDaemon(launch);
     } catch (error) {
       deps.log(`Warning: private daemon stop failed; retaining ${runDir}: ${errorMessage(error)}`);
@@ -239,7 +241,7 @@ async function cleanupBenchmark(
     }
   }
   try {
-    assertPrivateBenchmarkRunDir(runDir);
+    assertPrivateBenchmarkRunDir(runDir, deps.safety);
     deps.removeRunDir(runDir);
   } catch (error) {
     deps.log(`Warning: could not remove ${runDir}: ${errorMessage(error)}`);

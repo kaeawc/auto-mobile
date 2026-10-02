@@ -9,7 +9,10 @@ import {
   DEFAULT_SOCKET_PATH,
   DEFAULT_PID_FILE_PATH,
   LOCK_FILE_PATH,
+  SOCKET_PATH,
+  PID_FILE_PATH,
 } from "../src/daemon/constants";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../src/utils/workingDirectory";
 import { toActionableError } from "../src/models/ActionableError";
 import { defaultTimer, type Timer } from "../src/utils/SystemTimer";
 import {
@@ -26,23 +29,46 @@ export interface BenchmarkLaunchOptions {
 
 export interface BenchmarkLaunchSafety {
   homeDir: string;
-  defaultPaths: readonly string[];
+  builtInResidentPaths: readonly string[];
+  effectiveDaemonPaths: readonly string[];
 }
 
-const defaultSafety: BenchmarkLaunchSafety = {
-  homeDir: homedir(),
-  // constants.ts exports only the effective lock path. Derive the built-in
-  // sibling from its built-in PID path, and reject the effective path too.
-  defaultPaths: [
+/** Resolve only the supplied env; built-in paths can be fixed by callers/tests. */
+export function buildLaunchSafety(
+  env: BenchmarkChildEnv,
+  homeDir: string,
+  builtInResidentPaths: readonly [string, string, string],
+): BenchmarkLaunchSafety {
+  const keys = ["SOCKET_PATH", "PID_FILE_PATH", "LOCK_FILE_PATH"] as const;
+  return {
+    homeDir,
+    builtInResidentPaths,
+    effectiveDaemonPaths: keys.map((key, index) => {
+      const override = env[`AUTOMOBILE_DAEMON_${key}`] ?? env[`AUTO_MOBILE_DAEMON_${key}`];
+      return override
+        ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
+        : builtInResidentPaths[index];
+    }),
+  };
+}
+
+// constants.ts exposes no built-in lock constant; derive its sibling from the PID default.
+const defaultSafety = buildLaunchSafety(
+  {
+    AUTOMOBILE_DAEMON_SOCKET_PATH: SOCKET_PATH,
+    AUTOMOBILE_DAEMON_PID_FILE_PATH: PID_FILE_PATH,
+    AUTOMOBILE_DAEMON_LOCK_FILE_PATH: LOCK_FILE_PATH,
+  },
+  homedir(),
+  [
     DEFAULT_SOCKET_PATH,
     DEFAULT_PID_FILE_PATH,
     nodePath.join(
       nodePath.dirname(DEFAULT_PID_FILE_PATH),
       `${nodePath.parse(DEFAULT_PID_FILE_PATH).name}.lock`,
     ),
-    LOCK_FILE_PATH,
   ],
-};
+);
 
 function residentPath(path: string, safety: BenchmarkLaunchSafety): boolean {
   const resolved = nodePath.resolve(path);
@@ -56,10 +82,14 @@ function residentPath(path: string, safety: BenchmarkLaunchSafety): boolean {
     resolved.startsWith(nodePath.resolve("/tmp/auto-mobile-daemon-")) ||
     // macOS resolves /tmp through /private/tmp; refuse both spellings.
     resolved.startsWith(nodePath.resolve("/private/tmp/auto-mobile-daemon-")) ||
-    safety.defaultPaths.some((value) => nodePath.resolve(value) === resolved)
+    safety.builtInResidentPaths.some((value) => nodePath.resolve(value) === resolved)
   );
 }
 
+// Run dirs exclude only <homeDir>/.auto-mobile, /tmp/auto-mobile-daemon-*,
+// /private/tmp/auto-mobile-daemon-*, and equality with built-in socket/PID/lock paths.
+// Namespace paths exclude those locations plus equality with effective daemon paths;
+// effective env-derived paths alone never make a run directory resident.
 /** Refuse unsafe cleanup targets as well as unsafe child namespaces. */
 export function assertPrivateBenchmarkRunDir(
   runDir: string,
@@ -97,7 +127,10 @@ export function assertPrivateBenchmarkLaunch(
   assertPrivateBenchmarkRunDir(options.runDir, safety);
   const paths = assertPrivateDaemonNamespace(options.env, options.runDir);
   for (const value of Object.values(paths)) {
-    if (residentPath(value, safety)) {
+    if (
+      residentPath(value, safety) ||
+      safety.effectiveDaemonPaths.some((path) => nodePath.resolve(path) === nodePath.resolve(value))
+    ) {
       throw new Error("Refusing benchmark child launch: resident namespace path.");
     }
   }

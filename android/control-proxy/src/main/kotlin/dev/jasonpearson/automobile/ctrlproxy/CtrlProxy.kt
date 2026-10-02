@@ -3171,13 +3171,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
-  private fun toSystemInsetsInfo(insets: android.graphics.Insets): SystemInsetsInfo =
-    SystemInsetsInfo(
-      top = insets.top,
-      bottom = insets.bottom,
-      left = insets.left,
-      right = insets.right,
-    )
+  /** Supplies each requested display's inset categories and [SystemChromeInfo] visibility. */
+  private val displayInsetsProvider: DisplayInsetsProvider by lazy {
+    createDisplayInsetsProvider(this)
+  }
 
   /** Get typed current-window inset metadata for coordinate and layout inspection. */
   @Suppress("DEPRECATION")
@@ -3186,70 +3183,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     displayId: Int = Display.DEFAULT_DISPLAY,
   ): ObservationInsetsInfo {
     if (displayId != Display.DEFAULT_DISPLAY) {
-      return ObservationInsetsInfo(
-        available = false,
-        source = "unavailable",
-        units = "unknown",
-        displayCutoutInfo = DisplayCutoutInfo.unknown(),
-      )
+      return displayInsetsProvider.insetsFor(displayId, screenDimensions)
     }
     return try {
       val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
       if (windowManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val metrics = windowManager.currentWindowMetrics
         val windowInsets = metrics.windowInsets
-        val displayCutout = windowInsets.displayCutout
-        val displayCutoutInfo =
-          if (displayCutout == null) {
-            DisplayCutoutInfo.none()
-          } else {
-            DisplayCutoutInfo.fromBoundingRects(
-              screenWidth = screenDimensions?.width ?: 0,
-              screenHeight = screenDimensions?.height ?: 0,
-              bounds = displayCutout.boundingRects.filterNot { it.isEmpty }.map(::ElementBounds),
-            )
-          }
-        ObservationInsetsInfo(
-          systemBars =
-            SystemBarsInsetsInfo(
-              visible =
-                toSystemInsetsInfo(
-                  windowInsets.getInsets(android.view.WindowInsets.Type.systemBars())
-                ),
-              stable =
-                toSystemInsetsInfo(
-                  windowInsets.getInsetsIgnoringVisibility(
-                    android.view.WindowInsets.Type.systemBars()
-                  )
-                ),
-            ),
-          displayCutout =
-            toSystemInsetsInfo(
-              windowInsets.getInsetsIgnoringVisibility(
-                android.view.WindowInsets.Type.displayCutout()
-              )
-            ),
-          displayCutoutInfo = displayCutoutInfo,
-          systemGestures =
-            toSystemInsetsInfo(
-              windowInsets.getInsets(android.view.WindowInsets.Type.systemGestures())
-            ),
-          mandatorySystemGestures =
-            toSystemInsetsInfo(
-              windowInsets.getInsets(android.view.WindowInsets.Type.mandatorySystemGestures())
-            ),
-          tappableElement =
-            toSystemInsetsInfo(
-              windowInsets.getInsets(android.view.WindowInsets.Type.tappableElement())
-            ),
-          systemChrome =
-            SystemChromeInfo.fromAndroidBars(
-              statusBarVisible =
-                windowInsets.isVisible(android.view.WindowInsets.Type.statusBars()),
-              navigationBarVisible =
-                windowInsets.isVisible(android.view.WindowInsets.Type.navigationBars()),
-            ),
-        )
+        observationInsetsFromWindowInsets(windowInsets, screenDimensions)
       } else {
         // API 24-29 cannot provide the typed WindowInsets categories from this service context.
         val statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android")

@@ -6,7 +6,7 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
-import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
+import type { BootedDevice, ObservationInsets, ViewHierarchyResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
@@ -177,6 +177,99 @@ describe("display read routing", () => {
       resetObserveCacheStore();
     }
   });
+
+  test.each(["targeted", "default", "unavailable"] as const)(
+    "%s Android observation preserves the captured display's insets",
+    async (scenario) => {
+      const timer = new FakeTimer();
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("cmd display get-displays", {
+        stdout:
+          'Display id 0: DisplayInfo{uniqueId "local:cover" type INTERNAL, real 100 x 100}\nDisplay id 2: DisplayInfo{uniqueId "local:external" type EXTERNAL, real 200 x 200}',
+        stderr: "",
+      });
+      const isDefault = scenario === "default";
+      const systemInsets = isDefault
+        ? { top: 8, bottom: 12, left: 2, right: 2 }
+        : { top: 24, bottom: 32, left: 6, right: 6 };
+      const insets: ObservationInsets =
+        scenario === "unavailable"
+          ? {
+              available: false,
+              source: "unavailable",
+              units: "unknown",
+              displayCutoutInfo: { classification: "unknown" },
+            }
+          : {
+              available: true,
+              source: "android-window-metrics",
+              units: "physical-pixels",
+              systemBars: {
+                visible: { ...systemInsets, bottom: 0, left: 0, right: 0 },
+                stable: { ...systemInsets, left: 0, right: 0 },
+              },
+              systemGestures: {
+                top: 0,
+                bottom: 16,
+                left: systemInsets.left,
+                right: systemInsets.right,
+              },
+            };
+      const hierarchy: ViewHierarchyResult = {
+        hierarchy: { node: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } } },
+        displayId: isDefault ? 0 : 2,
+        screenWidth: isDefault ? 100 : 200,
+        screenHeight: isDefault ? 100 : 200,
+        insets,
+        ...(scenario === "unavailable" ? {} : { systemInsets }),
+      };
+      const defaultHierarchy = new FakeViewHierarchy();
+      defaultHierarchy.configureHierarchy(hierarchy);
+      const requestedDisplayIds: Array<number | undefined> = [];
+      const hierarchyCapture: HierarchyCapture = {
+        capture: async (request) => {
+          requestedDisplayIds.push(request.displayId);
+          return {
+            captureId: "insets-capture",
+            platform: "android",
+            requestedFreshness: request.freshness,
+            receivedAt: timer.now(),
+            hierarchy,
+            nodes: [],
+          };
+        },
+      };
+      try {
+        const screen = new RealObserveScreen(
+          device,
+          new FakeAdbClientFactory(adb),
+          {
+            ...(isDefault ? { viewHierarchy: defaultHierarchy } : { hierarchyCapture }),
+            cacheStore: new FakeObserveCacheStore(timer),
+          },
+          timer,
+        );
+        const result = await screen.execute({
+          ...readOptions,
+          ...(isDefault ? {} : { display: "external" }),
+        });
+        expect(result.insets).toEqual(insets);
+        expect(result.systemInsets).toEqual(
+          scenario === "unavailable" ? { top: 0, bottom: 0, left: 0, right: 0 } : systemInsets,
+        );
+        if (isDefault) {
+          expect(defaultHierarchy.wasCalled()).toBe(true);
+          expect(requestedDisplayIds).toEqual([]);
+        } else {
+          expect(requestedDisplayIds).toEqual([2]);
+          expect(result.display.key).toBe("external");
+        }
+      } finally {
+        displayTransitions.reset(device.deviceId);
+        resetObserveCacheStore();
+      }
+    },
+  );
 
   test("default Android observation stamps the focused window panel", async () => {
     const timer = new FakeTimer();

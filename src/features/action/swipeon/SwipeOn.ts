@@ -75,6 +75,32 @@ import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 
+const DISPLAY_SWIPE_OPTIONS = [
+  "lookFor",
+  "focusTarget",
+  "autoTarget",
+  "includeSystemInsets",
+  "scrollMode",
+] as const;
+
+type AutoTargetDecision = {
+  container?: SwipeOnOptions["container"];
+  warning?: string;
+  scrollableCandidates?: ScrollableCandidate[];
+};
+
+function unsupportedDisplaySwipeOption({
+  options,
+  platform,
+}: {
+  options: SwipeOnOptions;
+  platform: BootedDevice["platform"];
+}) {
+  return DISPLAY_SWIPE_OPTIONS.find(
+    (key) => options[key] !== undefined && (platform !== "android" || key === "focusTarget"),
+  );
+}
+
 function displaySwipeCoordinates(
   options: SwipeOnOptions,
   observation: ObserveResult,
@@ -275,12 +301,24 @@ export class SwipeOn extends BaseVisualChange {
     return candidates;
   }
 
-  private async executeOnAndroidDisplay(
-    options: SwipeOnOptions,
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
-    signal?: AbortSignal,
-  ): Promise<SwipeOnResult> {
-    const observation = target.observation;
+  private async executeOnAndroidDisplay({
+    options: requestedOptions,
+    target,
+    signal,
+  }: {
+    options: SwipeOnOptions;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    signal?: AbortSignal;
+  }): Promise<SwipeOnResult> {
+    const observation = this.validateSelectedDisplayObservation({
+      observation: target.observation,
+      target,
+      includeSystemInsets: requestedOptions.includeSystemInsets,
+    });
+    const { options, decision } = this.selectedDisplayAutoTarget({
+      options: requestedOptions,
+      observation,
+    });
     const bounds = this.selectedDisplayContainerBounds(options, observation);
     if (options.container && !bounds) {
       throw new ActionableError("Swipe container not found on selected display");
@@ -291,10 +329,7 @@ export class SwipeOn extends BaseVisualChange {
         : bounds;
     const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, swipeBounds);
     const duration = resolveSwipeDuration({ ...options, geometry: this.geometry });
-    const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
-      this.accessibilityService,
-      target.displayId,
-    );
+    const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
     await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
     const boomerang = resolveBoomerangConfig(options);
     let totalDuration = duration;
@@ -320,15 +355,69 @@ export class SwipeOn extends BaseVisualChange {
       });
       totalDuration += boomerang.apexPauseMs + returnDuration;
     }
+    return this.withAutoTargetDecision({
+      result: {
+        success: true,
+        targetType: bounds ? "element" : "screen",
+        x1,
+        y1,
+        x2,
+        y2,
+        duration: totalDuration,
+      },
+      decision,
+    });
+  }
+
+  private selectedDisplayAutoTarget({
+    options,
+    observation,
+  }: {
+    options: SwipeOnOptions;
+    observation: ObserveResult;
+  }): { options: SwipeOnOptions; decision: AutoTargetDecision } {
+    if (options.autoTarget !== true || options.container) {
+      return { options, decision: {} };
+    }
+    const direction = resolveSwipeDirection(options);
+    if (!direction.direction) {
+      throw new ActionableError(direction.error ?? "direction is required");
+    }
+    const scrollables = observation.viewHierarchy
+      ? this.finder.findScrollableElements(observation.viewHierarchy)
+      : [];
+    const decision = this.resolveAutoTargetDecision({
+      scrollables,
+      candidates: this.buildScrollableCandidates(scrollables),
+      observeResult: observation,
+      direction: direction.direction,
+    });
     return {
-      success: true,
-      targetType: bounds ? "element" : "screen",
-      x1,
-      y1,
-      x2,
-      y2,
-      duration: totalDuration,
+      options: { ...options, direction: direction.direction, container: decision.container },
+      decision,
     };
+  }
+
+  private async resolveDisplaySwipeRoute({
+    options,
+    target,
+  }: {
+    options: SwipeOnOptions;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+  }): Promise<boolean> {
+    if (options.scrollMode === "adb") {
+      return false;
+    }
+    const supported = await supportsCtrlProxyGestureDisplay(
+      this.accessibilityService,
+      target.displayId,
+    );
+    if (options.scrollMode === "a11y" && !supported) {
+      throw new ActionableError(
+        `scrollMode "a11y" requires CtrlProxy capability gesture_display_id_v1 for display "${target.observation.display.key}". Update CtrlProxy or use scrollMode "adb".`,
+      );
+    }
+    return supported;
   }
 
   private insetDisplaySwipeBounds({
@@ -389,10 +478,7 @@ export class SwipeOn extends BaseVisualChange {
     if (direction.error) {
       throw new ActionableError(direction.error);
     }
-    const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
-      this.accessibilityService,
-      target.displayId,
-    );
+    const useCtrlProxy = await this.resolveDisplaySwipeRoute({ options, target });
     const display = target.observation.display.key;
     const validateObservation = (observation: ObserveResult) =>
       this.validateSelectedDisplayObservation({
@@ -529,14 +615,10 @@ export class SwipeOn extends BaseVisualChange {
     const { progress, signal } = context;
     if (options.display !== undefined) {
       try {
-        const unsupported = (
-          ["lookFor", "focusTarget", "autoTarget", "includeSystemInsets", "scrollMode"] as const
-        ).find(
-          (key) =>
-            options[key] !== undefined &&
-            (this.device.platform !== "android" ||
-              (key !== "lookFor" && key !== "includeSystemInsets")),
-        );
+        const unsupported = unsupportedDisplaySwipeOption({
+          options,
+          platform: this.device.platform,
+        });
         if (unsupported) {
           throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
         }
@@ -563,7 +645,7 @@ export class SwipeOn extends BaseVisualChange {
           return options.lookFor
             ? await this.searchOnAndroidDisplay({ options, target, progress, signal })
             : await this.observedInteraction(
-                () => this.executeOnAndroidDisplay(options, target, signal),
+                () => this.executeOnAndroidDisplay({ options, target, signal }),
                 {
                   changeExpected: false,
                   display: target.observation.display.key,
@@ -592,6 +674,101 @@ export class SwipeOn extends BaseVisualChange {
       return targeted;
     }
     return this.executeLegacy(options, progress, signal);
+  }
+
+  private resolveAutoTargetDecision({
+    scrollables,
+    candidates,
+    observeResult,
+    direction,
+  }: {
+    scrollables: Element[];
+    candidates: ScrollableCandidate[];
+    observeResult?: ObserveResult;
+    direction: SwipeDirection;
+  }): AutoTargetDecision {
+    if (scrollables.length === 0) {
+      logger.info(`[SwipeOn] Mode: screen swipe (no scrollables found)`);
+      return {};
+    }
+    const screenBounds = observeResult
+      ? this.autoTargetSelector.getScreenBounds(observeResult)
+      : null;
+    const element = this.autoTargetSelector.selectAutoTargetScrollable(
+      scrollables,
+      screenBounds,
+      direction,
+    );
+    if (!element) {
+      logger.info(
+        `[SwipeOn] Mode: screen swipe (scrollables found but none matched direction=${direction})`,
+      );
+      return {
+        warning:
+          "Scrollable containers found but none matched the swipe direction; swiping the screen. Set autoTarget: false to force screen swipes.",
+        scrollableCandidates: candidates,
+      };
+    }
+    const container = buildContainerFromElement(element);
+    if (!container) {
+      logger.info(`[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`);
+      return {
+        warning:
+          "Auto-targeted scrollable container lacks a usable identifier; swiping the screen. Provide container.elementId or container.text to target it explicitly.",
+        scrollableCandidates: candidates,
+      };
+    }
+    logger.info(
+      `[SwipeOn] Mode: auto-target element swipe (container=${JSON.stringify(container)})`,
+    );
+    return {
+      container,
+      warning: `Auto-targeted scrollable container (${this.autoTargetSelector.describeContainer(container)}). Set autoTarget: false to force full-screen swipes.`,
+      scrollableCandidates: candidates,
+    };
+  }
+
+  private withAutoTargetDecision({
+    result,
+    decision,
+  }: {
+    result: SwipeOnResult;
+    decision: AutoTargetDecision;
+  }): SwipeOnResult {
+    if (!decision.warning) {
+      return result;
+    }
+    return {
+      ...result,
+      warning: decision.container
+        ? this.autoTargetSelector.mergeWarnings(result.warning, decision.warning)
+        : decision.warning,
+      scrollableCandidates: decision.scrollableCandidates,
+    };
+  }
+
+  private async executeAutoTargetSwipe({
+    options,
+    progress,
+    perf,
+    signal,
+  }: {
+    options: SwipeOnResolvedOptions;
+    progress?: ProgressCallback;
+    perf: PerformanceTracker;
+    signal?: AbortSignal;
+  }): Promise<SwipeOnResult> {
+    const context = await this.getScrollableContext(signal);
+    const decision = this.resolveAutoTargetDecision({ ...context, direction: options.direction });
+    const result = decision.container
+      ? await this.executeElementSwipe(
+          { ...options, container: decision.container },
+          progress,
+          perf,
+          signal,
+        )
+      : await this.executeScreenSwipe(options, progress, perf, signal);
+    return this.withAutoTargetDecision({ result, decision });
   }
 
   // oxlint-disable-next-line max-lines-per-function -- Keep the existing dispatch branches together while threading cancellation.
@@ -632,64 +809,12 @@ export class SwipeOn extends BaseVisualChange {
           return await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
         }
 
-        const scrollableContext = await this.getScrollableContext(signal);
-        if (scrollableContext.scrollables.length === 0) {
-          logger.info(`[SwipeOn] Mode: screen swipe (no scrollables found)`);
-          return await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
-        }
-        const screenBounds = scrollableContext.observeResult
-          ? this.autoTargetSelector.getScreenBounds(scrollableContext.observeResult)
-          : null;
-        const autoTargetElement = this.autoTargetSelector.selectAutoTargetScrollable(
-          scrollableContext.scrollables,
-          screenBounds,
-          normalizedOptions.direction,
-        );
-        if (!autoTargetElement) {
-          logger.info(
-            `[SwipeOn] Mode: screen swipe (scrollables found but none matched direction=${normalizedOptions.direction})`,
-          );
-          const result = await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
-          return {
-            ...result,
-            warning:
-              "Scrollable containers found but none matched the swipe direction; swiping the screen. Set autoTarget: false to force screen swipes.",
-            scrollableCandidates: scrollableContext.candidates,
-          };
-        }
-
-        const autoTargetContainer = buildContainerFromElement(autoTargetElement);
-        if (!autoTargetContainer) {
-          logger.info(
-            `[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`,
-          );
-          const result = await this.executeScreenSwipe(normalizedOptions, progress, perf, signal);
-          return {
-            ...result,
-            warning:
-              "Auto-targeted scrollable container lacks a usable identifier; swiping the screen. Provide container.elementId or container.text to target it explicitly.",
-            scrollableCandidates: scrollableContext.candidates,
-          };
-        }
-
-        logger.info(
-          `[SwipeOn] Mode: auto-target element swipe (container=${JSON.stringify(autoTargetContainer)})`,
-        );
-        const autoTargetResult = await this.executeElementSwipe(
-          { ...normalizedOptions, container: autoTargetContainer },
+        return await this.executeAutoTargetSwipe({
+          options: normalizedOptions,
           progress,
           perf,
           signal,
-        );
-
-        return {
-          ...autoTargetResult,
-          warning: this.autoTargetSelector.mergeWarnings(
-            autoTargetResult.warning,
-            `Auto-targeted scrollable container (${this.autoTargetSelector.describeContainer(autoTargetContainer)}). Set autoTarget: false to force full-screen swipes.`,
-          ),
-          scrollableCandidates: scrollableContext.candidates,
-        };
+        });
       } else {
         // Container specified = swipe within container
         logger.info(

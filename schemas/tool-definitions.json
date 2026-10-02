@@ -22920,7 +22920,7 @@
           ]
         },
         "autoTarget": {
-          "description": "Auto-target scrollable containers (default: true)",
+          "description": "Auto-target scrollable containers (default: true; with Android display, opt-in)",
           "type": "boolean"
         },
         "direction": {

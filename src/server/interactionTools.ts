@@ -748,7 +748,9 @@ export const swipeOnSchema = withJsonSchemaOverride(
         autoTarget: z
           .boolean()
           .optional()
-          .describe("Auto-target scrollable containers (default: true)"),
+          .describe(
+            "Auto-target scrollable containers (default: true; with Android display, opt-in)",
+          ),
         direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
         gestureType: z
           .enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"])

@@ -1,3 +1,18 @@
+import {
+  assertMayControl,
+  subscriptionKindForIdentity,
+  ViewerReadOnlyError,
+  type StreamSubscriptionIdentity,
+  type StreamSubscriptionLifecycleEndReason,
+  type StreamSubscriptionKind,
+} from "./streamSubscriptionPolicy";
+import {
+  getDaemonStreamDeviceLifecycleEmitter,
+  type StreamDeviceLifecycleEvents,
+} from "./streamDeviceLifecycleEvents";
+import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import { ViewerStreamActiveError } from "../server/ViewerStreamActiveError";
+import { WebRtcSubscriptionEndedError } from "../server/WebRtcSubscriptionEndedError";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
@@ -6,9 +21,15 @@ import { ActionableError, type BootedDevice } from "../models";
 import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../devices/deviceUtils";
 import type {
   getWebRtcStreamDescriptor,
+  getWebRtcSubscriptionKind,
+  getWebRtcStreamDeviceIds,
+  endWebRtcStreamsForDevice,
   listWebRtcStreams,
   startWebRtcStream,
   stopWebRtcStream,
+  stopWebRtcStreamAsOwner,
+  releaseWebRtcStreamOwnLeases,
+  getWebRtcStreamControlContext,
   reconcileWebRtcStreamsForDeviceOwnership,
   stopAllWebRtcStreams,
   waitForWebRtcStreamReadiness,
@@ -37,12 +58,45 @@ export interface WebRtcStreamSocketServerDependencies {
   resolveDevice: (deviceId?: string, platform?: "android" | "ios") => Promise<BootedDevice>;
   startStream: typeof startWebRtcStream;
   stopStream: typeof stopWebRtcStream;
+  stopStreamAsOwner?: typeof stopWebRtcStreamAsOwner;
+  releaseOwnLeases?: typeof releaseWebRtcStreamOwnLeases;
+  getControlContext?: typeof getWebRtcStreamControlContext;
   listStreams: typeof listWebRtcStreams;
   getStream: typeof getWebRtcStreamDescriptor;
   awaitReadiness?: typeof waitForWebRtcStreamReadiness;
   ownershipChanges?: () => DeviceOwnershipChanges | null;
   reconcileOwnership?: typeof reconcileWebRtcStreamsForDeviceOwnership;
   stopAllStreams?: typeof stopAllWebRtcStreams;
+  getSubscriptionKind?: typeof getWebRtcSubscriptionKind;
+  liveDeviceIds?: typeof getWebRtcStreamDeviceIds;
+  endStreamsForDevice?: typeof endWebRtcStreamsForDevice;
+  deviceLifecycle?: () => StreamDeviceLifecycleEvents | null;
+  sessionReleases?: { subscribe(callback: (sessionId: string) => void): () => void };
+}
+
+interface WebRtcRequestContext {
+  deps: WebRtcStreamSocketServerDependencies;
+  request: WebRtcStreamSocketRequest;
+  sessionUuid?: string;
+  kind: StreamSubscriptionKind;
+}
+interface WebRtcStopControlFacts {
+  target: "own_lease" | "stream";
+  stopIdentity?: StreamSubscriptionIdentity;
+  addressedStreamId?: string;
+}
+
+function ownLeaseControlTarget(input: {
+  request: WebRtcStreamSocketRequest;
+  context?: ReturnType<typeof getWebRtcStreamControlContext>;
+}): "own_lease" | "stream" {
+  const { request, context } = input;
+  if (!context?.holdsLease) {
+    return "stream";
+  }
+  return request.action === "stop" || (request.leaseId !== undefined && context.parametersMatch)
+    ? "own_lease"
+    : "stream";
 }
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
@@ -191,6 +245,8 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
   private removeOwnershipListener: (() => void) | null = null;
+  private readonly removeListeners: Array<() => void> = [];
+  private readonly viewerControlRejections = new Set<string>();
   private closed = false;
   private closing: Promise<void> | null = null;
 
@@ -214,18 +270,86 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   }
 
   protected override onServerStarted(): void {
+    this.viewerControlRejections.clear();
     this.closed = false;
     this.closing = null;
-    this.removeOwnershipListener?.();
+    this.unsubscribeListeners();
     const ownershipChanges = this.injectedDeps
       ? this.injectedDeps.ownershipChanges
       : defaultOwnershipChanges;
     this.removeOwnershipListener =
       ownershipChanges?.()?.onDeviceOwnershipChange((deviceId) => {
-        void this.reconcileOwnership(deviceId).catch((error) => {
-          logger.warn(`[WebRtcStream] ownership cleanup failed: ${errorMessage(error)}`, error);
-        });
+        this.onOwnershipChanged(deviceId);
       }) ?? null;
+    const sessionReleases = this.injectedDeps
+      ? this.injectedDeps.sessionReleases
+      : SessionReleaseBroadcaster;
+    const removeRelease = sessionReleases?.subscribe(() => {
+      for (const deviceId of this.resolvedDeps?.liveDeviceIds?.() ?? []) {
+        this.onOwnershipChanged(deviceId);
+      }
+    });
+    if (removeRelease) {
+      this.removeListeners.push(removeRelease);
+    }
+    this.registerLifecycleListeners();
+  }
+
+  private registerLifecycleListeners(): void {
+    const lifecycle = (
+      this.injectedDeps ? this.injectedDeps.deviceLifecycle : getDaemonStreamDeviceLifecycleEmitter
+    )?.();
+    const removeDevice = lifecycle?.onDeviceRemoved((deviceId) =>
+      this.endDeviceStreams({ deviceId, reason: "device_removed" }),
+    );
+    const removeIdentity = lifecycle?.onDeviceIdentityChanged((deviceId) =>
+      this.checkDeviceActionable(deviceId),
+    );
+    for (const remove of [removeDevice, removeIdentity]) {
+      if (remove) {
+        this.removeListeners.push(remove);
+      }
+    }
+  }
+
+  private unsubscribeListeners(): void {
+    this.removeOwnershipListener?.();
+    this.removeOwnershipListener = null;
+    for (const remove of this.removeListeners.splice(0)) {
+      remove();
+    }
+  }
+
+  private onOwnershipChanged(deviceId: string): void {
+    void this.reconcileOwnership(deviceId).catch((error) => {
+      logger.warn(`[WebRtcStream] ownership cleanup failed: ${errorMessage(error)}`, error);
+    });
+  }
+
+  private endDeviceStreams(options: {
+    deviceId: string;
+    reason: StreamSubscriptionLifecycleEndReason;
+  }): void {
+    if (this.closed) {
+      return;
+    }
+    void this.resolvedDeps?.endStreamsForDevice?.(options).catch((error) => {
+      logger.warn(`[WebRtcStream] lifecycle cleanup failed: ${errorMessage(error)}`, error);
+    });
+  }
+
+  private checkDeviceActionable(deviceId: string): void {
+    if (this.closed || !this.resolvedDeps?.liveDeviceIds?.().includes(deviceId)) {
+      return;
+    }
+    try {
+      this.admissionGate.assertDeviceActionable(deviceId, WEBRTC_STREAM_PURPOSE);
+    } catch (error) {
+      logger.warn(
+        `[WebRtcStream] identity no longer actionable for ${deviceId}: ${errorMessage(error)}`,
+      );
+      this.endDeviceStreams({ deviceId, reason: "identity_quarantined" });
+    }
   }
 
   private async reconcileOwnership(deviceId: string): Promise<void> {
@@ -233,15 +357,28 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     if (this.closed || !this.resolvedDeps?.reconcileOwnership) {
       return;
     }
-    await this.resolvedDeps.reconcileOwnership(deviceId, (sessionUuid) => {
-      try {
-        this.authenticator.authorize({ sessionUuid, deviceId, requireOwnership: true });
-        return true;
-      } catch (error) {
-        logger.warn(`[WebRtcStream] revoking lease for ${deviceId}: ${errorMessage(error)}`, error);
-        return false;
+    await this.resolvedDeps.reconcileOwnership(deviceId, (sessionUuid) =>
+      this.resolveLiveIdentity({ sessionUuid, deviceId }),
+    );
+  }
+
+  private resolveLiveIdentity(input: {
+    sessionUuid: string;
+    deviceId: string;
+  }): StreamSubscriptionIdentity {
+    try {
+      if (this.authenticator.resolveSubscriptionIdentity) {
+        return this.authenticator.resolveSubscriptionIdentity(input);
       }
-    });
+      this.authenticator.authorize({ ...input, requireOwnership: true });
+      return { authEnabled: true, sessionExists: true, ownsDevice: true };
+    } catch (error) {
+      // Fail closed without logging authentication errors that may contain session UUIDs.
+      logger.warn(
+        `[WebRtcStream] subscription identity check failed for deviceId=${input.deviceId}; ending session subscription`,
+      );
+      return { authEnabled: true, sessionExists: false, ownsDevice: false };
+    }
   }
 
   override close(): Promise<void> {
@@ -249,14 +386,11 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       return this.closing;
     }
     this.closed = true;
-    this.removeOwnershipListener?.();
-    this.removeOwnershipListener = null;
+    this.viewerControlRejections.clear();
+    this.unsubscribeListeners();
     this.closing = raceWithDeadline(
       async () => {
-        await Promise.all([
-          this.resolvedDeps?.stopAllStreams?.("socket server shutdown"),
-          super.close(),
-        ]);
+        await Promise.all([this.resolvedDeps?.stopAllStreams?.("daemon_shutdown"), super.close()]);
       },
       {
         timer: this.timer,
@@ -281,11 +415,17 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
         resolveDevice: defaultResolveDevice,
         startStream: manager.startWebRtcStream,
         stopStream: manager.stopWebRtcStream,
+        stopStreamAsOwner: manager.stopWebRtcStreamAsOwner,
+        releaseOwnLeases: manager.releaseWebRtcStreamOwnLeases,
+        getControlContext: manager.getWebRtcStreamControlContext,
         listStreams: manager.listWebRtcStreams,
         getStream: manager.getWebRtcStreamDescriptor,
         awaitReadiness: manager.waitForWebRtcStreamReadiness,
         reconcileOwnership: manager.reconcileWebRtcStreamsForDeviceOwnership,
         stopAllStreams: manager.stopAllWebRtcStreams,
+        getSubscriptionKind: manager.getWebRtcSubscriptionKind,
+        liveDeviceIds: manager.getWebRtcStreamDeviceIds,
+        endStreamsForDevice: manager.endWebRtcStreamsForDevice,
       };
     }
     return this.resolvedDeps;
@@ -294,27 +434,140 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   protected async handleRequest(
     request: WebRtcStreamSocketRequest,
   ): Promise<WebRtcStreamSocketResponse> {
-    this.assertOpen();
-    // Authenticate before touching device state or the WebRTC stack (issue
-    // #4751). An unauthenticated or cross-session request is rejected here.
-    this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
+    try {
+      this.assertOpen();
+      this.authorizeRequest(request);
+      const sessionUuid =
+        this.authenticator.resolveSessionIdentity?.(request.sessionUuid) ?? request.sessionUuid;
+      const deps = await this.getDeps();
+      this.assertOpen();
+      const kind =
+        request.action === "start" && !request.leaseId
+          ? "owner"
+          : (deps.getSubscriptionKind?.({
+              streamId: request.streamId,
+              leaseId: request.leaseId,
+              sessionUuid,
+              allowEndedLease: request.action === "start",
+            }) ?? "owner");
+      const control = this.requestControlFacts({ deps, request, sessionUuid, kind });
+      assertMayControl(control.stopIdentity?.ownsDevice ? "owner" : kind, {
+        transport: "webrtc",
+        action: request.action,
+        target: control.target,
+      });
+      return await this.dispatchRequest({ deps, request, sessionUuid, kind, ...control });
+    } catch (error) {
+      return this.subscriptionErrorResponse({ request, error });
+    }
+  }
+
+  private authorizeRequest(request: WebRtcStreamSocketRequest): void {
+    // Start keeps device admission. Attached viewers authenticate their session and
+    // use manager facts for lease/stream authority even after the device changes owner.
+    const admission = request.action === "start" || !this.authenticator.resolveSubscriptionIdentity;
+    this.authenticator.authorize({
+      sessionUuid: request.sessionUuid,
+      deviceId: admission ? request.deviceId : undefined,
+    });
+  }
+
+  private requestControlFacts(input: WebRtcRequestContext): WebRtcStopControlFacts {
+    const { deps, request, sessionUuid, kind } = input;
+    if (request.action !== "start" && request.action !== "stop") {
+      return { target: "stream" };
+    }
+    const context = deps.getControlContext?.({
+      streamId: request.streamId,
+      leaseId: request.leaseId,
+      sessionUuid,
+      deviceId: request.action === "start" ? request.deviceId : undefined,
+      overrides: resolveStartOverrides(request),
+      compareParameters: request.action === "start" && kind === "viewer",
+    });
+    return {
+      target: ownLeaseControlTarget({ request, context }),
+      addressedStreamId: context?.streamId,
+      stopIdentity: this.resolveStopIdentity({ request, deviceId: context?.deviceId }),
+    };
+  }
+
+  private resolveStopIdentity(input: {
+    request: WebRtcStreamSocketRequest;
+    deviceId?: string;
+  }): StreamSubscriptionIdentity | undefined {
+    if (input.request.action !== "stop" || input.deviceId === undefined) {
+      return undefined;
+    }
+    const identity = this.authenticator.resolveSubscriptionIdentity?.({
+      sessionUuid: input.request.sessionUuid,
+      deviceId: input.deviceId,
+    });
+    // Auth-off and legacy authenticators retain the original stop semantics.
+    return identity?.authEnabled && identity.sessionExists ? identity : undefined;
+  }
+
+  private logViewerControlRejection(request: WebRtcStreamSocketRequest): void {
     const sessionUuid =
       this.authenticator.resolveSessionIdentity?.(request.sessionUuid) ?? request.sessionUuid;
-    const deps = await this.getDeps();
-    this.assertOpen();
+    const key = JSON.stringify([sessionUuid, request.leaseId, request.action]);
+    const message = `[WebRtcStream] rejected viewer control: action=${request.action}`;
+    if (this.viewerControlRejections.has(key)) {
+      logger.debug(message);
+      return;
+    }
+    this.viewerControlRejections.add(key);
+    if (this.viewerControlRejections.size > 256) {
+      const oldest = this.viewerControlRejections.values().next().value;
+      if (oldest !== undefined) {
+        this.viewerControlRejections.delete(oldest);
+      }
+    }
+    logger.warn(message);
+  }
+
+  private subscriptionErrorResponse({
+    request,
+    error,
+  }: {
+    request: WebRtcStreamSocketRequest;
+    error: unknown;
+  }): WebRtcStreamSocketResponse {
+    if (error instanceof ViewerReadOnlyError) {
+      this.logViewerControlRejection(request);
+      return {
+        ...this.createErrorResponse(request.id, error.message),
+        errorCode: error.code,
+        subscriptionKind: "viewer",
+      };
+    }
+    if (error instanceof ViewerStreamActiveError) {
+      logger.info("[WebRtcStream] rejected owner start: viewer stream has different parameters");
+      return {
+        ...this.createErrorResponse(request.id, error.message),
+        errorCode: error.code,
+      };
+    }
+    if (error instanceof WebRtcSubscriptionEndedError) {
+      logger.info(`[WebRtcStream] reporting ended subscription: reason=${error.reason}`);
+      return {
+        ...this.createErrorResponse(request.id, error.message),
+        reason: error.reason,
+        subscriptionKind: error.subscriptionKind,
+      };
+    }
+    throw error;
+  }
+
+  private async dispatchRequest(
+    input: WebRtcRequestContext & WebRtcStopControlFacts,
+  ): Promise<WebRtcStreamSocketResponse> {
+    const { deps, request, sessionUuid, kind } = input;
     switch (request.action) {
       case "start":
         return this.handleStart(deps, request, sessionUuid);
-      case "stop": {
-        const stream = await deps.stopStream(request.streamId, request.leaseId, sessionUuid);
-        return {
-          id: request.id,
-          success: true,
-          type: "webrtc_stream_response",
-          action: "stop",
-          stream,
-        };
-      }
+      case "stop":
+        return this.handleStop(input);
       case "status":
         return this.handleStatus(deps, request, sessionUuid);
       case "list":
@@ -324,12 +577,64 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
           type: "webrtc_stream_response",
           action: "list",
           streams: deps.listStreams(),
+          subscriptionKind: request.leaseId ? kind : undefined,
         };
       case "await":
         return this.handleAwait(deps, request, sessionUuid);
       default:
         throw new ActionableError(`Unsupported webrtcStream action: ${request.action}`);
     }
+  }
+
+  private async handleStop(
+    input: WebRtcRequestContext & WebRtcStopControlFacts,
+  ): Promise<WebRtcStreamSocketResponse> {
+    const { deps, request, sessionUuid, kind } = input;
+    const options = {
+      streamId: input.addressedStreamId ?? request.streamId,
+      leaseId: request.leaseId,
+      sessionUuid,
+    };
+    const stream =
+      input.stopIdentity?.ownsDevice && deps.stopStreamAsOwner
+        ? await deps.stopStreamAsOwner(options)
+        : input.stopIdentity && deps.releaseOwnLeases
+          ? await deps.releaseOwnLeases(options)
+          : await deps.stopStream(request.streamId, request.leaseId, sessionUuid);
+    return {
+      id: request.id,
+      success: true,
+      type: "webrtc_stream_response",
+      action: "stop",
+      stream,
+      subscriptionKind: kind,
+    };
+  }
+
+  private assertRenewalMayControl(input: {
+    deps: WebRtcStreamSocketServerDependencies;
+    request: WebRtcStreamSocketRequest;
+    device: BootedDevice;
+    sessionUuid?: string;
+    subscriptionKind: StreamSubscriptionKind;
+    renewingLease: boolean;
+  }): void {
+    const { deps, request, device, sessionUuid, subscriptionKind, renewingLease } = input;
+    if (subscriptionKind !== "viewer" || !renewingLease) {
+      return;
+    }
+    const context = deps.getControlContext?.({
+      deviceId: device.deviceId,
+      leaseId: request.leaseId,
+      sessionUuid,
+      overrides: resolveStartOverrides(request),
+      compareParameters: true,
+    });
+    assertMayControl(subscriptionKind, {
+      transport: "webrtc",
+      action: "start",
+      target: ownLeaseControlTarget({ request, context }),
+    });
   }
 
   private async handleStart(
@@ -356,13 +661,30 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     this.assertOpen();
     this.admissionGate.assertDeviceActionable(device.deviceId, WEBRTC_STREAM_PURPOSE);
     authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
+    const { subscriptionKind, ownsDevice, renewingLease } = this.startSubscription({
+      deps,
+      request,
+      device,
+      sessionUuid,
+    });
+    this.assertRenewalMayControl({
+      deps,
+      request,
+      device,
+      sessionUuid,
+      subscriptionKind,
+      renewingLease,
+    });
     const stream = await deps.startStream({
       device,
       streamId: request.streamId,
       leaseId: request.leaseId,
       sessionUuid,
+      subscriptionKind,
+      ownsDevice,
       overrides: resolveStartOverrides(request),
     });
+    await this.recheckStartAdmission({ deps, request, device, stream, sessionUuid });
     logger.info(`[WebRtcStream] started stream ${stream.streamId} for device ${device.deviceId}`);
     return {
       id: request.id,
@@ -370,9 +692,75 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       type: "webrtc_stream_response",
       action: "start",
       stream,
+      subscriptionKind:
+        deps.getSubscriptionKind?.({
+          streamId: stream.streamId,
+          leaseId: stream.lease?.id,
+          sessionUuid,
+          existingLeaseOnly: true,
+        }) ?? subscriptionKind,
       failure: stream.failure ?? null,
       error: stream.failure?.message,
     };
+  }
+
+  private startSubscription(input: {
+    deps: WebRtcStreamSocketServerDependencies;
+    request: WebRtcStreamSocketRequest;
+    device: BootedDevice;
+    sessionUuid?: string;
+  }): { subscriptionKind: StreamSubscriptionKind; ownsDevice: boolean; renewingLease: boolean } {
+    const { deps, request, device, sessionUuid } = input;
+    const existingKind = request.leaseId
+      ? deps.getSubscriptionKind?.({
+          streamId: request.streamId,
+          leaseId: request.leaseId,
+          sessionUuid,
+          allowEndedLease: true,
+          existingLeaseOnly: true,
+        })
+      : undefined;
+    if (existingKind !== undefined) {
+      return { subscriptionKind: existingKind, ownsDevice: false, renewingLease: true };
+    }
+    const identity = this.authenticator.resolveSubscriptionIdentity?.({
+      sessionUuid: request.sessionUuid,
+      deviceId: device.deviceId,
+    });
+    return {
+      subscriptionKind: identity ? subscriptionKindForIdentity(identity) : "owner",
+      ownsDevice: !!identity?.authEnabled && identity.sessionExists && identity.ownsDevice,
+      renewingLease: false,
+    };
+  }
+
+  private async recheckStartAdmission(input: {
+    deps: WebRtcStreamSocketServerDependencies;
+    request: WebRtcStreamSocketRequest;
+    device: BootedDevice;
+    stream: NonNullable<WebRtcStreamSocketResponse["stream"]>;
+    sessionUuid?: string;
+  }): Promise<void> {
+    const { deps, request, device, stream, sessionUuid } = input;
+    try {
+      this.assertOpen();
+      authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
+    } catch (error) {
+      const leaseId = stream.lease?.id;
+      if (leaseId && leaseId !== request.leaseId) {
+        await raceWithDeadline(() => deps.stopStream(stream.streamId, leaseId, sessionUuid), {
+          timer: this.timer,
+          timeoutMs: WEBRTC_SOCKET_CLOSE_TIMEOUT_MS,
+          label: "WebRTC rejected start lease cleanup",
+        }).catch((cleanupError) => {
+          logger.warn(
+            `[WebRtcStream] rejected start cleanup failed: ${errorMessage(cleanupError)}`,
+            cleanupError,
+          );
+        });
+      }
+      throw error;
+    }
   }
 
   private async handleAwait(
@@ -399,6 +787,12 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       type: "webrtc_stream_response",
       action: "await",
       stream,
+      subscriptionKind:
+        deps.getSubscriptionKind?.({
+          streamId: stream.streamId,
+          leaseId: stream.lease?.id,
+          sessionUuid,
+        }) ?? "owner",
       failure: stream.failure ?? null,
       error: stream.failure?.message,
     };
@@ -420,6 +814,12 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
         type: "webrtc_stream_response",
         action: "status",
         stream,
+        subscriptionKind:
+          deps.getSubscriptionKind?.({
+            streamId: stream.streamId,
+            leaseId: stream.lease?.id,
+            sessionUuid,
+          }) ?? "owner",
         failure: stream.failure ?? null,
         error: stream.failure?.message,
       };
@@ -430,6 +830,9 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       type: "webrtc_stream_response",
       action: "list",
       streams: deps.listStreams(),
+      subscriptionKind: request.leaseId
+        ? (deps.getSubscriptionKind?.({ leaseId: request.leaseId, sessionUuid }) ?? "owner")
+        : undefined,
     };
   }
 

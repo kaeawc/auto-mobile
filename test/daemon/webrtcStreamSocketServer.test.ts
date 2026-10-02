@@ -204,8 +204,16 @@ describe("WebRtcStreamSocketServer", () => {
         reconcileOwnership: async (deviceId, isAuthorized) => {
           reconciled++;
           expect(deviceId).toBe(ANDROID.deviceId);
-          expect(isAuthorized("session-owner")).toBe(true);
-          expect(isAuthorized("session-released")).toBe(false);
+          expect(isAuthorized("session-owner")).toEqual({
+            authEnabled: true,
+            sessionExists: true,
+            ownsDevice: true,
+          });
+          expect(isAuthorized("session-released")).toEqual({
+            authEnabled: true,
+            sessionExists: false,
+            ownsDevice: false,
+          });
         },
         stopAllStreams: async () => {
           stoppedAll++;
@@ -436,6 +444,31 @@ describe("WebRtcStreamSocketServer", () => {
     expect(response.action).toBe("stop");
     expect(response.stream?.state).toBe("stopped");
     expect(stopped).toContain("s1");
+  });
+
+  test("owner stop falls back to normal stop for injected dependencies without the new seam", async () => {
+    const server = new TestableServer(
+      makeDeps({
+        getControlContext: () => ({
+          streamId: "s1",
+          deviceId: ANDROID.deviceId,
+          holdsLease: false,
+          parametersMatch: true,
+        }),
+      }),
+      {
+        authorize: () => {},
+        resolveSubscriptionIdentity: () => ({
+          authEnabled: true,
+          sessionExists: true,
+          ownsDevice: true,
+        }),
+      },
+    );
+    const socket = new FakeSocket();
+    await server.simulate(socket, { action: "stop", streamId: "s1", sessionUuid: "session-1" });
+    expect(lastResponse(socket)).toMatchObject({ success: true, stream: { state: "stopped" } });
+    expect(stopped).toEqual(["s1"]);
   });
 
   test("answers stop while await is pending and keeps other awaits ordered", async () => {

@@ -109,3 +109,36 @@ For a local development build, build `ios/screen-capture` with SwiftPM and set
 `screen-capture-helper` executable when starting AutoMobile. Both capture and
 highlighting must use this build; older released helpers do not support the overlay
 command. Rebuilt or unsigned executables may require renewed macOS privacy approval.
+
+Desktop subscriptions use the same read-only viewer policy as the video relay.
+Each WebRTC lease records its subscription kind when admitted: viewers keep watching
+through device ownership changes, while an owner losing ownership downgrades to a
+viewer. This downgrade is one-way, even if that session later regains ownership;
+renewal preserves the recorded kind. Any kind may release its own lease with `stop`,
+or renew its live lease with a compatible `start`. A non-owner's leaseless `stop`
+releases only that session's leases, preserving anonymous and other sessions' leases.
+Capture stops when no leases remain. Viewers also allow `status`, `list`, and `await`.
+`viewer_read_only` rejects changes to stream parameters or controls acting on others.
+
+The device's current owner controls its streams: `stop`, with or without a lease,
+stops the stream outright, releases the owner's leases, and ends every other lease
+with `stopped_by_owner`. Viewers learn this on their next lease-carrying request.
+When only viewer leases remain and a new owner holds no lease, an incompatible
+`start` returns `errorCode: "viewer_stream_active"` with only the differing parameter
+keys: stop the stream first, then start with the desired parameters. Compatible
+parameters attach an owner lease without restarting capture. Comparisons resolve
+environment defaults too, so a no-override start matches a stream using those defaults.
+An owner already holding a lease retains the existing attach behavior.
+
+Admission is unchanged for every `start`, including renewal: the device must be
+unowned or owned by the requesting session. A viewer starting a new stream on
+another session's device, or renewing there, is still rejected by that admission check.
+
+Either kind ends when its session ends, the device is removed or quarantined, or
+the daemon shuts down. VM restore ends the captured incarnation as `device_removed`.
+This socket is request/response only: the next `status`, `await`, or `stop` carrying
+an ended lease reports its `reason` and `subscriptionKind`. Ended leases are retained
+for one lease TTL, up to 256 entries; a later `start` can re-subscribe with a new lease.
+The optional response fields `subscriptionKind`, `reason`, and `errorCode` are additive
+and can be ignored by older clients. Auth disabled and legacy authenticators without
+an ownership resolver retain the previous stop and attach semantics.

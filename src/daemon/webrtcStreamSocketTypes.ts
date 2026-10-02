@@ -1,3 +1,7 @@
+import type {
+  StreamSubscriptionKind,
+  StreamSubscriptionEndReason,
+} from "./streamSubscriptionPolicy";
 import type { SocketRequest, SocketResponse } from "./socketServer/index";
 import type { WebRtcStreamDescriptor } from "../features/webrtc";
 
@@ -49,9 +53,25 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
   timeoutMs?: number;
 }
 
+/**
+ * A viewer lease survives device ownership changes; an owner losing ownership
+ * downgrades to a read-only viewer. The downgrade is one-way; either kind may release or
+ * renew its own lease with compatible parameters, subject to unchanged start admission.
+ * Ends report device_removed, identity_quarantined, daemon_shutdown, session_ended,
+ * or stopped_by_owner when the current device owner stops the stream outright.
+ * This socket has no push channel: typed ends are reported on the next request carrying
+ * the lease. These optional
+ * fields are additive for older clients; start remains a fresh admission.
+ * errorCode is viewer_read_only for stream control by viewers, or viewer_stream_active
+ * when a new owner's start conflicts with parameters on another session's viewer stream
+ * (stop it first). Parameter errors name keys only, never values or tokens.
+ */
 export interface WebRtcStreamSocketResponse extends SocketResponse {
   type: "webrtc_stream_response";
   action?: WebRtcStreamAction;
+  subscriptionKind?: StreamSubscriptionKind;
+  reason?: StreamSubscriptionEndReason;
+  errorCode?: string;
   /** Reconnect descriptor for a single stream (start/stop/status). */
   stream?: WebRtcStreamDescriptor;
   /** Reconnect descriptors for all active streams (list). */

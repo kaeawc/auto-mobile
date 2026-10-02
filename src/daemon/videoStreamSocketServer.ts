@@ -635,7 +635,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   private endDeviceSubscribers(
     deviceId: string,
-    event: Exclude<StreamSubscriptionEndReason, "session_ended">,
+    event: Exclude<StreamSubscriptionEndReason, "session_ended" | "stopped_by_owner">,
   ): void {
     const capture = this.captures.get(deviceId);
     if (!capture) {
@@ -650,7 +650,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private endSubscriber(
     socket: Socket,
     deviceId: string,
-    reason: StreamSubscriptionEndReason,
+    reason: Exclude<StreamSubscriptionEndReason, "stopped_by_owner">,
     options: { authorizationError?: unknown } = {},
   ): void {
     if (!this.socketDeviceIds.has(socket) && !this.subscribing.has(socket)) {

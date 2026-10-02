@@ -176,7 +176,7 @@ export const SUBSCRIPTION_NOTICE_CODES = {
   session_ended: 5,
 } as const;
 export function encodeSubscriptionNotice(
-  notice: StreamSubscriptionEndReason | "downgraded_to_viewer",
+  notice: Exclude<StreamSubscriptionEndReason, "stopped_by_owner"> | "downgraded_to_viewer",
 ): Buffer {
   return encodePacketHeader(
     PACKET_FLAG_SUBSCRIPTION_NOTICE | BigInt(SUBSCRIPTION_NOTICE_CODES[notice]),

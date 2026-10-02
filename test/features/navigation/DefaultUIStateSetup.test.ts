@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DefaultUIStateSetup,
   type ObserveScreenLike,
@@ -21,6 +21,28 @@ const device: BootedDevice = {
   name: "Test Device",
   platform: "android",
 };
+
+// A destination gives UIStateExtractor useful state without adding any modals.
+// A featureless root alone would make the extractor return undefined.
+const emptyModalHierarchy = (): ObserveResult =>
+  ({
+    viewHierarchy: {
+      hierarchy: {
+        class: "android.widget.FrameLayout",
+        "resource-id": "navigation.HomeDestination",
+      },
+    },
+  }) as unknown as ObserveResult;
+
+const emptyModalObserve = (): ObserveScreenLike => ({ execute: async () => emptyModalHierarchy() });
+
+// A flat sheet node with an explicit window ID uses the real extractor path.
+const bottomSheetHierarchy = (windowId: number): ObserveResult =>
+  ({
+    viewHierarchy: {
+      hierarchy: { class: "BottomSheetDialog", "window-id": String(windowId) },
+    },
+  }) as unknown as ObserveResult;
 
 function makeSetup(observeScreenProvider?: () => ObserveScreenLike): DefaultUIStateSetup {
   const fakeAdb = new FakeAdbClient() as unknown as AdbClient;
@@ -203,14 +225,6 @@ describe("DefaultUIStateSetup", () => {
       ToolRegistry.clearTools();
     });
 
-    // A null hierarchy makes getCurrentUIState() return undefined, so the
-    // post-swipe dismissal check (`!currentState?.modalStack?.some(...)`) treats
-    // the sheet as gone — the swipe branch resolves as dismissed without ever
-    // reaching the back-button fallback.
-    const nullObserve = (): ObserveScreenLike => ({
-      execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
-    });
-
     const bottomSheet: ModalState = { type: "bottomsheet", layer: 1, windowId: 42 };
 
     test("invokes the registered `swipeOn` handler (not `swipe`) with direction down", async () => {
@@ -222,7 +236,7 @@ describe("DefaultUIStateSetup", () => {
         return createStructuredToolResponse({ success: true });
       });
 
-      const setup = makeSetup(nullObserve);
+      const setup = makeSetup(emptyModalObserve);
       const dismissed = await (
         setup as unknown as {
           dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
@@ -246,18 +260,6 @@ describe("DefaultUIStateSetup", () => {
       expect(capturedArgs![INTERNAL_NO_DIFF_PARAM]).toBe(true);
     });
 
-    // Build a minimal view hierarchy that UIStateExtractor classifies as a
-    // `bottomsheet` modal with the given windowId: a flat node whose `class`
-    // contains "sheet" (classifyModalType) and an explicit `window-id`
-    // (getWindowId). No `windows` array => collectModalStack runs on the
-    // top-level hierarchy traversal.
-    const bottomSheetHierarchy = (windowId: number): ObserveResult =>
-      ({
-        viewHierarchy: {
-          hierarchy: { class: "BottomSheetDialog", "window-id": String(windowId) },
-        },
-      }) as unknown as ObserveResult;
-
     test("falls through to the back button when the swipe leaves the bottom sheet present (#3125)", async () => {
       ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
         createStructuredToolResponse({ success: true }),
@@ -269,15 +271,13 @@ describe("DefaultUIStateSetup", () => {
       // Stateful observe provider: the first post-swipe observation still
       // contains the bottomsheet's windowId (swipe did NOT dismiss it), forcing
       // the code past the swipe dismissal check into the back-button fallback;
-      // the second (post-back) observation has a null hierarchy => the sheet is
-      // gone, so the back-button path reports dismissal.
+      // the second (post-back) observation has healthy state without a modal,
+      // so the back-button path reports confirmed dismissal.
       let observeCalls = 0;
       const statefulObserve = (): ObserveScreenLike => ({
         execute: async () => {
           observeCalls++;
-          return observeCalls === 1
-            ? bottomSheetHierarchy(42)
-            : ({ viewHierarchy: null } as unknown as ObserveResult);
+          return observeCalls === 1 ? bottomSheetHierarchy(42) : emptyModalHierarchy();
         },
       });
 
@@ -316,7 +316,7 @@ describe("DefaultUIStateSetup", () => {
         return createStructuredToolResponse({ success: true });
       });
 
-      const setup = makeSetup(nullObserve);
+      const setup = makeSetup(emptyModalObserve);
       await (
         setup as unknown as {
           dismissTopModal: (modal: ModalState, platform: string) => Promise<boolean>;
@@ -331,7 +331,7 @@ describe("DefaultUIStateSetup", () => {
       const fakeAdb = new FakeAdbClient();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
-      const setup = new DefaultUIStateSetup(iosDevice, fakeAdb, nullObserve, timer);
+      const setup = new DefaultUIStateSetup(iosDevice, fakeAdb, emptyModalObserve, timer);
       let backArgs: Record<string, unknown> | undefined;
       ToolRegistry.register(
         "pressButton",
@@ -359,7 +359,7 @@ describe("DefaultUIStateSetup", () => {
     });
 
     test("preserves Android's coordinate outside-tap recovery for popups", async () => {
-      const setup = makeSetup(nullObserve);
+      const setup = makeSetup(emptyModalObserve);
 
       const dismissed = await (
         setup as unknown as {
@@ -371,6 +371,174 @@ describe("DefaultUIStateSetup", () => {
       const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
       expect(fakeAdb.wasCommandExecuted("shell input tap 50 50")).toBe(true);
     });
+  });
+
+  describe("modal dismissal requires observable confirmation (#6748)", () => {
+    let restoreCtrlProxy: () => void;
+
+    beforeEach(() => {
+      // Keep Android back recovery on the injected ADB fake, without device I/O.
+      const ctrlProxySpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+        requestGlobalAction: async () => ({ success: false, error: "unavailable" }),
+      } as never);
+      restoreCtrlProxy = () => ctrlProxySpy.mockRestore();
+    });
+
+    afterEach(() => {
+      restoreCtrlProxy();
+      ToolRegistry.clearTools();
+    });
+
+    type DismissalMethod = (modal: ModalState, platform: string) => Promise<boolean>;
+    type DismissalMethods = {
+      dismissTopModal: DismissalMethod;
+      dismissBottomSheet: DismissalMethod;
+      dismissByTappingOutside: DismissalMethod;
+    };
+
+    const paths = [
+      {
+        name: "dialog back button",
+        method: "dismissTopModal",
+        modalType: "dialog",
+        platform: "android",
+        swipe: false,
+        healthyBacks: 1,
+        unconfirmedBacks: 2,
+      },
+      {
+        name: "bottom-sheet swipe down",
+        method: "dismissBottomSheet",
+        modalType: "bottomsheet",
+        platform: "android",
+        swipe: true,
+        healthyBacks: 0,
+        unconfirmedBacks: 1,
+      },
+      {
+        name: "bottom-sheet back button",
+        method: "dismissBottomSheet",
+        modalType: "bottomsheet",
+        platform: "android",
+        swipe: false,
+        healthyBacks: 1,
+        unconfirmedBacks: 1,
+      },
+      {
+        name: "Android popup outside tap",
+        method: "dismissByTappingOutside",
+        modalType: "popup",
+        platform: "android",
+        swipe: false,
+        healthyBacks: 0,
+        unconfirmedBacks: 0,
+      },
+      {
+        name: "final back-button fallback",
+        method: "dismissTopModal",
+        modalType: "popup",
+        platform: "ios",
+        swipe: false,
+        healthyBacks: 1,
+        unconfirmedBacks: 1,
+      },
+    ] as const;
+
+    const observations = ["null hierarchy", "observe throws", "modal remains", "healthy"] as const;
+    for (const path of paths) {
+      for (const observation of observations) {
+        test(`${path.name}: ${observation}`, async () => {
+          let observeCalls = 0;
+          let swipeCalls = 0;
+          let iosBackCalls = 0;
+          const fakeAdb = new FakeAdbClient();
+          const timer = new FakeTimer();
+          timer.enableAutoAdvance();
+          const setup = new DefaultUIStateSetup(
+            { ...device, platform: path.platform },
+            fakeAdb,
+            () => ({
+              execute: async () => {
+                observeCalls++;
+                if (observation === "observe throws") {
+                  throw new Error("Observation unavailable");
+                }
+                if (observation === "null hierarchy") {
+                  return { viewHierarchy: null } as unknown as ObserveResult;
+                }
+                return observation === "healthy" ? emptyModalHierarchy() : bottomSheetHierarchy(42);
+              },
+            }),
+            timer,
+          );
+          if (path.swipe) {
+            ToolRegistry.register("swipeOn", "swipeOn", {}, async () => {
+              swipeCalls++;
+              return createStructuredToolResponse({ success: true });
+            });
+          }
+          ToolRegistry.register("pressButton", "pressButton", {}, async () => {
+            iosBackCalls++;
+            return createStructuredToolResponse({ success: true });
+          });
+          const modal: ModalState = { type: path.modalType, layer: 1, windowId: 42 };
+
+          const dismissed = await (setup as unknown as DismissalMethods)[path.method](
+            modal,
+            path.platform,
+          );
+
+          const confirmed = observation === "healthy";
+          expect(dismissed).toBe(confirmed);
+          expect(swipeCalls).toBe(path.swipe ? 1 : 0);
+          const backCalls = confirmed ? path.healthyBacks : path.unconfirmedBacks;
+          const outsideTap = path.method === "dismissByTappingOutside";
+          expect(fakeAdb.getAllCommands()).toEqual(
+            path.platform === "ios"
+              ? []
+              : outsideTap
+                ? ["shell input tap 50 50"]
+                : Array(backCalls).fill("shell input keyevent 4"),
+          );
+          expect(iosBackCalls).toBe(path.platform === "ios" ? backCalls : 0);
+          expect(observeCalls).toBe(swipeCalls + backCalls + (outsideTap ? 1 : 0));
+        });
+      }
+    }
+
+    for (const modalType of ["dialog", "bottomsheet", "popup"] as const) {
+      test(`${modalType} continues to the next strategy after an unavailable observation`, async () => {
+        let observeCalls = 0;
+        const setup = makeSetup(() => ({
+          execute: async () => {
+            observeCalls++;
+            return observeCalls === 1
+              ? ({ viewHierarchy: null } as unknown as ObserveResult)
+              : emptyModalHierarchy();
+          },
+        }));
+        let swipeCalls = 0;
+        ToolRegistry.register("swipeOn", "swipeOn", {}, async () => {
+          swipeCalls++;
+          return createStructuredToolResponse({ success: true });
+        });
+
+        const dismissed = await (setup as unknown as DismissalMethods).dismissTopModal(
+          { type: modalType, layer: 1, windowId: 42 },
+          "android",
+        );
+
+        expect(dismissed).toBe(true);
+        expect(observeCalls).toBe(2);
+        expect(swipeCalls).toBe(modalType === "bottomsheet" ? 1 : 0);
+        const fakeAdb = (setup as unknown as { adb: FakeAdbClient }).adb;
+        expect(fakeAdb.getAllCommands()).toEqual(
+          modalType === "popup"
+            ? ["shell input tap 50 50", "shell input keyevent 4"]
+            : Array(modalType === "dialog" ? 2 : 1).fill("shell input keyevent 4"),
+        );
+      });
+    }
   });
 
   // Regression for issue #6123: `tapCloseButton` returned `true` after the
@@ -403,7 +571,7 @@ describe("DefaultUIStateSetup", () => {
       const setup = makeSetup(() => ({
         execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
       }));
-      // getCurrentUIState drives isModalDismissed: report the modal gone as
+      // getCurrentUIState drives isModalConfirmedDismissed: report the modal gone as
       // soon as any candidate has been tapped.
       (
         setup as unknown as { getCurrentUIState: () => Promise<{ modalStack: ModalState[] }> }
@@ -513,7 +681,7 @@ describe("DefaultUIStateSetup", () => {
     });
 
     // Regression for issue #6319: an adversarial gap in the #6123 fix. The
-    // outcome check runs through the REAL getCurrentUIState/isModalDismissed
+    // outcome check runs through the REAL getCurrentUIState/isModalConfirmedDismissed
     // path (not a stubbed getCurrentUIState). When the confirming re-observation
     // returns no view hierarchy, getCurrentUIState resolves to `undefined`, so
     // the modal's presence is genuinely unobservable. The old
@@ -525,7 +693,7 @@ describe("DefaultUIStateSetup", () => {
       const tappedTexts: string[] = [];
 
       // Real getCurrentUIState runs: every observation returns a null
-      // hierarchy, so isModalDismissed can never confirm the modal is gone.
+      // hierarchy, so isModalConfirmedDismissed can never confirm the modal is gone.
       const setup = makeSetup(() => ({
         execute: async () => ({ viewHierarchy: null }) as unknown as ObserveResult,
       }));

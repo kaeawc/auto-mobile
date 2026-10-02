@@ -380,9 +380,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
         await this.sleep(200);
 
         // Verify dismissal
-        const currentState = await this.getCurrentUIState(platform);
-        const dismissed = !currentState?.modalStack?.some((m) => m.windowId === modal.windowId);
-        if (dismissed) {
+        if (await this.isModalConfirmedDismissed(modal, platform)) {
           logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button`);
           return true;
         }
@@ -417,9 +415,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       await this.pressBack(platform);
       await this.sleep(200);
 
-      const currentState = await this.getCurrentUIState(platform);
-      const dismissed = !currentState?.modalStack?.some((m) => m.windowId === modal.windowId);
-      if (dismissed) {
+      if (await this.isModalConfirmedDismissed(modal, platform)) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} with back button (fallback)`);
         return true;
       }
@@ -456,7 +452,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
           ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         });
         await this.sleep(200);
-        if (await this.isModalDismissed(modal, platform)) {
+        if (await this.isModalConfirmedDismissed(modal, platform)) {
           logger.info("[UI_STATE_SETUP] Dismissed bottom sheet with swipe down");
           return true;
         }
@@ -464,7 +460,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
 
       await this.pressBack(platform);
       await this.sleep(200);
-      if (await this.isModalDismissed(modal, platform)) {
+      if (await this.isModalConfirmedDismissed(modal, platform)) {
         logger.info("[UI_STATE_SETUP] Dismissed bottom sheet with back button");
         return true;
       }
@@ -496,7 +492,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
       // tool, so it proceeds to the single platform-aware back fallback.
       await this.adb.executeCommand("shell input tap 50 50");
       await this.sleep(200);
-      if (await this.isModalDismissed(modal, platform)) {
+      if (await this.isModalConfirmedDismissed(modal, platform)) {
         logger.info(`[UI_STATE_SETUP] Dismissed ${modal.type} by tapping outside`);
         return true;
       }
@@ -506,24 +502,11 @@ export class DefaultUIStateSetup implements UIStateSetup {
     return false;
   }
 
-  private async isModalDismissed(modal: ModalState, platform: string): Promise<boolean> {
-    const currentState = await this.getCurrentUIState(platform);
-    return !currentState?.modalStack?.some((m) => m.windowId === modal.windowId);
-  }
-
   /**
-   * Strict variant of {@link isModalDismissed} for the close-button success
-   * path. Unlike `isModalDismissed`, an unavailable observation (the
-   * re-observation returned no view hierarchy, or `observeScreen.execute`
-   * threw, so `getCurrentUIState` resolves to `undefined`) does NOT count as a
-   * confirmed dismissal (#6319): the modal's presence is genuinely
-   * unobservable, so there is zero positive evidence it closed. `tapCloseButton`
-   * promises a candidate succeeds only when it "genuinely dismissed the modal
-   * (verified by re-observing and checking the modal is no longer present)", so
-   * it must require an actual observation — the plain `!undefined?.…` negation
-   * would otherwise collapse to a false-positive `true`. An unverifiable outcome
-   * falls through to the next candidate (and, ultimately, the remaining
-   * dismissal strategies) instead of claiming success.
+   * Confirm dismissal for every strategy by observing that the modal's window
+   * is no longer present. An unavailable observation (no view hierarchy or an
+   * observation error) leaves the outcome unconfirmed (#6319, #6748), so the
+   * caller tries the next candidate or strategy instead of claiming success.
    */
   private async isModalConfirmedDismissed(modal: ModalState, platform: string): Promise<boolean> {
     const currentState = await this.getCurrentUIState(platform);

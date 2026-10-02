@@ -1,7 +1,8 @@
+import { cancellationHandlers, pausedSleep } from "../helpers/interactionCancellation";
 import { CtrlProxyClipboard } from "../../src/features/observe/ios/CtrlProxyClipboard";
 import { RequestManager } from "../../src/utils/RequestManager";
 import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { Shake } from "../../src/features/action/Shake";
 import { RecentApps } from "../../src/features/action/RecentApps";
@@ -9,7 +10,6 @@ import { Clipboard } from "../../src/features/action/Clipboard";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import { IosLockScreenUnlocker } from "../../src/features/action/IosLockScreenUnlocker";
 import {
-  registerInteractionTools,
   setShakeFactory,
   resetShakeFactory,
   setRecentAppsFactory,
@@ -30,13 +30,7 @@ const devices: BootedDevice[] = [
   { name: "Android", platform: "android", deviceId: "emulator-5554" },
   { name: "iOS", platform: "ios", deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890" },
 ];
-function handler(name: string) {
-  const registered = ToolRegistry.getTool(name)?.deviceAwareHandler;
-  if (!registered) {
-    throw new Error(`Missing handler ${name}`);
-  }
-  return registered;
-}
+const handler = cancellationHandlers(["shake", "recentApps", "clipboard", "wakeAndUnlock"]);
 function observed(command: Shake | RecentApps) {
   const screen = new FakeObserveScreen();
   screen.setObserveResult({
@@ -49,21 +43,8 @@ function observed(command: Shake | RecentApps) {
   command.window = new FakeWindow();
   command.awaitIdle = new FakeAwaitIdle();
 }
-function pausedSleep(timer: FakeTimer) {
-  let notify!: () => void;
-  const started = new Promise<void>((resolve) => {
-    notify = resolve;
-  });
-  const sleep = spyOn(timer, "sleep").mockImplementation((ms) => {
-    const pending = FakeTimer.prototype.sleep.call(timer, ms);
-    notify();
-    return pending;
-  });
-  return { started, sleep };
-}
 
 describe("slice 2 registered handler cancellation", () => {
-  beforeEach(() => registerInteractionTools());
   afterEach(() => {
     resetShakeFactory();
     resetRecentAppsFactory();

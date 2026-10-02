@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { cancellationHandlers, pausedSleep } from "../helpers/interactionCancellation";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { Keyboard } from "../../src/features/action/Keyboard";
@@ -15,7 +16,6 @@ import {
   setKeyboardFactory,
   setOpenUrlFactory,
   setOpenLinkChooserFactory,
-  registerInteractionTools,
 } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -44,14 +44,8 @@ const observation: ObserveResult = {
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
 };
 const restores: Array<() => void> = [];
-function handler(name: string) {
-  const registered = ToolRegistry.getTool(name)?.deviceAwareHandler;
-  if (!registered) {
-    throw new Error(`Missing handler ${name}`);
-  }
-  return registered;
-}
-beforeEach(() => registerInteractionTools());
+const handler = cancellationHandlers(["keyboard", "openLink", "systemTray"]);
+
 afterEach(() => {
   for (const restore of restores.splice(0)) {
     restore();
@@ -120,6 +114,8 @@ test.each(["tap", "dismiss"])(
   "systemTray %s cancels the group-expand wait without advancing time or acting on the notification",
   async (action) => {
     const timer = new FakeTimer();
+    const { started, sleep } = pausedSleep(timer);
+    restores.push(() => sleep.mockRestore());
     const adb = new FakeAdbExecutor();
     let reads = 0;
     setSystemTrayDependencies({
@@ -139,9 +135,7 @@ test.each(["tap", "dismiss"])(
       undefined,
       controller.signal,
     );
-    for (let i = 0; i < 100 && timer.getPendingSleepCount() === 0; i++) {
-      await Promise.resolve();
-    }
+    await started;
     expect(timer.getPendingSleeps()).toEqual([500]);
     controller.abort();
     await expect(pending).rejects.toThrow("Operation cancelled");
@@ -387,6 +381,8 @@ test("openLink cancels iOS foreground confirmation without waiting or rolling ba
     name: "Test simulator",
   };
   const timer = new FakeTimer();
+  const { started, sleep } = pausedSleep(timer);
+  restores.push(() => sleep.mockRestore());
   const simctl = new FakeSimCtlClient();
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
@@ -400,9 +396,7 @@ test("openLink cancels iOS foreground confirmation without waiting or rolling ba
     undefined,
     controller.signal,
   );
-  for (let i = 0; i < 100 && timer.getPendingSleepCount() === 0; i++) {
-    await Promise.resolve();
-  }
+  await started;
   expect(timer.getPendingSleeps()).toEqual([100]);
   controller.abort();
   await expect(pending).rejects.toThrow("Operation cancelled");

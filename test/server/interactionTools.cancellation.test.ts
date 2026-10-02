@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { cancellationHandlers } from "../helpers/interactionCancellation";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../src/models";
 import { DOUBLE_TAP_GAP_MS } from "../../src/features/action/tapAtGesture";
 import {
-  registerInteractionTools,
   resetTapAtElementFactory,
   resetTapOnElementFactory,
   resetTapAnyElementFactory,
@@ -21,19 +21,9 @@ const devices = [
   { name: "iOS test device", platform: "ios", deviceId: "ios-test-device" },
 ] as BootedDevice[];
 
-function registeredHandler(name: string) {
-  const handler = ToolRegistry.getTool(name)?.deviceAwareHandler;
-  if (!handler) {
-    throw new Error(`Missing registered handler: ${name}`);
-  }
-  return handler;
-}
+const registeredHandler = cancellationHandlers(["tapAt", "tapOn", "tapAny", "dragAndDrop"]);
 
 describe("registered interaction handler cancellation", () => {
-  beforeEach(() => {
-    registerInteractionTools();
-  });
-
   afterEach(() => {
     resetTapAtElementFactory();
     resetTapOnElementFactory();

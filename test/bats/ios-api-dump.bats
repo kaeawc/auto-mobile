@@ -58,7 +58,7 @@ setup() {
   [ "$status" -eq 0 ]
   [[ "$output" == *'  associatedtype Value'* ]]
   printf '%s\n' "$output" | grep -Fx '  var value: Value { get set }'
-  printf '%s\n' "$output" | grep -Fx '  var splitAccessors: Value'
+  printf '%s\n' "$output" | grep -Fx '  var splitAccessors: Value { get set }'
   [[ "$output" == *'  init( value: Value )'* ]]
   printf '%s\n' "$output" | grep -Fx '  subscript(index: Int) -> Value { get }'
   [[ "$output" == *'  static func make() -> Self'* ]]
@@ -173,7 +173,7 @@ setup() {
 @test "changing same-line protocol accessors fails the API check" {
   cp "$FIXTURES/findings/Accessors.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
   bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
-  grep -Fx '  var split: Int' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var split: Int { get set }' "$AUTOMOBILE_IOS_API_FILE"
   sed 's/{ get set }/{ get }/g' "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"
   mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
   run bash "$SCRIPT" --check
@@ -249,4 +249,95 @@ setup() {
   [[ "$output" == *'+  case first, renamedSecond'* ]]
   [[ "$output" == *'-  indirect case value( Int ), next(Options), last'* ]]
   [[ "$output" == *'+  indirect case value( Int ), renamedNext(Options), last'* ]]
+}
+
+@test "multiline protocol accessors match inline effects prefixes attributes and subscripts" {
+  cp "$FIXTURES/accessors/Inline.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  cp "$FIXTURES/accessors/Multiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$BATS_TEST_TMPDIR/multiline.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var x: Int { get set }' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var effect: Int { get async throws }' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var prefixed: Int { mutating get nonmutating set }' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var attributed: Int { @MainActor get nonmutating set }' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var coroutine: Int { _read _modify }' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  subscript(index: Int) -> Int { get set }' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  public var body: Int' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  var invalid: Int' "$BATS_TEST_TMPDIR/multiline.api"
+  grep -Fx '  func afterInvalid()' "$BATS_TEST_TMPDIR/multiline.api"
+}
+
+@test "adding a multiline protocol setter fails the API check" {
+  cp "$FIXTURES/accessors/Multiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  sed '/var readOnly: Int {/,/}/s/get/get set/' "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"
+  mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  run bash "$SCRIPT" --check
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'-  var readOnly: Int { get }'* ]]
+  [[ "$output" == *'+  var readOnly: Int { get set }'* ]]
+}
+
+@test "an extension before its type exposes nested cases and requirements in the same file" {
+  cat "$FIXTURES/module-extensions/Extensions.swift" "$FIXTURES/module-extensions/Types.swift" > "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  case one' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  case two' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  case openCase' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  func need()' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var value: Int { get set }' "$AUTOMOBILE_IOS_API_FILE"
+}
+
+@test "module extension visibility is independent of file order and case renames fail check" {
+  rm "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  cp "$FIXTURES/module-extensions/Types.swift" "$AUTOMOBILE_IOS_API_SOURCES/Middle.swift"
+  local extension_file
+  for extension_file in AAA.swift ZZZ.swift; do
+    cp "$FIXTURES/module-extensions/Extensions.swift" "$AUTOMOBILE_IOS_API_SOURCES/$extension_file"
+    bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+    grep -Fx '  case one' "$AUTOMOBILE_IOS_API_FILE"
+    grep -Fx '  case two' "$AUTOMOBILE_IOS_API_FILE"
+    grep -Fx '  case openCase' "$AUTOMOBILE_IOS_API_FILE"
+    grep -Fx '  func need()' "$AUTOMOBILE_IOS_API_FILE"
+    grep -Fx '  public func explicitMember()' "$AUTOMOBILE_IOS_API_FILE"
+    sed 's/case one/case renamedOne/' "$AUTOMOBILE_IOS_API_SOURCES/$extension_file" > "$BATS_TEST_TMPDIR/changed.swift"
+    mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/$extension_file"
+    run bash "$SCRIPT" --check
+    [ "$status" -eq 1 ]
+    [[ "$output" == *'-  case one'* ]]
+    [[ "$output" == *'+  case renamedOne'* ]]
+    rm "$AUTOMOBILE_IOS_API_SOURCES/$extension_file"
+  done
+}
+
+@test "internal commented string and nested types do not grant module extension visibility" {
+  export AUTOMOBILE_IOS_API_SOURCES="$FIXTURES/module-extensions"
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  # Existing public nested headers remain emitted even for an internal parent.
+  printf '%s\n' "$output" | grep -Fx 'public enum HKind'
+  printf '%s\n' "$output" | grep -Fx 'public protocol HReq'
+  [[ "$output" != *'hiddenCase'* ]]
+  [[ "$output" != *'hiddenRequirement'* ]]
+  [[ "$output" != *'commentCase'* ]]
+  [[ "$output" != *'stringCase'* ]]
+  [[ "$output" != *'nestedCase'* ]]
+  [[ "$output" != *'internalMember'* ]]
+  [[ "$output" == *'  case one'* ]]
+}
+
+@test "new fixtures are deterministic across runs system bash and C and UTF-8 locales" {
+  cp "$FIXTURES/accessors/Multiline.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  cp "$FIXTURES/module-extensions/Extensions.swift" "$AUTOMOBILE_IOS_API_SOURCES/AAA.swift"
+  cp "$FIXTURES/module-extensions/Types.swift" "$AUTOMOBILE_IOS_API_SOURCES/ZZZ.swift"
+  # These names sort differently under linguistic collation and byte order.
+  cp "$FIXTURES/accessors/Inline.swift" "$AUTOMOBILE_IOS_API_SOURCES/a.swift"
+  LC_ALL=C bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  LC_ALL=C bash "$SCRIPT" > "$BATS_TEST_TMPDIR/repeat.api"
+  LC_ALL=en_US.UTF-8 bash "$SCRIPT" > "$BATS_TEST_TMPDIR/utf8.api"
+  /bin/bash "$SCRIPT" > "$BATS_TEST_TMPDIR/system.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/repeat.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/utf8.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/system.api"
 }

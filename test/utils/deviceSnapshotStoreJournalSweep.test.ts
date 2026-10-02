@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { promises as fs } from "fs";
+import { promises as fs, type Dirent } from "fs";
 import * as os from "os";
 import * as path from "path";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
@@ -10,6 +10,20 @@ import {
 } from "../helpers/deviceSnapshotStoreSync";
 
 const LIMITS = { maxEntries: 50, maxScopeDirectories: 64 };
+
+function syntheticDirent(parentPath: string, name: string, directory = false): Dirent {
+  return {
+    name,
+    parentPath,
+    isDirectory: () => directory,
+    isFile: () => !directory,
+    isSymbolicLink: () => false,
+    isBlockDevice: () => false,
+    isCharacterDevice: () => false,
+    isFIFO: () => false,
+    isSocket: () => false,
+  };
+}
 
 describe("snapshot journal enumeration and discard", () => {
   let root: string;
@@ -64,12 +78,24 @@ describe("snapshot journal enumeration and discard", () => {
     await artifact("ios.journal.tmp.replacing");
     await artifact(".replacing");
     await artifact("..replacing");
-    await artifact("bad\\name.replacing");
-    await artifact("android/bad\\scope/hidden.replacing");
     await artifact("ordinary/nested.replacing");
     await artifact("android/Pixel/ordinary/nested.journal.replacing");
     await artifact("ios/UDID/ordinary/nested.replacing");
-    const read = spyOn(fs, "readdir");
+    const readdir = fs.readdir.bind(fs);
+    // Backslashes are path separators on Windows, so inject these names instead of creating them.
+    const read = spyOn(fs, "readdir").mockImplementation(async (directory, options) => {
+      if (options && typeof options === "object" && options.withFileTypes === true) {
+        const entries = await readdir(directory, options);
+        if (directory === root) {
+          return [...entries, syntheticDirent(root, "bad\\name.replacing")];
+        }
+        if (directory === path.join(root, "android")) {
+          return [...entries, syntheticDirent(directory, "bad\\scope", true)];
+        }
+        return entries;
+      }
+      return readdir(directory, options);
+    });
     try {
       expect(await store.listLeftoverSnapshotJournals(LIMITS)).toEqual({
         entries: [],

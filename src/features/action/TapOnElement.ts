@@ -2724,17 +2724,44 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private async executeOnAndroidDisplay(
     options: TapOnElementOptions,
-    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>,
-    signal?: AbortSignal,
-  ): Promise<TapOnElementResult> {
+    context: {
+      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+      selection: ElementSelectionResult;
+      signal?: AbortSignal;
+    },
+  ): Promise<TapOnElementResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
+    const { target, selection, signal } = context;
     const hierarchy = target.observation.viewHierarchy;
     if (!hierarchy) {
       throw new ActionableError("Selected display has no view hierarchy");
     }
-    const selection = this.selectElementOnDisplay(options, hierarchy);
     const element = selection.element;
     if (!element?.bounds) {
       throw new ActionableError("Element not found on selected display");
+    }
+    const selectedElement = this.buildSelectedElementMetadata(selection);
+    if (options.action === "focus") {
+      if (!isFocusEditableElement(element)) {
+        return {
+          success: false,
+          action: options.action,
+          element,
+          selectedElement,
+          error: `Cannot focus ${this.describeFocusTarget(element, options)} because it is not an editable input`,
+        };
+      }
+      if (this.finder.isElementKeyboardFocused(element)) {
+        return {
+          success: true,
+          action: options.action,
+          element,
+          selectedElement,
+          wasAlreadyFocused: true,
+          focusChanged: false,
+          focusVerified: true,
+          ...this.geometry.getElementCenter(element),
+        };
+      }
     }
     const visibleBounds = this.visibleTapBounds(
       selection,
@@ -2793,7 +2820,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       success: true,
       action: options.action,
       element,
-      selectedElement: this.buildSelectedElementMetadata(selection),
+      selectedElement,
     };
   }
 
@@ -2801,6 +2828,21 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapOnElementOptions,
     hierarchy: ViewHierarchyResult,
   ): ElementSelectionResult {
+    if (options.action === "focus") {
+      const selection = this.findElementInHierarchy(options, hierarchy).selection;
+      if (selection.element) {
+        return selection;
+      }
+      // Focus lookup filters out inert nodes. Reuse inspect lookup only to
+      // report the editable-input error for a selector matching such a node.
+      const inspected = this.findElementInHierarchy(
+        { ...options, action: "tap" },
+        hierarchy,
+      ).selection;
+      return inspected.element && !isFocusEditableElement(inspected.element)
+        ? inspected
+        : selection;
+    }
     const selectorOptions = {
       container: options.container,
       strategy: options.selectionStrategy,
@@ -2817,6 +2859,48 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             selectorOptions,
           );
     return selected;
+  }
+
+  private async observedAndroidDisplayInteraction(
+    options: TapOnElementOptions,
+    context: {
+      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+      signal?: AbortSignal;
+    },
+  ): Promise<TapOnElementResult> {
+    const { target, signal } = context;
+    const hierarchy = target.observation.viewHierarchy;
+    if (!hierarchy) {
+      throw new ActionableError("Selected display has no view hierarchy");
+    }
+    const selection = this.selectElementOnDisplay(options, hierarchy);
+    const result: Awaited<ReturnType<TapOnElement["executeOnAndroidDisplay"]>> =
+      await this.observedInteraction(
+        () => this.executeOnAndroidDisplay(options, { target, selection, signal }),
+        {
+          changeExpected: false,
+          display: target.observation.display.key,
+          previousObservation: target.observation,
+          signal,
+        },
+      );
+    if (options.action !== "focus" || !result.success || result.wasAlreadyFocused) {
+      return result;
+    }
+    const labelText =
+      selection.matchedElement !== result.element ? selection.matchedElement?.text : undefined;
+    result.focusVerified = this.verifyFocusedInputTarget(
+      options,
+      result.element,
+      result.observation,
+      labelText,
+      result.selectedElement?.indexInMatches,
+    );
+    if (!result.focusVerified) {
+      result.success = false;
+      result.error = `Failed to confirm focus on editable input ${this.describeFocusTarget(result.element, options)}`;
+    }
+    return result;
   }
 
   private async executeOnDisplay(
@@ -2847,9 +2931,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             "textAny with multiple values is not supported with `display` yet",
           );
         }
-        if (options.action === "focus") {
-          throw new ActionableError("focus is not supported with `display` yet");
-        }
         const target = await prepareTargetDisplayAction(
           this.device,
           options.display,
@@ -2860,15 +2941,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           this.displayTransitionReader,
         );
         if (this.device.platform === "android") {
-          return await this.observedInteraction(
-            () => this.executeOnAndroidDisplay(options, target, signal),
-            {
-              changeExpected: false,
-              display: target.observation.display.key,
-              previousObservation: target.observation,
-              signal,
-            },
-          );
+          return await this.observedAndroidDisplayInteraction(options, { target, signal });
         }
       } catch (error) {
         logger.warn(`tapOn display routing failed: ${errorMessage(error)}`, error);

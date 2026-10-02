@@ -1013,9 +1013,9 @@ final class CommandHandler: CommandHandling {
         perf.serial("handlePressKey")
         defer { perf.end() }
 
-        let outcome = try await performContextCheckedGesture(expected: request.frameContext) {
-            try self.tracked("pressKey") {
-                try self.gesturePerformer.pressKeyOutcome(key: request.key, modifiers: request.modifiers)
+        let outcome = try await performContextCheckedGestureAsync(expected: request.frameContext) {
+            try await self.trackedAsync("pressKey") {
+                try await self.gesturePerformer.pressKeyOutcome(key: request.key, modifiers: request.modifiers)
             }
         }
 

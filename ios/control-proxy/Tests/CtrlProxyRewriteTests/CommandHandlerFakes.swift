@@ -80,14 +80,14 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var keyVerified: Bool?
     var keyWarning: String?
 
-    func pressKey(key: String, modifiers: [String]) throws -> Bool? {
+    func pressKey(key: String, modifiers: [String]) async throws -> Bool? {
         if let keyError { throw keyError }
         keyCalls.append((key, modifiers))
         return keyVerified
     }
 
-    func pressKeyOutcome(key: String, modifiers: [String]) throws -> PressKeyOutcome {
-        try PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers), warning: keyWarning)
+    func pressKeyOutcome(key: String, modifiers: [String]) async throws -> PressKeyOutcome {
+        try await PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers), warning: keyWarning)
     }
 
     func tap(x _: Double, y _: Double, duration _: TimeInterval) throws { tapCalls += 1 }

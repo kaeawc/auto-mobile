@@ -1,8 +1,9 @@
 import Foundation
 
 /// Keyboard polling stays in the caller's task and yields the main actor between probes.
-/// Both waits retain their polling cadence and probe at the deadline edge before reporting failure.
-/// A hierarchy poll can interleave during the sleep, so the focus deadline edge re-probes.
+/// Focus, visibility, close, and destructive-key post-condition waits use an injected monotonic clock.
+/// Each retains its cadence and probes after a sleep reaches or overruns the deadline.
+/// Close sleeps are bounded by both the attempt and the whole-action budget.
 @MainActor
 enum KeyboardWait {
     struct FocusResult: Sendable {
@@ -71,5 +72,59 @@ enum KeyboardWait {
             visible = try probe()
         }
         return visible
+    }
+
+    /// Next close poll, bounded by both the current attempt and the whole action.
+    nonisolated static func closePollDelay<I: InstantProtocol>(
+        now: I,
+        attemptDeadline: I,
+        closeDeadline: I
+    )
+        -> Duration? where I.Duration == Duration
+    {
+        let remaining = now.duration(to: min(attemptDeadline, closeDeadline))
+        return remaining > .zero ? min(.milliseconds(100), remaining) : nil
+    }
+
+    static func close<C: Clock>(
+        clock: C,
+        closeDeadline: C.Instant,
+        probe: () throws -> Bool
+    )
+        async throws -> Bool where C.Duration == Duration
+    {
+        try Task.checkCancellation()
+        let attemptDeadline = min(clock.now.advanced(by: .milliseconds(600)), closeDeadline)
+        // Visibility is checked before the budget, including after the final sleep.
+        while true {
+            try Task.checkCancellation()
+            if try !probe() { return true }
+            guard let delay = closePollDelay(
+                now: clock.now, attemptDeadline: attemptDeadline, closeDeadline: closeDeadline
+            ) else { return false }
+            try Task.checkCancellation()
+            try await clock.sleep(for: delay)
+            try Task.checkCancellation()
+        }
+    }
+
+    static func destructivePostCondition<C: Clock>(
+        clock: C,
+        probe: () throws -> Bool
+    )
+        async throws -> Bool where C.Duration == Duration
+    {
+        try Task.checkCancellation()
+        let deadline = clock.now.advanced(by: .seconds(1))
+        while clock.now < deadline {
+            try Task.checkCancellation()
+            if try probe() { return true }
+            try Task.checkCancellation()
+            try await clock.sleep(for: .milliseconds(50))
+            try Task.checkCancellation()
+        }
+        // This is also the caller's final exists/value read for timeout diagnostics.
+        try Task.checkCancellation()
+        return try probe()
     }
 }

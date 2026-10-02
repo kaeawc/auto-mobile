@@ -1314,7 +1314,12 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
       }
     }
 
-    if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
+    if (
+      shouldResolveDevice &&
+      sessionUuid &&
+      !(name === "observe" && args.display === "all") &&
+      DaemonState.getInstance().isInitialized()
+    ) {
       const sessionManager = DaemonState.getInstance().getSessionManager();
       const observedHierarchy = getObservedHierarchy(name, response);
       if (observedHierarchy) {

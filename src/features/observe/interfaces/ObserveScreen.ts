@@ -24,7 +24,7 @@ export interface ObserveScreenExecuteOptions {
   /** Per-call override; omitted reads the env and persisted flag. */
   screenshot?: ScreenshotMode;
   screenshotOptions?: ScreenshotEncodingOptions;
-  /** Physical display panel key or role; "active" follows focus. */
+  /** Physical panel key or role; "active" follows focus, Android "all" adds panel observations. */
   display?: string;
   /** Skip screenshot-dependent accessibility auditing for intermediate observations. */
   skipAccessibilityAudit?: boolean;

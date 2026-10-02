@@ -12,7 +12,7 @@ the exact arguments supported by your connection.
 ## Observe & navigate
 
 `observe` accepts an optional `display` panel key, a panel role (`inner`,
-`cover`, `rear`, or `external`), or `"active"`. With no argument, it follows
+`cover`, `rear`, or `external`), `"active"`, or opt-in Android `"all"`. With no argument, it follows
 the focused window's panel when available, then the current posture's default
 panel. The returned `display` stamp identifies the panel actually observed.
 For Android it uses the physical panel key from the hierarchy's `panelUniqueId`
@@ -21,9 +21,33 @@ or mapped `displayId`; for iOS it uses the matched simulator screen name. Its
 `posture` when available; iOS and single-panel devices report `unknown`.
 When inventory has two or more panels, `otherDisplays` lists each remaining
 panel's `key`, `role`, and pixel `size` (`width`, `height`).
-`display: "all"` is not supported yet. Android routes the hierarchy and
-screenshot reads to the selected display; on iOS, only the currently live
-simulator panel can be observed.
+Android routes explicit hierarchy and screenshot reads to the selected display;
+on iOS, only the currently live simulator panel can be observed.
+
+`observe({ display: "all" })` opts into the proposed additive shape for #8256
+(owner confirmation is pending): the top level retains the ordinary active-panel
+observation, and `displays` contains every inventory panel, including the active
+one. Each entry has `display`, `screenSize`, `freshness`, and the requested
+`viewHierarchy` or `skeleton`/`context` projection (including keyboard, capture
+truncation metadata, and `observeScope` when present). Panels are read sequentially within the observe
+deadline (the existing 15-second hierarchy budget when no transport deadline is
+supplied). Unavailable panels remain in the list with a typed freshness reason;
+panels left after the deadline carry `request_timed_out`.
+
+With a one-panel inventory, `displays` contains that panel. Without inventory
+(including ordinary single-screen discovery), `displays` is omitted and no new
+field is added. `waitFor`, `raw: true`, and `includeScreenshotImage: true` are
+rejected with `"all"`; use a separate single-panel observe. iOS rejects `"all"`.
+The active entry may include the normal settled `screenshotPath`; extra-panel
+screenshot paths are omitted to avoid overwriting shared screenshot state.
+Session-less `deviceId` reads support `"all"` with the same read-only service
+access as explicit-panel reads; they never start or recover a service.
+
+An aggregate read does not update observation caches, session baselines,
+snapshot references, or display-transition fences. Observe one explicit panel
+before acting on it; `"all"` is an observe selector only. The ordinary output
+size limit still applies: a large aggregate is stored intact in a tool-output
+artifact and the response supplies its artifact pointer.
 
 `tapOn`, `tapAt`, `swipeOn`, `pinchOn`, `dragAndDrop`, and `sendKeys` accept the
 same optional `display` selector. First observe the target panel, then pass the

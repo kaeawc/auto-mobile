@@ -773,6 +773,18 @@ describe("observeResultSchema: every bounds site is the advertised union (#3025)
     if (properties) {
       delete properties.skeleton;
       delete properties.context;
+      // The opt-in per-panel projection has the same always-tuple rows.
+      const displayProperties = (
+        properties.displays as
+          | {
+              items?: { properties?: Record<string, unknown> };
+            }
+          | undefined
+      )?.items?.properties;
+      if (displayProperties) {
+        delete displayProperties.skeleton;
+        delete displayProperties.context;
+      }
     }
     const json = JSON.stringify(out);
     expect(json).not.toContain("prefixItems");

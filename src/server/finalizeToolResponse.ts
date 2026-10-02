@@ -1,4 +1,4 @@
-import type { ObserveResult } from "../models/ObserveResult";
+import type { ObserveResult, DisplayObservation } from "../models/ObserveResult";
 import {
   sanitizeObserveResult,
   projectSanitizedObserveSkeleton,
@@ -451,6 +451,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     : undefined;
   const renderedDisplayRevision =
     !ctx.internal &&
+    !(isObserveTool && ctx.args?.display === "all") &&
     (isObserveTool || !noObserveEnabled) &&
     isObserveResult(renderedObservation) &&
     typeof renderedObservation.displayRevision === "number"
@@ -461,7 +462,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
     // strips the observe tool itself) and resets the diff baseline to it (#2761).
     const observeResult = payload as unknown as ObserveResult;
     const { uncapped, capped: sanitized } = sanitizedCopies(observeResult);
-    if (canDiff) {
+    if (canDiff && ctx.args?.display !== "all") {
       // Diff against the full sanitized tree, never the scoped/projected copy — the
       // next action must see real state, not what this observe payload was cropped
       // to (scope experiments #4344) or projected to (skeleton #4388).
@@ -500,6 +501,39 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       if (served.layoutWarnings) {
         served.layoutWarnings = capLayoutWarnings(served.layoutWarnings);
       }
+    }
+    if (observeResult.displays) {
+      served = {
+        ...served,
+        displays: observeResult.displays.map((entry) => {
+          const source: ObserveResult = {
+            observationId: observeResult.observationId,
+            updatedAt: observeResult.updatedAt,
+            ...entry,
+            systemInsets: entry.systemInsets ?? observeResult.systemInsets,
+          };
+          let panel = sanitizeObserveResult(source, cfg, ctx.cloneObservation);
+          if (resolveObserveProjection(ctx.args) === "skeleton") {
+            panel = projectSanitizedObserveSkeleton(panel, source);
+          } else if (scopeActive) {
+            panel = applyObserveScopeExperiments(panel, scopeConfig);
+          }
+          return {
+            display: panel.display,
+            screenSize: panel.screenSize,
+            freshness: entry.freshness,
+            ...copyDefinedFields(panel, [
+              "viewHierarchy",
+              "skeleton",
+              "context",
+              "keyboard",
+              "truncationReasons",
+              "screenshotPath",
+              "observeScope",
+            ]),
+          } satisfies DisplayObservation;
+        }),
+      };
     }
     attachObservationScreenshotUri(served);
     sanitizedPayload = served as unknown as Record<string, unknown>;

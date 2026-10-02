@@ -93,7 +93,13 @@ import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDi
 import { displayTransitions } from "./DisplayTransition";
 import { readFile } from "node:fs/promises";
 import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
-import { DisplaySelectionError, resolveTargetDisplay } from "./DisplaySelection";
+import {
+  assertAllDisplayObserveSupported,
+  DisplaySelectionError,
+  resolveTargetDisplay,
+} from "./DisplaySelection";
+import type { DisplayObservation } from "../../models/ObserveResult";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   observationScreenshotEvidence,
   screenshotFormatForPath,
@@ -799,7 +805,23 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
     screenshot: ScreenshotMode = "settled",
     screenshotOptions?: ScreenshotEncodingOptions,
+    timeoutMs?: number,
   ): Promise<ObserveResult> {
+    if (this.requestedDisplay === "all") {
+      return this.executeAllDisplays(
+        {
+          observerMode: true,
+          skipCache: true,
+          skipRecompositionTracking: true,
+          skipPerformanceAudit: true,
+          skipAccessibilityAudit: true,
+          screenshot: "none",
+          signal,
+          timeoutMs,
+        },
+        screenshot === "none" ? undefined : (screenshotOptions ?? {}),
+      );
+    }
     const result = await this.execute({
       observerMode: true,
       skipCache: true,
@@ -846,10 +868,11 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     signal?: AbortSignal,
     screenshotOptions?: ScreenshotEncodingOptions,
+    display = this.requestedDisplay,
   ): Promise<void> {
     result.screenshotCaptureAttempted = true;
     result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
-    const displayId = await this.resolveReadDisplayId(result, signal);
+    const displayId = await this.resolveReadDisplayId(result, signal, display);
     const options = { format: screenshotOptions?.format ?? "png", ...screenshotOptions, displayId };
     const capture =
       this.screenshotService instanceof TakeScreenshot
@@ -895,15 +918,12 @@ export class RealObserveScreen implements ObserveScreen {
   private async resolveReadDisplayId(
     result: ObserveResult,
     signal?: AbortSignal,
+    display = this.requestedDisplay,
   ): Promise<number | undefined> {
-    if (
-      this.device.platform !== "android" ||
-      !this.requestedDisplay ||
-      this.requestedDisplay === "active"
-    ) {
+    if (this.device.platform !== "android" || !display || display === "active") {
       return undefined;
     }
-    const panel = resolveTargetDisplay(this.device.displays, this.requestedDisplay, {});
+    const panel = resolveTargetDisplay(this.device.displays, display, {});
     const displayId = await this.observedAndroidDisplayCache.logicalIdForPanel(
       this.device,
       this.adb,
@@ -1006,8 +1026,145 @@ export class RealObserveScreen implements ObserveScreen {
    * Execute the observe command.
    */
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+    if ((options?.display ?? this.requestedDisplay) === "all") {
+      return this.executeAllDisplays(options);
+    }
+    return this.executeSingleDisplay(options);
+  }
+
+  private async executeAllDisplays(
+    options?: ObserveScreenExecuteOptions,
+    deviceReadScreenshot?: ScreenshotEncodingOptions,
+  ): Promise<ObserveResult> {
+    assertAllDisplayObserveSupported(this.device.platform);
+    // Reuse the existing hierarchy-capture budget; one deadline covers every panel.
+    const deadline = this.timer.now() + (options?.timeoutMs ?? 15000);
+    const active = await this.readAggregatePanel("active", options, deadline, deviceReadScreenshot);
+    const panels = this.device.displays?.panels;
+    if (!panels?.length) {
+      // Discovery omits single-screen inventory: retain exactly the ordinary result.
+      return active;
+    }
+    const displays: DisplayObservation[] = [];
+    for (const panel of panels) {
+      const observation =
+        panel.key === active.display.key
+          ? active
+          : await this.readAggregatePanel(
+              panel.key,
+              {
+                ...options,
+                // Extra screenshots would overwrite shared screenshot state. Only the
+                // normal active capture supplies a path; extras are hierarchy reads.
+                skipScreenshot: true,
+                skipPerformanceAudit: true,
+                skipAccessibilityAudit: true,
+                skipRecompositionTracking: true,
+              },
+              deadline,
+            );
+      const {
+        display,
+        screenSize,
+        viewHierarchy,
+        elements,
+        screenshotPath,
+        systemInsets,
+        insets,
+        activeWindow,
+      } = observation;
+      displays.push({
+        display,
+        screenSize,
+        viewHierarchy,
+        elements,
+        screenshotPath,
+        systemInsets,
+        insets,
+        activeWindow,
+        freshness:
+          observation.freshness ?? computeFreshness({ now: this.timer.now(), unavailable: true }),
+      });
+    }
+    return { ...active, displays };
+  }
+
+  private async readAggregatePanel(
+    display: string,
+    options: ObserveScreenExecuteOptions | undefined,
+    deadline: number,
+    deviceReadScreenshot?: ScreenshotEncodingOptions,
+  ): Promise<ObserveResult> {
+    const remaining = Math.max(0, deadline - this.timer.now());
+    const controller = new AbortController();
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    let timedOut = remaining === 0;
+    try {
+      options?.signal?.throwIfAborted();
+      if (timedOut) {
+        throw new DisplaySelectionError("Observe deadline reached; retry this panel separately.");
+      }
+      return await raceWithDeadline(
+        async () => {
+          const result = await this.executeSingleDisplay(
+            {
+              ...options,
+              display: display === "active" ? undefined : display,
+              signal,
+              timeoutMs: remaining,
+              skipCache: true,
+            },
+            true,
+          );
+          if (deviceReadScreenshot !== undefined) {
+            await this.captureDeviceReadScreenshot(result, signal, deviceReadScreenshot, display);
+          }
+          return result;
+        },
+        {
+          timer: this.timer,
+          timeoutMs: remaining,
+          signal: options?.signal,
+          label: `Observe display ${display}`,
+          onTimeout: () => {
+            timedOut = true;
+            controller.abort();
+          },
+        },
+      );
+    } catch (error) {
+      options?.signal?.throwIfAborted();
+      logger.warn(`[ObserveScreen] Display ${display} unavailable: ${describeError(error)}`, error);
+      const result = this.createBaseResult();
+      const panel = resolveTargetDisplay(this.device.displays, display, {
+        focusedPanelKey: displayTransitions.observedPanel(this.device.deviceId)?.key,
+      });
+      result.display = {
+        ...result.display,
+        key: panel.key,
+        role: panel.role,
+        generation: displayTransitions.identityRevision(this.device.deviceId),
+      };
+      result.screenSize = { ...panel.sizePx, units: "physical-pixels" };
+      result.freshness = computeFreshness({
+        now: this.timer.now(),
+        unavailable: true,
+        unavailableReason: timedOut ? "request_timed_out" : "unknown",
+        unavailableDetail: describeError(error),
+      });
+      return result;
+    }
+  }
+
+  private async executeSingleDisplay(
+    options?: ObserveScreenExecuteOptions,
+    preserveDisplayState = false,
+  ): Promise<ObserveResult> {
     const observerMode = options?.observerMode === true;
-    const displayRequest = options?.display ?? this.requestedDisplay;
+    const displayRequest =
+      options?.display ?? (this.requestedDisplay === "all" ? undefined : this.requestedDisplay);
     const queryOptions = options?.queryOptions;
     const perf = options?.perf ?? new NoOpPerformanceTracker();
     const skipWaitForFresh = options?.freshness
@@ -1180,6 +1337,7 @@ export class RealObserveScreen implements ObserveScreen {
         result.display = observedIosDisplay(this.device, result.viewHierarchy);
         if (
           !observerMode &&
+          !preserveDisplayState &&
           displayTransitions.revision(this.device.deviceId) === recordProvenance.revision
         ) {
           reconcileIosDisplayTransition(
@@ -1206,7 +1364,17 @@ export class RealObserveScreen implements ObserveScreen {
       } else if (this.device.displays?.panels.length) {
         const reportedId = result.viewHierarchy?.displayId;
         const panelUniqueId = result.viewHierarchy?.panelUniqueId;
-        if (requestedDisplayId !== undefined && typeof reportedId !== "number" && !panelUniqueId) {
+        if (
+          requestedDisplayId !== undefined &&
+          typeof reportedId !== "number" &&
+          !panelUniqueId &&
+          !(
+            preserveDisplayState &&
+            (result.viewHierarchy?.hierarchy?.error ||
+              result.viewHierarchy?.hierarchy?.unavailableReason ||
+              (result.viewHierarchy?.ctrlProxyIncomplete && !result.viewHierarchy.hierarchy?.node))
+          )
+        ) {
           throw new DisplaySelectionError(
             "CtrlProxy APK too old for display routing; update it and retry the observation.",
           );
@@ -1260,6 +1428,7 @@ export class RealObserveScreen implements ObserveScreen {
         result.display = { ...result.display, key: panel.key, role: panel.role };
         if (
           !explicitlyRouted &&
+          !preserveDisplayState &&
           !observerMode &&
           displayTransitions.revision(this.device.deviceId) === recordProvenance.revision
         ) {
@@ -1385,6 +1554,8 @@ export class RealObserveScreen implements ObserveScreen {
             ? result.viewHierarchy.fresh
             : undefined,
         unavailable:
+          (preserveDisplayState &&
+            result.viewHierarchy?.hierarchy?.unavailableReason !== undefined) ||
           !hierarchyPlatformValid ||
           result.viewHierarchy?.hierarchy === undefined ||
           result.viewHierarchy?.hierarchy?.error !== undefined ||
@@ -1434,6 +1605,7 @@ export class RealObserveScreen implements ObserveScreen {
         displayTransitions.revision(this.device.deviceId) !== recordProvenance.revision;
       const geometryTransition =
         !observerMode &&
+        !preserveDisplayState &&
         !explicitlyRouted &&
         displayTransitions.record(
           this.device.deviceId,
@@ -1471,6 +1643,7 @@ export class RealObserveScreen implements ObserveScreen {
       if (
         !staleDisplay &&
         !observerMode &&
+        !preserveDisplayState &&
         !options?.skipCache &&
         !options?.skipRecompositionTracking
       ) {
@@ -1500,7 +1673,7 @@ export class RealObserveScreen implements ObserveScreen {
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
     } catch (err) {
-      if (observerMode) {
+      if (observerMode || preserveDisplayState) {
         throw toActionableError(err, `Unable to observe device ${this.device.deviceId}`);
       }
       if (

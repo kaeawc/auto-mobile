@@ -203,6 +203,162 @@ describe("finalizeToolResponse", () => {
     serverConfig.setObserveResultIncludeElementsEnabled(originalIncludeElements);
   });
 
+  test.each(["full", "skeleton"] as const)(
+    "all panels use the %s projection and preserve the default top level",
+    (project) => {
+      const observation = loadAndroidHomeObserve().observe;
+      observation.display = { key: "cover", role: "cover", posture: "unknown", generation: 0 };
+      observation.deviceId = "android";
+      observation.observationId = "capture";
+      observation.freshness = { isFresh: true };
+      const ordinary = structuredPayload(
+        finalizeToolResponse(createStructuredToolResponse(observation), {
+          name: "observe",
+          args: { project },
+        }),
+      );
+      const entry = {
+        display: observation.display,
+        screenSize: observation.screenSize,
+        freshness: observation.freshness,
+        viewHierarchy: observation.viewHierarchy,
+        elements: observation.elements,
+      };
+      const aggregate = {
+        ...observation,
+        displays: [
+          entry,
+          { ...entry, display: { ...entry.display, key: "external", role: "external" as const } },
+        ],
+      };
+      const original = JSON.stringify(aggregate);
+      const { displays, ...topLevel } = structuredPayload(
+        finalizeToolResponse(createStructuredToolResponse(aggregate), {
+          name: "observe",
+          args: { project, display: "all" },
+        }),
+      );
+      expect(JSON.stringify(topLevel)).toBe(JSON.stringify(ordinary));
+      expect(displays).toHaveLength(2);
+      expect(displays?.[0].elements).toBeUndefined();
+      if (project === "skeleton") {
+        expect(displays?.[0].viewHierarchy).toBeUndefined();
+        expect(displays?.[0].skeleton).toEqual(ordinary.skeleton);
+        expect(displays?.[1].skeleton).toEqual(ordinary.skeleton);
+      } else {
+        expect(displays?.[0].viewHierarchy).toEqual(ordinary.viewHierarchy);
+      }
+      expect(JSON.stringify(aggregate)).toBe(original);
+    },
+  );
+
+  test("each scoped panel uses its own capture metadata", () => {
+    const active = loadAndroidHomeObserve().observe;
+    const external = {
+      ...loadAndroidHomeObserve().observe,
+      activeWindow: { ...active.activeWindow!, appId: "external.app" },
+      systemInsets: { top: 100, bottom: 200, left: 0, right: 0 },
+      insets: undefined,
+      display: {
+        key: "external",
+        role: "external" as const,
+        posture: "unknown" as const,
+        generation: 0,
+      },
+      freshness: { isFresh: true },
+    };
+    const args = { project: "full", scope: { region: true } };
+    const expected = structuredPayload(
+      finalizeToolResponse(createStructuredToolResponse(external), {
+        name: "observe",
+        args,
+      }),
+    );
+    const entry = {
+      display: external.display,
+      screenSize: external.screenSize,
+      viewHierarchy: external.viewHierarchy,
+      freshness: external.freshness,
+      elements: external.elements,
+      systemInsets: external.systemInsets,
+      insets: external.insets,
+      activeWindow: external.activeWindow,
+    };
+    const aggregate = { ...active, displays: [entry] };
+    const output = structuredPayload(
+      finalizeToolResponse(createStructuredToolResponse(aggregate), {
+        name: "observe",
+        args: { ...args, display: "all" },
+      }),
+    );
+    expect(output.displays?.[0].viewHierarchy).toEqual(expected.viewHierarchy);
+    expect(output.displays?.[0].observeScope).toEqual(expected.observeScope);
+    expect(output.displays?.[0].systemInsets).toBeUndefined();
+    expect(output.displays?.[0].activeWindow).toBeUndefined();
+  });
+
+  test("an oversized all result retains every projected panel in the artifact", () => {
+    const observation = loadAndroidHomeObserve().observe;
+    observation.observationId = "capture";
+    observation.deviceId = "android";
+    observation.display = { key: "cover", role: "cover", posture: "unknown", generation: 0 };
+    const entry = {
+      display: observation.display,
+      screenSize: observation.screenSize,
+      viewHierarchy: observation.viewHierarchy,
+      freshness: { isFresh: true },
+    };
+    observation.displays = Array.from({ length: 12 }, (_, index) => ({
+      ...entry,
+      display: { ...entry.display, key: String(index) },
+    }));
+    const writer = new FakeObservationArtifactWriter();
+    const response = finalizeToolResponse(createStructuredToolResponse(observation), {
+      name: "observe",
+      args: { display: "all", project: "full" },
+      artifactWriter: writer,
+      artifactMode: "oversized",
+    });
+    expect(writer.writes).toHaveLength(1);
+    const written = writer.writes[0].data as ObserveResult;
+    expect(written.displays).toHaveLength(12);
+    expect(written.displays?.at(-1)?.display.key).toBe("11");
+    expect(written.displays?.[0].viewHierarchy).toEqual(written.viewHierarchy);
+    expect(structuredPayload(response)).toHaveProperty("artifact");
+    expect(Buffer.byteLength(JSON.stringify(structuredPayload(response)))).toBeLessThan(
+      DEFAULT_OBSERVATION_INLINE_MAX_BYTES,
+    );
+  });
+
+  test("all never replaces the session baseline or rendered display fence", () => {
+    const original = serverConfig.isActionsDiffObserveEnabled();
+    const writes: string[] = [];
+    const store = {
+      get: () => undefined,
+      set: () => {
+        writes.push("baseline");
+      },
+      setDisplayRevision: () => {
+        writes.push("fence");
+      },
+    };
+    const observation = { ...loadAndroidHomeObserve().observe, displayRevision: 9 };
+    try {
+      for (const diff of [false, true]) {
+        serverConfig.setActionsDiffObserveEnabled(diff);
+        finalizeToolResponse(createStructuredToolResponse(observation), {
+          name: "observe",
+          args: { display: "all" },
+          sessionUuid: "owner",
+          baselineStore: store,
+        });
+      }
+      expect(writes).toEqual([]);
+    } finally {
+      serverConfig.setActionsDiffObserveEnabled(original);
+    }
+  });
+
   test("records only caller-visible observation revisions and strips the internal stamp", () => {
     const originalDiff = serverConfig.isActionsDiffObserveEnabled();
     const originalNoObserve = serverConfig.isActionsNoObserveEnabled();

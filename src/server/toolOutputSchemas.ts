@@ -1299,6 +1299,19 @@ const perfSnapshotSchema = z.object({
   startup: z.object({ displayedMs: z.number(), ageMs: z.number() }).nullable(),
 });
 
+export const displayObservationSchema = z.object({
+  display: observationDisplaySchema.nonoptional(),
+  screenSize: screenSizeSchema,
+  viewHierarchy: viewHierarchyResultSchema.optional(),
+  skeleton: z.array(skeletonElementSchema).optional(),
+  context: z.array(skeletonElementSchema).optional(),
+  keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
+  truncationReasons: z.array(z.string()).optional(),
+  screenshotPath: z.string().optional(),
+  observeScope: observeScopeMetadataSchema.optional(),
+  freshness: freshnessSchema,
+});
+
 export const observeResultSchema = z
   .object({
     keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
@@ -1306,6 +1319,12 @@ export const observeResultSchema = z
     deviceId: observationDeviceIdSchema,
     display: observationDisplaySchema,
     otherDisplays: otherDisplaysSchema,
+    displays: z
+      .array(displayObservationSchema)
+      .optional()
+      .describe(
+        "Opt-in Android display:all observations, including the active panel. Proposed additive shape; absent on default reads or without inventory. Each panel uses the requested projection; unavailable panels retain freshness reasons.",
+      ),
     observationScreenshotResourceUri: observationScreenshotResourceUriSchema,
     snapshotReference: snapshotReferenceSchema,
     snapshotReferenceUnavailable: snapshotReferenceUnavailableSchema,

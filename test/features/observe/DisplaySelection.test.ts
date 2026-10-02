@@ -62,7 +62,7 @@ describe("resolveTargetDisplay", () => {
       resolveTargetDisplay({ ...displays, panels: displays.panels.slice(0, 2) }, "rear", {}),
     ).toThrow(/Available panels:.*inner-id.*cover-id/);
     expect(() => resolveTargetDisplay(displays, "all", {})).toThrow(
-      /all.*not supported yet.*Choose one panel/,
+      /all.*not supported for single-panel targeting.*Choose one panel/,
     );
   });
 });

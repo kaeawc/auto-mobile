@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import {
   DefaultAfterToolCallHandler,
@@ -20,6 +20,7 @@ import {
 } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
 import {
   getMcpRecordingStatus,
@@ -457,6 +458,34 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         },
       },
     },
+  });
+
+  test("all does not replace the session's last hierarchy", async () => {
+    const daemon = DaemonState.getInstance();
+    const originalManager = Reflect.get(daemon, "sessionManager");
+    const writes: string[] = [];
+    Reflect.set(daemon, "sessionManager", {
+      setLastHierarchy: () => writes.push("hierarchy"),
+    });
+    const initialized = spyOn(daemon, "isInitialized").mockReturnValue(true);
+    const handler = new DefaultAfterToolCallHandler(() => new FakeObservationArtifactWriter());
+    try {
+      await handler.handle({
+        name: "observe",
+        args: { display: "all" },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse(makeObservePayload()),
+        sessionUuid: "owner",
+        shouldResolveDevice: true,
+        timer: new FakeTimer(),
+        toolStartMs: 0,
+      });
+      expect(writes).toEqual([]);
+    } finally {
+      initialized.mockRestore();
+      Reflect.set(daemon, "sessionManager", originalManager);
+    }
   });
 
   const makeLargeOcclusionHeavyObservePayload = () => {

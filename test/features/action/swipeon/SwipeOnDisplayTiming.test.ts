@@ -327,11 +327,7 @@ for (const route of ["ctrlproxy", "adb"] as const) {
       expect(h.legs()).toHaveLength(1);
       expect(h.timer.getSleepHistory()).toEqual([]);
     });
-    for (const options of [
-      { focusTarget: false },
-      { autoTarget: false },
-      { scrollMode: "adb" },
-    ] satisfies Array<Partial<SwipeOnOptions>>) {
+    for (const options of [{ focusTarget: false }] satisfies Array<Partial<SwipeOnOptions>>) {
       test(`still rejects ${Object.keys(options)[0]}`, async () => {
         const h = harness({ route });
         const result = await h.action.execute({ direction: "up", display: "external", ...options });

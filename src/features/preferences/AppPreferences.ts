@@ -1,7 +1,14 @@
-import { iosPreferenceType, type IosPreferenceType } from "./IosPreferenceTypes";
+import {
+  IOS_SDK_REDACTED_VALUE,
+  iosPreferenceType,
+  type IosPreferenceType,
+} from "./IosPreferenceTypes";
 import { parseIosUserDefaultsPlist } from "./IosUserDefaultsPlist";
 import { join } from "node:path";
-import { IOSCtrlProxyClient } from "../observe/ios/IOSCtrlProxyClient";
+import {
+  CtrlProxyServicePortChangedError,
+  IOSCtrlProxyClient,
+} from "../observe/ios/IOSCtrlProxyClient";
 import { PlistClient, type PlistReader } from "../../utils/ios-cmdline-tools/PlistClient";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { toActionableError } from "../../models/ActionableError";
@@ -64,6 +71,10 @@ export interface PreferenceResult {
   type?: PreferenceResultType;
   found: boolean;
   verified?: boolean;
+  /** SDK sentinel: present but hidden; value is null and never compared on write. */
+  redacted?: true;
+  /** SDK collections only; descriptions retain raw text with type unknown. */
+  valueFormat?: "canonical-json" | "sdk-description";
   warning?: string;
   /** iOS userDefaults only: standard, custom suite, or global domain name. */
   resolvedStore?: string;
@@ -245,6 +256,14 @@ export class AppPreferences {
     readBack: PreferenceResult,
     iosStore?: IosPreferenceStore,
   ): PreferenceResult {
+    if (readBack.redacted) {
+      return {
+        ...readBack,
+        verified: false,
+        warning:
+          "The value was written; value redacted by the SDK so not compared. Read-back equality could not be verified.",
+      };
+    }
     const parsedReadBackValue = readBack.found
       ? parsePreferenceValue(stringValue(readBack.value), input.type)
       : null;
@@ -472,7 +491,10 @@ export class AppPreferences {
         IOS_PREFERENCE_SDK_TIMEOUT_MS,
       );
       const mapped = entry ? iosSdkPreferenceValue(entry) : null;
-      result = this.result(input, entry !== null, mapped?.value ?? null, mapped?.type);
+      result = {
+        ...this.result(input, entry !== null, mapped?.value ?? null, mapped?.type),
+        ...mapped,
+      };
     } else if (store.kind === "container-plist") {
       result = store.unavailableGroup
         ? { ...this.result(input, false, null), warning: IOS_GROUP_SUITE_WARNING }
@@ -845,6 +867,9 @@ export function isIosPreferenceSdkUnavailable(error: unknown): boolean {
   // Read-only policy: known transport/deadline/capability signals. Never authorize
   // retries of writes, app mismatch, mutation refusals, or unknown SDK faults.
   return (
+    error instanceof CtrlProxyServicePortChangedError ||
+    // Compatibility with pending requests from clients emitting the original Error.
+    message === "CtrlProxy service port changed" ||
     message === "Failed to connect to CtrlProxy" ||
     /^(?:Get preference timeout after \d+ms|iOS UserDefaults request timed out after \d+ms\.)$/.test(
       message,
@@ -865,12 +890,28 @@ export function isIosPreferenceSdkUnavailable(error: unknown): boolean {
   );
 }
 
-function iosSdkPreferenceValue(entry: KeyValueEntry): {
-  value: PreferenceResultValue | null;
-  type: PreferenceResultType;
-} {
+function iosSdkPreferenceValue(
+  entry: KeyValueEntry,
+): Pick<PreferenceResult, "value" | "type" | "redacted" | "valueFormat" | "warning"> {
   const type = iosPreferenceType(entry.type);
   const value = entry.value;
+  // SDK-only: the protocol cannot distinguish a real STRING "[REDACTED]" from
+  // its sentinel. Treat it as redacted for every type before scalar conversion.
+  if (value === IOS_SDK_REDACTED_VALUE) {
+    return { type, value: null, redacted: true };
+  }
+  if (value !== null && (type === "array" || type === "dictionary")) {
+    if (isCanonicalSdkCollection(value, type)) {
+      return { type, value, valueFormat: "canonical-json" };
+    }
+    return {
+      type: "unknown",
+      value,
+      valueFormat: "sdk-description",
+      warning:
+        "The SDK could not encode this collection as JSON (nested Date/Data values can cause this). The raw SDK description may be lossy; the container-plist route, used when the SDK is not connected, returns recursive JSON with ISO/base64 leaves.",
+    };
+  }
   return {
     type,
     value:
@@ -884,6 +925,23 @@ function iosSdkPreferenceValue(entry: KeyValueEntry): {
               ? parseFloatValue(value)
               : value,
   };
+}
+
+// UserDefaultsInspector.encode uses JSONSerialization or Swift interpolation.
+// Interpolated Optional(...), [key: value], and NSDictionary { key = value; }
+// descriptions fail JSON parsing/shape checks. Do not reject those words inside
+// valid JSON strings: they can be legitimate collection contents.
+function isCanonicalSdkCollection(value: string, type: "array" | "dictionary"): boolean {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return type === "array"
+      ? Array.isArray(parsed)
+      : parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+  } catch (error) {
+    // Swift interpolation is an expected fallback; callers expose the raw description.
+    logger.debug("iOS SDK collection is not canonical JSON", error);
+    return false;
+  }
 }
 
 function isStandardIosStore(input: GetPreferenceInput): boolean {

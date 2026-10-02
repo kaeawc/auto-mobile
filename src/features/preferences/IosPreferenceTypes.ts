@@ -1,3 +1,6 @@
+// Matches StorageInspectionPolicy.swift and SdkPreferenceRouteHandler.swift.
+export const IOS_SDK_REDACTED_VALUE = "[REDACTED]";
+
 export type IosPreferenceType =
   | "string"
   | "bool"

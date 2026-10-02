@@ -73,7 +73,7 @@ function nodeValue(node: PlistNode): PlistValue {
     case "integer":
       return plistInteger(text);
     case "real":
-      return Number(text);
+      return plistReal(text);
     case "true":
       return true;
     case "false":
@@ -95,4 +95,24 @@ function plistInteger(text: string): number | string {
   }
   const value = Number(text);
   return Number.isSafeInteger(value) ? value : text.trim();
+}
+
+// JSON cannot carry NaN/Infinity; preserve these as strings, including nested leaves.
+// plutil emits nan/+infinity/-infinity; accept the short input spellings too.
+function plistReal(text: string): number | string {
+  const normalized = text.trim().toLowerCase();
+  if (normalized === "nan") {
+    return "nan";
+  }
+  if (["inf", "+inf", "infinity", "+infinity"].includes(normalized)) {
+    return "inf";
+  }
+  if (["-inf", "-infinity"].includes(normalized)) {
+    return "-inf";
+  }
+  const value = Number(text);
+  if (!Number.isFinite(value)) {
+    throw new ActionableError("Invalid real in iOS UserDefaults plist.");
+  }
+  return value;
 }

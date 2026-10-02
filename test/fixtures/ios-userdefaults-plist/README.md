@@ -24,7 +24,45 @@ mkdir -p scratch/ios-userdefaults-fixtures test/fixtures/ios-userdefaults-plist
 /usr/bin/plutil -insert data -data aGVsbG8= scratch/ios-userdefaults-fixtures/source.plist
 /usr/bin/plutil -insert array -json '[1,"two",true]' scratch/ios-userdefaults-fixtures/source.plist
 /usr/bin/plutil -insert dictionary -json '{"nested":3,"text":"three"}' scratch/ios-userdefaults-fixtures/source.plist
-/usr/bin/plutil -convert xml1 -o - scratch/ios-userdefaults-fixtures/source.plist > test/fixtures/ios-userdefaults-plist/xml-origin.xml
+/usr/bin/plutil -convert xml1 -o - scratch/ios-userdefaults-fixtures/source.plist > test/fixtures/ios-userdefaults-plist/xml-origin.plist
 /usr/bin/plutil -convert binary1 -o scratch/ios-userdefaults-fixtures/binary.plist scratch/ios-userdefaults-fixtures/source.plist
-/usr/bin/plutil -convert xml1 -o - scratch/ios-userdefaults-fixtures/binary.plist > test/fixtures/ios-userdefaults-plist/binary-origin.xml
+/usr/bin/plutil -convert xml1 -o - scratch/ios-userdefaults-fixtures/binary.plist > test/fixtures/ios-userdefaults-plist/binary-origin.plist
+```
+
+The XML-format captures use `.plist` so the generic `*.xml` validation gate
+does not attempt to fetch Apple's network DTD. Captured bytes are unchanged.
+
+## Non-finite reals
+
+Host `plutil -insert ... -float nan/inf/-inf` succeeded but silently emitted
+`<real>0.0</real>` for all three keys. These scratch-only probes were:
+
+```bash
+mkdir -p scratch/third-pass
+/usr/bin/plutil -create xml1 scratch/third-pass/non-finite-source.plist
+/usr/bin/plutil -insert nan -float nan scratch/third-pass/non-finite-source.plist
+/usr/bin/plutil -insert positiveInfinity -float inf scratch/third-pass/non-finite-source.plist
+/usr/bin/plutil -insert negativeInfinity -float -inf scratch/third-pass/non-finite-source.plist
+/usr/bin/plutil -convert xml1 -o - scratch/third-pass/non-finite-source.plist
+```
+
+The additional fixtures are **captured plutil output from constructed XML input**,
+not a simulator capture or direct hand-authored output. The host accepted `nan`,
+`inf`, and `-inf` in XML and emitted `nan`, `+infinity`, and `-infinity` respectively.
+A binary round trip retained all three spellings, including nested array values.
+Exact capture commands:
+
+```bash
+cat > scratch/third-pass/non-finite-hand-input.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>nan</key><real>nan</real>
+<key>positiveInfinity</key><real>inf</real>
+<key>negativeInfinity</key><real>-inf</real>
+<key>nested</key><array><real>nan</real><real>inf</real><real>-inf</real></array>
+</dict></plist>
+EOF
+/usr/bin/plutil -convert xml1 -o - scratch/third-pass/non-finite-hand-input.plist > test/fixtures/ios-userdefaults-plist/non-finite-origin.plist
+/usr/bin/plutil -convert binary1 -o scratch/third-pass/non-finite-hand-binary.plist scratch/third-pass/non-finite-hand-input.plist
+/usr/bin/plutil -convert xml1 -o - scratch/third-pass/non-finite-hand-binary.plist > test/fixtures/ios-userdefaults-plist/non-finite-binary-origin.plist
 ```

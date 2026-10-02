@@ -687,7 +687,14 @@ an SDK write is attempted, failures never cause a container write; ambiguous
 failures report that the write may or may not have been applied. Inspection-disabled
 and mutation-refused writes surface errors, preserving the app's opt-in policy.
 Read-back verification uses the successful write route and reports the type read
-back, while comparing according to the requested input type.
+back, while comparing according to the requested input type. SDK-redacted reads
+return `found: true`, `redacted: true`, `value: null`, and the original canonical
+type. This applies to every SDK type, including STRING: the protocol cannot
+distinguish a real string equal to the redaction sentinel from hidden content.
+A successful write with redacted read-back returns `success: true`, `redacted: true`,
+`verified: false`, and a warning that the value was written but not compared;
+`verified: false` means equality was not established, not that the write failed.
+Container-plist and defaults reads treat the sentinel as an ordinary string.
 
 The container route reads `Library/Preferences/<suite>.plist` for custom suites
 and `<appId>.plist` for the standard store, preserving the bundle ID's casing.
@@ -705,7 +712,16 @@ cached state until the app restarts. `verified: true` proves file content only.
 Canonical types are `string`, `bool`, `int`, `float` (SDK FLOAT/DOUBLE and plist
 real), `date`, `data`, `array`, `dictionary`, and `unknown` for unrecognized SDK
 types. Unsafe integers retain their exact decimal string with type `int`. Date
-and data values are ISO and base64 strings; arrays/dictionaries are JSON strings.
+and data values are ISO and base64 strings. Plist non-finite reals retain type
+`float` and values `"nan"`, `"inf"`, or `"-inf"` so JSON does not turn them into null;
+these strings are also preserved recursively inside collections.
+Arrays/dictionaries are JSON strings. SDK collections that parse as their declared
+JSON shape carry `valueFormat: "canonical-json"`. If the SDK falls back to Swift
+interpolation (for example, nested Date/Data), the raw description is retained,
+`type` is `unknown`, and `valueFormat` is `"sdk-description"`, with a warning about
+lossy encoding. Reading via the container-plist route when the SDK is disconnected
+returns recursive JSON with ISO/base64 leaves. `valueFormat` is omitted for other
+values and routes.
 Android additionally retains `long` and `stringSet`.
 
 The optional iOS `resolvedStore` is a plain name: `standard` or the custom suite.

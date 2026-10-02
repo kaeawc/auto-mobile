@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
 import {
+  CtrlProxyServicePortChangedError,
   IOS_RUNNER_FEATURE_FLAGS,
   SdkCapabilityProbeSupersededError,
   getRequiredIosRunnerFeatureFlags,
@@ -3747,13 +3748,16 @@ describe("IOSCtrlProxyClient", function () {
         // Macrotask flush: ensure the request is registered before the port change.
         await new Promise((resolve) => setImmediate(resolve));
 
-        const requestManager = (testClient as any).requestManager as { getPendingCount(): number };
+        const requestManager = testClient["getRequestManager"]();
+        const cancel = spyOn(requestManager, "cancelAll");
         // Precondition: the request is genuinely in-flight before the port change.
         expect(requestManager.getPendingCount()).toBeGreaterThan(0);
 
         // Changing the service port on a live socket must FAIL the in-flight request
         // (cancelAll rejects it), not silently strand it in the pending map.
-        (testClient as any).updatePort(serverPort + 1);
+        testClient["updatePort"](serverPort + 1);
+        expect(cancel).toHaveBeenCalledWith(expect.any(CtrlProxyServicePortChangedError));
+        cancel.mockRestore();
 
         // cancelAll clears the pending map synchronously — nothing is stranded.
         expect(requestManager.getPendingCount()).toBe(0);

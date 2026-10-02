@@ -6,8 +6,12 @@ import {
   type IosPreferenceKeyValueClient,
   type PreferenceValueType,
 } from "../../../src/features/preferences/AppPreferences";
+import { IOS_SDK_REDACTED_VALUE } from "../../../src/features/preferences/IosPreferenceTypes";
 import { parseIosUserDefaultsPlist } from "../../../src/features/preferences/IosUserDefaultsPlist";
-import { IOSCtrlProxyClient } from "../../../src/features/observe/ios/IOSCtrlProxyClient";
+import {
+  CtrlProxyServicePortChangedError,
+  IOSCtrlProxyClient,
+} from "../../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { KeyValueEntry, KeyValueType } from "../../../src/features/storage/storageTypes";
 import type { PlistReader } from "../../../src/utils/ios-cmdline-tools/PlistClient";
 import { IOS_STORAGE_MUTATION_AUTHORIZATION_HINT } from "../../../src/server/storageSdkErrors";
@@ -29,11 +33,11 @@ const input = {
 } as const;
 const container = "/fake/app container";
 const fixtureXml = readFileSync(
-  new URL("../../fixtures/ios-userdefaults-plist/xml-origin.xml", import.meta.url),
+  new URL("../../fixtures/ios-userdefaults-plist/xml-origin.plist", import.meta.url),
   "utf8",
 );
 const fixtureBinary = readFileSync(
-  new URL("../../fixtures/ios-userdefaults-plist/binary-origin.xml", import.meta.url),
+  new URL("../../fixtures/ios-userdefaults-plist/binary-origin.plist", import.meta.url),
   "utf8",
 );
 
@@ -49,8 +53,8 @@ class FakeKeyValueClient implements IosPreferenceKeyValueClient {
     timeoutMs?: number;
   }> = [];
   entry: KeyValueEntry | null = null;
-  readError?: string;
-  writeError?: string;
+  readError?: string | Error;
+  writeError?: string | Error;
   onRead?: () => void;
   onWrite?: () => void;
   isConnected(): boolean {
@@ -65,7 +69,7 @@ class FakeKeyValueClient implements IosPreferenceKeyValueClient {
     this.calls.push({ operation: "get", appId, store, key, timeoutMs });
     this.onRead?.();
     if (this.readError) {
-      throw new Error(this.readError);
+      throw typeof this.readError === "string" ? new Error(this.readError) : this.readError;
     }
     return this.entry;
   }
@@ -80,7 +84,7 @@ class FakeKeyValueClient implements IosPreferenceKeyValueClient {
     this.calls.push({ operation: "set", appId, store, key, value, type, timeoutMs });
     this.onWrite?.();
     if (this.writeError) {
-      throw new Error(this.writeError);
+      throw typeof this.writeError === "string" ? new Error(this.writeError) : this.writeError;
     }
     this.entry = { key, value, type };
   }
@@ -162,6 +166,7 @@ const unavailableMessages = [
   "Failed to connect to CtrlProxy",
   "WebSocket connection closed",
   "WebSocket is not open",
+  "CtrlProxy service port changed",
   "Get preference timeout after 2500ms",
   "iOS UserDefaults request timed out after 2500ms.",
   "iOS key-value storage inspection is disabled; call UserDefaultsInspector.shared.setEnabled(true): user_defaults_inspection_disabled",
@@ -697,3 +702,199 @@ describe("real plutil fixtures and route type consistency", () => {
     });
   });
 });
+
+describe("SDK redaction and collection encoding", () => {
+  for (const [sdkType, type] of [
+    ["INT", "int"],
+    ["BOOLEAN", "bool"],
+    ["DOUBLE", "float"],
+    ["STRING", "string"],
+  ] as const) {
+    test(`${sdkType} sentinel is redacted before conversion`, async () => {
+      const { sdk, preferences } = harness();
+      sdk.entry = { key: "access_token", type: sdkType, value: IOS_SDK_REDACTED_VALUE };
+      expect(await preferences.getPreference({ ...input, key: "access_token" })).toMatchObject({
+        found: true,
+        success: true,
+        type,
+        value: null,
+        redacted: true,
+        storeRoute: "sdk",
+      });
+    });
+  }
+  for (const { type, sdkType, value } of typedCases) {
+    test(`${sdkType} sensitive write succeeds without comparing redacted read-back`, async () => {
+      const { sdk, preferences, simctl } = harness();
+      sdk.onRead = () => {
+        sdk.entry = { key: "access_token", type: sdkType, value: IOS_SDK_REDACTED_VALUE };
+      };
+      const result = await preferences.setPreference({
+        ...input,
+        key: "access_token",
+        type,
+        value,
+      });
+      expect(result).toMatchObject({
+        success: true,
+        found: true,
+        redacted: true,
+        value: null,
+        verified: false,
+      });
+      expect(result.warning).toContain(
+        "value was written; value redacted by the SDK so not compared",
+      );
+      expect(sdk.calls.map((call) => call.operation)).toEqual(["set", "get"]);
+      expect(simctl.calls).toEqual([]);
+    });
+  }
+  test("literal sentinel stays a normal string on container-plist and defaults routes", async () => {
+    const plist = harness("absent");
+    plist.plist.setValue(IOS_SDK_REDACTED_VALUE, "string");
+    const result = await plist.preferences.getPreference(input);
+    expect(result).toMatchObject({ value: IOS_SDK_REDACTED_VALUE, type: "string" });
+    expect(result.redacted).toBeUndefined();
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      `spawn ${device.deviceId} defaults read globalSuite ${input.key}`,
+      `${IOS_SDK_REDACTED_VALUE}\n`,
+    );
+    simctl.setCommandResult(
+      `spawn ${device.deviceId} defaults read-type globalSuite ${input.key}`,
+      "Type is string\n",
+    );
+    const defaults = new AppPreferences(device, { simctl, timer: new FakeTimer() });
+    const global = await defaults.getPreference({
+      scope: "userDefaults",
+      suite: "globalSuite",
+      key: input.key,
+    });
+    expect(global.value).toBe(IOS_SDK_REDACTED_VALUE);
+    expect(global.redacted).toBeUndefined();
+  });
+  for (const [type, canonicalType, value] of [
+    ["ARRAY", "array", '[1,"Optional(date)",true]'],
+    ["DICTIONARY", "dictionary", '{"nested":{"data":"aGVsbG8="}}'],
+  ] as const) {
+    test(`${type} canonical JSON retains collection type`, async () => {
+      const { sdk, preferences } = harness();
+      sdk.entry = { key: input.key, type, value };
+      const result = await preferences.getPreference(input);
+      expect(result).toMatchObject({ value, type: canonicalType, valueFormat: "canonical-json" });
+      expect(result.warning).toBeUndefined();
+    });
+  }
+  // Constructed from reading UserDefaultsInspector.encode's "\(value)" fallback;
+  // Swift Array/Dictionary interpolation and Foundation NSDictionary descriptions.
+  for (const [type, value] of [
+    ["ARRAY", "[2026-10-01 12:34:56 +0000, 5 bytes]"],
+    ["DICTIONARY", '["date": 2026-10-01 12:34:56 +0000, "data": 5 bytes]'],
+    [
+      "DICTIONARY",
+      '{ date = "2026-10-01 12:34:56 +0000"; data = {length = 5, bytes = 0x68656c6c6f}; }',
+    ],
+    ["ARRAY", "[Optional(2026-10-01 12:34:56 +0000)]"],
+    ["ARRAY", '{"wrongShape":true}'],
+    ["DICTIONARY", "[]"],
+  ] as const) {
+    test(`${type} constructed-from-Swift-source description/shape ${value} is explicit`, async () => {
+      const { sdk, preferences } = harness();
+      sdk.entry = { key: input.key, type, value };
+      const result = await preferences.getPreference(input);
+      expect(result).toMatchObject({ value, type: "unknown", valueFormat: "sdk-description" });
+      expect(result.warning).toContain("nested Date/Data");
+      expect(result.warning).toContain("container-plist");
+    });
+  }
+});
+
+test("container-plist collections retain nested Date/Data as recursive JSON", async () => {
+  const { preferences, plist } = harness("absent");
+  plist.xml = buildPlist(
+    new Map([
+      [input.key, new Map([["leaves", [new Date("2026-10-01T12:34:56Z"), Buffer.from("hello")]]])],
+    ]),
+  );
+  const result = await preferences.getPreference(input);
+  expect(result).toMatchObject({
+    type: "dictionary",
+    value: '{"leaves":["2026-10-01T12:34:56.000Z","aGVsbG8="]}',
+    storeRoute: "container-plist",
+  });
+  expect(result.valueFormat).toBeUndefined();
+});
+
+describe("non-finite plist reals", () => {
+  for (const filename of ["non-finite-origin.plist", "non-finite-binary-origin.plist"]) {
+    const xml = readFileSync(
+      new URL(`../../fixtures/ios-userdefaults-plist/${filename}`, import.meta.url),
+      "utf8",
+    );
+    test(`captured plutil ${filename} preserves non-finite values through JSON`, async () => {
+      const values = await parseIosUserDefaultsPlist(xml);
+      expect(values.get("nan")).toEqual({ type: "float", value: "nan" });
+      expect(values.get("positiveInfinity")).toEqual({ type: "float", value: "inf" });
+      expect(values.get("negativeInfinity")).toEqual({ type: "float", value: "-inf" });
+      expect(values.get("nested")).toEqual({ type: "array", value: '["nan","inf","-inf"]' });
+      const { preferences, plist } = harness("absent");
+      plist.xml = xml;
+      const result = await preferences.getPreference({ ...input, key: "positiveInfinity" });
+      expect(JSON.parse(JSON.stringify(result))).toMatchObject({
+        found: true,
+        type: "float",
+        value: "inf",
+      });
+    });
+  }
+  for (const [spelling, value] of [
+    ["nan", "nan"],
+    ["inf", "inf"],
+    ["+inf", "inf"],
+    ["-inf", "-inf"],
+    ["infinity", "inf"],
+    ["+infinity", "inf"],
+    ["-infinity", "-inf"],
+  ]) {
+    test(`constructed real input ${spelling} is canonicalized`, async () => {
+      const values = await parseIosUserDefaultsPlist(
+        `<plist><dict><key>k</key><real>${spelling}</real></dict></plist>`,
+      );
+      expect(values.get("k")).toEqual({ type: "float", value });
+    });
+  }
+});
+
+for (const error of [
+  new Error("CtrlProxy service port changed"),
+  new CtrlProxyServicePortChangedError(),
+]) {
+  test(`pending SDK read cancelled with ${error.name} falls back; write never does`, async () => {
+    const read = harness();
+    let rejectRead!: (error: Error) => void;
+    const pending = new Promise<KeyValueEntry | null>((_resolve, reject) => {
+      rejectRead = reject;
+    });
+    const get = spyOn(read.sdk, "getPreference").mockImplementation(() => pending);
+    try {
+      read.plist.setValue(42, "int");
+      const result = read.preferences.getPreference(input);
+      rejectRead(error);
+      expect(await result).toMatchObject({
+        value: 42,
+        storeRoute: "container-plist",
+        warning: expect.stringContaining("may lag a running app"),
+      });
+      expect(isIosPreferenceSdkUnavailable(error)).toBe(true);
+    } finally {
+      get.mockRestore();
+    }
+    const write = harness();
+    write.sdk.writeError = error;
+    await expect(
+      write.preferences.setPreference({ ...input, value: 42, type: "int" }),
+    ).rejects.toThrow("may or may not have been applied");
+    expect(write.simctl.calls).toEqual([]);
+    expect(write.plist.paths).toEqual([]);
+  });
+}

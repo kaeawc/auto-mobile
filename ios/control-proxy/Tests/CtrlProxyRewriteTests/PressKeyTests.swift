@@ -527,59 +527,155 @@ final class CaretMemoTests: XCTestCase {
         }
     }
 
-    func testBoundarySuccessRecordsCaretButExhaustedAfterProbeDoesNot() throws {
-        for exhausted in [false, true] {
-            let scenario = ArrowKeyScenario()
-            scenario.caretPositions = [0]
-            scenario.probeDurations = [exhausted ? .seconds(6) : .zero]
-            let gestures = performer(clock: scenario.clock)
-            gestures.rememberCaret(bundleId: "app", value: "abc", index: 0)
-            let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
-            XCTAssertEqual(try scenario.run(
-                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
-                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
-            ), !exhausted)
-            let next = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
-            XCTAssertEqual(next?.caret(bundleId: "app", value: "abc"), exhausted ? nil : 0)
+    func testExactOneStepAfterMemoHitRecordsFreshCaretOnlyWithinBudget() throws {
+        for (key, after) in [("arrow_left", 0), ("arrow_right", 2)] {
+            for exhausted in [false, true] {
+                let scenario = ArrowKeyScenario()
+                scenario.key = key
+                scenario.caretPositions = [after]
+                scenario.probeDurations = [exhausted ? .seconds(6) : .zero]
+                let gestures = performer(clock: scenario.clock)
+                gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+                let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+                XCTAssertEqual(try scenario.run(
+                    knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                    verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+                ), !exhausted)
+                XCTAssertEqual(scenario.sends, 1)
+                XCTAssertEqual(scenario.probes, 1)
+                let next = gestures.consumeCaretMemo(key: key, modifiers: [])
+                XCTAssertEqual(next?.caret(bundleId: "app", value: "abc"), exhausted ? nil : after)
+            }
         }
     }
 
-    func testNoEffectAfterMemoHitRetriesAndLeavesMemoCleared() {
+    func testMemoizedBoundaryIsUnverifiedAndLeavesMemoCleared() throws {
+        for (key, boundary) in [("arrow_left", 0), ("arrow_right", 3)] {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            scenario.caretPositions = [boundary]
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: boundary)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertFalse(try scenario.run(
+                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 1)
+            XCTAssertNil(gestures.consumeCaretMemo(key: key, modifiers: []))
+        }
+    }
+
+    func testFreshBaselineBoundaryVerifiesAndRecordsCaret() throws {
+        for (key, boundary) in [("arrow_left", 0), ("arrow_right", 3)] {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            scenario.caretPositions = [boundary, boundary]
+            let gestures = performer(clock: scenario.clock)
+            XCTAssertTrue(try scenario.run(
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 2)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertEqual(memo?.caret(bundleId: "app", value: "abc"), boundary)
+        }
+    }
+
+    func testExternallyMovedCaretMatchingMemoDoesNotRetry() throws {
+        for (key, retryAfter) in [("arrow_left", 0), ("arrow_right", 2)] {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            // External movement to 2 (left) or 0 (right); the first key returns to memo 1.
+            scenario.caretPositions = [1, retryAfter]
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertFalse(try scenario.run(
+                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 1)
+            XCTAssertNil(gestures.consumeCaretMemo(key: key, modifiers: []))
+        }
+    }
+
+    func testNoEffectAfterMemoHitIsUnverifiedAndLeavesMemoCleared() throws {
         let scenario = ArrowKeyScenario()
-        scenario.caretPositions = [1, 1] // AFTER probes only, including retry.
+        scenario.caretPositions = [1, 1] // AFTER probes only; the retry must not run.
         let gestures = performer(clock: scenario.clock)
         gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
         let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
-        XCTAssertThrowsError(try scenario.run(
+        XCTAssertFalse(try scenario.run(
             knownCaret: { memo?.caret(bundleId: "app", value: $0) },
             verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
-        )) { error in
+        ))
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 1)
+        XCTAssertEqual(scenario.reads, 1)
+        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+    }
+
+    func testFreshBaselineNoEffectRetriesAndThrows() {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1, 1]
+        XCTAssertThrowsError(try scenario.run()) { error in
             guard case GesturePerformer.GestureError.arrowNoEffect = error else {
                 return XCTFail("Expected arrowNoEffect, got \(error)")
             }
         }
         XCTAssertEqual(scenario.sends, 2)
-        XCTAssertEqual(scenario.probes, 2)
+        XCTAssertEqual(scenario.probes, 3)
         XCTAssertEqual(scenario.reads, 2)
-        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
     }
 
-    func testStaleMemoWrongDirectionStillThrowsAndLeavesMemoCleared() {
+    func testStaleMemoWrongDirectionIsUnverifiedAndLeavesMemoCleared() throws {
         let scenario = ArrowKeyScenario()
         scenario.caretPositions = [2] // Stale memo says 1, but AFTER left is 2.
         let gestures = performer(clock: scenario.clock)
         gestures.rememberCaret(bundleId: "app", value: "abc", index: 1)
         let memo = gestures.consumeCaretMemo(key: "arrow_left", modifiers: [])
-        XCTAssertThrowsError(try scenario.run(
+        XCTAssertFalse(try scenario.run(
             knownCaret: { memo?.caret(bundleId: "app", value: $0) },
             verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
-        )) { error in
+        ))
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 1)
+        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+    }
+
+    func testFreshBaselineWrongDirectionStillThrows() {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 2]
+        XCTAssertThrowsError(try scenario.run()) { error in
             guard case let GesturePerformer.GestureError.gestureFailed(reason) = error else {
                 return XCTFail("Expected wrong-direction error, got \(error)")
             }
             XCTAssertEqual(reason, "arrow key moved the caret in the wrong direction")
         }
-        XCTAssertNil(gestures.consumeCaretMemo(key: "arrow_left", modifiers: []))
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 2)
+    }
+
+    func testMultiStepOrMissingAfterMemoHitIsUnverifiedAndLeavesMemoCleared() throws {
+        let cases: [(String, Int, Int?)] = [("arrow_left", 2, 0), ("arrow_right", 1, 3), ("arrow_left", 1, nil)]
+        for (key, before, after) in cases {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            scenario.caretPositions = [after]
+            let gestures = performer(clock: scenario.clock)
+            gestures.rememberCaret(bundleId: "app", value: "abc", index: before)
+            let memo = gestures.consumeCaretMemo(key: key, modifiers: [])
+            XCTAssertFalse(try scenario.run(
+                knownCaret: { memo?.caret(bundleId: "app", value: $0) },
+                verifiedCaret: { gestures.rememberCaret(bundleId: "app", value: $0, index: $1) }
+            ))
+            XCTAssertEqual(scenario.sends, 1)
+            XCTAssertEqual(scenario.probes, 1)
+            XCTAssertNil(gestures.consumeCaretMemo(key: key, modifiers: []))
+        }
     }
 
     func testUnverifiedOrChangedValueAfterMemoHitLeavesMemoCleared() {

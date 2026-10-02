@@ -41,9 +41,10 @@ public final class GesturePerformer: GesturePerforming {
     nonisolated static let caretMemoTTL: Duration = .seconds(2)
 
     /// Baseline only for non-destructive horizontal arrows. Age and text checks
-    /// cannot detect external caret movement: a stale caret can cause a direction
-    /// error or a correctly verified movement, never a wrong deletion. Forward
-    /// delete always probes its BEFORE caret independently.
+    /// cannot detect external caret movement: a memo only confirms an exact
+    /// one-step move and is never the basis for a retry or a no-effect/direction
+    /// verdict. Any mismatch is unverified. Forward delete always probes its
+    /// BEFORE caret independently.
     struct CaretMemo: Sendable {
         let bundleId: String
         let value: String
@@ -396,15 +397,19 @@ public final class GesturePerformer: GesturePerforming {
         let (element, original) = try resolveInput()
         _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
         let caretBefore: Int?
+        let baselineIsMemo: Bool
         let lastStep: String
         if let original, let known = knownCaret(original) {
             caretBefore = known
+            baselineIsMemo = true
             lastStep = "focus check"
         } else if let element {
             caretBefore = try probeCaret(element, original)
+            baselineIsMemo = false
             lastStep = "caret probe"
         } else {
             caretBefore = nil
+            baselineIsMemo = false
             lastStep = "focus check"
         }
         _ = try budget.check(step: .appKey, consumedBy: lastStep)
@@ -413,7 +418,7 @@ public final class GesturePerformer: GesturePerforming {
 
         for attempt in 0 ... 1 {
             guard let outcome = try observeArrowOutcome(
-                key: key, original: original, caretBefore: caretBefore, budget: budget,
+                key: key, original: original, caretBefore: caretBefore, baselineIsMemo: baselineIsMemo, budget: budget,
                 readValue: { try readValue(element) },
                 probeCaret: { try probeCaret(element, original) },
                 restoreValue: { try restoreValue(element, original) },
@@ -436,8 +441,9 @@ public final class GesturePerformer: GesturePerforming {
         return false
     }
 
+    /// A memo baseline may be stale, so a mismatch cannot justify a retry or a caret verdict.
     private nonisolated static func observeArrowOutcome<C: Clock>(
-        key: String, original: String, caretBefore: Int?, budget: ArrowBudget<C>,
+        key: String, original: String, caretBefore: Int?, baselineIsMemo: Bool, budget: ArrowBudget<C>,
         readValue: () throws -> String,
         probeCaret: () throws -> Int?,
         restoreValue: () throws -> Void,
@@ -457,6 +463,11 @@ public final class GesturePerformer: GesturePerforming {
         let caretAfter = try probeCaret()
         guard try budget.check(step: .completion), let caretAfter else { return nil }
         // probeCaretIndex already checked that deleting its marker restored original.
+        if baselineIsMemo {
+            guard caretAfter == caretBefore + (key == "arrow_left" ? -1 : 1) else { return nil }
+            verifiedCaret(caretAfter)
+            return .moved
+        }
         let outcome = arrowOutcome(
             key: key,
             original: original,

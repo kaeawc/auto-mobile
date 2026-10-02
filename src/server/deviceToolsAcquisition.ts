@@ -17,6 +17,7 @@ import { ambientPerfFor, runWithPerfTracker } from "../utils/PerfContext";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { DEFAULT_RUNNER_PROVISION_TIMEOUT_MS } from "../utils/runnerReadinessConfig";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { ProgressCallback } from "./toolRegistry";
@@ -43,6 +44,35 @@ import type {
   StartDeviceArgs,
 } from "./deviceTools";
 import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+
+// Match the cancellation settlement grace in RunnerReadinessService and DeviceBootService.
+const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+
+async function awaitFailedAcquisitionCleanup(
+  cleanup: () => Promise<void>,
+  timer: Timer,
+): Promise<void> {
+  // raceWithDeadline observes late rejection; log it as well so a detached
+  // reservation release failure remains visible after the caller has returned.
+  const observedCleanup = cleanup().catch((error: unknown) => {
+    logger.warn(
+      `[DeviceTools] Failed acquisition reservation release failed: ${errorMessage(error)}`,
+      error,
+    );
+  });
+  try {
+    await raceWithDeadline(observedCleanup, {
+      timer,
+      timeoutMs: ABORT_SETTLEMENT_GRACE_MS,
+      label: "Failed device acquisition cleanup",
+    });
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Failed acquisition cleanup did not settle: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
 
 type AcquisitionHooks = {
   getBootAndPrepareDevice: () => ReturnType<
@@ -247,7 +277,11 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       return { releaseAndroidStartupLease, lifecycleLease };
     } catch (error) {
       lifecycleLease?.release();
-      await releaseAndroidStartupLease?.();
+      // This partial-reservation rollback is also on prepareDevice's failure
+      // path, before its outer finally has received the reservations.
+      await awaitFailedAcquisitionCleanup(async () => {
+        await releaseAndroidStartupLease?.();
+      }, deps.timer);
       throw error;
     }
   };
@@ -280,6 +314,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
       bindingSettlements: [],
     };
     const releaseReadinessReservations: DeviceReadinessReservation[] = [];
+    let preparationFailed = false;
     let lifecycleReservations:
       | Awaited<ReturnType<typeof reserveStartDeviceLifecycleReservations>>
       | undefined;
@@ -331,6 +366,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
         state: state,
       });
     } catch (error) {
+      preparationFailed = true;
       perf.end();
       if (!state.ownershipTransferred) {
         const settlement = cancelUnownedColdBoot(state.boot);
@@ -338,56 +374,71 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
           state.coldBootSettlements.push(settlement);
         }
       }
+      // The startup-lease boundary propagates raw caller abort reasons; later
+      // preparation retains its established structured cancellation errors.
+      if (!lifecycleReservations) {
+        signal?.throwIfAborted();
+      }
       if (error instanceof ActionableError) {
         throw error;
       }
       throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     } finally {
-      const releaseReadiness = async () => {
-        for (const releaseReservation of releaseReadinessReservations.reverse()) {
-          await releaseReservation();
-        }
-      };
-      if (state.bindingSettlements.length > 0) {
-        // A cancelled binding may still hold the assignment mutex while its
-        // persistence write drains. Keep identity reservations until rollback
-        // settles, but do not make the timed-out caller wait for that write.
-        void Promise.allSettled([...state.bindingSettlements, ...state.coldBootSettlements])
-          .then(async () => {
-            try {
-              await releaseReadiness();
-            } finally {
-              lifecycleReservations?.lifecycleLease.release();
-              await lifecycleReservations?.releaseAndroidStartupLease?.();
-            }
-          })
-          .catch((error: unknown) => {
-            logger.warn(
-              `[DeviceTools] Deferred binding reservation release failed: ${errorMessage(error)}`,
-              error,
-            );
-          });
-      } else {
-        await releaseReadiness();
-        if (state.coldBootSettlements.length > 0) {
-          // Release exactly once whatever the settlements do — the bounded wait in
-          // `cancelUnownedColdBoot` guarantees each completes, and `finally`
-          // guarantees the lease is not stranded if one completes by rejecting.
-          // A System UI ANR replacement retired mid-recovery settles here too, so
-          // the AVD's key cannot be handed to the next request while the emulator
-          // this one only signalled is still running.
-          void Promise.allSettled(state.coldBootSettlements)
-            .finally(() => lifecycleReservations?.lifecycleLease.release())
+      const cleanup = async () => {
+        const releaseReadiness = async () => {
+          for (const releaseReservation of releaseReadinessReservations.reverse()) {
+            await releaseReservation();
+          }
+        };
+        if (state.bindingSettlements.length > 0) {
+          // A cancelled binding may still hold the assignment mutex while its
+          // persistence write drains. Keep identity reservations until rollback
+          // settles, but do not make the timed-out caller wait for that write.
+          void Promise.allSettled([...state.bindingSettlements, ...state.coldBootSettlements])
+            .then(async () => {
+              try {
+                await releaseReadiness();
+              } finally {
+                lifecycleReservations?.lifecycleLease.release();
+                await lifecycleReservations?.releaseAndroidStartupLease?.();
+              }
+            })
             .catch((error: unknown) => {
               logger.warn(
-                `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+                `[DeviceTools] Deferred binding reservation release failed: ${errorMessage(error)}`,
                 error,
               );
             });
         } else {
-          lifecycleReservations?.lifecycleLease.release();
+          await releaseReadiness();
+          if (state.coldBootSettlements.length > 0) {
+            // Release exactly once whatever the settlements do — the bounded wait in
+            // `cancelUnownedColdBoot` guarantees each completes, and `finally`
+            // guarantees the lease is not stranded if one completes by rejecting.
+            // A System UI ANR replacement retired mid-recovery settles here too, so
+            // the AVD's key cannot be handed to the next request while the emulator
+            // this one only signalled is still running.
+            void Promise.allSettled(state.coldBootSettlements)
+              .finally(() => lifecycleReservations?.lifecycleLease.release())
+              .catch((error: unknown) => {
+                logger.warn(
+                  `[DeviceTools] Deferred lifecycle lease release failed: ${errorMessage(error)}`,
+                  error,
+                );
+              });
+          } else {
+            lifecycleReservations?.lifecycleLease.release();
+          }
+          await lifecycleReservations?.releaseAndroidStartupLease?.();
         }
-        await lifecycleReservations?.releaseAndroidStartupLease?.();
+      };
+      if (!preparationFailed) {
+        await cleanup();
+      } else {
+        // Preserve the existing release order and settlement ownership. A mutex
+        // waiter cannot be cancelled; let this same cleanup finish exactly once
+        // when its holder drains, without wedging the failed caller behind it.
+        await awaitFailedAcquisitionCleanup(cleanup, deps.timer);
       }
     }
   };

@@ -36,6 +36,7 @@ import {
   Element,
   HighlightOperationResult,
   HighlightShape,
+  toActionableError,
 } from "../../../models";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { readScreenScaleMetadata } from "../../../models/ScreenScaleMetadata";
@@ -1518,6 +1519,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Distinct from a transient websocket disconnect (onConnectionClosed), which
   // must still allow the ADB fallback.
   private closed: boolean = false;
+  private readonly inFlightMessageHandlers = new Set<Promise<void>>();
+  // Match the bounded ADB forward-removal confirmation window during teardown.
+  private static readonly INBOUND_HANDLER_DRAIN_TIMEOUT_MS = 2000;
 
   // Connection-failure escalation to service recovery (issue #7532). Counts
   // failures via the base class's onConnectAttemptFailed() hook, which fires
@@ -1956,7 +1960,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
     const resolve = async (): Promise<void> => {
       try {
+        if (this.closed) {
+          // Provenance is optional; a closed client must not start deferred device work.
+          logger.debug("[CTRL_PROXY] Skipping deferred build-context resolution after close");
+          return;
+        }
         const info = await this.requestPackageInfo(appId, { includePermissions: false }, 4000);
+        if (this.closed) {
+          // Missing provenance is safe; avoid a new ADB content-hash probe after release.
+          logger.debug("[CTRL_PROXY] Skipping content-hash resolution after close");
+          return;
+        }
         // A transient package-info failure (timeout / success:false) must NOT be
         // cached as version 0 — that would attribute the whole install to a bogus
         // version until a package event. Defer; a later event retries.
@@ -2279,8 +2293,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return `ws://127.0.0.1:${this.localPort}/ws`;
   }
 
-  protected async handleMessage(data: WebSocket.Data): Promise<void> {
-    return this.handleWebSocketMessage(data);
+  protected handleMessage(data: WebSocket.Data): Promise<void> {
+    const handler = this.handleWebSocketMessage(data);
+    this.inFlightMessageHandlers.add(handler);
+    // Observe settlement without wrapping dispatch or moving its synchronous prefix.
+    // The existing handleWebSocketMessage catch owns logging handler failures.
+    void handler.then(
+      () => this.inFlightMessageHandlers.delete(handler),
+      () => this.inFlightMessageHandlers.delete(handler),
+    );
+    return handler;
   }
 
   /**
@@ -4494,6 +4516,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.stopWorkProfileMonitor();
 
       await super.close();
+      await this.drainInFlightMessageHandlers();
 
       if (this.portForwardingSetup) {
         // Do not claim the forward is gone when adb could not confirm its removal:
@@ -4517,6 +4540,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
   // Private Methods
   // ===========================================================================
+
+  private async drainInFlightMessageHandlers(): Promise<void> {
+    if (this.inFlightMessageHandlers.size === 0) {
+      return;
+    }
+    const drainTimeout = Symbol("inbound handler drain timeout");
+    try {
+      await raceWithDeadline(Promise.allSettled([...this.inFlightMessageHandlers]), {
+        timer: this.timer,
+        timeoutMs: AndroidCtrlProxyClient.INBOUND_HANDLER_DRAIN_TIMEOUT_MS,
+        label: "Inbound handler drain",
+        timeoutError: () => drainTimeout,
+      });
+    } catch (error) {
+      if (error !== drainTimeout) {
+        throw toActionableError(error, "Failed to drain Android CtrlProxy inbound handlers");
+      }
+      logger.warn(
+        `[CTRL_PROXY] Inbound handler drain timed out after ${AndroidCtrlProxyClient.INBOUND_HANDLER_DRAIN_TIMEOUT_MS}ms; continuing cleanup`,
+      );
+    }
+  }
 
   private ensureLocalPortAvailableForForwarding(): void {
     const currentAllocation = PortManager.getPort(this.portAllocationId);
@@ -5397,22 +5442,35 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         const navWrite = this.enqueueNavigationGraphWrite(event);
         void getDbWriteBarrier().trackExisting(navWrite);
         await navWrite;
+        if (this.closed) {
+          // The graph write is best-effort; skipping its screenshot tail avoids released-device I/O.
+          logger.debug("[CTRL_PROXY] Skipping navigation screenshot after close");
+          return;
+        }
 
         if (
           event.applicationId &&
           event.destination &&
           serverConfig.isNavigationScreenshotsEnabled()
         ) {
-          NavigationScreenshotManager.getInstance()
+          await NavigationScreenshotManager.getInstance()
             .captureAndStore(this.device, this.adb, event.applicationId, event.destination)
             .then((screenshotPath) => {
+              if (this.closed) {
+                // The screenshot is optional; do not attach it to a session that has ended.
+                logger.debug("[CTRL_PROXY] Skipping navigation screenshot update after close");
+                return;
+              }
               if (screenshotPath) {
-                this.getNavigationGraphManager()
+                return this.getNavigationGraphManager()
                   .updateNodeScreenshot(event.applicationId!, event.destination!, screenshotPath)
                   .catch((err) => logger.warn(`[CTRL_PROXY] Failed to update screenshot: ${err}`));
               }
             })
-            .catch((err) => logger.debug(`[CTRL_PROXY] Screenshot capture skipped: ${err}`));
+            .catch((err) => {
+              // Navigation screenshots are optional and never block navigation recording.
+              logger.debug(`[CTRL_PROXY] Screenshot capture skipped: ${err}`);
+            });
         }
       }
     },

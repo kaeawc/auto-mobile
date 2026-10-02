@@ -4,7 +4,7 @@ import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, OrientationLockState, RotateResult } from "../../models";
+import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -14,6 +14,7 @@ import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClien
 import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
 import { runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { verifyIosRotation } from "./iosRotateVerification";
 
 interface RotationSettingCleanup {
   pendingWrite?: Promise<unknown>;
@@ -726,6 +727,25 @@ export class Rotate extends BaseVisualChange {
         error: `Rotated to ${orientation}, but automatic rotation could not be confirmed as restored (orientation lock is ${orientationLockState}).`,
       };
     }
+    if (achievedOrientation !== "unknown" && achievedOrientation !== orientation) {
+      const cause = restoreConfirmed
+        ? "auto-rotate reverted it"
+        : `after attempting to restore auto-rotate, it was confirmed ${achievedOrientation}; auto-rotate may have reverted it`;
+      const error = `Requested ${orientation}, but the device is actually in ${achievedOrientation}; ${cause}. Pass lockOrientation: true to keep the requested ${orientation} orientation.`;
+      return {
+        success: false,
+        orientation,
+        value,
+        currentOrientation: achievedOrientation,
+        previousOrientation: currentOrientation,
+        rotationPerformed: achievedOrientation !== currentOrientation,
+        orientationLockHandled: wasAutoRotateEnabled,
+        orientationLockState,
+        warning,
+        error,
+        message: error,
+      };
+    }
     return {
       success: true,
       orientation,
@@ -852,10 +872,10 @@ export class Rotate extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<RotateResult> {
     throwIfAborted(signal);
-    let previousScreenSize: { width: number; height: number } | undefined;
+    let previousObservation: ObserveResult | undefined;
     const result: RotateResult = await this.observedInteraction(
-      async (previousObservation) => {
-        previousScreenSize = previousObservation.screenSize;
+      async (observation) => {
+        previousObservation = observation;
         try {
           throwIfAborted(signal);
           const client = IOSCtrlProxyClient.getInstance(this.device);
@@ -869,6 +889,9 @@ export class Rotate extends BaseVisualChange {
               orientation,
               value: orientation === "portrait" ? 0 : 1,
               error: result.error ?? "Failed to rotate iOS device",
+              currentOrientation: result.currentOrientation,
+              previousOrientation: result.previousOrientation,
+              rotationPerformed: result.rotationPerformed,
             };
           }
 
@@ -900,25 +923,7 @@ export class Rotate extends BaseVisualChange {
         skipUiStability: true,
       },
     );
-    const currentScreenSize = result.observation?.screenSize;
-    if (
-      result.success &&
-      result.rotationPerformed &&
-      result.previousOrientation === "unknown" &&
-      previousScreenSize &&
-      currentScreenSize &&
-      previousScreenSize.width === currentScreenSize.width &&
-      previousScreenSize.height === currentScreenSize.height
-    ) {
-      return {
-        ...result,
-        success: false,
-        rotationPerformed: false,
-        currentOrientation: "unknown",
-        error: "Rotation is not supported on this display (the screen size did not change)",
-      };
-    }
-    return result;
+    return verifyIosRotation(result, orientation, previousObservation);
   }
 
   private async executeAndroidRotation(

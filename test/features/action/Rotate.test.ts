@@ -387,36 +387,6 @@ describe("Rotate", () => {
       expect(orientation).toBe("landscape");
     });
 
-    test("should honestly report the sensor-held orientation when auto-rotate overrides the forced rotation (#6199)", async () => {
-      // Auto-rotate is on and the physical sensor stays landscape throughout
-      // (e.g. the device is physically held sideways) — restoring auto-rotate
-      // after forcing portrait immediately snaps it back to landscape. The
-      // result must report the ACHIEVED orientation and warn, not falsely
-      // claim portrait succeeded.
-      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-      fakeAdb.setCommandResponse(
-        "shell settings get system accelerometer_rotation",
-        createExecResult("1"),
-      );
-      // mRotation reads landscape both before AND after the forced rotation +
-      // restore — the sensor never let go of landscape.
-      fakeAdb.setCommandResponse(
-        'shell dumpsys window | grep -i "mRotation="',
-        createExecResult("mRotation=1"),
-      );
-
-      const result = await rotate.execute("portrait");
-
-      expect(result.success).toBe(true);
-      expect(result.rotationPerformed).toBe(true);
-      expect(result.previousOrientation).toBe("landscape");
-      // Must report what is ACTUALLY held, not a false "portrait" success.
-      expect(result.currentOrientation).toBe("landscape");
-      expect(result.warning).toBeDefined();
-      expect(result.warning ?? "").toMatch(/auto-rotate/i);
-      expect(result.warning ?? "").toContain("landscape");
-    });
-
     test("should report the achieved orientation as unconfirmed when the post-restore live read is unparseable, never falling back to user_rotation (#6199)", async () => {
       // Auto-rotate is on; the device is physically landscape. The FIRST
       // dumpsys read (pre-rotation state check) succeeds and reports
@@ -905,37 +875,6 @@ describe("Rotate", () => {
       expect(fakeTimer.getSleepCallCount()).toBeGreaterThan(0);
     });
 
-    test("does not accept a first post-restore sample matching the requested orientation without confirming it is stable (#6211)", async () => {
-      // Auto-rotate is on; the device starts landscape. After forcing
-      // portrait and restoring auto-rotate, the FIRST confirmation read
-      // already matches the requested "portrait" — but the physical sensor
-      // swings it back to landscape moments later. A fix that returns on the
-      // first matching sample without confirming stability would falsely
-      // report "portrait" held; the settle-wait must confirm the match holds
-      // across a second read before accepting it.
-      fakeAdb.setCommandResponse(
-        "shell settings get system accelerometer_rotation",
-        createExecResult("1"),
-      );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
-        createExecResult("mRotation=1"), // pre-rotation state check
-        createExecResult("mRotation=0"), // post-restore confirm attempt 1: matches requested portrait...
-        createExecResult("mRotation=1"), // ...but attempt 2 reveals it swung back to landscape
-      ]);
-
-      const result = await rotate.execute("portrait");
-
-      expect(result.success).toBe(true);
-      expect(result.rotationPerformed).toBe(true);
-      // Must report the ACTUAL orientation (landscape), not the transient
-      // first-sample match that was never confirmed stable.
-      expect(result.currentOrientation).toBe("landscape");
-      expect(result.warning).toBeDefined();
-      expect(result.warning ?? "").toMatch(/reverted/i);
-      // The settle-wait must have kept sampling past the first match.
-      expect(fakeTimer.getSleepCallCount()).toBeGreaterThan(0);
-    });
-
     test("does not accept a lone match on the FINAL settle-wait attempt, since there is no later sample to confirm it (#6211)", async () => {
       // Auto-rotate is on; the device starts landscape. After forcing
       // portrait and restoring auto-rotate, the settle-wait budget
@@ -1073,72 +1012,6 @@ describe("Rotate", () => {
         .getExecutedCommands()
         .filter((cmd) => cmd.includes('shell dumpsys window | grep -i "mRotation="')).length;
       expect(dumpsysCalls).toBeGreaterThan(1);
-    });
-
-    test("reflects the true reverted orientation, not the requested one, when an ambiguous restore-write failure turns out to have actually re-enabled auto-rotate (#6211)", async () => {
-      // The accelerometer_rotation=1 restore write throws (ambiguous outcome:
-      // it may have been applied by CtrlProxy before the failure was
-      // reported), and the physical sensor genuinely reverts the device once
-      // auto-rotate is back on. The code must report the ACTUAL confirmed
-      // orientation, not blindly assume the forced rotation still holds just
-      // because the restore write appeared to fail.
-      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-      fakeAdb.setCommandResponse(
-        "shell settings get system accelerometer_rotation",
-        createExecResult("1"),
-      );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
-        createExecResult("mRotation=1"), // pre-rotation state check (landscape before)
-        createExecResult("mRotation=1"), // post-write-failure confirm reads: reverted to landscape
-      ]);
-      fakeAdb.setCommandError(
-        "shell settings put system accelerometer_rotation 1",
-        new Error("device offline"),
-      );
-
-      const result = await rotate.execute("portrait");
-
-      expect(result.success).toBe(true);
-      expect(result.rotationPerformed).toBe(true);
-      // Must report the TRUE confirmed orientation, not the requested one.
-      expect(result.currentOrientation).toBe("landscape");
-      expect(result.previousOrientation).toBe("landscape");
-      expect(result.warning).toBeDefined();
-      expect(result.warning ?? "").toMatch(/reverted/i);
-      // The live read confirms landscape, but the rejected restore write does
-      // not prove auto-rotate caused it. Keep the evidence without inventing
-      // that causal outcome in the public message.
-      expect(result.message).toContain("attempting to restore auto-rotate");
-      expect(result.message).toContain("confirmed landscape");
-      expect(result.message).not.toMatch(/auto-rotate reverted/i);
-    });
-
-    test("retains a confirmed stable opposite orientation when the FINAL settle-wait sample fails to read (#6211)", async () => {
-      // Auto-rotate is on; the device starts landscape. After forcing
-      // portrait and restoring auto-rotate, the first two post-restore
-      // samples both read landscape (two consecutive matching samples — a
-      // confirmed reversion), but the third (final) settle-wait attempt
-      // fails to parse at all. That read FAILURE must not discard the
-      // already-confirmed landscape reversion in favor of "unknown".
-      fakeAdb.setCommandResponse(
-        "shell settings get system accelerometer_rotation",
-        createExecResult("1"),
-      );
-      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
-        createExecResult("mRotation=1"), // pre-rotation state check
-        createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
-        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (confirmed stable)
-        createExecResult(""), // post-restore confirm attempt 3 (final): unparseable
-      ]);
-
-      const result = await rotate.execute("portrait");
-
-      expect(result.success).toBe(true);
-      expect(result.rotationPerformed).toBe(true);
-      // Must report the confirmed landscape reversion, not "unknown".
-      expect(result.currentOrientation).toBe("landscape");
-      expect(result.warning).toBeDefined();
-      expect(result.warning ?? "").toMatch(/reverted/i);
     });
 
     test("retries the auto-rotate restore write once before treating a transient failure as ambiguous (#6211)", async () => {
@@ -1328,6 +1201,157 @@ describe("Rotate", () => {
     });
   });
 
+  describe("Android post-restore verification (#8768)", () => {
+    test("should honestly report the sensor-held orientation when auto-rotate overrides the forced rotation (#6199)", async () => {
+      // Auto-rotate is on and the physical sensor stays landscape throughout
+      // (e.g. the device is physically held sideways) — restoring auto-rotate
+      // after forcing portrait immediately snaps it back to landscape. The
+      // result must report the ACHIEVED orientation and warn, not falsely
+      // claim portrait succeeded.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      // mRotation reads landscape both before AND after the forced rotation +
+      // restore — the sensor never let go of landscape.
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=1"),
+      );
+
+      fakeObserveScreen = new FakeObserveScreen();
+      fakeObserveScreen.setObserveResult(() => createObserveResult());
+      Object.assign(rotate, { observeScreen: fakeObserveScreen });
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("auto-rotate reverted");
+      expect(formatRotateMessage(result)).toBe(`Failed to rotate device: ${result.error}`);
+      expect(result.error).toContain("portrait");
+      expect(result.error).toContain("landscape");
+      expect(result.error).toContain("lockOrientation: true");
+      expect(result.error).not.toContain("No visual change observed");
+      expect(result.rotationPerformed).toBe(false);
+      expect(result.previousOrientation).toBe("landscape");
+      // Must report what is ACTUALLY held, not a false "portrait" success.
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/auto-rotate/i);
+      expect(result.warning ?? "").toContain("landscape");
+    });
+
+    test("does not accept a first post-restore sample matching the requested orientation without confirming it is stable (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the FIRST confirmation read
+      // already matches the requested "portrait" — but the physical sensor
+      // swings it back to landscape moments later. A fix that returns on the
+      // first matching sample without confirming stability would falsely
+      // report "portrait" held; the settle-wait must confirm the match holds
+      // across a second read before accepting it.
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=0"), // post-restore confirm attempt 1: matches requested portrait...
+        createExecResult("mRotation=1"), // ...but attempt 2 reveals it swung back to landscape
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("portrait");
+      expect(result.error).toContain("landscape");
+      expect(result.error).toContain("lockOrientation: true");
+      expect(result.error).not.toContain("No visual change observed");
+      expect(result.rotationPerformed).toBe(false);
+      // Must report the ACTUAL orientation (landscape), not the transient
+      // first-sample match that was never confirmed stable.
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/reverted/i);
+      // The settle-wait must have kept sampling past the first match.
+      expect(fakeTimer.getSleepCallCount()).toBeGreaterThan(0);
+    });
+
+    test("reflects the true reverted orientation, not the requested one, when an ambiguous restore-write failure turns out to have actually re-enabled auto-rotate (#6211)", async () => {
+      // The accelerometer_rotation=1 restore write throws (ambiguous outcome:
+      // it may have been applied by CtrlProxy before the failure was
+      // reported), and the physical sensor genuinely reverts the device once
+      // auto-rotate is back on. The code must report the ACTUAL confirmed
+      // orientation, not blindly assume the forced rotation still holds just
+      // because the restore write appeared to fail.
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check (landscape before)
+        createExecResult("mRotation=1"), // post-write-failure confirm reads: reverted to landscape
+      ]);
+      fakeAdb.setCommandError(
+        "shell settings put system accelerometer_rotation 1",
+        new Error("device offline"),
+      );
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("portrait");
+      expect(result.error).toContain("landscape");
+      expect(result.error).toContain("lockOrientation: true");
+      expect(result.error).not.toContain("No visual change observed");
+      expect(result.rotationPerformed).toBe(false);
+      // Must report the TRUE confirmed orientation, not the requested one.
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.previousOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/reverted/i);
+      // The live read confirms landscape, but the rejected restore write does
+      // not prove auto-rotate caused it. Keep the evidence without inventing
+      // that causal outcome in the public message.
+      expect(result.message).toContain("attempting to restore auto-rotate");
+      expect(result.message).toContain("confirmed landscape");
+      expect(result.message).not.toMatch(/auto-rotate reverted/i);
+    });
+
+    test("retains a confirmed stable opposite orientation when the FINAL settle-wait sample fails to read (#6211)", async () => {
+      // Auto-rotate is on; the device starts landscape. After forcing
+      // portrait and restoring auto-rotate, the first two post-restore
+      // samples both read landscape (two consecutive matching samples — a
+      // confirmed reversion), but the third (final) settle-wait attempt
+      // fails to parse at all. That read FAILURE must not discard the
+      // already-confirmed landscape reversion in favor of "unknown".
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=1"), // pre-rotation state check
+        createExecResult("mRotation=1"), // post-restore confirm attempt 1: landscape
+        createExecResult("mRotation=1"), // post-restore confirm attempt 2: landscape (confirmed stable)
+        createExecResult(""), // post-restore confirm attempt 3 (final): unparseable
+      ]);
+
+      const result = await rotate.execute("portrait");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("portrait");
+      expect(result.error).toContain("landscape");
+      expect(result.error).toContain("lockOrientation: true");
+      expect(result.error).not.toContain("No visual change observed");
+      expect(result.rotationPerformed).toBe(false);
+      // Must report the confirmed landscape reversion, not "unknown".
+      expect(result.currentOrientation).toBe("landscape");
+      expect(result.warning).toBeDefined();
+      expect(result.warning ?? "").toMatch(/reverted/i);
+    });
+  });
+
   describe("iOS platform", () => {
     let iosDevice: BootedDevice;
     let fakeIOSCtrlProxy: FakeIOSCtrlProxy;
@@ -1348,6 +1372,10 @@ describe("Rotate", () => {
     });
 
     test("should use CtrlProxy to rotate to landscape on iOS", async () => {
+      fakeObserveScreen.setObserveSequence([
+        createObserveResult(),
+        { ...createObserveResult(), rotation: 1, screenSize: { width: 874, height: 402 } },
+      ]);
       const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
       (iosRotate as any).observeScreen = fakeObserveScreen;
       (iosRotate as any).window = fakeWindow;

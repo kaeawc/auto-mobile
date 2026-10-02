@@ -399,10 +399,28 @@ describe("decodeCtrlProxyMessage", () => {
     });
   });
 
-  test("preferences preserves explicit entry redaction", () => {
-    const entries = [{ key: "token", value: "42", type: "INT", redacted: true }] as const;
-    const response = { type: "preferences", success: true, entries };
-    expect(decodeCtrlProxyMessage(msg(response))?.result).toMatchObject({ entries });
+  test("preferences carries only explicit entry redaction flags", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "preferences",
+        success: true,
+        entries: [
+          { key: "flagged", value: "private", type: "STRING", redacted: true },
+          { key: "plain", value: "visible", type: "STRING" },
+          { key: "sentinel", value: "[REDACTED]", type: "STRING", redacted: "true" },
+        ],
+      } as never),
+    );
+    expect(decoded?.result).toEqual({
+      success: true,
+      entries: [
+        { key: "flagged", value: "private", type: "STRING", redacted: true },
+        { key: "plain", value: "visible", type: "STRING" },
+        { key: "sentinel", value: "[REDACTED]", type: "STRING" },
+      ],
+      totalTimeMs: 0,
+      error: undefined,
+    });
   });
 
   test("get_preference_result entry undefined when not found", () => {

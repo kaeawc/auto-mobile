@@ -706,6 +706,10 @@ back, while comparing according to the requested input type. SDK-redacted reads
 return `found: true`, `redacted: true`, `value: null`, and the original canonical
 type. The host honors the SDK's explicit `redacted: true` flag regardless of value,
 and falls back to the `[REDACTED]` sentinel for older SDKs when the flag is absent.
+The storage entries resource keeps each redacted list entry's SDK type vocabulary
+(for example, `STRING`) while returning `value: null` and `redacted: true`; single
+reads use the canonical type (for example, `string`). Unredacted list entries
+retain their existing wire shape.
 New SDKs also omit the flag for ordinary values, so a literal `"[REDACTED]"` string
 remains indistinguishable from older SDK redaction and is treated as redacted.
 A successful write with redacted read-back returns `success: true`, `redacted: true`,

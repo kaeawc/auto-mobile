@@ -9,6 +9,7 @@
 
 import type { CtrlProxyPerfTiming, WebSocketMessage } from "./types";
 import { rewriteUnknownCommandError as rewritePlatformUnknownCommandError } from "../shared/rewriteUnknownCommandError";
+import type { KeyValueEntry } from "../../storage/storageTypes";
 
 /**
  * Decoded request/response message. Exactly one of `result` / `errorMessage` is
@@ -248,14 +249,24 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
       };
       break;
 
-    case "preferences":
+    case "preferences": {
+      const entries =
+        (
+          message as {
+            entries?: Array<Omit<KeyValueEntry, "redacted"> & { redacted?: unknown }>;
+          }
+        ).entries || [];
       result = {
         success: message.success ?? false,
-        entries: (message as { entries?: unknown[] }).entries || [],
+        entries: entries.map(({ redacted, ...entry }): KeyValueEntry => ({
+          ...entry,
+          ...(redacted === true ? { redacted: true } : {}),
+        })),
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       };
       break;
+    }
 
     case "get_preference_result": {
       const msg = message as {

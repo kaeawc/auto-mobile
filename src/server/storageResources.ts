@@ -7,6 +7,10 @@ import { BootedDevice } from "../models";
 import { ActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 import type { PreferenceFile, KeyValueEntry } from "../features/storage/storageTypes";
+import {
+  isIosSdkEntryRedacted,
+  readAndroidStorageEntries,
+} from "../features/preferences/AppPreferences";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 import {
   ProviderUnavailableError,
@@ -18,7 +22,6 @@ import {
   sanitizeAndroidPreferencesFileName,
 } from "../features/preferences/AndroidPreferencesXmlFile";
 import { isSharedPreferencesInspectionDisabledError } from "../features/storage/AndroidSharedPreferencesKeyValueFile";
-import { readAndroidStorageEntries } from "../features/preferences/AppPreferences";
 import { isCtrlProxyStorageUnavailableError } from "../features/observe/android/CtrlProxyStorage";
 
 // Resource URI templates
@@ -322,6 +325,12 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
 
     // Update cache
     cache.entries.set(cacheKey, { entries, lastUpdated, hash });
+    const outputEntries =
+      device.platform === "ios"
+        ? entries.map((entry) => {
+            return isIosSdkEntryRedacted(entry) ? { ...entry, value: null, redacted: true } : entry;
+          })
+        : entries;
 
     return {
       uri,
@@ -333,7 +342,7 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
           fileName: decodedFileName,
           platform: device.platform,
           source,
-          entries,
+          entries: outputEntries,
           totalCount: entries.length,
           lastUpdated,
         },

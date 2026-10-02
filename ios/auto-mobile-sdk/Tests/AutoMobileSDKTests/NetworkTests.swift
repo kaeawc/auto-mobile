@@ -1077,6 +1077,13 @@ final class NetworkCaptureRecorderTests: XCTestCase {
             let data = try JSONEncoder().encode(batch)
             try data.write(to: URL(fileURLWithPath: outputDirectory).appendingPathComponent("\(name).json"))
         }
+
+        let contractKeys = SdkNetworkRequestEvent.CodingKeys.allCases.map(\.rawValue).sorted()
+        var contractData = try JSONEncoder().encode(contractKeys)
+        contractData.append(0x0A)
+        try contractData.write(
+            to: URL(fileURLWithPath: outputDirectory).appendingPathComponent("contract-keys.json")
+        )
     }
 
     /// Single-threaded harness whose `emit` re-enters the recorder. `@unchecked Sendable`

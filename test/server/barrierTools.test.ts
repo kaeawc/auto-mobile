@@ -1,10 +1,11 @@
-import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerBarrierTools } from "../../src/server/barrierTools";
 import { CriticalSectionCoordinator } from "../../src/server/CriticalSectionCoordinator";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import type { Plan } from "../../src/models/Plan";
 import type { BootedDevice } from "../../src/models";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 const makeDevice = (deviceId: string): BootedDevice => ({
   platform: "android",
@@ -14,7 +15,35 @@ const makeDevice = (deviceId: string): BootedDevice => ({
 
 const parseResponse = (response: any): any => JSON.parse(response.content[0].text);
 
+async function settleWithinMicrotasks<T>(promise: Promise<T>, context: string): Promise<T> {
+  let settled = false;
+  void promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  for (let turn = 0; turn < 20 && !settled; turn++) {
+    await Promise.resolve();
+  }
+  if (!settled) {
+    throw new Error(`${context} did not settle within 20 microtask turns after fake timeout`);
+  }
+  return promise;
+}
+
 describe("barrier tool", () => {
+  let restoreCoordinator: (() => void) | undefined;
+
+  const injectFakeCoordinator = (): FakeTimer => {
+    const timer = new FakeTimer();
+    restoreCoordinator = CriticalSectionCoordinator.setInstanceForTesting(
+      CriticalSectionCoordinator.createForTesting(timer),
+    );
+    return timer;
+  };
   beforeAll(() => {
     if (!ToolRegistry.getToolForPlan("barrier")) {
       registerBarrierTools();
@@ -23,6 +52,14 @@ describe("barrier tool", () => {
 
   beforeEach(() => {
     CriticalSectionCoordinator.getInstance().reset();
+  });
+
+  afterEach(() => {
+    if (restoreCoordinator) {
+      CriticalSectionCoordinator.getInstance().reset();
+      restoreCoordinator();
+      restoreCoordinator = undefined;
+    }
   });
 
   test("tool is registered with correct schema", () => {
@@ -72,16 +109,28 @@ describe("barrier tool", () => {
   });
 
   test("rejects with an actionable error on barrier timeout", async () => {
+    const timer = injectFakeCoordinator();
     const tool = ToolRegistry.getToolForPlan("barrier");
-    // deviceCount 2 but only one device arrives; short timeout so the test is fast.
-    await expect(
-      tool!.deviceAwareHandler!(
-        makeDevice("device-1"),
-        { lock: "lonely", deviceCount: 2, timeout: 50 },
-        undefined,
-        undefined,
-      ),
-    ).rejects.toThrow(/Barrier "lonely" failed for device device-1/);
+    // deviceCount 2 but only one device arrives; drive the timeout explicitly.
+    const pending = tool!.deviceAwareHandler!(
+      makeDevice("device-1"),
+      { lock: "lonely", deviceCount: 2, timeout: 50 },
+      undefined,
+      undefined,
+    );
+    // Capture rejection before advancing time, without asking Bun's rejection
+    // matcher to wait on a deadline that has not fired yet.
+    const outcome = pending.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(timer.getPendingTimeouts()).toEqual([50]);
+    timer.advanceTime(50);
+    const error = await settleWithinMicrotasks(outcome, 'Barrier "lonely" rejection');
+    expect(error).toBeInstanceOf(Error);
+    await expect(Promise.reject(error)).rejects.toThrow(
+      /Barrier "lonely" failed for device device-1/,
+    );
   });
 
   test("schema preserves the injected __lockNamespace (not stripped by parse)", () => {
@@ -95,6 +144,7 @@ describe("barrier tool", () => {
   });
 
   test("__lockNamespace scopes the barrier: same lock name, different plans do not cross-satisfy", async () => {
+    const timer = injectFakeCoordinator();
     const tool = ToolRegistry.getToolForPlan("barrier");
 
     // One device from plan A and one from plan B arrive at the same lock name
@@ -106,21 +156,25 @@ describe("barrier tool", () => {
       { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-A" },
       undefined,
       undefined,
-    )
-      .then(() => "passed")
-      .catch(() => "timed-out");
+    ).then(
+      () => "passed",
+      () => "timed-out",
+    );
 
     const bTimedOut = tool!.deviceAwareHandler!(
       makeDevice("planB-device-1"),
       { lock: "sync", deviceCount: 2, timeout: 50, __lockNamespace: "session-B" },
       undefined,
       undefined,
-    )
-      .then(() => "passed")
-      .catch(() => "timed-out");
+    ).then(
+      () => "passed",
+      () => "timed-out",
+    );
 
-    expect(await aTimedOut).toBe("timed-out");
-    expect(await bTimedOut).toBe("timed-out");
+    expect(timer.getPendingTimeouts()).toEqual([50, 50]);
+    timer.advanceTime(50);
+    expect(await settleWithinMicrotasks(aTimedOut, "Plan A barrier")).toBe("timed-out");
+    expect(await settleWithinMicrotasks(bTimedOut, "Plan B barrier")).toBe("timed-out");
   });
 
   test("schema preserves the device label and sessionUuid (not stripped by parse)", () => {

@@ -63,6 +63,15 @@ export class CriticalSectionCoordinator {
     return new CriticalSectionCoordinator(timer);
   }
 
+  /** Temporarily replace the process singleton; restore it after the test. */
+  public static setInstanceForTesting(instance: CriticalSectionCoordinator): () => void {
+    const previous = CriticalSectionCoordinator.instance;
+    CriticalSectionCoordinator.instance = instance;
+    return () => {
+      CriticalSectionCoordinator.instance = previous;
+    };
+  }
+
   /**
    * Build the internal map key for a lock. When a namespace is supplied (the
    * plan's base session UUID), it scopes the lock so two independent plans that

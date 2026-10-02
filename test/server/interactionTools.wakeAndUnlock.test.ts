@@ -1,4 +1,5 @@
-import { expect, spyOn, test } from "bun:test";
+import { warmedTests } from "../helpers/interactionCancellation";
+import { expect, spyOn } from "bun:test";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 import { WakeAndUnlock } from "../../src/features/action/WakeAndUnlock";
 import type { BootedDevice } from "../../src/models";
@@ -6,6 +7,8 @@ import { registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+
+const test = warmedTests(() => ToolRegistry.clearTools());
 
 test("wakeAndUnlock handler forwards the daemon's absolute transport deadline", async () => {
   let handler: Parameters<typeof ToolRegistry.registerDeviceAware>[3] | undefined;

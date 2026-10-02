@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { warmedTests } from "../helpers/interactionCancellation";
+import { afterEach, describe, expect } from "bun:test";
 import {
   dragAndDropHandler,
   pressButtonHandler,
@@ -34,6 +35,15 @@ import type {
   SelectAllTextResult,
   TapOnElementResult,
 } from "../../src/models";
+
+const test = warmedTests(() => {
+  resetTapAnyElementFactory();
+  resetDragAndDropFactory();
+  resetSelectAllTextFactory();
+  resetPressButtonFactory();
+  resetRotateFactory();
+  resetSetPostureFactory();
+});
 
 // #6163: the tapOn (#6152) fix — gate the message on
 // `result.success` and set `isError: true` on the MCP envelope when the

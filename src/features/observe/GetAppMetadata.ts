@@ -7,7 +7,7 @@ import {
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "./android";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosAppInfoBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { shellQuote } from "../../utils/shellQuote";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
@@ -23,6 +23,7 @@ export class GetAppMetadata {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     iosSource: IosAppMetadataSource | null = null,
+    private readonly iosAppInfoBackendResolver = resolveIosAppInfoBackend,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -80,38 +81,10 @@ export class GetAppMetadata {
       return null;
     }
 
-    const isSimulator = isIosSimulatorUdid(this.device.deviceId);
-
-    if (isSimulator) {
-      return this.getSimulatorMetadata(bundleId);
-    }
-
-    return this.getPhysicalDeviceMetadata(bundleId);
-  }
-
-  private async getSimulatorMetadata(bundleId: string): Promise<AppMetadataResult | null> {
-    let apps: Record<string, unknown>[];
-    try {
-      apps = await this.iosSource!.listApps(this.device.deviceId);
-    } catch (error) {
-      logger.warn(`[GetAppMetadata] Failed to list iOS apps: ${error}`);
-      return null;
-    }
-    const app = findAppByBundleId(apps, bundleId);
-    if (!app) {
-      return null;
-    }
-    return iosRecordToMetadata(bundleId, app);
-  }
-
-  private async getPhysicalDeviceMetadata(bundleId: string): Promise<AppMetadataResult | null> {
-    let app: Record<string, unknown> | null;
-    try {
-      app = await this.iosSource!.getPhysicalDeviceAppInfo(this.device.deviceId, bundleId);
-    } catch (error) {
-      logger.warn(`[GetAppMetadata] Failed to get physical device app info: ${error}`);
-      return null;
-    }
+    const app = await this.iosAppInfoBackendResolver(this.device.deviceId, {
+      iosSource: this.iosSource,
+      findAppByBundleId,
+    }).getAppInfo(bundleId);
     if (!app) {
       return null;
     }

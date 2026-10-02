@@ -355,3 +355,45 @@ class FakeIosMetadataSource implements IosAppMetadataSource {
     return this.physicalApps.get(bundleId) ?? null;
   }
 }
+
+describe("GetAppMetadata backend injection", () => {
+  test("uses the injected resolver and retains metadata conversion", async () => {
+    const device: BootedDevice = { deviceId: "custom-ios-id", name: "iOS", platform: "ios" };
+    const calls: Array<{ deviceId: string; bundleId: string }> = [];
+    const iosSource: IosAppMetadataSource = {
+      listApps: async () => [],
+      getPhysicalDeviceAppInfo: async () => null,
+    };
+    const metadata = new GetAppMetadata(
+      device,
+      fakeAdbFactory(new FakeAdbExecutor()),
+      iosSource,
+      (deviceId, deps) => {
+        expect(deps.iosSource).toBe(iosSource);
+        expect(deps.findAppByBundleId).toBe(findAppByBundleId);
+        return {
+          getAppInfo: async (bundleId) => {
+            calls.push({ deviceId, bundleId });
+            return { CFBundleVersion: "42", CFBundleShortVersionString: "1.2", Path: "/app" };
+          },
+        };
+      },
+    );
+    expect(await metadata.execute("com.example.app")).toEqual({
+      appId: "com.example.app",
+      platform: "ios",
+      versionName: "1.2",
+      buildNumber: "42",
+      installPath: "/app",
+    });
+    expect(calls).toEqual([{ deviceId: device.deviceId, bundleId: "com.example.app" }]);
+  });
+
+  test("keeps the no-source early return before resolving a backend", async () => {
+    const device: BootedDevice = { deviceId: "custom-ios-id", name: "iOS", platform: "ios" };
+    const metadata = new GetAppMetadata(device, fakeAdbFactory(new FakeAdbExecutor()), null, () => {
+      throw new Error("resolver must not run");
+    });
+    expect(await metadata.execute("com.example.app")).toBeNull();
+  });
+});

@@ -1641,3 +1641,29 @@ describe("ListInstalledApps physical iOS devices", function () {
     ]);
   });
 });
+
+describe("ListInstalledApps backend injection", () => {
+  test("uses the injected resolver and preserves listing failures", async () => {
+    const device: BootedDevice = { deviceId: "custom-ios-id", name: "iOS", platform: "ios" };
+    const calls: string[] = [];
+    const error = new Error("backend listing failed");
+    const list = new ListInstalledApps(
+      device,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      null,
+      {
+        installedAppsRepository: new FakeInstalledAppsRepository(),
+        iosAppListBackendResolver: (deviceId) => {
+          calls.push(deviceId);
+          return {
+            listApps: async () => {
+              throw error;
+            },
+          };
+        },
+      },
+    );
+    expect(await list.executeIosDetailedResult()).toEqual({ apps: [], successful: false, error });
+    expect(calls).toEqual([device.deviceId]);
+  });
+});

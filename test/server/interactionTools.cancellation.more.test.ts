@@ -1,4 +1,9 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  cancellationHandlers,
+  pausedSleep,
+  cleanupDeadline,
+} from "../helpers/interactionCancellation";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { SelectAllText } from "../../src/features/action/SelectAllText";
@@ -12,7 +17,6 @@ import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
-  registerInteractionTools,
   setSelectAllTextFactory,
   resetSelectAllTextFactory,
   setPressButtonFactory,
@@ -29,14 +33,17 @@ import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext
 import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
 import { createExecResult } from "../../src/utils/execResult";
 
+const printStates = readFileSync(
+  new URL("../fixtures/android-display/foldpf-print-states.txt", import.meta.url),
+  "utf8",
+);
+const resetState = readFileSync(
+  new URL("../fixtures/android-display/foldpf-5-after-reset-state.txt", import.meta.url),
+  "utf8",
+);
+
 const device: BootedDevice = { name: "Foldable", deviceId: "emulator-cancel", platform: "android" };
-const handler = (name: string) => {
-  const registered = ToolRegistry.getTool(name)?.deviceAwareHandler;
-  if (!registered) {
-    throw new Error(`Missing registered handler: ${name}`);
-  }
-  return registered;
-};
+const handler = cancellationHandlers(["selectAllText", "pressButton", "setPosture", "rotate"]);
 
 // Execute real command logic without the unrelated observation pipeline.
 const observation = new FakeObserveScreen();
@@ -50,10 +57,6 @@ const bypassObservation = () =>
   );
 
 describe("registered interaction handlers honor cancellation", () => {
-  beforeEach(() => {
-    ToolRegistry.clearTools();
-    registerInteractionTools();
-  });
   afterEach(() => {
     resetSelectAllTextFactory();
     resetPressButtonFactory();
@@ -128,66 +131,58 @@ describe("registered interaction handlers honor cancellation", () => {
   test("setPosture aborts its polling wait before another device command", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
-    adb.setCommandResponse(
-      "shell cmd device_state print-states",
-      createExecResult(
-        readFileSync(
-          new URL("../fixtures/android-display/foldpf-print-states.txt", import.meta.url),
-          "utf8",
-        ),
-        "",
-      ),
-    );
-    adb.setCommandResponse(
-      "shell cmd device_state state",
-      createExecResult(
-        readFileSync(
-          new URL("../fixtures/android-display/foldpf-5-after-reset-state.txt", import.meta.url),
-          "utf8",
-        ),
-        "",
-      ),
-    );
-    setSetPostureFactory(
-      () =>
-        new SetPosture(device, {
-          timer,
-          adbFactory: { create: () => adb },
-          observeFactory: () => observation,
-        }),
-    );
-    const controller = new AbortController();
-    const pending = handler("setPosture")(
-      device,
-      { posture: "opened" },
-      undefined,
-      controller.signal,
-    );
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(timer.getSleepHistory().length).toBeGreaterThan(0);
-    let settled = false;
-    void pending.then(
-      () => {
-        settled = true;
-      },
-      () => {
-        settled = true;
-      },
-    );
-    controller.abort();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(settled).toBe(true);
-    await expect(pending).rejects.toThrow("device may still complete the change");
-    expect(timer.now()).toBe(0);
-    const commands = adb.getExecutedCommands();
-    timer.advanceTime(3000);
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(adb.getExecutedCommands()).toEqual(commands);
+    const { started, sleep } = pausedSleep(timer);
+    try {
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(printStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(resetState, ""));
+      setSetPostureFactory(
+        () =>
+          new SetPosture(device, {
+            timer,
+            adbFactory: { create: () => adb },
+            observeFactory: () => observation,
+          }),
+      );
+      const controller = new AbortController();
+      const pending = handler("setPosture")(
+        device,
+        { posture: "opened" },
+        undefined,
+        controller.signal,
+      );
+      await started;
+      expect(timer.getSleepHistory().length).toBeGreaterThan(0);
+      let settled = false;
+      void pending.then(
+        () => {
+          settled = true;
+        },
+        () => {
+          settled = true;
+        },
+      );
+      controller.abort();
+      await pending.catch(() => {});
+      expect(settled).toBe(true);
+      await expect(pending).rejects.toThrow("device may still complete the change");
+      expect(timer.now()).toBe(0);
+      const commands = adb.getExecutedCommands();
+      timer.advanceTime(3000);
+      await sleep.mock.results[0]!.value;
+      expect(adb.getExecutedCommands()).toEqual(commands);
+    } finally {
+      timer.resolveAll();
+      sleep.mockRestore();
+    }
   });
 
   test("rotate cancellation during waitForRotation restores auto-rotate without further reads", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
+    const { started, sleep } = pausedSleep(timer);
     adb.setCommandResponse(
       'shell dumpsys window | grep -i "mRotation="',
       createExecResult("mRotation=0", ""),
@@ -212,7 +207,7 @@ describe("registered interaction handlers honor cancellation", () => {
         undefined,
         controller.signal,
       );
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await started;
       expect(timer.getSleepHistory().length).toBeGreaterThan(0);
       let settled = false;
       void pending.then(
@@ -224,7 +219,7 @@ describe("registered interaction handlers honor cancellation", () => {
         },
       );
       controller.abort();
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await pending.catch(() => {});
       expect(settled).toBe(true);
       await expect(pending).rejects.toThrow("device may still complete the change");
       expect(timer.now()).toBe(0);
@@ -234,10 +229,11 @@ describe("registered interaction handlers honor cancellation", () => {
       const commands = adb.getExecutedCommands();
       const puts = settingsPut.mock.calls.length;
       timer.advanceTime(5000);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await sleep.mock.results[0]!.value;
       expect(adb.getExecutedCommands()).toEqual(commands);
       expect(settingsPut.mock.calls.length).toBe(puts);
     } finally {
+      sleep.mockRestore();
       observed.mockRestore();
       settingsGet.mockRestore();
       settingsPut.mockRestore();
@@ -401,6 +397,7 @@ describe("registered interaction handlers honor cancellation", () => {
     async (phase) => {
       const adb = new FakeAdbExecutor();
       const timer = new FakeTimer();
+      const cleanup = cleanupDeadline(timer);
       const controller = new AbortController();
       const heldWrite = Promise.withResolvers<ReturnType<typeof createExecResult>>();
       const started = Promise.withResolvers<void>();
@@ -451,7 +448,7 @@ describe("registered interaction handlers honor cancellation", () => {
         );
         await started.promise;
         controller.abort();
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await cleanup.started;
         expect(settled).toBe(false);
         expect(writes.at(-1)).toBe(heldCommand);
         expect(
@@ -462,6 +459,7 @@ describe("registered interaction handlers honor cancellation", () => {
         expect(writes.at(-1)).toBe("shell settings put system accelerometer_rotation 1");
         expect(timer.getPendingTimeoutCount()).toBe(0);
       } finally {
+        cleanup.setTimeout.mockRestore();
         execute.mockRestore();
         observed.mockRestore();
         settingsGet.mockRestore();
@@ -476,8 +474,15 @@ describe("registered interaction handlers honor cancellation", () => {
     async (mode) => {
       const adb = new FakeAdbExecutor();
       const timer = new FakeTimer();
+      const cleanup = cleanupDeadline(timer);
       const controller = new AbortController();
       const disable = Promise.withResolvers<{ success: boolean }>();
+      const restored = Promise.withResolvers<void>();
+      const restoreStarted = Promise.withResolvers<void>();
+      const cleared = spyOn(timer, "clearTimeout").mockImplementation((handle) => {
+        FakeTimer.prototype.clearTimeout.call(timer, handle);
+        restored.resolve();
+      });
       const started = Promise.withResolvers<void>();
       adb.setCommandResponse(
         'shell dumpsys window | grep -i "mRotation="',
@@ -495,6 +500,7 @@ describe("registered interaction handlers honor cancellation", () => {
           started.resolve();
           return disable.promise;
         }
+        restoreStarted.resolve();
         return { success: true };
       });
       setRotateFactory(() => new Rotate(device, adb, timer));
@@ -517,7 +523,7 @@ describe("registered interaction handlers honor cancellation", () => {
         );
         await started.promise;
         controller.abort();
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await cleanup.started;
         expect(settled).toBe(false);
         expect(settingsPut.mock.calls.map((call) => call[2])).toEqual(["0"]);
         if (mode === "deadline") {
@@ -526,7 +532,8 @@ describe("registered interaction handlers honor cancellation", () => {
           expect(settingsPut.mock.calls.map((call) => call[2])).toEqual(["0"]);
         }
         disable.resolve({ success: true });
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await restoreStarted.promise;
+        await restored.promise;
         if (mode === "settled") {
           await expect(pending).rejects.toThrow("Operation cancelled");
         }
@@ -536,6 +543,8 @@ describe("registered interaction handlers honor cancellation", () => {
         ).toEqual([]);
         expect(timer.getPendingTimeoutCount()).toBe(0);
       } finally {
+        cleanup.setTimeout.mockRestore();
+        cleared.mockRestore();
         observed.mockRestore();
         settingsGet.mockRestore();
         settingsPut.mockRestore();
@@ -595,7 +604,7 @@ describe("registered interaction handlers honor cancellation", () => {
         );
         expect(timer.getPendingTimeoutCount()).toBe(0);
         restore.resolve(createExecResult("", ""));
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await restore.promise;
       } finally {
         execute.mockRestore();
         observed.mockRestore();
@@ -653,6 +662,7 @@ describe("registered interaction handlers honor cancellation", () => {
       deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
     };
     const timer = new FakeTimer();
+    const { started, sleep } = pausedSleep(timer);
     const adb = new FakeAdbExecutor();
     const client = new FakeIOSCtrlProxy(timer);
     client.setHierarchyData({
@@ -683,7 +693,7 @@ describe("registered interaction handlers honor cancellation", () => {
         undefined,
         controller.signal,
       );
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await started;
       expect(timer.getSleepHistory().length).toBeGreaterThan(0);
       controller.abort();
       await expect(pending).rejects.toThrow("Operation cancelled");
@@ -691,10 +701,11 @@ describe("registered interaction handlers honor cancellation", () => {
       expect(launches).toHaveLength(1);
       const readCount = reads.mock.calls.length;
       timer.advanceTime(5000);
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await sleep.mock.results[0]!.value;
       expect(reads.mock.calls).toHaveLength(readCount);
       expect(launches).toHaveLength(1);
     } finally {
+      sleep.mockRestore();
       observed.mockRestore();
       reads.mockRestore();
       instance.mockRestore();

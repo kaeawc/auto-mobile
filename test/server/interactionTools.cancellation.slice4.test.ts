@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { cancellationHandlers } from "../helpers/interactionCancellation";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type WebSocket from "ws";
 import type { BootedDevice, ObserveResult } from "../../src/models";
@@ -12,7 +13,6 @@ import { CtrlProxyKeyboard } from "../../src/features/observe/ios/CtrlProxyKeybo
 import { CtrlProxyGestures } from "../../src/features/observe/ios/CtrlProxyGestures";
 import type { DelegateContext } from "../../src/features/observe/ios/types";
 import {
-  registerInteractionTools,
   setKeyboardFactory,
   resetKeyboardFactory,
   setOpenUrlFactory,
@@ -59,14 +59,8 @@ const observation: ObserveResult = {
   },
 };
 const restores: Array<() => void> = [];
-function handler(name: string) {
-  const registered = ToolRegistry.getTool(name)?.deviceAwareHandler;
-  if (!registered) {
-    throw new Error(`Missing handler ${name}`);
-  }
-  return registered;
-}
-beforeEach(() => registerInteractionTools());
+const handler = cancellationHandlers(["keyboard", "openLink", "systemTray", "homeScreen"]);
+
 afterEach(() => {
   for (const restore of restores.splice(0)) {
     restore();

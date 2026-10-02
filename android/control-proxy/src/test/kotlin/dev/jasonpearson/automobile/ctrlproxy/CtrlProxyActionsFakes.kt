@@ -153,6 +153,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun getPreferences(requestId: String?, packageName: String, fileName: String) {}
 
+  override fun discoverKeystore(requestId: String?, packageName: String) {}
+
   override fun listDataStores(requestId: String?, packageName: String, adapterName: String) {}
 
   override fun getDataStore(
@@ -469,6 +471,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     record("getPreferences", requestId, packageName, fileName)
+
+  override fun discoverKeystore(requestId: String?, packageName: String) =
+    record("discoverKeystore", requestId, packageName)
 
   override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
     record("listDataStores", requestId, packageName, adapterName)

@@ -1,3 +1,8 @@
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
+import type {
+  KeystoreDiscovery,
+  KeystoreDiscoveryState,
+} from "../features/storage/keystoreDiscovery";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { serverConfig } from "../utils/ServerConfig";
@@ -52,6 +57,7 @@ export interface StorageCapabilityUserResolver {
 
 export interface StorageCapabilityDependencies {
   adbFactory?: AdbClientFactory;
+  createKeystoreDiscovery?: (device: BootedDevice) => KeystoreDiscovery;
   createUserResolver?: (adb: AdbExecutor) => StorageCapabilityUserResolver;
 }
 
@@ -100,6 +106,31 @@ async function resolveActiveUserProfile(
   return activeUserProfile;
 }
 
+async function resolveKeystoreDiscovery(
+  device: BootedDevice,
+  appId: string,
+  dependencies: StorageCapabilityDependencies,
+): Promise<KeystoreDiscoveryState> {
+  try {
+    const discovery =
+      dependencies.createKeystoreDiscovery?.(device) ?? AndroidCtrlProxyClient.getInstance(device);
+    return await discovery.discoverKeystore(appId);
+  } catch (error) {
+    logger.warn("[StorageCapabilityResources] Keystore discovery unavailable", error);
+    return {
+      schemaVersion: 1,
+      capability: "storage.keystore",
+      outcome: "unavailable",
+      reason: "BRIDGE_UNAVAILABLE",
+      bridgeAvailable: false,
+      metadata: "supported",
+      mutation: "declared_unsupported",
+      deviceLocked: "unknown",
+      scopes: [],
+    };
+  }
+}
+
 function buildUri(deviceId: string, appId?: string): string {
   const base = `automobile:devices/${deviceId}/storage/capabilities`;
   return appId ? `${base}?appId=${encodeURIComponent(appId)}` : base;
@@ -138,9 +169,11 @@ export async function getStorageCapabilitiesResource(
     }
 
     const activeUserProfile = await resolveActiveUserProfile(device, dependencies);
-    const report = computeStorageCapabilities(
-      resolveStorageCapabilityContext(device, appId, activeUserProfile),
-    );
+    const context = resolveStorageCapabilityContext(device, appId, activeUserProfile);
+    if (device.platform === "android" && appId && context.embeddedSdk) {
+      context.keystore = await resolveKeystoreDiscovery(device, appId, dependencies);
+    }
+    const report = computeStorageCapabilities(context);
 
     return {
       uri,

@@ -16,7 +16,14 @@ import {
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
   KNOWN_REQUEST_TYPES,
+  ANDROID_CAPABILITY_GATED_COMMANDS,
+  ANDROID_CAPABILITY_REQUEST_TYPES,
 } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+
+test("Keystore discovery is an optional advertised Android capability", () => {
+  expect(ANDROID_CAPABILITY_REQUEST_TYPES).toContain("discover_keystore");
+  expect(ANDROID_CAPABILITY_GATED_COMMANDS.has("discover_keystore")).toBe(true);
+});
 
 /**
  * Every `@SerialName` declared in WebSocketRequest.kt, transcribed by hand. Keep this in lockstep
@@ -61,6 +68,7 @@ const KOTLIN_SERIAL_NAMES = [
   "add_highlight",
   "list_preference_files",
   "get_preferences",
+  "discover_keystore",
   "list_data_stores",
   "get_data_store",
   "subscribe_storage",
@@ -505,6 +513,14 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         '{"type":"get_preferences","requestId":"gp-1","packageName":"com.x","fileName":"prefs"}',
     },
     {
+      builder: "discoverKeystore",
+      name: "app-owned metadata capability discovery",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.discoverKeystore({ requestId: "ks-1", packageName: "com.x" }),
+      ),
+      expected: '{"type":"discover_keystore","requestId":"ks-1","packageName":"com.x"}',
+    },
+    {
       builder: "listDataStores",
       name: "packageName + adapterName",
       actual: serializeCtrlProxyRequest(
@@ -770,12 +786,12 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   });
 
   // Completeness guard: every builder in the module must have at least one wire row above, and the
-  // total builder count is pinned. Ship builder #41 without a row and this fails — not a silently
+  // total builder count is pinned. Ship builder #42 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 40", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 41", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(40);
+    expect(builderNames.length).toBe(41);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });

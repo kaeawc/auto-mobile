@@ -72,6 +72,7 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     expect(Object.keys(client.webSocketMessageHandlers)).toHaveLength(57);
     expect(Object.hasOwn(client.webSocketMessageHandlers, "custom_event")).toBe(false);
     for (const type of [
+      "keystore_discovery",
       "network_event",
       "websocket_frame_event",
       "log_event",

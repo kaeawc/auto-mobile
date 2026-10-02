@@ -746,6 +746,12 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatches read only keystore discovery`() = runTest {
+    dispatch("""{"type":"discover_keystore","requestId":"ks1","packageName":"com.example"}""")
+    assertEquals("discoverKeystore" to listOf<Any?>("ks1", "com.example"), lastCall)
+  }
+
+  @Test
   fun `dispatches list_data_stores`() = runTest {
     dispatch(
       """{"type":"list_data_stores","requestId":"lds1","packageName":"com.example","adapterName":"settings"}"""

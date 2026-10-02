@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk
 
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
+import dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import org.junit.After
 import org.junit.Assert.assertFalse
@@ -44,6 +45,8 @@ class AutoMobileSDKShutdownTest {
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     DatabaseInspector.setEnabled(true)
     SharedPreferencesInspector.setEnabled(true)
+    KeystoreTestState.declareScope("fixture", setOf("auth"))
+    KeystoreTestState.setEnabled(true)
 
     AutoMobileSDK.shutdown()
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
@@ -52,6 +55,8 @@ class AutoMobileSDKShutdownTest {
     assertFalse(AutoMobileCrashes.isInitialized())
     assertFalse(DatabaseInspector.isEnabled())
     assertFalse(SharedPreferencesInspector.isEnabled())
+    assertFalse(KeystoreTestState.isEnabled())
+    assertTrue(KeystoreTestState.declaredScopes().isEmpty())
   }
 
   @Test

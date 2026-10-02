@@ -1,3 +1,4 @@
+import { FakeKeystoreDiscovery } from "../fakes/FakeKeystoreDiscovery";
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   registerStorageCapabilityResources,
@@ -42,6 +43,7 @@ describe("storageCapabilityResources", () => {
     devices: BootedDevice[],
     dependencies: StorageCapabilityDependencies = {
       adbFactory: new FakeAdbClientFactory(new FakeAdbExecutor()),
+      createKeystoreDiscovery: () => new FakeKeystoreDiscovery(),
       createUserResolver: () => ({
         resolve: async () => ({ userId: 0, source: "currentUser" }),
       }),
@@ -58,6 +60,88 @@ describe("storageCapabilityResources", () => {
     }
     return match.template.handler(match.params);
   }
+
+  test.each([
+    "ok",
+    "disabled",
+    "unavailable",
+    "unsupported",
+    "locked",
+    "authentication_required",
+  ] as const)("Keystore discovery reports typed %s outcome", async (outcome) => {
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    try {
+      const fake = new FakeKeystoreDiscovery();
+      fake.state.outcome = outcome;
+      if (outcome === "unavailable") {
+        fake.state.reason = "BRIDGE_NOT_INSTALLED";
+        fake.state.bridgeAvailable = false;
+      }
+      setDevices([androidEmulator], {
+        adbFactory: new FakeAdbClientFactory(),
+        createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+        createKeystoreDiscovery: () => fake,
+      });
+      const content = await readResource(
+        "automobile:devices/emulator-5554/storage/capabilities?appId=com.x",
+      );
+      const body = JSON.parse(content.text ?? "{}");
+      expect(
+        body.domains.find((d: { domain: string }) => d.domain === "secure_state").capabilities,
+      ).toEqual([fake.state]);
+      expect(fake.calls).toEqual(["com.x"]);
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
+
+  test("failed Keystore transport becomes unavailable while other capabilities remain", async () => {
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    serverConfig.setEmbeddedSdkEnabled(true);
+    try {
+      const fake = new FakeKeystoreDiscovery();
+      fake.failure = new Error("transport down");
+      setDevices([androidEmulator], {
+        adbFactory: new FakeAdbClientFactory(),
+        createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+        createKeystoreDiscovery: () => fake,
+      });
+      const content = await readResource(
+        "automobile:devices/emulator-5554/storage/capabilities?appId=com.x",
+      );
+      const body = JSON.parse(content.text ?? "{}");
+      expect(body.domains).toHaveLength(6);
+      const state = body.domains.find((d: { domain: string }) => d.domain === "secure_state")
+        .capabilities[0];
+      expect(state.outcome).toBe("unavailable");
+      expect(state.reason).toBe("BRIDGE_UNAVAILABLE");
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
+
+  test("Keystore discovery requires app scope and enabled SDK and Android", async () => {
+    const previous = serverConfig.isEmbeddedSdkEnabled();
+    const fake = new FakeKeystoreDiscovery();
+    try {
+      setDevices([androidEmulator, iosPhysical], {
+        adbFactory: new FakeAdbClientFactory(),
+        createUserResolver: () => ({ resolve: async () => ({ userId: 0, source: "currentUser" }) }),
+        createKeystoreDiscovery: () => fake,
+      });
+      serverConfig.setEmbeddedSdkEnabled(true);
+      await readResource("automobile:devices/emulator-5554/storage/capabilities");
+      await readResource(
+        `automobile:devices/${iosPhysical.deviceId}/storage/capabilities?appId=com.x`,
+      );
+      serverConfig.setEmbeddedSdkEnabled(false);
+      await readResource("automobile:devices/emulator-5554/storage/capabilities?appId=com.x");
+      expect(fake.calls).toEqual([]);
+    } finally {
+      serverConfig.setEmbeddedSdkEnabled(previous);
+    }
+  });
 
   test("registers a single query-variant template that matches bare and app-scoped URIs", () => {
     setDevices([]);

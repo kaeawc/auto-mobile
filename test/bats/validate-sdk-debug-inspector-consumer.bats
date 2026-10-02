@@ -26,6 +26,7 @@ setup() {
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.jasonpearson.automobile.sdk">
   <application>
     <provider android:name="${DB_PROVIDER}" android:authorities="\${applicationId}.automobile.database" android:exported="true" />
+    <provider android:name="${KS_PROVIDER}" android:authorities="\${applicationId}.automobile.keystore" android:exported="true" />
     <provider android:name="${SP_PROVIDER}" android:authorities="\${applicationId}.automobile.sharedprefs" android:exported="true" />
   </application>
 </manifest>
@@ -41,9 +42,11 @@ XML
   # A debug AAR carrying a classes.jar with both provider classes.
   local work="${FIX}/work"
   mkdir -p "${work}/dev/jasonpearson/automobile/sdk/database" \
-           "${work}/dev/jasonpearson/automobile/sdk/storage"
+           "${work}/dev/jasonpearson/automobile/sdk/storage" \
+           "${work}/dev/jasonpearson/automobile/sdk/keystore"
   : >"${work}/${DB_CLASS}"
   : >"${work}/${SP_CLASS}"
+  : >"${work}/${KS_PROVIDER_CLASS}"
   ( cd "${work}" && zip -q -r classes.jar dev )
   ( cd "${work}" && zip -q "${FIX}/debug.aar" classes.jar )
 
@@ -209,4 +212,22 @@ XML
   # Two indistinguishable matching variants make the coordinate unresolvable;
   # returning the first would overstate AC4.
   [ -z "$(module_runtime_aar_for_build_type "${FIX}/ambiguous.module" debug)" ]
+}
+
+@test "Keystore provider and exact authority are debug only" {
+  [ "$(manifest_provider_count "${FIX}/debug-manifest.xml" "$KS_PROVIDER" '${applicationId}.automobile.keystore')" = "1" ]
+  [ "$(manifest_provider_count "${FIX}/debug-manifest.xml" "$KS_PROVIDER" 'wrong.automobile.keystore')" = "0" ]
+  [ "$(manifest_named_provider_count "${FIX}/release-manifest.xml" "$KS_PROVIDER")" = "0" ]
+  [ "$(manifest_provider_match_count "${FIX}/release-manifest.xml" "" "" "\${applicationId}.automobile.keystore")" = "0" ]
+  [ "$(aar_class_present "${FIX}/debug.aar" "$KS_PROVIDER_CLASS")" = "1" ]
+  [ "$(aar_class_present "${FIX}/release.aar" "$KS_PROVIDER_CLASS")" = "0" ]
+}
+
+@test "Keystore authority check detects a different class claiming the release authority" {
+  cat >"${FIX}/wrong-keystore-provider.xml" <<XML
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application>
+  <provider android:name="other.Provider" android:authorities="\${applicationId}.automobile.keystore" android:exported="false" />
+</application></manifest>
+XML
+  [ "$(manifest_provider_match_count "${FIX}/wrong-keystore-provider.xml" "" "" "\${applicationId}.automobile.keystore")" = "1" ]
 }

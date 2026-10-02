@@ -121,6 +121,73 @@ describe("CtrlProxyStorage (Android)", function () {
     throw new Error(`No message of type ${type} in: ${socket.sentMessages.join(", ")}`);
   };
 
+  test("Keystore discovery round trip preserves typed state and strips unexpected fields", async () => {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "connected",
+          id: "new-apk",
+          supportedCommands: ["discover_keystore"],
+        }),
+      );
+      const count = socket!.sentMessages.length;
+      const pending = client.discoverKeystore("com.example");
+      await waitForSentMessages(socket, count + 1);
+      const request = findSentMessage(socket!, "discover_keystore");
+      const state = {
+        schemaVersion: 1,
+        capability: "storage.keystore",
+        outcome: "disabled",
+        reason: "DISABLED",
+        bridgeAvailable: true,
+        metadata: "supported",
+        mutation: "declared_unsupported",
+        deviceLocked: "locked",
+        scopes: [],
+      };
+      socket!.simulateMessage(
+        JSON.stringify({
+          type: "keystore_discovery",
+          requestId: request.requestId,
+          state: { ...state, unexpected: "must be dropped" },
+        }),
+      );
+      expect(await pending).toEqual(state);
+      expect(request.packageName).toBe("com.example");
+    } finally {
+      client.close();
+    }
+  });
+
+  test("old APK consistently reports unsupported Keystore discovery without sending requests", async () => {
+    const { factory, getSocket } = createCapturingFactory(fakeTimer);
+    const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+    try {
+      await client.ensureConnected();
+      const socket = await waitForSocket(getSocket);
+      await waitForSocketOpen(socket);
+      const pending = client.discoverKeystore("com.example");
+      socket!.simulateMessage(
+        JSON.stringify({ type: "connected", id: "old-apk", supportedCommands: [] }),
+      );
+      const first = await pending;
+      const second = await client.discoverKeystore("com.example");
+      expect(first).toEqual(second);
+      expect(first.outcome).toBe("unsupported");
+      expect(first.reason).toBe("DECLARED_UNSUPPORTED");
+      expect(
+        socket!.sentMessages.some((message) => JSON.parse(message).type === "discover_keystore"),
+      ).toBe(false);
+    } finally {
+      client.close();
+    }
+  });
+
   test.each([
     ["list_preference_files", "preference_files"],
     ["get_preferences", "preferences"],

@@ -28,6 +28,7 @@ const iosDevice: BootedDevice = {
 
 // Copied in order from android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt's supportedCommands advertisement.
 const androidAdvertisedCommands = [
+  "discover_keystore",
   "set_hierarchy_interval",
   "node_selector_actions",
   "request_activate_accessibility_link",
@@ -124,7 +125,7 @@ describe("CtrlProxy command support", () => {
     }
   });
 
-  test("Android sends core commands with the ten advertised capabilities", async () => {
+  test("Android sends core commands with the advertised capabilities", async () => {
     const client = androidClient();
     client["webSocketMessageHandlers"].connected({
       type: "connected",

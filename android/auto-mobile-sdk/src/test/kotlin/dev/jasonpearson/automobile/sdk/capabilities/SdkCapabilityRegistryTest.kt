@@ -9,6 +9,18 @@ import org.junit.Test
 
 class SdkCapabilityRegistryTest {
   @Test
+  fun `main defaults do not contribute a debug keystore descriptor`() {
+    val registry = SdkCapabilityRegistry()
+    registry.markInitialized()
+    dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState.setEnabled(true)
+    try {
+      assertTrue(registry.snapshot().capabilities.none { it.id == "storage.keystore" })
+    } finally {
+      dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState.reset()
+    }
+  }
+
+  @Test
   fun `capabilities are distinct before and after initialization`() {
     val registry = SdkCapabilityRegistry()
 

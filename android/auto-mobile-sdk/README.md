@@ -369,3 +369,15 @@ Apache License 2.0
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+### Keystore test-state metadata (debug only)
+
+Opt in with `KeystoreTestState.declareScope("fixture", setOf("app.fixture"))` and
+`KeystoreTestState.setEnabled(true)`; retain the returned `InspectorRegistration`
+and call `unregister()` when the scope owner ends. Disabled by default, reset on
+SDK shutdown. The debug-only `${applicationId}.automobile.keystore` provider accepts
+`discover` and `metadata` (required `scope`, optional exact `alias`). It runs in the
+app's own security context, grants no cross-app access, and never returns key
+material, certificates, or credential bytes. Mutation is declared unsupported;
+package-data reset remains separate. Android and iOS use parallel implementations
+under the same opt-in, exact-scope, caller-authorization, metadata-only contract.

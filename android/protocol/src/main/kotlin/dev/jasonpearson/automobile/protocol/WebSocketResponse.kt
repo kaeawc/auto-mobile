@@ -702,6 +702,14 @@ data class HighlightResponse(
 // =============================================================================
 
 @Serializable
+@SerialName("keystore_discovery")
+data class KeystoreDiscoveryResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val state: KeystoreDiscoveryState,
+) : WebSocketResponse()
+
+@Serializable
 @SerialName("preference_files")
 data class PreferenceFilesResult(
   override val timestamp: Long,

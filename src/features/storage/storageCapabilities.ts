@@ -10,9 +10,11 @@
  * device and delegates the reasoning here so the state machine is fully testable
  * without devices, sockets, or a clock.
  *
- * Secure-state (Keychain / Core Data) policy is owned by #5161; this module reports
- * the domain as an explicit extension point and never advertises secret export.
+ * Secure-state uses platform-specific discovery. Android reports only Keystore
+ * metadata support; iOS Keychain / Core Data policy remains owned by #5161.
  */
+
+import type { KeystoreDiscoveryState } from "./keystoreDiscovery";
 
 /** Payload schema version. Bump when the report shape changes incompatibly. */
 export const STORAGE_CAPABILITIES_SCHEMA_VERSION = 1 as const;
@@ -61,6 +63,8 @@ export interface StorageCapabilityContext {
   deviceType: StorageDeviceType;
   /** AutoMobile SDK embedded with storage inspection enabled. */
   embeddedSdk: boolean;
+  /** Verified through the typed Android test-control bridge, not inferred from SDK presence. */
+  keystore?: KeystoreDiscoveryState;
   /** Active CtrlProxy runner session. */
   sessionActive?: boolean;
   /** App built debuggable (required for adb `run-as` file/db access). */
@@ -100,6 +104,8 @@ export interface DomainCapability {
   platformScope: "android" | "ios" | "cross-platform";
   operations: OperationCapability[];
   note?: string;
+  /** Platform-specific bridge discovery; contains metadata support, never secret values. */
+  capabilities?: KeystoreDiscoveryState[];
 }
 
 /** A documented platform-specific extension point. */
@@ -349,7 +355,35 @@ function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
   };
 }
 
-function secureStateDomain(_ctx: StorageCapabilityContext): DomainCapability {
+function secureStateDomain(ctx: StorageCapabilityContext): DomainCapability {
+  if (ctx.platform === "android") {
+    return {
+      domain: "secure_state",
+      portable: false,
+      platformScope: "android",
+      note: "App-owned Android Keystore metadata via storage.keystore; exact declared scopes only, never key material. Package-data reset is separate.",
+      capabilities: ctx.keystore ? [ctx.keystore] : [],
+      operations: [
+        {
+          operation: "read",
+          state: "unavailable",
+          reason:
+            "SDK alias metadata is read-only; no host storage read surface is exposed in this slice.",
+          prerequisites: ["code-only KeystoreTestState opt-in and exact declared scope (#5189)"],
+        },
+        deriveOperation(
+          "write",
+          "Keystore mutation is declared_unsupported in this slice (#5190).",
+          [],
+        ),
+        deriveOperation(
+          "namespace_reset",
+          "Keystore mutation is declared_unsupported; package-data reset is explicit and separate (#5190).",
+          [],
+        ),
+      ],
+    };
+  }
   // Policy is owned by #5161. Values are never exported here; mutation is a non-goal.
   const policyPrereq = "host secure-state policy (see #5161)";
   return {

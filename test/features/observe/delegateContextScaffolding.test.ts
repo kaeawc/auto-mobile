@@ -71,6 +71,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
       expect(Object.keys(ctx).sort()).toEqual([
         "cancelScreenshotBackoff",
         "ensureConnected",
+        "getSupportedCommands",
         "getWebSocket",
         "isCommandSupported",
         "requestManager",
@@ -87,6 +88,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
       expect(ctx.getWebSocket()).toBe((client as any).ws);
       expect(typeof ctx.ensureConnected).toBe("function");
       expect(typeof ctx.isCommandSupported).toBe("function");
+      expect(typeof ctx.getSupportedCommands).toBe("function");
       expect(typeof ctx.cancelScreenshotBackoff).toBe("function");
     });
   });
@@ -102,6 +104,7 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "ensureConnected",
         "getCachedHierarchy",
         "getLastWebSocketTimeout",
+        "getSupportedCommands",
         "getWebSocket",
         "isCommandSupported",
         "markObserverHierarchyRequest",

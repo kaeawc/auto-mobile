@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.sdk.capabilities
 
+import dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState
 import java.util.LinkedHashMap
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
@@ -146,7 +147,19 @@ internal class SdkCapabilityRegistry {
   fun snapshot(): SdkCapabilityDocument {
     synchronized(lock) {
       val visible =
-        descriptors.values.map { descriptor ->
+        descriptors.values.map { registered ->
+          val descriptor =
+            if (registered.id == "storage.keystore") {
+              val keystoreEnabled = KeystoreTestState.isEnabled()
+              registered.copy(
+                state =
+                  if (keystoreEnabled) SdkCapabilityState.SUPPORTED
+                  else SdkCapabilityState.DISABLED,
+                reason =
+                  if (keystoreEnabled) "App-owned metadata only; mutation declared unsupported"
+                  else "KeystoreTestState is disabled",
+              )
+            } else registered
           when {
             navigationOnly && descriptor.id != "events.navigation" ->
               descriptor.copy(

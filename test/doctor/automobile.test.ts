@@ -28,6 +28,7 @@ import { createDoctorDeadline } from "../../src/doctor/deadline";
 import { logger } from "../../src/utils/logger";
 import { DoctorDeadlineError } from "../../src/doctor/deadline";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { ActionableError } from "../../src/models/ActionableError";
 
 describe("checkDaemonVersion", () => {
   test("returns pass status", () => {
@@ -760,6 +761,62 @@ describe("checkCtrlProxy", () => {
     expect(unknown.message).toContain("versionStatus=unverifiable");
   });
 
+  test("fails when a known pinned installed APK SHA cannot be read", async () => {
+    const previousVersion = process.env.AUTOMOBILE_VERSION;
+    const previousSkip = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    fakeAdb.setDevices([device("one")]);
+    configureInstalled(fakeAdb);
+    fakeAdb.setCommandResponse("shell pm path", { stdout: "", stderr: "" });
+    try {
+      const result = await checkCtrlProxy(fakeFactory);
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain("versionStatus=unverifiable");
+      expect(result.message).toContain("cannot verify the pinned release");
+      expect(result.message).toContain("AUTOMOBILE_VERSION=0.0.18");
+    } finally {
+      if (previousVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = previousVersion;
+      }
+      if (previousSkip === undefined) {
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+      } else {
+        process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = previousSkip;
+      }
+    }
+  });
+
+  test("checksum skip prevents fail-closed status for an unreadable installed APK SHA", async () => {
+    const previousVersion = process.env.AUTOMOBILE_VERSION;
+    const previousSkip = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+    process.env.AUTOMOBILE_VERSION = "0.0.18";
+    process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "1";
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    fakeAdb.setDevices([device("one")]);
+    configureInstalled(fakeAdb);
+    fakeAdb.setCommandResponse("shell pm path", { stdout: "", stderr: "" });
+    try {
+      const result = await checkCtrlProxy(fakeFactory);
+      expect(result.status).not.toBe("fail");
+      expect(result.message).toContain("versionStatus=skipped");
+    } finally {
+      if (previousVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = previousVersion;
+      }
+      if (previousSkip === undefined) {
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+      } else {
+        process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = previousSkip;
+      }
+    }
+  });
+
   test("abort after the first status read stops before accessibility reads", async () => {
     fakeAdb.setDevices([device("one"), device("two")]);
     const controller = new AbortController();
@@ -831,11 +888,32 @@ describe("checkCtrlProxy", () => {
     }
   });
 
+  test("fails for an actionable CtrlProxy device failure and continues", async () => {
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    fakeAdb.setDevices([device("one"), device("two")]);
+    configureInstalled(fakeAdb, "expected-sha");
+    const error = new ActionableError("known pin could not be verified");
+    const installed = spyOn(AndroidCtrlProxyManager.prototype, "isInstalled").mockRejectedValueOnce(
+      error,
+    );
+    try {
+      const result = await checkCtrlProxy(fakeFactory);
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain(
+        "Could not check device=one: known pin could not be verified",
+      );
+      expect(result.message).toContain("device=two; installed=true; enabled=true");
+    } finally {
+      installed.mockRestore();
+    }
+  });
+
   test("work profile reports different results for every device", async () => {
     fakeAdb.setDevices([device("one"), device("two")]);
     const one = new FakeAdbExecutor();
     one.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
     const two = new FakeAdbExecutor();
+    two.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
     const factory: AdbClientFactory = {
       create: (target) => (target ? (target.deviceId === "one" ? one : two) : fakeAdb),
     };
@@ -857,6 +935,7 @@ describe("checkCtrlProxy", () => {
       const one = new FakeAdbExecutor();
       one.setUsers([{ userId: 10, name: "Work", flags: 0x20, running: true }]);
       const two = new FakeAdbExecutor();
+      two.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
       const factory: AdbClientFactory = {
         create: (target) => (target ? (target.deviceId === "one" ? one : two) : fakeAdb),
       };
@@ -888,6 +967,7 @@ describe("checkCtrlProxy", () => {
       message: "No Android devices connected",
     });
     fakeAdb.setDevices([device("one")]);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
     expect((await checkWorkProfileAccessibility(fakeFactory)).message).toBe(
       "device=one; No work profiles detected",
     );
@@ -899,6 +979,28 @@ describe("checkCtrlProxy", () => {
     expect((await checkWorkProfileAccessibility(fakeFactory)).message).toBe(
       "device=one; Accessibility service enabled for 1 work profile(s)",
     );
+  });
+
+  test("fails for an actionable work profile device failure and continues", async () => {
+    fakeAdb.setDevices([device("one"), device("two")]);
+    const one = new FakeAdbExecutor();
+    const two = new FakeAdbExecutor();
+    two.setUsers([{ userId: 0, name: "Owner", flags: 0x13, running: true }]);
+    const factory: AdbClientFactory = {
+      create: (target) => (target ? (target.deviceId === "one" ? one : two) : fakeAdb),
+    };
+    const error = new ActionableError("user listing could not be verified");
+    const query = spyOn(one, "listUsers").mockRejectedValue(error);
+    try {
+      const result = await checkWorkProfileAccessibility(factory);
+      expect(result.status).toBe("fail");
+      expect(result.message).toContain(
+        "Could not check device=one: user listing could not be verified",
+      );
+      expect(result.message).toContain("device=two; No work profiles detected");
+    } finally {
+      query.mockRestore();
+    }
   });
 
   test("work profile caps devices and deduplicates recommendations", async () => {

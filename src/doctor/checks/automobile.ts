@@ -405,6 +405,11 @@ async function checkDeviceCtrlProxy(
     if (version.knownPinMismatch) {
       diagnostics.push(`AUTOMOBILE_VERSION=${resolvePinnedVersion()}`);
     }
+  } else if (version.status === "unverifiable" && version.knownPinMismatch) {
+    diagnostics.push(
+      "Installed CtrlProxy APK SHA could not be read; cannot verify the pinned release",
+    );
+    diagnostics.push(`AUTOMOBILE_VERSION=${resolvePinnedVersion()}`);
   }
   const status = version.knownPinMismatch
     ? "fail"
@@ -437,7 +442,7 @@ function androidDoctorDeviceFailure(
   log.warn(`${description} check failed for ${device.deviceId}: ${errorMessage(error)}`, error);
   return {
     name,
-    status: "warn",
+    status: error instanceof ActionableError ? "fail" : "warn",
     message: `Could not check device=${device.deviceId}: ${errorMessage(error)}`,
     recommendation:
       "Re-run doctor and verify adb access to that device; doctor only reports status.",
@@ -530,6 +535,16 @@ async function checkDeviceWorkProfileAccessibility(
   currentProbe.signal?.throwIfAborted();
   const users = await deviceAdb.listUsers(currentProbe.signal);
   remainingDoctorProbe(currentProbe);
+
+  if (users.length === 0) {
+    return {
+      name: "Work Profile Accessibility",
+      status: "warn",
+      message: `device=${device.deviceId}; Could not list Android users`,
+      recommendation:
+        "Re-run doctor and verify adb access to that device; doctor only reports status.",
+    };
+  }
 
   // Filter to work profiles: userId > 0, running, and flags indicate managed profile (0x30 = 48)
   // Work profiles have FLAG_MANAGED_PROFILE (0x20) in their flags

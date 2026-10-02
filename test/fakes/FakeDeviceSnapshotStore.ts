@@ -8,6 +8,8 @@ type DeviceSnapshotStoreContract = Pick<
   | "getSnapshotPath"
   | "getSnapshotPathWithOptions"
   | "recoverSnapshotData"
+  | "discardSnapshotArtifacts"
+  | "listLeftoverSnapshotJournals"
   | "generateSnapshotName"
   | "snapshotDirectoryExists"
   | "getSnapshotSizeBytes"
@@ -28,6 +30,13 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
   readonly deleteCalls: Array<{ snapshotName: string; options?: SnapshotPathOptions }> = [];
   readonly recoveryCalls: Array<{ snapshotName: string; options?: SnapshotPathOptions }> = [];
   private readonly recoveryFailures: Error[] = [];
+
+  readonly discardCalls: Array<{ snapshotName: string; options?: SnapshotPathOptions }> = [];
+  private readonly discardLeftovers: string[][] = [];
+
+  leftoverJournalEntries: Array<{ snapshotName: string; options?: SnapshotPathOptions }> = [];
+  leftoverJournalsTruncated = false;
+  readonly journalListCalls: Array<{ maxEntries: number; maxScopeDirectories: number }> = [];
 
   constructor(basePath?: string) {
     this.basePath = basePath ?? path.join(os.tmpdir(), "auto-mobile-fake-snapshots");
@@ -55,6 +64,33 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
     if (failure) {
       throw failure;
     }
+  }
+
+  queueDiscardLeftovers(paths: string[]): void {
+    this.discardLeftovers.push(paths);
+  }
+
+  async discardSnapshotArtifacts(
+    snapshotName: string,
+    options?: SnapshotPathOptions,
+  ): Promise<string[]> {
+    this.discardCalls.push({ snapshotName, options });
+    return this.discardLeftovers.shift() ?? [];
+  }
+
+  async listLeftoverSnapshotJournals(limits: {
+    maxEntries: number;
+    maxScopeDirectories: number;
+  }): Promise<{
+    entries: Array<{ snapshotName: string; options?: SnapshotPathOptions }>;
+    truncated: boolean;
+  }> {
+    this.journalListCalls.push({ ...limits });
+    return {
+      entries: this.leftoverJournalEntries.slice(0, limits.maxEntries),
+      truncated:
+        this.leftoverJournalsTruncated || this.leftoverJournalEntries.length > limits.maxEntries,
+    };
   }
 
   setSnapshotSize(snapshotName: string, sizeBytes: number | null): void {

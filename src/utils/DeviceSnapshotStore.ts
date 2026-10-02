@@ -4,7 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import { logger } from "./logger";
 import { assertSafePathSegment } from "./snapshotNameValidation";
-import type { Platform } from "../models";
+import { toActionableError, type Platform } from "../models";
 
 /**
  * Suffix of the sibling directory that {@link DeviceSnapshotStore.replaceSnapshotData}
@@ -263,6 +263,133 @@ export class DeviceSnapshotStore {
     await this.syncParent(snapshotPath);
     await fs.rm(journalPath);
     await this.syncParent(snapshotPath);
+  }
+
+  /** Discard only overwrite artifacts; the caller owns deletion of the archive itself. */
+  async discardSnapshotArtifacts(
+    snapshotName: string,
+    options?: SnapshotPathOptions,
+  ): Promise<string[]> {
+    const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
+    const journalPath = this.getJournalPath(snapshotPath);
+    const failedPaths: string[] = [];
+    for (const artifactPath of [
+      `${snapshotPath}${SNAPSHOT_REPLACING_SUFFIX}`,
+      journalPath,
+      this.getTempJournalPath(journalPath),
+    ]) {
+      try {
+        await fs.rm(artifactPath, { recursive: true, force: true });
+      } catch (error) {
+        logger.warn(`Failed to discard snapshot artifact '${artifactPath}'`, error);
+        failedPaths.push(artifactPath);
+      }
+    }
+    return failedPaths;
+  }
+
+  /** Shallow host-archive scan. Never descend into snapshots or emulator-owned payloads. */
+  async listLeftoverSnapshotJournals(limits: {
+    maxEntries: number;
+    maxScopeDirectories: number;
+  }): Promise<{
+    entries: Array<{ snapshotName: string; options?: SnapshotPathOptions }>;
+    truncated: boolean;
+  }> {
+    const entries: Array<{ snapshotName: string; options?: SnapshotPathOptions }> = [];
+    const baseEntries = await this.readJournalDirectory(this.getBasePath());
+    if (this.collectJournalEntries(baseEntries, undefined, entries, limits.maxEntries)) {
+      return { entries, truncated: true };
+    }
+    let scopeDirectories = 0;
+    for (const platform of ["android", "ios"] as const) {
+      // Dirent.isDirectory excludes symlink roots/scopes, keeping this scan inside the archive.
+      if (!baseEntries.some((entry) => entry.name === platform && entry.isDirectory())) {
+        continue;
+      }
+      const scopeRoot = path.join(this.getBasePath(), platform);
+      const scopes = await this.readJournalDirectory(scopeRoot);
+      for (const scope of scopes) {
+        if (!scope.isDirectory() || !this.isSafeJournalSegment(scope.name)) {
+          continue;
+        }
+        if (scopeDirectories >= limits.maxScopeDirectories) {
+          return { entries, truncated: true };
+        }
+        scopeDirectories++;
+        const options: SnapshotPathOptions =
+          platform === "android"
+            ? { platform, avdName: scope.name }
+            : { platform, deviceId: scope.name };
+        const scopeEntries = await this.readJournalDirectory(path.join(scopeRoot, scope.name));
+        if (this.collectJournalEntries(scopeEntries, options, entries, limits.maxEntries)) {
+          return { entries, truncated: true };
+        }
+      }
+    }
+    return { entries, truncated: false };
+  }
+
+  private async readJournalDirectory(directoryPath: string): Promise<Dirent[]> {
+    try {
+      const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+      return entries.sort((left, right) =>
+        left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        // A missing archive or platform scope is normal; enumeration must not create it.
+        logger.debug(`Snapshot journal directory '${directoryPath}' does not exist`, error);
+        return [];
+      }
+      throw toActionableError(error, `Failed to enumerate snapshot journals in '${directoryPath}'`);
+    }
+  }
+
+  private isSafeJournalSegment(segment: string): boolean {
+    try {
+      assertSafePathSegment("snapshot journal segment", segment);
+      return true;
+    } catch (error) {
+      // Unsafe on-disk names are not recovery candidates; skipping prevents path escape.
+      logger.debug(`Skipping unsafe snapshot journal segment '${segment}'`, error);
+      return false;
+    }
+  }
+
+  private collectJournalEntries(
+    directoryEntries: Dirent[],
+    options: SnapshotPathOptions | undefined,
+    entries: Array<{ snapshotName: string; options?: SnapshotPathOptions }>,
+    maxEntries: number,
+  ): boolean {
+    const names = new Set<string>();
+    for (const entry of directoryEntries) {
+      if (!entry.name.endsWith(SNAPSHOT_REPLACING_SUFFIX) || entry.isSymbolicLink()) {
+        continue;
+      }
+      const suffix = entry.name.endsWith(".journal.tmp.replacing")
+        ? ".journal.tmp.replacing"
+        : entry.name.endsWith(".journal.replacing")
+          ? ".journal.replacing"
+          : SNAPSHOT_REPLACING_SUFFIX;
+      const snapshotName = entry.name.slice(0, -suffix.length);
+      if (!this.isSafeJournalSegment(snapshotName) || names.has(snapshotName)) {
+        continue;
+      }
+      if (!options && ["android", "ios"].includes(snapshotName)) {
+        continue;
+      }
+      names.add(snapshotName);
+      if (entries.length >= maxEntries) {
+        return true;
+      }
+      entries.push({ snapshotName, options });
+      if (entries.length >= maxEntries) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async recoverLegacyAside(snapshotPath: string, asidePath: string): Promise<void> {

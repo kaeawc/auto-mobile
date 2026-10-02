@@ -951,8 +951,183 @@ describe("RestoreSnapshot (iOS)", () => {
     }
   });
 
-  function makeRestore(): RestoreSnapshot {
-    return new RestoreSnapshot(device, undefined, undefined, undefined, store, simctl as any);
+  function makeRestore(
+    operations?: ConstructorParameters<typeof RestoreSnapshot>[7],
+  ): RestoreSnapshot {
+    return new RestoreSnapshot(
+      device,
+      undefined,
+      undefined,
+      new FakeTimer(),
+      store,
+      simctl as any,
+      undefined,
+      operations,
+    );
+  }
+
+  // All gate version values below are synthetic.
+  function compatibilityManifest(osVersion?: string): DeviceSnapshotManifest {
+    return {
+      snapshotName: "compatibility-gate",
+      timestamp: "2026-10-02T00:00:00.000Z",
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      osVersion,
+      includeSettings: true,
+      includeAppData: true,
+      iosSettings: { values: { ".GlobalPreferences/AppleLocale": "nl_BE" } },
+      appDataBackup: { backupMethod: "simctl_copy", backedUpPackages: ["com.example.app"] },
+    };
+  }
+
+  function setCompatibilityRuntime(name = "iOS 17.0", version = "17.0"): void {
+    simctl.setDeviceInfo(device.deviceId, {
+      udid: device.deviceId,
+      name: device.name,
+      state: "Booted",
+      isAvailable: true,
+      runtime: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
+    });
+    simctl.setRuntimes([
+      {
+        bundlePath: "/runtime",
+        buildversion: "A123",
+        runtimeRoot: "/runtime/root",
+        identifier: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
+        version,
+        name,
+        isAvailable: true,
+      },
+    ]);
+  }
+
+  for (const row of [
+    {
+      manifestVersion: "watchOS-11-0",
+      simulatorName: "iOS 11.0",
+      simulatorVersion: "11.0",
+      source: "Snapshot manifest osVersion",
+      offending: "watchOS-11-0",
+    },
+    {
+      manifestVersion: "1.2.3.4.5",
+      simulatorName: "iOS 1.0",
+      simulatorVersion: "1.0",
+      source: "Snapshot manifest osVersion",
+      offending: "1.2.3.4.5",
+    },
+    {
+      manifestVersion: "11.0",
+      simulatorName: "watchOS 11.0",
+      simulatorVersion: "",
+      source: "Simulator OS version",
+      offending: "watchOS 11.0",
+    },
+    {
+      manifestVersion: "17.0",
+      simulatorName: "iOS 17.0",
+      simulatorVersion: "17e2",
+      source: "Simulator OS version",
+      offending: "17e2",
+    },
+    {
+      manifestVersion: "   ",
+      simulatorName: "iOS 17.0",
+      simulatorVersion: "17.0",
+      source: "Snapshot manifest osVersion",
+      offending: "   ",
+    },
+    {
+      manifestVersion: "17.0",
+      simulatorName: "iOS 17.0",
+      simulatorVersion: "   ",
+      source: "Simulator OS version",
+      offending: "   ",
+    },
+  ]) {
+    it(`compatibility gate rejects ${row.source} '${row.offending}' before device writes`, async () => {
+      setCompatibilityRuntime(row.simulatorName, row.simulatorVersion);
+      const operations: string[] = [];
+      const restore = makeRestore({
+        pathExists: async () => {
+          operations.push("pathExists");
+          return true;
+        },
+        terminateAppIfRunning: async () => {
+          operations.push("terminate");
+        },
+        getAppDataContainerPath: async () => {
+          operations.push("container");
+          return "/live/app";
+        },
+        rm: async () => {
+          operations.push("rm");
+        },
+        cp: async () => {
+          operations.push("cp");
+        },
+      });
+      const manifest = compatibilityManifest(row.manifestVersion);
+      const error = await restore.execute({ snapshotName: manifest.snapshotName, manifest }).then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      expect(error).toBeInstanceOf(ActionableError);
+      expect(error).toBeInstanceOf(Error);
+      if (!(error instanceof Error)) {
+        throw new Error("Expected compatibility error");
+      }
+      expect(error.message).toContain(`${row.source} '${row.offending}' is not an iOS version.`);
+      expect(error.message).toContain(
+        "Expected an iOS version such as '26.5', 'iOS 26.5' or 'com.apple.CoreSimulator.SimRuntime.iOS-26-5'",
+      );
+      expect(operations).toEqual([]);
+      for (const method of ["executeCommand", "executeCommandArgs", "terminateApp", "listApps"]) {
+        expect(simctl.getMethodCalls(method)).toHaveLength(0);
+      }
+    });
+  }
+
+  it("compatibility gate rejects malformed manifest even when simulator version is unreadable", async () => {
+    const manifest = compatibilityManifest("watchOS-11-0");
+    await expect(
+      makeRestore().execute({ snapshotName: manifest.snapshotName, manifest }),
+    ).rejects.toThrow("Snapshot manifest osVersion 'watchOS-11-0' is not an iOS version");
+  });
+
+  for (const osVersion of ["iOS 17.0", "17.2", "com.apple.CoreSimulator.SimRuntime.iOS-17-0"]) {
+    it(`compatibility gate proceeds for matching major ${osVersion}`, async () => {
+      setCompatibilityRuntime();
+      const manifest = { ...compatibilityManifest(osVersion), includeAppData: false };
+      await makeRestore().execute({ snapshotName: manifest.snapshotName, manifest });
+      expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+    });
+  }
+
+  for (const row of [
+    { version: undefined, readable: true, warning: "Snapshot OS version missing" },
+    { version: "", readable: true, warning: "Snapshot OS version missing" },
+    { version: "17.0", readable: false, warning: "Unable to read simulator OS version" },
+  ]) {
+    it(`compatibility gate warns and proceeds: ${row.warning} (${JSON.stringify(row.version)})`, async () => {
+      if (row.readable) {
+        setCompatibilityRuntime();
+      }
+      const warning = spyOn(logger, "warn");
+      try {
+        const manifest = { ...compatibilityManifest(row.version), includeAppData: false };
+        await makeRestore().execute({ snapshotName: manifest.snapshotName, manifest });
+        expect(warning.mock.calls.some(([message]) => String(message).includes(row.warning))).toBe(
+          true,
+        );
+        expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+      } finally {
+        warning.mockRestore();
+      }
+    });
   }
 
   it("rejects a physical iOS device instead of driving simctl against it", async () => {
@@ -1087,7 +1262,9 @@ describe("RestoreSnapshot (iOS)", () => {
         manifest,
         useVmSnapshot: false,
       }),
-    ).rejects.toThrow("incompatible");
+    ).rejects.toThrow(
+      "Snapshot iOS version 'iOS 16.4' is incompatible with simulator iOS '17.0'. Please restore on an iOS 16.x simulator.",
+    );
   });
 
   it("skips restore when backup method is none", async () => {

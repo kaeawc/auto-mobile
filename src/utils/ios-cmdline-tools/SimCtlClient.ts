@@ -1,3 +1,4 @@
+import { detectImageMimeType } from "../screenshot/imageHeaderDimensions";
 import { errorMessage } from "../describeUnknownError";
 import { trackAmbient } from "../PerfContext";
 import type {
@@ -6,7 +7,7 @@ import type {
 } from "../HostCommandExecutor";
 import { promises as fsPromises } from "fs";
 import { tmpdir } from "os";
-import { join } from "path";
+import { join, resolve } from "path";
 import { logger } from "../logger";
 import { runExecSeam } from "../ExecSeam";
 import {
@@ -103,10 +104,13 @@ export interface SimCtlFileSystem {
   mkdtemp(prefix: string): Promise<string>;
   writeFile(path: string, data: string, encoding: "utf8"): Promise<void>;
   readFile(path: string, encoding: "utf8"): Promise<string>;
+  readFileBuffer(path: string): Promise<Buffer>;
   rm(path: string, options: { recursive: boolean; force: boolean }): Promise<void>;
 }
 
 export type SimctlScreenshotFailureReason =
+  | "missing-output-file"
+  | "read-failure"
   | "empty-output"
   | "non-image-output"
   | "aborted-by-caller"
@@ -142,6 +146,7 @@ const defaultSimCtlFileSystem: SimCtlFileSystem = {
   mkdtemp: (prefix) => fsPromises.mkdtemp(prefix),
   writeFile: (path, data, encoding) => fsPromises.writeFile(path, data, encoding),
   readFile: (path, encoding) => fsPromises.readFile(path, encoding),
+  readFileBuffer: (path) => fsPromises.readFile(path),
   rm: (path, options) => fsPromises.rm(path, options),
 };
 
@@ -2733,94 +2738,136 @@ export class SimCtlClient implements SimCtl {
     return parseSimulatorDisplays(result.stdout);
   }
 
-  /** Capture the selected physical framebuffer as binary PNG stdout. */
+  /** Capture the selected physical framebuffer as PNG through a private temporary file. */
   async screenshot(deviceId: string, display: string, signal?: AbortSignal): Promise<Buffer> {
-    const startedAt = this.timer.now();
-    const args = ["simctl", "io", deviceId, "screenshot", `--display=${display}`, "-"];
-    const timeout = new AbortController();
-    const handle = this.timer.setTimeout(
-      () =>
-        timeout.abort(
-          new SimctlScreenshotError(
-            "aborted-by-timeout",
-            `simctl screenshot timed out after ${this.timer.now() - startedAt}ms`,
-          ),
-        ),
-      10_000,
-    );
-    const captureSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-    return new Promise<Buffer>((resolve, reject) => {
-      let child: ChildProcess;
+    let dir: string;
+    try {
+      dir = await this.fileSystem.mkdtemp(resolve(tmpdir(), "automobile-screenshot-"));
+    } catch (error) {
+      throw new SimctlScreenshotError(
+        "read-failure",
+        "Unable to prepare simctl screenshot temp directory",
+        { cause: error },
+      );
+    }
+    try {
+      const path = resolve(dir, `screenshot-${this.idGenerator.next()}.png`);
+      const stderr = await this.captureScreenshotFile(deviceId, display, path, signal);
+      return await this.readScreenshotFile(path, stderr);
+    } finally {
       try {
-        child = this.spawnProcess("xcrun", args, { signal: captureSignal });
+        await this.fileSystem.rm(dir, { recursive: true, force: true });
       } catch (error) {
-        this.timer.clearTimeout(handle);
-        reject(error);
-        return;
+        // Best-effort temp cleanup is safe to swallow: the capture result is already decided.
+        logger.debug(`simctl screenshot temp cleanup failed: ${errorMessage(error)}`, error);
       }
-      const chunks: Buffer[] = [];
-      const errors: Buffer[] = [];
-      child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
-      child.stderr?.on("data", (chunk: Buffer) => errors.push(chunk));
-      const stderrText = (): string => Buffer.concat(errors).toString();
-      const outputLength = (): number => chunks.reduce((length, chunk) => length + chunk.length, 0);
-      const abortFailure = (cause?: unknown): SimctlScreenshotError => {
-        const elapsed = this.timer.now() - startedAt;
-        if (timeout.signal.aborted) {
-          return new SimctlScreenshotError(
-            "aborted-by-timeout",
-            `simctl screenshot timed out after ${elapsed}ms`,
-            {
-              stderr: stderrText(),
-              byteLength: outputLength(),
-              cause: cause ?? timeout.signal.reason,
-            },
-          );
-        }
-        const callerReason = signal?.reason;
-        return new SimctlScreenshotError(
-          "aborted-by-caller",
-          `simctl screenshot cancelled by the caller after ${elapsed}ms: ${errorMessage(callerReason)}`,
-          { stderr: stderrText(), byteLength: outputLength(), cause: cause ?? callerReason },
-        );
-      };
-      child.once("error", (error) => {
-        this.timer.clearTimeout(handle);
-        if (timeout.signal.aborted || signal?.aborted) {
-          reject(abortFailure(error));
-        } else {
-          reject(error);
-        }
+    }
+  }
+
+  private async readScreenshotFile(path: string, stderr: string): Promise<Buffer> {
+    let output: Buffer;
+    try {
+      output = await this.fileSystem.readFileBuffer(path);
+    } catch (error) {
+      const missing =
+        typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+      throw new SimctlScreenshotError(
+        missing ? "missing-output-file" : "read-failure",
+        `simctl screenshot output ${missing ? "file missing" : "read failed"}: ${errorMessage(error)}`,
+        { exitCode: 0, stderr, cause: error },
+      );
+    }
+    if (output.length === 0 || detectImageMimeType(output) !== "image/png") {
+      const reason = output.length === 0 ? "empty-output" : "non-image-output";
+      throw new SimctlScreenshotError(reason, `simctl screenshot returned ${reason}`, {
+        exitCode: 0,
+        stderr,
+        byteLength: output.length,
       });
-      child.once("close", (code) => {
-        this.timer.clearTimeout(handle);
-        if (captureSignal.aborted) {
-          reject(abortFailure(captureSignal.reason));
-        } else if (code === 0) {
-          const output = Buffer.concat(chunks);
-          if (output.length === 0) {
+    }
+    return output;
+  }
+
+  private async captureScreenshotFile(
+    deviceId: string,
+    display: string,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const startedAt = this.timer.now();
+    const args = ["simctl", "io", deviceId, "screenshot", `--display=${display}`, path];
+    const timeout = new AbortController();
+    const handle = this.timer.setTimeout(() => timeout.abort(), 10_000);
+    const captureSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+    try {
+      return await new Promise<string>((resolve, reject) => {
+        const errors: Buffer[] = [];
+        const stderrText = (): string => Buffer.concat(errors).toString();
+        const abortFailure = (cause?: unknown, exitCode?: number | null): SimctlScreenshotError => {
+          const elapsed = this.timer.now() - startedAt;
+          const timedOut = captureSignal.reason === timeout.signal.reason && timeout.signal.aborted;
+          const reason = timedOut ? "aborted-by-timeout" : "aborted-by-caller";
+          const message = timedOut
+            ? `simctl screenshot timed out after ${elapsed}ms`
+            : `simctl screenshot cancelled by the caller after ${elapsed}ms: ${errorMessage(signal?.reason)}`;
+          return new SimctlScreenshotError(reason, message, {
+            exitCode,
+            stderr: stderrText(),
+            cause: cause ?? captureSignal.reason,
+          });
+        };
+        let child: ChildProcess;
+        try {
+          if (captureSignal.aborted) {
+            reject(abortFailure());
+            return;
+          }
+          child = this.spawnProcess("xcrun", args, { signal: captureSignal });
+        } catch (error) {
+          reject(
+            captureSignal.aborted
+              ? abortFailure(error)
+              : new SimctlScreenshotError(
+                  "non-zero-exit",
+                  `simctl screenshot failed to spawn: ${errorMessage(error)}`,
+                  { cause: error },
+                ),
+          );
+          return;
+        }
+        // Drain diagnostic stdout; simctl writes the PNG only to the requested file.
+        child.stdout?.on("data", () => {});
+        child.stderr?.on("data", (chunk: Buffer) => errors.push(chunk));
+        child.once("error", (error) => {
+          reject(
+            captureSignal.aborted
+              ? abortFailure(error)
+              : new SimctlScreenshotError(
+                  "non-zero-exit",
+                  `simctl screenshot process failed: ${errorMessage(error)}`,
+                  { stderr: stderrText(), cause: error },
+                ),
+          );
+        });
+        child.once("close", (code) => {
+          if (captureSignal.aborted) {
+            reject(abortFailure(captureSignal.reason, code));
+          } else if (code === 0) {
+            resolve(stderrText());
+          } else {
+            const stderr = stderrText();
             reject(
-              new SimctlScreenshotError("empty-output", "simctl screenshot returned empty output", {
-                exitCode: 0,
-                stderr: stderrText(),
-                byteLength: 0,
+              new SimctlScreenshotError("non-zero-exit", `simctl screenshot failed: ${stderr}`, {
+                exitCode: code,
+                stderr,
               }),
             );
-          } else {
-            resolve(output);
           }
-        } else {
-          const stderr = stderrText();
-          reject(
-            new SimctlScreenshotError("non-zero-exit", `simctl screenshot failed: ${stderr}`, {
-              exitCode: code,
-              stderr,
-              byteLength: outputLength(),
-            }),
-          );
-        }
+        });
       });
-    });
+    } finally {
+      this.timer.clearTimeout(handle);
+    }
   }
 
   async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {

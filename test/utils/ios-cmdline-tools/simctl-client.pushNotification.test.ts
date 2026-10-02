@@ -25,6 +25,7 @@ function createFakeSimCtlFileSystem(): SimCtlFileSystem & { writes: Map<string, 
       }
       return data;
     },
+    readFileBuffer: async (path: string) => Buffer.from(writes.get(path) ?? ""),
     rm: async (path: string) => {
       // Recursive delete semantics: drop this exact path plus anything nested
       // under it, mirroring `fs.promises.rm({ recursive: true })` removing a

@@ -251,15 +251,22 @@ crops its terminal observation. The original `screenshotPath` and
 - `unit`: `"pixels"` or `"points"`.
 - `requestedBounds`, `clippedBounds`: native `{ left, top, right, bottom }` bounds.
 - `clipped`: whether visible-screen clipping changed the requested bounds.
-- `screenSize`, `imageSize`: native screen dimensions and crop raster dimensions.
+- `screenSize`, `imageSize`: native screen dimensions and upright output crop PNG
+  dimensions.
 - `pixelsPerNativeUnit`: raster scale `{ x, y }`; actual raster dimensions handle
   Display Zoom and downsampled devices, with floor/ceil covering fractional points.
 - `scaleProvenance`: `"native-scale-confirmed"` or `"raster-dimensions"`.
-- `rasterBounds`: integer bounds in the captured raster.
-- `screenshotOrientation`: crop raster orientation, including iOS framebuffer
-  quarter turns and half turns. A raster already reported in display orientation
-  is not mapped through another rotation. No downscaling or orientation
-  normalization occurs.
+- `rasterBounds`: integer bounds read from the captured source raster before
+  orientation normalization.
+- `screenshotOrientation`: orientation of the output crop PNG (`"display"`).
+  Native iOS framebuffer crops are rotated upright: rotation 1 maps display
+  `(x, y)` to `(screenHeight - y, x)` and rotates the extracted pixels 270°
+  clockwise; rotation 3 maps to `(y, screenWidth - x)` and rotates 90° clockwise;
+  rotation 2 maps to `(screenWidth - x, screenHeight - y)` and rotates 180°.
+  A raster already reported in display orientation is neither remapped nor
+  rotated. No downscaling occurs. The full screenshot retains its own
+  `screenshotOrientation`. The same crop mapping and normalization apply to
+  `snapshotOf`.
 
 The hierarchy/elements are unchanged by crop. Element resolution uses the full
 filtered exposed hierarchy before raw append or skeleton projection; `raw` does

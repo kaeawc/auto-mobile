@@ -62,6 +62,8 @@ export class SharpBackend implements ImageBackend {
           kernel,
         });
       }
+      case "rotate":
+        return image.rotate(op.degrees);
       case "crop":
         return image.extract({ left: op.x, top: op.y, width: op.width, height: op.height });
     }
@@ -97,21 +99,28 @@ export class SharpBackend implements ImageBackend {
     let image = sharp(source);
     let hasResizeInCurrentPipeline = false;
     let hasCropInCurrentPipeline = false;
+    let hasRotationInCurrentPipeline = false;
     for (const operation of pipeline.operations) {
       if (
         (operation.type === "resize" && hasResizeInCurrentPipeline) ||
-        (operation.type === "crop" && hasCropInCurrentPipeline)
+        (operation.type === "crop" && hasCropInCurrentPipeline) ||
+        (operation.type === "rotate" && (hasResizeInCurrentPipeline || hasCropInCurrentPipeline)) ||
+        hasRotationInCurrentPipeline
       ) {
-        // Sharp collapses some repeated operations in one pipeline; materialize only at compatibility boundaries.
+        // Sharp collapses repeated transforms and can move rotation ahead of extract/resize.
+        // Materialize at rotation boundaries to preserve the declarative operation order.
         image = sharp(await image.toBuffer());
         hasResizeInCurrentPipeline = false;
         hasCropInCurrentPipeline = false;
+        hasRotationInCurrentPipeline = false;
       }
       image = this.applyOperation(image, operation);
       if (operation.type === "resize") {
         hasResizeInCurrentPipeline = true;
-      } else {
+      } else if (operation.type === "crop") {
         hasCropInCurrentPipeline = true;
+      } else {
+        hasRotationInCurrentPipeline = true;
       }
     }
 

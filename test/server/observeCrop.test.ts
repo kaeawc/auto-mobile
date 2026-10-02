@@ -264,7 +264,7 @@ describe("observe crop capture and output", () => {
       "native-scale-confirmed",
     ],
     [
-      "quarter turn clockwise",
+      "landscape left",
       6,
       4,
       8,
@@ -272,11 +272,11 @@ describe("observe crop capture and output", () => {
       1,
       2,
       { x: 1, y: 0, width: 2, height: 2 },
-      { left: 0, top: 6, right: 4, bottom: 10 },
+      { left: 4, top: 2, right: 8, bottom: 6 },
       "native-scale-confirmed",
     ],
     [
-      "quarter turn counterclockwise",
+      "landscape right",
       6,
       4,
       8,
@@ -284,7 +284,7 @@ describe("observe crop capture and output", () => {
       3,
       2,
       { x: 1, y: 0, width: 2, height: 2 },
-      { left: 4, top: 2, right: 8, bottom: 6 },
+      { left: 0, top: 6, right: 4, bottom: 10 },
       "native-scale-confirmed",
     ],
     [
@@ -337,11 +337,53 @@ describe("observe crop capture and output", () => {
       expect(crop.rasterBounds).toEqual(rasterBounds);
       expect(crop.scaleProvenance).toBe(provenance);
       expect(crop.unit).toBe("points");
-      expect(crop.screenshotOrientation).toBe(rotation === 0 ? "display" : "native");
-      expect(image.lastPipeline?.operations.map((op) => op.type)).toEqual(["crop"]);
+      expect(crop.screenshotOrientation).toBe("display");
+      expect(getStructuredField(response, "screenshotOrientation")).toBe("native");
+      expect(image.lastPipeline?.operations).toEqual([
+        {
+          type: "crop",
+          x: rasterBounds.left,
+          y: rasterBounds.top,
+          width: rasterBounds.right - rasterBounds.left,
+          height: rasterBounds.bottom - rasterBounds.top,
+        },
+        ...(rotation === 0
+          ? []
+          : [{ type: "rotate", degrees: rotation === 1 ? 270 : rotation === 3 ? 90 : 180 }]),
+      ]);
       expect(captures).toBe(1);
     },
   );
+
+  test.each([1, 3])("landscape iOS element crop rotation %s is upright", async (rotation) => {
+    // Reuse the exposed Gmail fixture; only crop geometry is configured at the fake seam.
+    current.screenSize = { width: 4000, height: 2000 };
+    current.rotation = rotation;
+    current.screenshotOrientation = "native";
+    const bounds = target.bounds!;
+    image.setMetadataResult({ width: 6000, height: 12000, format: "png", size: source.length });
+    const response = await call(
+      { crop: { element: { text: "Gmail" } } },
+      { ...device, platform: "ios" },
+    );
+    const crop = getStructuredField<ObserveCropResult>(response, "crop")!;
+    expect(crop.requestedBounds).toEqual(bounds);
+    expect(crop.imageSize).toEqual({
+      width: (bounds.right - bounds.left) * 3,
+      height: (bounds.bottom - bounds.top) * 3,
+    });
+    expect(crop.screenshotOrientation).toBe("display");
+    expect(image.lastPipeline?.operations).toEqual([
+      {
+        type: "crop",
+        x: (rotation === 1 ? 2000 - bounds.bottom : bounds.top) * 3,
+        y: (rotation === 1 ? bounds.left : 4000 - bounds.right) * 3,
+        width: (bounds.bottom - bounds.top) * 3,
+        height: (bounds.right - bounds.left) * 3,
+      },
+      { type: "rotate", degrees: rotation === 1 ? 270 : 90 },
+    ]);
+  });
 
   test("a display-oriented iOS raster avoids a second half-turn mapping", async () => {
     current.screenSize = { width: 4, height: 6 };

@@ -1,7 +1,7 @@
 import { ActionableError } from "../../../models/ActionableError";
 import type { ElementBounds } from "../../../models/ElementBounds";
 import { nativeBoundsInRaster, snapRasterBounds, RASTER_SCALE_TOLERANCE } from "./rasterGeometry";
-import type { ImageBackend } from "../../../utils/image/backend/ImageBackend";
+import type { ImageBackend, ImageOperation } from "../../../utils/image/backend/ImageBackend";
 
 export interface SnapshotGeometry {
   platform: "android" | "ios";
@@ -17,11 +17,13 @@ export interface SnapshotCropResult {
   requestedBounds: ElementBounds;
   clippedBounds: ElementBounds;
   screenSize: SnapshotGeometry["screenSize"];
+  /** Dimensions of the upright output PNG. */
   imageSize: { width: number; height: number };
   pixelsPerNativeUnit: { x: number; y: number };
   scaleProvenance: "raster-dimensions" | "native-scale-confirmed";
   clipped: boolean;
   rasterBounds: { left: number; top: number; right: number; bottom: number };
+  /** Orientation of the output crop, not the source framebuffer. */
   screenshotOrientation: "display" | "native";
 }
 
@@ -83,15 +85,26 @@ export async function cropSnapshot(
     { x: scaleX, y: scaleY },
     metadata,
   );
-  const imageSize = {
+  const rasterSize = {
     width: rasterBounds.right - rasterBounds.left,
     height: rasterBounds.bottom - rasterBounds.top,
   };
-  if (imageSize.width <= 0 || imageSize.height <= 0) {
+  if (rasterSize.width <= 0 || rasterSize.height <= 0) {
     throw new ActionableError(`${label} rectangle covers no screenshot pixels`);
   }
+  const operations: ImageOperation[] = [
+    { type: "crop", x: rasterBounds.left, y: rasterBounds.top, ...rasterSize },
+  ];
+  if (quarterTurn) {
+    operations.push({ type: "rotate", degrees: geometry.rotation === 1 ? 270 : 90 });
+  } else if (halfTurn) {
+    operations.push({ type: "rotate", degrees: 180 });
+  }
+  const imageSize = quarterTurn
+    ? { width: rasterSize.height, height: rasterSize.width }
+    : rasterSize;
   const png = await backend.execute(source, {
-    operations: [{ type: "crop", x: rasterBounds.left, y: rasterBounds.top, ...imageSize }],
+    operations,
     encoding: { mime: "image/png" },
   });
   return {
@@ -113,6 +126,6 @@ export async function cropSnapshot(
       right !== clippedBounds.right ||
       bottom !== clippedBounds.bottom,
     rasterBounds,
-    screenshotOrientation: quarterTurn || halfTurn ? "native" : "display",
+    screenshotOrientation: "display",
   };
 }

@@ -19,11 +19,11 @@ export function nativeToRasterPoint(
   const { x, y } = point;
   switch (turn) {
     case 1:
-      return { x: y, y: screen.width - x };
+      return { x: screen.height - y, y: x };
     case 2:
       return { x: screen.width - x, y: screen.height - y };
     case 3:
-      return { x: screen.height - y, y: x };
+      return { x: y, y: screen.width - x };
     default:
       return point;
   }
@@ -37,11 +37,11 @@ export function rasterToNativePoint(
   const { x, y } = point;
   switch (turn) {
     case 1:
-      return { x: screen.width - y, y: x };
+      return { x: y, y: screen.height - x };
     case 2:
       return { x: screen.width - x, y: screen.height - y };
     case 3:
-      return { x: y, y: screen.height - x };
+      return { x: screen.width - y, y: x };
     default:
       return point;
   }

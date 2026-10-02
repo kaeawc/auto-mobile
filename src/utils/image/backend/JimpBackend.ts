@@ -41,6 +41,10 @@ export class JimpBackend implements ImageBackend {
         // fit "fill": stretch to exact WxH.
         return image.resize({ w: op.width, h: op.height, mode });
       }
+      case "rotate":
+        // Jimp uses counter-clockwise degrees; the backend contract is clockwise.
+        image.rotate(-op.degrees);
+        return image;
       case "crop":
         return image.crop({ x: op.x, y: op.y, w: op.width, h: op.height });
     }

@@ -43,6 +43,72 @@ describe("snapshotOf tool", () => {
     ).toBe(false);
   });
 
+  test.each([1, 3])(
+    "iOS snapshotOf rotation %s uses the upright shared crop for both sources",
+    async (rotation) => {
+      const image = new FakeImageBackend();
+      image.setMetadataResult({ width: 1206, height: 2622, format: "png", size: 8 });
+      const landscape = structuredClone(hierarchy);
+      landscape.screenWidth = 874;
+      landscape.screenHeight = 402;
+      landscape.rotation = rotation;
+      // Keep the existing selector fixture intact; rectangle form also exercises a nonsquare crop.
+      const bounds = { left: 0, top: 0, right: 200, bottom: 100 };
+      const writes: Buffer[] = [];
+      registerSnapshotOfTools({
+        hierarchyCaptureFactory: () => ({
+          capture: async (request) => ({
+            captureId: "capture",
+            platform: "ios",
+            requestedFreshness: request.freshness,
+            receivedAt: 0,
+            hierarchy: landscape,
+            nodes: new SearchableHierarchy().project(landscape),
+          }),
+        }),
+        screenshotFactory: () => ({ execute: async () => ({ success: true, path: "fake.png" }) }),
+        readFile: async () => Buffer.from("source"),
+        imageBackend: image,
+        writer: {
+          write: async (_path, data) => {
+            writes.push(data);
+          },
+          remove: async () => {},
+        },
+        outputDirectory: () => "/fake/screenshots",
+        ids: new CountingIdGenerator("crop"),
+      });
+      const tool = ToolRegistry.getTool("snapshotOf")!;
+      for (const args of [{ elementId: "target" }, { rectangle: bounds }]) {
+        const response = await tool.deviceAwareHandler!(
+          { ...device, platform: "ios" },
+          tool.schema.parse(args),
+        );
+        const result = JSON.parse(response.content[0].text);
+        const requested = "elementId" in args ? { left: 1, top: 1, right: 3, bottom: 3 } : bounds;
+        expect(result).toMatchObject({
+          imageSize: {
+            width: (requested.right - requested.left) * 3,
+            height: (requested.bottom - requested.top) * 3,
+          },
+          screenshotOrientation: "display",
+          requestedBounds: requested,
+        });
+        expect(image.lastPipeline?.operations).toEqual([
+          {
+            type: "crop",
+            x: (rotation === 1 ? 402 - requested.bottom : requested.top) * 3,
+            y: (rotation === 1 ? requested.left : 874 - requested.right) * 3,
+            width: (requested.bottom - requested.top) * 3,
+            height: (requested.right - requested.left) * 3,
+          },
+          { type: "rotate", degrees: rotation === 1 ? 270 : 90 },
+        ]);
+      }
+      expect(writes).toHaveLength(2);
+    },
+  );
+
   test("captures once, writes secure PNG, and returns metadata without bytes", async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-of-test-"));
     paths.push(dir);

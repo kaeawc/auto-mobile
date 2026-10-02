@@ -1059,6 +1059,28 @@ The `deviceId` fields exist so the value at `runtime.deviceId` in `listDevices` 
 `getAndroid`/`getApple` — the discovery→acquire path (#5870). See the
 [FAQ](faq.md#how-do-i-see-or-start-a-device) for the CLI equivalents.
 
+Read-only Android inventory shares successful name/display enrichment and AVD listings for
+2.5 seconds, keyed by the device-list observation to avoid reusing a replaced emulator's
+identity. The booted resource has an 8-second compute budget; the images resource has a
+9-second response budget; `listDevices` configured-image fallback has a 2-second budget.
+Known devices/images remain available on expiry with additive `retryable: true` and
+`retryAfterMs: 1000` hints: booted `enrichment` names `pending` work, tool `enrichment.missing`
+names `configuredImages`, and image observation errors name `catalog` and, when unfinished,
+`configuredInventory`. Retry hints suggest a delay, not a completion deadline. One background
+catalog fetch continues for up to 30 seconds and retains its completed stage for 2.5 seconds,
+so a short retry normally gets the full inventory. The device-free five-emulator mixed-load
+fixture bounds the three sequential reads at 25 seconds and each response below its
+15-second client deadline. See [device resources](design-docs/device-resources.md) for the
+constants, cancellation behavior, and completeness shapes.
+Persistent Android provenance failure returns `enrichment: { complete: false,
+missing: ["provenance"], retryable: false, reason }`; the reason names the cmdline-tools
+failure once and clients should address it instead of polling. Pending provenance is
+retryable; success omits the enrichment field. Catalog lifecycle invalidation returns
+`code: "superseded"` with retry hints, hard-cap expiry returns `code: "timeout"`, and a
+genuine failure retains `code: "failed"` with its cause. ADB inventory wait expiry reports
+incomplete discovery with `code: "timeout"`, `retryable: true` and `retryAfterMs: 1000`
+while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms shared cap.
+
 ## Network, plans & recording
 
 | Tool                                                           | What it does                                                                   |

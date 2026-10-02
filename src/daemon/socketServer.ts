@@ -239,6 +239,30 @@ function requestFailureCause(
   };
 }
 
+class ClientRequestCancellation extends ActionableError {}
+
+const EXPECTED_PEER_CLOSE_CODES = new Set([
+  "EPIPE",
+  "ECONNRESET",
+  "ERR_STREAM_DESTROYED",
+  "ECONNABORTED",
+]);
+function isExpectedPeerClose(error: Error): boolean {
+  return (
+    "code" in error && typeof error.code === "string" && EXPECTED_PEER_CLOSE_CODES.has(error.code)
+  );
+}
+function isClientForwardCancellation(
+  signal: AbortSignal | undefined,
+  cause: DaemonRequestFailureCause | undefined,
+): boolean {
+  return (
+    signal?.aborted === true &&
+    (cause?.message === "Daemon MCP client disconnected" ||
+      signal.reason instanceof ClientRequestCancellation)
+  );
+}
+
 function logRequestFailureCause(cause: DaemonRequestFailureCause | undefined): void {
   if (cause) {
     logger.error(`Original MCP request failure cause: ${cause.name}: ${cause.message}`);
@@ -1164,7 +1188,12 @@ export class UnixSocketServer {
     });
 
     socket.on("error", (error) => {
-      logger.error(`Socket error for ${sessionId}:`, error);
+      if (isExpectedPeerClose(error)) {
+        // The peer has gone away; release and destruction still clean up this socket's work.
+        logger.debug(`Socket peer closed for ${sessionId}: ${errorMessage(error)}`);
+      } else {
+        logger.error(`Socket error for ${sessionId}:`, error);
+      }
       this.releaseSocketSession(sessionId, socket);
       if (!socket.destroyed) {
         socket.destroy();
@@ -1215,9 +1244,16 @@ export class UnixSocketServer {
       const response = await this.handleRequest(sessionId, socket, request, receivedAtMs, () => {
         tracked.admitted = true;
       });
-      this.writeTerminalSocketResponse(tracked, response, deviceId);
+      if (response) {
+        this.writeTerminalSocketResponse(tracked, response, deviceId);
+      }
     } catch (error) {
-      logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+      if (error instanceof ClientRequestCancellation) {
+        // Explicit client cancellation is already reported by the cancellation/forward path.
+        logger.debug(`Client cancelled request ${requestId} from ${sessionId}`);
+      } else {
+        logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+      }
       const errorResponse: DaemonResponse = {
         id: requestId,
         type: "mcp_response",
@@ -1556,7 +1592,7 @@ export class UnixSocketServer {
     request: DaemonRequest,
     receivedAtMs: number = this.timer.now(),
     onAdmitted?: () => void,
-  ): Promise<DaemonResponse> {
+  ): Promise<DaemonResponse | undefined> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return {
@@ -1621,7 +1657,7 @@ export class UnixSocketServer {
     let activeRequestSignal: AbortSignal | undefined;
     const cancellation = this.registerRequestCancellation(session, request.id);
 
-    const handler = async (): Promise<DaemonResponse> => {
+    const handler = async (): Promise<DaemonResponse | undefined> => {
       try {
         if (request.method.startsWith("daemon/")) {
           const daemonResponse = await handleDaemonRequest(request, this.daemonState);
@@ -1738,27 +1774,13 @@ export class UnixSocketServer {
           mcpRequest.dispose();
         }
       } catch (error) {
-        const errorMsg = errorMessage(error);
-        const preservedCause = requestFailureCause(error, activeRequestSignal);
-        const errorStack = error instanceof Error ? error.stack : "no stack";
-        logger.error(`Error forwarding request to MCP server: ${errorMsg}`);
-        logRequestFailureCause(preservedCause);
-        logger.error(`Error stack: ${errorStack}`);
-        logger.error(`Full error: ${JSON.stringify(error)}`);
-        return {
-          id: request.id,
-          type: "mcp_response",
-          success: false,
-          error: errorMsg,
-          ...(error instanceof DeviceControlTransportError
-            ? { transportFailure: error.failure }
-            : {}),
-          ...(error instanceof ReleasedBoundSessionError
-            ? { boundSessionLoss: error.failure }
-            : {}),
-          ...mcpRequestFailureDetails(error, preservedCause),
-          ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
-        };
+        return this.mcpForwardFailureResponse({
+          error,
+          request,
+          sessionId,
+          ownerSocket,
+          signal: activeRequestSignal,
+        });
       }
     };
     // Admit through the socket's queue: same-lane requests keep arrival order, while an
@@ -1768,7 +1790,7 @@ export class UnixSocketServer {
       this.traceFrame("admission_requested", request.id, deviceId);
     }
     return session.requestQueue
-      .run(
+      .run<DaemonResponse | undefined>(
         resolveSocketAdmissionLane(request),
         () => {
           if (this.closing) {
@@ -1805,6 +1827,45 @@ export class UnixSocketServer {
         },
       )
       .finally(cancellation.dispose);
+  }
+
+  private mcpForwardFailureResponse({
+    error,
+    request,
+    sessionId,
+    ownerSocket,
+    signal,
+  }: {
+    error: unknown;
+    request: DaemonRequest;
+    sessionId: string;
+    ownerSocket: Socket;
+    signal?: AbortSignal;
+  }): DaemonResponse | undefined {
+    const errorMsg = errorMessage(error);
+    const preservedCause = requestFailureCause(error, signal);
+    if (isClientForwardCancellation(signal, preservedCause)) {
+      logger.debug(`MCP forward abandoned for ${sessionId}: ${preservedCause?.message}`);
+      if (ownerSocket.destroyed) {
+        return undefined;
+      }
+    } else {
+      const errorStack = error instanceof Error ? error.stack : "no stack";
+      logger.error(`Error forwarding request to MCP server: ${errorMsg}`);
+      logRequestFailureCause(preservedCause);
+      logger.error(`Error stack: ${errorStack}`);
+      logger.error(`Full error: ${JSON.stringify(error)}`);
+    }
+    return {
+      id: request.id,
+      type: "mcp_response",
+      success: false,
+      error: errorMsg,
+      ...(error instanceof DeviceControlTransportError ? { transportFailure: error.failure } : {}),
+      ...(error instanceof ReleasedBoundSessionError ? { boundSessionLoss: error.failure } : {}),
+      ...mcpRequestFailureDetails(error, preservedCause),
+      ...(error instanceof InputTypeTextAppendError ? { charsSent: error.charsSent } : {}),
+    };
   }
 
   private async waitForStartup(
@@ -1876,7 +1937,7 @@ export class UnixSocketServer {
       return { id: request.id, type: "mcp_response", success: true, result: { cancelled: false } };
     }
     session.requestCancellations.delete(targetId);
-    const reason = new ActionableError(
+    const reason = new ClientRequestCancellation(
       `Request ${targetId} was cancelled by its client (client-side timeout or abort); ` +
         "the daemon abandoned it so the next request on this connection can run.",
     );

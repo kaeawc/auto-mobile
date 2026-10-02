@@ -12,7 +12,7 @@ import {
 } from "../utils/android-cmdline-tools/AvdConfigReader";
 import { parseAndroidSystemImageRuntime } from "../utils/android-cmdline-tools/AndroidSystemImageRuntime";
 import { AvdManagerClient } from "../utils/android-cmdline-tools/AvdManagerClient";
-import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
+import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import type { CreateAvdParams } from "../utils/android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../utils/toolUtils";
@@ -612,7 +612,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
         `Failed to create Android AVD '${request.name}': ${created.message}`,
       );
     }
-    AndroidAvdProvenanceCache.getInstance().invalidate();
+    invalidateAndroidInventoryProvenanceAndCatalog();
     if (spec.configuration) {
       await this.configureAndroid(request.name, spec.configuration, request.signal);
     }

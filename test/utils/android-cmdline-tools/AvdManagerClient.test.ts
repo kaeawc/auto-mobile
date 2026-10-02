@@ -110,6 +110,24 @@ function createClient(overrides: Partial<ConstructorParameters<typeof AvdManager
 }
 
 describe("AvdManagerClient", () => {
+  test("missing cmdline-tools fails resolve before any avdmanager invocation", async () => {
+    const { client, timer, calls } = createClient({
+      detectAndroidCommandLineTools: async () => [],
+    });
+    await expect(client.listDeviceImages()).rejects.toThrow("Android command line tools not found");
+    expect(timer.now()).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("missing avdmanager fails resolve before spawning", async () => {
+    const { client, timer, calls } = createClient({
+      validateRequiredTools: () => ({ valid: false, missing: ["avdmanager"] }),
+    });
+    await expect(client.listDeviceImages()).rejects.toThrow("Missing required tools: avdmanager");
+    expect(timer.now()).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+
   test("returns failure stdout unchanged under the limit", async () => {
     const { client, child } = createClient();
     const pending = client.deleteAvd("pixel");

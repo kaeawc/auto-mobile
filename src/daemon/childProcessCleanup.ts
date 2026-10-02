@@ -1,3 +1,4 @@
+import { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import type { VideoRecordingRecord } from "../db/videoRecordingRepository";
 import {
   interruptVideoRecording,
@@ -23,6 +24,7 @@ const CHILD_PROCESS_CLEANUP_TIMEOUT_MS = 1_500;
  * without starting real capture or iOS runner processes.
  */
 export interface DaemonChildProcessCleanupDependencies {
+  shutdownInventoryReads?(): void;
   stopAcceptingVideoRecordingStarts(): Promise<void>;
   listActiveVideoRecordings(): Promise<VideoRecordingRecord[]>;
   listOwnedActiveVideoRecordingIds(): string[];
@@ -35,6 +37,9 @@ export interface DaemonChildProcessCleanupDependencies {
 }
 
 const defaultDependencies: DaemonChildProcessCleanupDependencies = {
+  shutdownInventoryReads: () => {
+    invalidateAndroidInventoryProvenanceAndCatalog();
+  },
   stopAcceptingVideoRecordingStarts,
   listActiveVideoRecordings,
   listOwnedActiveVideoRecordingIds,
@@ -52,6 +57,7 @@ const defaultDependencies: DaemonChildProcessCleanupDependencies = {
 export async function cleanupDaemonChildProcesses(
   dependencies: DaemonChildProcessCleanupDependencies = defaultDependencies,
 ): Promise<void> {
+  dependencies.shutdownInventoryReads?.();
   const timer = dependencies.timer ?? defaultTimer;
   const timeoutMs = dependencies.timeoutMs ?? CHILD_PROCESS_CLEANUP_TIMEOUT_MS;
   const recordingIds = new Set<string>();

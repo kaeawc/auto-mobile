@@ -1,6 +1,10 @@
+import { registerAndroidInventoryCatalogInvalidator } from "../utils/AndroidInventoryInvalidation";
+export { invalidateAndroidInventoryProvenanceAndCatalog } from "../utils/AndroidInventoryInvalidation";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { resetAndroidInventoryEnrichmentCache } from "../utils/android-cmdline-tools/AndroidEmulatorClient";
 import { AndroidAvdProvenanceCache } from "../utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../devices/deviceUtils";
@@ -36,24 +40,25 @@ import { describeDevice, projectConfiguredImage, type ConfiguredImage } from "./
 import { TTLCache } from "../utils/cache/Cache";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 
-/**
- * Wall-clock budget for the COMPLETE Android resource path — the device-image
- * listing (avdmanager `list avd`) AND the installed-only provisioning-catalog
- * enumeration (sdkmanager + avdmanager `list device`). This operation-specific
- * resource budget returns an explicit incomplete diagnostic when the host
- * toolchain stalls.
- * The deadline is armed BEFORE the first Android await so a stall in the
- * device-image listing is bounded too, and its AbortSignal cancels every
- * in-flight avdmanager/sdkmanager child on timeout.
- */
+/** Per-read response budget; the shared fetch has its own lifecycle and hard cap. */
 export const ANDROID_PROVISIONING_CATALOG_BUDGET_MS = 9_000;
+export const ANDROID_INVENTORY_BACKGROUND_CAP_MS = 30_000;
+export const ANDROID_INVENTORY_RETRY_AFTER_MS = 1_000;
+// The stage includes configured images, so it uses the same 2.5s freshness bound.
+export const ANDROID_INVENTORY_STAGE_TTL_MS = 2_500;
 
 const ANDROID_DEVICE_IMAGE_RESOURCE_CACHE_TTL_MS = 2_500; // Stay below adb's ~5s device-list cache.
+interface AndroidBackgroundFetch {
+  promise: Promise<PlatformResourceResult>;
+  controller: AbortController;
+  inventory?: AndroidConfiguredInventoryResult;
+}
 interface AndroidImageCacheState {
+  background?: AndroidBackgroundFetch;
+  stage?: TTLCache<string, PlatformResourceResult>;
   cache: TTLCache<string, PlatformResourceResult> | null;
   singleFlight: SingleFlight<string, PlatformResourceResult>;
   generation: number;
-  publishedGeneration: number;
 }
 
 // The production registration has one handler; tests and embedded callers may have more.
@@ -61,9 +66,9 @@ interface AndroidImageCacheState {
 const androidImageCacheStates = new Set<WeakRef<AndroidImageCacheState>>();
 
 function resetAndroidImageCacheState(state: AndroidImageCacheState): void {
+  state.stage?.clear();
   state.cache = null;
   state.singleFlight = new SingleFlight();
-  state.publishedGeneration = ++state.generation;
 }
 
 function getAndroidDeviceImageResourceCache(
@@ -79,6 +84,11 @@ function getAndroidDeviceImageResourceCache(
 }
 
 export function resetAndroidDeviceImageResourceCache(): void {
+  resetAndroidInventoryEnrichmentCache();
+  resetAndroidResourceCacheStates();
+}
+
+function resetAndroidResourceCacheStates(): void {
   for (const reference of androidImageCacheStates) {
     const state = reference.deref();
     if (state) {
@@ -97,6 +107,20 @@ export const DEVICE_IMAGE_RESOURCE_URIS = {
 
 // Device image info for resource response
 export type DeviceImageInfo = ConfiguredImage;
+
+registerAndroidInventoryCatalogInvalidator(() => {
+  resetAndroidResourceCacheStates();
+  for (const reference of androidImageCacheStates) {
+    const state = reference.deref();
+    if (state) {
+      state.generation++;
+      state.background?.controller.abort(
+        new Error("Android inventory fetch superseded by invalidation"),
+      );
+      state.background = undefined;
+    }
+  }
+});
 
 interface ProvisioningRuntime {
   platform: Platform;
@@ -146,8 +170,11 @@ interface ProvisioningCatalog {
 interface ProvisioningCatalogObservation {
   catalogComplete: boolean;
   error?: {
-    code: "unavailable" | "failed" | "timeout";
+    code: "unavailable" | "failed" | "timeout" | "superseded";
     message: string;
+    retryable?: boolean;
+    retryAfterMs?: number;
+    missing?: Array<"catalog" | "configuredInventory">;
   };
 }
 
@@ -210,7 +237,6 @@ export function createDeviceImageResourcesHandler(
     cache: null,
     singleFlight: new SingleFlight(),
     generation: 0,
-    publishedGeneration: 0,
   };
   androidImageCacheStates.add(new WeakRef(androidCacheState));
 
@@ -311,7 +337,10 @@ async function buildAndroidImages(
   signal?: AbortSignal,
 ): Promise<AndroidConfiguredInventoryResult> {
   try {
-    const discovery = await deviceManager.getDeviceImagesDetailed("android", { signal });
+    const discovery = await deviceManager.getDeviceImagesDetailed("android", {
+      signal,
+      coalesceInventoryEnrichment: true,
+    });
     if (signal?.aborted) {
       return {
         images: [],
@@ -406,138 +435,223 @@ async function generateAndroidResource(
     return cached;
   }
 
-  return await state.singleFlight.run(cacheKey, async () => {
-    const generation = ++state.generation;
-    const result = await computeAndroidResource(deviceManager, avdManager, timer, budgetMs);
-    if (generation >= state.publishedGeneration) {
-      state.publishedGeneration = generation;
-      getAndroidDeviceImageResourceCache(state, timer).set(cacheKey, result);
-    }
-    return result;
-  });
+  return await state.singleFlight.run(
+    cacheKey,
+    () =>
+      runWithAbortSignal(undefined, async () => {
+        const generation = state.generation;
+        const result = await computeAndroidResource({
+          state,
+          deviceManager,
+          avdManager,
+          timer,
+          budgetMs,
+        });
+        if (generation === state.generation && result.catalogObservation.catalogComplete) {
+          getAndroidDeviceImageResourceCache(state, timer).set(cacheKey, result);
+        }
+        return result;
+      }),
+    getAbortSignal(),
+  );
 }
 
-async function computeAndroidResource(
-  deviceManager: PlatformDeviceManager,
-  avdManager: AvdManager,
-  timer: Timer,
-  budgetMs: number,
-): Promise<PlatformResourceResult> {
-  // Bound the COMPLETE Android path under ONE deadline: the device-image
-  // listing (buildAndroidImages -> avdmanager `list avd`) AND the
-  // provisioning-catalog enumeration. The deadline is armed before the first
-  // Android await, so a stall in the preceding listing is bounded too — not
-  // just the catalog enumeration — and its AbortSignal cancels every in-flight
-  // avdmanager/sdkmanager child on timeout instead of leaving them to their own
-  // independent 60s timeouts.
-  //
-  // The catalog enumerates ONLY installed system images: they are the exact
-  // source provisionDevice validates against (DeviceProvisioner.provisionAndroid
-  // reads listInstalledSystemImages before createAvd), so the catalog cannot
-  // drift into offering available-to-download packages that fail with "Package
-  // path is not valid". Device profiles come from `avdmanager list device`,
-  // which are the profile ids AVD creation accepts.
+function startAndroidBackgroundFetch({
+  state,
+  deviceManager,
+  avdManager,
+  timer,
+}: {
+  state: AndroidImageCacheState;
+  deviceManager: PlatformDeviceManager;
+  avdManager: AvdManager;
+  timer: Timer;
+}): AndroidBackgroundFetch {
   const controller = new AbortController();
-  let timedOut = false;
-  let completedInventory: AndroidConfiguredInventoryResult | undefined;
-  try {
-    let timeoutError: Error | undefined;
-    return await raceWithDeadline(
-      buildAndroidResourceResult(
-        deviceManager,
-        avdManager,
-        timer,
-        controller.signal,
-        (inventory) => {
-          completedInventory = inventory;
-        },
-      ),
-      {
-        timer,
-        timeoutMs: budgetMs,
-        label: "Android device-image resource generation",
-        timeoutError: () =>
-          (timeoutError = new Error(
-            `Android device-image resource generation exceeded ${budgetMs}ms`,
-          )),
-        onTimeout: () => {
-          timedOut = true;
-          // Cancel every in-flight avdmanager/sdkmanager child so none keep running.
-          controller.abort(timeoutError);
-        },
+  const generation = state.generation;
+  let hardCapExpired = false;
+  const fetch: AndroidBackgroundFetch = {
+    controller,
+    promise: runWithAbortSignal(undefined, async () => {
+      await Promise.resolve();
+      try {
+        const result = await raceWithDeadline(
+          () =>
+            buildAndroidResourceResult({
+              deviceManager,
+              avdManager,
+              timer,
+              signal: controller.signal,
+              onInventoryComplete: (inventory) => {
+                fetch.inventory = inventory;
+              },
+            }),
+          {
+            timer,
+            timeoutMs: ANDROID_INVENTORY_BACKGROUND_CAP_MS,
+            signal: controller.signal,
+            label: "Android inventory background fetch",
+            onTimeout: () => {
+              hardCapExpired = true;
+              controller.abort(new Error("Android inventory background hard cap elapsed"));
+            },
+          },
+        );
+        if (generation === state.generation && result.catalogObservation.catalogComplete) {
+          state.stage ??= new TTLCache(timer, { ttlMs: ANDROID_INVENTORY_STAGE_TTL_MS });
+          state.stage.set("android", result);
+        }
+        return result;
+      } catch (error) {
+        if (hardCapExpired) {
+          logger.warn("Android inventory background fetch reached its 30000ms hard cap", error);
+          return incompleteAndroidResource(fetch.inventory, ANDROID_INVENTORY_BACKGROUND_CAP_MS);
+        }
+        if (controller.signal.aborted) {
+          // Lifecycle invalidation supersedes this observation; callers can retry the replacement.
+          logger.debug(`Android inventory background fetch superseded: ${errorMessage(error)}`);
+          return supersededAndroidResource(fetch.inventory);
+        }
+        logger.warn(`Android inventory background fetch failed: ${errorMessage(error)}`, error);
+        return {
+          platform: "android",
+          images: fetch.inventory?.images ?? [],
+          provisioningCatalog: emptyProvisioningCatalog(),
+          catalogObservation: failedCatalogObservation("Android", error),
+          inventoryObservation:
+            fetch.inventory?.observation ??
+            failedConfiguredInventoryObservation(
+              "failed",
+              `Android configured-device inventory failed: ${errorMessage(error)}`,
+            ),
+        };
+      } finally {
+        if (state.background === fetch) {
+          state.background = undefined;
+        }
+      }
+    }),
+  };
+  state.background = fetch;
+  return fetch;
+}
+
+function supersededAndroidResource(
+  inventory: AndroidConfiguredInventoryResult | undefined,
+): PlatformResourceResult {
+  const message =
+    "Android inventory fetch was superseded by lifecycle invalidation or shutdown; retry inventory discovery.";
+  return {
+    platform: "android",
+    images: inventory?.images ?? [],
+    provisioningCatalog: emptyProvisioningCatalog(),
+    catalogObservation: {
+      catalogComplete: false,
+      error: {
+        code: "superseded",
+        message,
+        retryable: true,
+        retryAfterMs: ANDROID_INVENTORY_RETRY_AFTER_MS,
       },
+    },
+    inventoryObservation:
+      inventory?.observation ?? failedConfiguredInventoryObservation("unavailable", message),
+  };
+}
+
+function incompleteAndroidResource(
+  inventory: AndroidConfiguredInventoryResult | undefined,
+  budgetMs: number,
+): PlatformResourceResult {
+  const observation =
+    inventory?.observation ??
+    failedConfiguredInventoryObservation(
+      "timeout",
+      `Android configured-device inventory exceeded the ${budgetMs}ms resource budget.`,
     );
-  } catch (error) {
-    if (timedOut) {
-      logger.warn(
-        `[DeviceImageResources] Android device-image resource generation timed out after ${budgetMs}ms; returning incomplete catalog`,
-      );
-      return {
-        platform: "android",
-        images: completedInventory?.images ?? [],
-        provisioningCatalog: emptyProvisioningCatalog(),
-        catalogObservation: {
-          catalogComplete: false,
+  return {
+    platform: "android",
+    images: inventory?.images ?? [],
+    provisioningCatalog: emptyProvisioningCatalog(),
+    catalogObservation: {
+      catalogComplete: false,
+      error: {
+        code: "timeout",
+        message: `Android device-image resource generation exceeded the ${budgetMs}ms budget; catalog is incomplete.`,
+        retryable: true,
+        retryAfterMs: ANDROID_INVENTORY_RETRY_AFTER_MS,
+        missing: observation.complete ? ["catalog"] : ["catalog", "configuredInventory"],
+      },
+    },
+    inventoryObservation: observation.complete
+      ? observation
+      : {
+          ...observation,
           error: {
-            code: "timeout",
-            message: `Android device-image resource generation exceeded the ${budgetMs}ms budget; catalog is incomplete.`,
+            ...observation.error,
+            retryable: true,
+            retryAfterMs: ANDROID_INVENTORY_RETRY_AFTER_MS,
+            missing: ["configuredInventory"],
           },
         },
-        inventoryObservation:
-          completedInventory?.observation ??
-          failedConfiguredInventoryObservation(
-            "timeout",
-            `Android configured-device inventory exceeded the ${budgetMs}ms resource budget.`,
-          ),
-      };
-    }
-    logger.warn(`[DeviceImageResources] Failed to build Android provisioning catalog: ${error}`);
-    return {
-      platform: "android",
-      images: [],
-      provisioningCatalog: emptyProvisioningCatalog(),
-      catalogObservation: failedCatalogObservation("Android", error),
-      inventoryObservation: failedConfiguredInventoryObservation(
-        "failed",
-        "Android configured-device inventory did not complete.",
-      ),
-    };
+  };
+}
+
+async function computeAndroidResource(options: {
+  state: AndroidImageCacheState;
+  deviceManager: PlatformDeviceManager;
+  avdManager: AvdManager;
+  timer: Timer;
+  budgetMs: number;
+}): Promise<PlatformResourceResult> {
+  const { state, timer, budgetMs } = options;
+  const staged = state.stage?.get("android");
+  if (staged) {
+    return staged;
+  }
+  const background = state.background ?? startAndroidBackgroundFetch(options);
+  try {
+    return await raceWithDeadline(background.promise, {
+      timer,
+      timeoutMs: budgetMs,
+      label: "Android device-image resource generation",
+    });
+  } catch (error) {
+    logger.warn(
+      `[DeviceImageResources] Android device-image resource generation exceeded ${budgetMs}ms; returning retryable incomplete catalog`,
+      error,
+    );
+    return incompleteAndroidResource(background.inventory, budgetMs);
   }
 }
 
-async function buildAndroidResourceResult(
-  deviceManager: PlatformDeviceManager,
-  avdManager: AvdManager,
-  timer: Timer,
-  signal: AbortSignal,
-  onInventoryComplete: (inventory: AndroidConfiguredInventoryResult) => void,
-): Promise<PlatformResourceResult> {
+async function buildAndroidResourceResult({
+  deviceManager,
+  avdManager,
+  timer,
+  signal,
+  onInventoryComplete,
+}: {
+  deviceManager: PlatformDeviceManager;
+  avdManager: AvdManager;
+  timer: Timer;
+  signal: AbortSignal;
+  onInventoryComplete: (inventory: AndroidConfiguredInventoryResult) => void;
+}): Promise<PlatformResourceResult> {
   const android = await buildAndroidImages(deviceManager, avdManager, timer, signal);
   onInventoryComplete(android);
-  try {
-    const [installedSystemImages, profiles] = await Promise.all([
-      avdManager.listInstalledSystemImages(undefined, signal),
-      avdManager.listDevices(signal),
-    ]);
-    const systemImages = new Map(installedSystemImages.map((image) => [image.packageName, image]));
-    return {
-      platform: "android",
-      images: android.images,
-      provisioningCatalog: buildAndroidProvisioningCatalog([...systemImages.values()], profiles),
-      catalogObservation: { catalogComplete: true },
-      inventoryObservation: android.observation,
-    };
-  } catch (error) {
-    signal.throwIfAborted();
-    logger.warn(`[DeviceImageResources] Failed to build Android provisioning catalog: ${error}`);
-    return {
-      platform: "android",
-      images: android.images,
-      provisioningCatalog: emptyProvisioningCatalog(),
-      catalogObservation: failedCatalogObservation("Android", error),
-      inventoryObservation: android.observation,
-    };
-  }
+  const [installedSystemImages, profiles] = await Promise.all([
+    avdManager.listInstalledSystemImages(undefined, signal),
+    avdManager.listDevices(signal),
+  ]);
+  const systemImages = new Map(installedSystemImages.map((image) => [image.packageName, image]));
+  return {
+    platform: "android",
+    images: android.images,
+    provisioningCatalog: buildAndroidProvisioningCatalog([...systemImages.values()], profiles),
+    catalogObservation: { catalogComplete: true },
+    inventoryObservation: android.observation,
+  };
 }
 
 async function buildIosProvisioningCatalog(

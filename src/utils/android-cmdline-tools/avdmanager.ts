@@ -15,7 +15,7 @@ import {
   type SdkManagerClientDependencies,
 } from "./SdkManagerClient";
 import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
-import { AndroidAvdProvenanceCache } from "../AndroidAvdProvenanceCache";
+import { invalidateAndroidInventoryProvenanceAndCatalog } from "../AndroidInventoryInvalidation";
 
 /** Dependencies shared by the functional AVD facade and its two typed clients. */
 export type AvdManagerDependencies = Omit<
@@ -120,6 +120,7 @@ export async function installSystemImage(
       acceptLicenses: acceptLicense,
     });
     if (result.exitCode === 0) {
+      invalidateAndroidInventoryProvenanceAndCatalog();
       return { success: true, message: `System image ${packageName} installed successfully` };
     }
     return { success: false, message: `Installation failed: ${failureDiagnostics(result)}` };
@@ -146,7 +147,7 @@ export async function createAvd(
 ): Promise<{ success: boolean; message: string; avdName?: string }> {
   const result = await createAvdManagerClient(dependencies).createAvd(params, { signal });
   if (result.success) {
-    AndroidAvdProvenanceCache.getInstance().invalidate();
+    invalidateAndroidInventoryProvenanceAndCatalog();
   }
   return result;
 }
@@ -159,7 +160,7 @@ export async function deleteAvd(
 ): Promise<{ success: boolean; message: string }> {
   const result = await createAvdManagerClient(dependencies).deleteAvd(name, options);
   if (result.success) {
-    AndroidAvdProvenanceCache.getInstance().invalidate();
+    invalidateAndroidInventoryProvenanceAndCatalog();
   }
   return result;
 }

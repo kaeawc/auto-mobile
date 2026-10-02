@@ -1,3 +1,4 @@
+import { raceWithDeadline } from "../raceWithDeadline";
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
 import { runExecSeam } from "../ExecSeam";
@@ -31,7 +32,7 @@ import {
   type AdbSpawnOptions,
   type DeviceTimestampResult,
 } from "./interfaces/AdbExecutor";
-import { getAbortSignal } from "../AbortContext";
+import { runWithAbortSignal, getAbortSignal } from "../AbortContext";
 import { trackAmbient } from "../PerfContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
@@ -1415,7 +1416,7 @@ export class AdbClient implements AdbExecutor {
     }
 
     const timeoutMs = options.timeoutMs ?? AdbClient.DEVICE_LIST_TIMEOUT_MS;
-    const flightKey = `devices:${timeoutMs}`;
+    const signal = options.signal ?? getAbortSignal();
     try {
       // A bypass caller needs its own fresh snapshot and must not inherit the
       // result of a non-bypass request that was already in flight.
@@ -1423,17 +1424,27 @@ export class AdbClient implements AdbExecutor {
         return await this.readDeviceListFromAdb(timeoutMs, options.signal);
       }
 
-      return await deviceListSingleFlight.run(
-        flightKey,
+      const shared = deviceListSingleFlight.run(
+        "devices",
         () => {
           // The shared subprocess has its own bounded timeout but deliberately
           // does not inherit a waiter's signal. Each caller races its signal in
           // SingleFlight, so one disconnected client cannot cancel discovery
           // for the other clients sharing this cold read.
-          return this.readDeviceListFromAdb(timeoutMs);
+          return runWithAbortSignal(undefined, () =>
+            this.readDeviceListFromAdb(AdbClient.DEVICE_LIST_TIMEOUT_MS),
+          );
         },
-        options.signal,
+        signal,
       );
+      return await raceWithDeadline(shared, {
+        timer: this.timer,
+        timeoutMs,
+        signal,
+        label: "ADB device-list caller wait",
+        timeoutError: () =>
+          new AdbCommandTimeoutError(`ADB device-list caller wait timed out after ${timeoutMs}ms`),
+      });
     } catch (error) {
       if (error instanceof AdbUnavailableError && !options.throwOnMissingAdb) {
         return [];

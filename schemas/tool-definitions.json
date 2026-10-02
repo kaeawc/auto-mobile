@@ -7079,7 +7079,7 @@
   },
   {
     "name": "listDevices",
-    "description": "List booted devices; resource pointers for images and detail in the note",
+    "description": "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -7711,6 +7711,33 @@
           "type": "number"
         },
         "discovery": {},
+        "enrichment": {
+          "type": "object",
+          "properties": {
+            "complete": {
+              "type": "boolean",
+              "const": false
+            },
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["configuredImages", "provenance"]
+              }
+            },
+            "retryable": {
+              "type": "boolean"
+            },
+            "retryAfterMs": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": ["complete", "missing", "retryable"],
+          "additionalProperties": false
+        },
         "note": {},
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",

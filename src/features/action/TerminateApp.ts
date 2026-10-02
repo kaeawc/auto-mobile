@@ -9,7 +9,12 @@ import { runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isProcessAlreadyGoneError } from "../../utils/ios-cmdline-tools/iosProcessErrors";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import {
+  resolveIosTerminateBackend,
+  type DeviceAppTerminator,
+  type IosTerminateBackend,
+} from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+export type { DeviceAppTerminator } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -57,19 +62,6 @@ registerDeviceIncarnationListener({
       platform: "android",
     }),
 });
-
-/**
- * Physical-device app terminator. `DeviceAppManager` satisfies this
- * structurally (via `xcrun devicectl device process terminate --kill`); tests
- * inject a fake so the physical path is exercised without a real device. Mirrors
- * the `DeviceAppUninstaller`/`DeviceAppLauncher` injection in the sibling tools.
- */
-export interface DeviceAppTerminator {
-  terminateApp(
-    deviceUdid: string,
-    bundleId: string,
-  ): Promise<{ wasInstalled: boolean; wasRunning: boolean }>;
-}
 
 export class TerminateApp extends BaseVisualChange {
   private simctl: SimCtlClient;
@@ -272,11 +264,13 @@ export class TerminateApp extends BaseVisualChange {
     perf.serial("terminateApp");
 
     return runWithNestedPerfTracker(perf, async () => {
-      // Physical iOS devices (00008XXX / 40-char UDID) can't be driven by simctl;
-      // route them through devicectl instead. Simulators keep the simctl path.
-      const terminateTransport = isIosSimulatorUdid(this.device.deviceId)
-        ? () => this.terminateSimulator(bundleId, perf)
-        : () => this.terminatePhysicalDevice(bundleId, perf);
+      const backend = resolveIosTerminateBackend(this.device.deviceId, {
+        simctl: this.simctl,
+        deviceAppTerminator: this.deviceTerminator,
+      });
+      const terminateTransport = backend.requiresInstalledAppCheck
+        ? () => this.terminateSimulator(bundleId, perf, backend)
+        : () => this.terminatePhysicalDevice(bundleId, perf, backend);
       const terminateLogic = async (): Promise<TerminateAppResult> => {
         const result = await terminateTransport();
         if (result.success) {
@@ -322,6 +316,7 @@ export class TerminateApp extends BaseVisualChange {
   private async terminateSimulator(
     bundleId: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    backend: IosTerminateBackend,
   ): Promise<TerminateAppResult> {
     const listApps = new ListInstalledApps(this.device, { create: () => this.adb }, this.simctl, {
       cacheEnabled: false,
@@ -358,9 +353,7 @@ export class TerminateApp extends BaseVisualChange {
     let errorMsg: string | undefined;
 
     try {
-      await perf.track("terminateApp", () =>
-        this.simctl.terminateApp(bundleId, this.device.deviceId),
-      );
+      await perf.track("terminateApp", () => backend.terminateApp(bundleId));
     } catch (error) {
       const message = errorMessage(error);
       // Shared already-gone matcher (issue #3076): a simctl "found nothing to
@@ -397,10 +390,11 @@ export class TerminateApp extends BaseVisualChange {
   private async terminatePhysicalDevice(
     bundleId: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    backend: IosTerminateBackend,
   ): Promise<TerminateAppResult> {
     try {
       const { wasInstalled, wasRunning } = await perf.track("terminateApp", () =>
-        this.deviceTerminator.terminateApp(this.device.deviceId, bundleId),
+        backend.terminateApp(bundleId),
       );
       return {
         success: true,

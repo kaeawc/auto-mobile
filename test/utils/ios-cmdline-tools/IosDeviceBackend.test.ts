@@ -1,11 +1,16 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import type { DeviceAppUninstaller } from "../../../src/features/action/UninstallApp";
+import { FakeSimctl } from "../../fakes/FakeSimctl";
+import { FakeDeviceAppTerminator } from "../../fakes/FakeDeviceAppTerminator";
 import { FakeDeviceAppLauncher } from "../../fakes/FakeDeviceAppLauncher";
 import { DeviceAppManager } from "../../../src/utils/ios-cmdline-tools/DeviceAppManager";
 import { SimCtlClient } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import {
   PhysicalIosDeviceBackend,
+  PhysicalIosTerminateBackend,
+  SimulatorIosTerminateBackend,
+  resolveIosTerminateBackend,
   resolveIosDeviceBackend,
   resolveIosLaunchBackend,
   SimulatorIosDeviceBackend,
@@ -224,5 +229,61 @@ describe("resolveIosLaunchBackend", () => {
       { deviceUdid: physicalUdid, bundleId, terminateExisting: true },
       { deviceUdid: physicalUdid, bundleId, terminateExisting: true },
     ]);
+  });
+});
+
+describe("resolveIosTerminateBackend", () => {
+  test("selects simulator backend and preserves simctl argument order", async () => {
+    const simctl = new FakeSimctl();
+    const terminator = new FakeDeviceAppTerminator();
+    const backend = resolveIosTerminateBackend(simulatorUdid, {
+      simctl,
+      deviceAppTerminator: terminator,
+    });
+
+    expect(backend).toBeInstanceOf(SimulatorIosTerminateBackend);
+    expect(backend.requiresInstalledAppCheck).toBe(true);
+    expect(await backend.terminateApp(bundleId)).toEqual({ wasInstalled: true, wasRunning: true });
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
+    expect(terminator.terminateCalls).toEqual([]);
+  });
+
+  test("selects physical backend and preserves terminator argument order and outcome", async () => {
+    const simctl = new FakeSimctl();
+    const terminator = new FakeDeviceAppTerminator({
+      result: { wasInstalled: true, wasRunning: false },
+    });
+    const backend = resolveIosTerminateBackend(physicalUdid, {
+      simctl,
+      deviceAppTerminator: terminator,
+    });
+
+    expect(backend).toBeInstanceOf(PhysicalIosTerminateBackend);
+    expect(backend.requiresInstalledAppCheck).toBe(false);
+    expect(await backend.terminateApp(bundleId)).toEqual({ wasInstalled: true, wasRunning: false });
+    expect(terminator.terminateCalls).toEqual([{ deviceUdid: physicalUdid, bundleId }]);
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([]);
+  });
+
+  test("simulator backend propagates transport errors for action-level mapping", async () => {
+    const simctl = new FakeSimctl();
+    const error = new Error("found nothing to terminate");
+    spyOn(simctl, "terminateApp").mockRejectedValue(error);
+    const backend = resolveIosTerminateBackend(simulatorUdid, {
+      simctl,
+      deviceAppTerminator: new FakeDeviceAppTerminator(),
+    });
+
+    await expect(backend.terminateApp(bundleId)).rejects.toBe(error);
+  });
+
+  test("physical backend propagates transport errors for action-level logging", async () => {
+    const error = new Error("device disconnected");
+    const backend = resolveIosTerminateBackend(physicalUdid, {
+      simctl: new FakeSimctl(),
+      deviceAppTerminator: new FakeDeviceAppTerminator({ error }),
+    });
+
+    await expect(backend.terminateApp(bundleId)).rejects.toBe(error);
   });
 });

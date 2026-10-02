@@ -149,6 +149,13 @@ interface ObservedChangeOptions {
 }
 
 export class BaseVisualChange {
+  /** Missing freshness remains compatible unless an internal caller requires verification. */
+  static shouldRefetchCachedObservation(cached: ObserveResult, requireVerified = false): boolean {
+    return requireVerified
+      ? cached.freshness?.isFresh !== true
+      : cached.freshness?.isFresh === false;
+  }
+
   device: BootedDevice;
   adb: AdbExecutor;
   protected adbFactory: AdbClientFactory;
@@ -293,6 +300,7 @@ export class BaseVisualChange {
     if (options.skipPreviousObserve) {
       logger.info("[BaseVisualChange] Skipping previous observe (app was terminated/cleared)");
     } else if (!previousObserveResult) {
+      let staleCachedRefetch = false;
       try {
         if (progress) {
           await progress(10, 100, "Getting previous view hierarchy...");
@@ -301,13 +309,21 @@ export class BaseVisualChange {
           const cached = options.display
             ? undefined
             : await this.observeScreen.getMostRecentCachedObserveResult();
+          // Preserve the missing/errored-cache fallback; a rejected usable cache
+          // must instead get exactly one fresh read before any action is dispatched.
+          staleCachedRefetch = Boolean(
+            cached?.viewHierarchy &&
+            !cached.viewHierarchy.hierarchy.error &&
+            BaseVisualChange.shouldRefetchCachedObservation(cached),
+          );
           if (
             !cached?.viewHierarchy ||
             cached.viewHierarchy.hierarchy.error ||
-            (options.skipCallerDisplayFence && cached.freshness?.isFresh !== true)
+            BaseVisualChange.shouldRefetchCachedObservation(cached, options.skipCallerDisplayFence)
           ) {
             return this.observeScreen.execute({
-              freshness: options.skipCallerDisplayFence ? "fresh" : "cached-ok",
+              freshness:
+                staleCachedRefetch || options.skipCallerDisplayFence ? "fresh" : "cached-ok",
               display: options.display,
               queryOptions: options.queryOptions,
               perf,
@@ -317,6 +333,11 @@ export class BaseVisualChange {
           return cached;
         });
       } catch (error) {
+        if (staleCachedRefetch) {
+          throw new ActionableError("Cannot perform action without view hierarchy", {
+            cause: error,
+          });
+        }
         logger.warn(`Previous observation failed: ${errorMessage(error)}`, error);
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
           return this.observeScreen.execute({
@@ -329,7 +350,12 @@ export class BaseVisualChange {
         });
       }
 
-      if (!previousObserveResult) {
+      if (
+        !previousObserveResult ||
+        (staleCachedRefetch &&
+          (!previousObserveResult.viewHierarchy ||
+            previousObserveResult.viewHierarchy.hierarchy.error))
+      ) {
         throw new ActionableError("Cannot perform action without view hierarchy");
       }
     }

@@ -1,4 +1,5 @@
 import { DEFAULT_VISION_CONFIG } from "../../../src/vision";
+import { hierarchyFingerprint } from "../../../src/utils/hierarchyFingerprint";
 import { FakeElementSelector } from "../../fakes/FakeElementSelector";
 import type { Element } from "../../../src/models";
 import { TalkBackTapStrategy } from "../../../src/features/talkback/TalkBackTapStrategy";
@@ -567,7 +568,7 @@ describe("ExecuteGesture path fences", () => {
                   ],
               300,
               undefined,
-              fence,
+              { displayFence: fence },
             );
           },
           {
@@ -882,5 +883,158 @@ describe("default-display recovery dispatches", () => {
         }
       },
     );
+  }
+});
+
+// Exercise the public seams directly, including the harness's untyped extra-argument shape.
+describe("display fence options preserve public call shapes", () => {
+  for (const entry of ["tap", "retry", "path", "coordinateFallback", "longPress"] as const) {
+    test.each(["legacy", "fenced", "stale", "extra"] as const)(`${entry}: %s`, async (shape) => {
+      const h = harness("android", "unchanged");
+      const events: string[] = [];
+      const stale = new StaleDisplayError({
+        observedGeneration: 7,
+        currentGeneration: 8,
+        retry: "observe",
+      });
+      const displayFence = {
+        assertCurrent() {
+          events.push("fence");
+          if (shape === "stale") {
+            throw stale;
+          }
+        },
+      };
+      const options = shape === "fenced" || shape === "stale" ? { displayFence } : {};
+      const element: Element = {
+        clickable: true,
+        bounds: { left: 40, top: 60, right: 80, bottom: 100 },
+      };
+      const dispatch = async () => {
+        events.push("dispatch");
+        return { success: true, totalTimeMs: 1 };
+      };
+      watch(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(dispatch);
+      watch(h.adb, "executeCommand").mockImplementation(async () => {
+        events.push("dispatch");
+        return { stdout: "", stderr: "", toString: () => "", valueOf: () => "" };
+      });
+      const driver = new FakeTalkBackNavigationDriver();
+      watch(driver, "requestTapCoordinates").mockImplementation(dispatch);
+      const strategy = new TalkBackTapStrategy({ timer: h.timer });
+      const tap = h.attach(new TapOnElement(h.device, h.adb, h.deps));
+      const path = [
+        { x: 10, y: 10 },
+        { x: 20, y: 20 },
+      ];
+      const gesture = new ExecuteGesture(h.device, h.adb, h.timer);
+      const hierarchy = h.screen.viewHierarchy;
+      if (!hierarchy) {
+        throw new Error("Missing fake hierarchy");
+      }
+      Object.assign(tap, { refreshViewHierarchy: async () => hierarchy });
+      const hash = hierarchyFingerprint(hierarchy);
+      if (!hash) {
+        throw new Error("Missing fake hierarchy fingerprint");
+      }
+      let invoke: () => Promise<unknown>;
+      switch (entry) {
+        case "tap":
+          invoke =
+            shape === "extra"
+              ? () =>
+                  Reflect.apply(tap.executeAndroidTap, tap, [
+                    "tap",
+                    50,
+                    70,
+                    50,
+                    element,
+                    undefined,
+                    undefined,
+                    false,
+                    [],
+                  ])
+              : shape === "legacy"
+                ? () => tap.executeAndroidTap("tap", 50, 70, 50, element)
+                : () =>
+                    tap.executeAndroidTap(
+                      "tap",
+                      50,
+                      70,
+                      50,
+                      element,
+                      undefined,
+                      { action: "tap", ...options },
+                      false,
+                    );
+          break;
+        case "retry": {
+          const args: Parameters<TapOnElement["retryTapIfNoChange"]> = [
+            hash,
+            { x: 50, y: 70 },
+            "tap",
+            50,
+            element,
+            { action: "tap", ...options },
+            false,
+            h.screen.screenSize,
+          ];
+          invoke =
+            shape === "extra"
+              ? () =>
+                  Reflect.apply(tap.retryTapIfNoChange, tap, [...args, undefined, undefined, []])
+              : () => tap.retryTapIfNoChange(...args);
+          break;
+        }
+        case "path":
+          invoke =
+            shape === "extra"
+              ? () => Reflect.apply(gesture.execute, gesture, [path, 300, undefined, []])
+              : shape === "legacy"
+                ? () => gesture.execute(path, 300)
+                : () => gesture.execute(path, 300, undefined, options);
+          break;
+        case "coordinateFallback":
+          invoke =
+            shape === "extra"
+              ? () =>
+                  Reflect.apply(strategy.executeCoordinateFallback, strategy, [
+                    50,
+                    70,
+                    "longPress",
+                    500,
+                    driver,
+                    [],
+                  ])
+              : shape === "legacy"
+                ? () => strategy.executeCoordinateFallback(50, 70, "longPress", 500, driver)
+                : () =>
+                    strategy.executeCoordinateFallback(50, 70, "longPress", 500, driver, options);
+          break;
+        case "longPress":
+          invoke =
+            shape === "extra"
+              ? () =>
+                  Reflect.apply(strategy.executeLongPress, strategy, [
+                    50,
+                    70,
+                    500,
+                    element,
+                    driver,
+                    [],
+                  ])
+              : shape === "legacy"
+                ? () => strategy.executeLongPress(50, 70, 500, element, driver)
+                : () => strategy.executeLongPress(50, 70, 500, element, driver, options);
+          break;
+      }
+      if (shape === "stale") {
+        await expect(invoke()).rejects.toBe(stale);
+        expect(events).toEqual(["fence"]);
+      } else {
+        await invoke();
+        expect(events).toEqual(shape === "fenced" ? ["fence", "dispatch"] : ["dispatch"]);
+      }
+    });
   }
 });

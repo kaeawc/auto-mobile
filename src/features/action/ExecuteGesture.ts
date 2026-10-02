@@ -4,7 +4,12 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { BootedDevice, Point } from "../../models";
 import { FingerPath } from "../../models";
 import { GestureOptions } from "../../models";
-import { BaseVisualChange, type DisplayFence } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  resolveDisplayFence,
+  type DisplayFence,
+  type DisplayFenceOption,
+} from "./BaseVisualChange";
 import { SwipeResult } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -87,16 +92,9 @@ export class ExecuteGesture extends BaseVisualChange {
 
     // Use accessibility service swipe if requested
     if (scrollMode === "a11y") {
-      return await this.executeA11ySwipe(
-        x1,
-        y1,
-        x2,
-        y2,
-        duration,
-        perf,
-        signal,
-        options.displayFence,
-      );
+      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, perf, signal, {
+        displayFence: options.displayFence,
+      });
     }
 
     // Default ADB mode
@@ -153,8 +151,9 @@ export class ExecuteGesture extends BaseVisualChange {
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
-    fence: DisplayFence = { assertCurrent: () => {} },
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<SwipeResult> {
+    const fence = resolveDisplayFence(fenceOptions);
     let dispatched = false;
     const indeterminateResult = (reason: string): SwipeResult => ({
       success: false,
@@ -281,7 +280,7 @@ export class ExecuteGesture extends BaseVisualChange {
       perf,
       signal,
       options.timeoutMs,
-      options.displayFence,
+      { displayFence: options.displayFence },
     );
   }
 
@@ -306,8 +305,9 @@ export class ExecuteGesture extends BaseVisualChange {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     timeoutMs?: number,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<SwipeResult> {
+    const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
@@ -367,15 +367,16 @@ export class ExecuteGesture extends BaseVisualChange {
     path: Point[] | FingerPath[],
     duration: number = 300,
     signal?: AbortSignal,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<any> {
+    const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
     // Platform-specific gesture execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
       case "android":
-        return await this.executeAndroidGesture(path, duration, signal, fence);
+        return await this.executeAndroidGesture(path, duration, signal, { displayFence: fence });
       case "ios":
-        return await this.executeiOSGesture(path, duration, signal, fence);
+        return await this.executeiOSGesture(path, duration, signal, { displayFence: fence });
       default:
         throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
@@ -388,8 +389,9 @@ export class ExecuteGesture extends BaseVisualChange {
     path: Point[] | FingerPath[],
     duration: number,
     signal?: AbortSignal,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<any> {
+    const fence = fenceOptions.displayFence;
     // Generate and execute adb touch events
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
@@ -431,8 +433,9 @@ export class ExecuteGesture extends BaseVisualChange {
     path: Point[] | FingerPath[],
     duration: number,
     signal?: AbortSignal,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<any> {
+    const fence = fenceOptions.displayFence;
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
         const fingers = path as FingerPath[];

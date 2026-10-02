@@ -74,6 +74,17 @@ export interface DisplayFence {
   assertCurrent(): void;
 }
 
+/** Internal dispatch options; never part of a tool's input schema. */
+export interface DisplayFenceOption {
+  readonly displayFence?: DisplayFence;
+}
+
+const NO_OP_DISPLAY_FENCE: DisplayFence = Object.freeze({ assertCurrent: () => {} });
+
+export function resolveDisplayFence(options?: DisplayFenceOption): DisplayFence {
+  return options?.displayFence ?? NO_OP_DISPLAY_FENCE;
+}
+
 export interface DisplayFenceDependencies {
   displayTransitions?: DisplayTransitionReader;
   renderedDisplayRevision?: RenderedDisplayRevisionReader;

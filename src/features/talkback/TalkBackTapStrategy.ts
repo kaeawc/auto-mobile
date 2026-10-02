@@ -1,4 +1,4 @@
-import type { DisplayFence } from "../action/BaseVisualChange";
+import type { DisplayFence, DisplayFenceOption } from "../action/BaseVisualChange";
 import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Element } from "../../models/Element";
@@ -381,8 +381,9 @@ export class TalkBackTapStrategy {
     action: TalkBackFallbackAction,
     durationMs: number,
     driver: TalkBackNavigationDriver,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<TalkBackTapResult> {
+    const fence = fenceOptions.displayFence;
     const tapDuration = action === "longPress" ? durationMs : 50;
 
     if (action === "doubleTap") {
@@ -468,14 +469,9 @@ export class TalkBackTapStrategy {
 
     // Keep the focus tap outside TalkBack's activation double-tap window.
     await this.timer.sleep(TALKBACK_PRECISE_FOCUS_SETTLE_MS);
-    const activationResult = await this.executeCoordinateFallback(
-      x,
-      y,
-      "doubleTap",
-      50,
-      driver,
-      fence,
-    );
+    const activationResult = await this.executeCoordinateFallback(x, y, "doubleTap", 50, driver, {
+      displayFence: fence,
+    });
     return {
       ...activationResult,
       focusCompleted: true,
@@ -503,8 +499,9 @@ export class TalkBackTapStrategy {
     durationMs: number,
     element: Element,
     driver: TalkBackNavigationDriver,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<TalkBackTapResult> {
+    const fence = fenceOptions.displayFence;
     const selector = stableNodeSelectorForElement(element);
 
     if (selector) {
@@ -512,7 +509,9 @@ export class TalkBackTapStrategy {
         logger.info(
           "[TalkBackTapStrategy] Runner does not support stable node selectors; using coordinate long press",
         );
-        return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, fence);
+        return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
+          displayFence: fence,
+        });
       }
       const longClickResult = requiresNodeSelector(selector)
         ? await driver.requestNodeAction("long_click", selector)
@@ -535,7 +534,9 @@ export class TalkBackTapStrategy {
       );
     }
 
-    return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, fence);
+    return this.executeCoordinateFallback(x, y, "longPress", durationMs, driver, {
+      displayFence: fence,
+    });
   }
 
   /**

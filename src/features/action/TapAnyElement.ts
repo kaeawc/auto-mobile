@@ -1,4 +1,8 @@
-import type { DisplayFence, DisplayFenceDependencies } from "./BaseVisualChange";
+import {
+  resolveDisplayFence,
+  type DisplayFenceOption,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
@@ -505,8 +509,9 @@ export class TapAnyElement extends BaseVisualChange {
     durationMs: number,
     target: CapturedTapTarget,
     signal?: AbortSignal,
-    fence: DisplayFence = { assertCurrent: () => {} },
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = resolveDisplayFence(fenceOptions);
     const { element, capture } = target;
     this.beforeAndroidTapForTesting?.();
     this.assertSelectedCapture(capture);
@@ -519,7 +524,9 @@ export class TapAnyElement extends BaseVisualChange {
       )) === "talkback";
     if (
       talkBackEnabled &&
-      (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, fence))
+      (await this.executeAndroidTalkBackTap(action, x, y, durationMs, element, {
+        displayFence: fence,
+      }))
     ) {
       return;
     }
@@ -632,8 +639,9 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<boolean> {
+    const fence = fenceOptions.displayFence;
     const driver = this.talkBackDriverFactory.createDriver(this.device);
     if (action === "longPress") {
       const result = await this.talkBackStrategy.executeLongPress(
@@ -642,7 +650,7 @@ export class TapAnyElement extends BaseVisualChange {
         durationMs,
         element,
         driver,
-        fence,
+        { displayFence: fence },
       );
       if (!result.success && result.semanticActionFailure) {
         throw new ActionableError(
@@ -663,14 +671,9 @@ export class TapAnyElement extends BaseVisualChange {
     const fallback =
       action === "tap"
         ? await this.talkBackStrategy.executePreciseTap(x, y, driver, fence)
-        : await this.talkBackStrategy.executeCoordinateFallback(
-            x,
-            y,
-            action,
-            durationMs,
-            driver,
-            fence,
-          );
+        : await this.talkBackStrategy.executeCoordinateFallback(x, y, action, durationMs, driver, {
+            displayFence: fence,
+          });
     return fallback.success;
   }
 
@@ -682,8 +685,9 @@ export class TapAnyElement extends BaseVisualChange {
     durationMs: number,
     screenSize?: ObserveResult["screenSize"],
     signal?: AbortSignal,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     if (!preTapHash) {
       return;
     }
@@ -706,15 +710,9 @@ export class TapAnyElement extends BaseVisualChange {
       `[TapAnyElement] Hierarchy unchanged after tap at (${retryPoint.x}, ${retryPoint.y}); retrying`,
     );
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
-    await this.executeAndroidTap(
-      action,
-      retryPoint.x,
-      retryPoint.y,
-      durationMs,
-      target,
-      signal,
-      fence,
-    );
+    await this.executeAndroidTap(action, retryPoint.x, retryPoint.y, durationMs, target, signal, {
+      displayFence: fence,
+    });
   }
 
   private assertSelectedCapture(selectedCapture: HierarchySnapshot): void {
@@ -994,8 +992,9 @@ export class TapAnyElement extends BaseVisualChange {
     longPressDuration: number,
     element?: Element,
     signal?: AbortSignal,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     // Fail-safe tap-bias variant (#6267): an indeterminate probe must route
     // through the VoiceOver activation gesture rather than a plain
@@ -1017,15 +1016,9 @@ export class TapAnyElement extends BaseVisualChange {
       return;
     }
 
-    await this.executeIosTapWithCoordinates(
-      xcTestClient,
-      action,
-      x,
-      y,
-      longPressDuration,
-      signal,
-      fence,
-    );
+    await this.executeIosTapWithCoordinates(xcTestClient, action, x, y, longPressDuration, signal, {
+      displayFence: fence,
+    });
   }
 
   /**
@@ -1049,8 +1042,9 @@ export class TapAnyElement extends BaseVisualChange {
     y: number,
     longPressDuration: number,
     signal?: AbortSignal,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     // Short fixed duration for tap/doubleTap, caller-supplied duration for longPress.
     const tapDuration =
       action === "longPress" ? longPressDuration : TAP_ANY_ORDINARY_TAP_DURATION_MS;
@@ -1382,7 +1376,7 @@ export class TapAnyElement extends BaseVisualChange {
                 longPressDuration,
                 target,
                 signal,
-                fence,
+                { displayFence: fence },
               );
               await this.retryAndroidTapIfNoChange(
                 preTapHash,
@@ -1391,7 +1385,7 @@ export class TapAnyElement extends BaseVisualChange {
                 longPressDuration,
                 observeResult.screenSize,
                 signal,
-                fence,
+                { displayFence: fence },
               );
               break;
             }
@@ -1404,7 +1398,7 @@ export class TapAnyElement extends BaseVisualChange {
                 longPressDuration,
                 element,
                 signal,
-                fence,
+                { displayFence: fence },
               );
               break;
             default:

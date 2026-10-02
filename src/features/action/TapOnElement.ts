@@ -1,5 +1,9 @@
 import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
-import type { DisplayFence, DisplayFenceDependencies } from "./BaseVisualChange";
+import {
+  type DisplayFence,
+  type DisplayFenceOption,
+  type DisplayFenceDependencies,
+} from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import {
@@ -3197,9 +3201,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   longPressDuration,
                   tapElement,
                   signal,
-                  options,
+                  { ...options, displayFence: fence },
                   isAccessibilityServiceEnabled,
-                  fence,
                 );
                 break;
               case "ios":
@@ -3210,7 +3213,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                   longPressDuration,
                   tapElement,
                   isAccessibilityServiceEnabled,
-                  fence,
+                  { displayFence: fence },
                 );
                 break;
               default:
@@ -3228,12 +3231,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               action,
               longPressDuration,
               tapElement,
-              options,
+              { ...options, displayFence: fence },
               isAccessibilityServiceEnabled,
               observeResult.screenSize,
               signal,
               finalSelection,
-              fence,
             );
           }
 
@@ -3382,23 +3384,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element: Element,
     signal?: AbortSignal,
-    options?: TapOnElementOptions,
+    options?: TapOnElementOptions & DisplayFenceOption,
     isTalkBackEnabled?: boolean,
-    fence?: DisplayFence,
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    const fence = options?.displayFence;
     // XML-only candidates have no CtrlProxy node identity, even if their resource
     // ID also exists in the incomplete native tree. Never retarget semantic actions.
     if (element["hierarchy-source"] === "uiautomator") {
-      await this.executeAndroidTapWithCoordinates(
-        action,
-        x,
-        y,
-        durationMs,
-        element,
-        signal,
-        true,
-        fence,
-      );
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, true, {
+        displayFence: fence,
+      });
       return undefined;
     }
 
@@ -3420,20 +3415,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         durationMs,
         options,
         signal,
-        fence,
       );
     }
 
-    await this.executeAndroidTapWithCoordinates(
-      action,
-      x,
-      y,
-      durationMs,
-      element,
-      signal,
-      false,
-      fence,
-    );
+    await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal, false, {
+      displayFence: fence,
+    });
     return undefined;
   }
 
@@ -3449,8 +3436,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     signal?: AbortSignal,
     skipSemanticLongPress: boolean = false,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     if (action === "tap") {
       if (
         isAndroidDocumentsUiRow(element) &&
@@ -3458,21 +3446,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       ) {
         return;
       }
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, fence);
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
     } else if (action === "longPress") {
-      await this.executeAndroidLongPress(
-        x,
-        y,
-        durationMs,
-        element,
-        signal,
-        skipSemanticLongPress,
-        fence,
-      );
+      await this.executeAndroidLongPress(x, y, durationMs, element, signal, skipSemanticLongPress, {
+        displayFence: fence,
+      });
     } else if (action === "doubleTap") {
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, fence);
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
       await this.timer.sleep(200);
-      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, fence);
+      await this.dispatchCoordinateTapOrAdbFallback(x, y, element, signal, { displayFence: fence });
     }
   }
 
@@ -3522,8 +3504,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     y: number,
     element: Element,
     signal?: AbortSignal,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
     const requiresAdbInput = isAndroidDocumentsUiRow(element);
     if (!requiresAdbInput) {
@@ -3616,12 +3599,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     action: string,
     longPressDuration: number,
     tapElement: Element,
-    options: TapOnElementOptions,
+    options: TapOnElementOptions & DisplayFenceOption,
     isTalkBackEnabled: boolean,
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
     selection?: ElementSelectionResult,
-    fence?: DisplayFence,
   ): Promise<void> {
     const probe = await checkAndroidTapHierarchyChange(
       this.timer,
@@ -3704,7 +3686,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       signal,
       options,
       isTalkBackEnabled,
-      fence,
     );
   }
 
@@ -3736,10 +3717,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     y: number,
     element: Element,
     durationMs: number,
-    options?: TapOnElementOptions,
+    options?: TapOnElementOptions & DisplayFenceOption,
     signal?: AbortSignal,
-    fence?: DisplayFence,
   ): Promise<ScreenReaderNavigationResult | undefined> {
+    const fence = this.readOptionalDisplayFence(options);
     const driver = this.talkBackDriverFactory.createDriver(this.device);
     let screenReaderNavigation: ScreenReaderNavigationResult | undefined;
 
@@ -3751,7 +3732,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         durationMs,
         element,
         driver,
-        fence,
+        { displayFence: fence },
       );
 
       if (!longPressResult.success) {
@@ -3772,7 +3753,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           element,
           signal,
           false,
-          fence,
+          { displayFence: fence },
         );
       }
       return undefined;
@@ -3825,7 +3806,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         element,
         signal,
         false,
-        fence,
+        { displayFence: fence },
       );
       return screenReaderNavigation;
     }
@@ -3841,7 +3822,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             fallbackAction,
             durationMs,
             driver,
-            fence,
+            { displayFence: fence },
           );
 
     if (!fallbackResult.success) {
@@ -3857,7 +3838,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         element,
         signal,
         false,
-        fence,
+        { displayFence: fence },
       );
     }
     return screenReaderNavigation;
@@ -3880,14 +3861,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     durationMs: number,
     element?: Element,
     isVoiceOverEnabled?: boolean,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     if (isVoiceOverEnabled && element) {
-      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, fence);
+      await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs, {
+        displayFence: fence,
+      });
       return;
     }
 
-    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fence);
+    await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
   }
 
   /**
@@ -3898,8 +3882,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     // Use short duration (50ms) for tap/doubleTap, full duration for longPress
     const tapDuration = action === "longPress" ? durationMs : 50;
 
@@ -3949,8 +3934,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     x: number,
     y: number,
     durationMs: number,
-    fence?: DisplayFence,
+    fenceOptions?: DisplayFenceOption,
   ): Promise<void> {
+    const fence = this.readOptionalDisplayFence(fenceOptions);
     // Resolve accessibility label: ios-accessibility-label > content-desc > text > fallback
     const label =
       (element["ios-accessibility-label"] as string | undefined) ??
@@ -3961,7 +3947,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     if (!label) {
       logger.info("[TapOnElement] VoiceOver: no label available, falling back to coordinate tap");
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fence);
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
       return;
     }
 
@@ -3988,8 +3974,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         `[TapOnElement] VoiceOver action failed for label "${label}": ${result.error ?? "unknown error"}, ` +
           `falling back to coordinate tap at (${x}, ${y})`,
       );
-      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, fence);
+      await this.executeiOSTapWithCoordinates(action, x, y, durationMs, { displayFence: fence });
     }
+  }
+
+  private readOptionalDisplayFence(options?: DisplayFenceOption): DisplayFence | undefined {
+    return options?.displayFence;
   }
 
   private getLongPressDuration(options: TapOnElementOptions): number {
@@ -4007,8 +3997,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     element: Element,
     signal?: AbortSignal,
     skipSemanticAction: boolean = false,
-    fence?: DisplayFence,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<void> {
+    const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
     if (!skipSemanticAction) {
       const selector = stableNodeSelectorForElement(element);

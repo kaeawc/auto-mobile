@@ -84,6 +84,60 @@ test("registered openLink retries a multi-panel first observation without hierar
   }
 });
 
+test("registered openLink waits for a known lone panel after a stub activeDisplay stamp", async () => {
+  const device: BootedDevice = {
+    platform: "ios",
+    deviceId: "fake-duo",
+    name: "iPhone Duo",
+    [displayInventoryOutcome]: { kind: "single" },
+    displays: {
+      panels: [{ key: "main", role: "inner", sizePx: { width: 200, height: 200 } }],
+      postures: [],
+    },
+  };
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const screen = new FakeObserveScreen();
+  screen.setObserveSequence([
+    {
+      ...makeObservation("locked"),
+      display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    },
+    {
+      ...makeObservation("closed"),
+      display: { key: "main", role: "inner", posture: "unknown", generation: 0 },
+    },
+  ]);
+  const openSpy = spyOn(OpenURL.prototype, "execute").mockResolvedValue({
+    success: true,
+    url: "example://item",
+  });
+  const observeSpy = spyOn(RealObserveScreen.prototype, "execute").mockImplementation((options) =>
+    screen.execute(options),
+  );
+  const sleepSpy = spyOn(defaultTimer, "sleep").mockImplementation((ms) => timer.sleep(ms));
+  const nowSpy = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
+  try {
+    registerInteractionTools();
+    const handler = ToolRegistry.getTool("openLink")?.deviceAwareHandler;
+    expect(handler).toBeDefined();
+    const result = await handler!(device, {
+      url: "example://item",
+      waitFor: { activeDisplay: "main", timeout: 200 },
+    });
+    expect(result).toMatchObject({
+      content: [{ type: "text", text: expect.stringContaining('"awaitTimeout":false') }],
+    });
+    expect(screen.getExecuteCallCount()).toBe(2);
+  } finally {
+    openSpy.mockRestore();
+    observeSpy.mockRestore();
+    sleepSpy.mockRestore();
+    nowSpy.mockRestore();
+    ToolRegistry.clearTools();
+  }
+});
+
 const appOpenAlertObservation = {
   ...makeObservation("system-alert"),
   viewHierarchy: {

@@ -653,8 +653,11 @@ actionable error only when hydrated display inventory confirms a single panel.
 Multi-panel or unavailable inventory keeps polling, including a first capture
 with no hierarchy and an unknown display stamp. Posture waits also tolerate
 transient observation failures after the first capture during a fold;
-cancellation still propagates. `activeDisplay` retains its no-inventory stamp
-check (key `"0"`, role `"unknown"`).
+cancellation still propagates. `activeDisplay` fails immediately only when the
+known inventory's panel list has no matching key or role. A single-panel device
+asking for its own panel's key or role keeps waiting normally and resolves on a
+match. An unavailable inventory or an unknown panel list keeps polling, as does
+a present panel whose first display stamp is unknown.
 
 Posture-only waits use the independently read display stamp without requiring a
 new hierarchy timestamp. Combined text/element predicates and settling retain
@@ -666,6 +669,7 @@ If posture was never known on a multi-panel device and no hierarchy was captured
 the reason ends with `posture was never observable because no hierarchy was captured`.
 If inventory was unavailable and posture was never known, it ends with
 `display inventory was unavailable so posture support was never confirmed`.
+Active-display timeouts use the parallel reasons `the active display was never observable because no hierarchy was captured` when no known stamp appeared and no hierarchy was captured, or `display inventory was unavailable so the active display was never confirmed` when inventory was unavailable and no known stamp appeared. Otherwise the reason names the last observed active display key and role.
 
 `display.generation` is the host tracker’s `identityRevision`.
 Generation advances on notifyTransition calls for panel key, role, or posture changes, Android non-swap size changes and accepted pushed display_transition events (changed with a different panel key or non-swap size, added, removed, or device_state changes), iOS multi-panel rotation, and iOS setPosture hinge, observed identity, and settled notifications (potentially several increments per request), but not on captures, Android pure width/height swaps, or iOS same-observation geometry corrections.

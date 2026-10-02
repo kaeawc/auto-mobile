@@ -9,6 +9,7 @@ import { ElementResolver } from "../../src/features/utility/ElementResolver";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../src/models";
 import { displayInventoryOutcome } from "../../src/models/DeviceInfo";
 import {
+  canDisplayExist,
   classifyDisplayInventory,
   type DisplayInventoryClassification,
 } from "../../src/utils/deviceMatcher";
@@ -92,6 +93,19 @@ describe("posture wait inventory classification", () => {
       screenHeight: 200,
     };
     expect(classifyDisplayInventory(device)).toBe("unavailable");
+  });
+  test.each([
+    ["single", [{ key: "main", role: "inner" }], "main", true],
+    ["single", [{ key: "main", role: "inner" }], "inner", true],
+    ["single", [{ key: "main", role: "inner" }], "cover", false],
+    ["multi", [{ key: "main", role: "inner" }], "inner", true],
+    ["multi", [{ key: "main", role: "inner" }], "cover", false],
+    ["single", [], "cover", true],
+    ["multi", [], "cover", true],
+    ["unavailable", [{ key: "main", role: "inner" }], "cover", true],
+    ["unavailable", [], "cover", true],
+  ] as const)("canDisplayExist(%s, %j, %s) is %s", (inventory, panels, requested, expected) => {
+    expect(canDisplayExist(inventory, panels, requested)).toBe(expected);
   });
 });
 
@@ -1531,6 +1545,282 @@ describe("waitForObservation activeWindow", () => {
         'Timed out after 200 ms waiting for posture "closed"; last observed posture "opened"',
     });
     expect(outcome.observation.display?.posture).toBe("opened");
+  });
+
+  const activeDisplayStub = (): ObserveResult => ({
+    ...makeObservation("com.example.app", ""),
+    display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    viewHierarchy: undefined,
+  });
+  const activePanels = [
+    { key: "cover", role: "cover", sizePx: { width: 100, height: 200 } },
+    { key: "inner", role: "inner", sizePx: { width: 200, height: 200 } },
+  ] as const;
+  const activeDisplayObservation = (key: string, role: "cover" | "inner"): ObserveResult => ({
+    ...makeObservation("com.example.app", ""),
+    display: { key, role, posture: "closed", generation: 0 },
+  });
+
+  for (const [identity, requested] of [
+    ["key", "cover"],
+    ["role", "cover"],
+  ] as const) {
+    for (const platform of ["ios", "android"] as const) {
+      test(`multi inventory polls a stub before matching the requested ${identity} on ${platform}`, async () => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const screen = new FakeObserveScreen();
+        screen.setObserveSequence([
+          activeDisplayStub(),
+          activeDisplayObservation(identity === "key" ? "cover" : "local:cover", "cover"),
+        ]);
+        const outcome = await waitForObservation(
+          screen,
+          { activeDisplay: requested, timeout: 300 },
+          undefined,
+          false,
+          timer,
+          platform,
+          undefined,
+          undefined,
+          "multi",
+          activePanels,
+        );
+        expect(outcome.awaitTimeout).toBe(false);
+        expect(screen.getExecuteCallCount()).toBe(2);
+      });
+    }
+  }
+
+  const activeDisplayFailure =
+    "Cannot wait for activeDisplay: this device has no display inventory. Select a device that reports display panels and posture and retry.";
+
+  test("multi inventory missing the requested panel fails after one observation", async () => {
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(activeDisplayStub());
+    await expect(
+      waitForObservation(
+        screen,
+        { activeDisplay: "rear", timeout: 300 },
+        undefined,
+        false,
+        new FakeTimer(),
+        "ios",
+        undefined,
+        undefined,
+        "multi",
+        activePanels,
+      ),
+    ).rejects.toThrow(activeDisplayFailure);
+    expect(screen.getExecuteCallCount()).toBe(1);
+  });
+
+  test.each([
+    ["key", "main", "main"],
+    ["role", "local:main", "inner"],
+  ] as const)(
+    "single inventory resolves its known lone panel by %s on the first observation",
+    async (_identity, key, requested) => {
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult(activeDisplayObservation(key, "inner"));
+      const outcome = await waitForObservation(
+        screen,
+        { activeDisplay: requested, timeout: 300 },
+        undefined,
+        false,
+        new FakeTimer(),
+        "ios",
+        undefined,
+        undefined,
+        "single",
+        [{ key: "main", role: "inner" }],
+      );
+      expect(outcome.matched).toBe(true);
+      expect(outcome.awaitTimeout).toBe(false);
+      expect(screen.getExecuteCallCount()).toBe(1);
+    },
+  );
+
+  test("single inventory with a known different panel fails after one observation", async () => {
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(activeDisplayObservation("main", "inner"));
+    await expect(
+      waitForObservation(
+        screen,
+        { activeDisplay: "cover", timeout: 300 },
+        undefined,
+        false,
+        new FakeTimer(),
+        "ios",
+        undefined,
+        undefined,
+        "single",
+        [{ key: "main", role: "inner" }],
+      ),
+    ).rejects.toThrow(activeDisplayFailure);
+    expect(screen.getExecuteCallCount()).toBe(1);
+  });
+
+  test("single inventory with unknown panels polls a stub until the display stamp matches", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveSequence([activeDisplayStub(), activeDisplayObservation("main", "inner")]);
+    const outcome = await waitForObservation(
+      screen,
+      { activeDisplay: "inner", timeout: 300 },
+      undefined,
+      false,
+      timer,
+      "ios",
+      undefined,
+      undefined,
+      "single",
+      [],
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(screen.getExecuteCallCount()).toBe(2);
+  });
+
+  test("single panel key 0 does not treat its unknown-role stub stamp as a match", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveSequence([
+      activeDisplayStub(),
+      {
+        ...activeDisplayObservation("0", "inner"),
+        display: {
+          key: "0",
+          role: "inner",
+          posture: "unknown",
+          generation: 0,
+        },
+      },
+    ]);
+    const outcome = await waitForObservation(
+      screen,
+      { activeDisplay: "0", timeout: 300 },
+      undefined,
+      false,
+      timer,
+      "ios",
+      undefined,
+      undefined,
+      "single",
+      [{ key: "0", role: "inner" }],
+    );
+    expect(outcome.matched).toBe(true);
+    expect(outcome.awaitTimeout).toBe(false);
+    expect(screen.getExecuteCallCount()).toBe(2);
+  });
+
+  test("unavailable inventory polls a stub and reports its timeout reason", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(activeDisplayStub());
+    const outcome = await waitForObservation(
+      screen,
+      { activeDisplay: "cover", timeout: 200 },
+      undefined,
+      false,
+      timer,
+      "ios",
+      undefined,
+      undefined,
+      "unavailable",
+    );
+    expect(outcome).toMatchObject({
+      timedOut: true,
+      awaitTimeout: true,
+      timeoutReason:
+        'Timed out after 200 ms waiting for activeDisplay "cover"; display inventory was unavailable so the active display was never confirmed',
+    });
+    expect(screen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
+  test("multi inventory with a known requested panel reports an unobservable timeout", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(activeDisplayStub());
+    const outcome = await waitForObservation(
+      screen,
+      { activeDisplay: "cover", timeout: 200 },
+      undefined,
+      false,
+      timer,
+      "ios",
+      undefined,
+      undefined,
+      "multi",
+      activePanels,
+    );
+    expect(outcome.timeoutReason).toBe(
+      'Timed out after 200 ms waiting for activeDisplay "cover"; the active display was never observable because no hierarchy was captured',
+    );
+  });
+
+  test("activeDisplay timeout reports the last known display stamp", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(activeDisplayObservation("inner", "inner"));
+    const outcome = await waitForObservation(
+      screen,
+      { activeDisplay: "cover", timeout: 200 },
+      undefined,
+      false,
+      timer,
+      "ios",
+      undefined,
+      undefined,
+      "multi",
+      activePanels,
+    );
+    expect(outcome.timeoutReason).toBe(
+      'Timed out after 200 ms waiting for activeDisplay "cover"; last observed active display "inner" (inner)',
+    );
+  });
+
+  test("Android matching stamp resolves immediately and a real mismatch keeps polling", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const firstScreen = new FakeObserveScreen();
+    firstScreen.setObserveResult(activeDisplayObservation("cover", "cover"));
+    const first = await waitForObservation(
+      firstScreen,
+      { activeDisplay: "cover", timeout: 200 },
+      undefined,
+      false,
+      timer,
+      "android",
+      undefined,
+      undefined,
+      "multi",
+      activePanels,
+    );
+    expect(first.awaitTimeout).toBe(false);
+    expect(firstScreen.getExecuteCallCount()).toBe(1);
+
+    const mismatchScreen = new FakeObserveScreen();
+    mismatchScreen.setObserveResult(activeDisplayObservation("inner", "inner"));
+    const mismatch = await waitForObservation(
+      mismatchScreen,
+      { activeDisplay: "cover", timeout: 200 },
+      undefined,
+      false,
+      timer,
+      "android",
+      undefined,
+      undefined,
+      "multi",
+      activePanels,
+    );
+    expect(mismatch.awaitTimeout).toBe(true);
+    expect(mismatchScreen.getExecuteCallCount()).toBeGreaterThan(1);
   });
 
   test("posture and text both have to match on the same observation", async () => {

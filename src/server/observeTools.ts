@@ -1,9 +1,11 @@
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
-  classifyDisplayInventory,
+  canDisplayExist,
+  displayWaitInventory,
   type DisplayInventoryClassification,
 } from "../utils/deviceMatcher";
+import type { DisplayPanel } from "../models/DisplayPanel";
 import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
@@ -1170,21 +1172,32 @@ const matchesAbsent = (
   );
 };
 
-const matchesDisplayStamp = (observation: ObserveResult, waitFor: ObserveWaitForOptions): boolean =>
-  (waitFor.posture === undefined || observation.display?.posture === waitFor.posture) &&
-  (waitFor.activeDisplay === undefined ||
-    observation.display?.key === waitFor.activeDisplay ||
-    observation.display?.role === waitFor.activeDisplay);
+const matchesDisplayStamp = (
+  observation: ObserveResult,
+  waitFor: ObserveWaitForOptions,
+  displayInventory: DisplayInventoryClassification,
+): boolean => {
+  const display = observation.display;
+  const isSingleInventoryStub =
+    displayInventory === "single" && display?.key === "0" && display.role === "unknown";
+  return (
+    (waitFor.posture === undefined || display?.posture === waitFor.posture) &&
+    (waitFor.activeDisplay === undefined ||
+      (!isSingleInventoryStub &&
+        (display?.key === waitFor.activeDisplay || display?.role === waitFor.activeDisplay)))
+  );
+};
 
 const evaluateWaitForObservation = (
   finder: ConditionResolver,
   waitFor: ObserveWaitForOptions,
   observation: ObserveResult,
   platform: BootedDevice["platform"] | undefined,
+  displayInventory: DisplayInventoryClassification,
   modes: Map<string, MatchMode>,
 ): { matched: boolean; awaitedElement?: Element } => {
   const activeWindowMatched = matchesActiveWindow(observation, waitFor, platform);
-  const displayMatched = matchesDisplayStamp(observation, waitFor);
+  const displayMatched = matchesDisplayStamp(observation, waitFor, displayInventory);
   const needsElementMatch = hasElementPredicate(waitFor);
   const awaitedElement =
     needsElementMatch && observation.viewHierarchy
@@ -1302,27 +1315,54 @@ export const hashHierarchyForSettle = (viewHierarchy?: ViewHierarchyResult): str
   }
 };
 
-interface PostureWaitEvidence {
-  lastObservedPosture: string;
-  knownPostureObserved: boolean;
+interface DisplayWaitTimeoutEvidence {
+  knownValueObserved: boolean;
   hierarchyCaptured: boolean;
+  lastObservedReason: string;
 }
 
-function postureTimeoutReason(
-  posture: string,
+function displayWaitTimeoutReason(
+  waitKind: "posture" | "activeDisplay",
+  requested: string,
   duration: number,
   inventory: DisplayInventoryClassification,
-  evidence: PostureWaitEvidence,
+  evidence: DisplayWaitTimeoutEvidence,
 ): string {
-  let reason = `last observed posture "${evidence.lastObservedPosture}"`;
-  if (!evidence.knownPostureObserved) {
+  let reason = evidence.lastObservedReason;
+  if (!evidence.knownValueObserved) {
     if (inventory === "unavailable") {
-      reason = "display inventory was unavailable so posture support was never confirmed";
+      reason =
+        waitKind === "posture"
+          ? "display inventory was unavailable so posture support was never confirmed"
+          : "display inventory was unavailable so the active display was never confirmed";
     } else if (!evidence.hierarchyCaptured) {
-      reason = "posture was never observable because no hierarchy was captured";
+      reason =
+        waitKind === "posture"
+          ? "posture was never observable because no hierarchy was captured"
+          : "the active display was never observable because no hierarchy was captured";
     }
   }
-  return `Timed out after ${duration} ms waiting for posture "${posture}"; ${reason}`;
+  return `Timed out after ${duration} ms waiting for ${waitKind} "${requested}"; ${reason}`;
+}
+
+function recordDisplayWaitEvidence(
+  observation: ObserveResult,
+  postureEvidence: DisplayWaitTimeoutEvidence,
+  activeDisplayEvidence: DisplayWaitTimeoutEvidence,
+): void {
+  if (observation.display?.posture !== undefined) {
+    postureEvidence.lastObservedReason = `last observed posture "${observation.display.posture}"`;
+  }
+  postureEvidence.knownValueObserved ||=
+    observation.display !== undefined && observation.display.posture !== "unknown";
+  postureEvidence.hierarchyCaptured ||= observation.viewHierarchy !== undefined;
+  activeDisplayEvidence.lastObservedReason = observation.display
+    ? `last observed active display "${observation.display.key}" (${observation.display.role})`
+    : 'last observed active display "unknown"';
+  activeDisplayEvidence.knownValueObserved ||=
+    observation.display !== undefined &&
+    !(observation.display.key === "0" && observation.display.role === "unknown");
+  activeDisplayEvidence.hierarchyCaptured ||= observation.viewHierarchy !== undefined;
 }
 
 export const waitForObservation = async (
@@ -1335,21 +1375,36 @@ export const waitForObservation = async (
   screenshot?: ScreenshotMode,
   screenshotOptions?: z.infer<typeof screenshotOptionsSchema>,
   displayInventory: DisplayInventoryClassification = "unavailable",
+  displayPanels: readonly Pick<DisplayPanel, "key" | "role">[] = [],
 ): Promise<WaitForObservationOutcome> => {
-  const postureEvidence: PostureWaitEvidence = {
-    lastObservedPosture: "unknown",
-    knownPostureObserved: false,
+  const postureEvidence: DisplayWaitTimeoutEvidence = {
+    lastObservedReason: 'last observed posture "unknown"',
+    knownValueObserved: false,
+    hierarchyCaptured: false,
+  };
+  const activeDisplayEvidence: DisplayWaitTimeoutEvidence = {
+    lastObservedReason: 'last observed active display "unknown"',
+    knownValueObserved: false,
     hierarchyCaptured: false,
   };
   const complete = async (
     outcome: WaitForObservationOutcome,
   ): Promise<WaitForObservationOutcome> => {
     if (outcome.timedOut && waitFor.posture !== undefined) {
-      outcome.timeoutReason = postureTimeoutReason(
+      outcome.timeoutReason = displayWaitTimeoutReason(
+        "posture",
         waitFor.posture,
         outcome.awaitDuration,
         displayInventory,
         postureEvidence,
+      );
+    } else if (outcome.timedOut && waitFor.activeDisplay !== undefined) {
+      outcome.timeoutReason = displayWaitTimeoutReason(
+        "activeDisplay",
+        waitFor.activeDisplay,
+        outcome.awaitDuration,
+        displayInventory,
+        activeDisplayEvidence,
       );
     }
     const mode = resolveScreenshotMode(screenshot);
@@ -1408,20 +1463,14 @@ export const waitForObservation = async (
       skipScreenshot: true,
       skipAccessibilityAudit: true,
     });
-    postureEvidence.lastObservedPosture =
-      observation.display?.posture ?? postureEvidence.lastObservedPosture;
-    postureEvidence.knownPostureObserved ||=
-      observation.display !== undefined && observation.display.posture !== "unknown";
-    postureEvidence.hierarchyCaptured ||= observation.viewHierarchy !== undefined;
+    recordDisplayWaitEvidence(observation, postureEvidence, activeDisplayEvidence);
     return observation;
   };
 
-  const checkDisplaySupport = (observation: ObserveResult): void => {
-    // activeDisplay retains its observation-stub check; posture uses inventory.
+  const checkDisplaySupport = (): void => {
     if (
       waitFor.activeDisplay !== undefined &&
-      observation.display?.key === "0" &&
-      observation.display.role === "unknown"
+      !canDisplayExist(displayInventory, displayPanels, waitFor.activeDisplay)
     ) {
       throw new ActionableError(
         "Cannot wait for activeDisplay: this device has no display inventory. Select a device that reports display panels and posture and retry.",
@@ -1458,7 +1507,7 @@ export const waitForObservation = async (
   // Evaluate the current cache on the first poll, then use its device-clock
   // timestamp to request a strictly newer hierarchy on later polls.
   let observation = await observeOnce(0);
-  checkDisplaySupport(observation);
+  checkDisplaySupport();
   const baselineTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
   // A posture-only stamp is read independently of hierarchy capture, including
   // while folding locks the device. UI predicates/settling still need a fresh tree.
@@ -1474,7 +1523,14 @@ export const waitForObservation = async (
       : 0;
   let polls = 1;
   const modes = new Map<string, MatchMode>();
-  let waitEvaluation = evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
+  let waitEvaluation = evaluateWaitForObservation(
+    finder,
+    waitFor,
+    observation,
+    platform,
+    displayInventory,
+    modes,
+  );
 
   if (waitEvaluation.matched && settleReady(observation)) {
     const waitMs = timer.now() - startTime;
@@ -1534,14 +1590,21 @@ export const waitForObservation = async (
       continue;
     }
     throwIfAborted(signal);
-    checkDisplaySupport(observation);
+    checkDisplaySupport();
     const observedTimestamp = hierarchyUpdatedAtToMillis(observation.viewHierarchy);
     // A timed-out delegate may return its old cache despite the requested
     // floor. It must not satisfy waitFor as post-invocation evidence.
     waitEvaluation =
       minTimestamp > 0 && (observedTimestamp === undefined || observedTimestamp < minTimestamp)
         ? { matched: false, awaitedElement: undefined }
-        : evaluateWaitForObservation(finder, waitFor, observation, platform, modes);
+        : evaluateWaitForObservation(
+            finder,
+            waitFor,
+            observation,
+            platform,
+            displayInventory,
+            modes,
+          );
 
     if (waitEvaluation.matched) {
       if (settleReady(observation)) {
@@ -1766,7 +1829,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
               device.platform,
               screenshotMode,
               args.screenshotOptions,
-              classifyDisplayInventory(device),
+              ...displayWaitInventory(device),
             )
           : null;
       const result = deviceRead

@@ -1,5 +1,5 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
-import type { DeviceDisplays } from "../models/DisplayPanel";
+import type { DeviceDisplays, DisplayPanel } from "../models/DisplayPanel";
 import { displayInventoryOutcome, type DisplayInventoryOutcome } from "../models/DeviceInfo";
 import type {
   DeviceMatchCriteria,
@@ -27,6 +27,25 @@ export function classifyDisplayInventory(
     return "single";
   }
   return "unavailable";
+}
+
+/** Inventory evidence threaded to a display-stamp wait. */
+export function displayWaitInventory(
+  device: Pick<BootedDevice, "displays" | typeof displayInventoryOutcome>,
+): readonly [DisplayInventoryClassification, readonly Pick<DisplayPanel, "key" | "role">[]] {
+  return [classifyDisplayInventory(device), device.displays?.panels ?? []];
+}
+
+/** Whether hydrated inventory can contain a panel with the requested key or role. */
+export function canDisplayExist(
+  inventory: DisplayInventoryClassification,
+  panels: readonly Pick<DisplayPanel, "key" | "role">[],
+  requested: string,
+): boolean {
+  if (inventory === "unavailable" || panels.length === 0) {
+    return true;
+  }
+  return panels.some((panel) => panel.key === requested || panel.role === requested);
 }
 
 /** Selects a booted device or device image for one boot request. */

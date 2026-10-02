@@ -58,6 +58,7 @@ export class DevicePoolRefresh {
   private refreshGeneration = 0;
   private deviceRemovalGeneration = 0;
   private readonly deviceRemovalStamps = new Map<string, number>();
+  private readonly targetDiscoveryFloors = new Map<symbol, number>();
   private readonly inFlightRefreshFloors = new Map<number, number>();
 
   constructor(private readonly pool: DevicePoolRefreshPort) {}
@@ -68,6 +69,20 @@ export class DevicePoolRefresh {
 
   recordDeviceRemoval(deviceId: string): void {
     this.deviceRemovalStamps.set(deviceId, ++this.deviceRemovalGeneration);
+  }
+
+  /** Retain removal stamps until this unlocked target observation is consumed. */
+  captureDeviceRemovalFence(deviceId: string): { wasRemoved: () => boolean; release: () => void } {
+    const token = Symbol(deviceId);
+    const floor = this.deviceRemovalGeneration;
+    this.targetDiscoveryFloors.set(token, floor);
+    return {
+      wasRemoved: () => (this.deviceRemovalStamps.get(deviceId) ?? 0) > floor,
+      release: () => {
+        this.targetDiscoveryFloors.delete(token);
+        this.pruneDeviceRemovalStamps();
+      },
+    };
   }
 
   getDeviceRemovalStampCountForTest(): number {
@@ -229,10 +244,11 @@ export class DevicePoolRefresh {
   }
 
   private pruneDeviceRemovalStamps(): void {
-    const floor =
-      this.inFlightRefreshFloors.size > 0
-        ? Math.min(...this.inFlightRefreshFloors.values())
-        : this.deviceRemovalGeneration;
+    const floor = Math.min(
+      this.deviceRemovalGeneration,
+      ...this.inFlightRefreshFloors.values(),
+      ...this.targetDiscoveryFloors.values(),
+    );
     for (const [deviceId, stamp] of this.deviceRemovalStamps) {
       if (stamp <= floor) {
         this.deviceRemovalStamps.delete(deviceId);

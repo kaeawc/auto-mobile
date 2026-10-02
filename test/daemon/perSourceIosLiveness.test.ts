@@ -333,14 +333,14 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
   });
 
-  test("a complete sweep that no longer lists an iPhone still prunes it", async () => {
+  test("a pre-lock bind sweep that no longer lists an iPhone rejects without pruning", async () => {
     await pool([PHYSICAL, SIMULATOR]);
     deviceManager.bootedDevices = [SIMULATOR];
 
     await expect(
       devicePool.bindOrReuseDeviceSession("session-e", PHYSICAL_UDID, "ios"),
     ).rejects.toThrow();
-    expect(devicePool.getDevice(PHYSICAL_UDID)).toBeNull();
+    expect(devicePool.getDevice(PHYSICAL_UDID)?.status).toBe("idle");
   });
 });
 

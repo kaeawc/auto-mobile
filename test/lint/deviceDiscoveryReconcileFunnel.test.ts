@@ -57,7 +57,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
   const ALLOWLIST: Readonly<Record<string, Allowed>> = {
     // --- The funnel itself, and its producers -------------------------------
     "src/daemon/devicePool.ts": {
-      calls: 3,
+      calls: 2,
       reason:
         "The pool routes discovery through the identity collaborator before reading pooled identity.",
     },
@@ -80,11 +80,6 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       calls: 1,
       reason:
         "Bounded stale-disconnect rediscovery reads the injected pool port and preserves captured incarnation checks.",
-    },
-    "src/daemon/deviceAutolockManager.ts": {
-      calls: 1,
-      reason:
-        "Autolock checks whether a requested device is booted, then adds it through the pool port before reading pooled identity.",
     },
     "src/devices/deviceUtils.ts": {
       calls: 9,

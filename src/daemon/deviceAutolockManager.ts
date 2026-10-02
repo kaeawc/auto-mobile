@@ -4,7 +4,6 @@ import { getAbortSignal, throwIfRequestAborted } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer } from "../utils/SystemTimer";
 import { type IdGenerator } from "../utils/IdGenerator";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import { getDevicePoolTimeoutMs, isDevicePoolAutolockEnabled } from "./poolConfig";
 import type { DeviceSessionRepository } from "../db/deviceSessionRepository";
@@ -13,8 +12,10 @@ import type {
   DeviceAutolockChildProcess,
   PooledDevice,
   SessionAssignmentSnapshot,
+  TargetDeviceDiscoveryOptions,
+  TargetDeviceDiscoverySnapshot,
+  TargetDeviceValidationOptions,
 } from "./devicePool";
-import type { IdentityEvidence } from "../devices/deviceIdentityEvidence";
 
 export type AutolockClient = { mcpSessionId?: string; expectedSessionId?: string };
 
@@ -28,37 +29,41 @@ export class McpSessionRecoveryInProgressError extends ActionableError {
 
 type ExpectedIdentity = Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
 
+interface AutolockAcquisitionOptions {
+  snapshot: TargetDeviceDiscoverySnapshot;
+  deviceId: string;
+  platform: Platform;
+  mcpSessionId?: string;
+  sourceImage?: DeviceInfo;
+  childProcess?: DeviceAutolockChildProcess | null;
+  expectedIdentity?: ExpectedIdentity;
+  readinessReservationOwners?: ReadonlySet<symbol>;
+  verifiedAndroidAvdIdentity?: DeviceInfo;
+  achievedReadiness: DeviceReadinessLevel;
+  collectCancellationSettlement?: (settlement: Promise<void>) => void;
+}
+
 export interface DeviceAutolockPoolPort {
   getSessionManager(): SessionManager;
-  getDeviceManager(): Pick<PlatformDeviceManager, "getBootedDevices">;
   getDaemonSessionId(): string;
   getDevice(id: string): PooledDevice | undefined;
   withAssignmentLock<T>(operation: () => Promise<T> | T): Promise<T>;
-  addDevice(
-    device: BootedDevice,
-    image: DeviceInfo | undefined,
-    evidence: IdentityEvidence,
-  ): Promise<void>;
-  identityEvidenceForBootedDevice(device: BootedDevice): IdentityEvidence;
+  withTargetDeviceDiscovery(options: TargetDeviceDiscoveryOptions): Promise<string>;
   assertRuntimeIdentity(device: PooledDevice, identity: ExpectedIdentity | undefined): void;
   assertNotReservedForShutdown(device: PooledDevice, message: string): void;
   recordSourceAndroidAvd(id: string, image: DeviceInfo | undefined): void;
-  notifyDeviceReady(id: string): void;
+  notifyTargetDeviceReady(options: {
+    device: PooledDevice;
+    snapshot: TargetDeviceDiscoverySnapshot;
+  }): void;
   trackStartedDeviceProcess(
     device: BootedDevice,
     process: DeviceAutolockChildProcess | null | undefined,
   ): Promise<void>;
-  assertIdleDeviceAssignable(
-    device: PooledDevice,
-    message: string,
-    owners?: ReadonlySet<symbol>,
-  ): Promise<void>;
+  assertIdleDeviceAssignable(options: TargetDeviceValidationOptions): void;
   validateOrReloadIdlePooledDevice(
-    device: PooledDevice,
-    identity: ExpectedIdentity | undefined,
-    message: string,
-    owners?: ReadonlySet<symbol>,
-  ): Promise<PooledDevice>;
+    options: TargetDeviceValidationOptions,
+  ): Promise<PooledDevice | undefined>;
   assertDeviceCleanupComplete(id: string): void;
   snapshotSessionAssignment(device: PooledDevice): SessionAssignmentSnapshot;
   nextLastUsedAt(): number;
@@ -115,63 +120,51 @@ export class DeviceAutolockManager {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
     }
-    return this.pool.withAssignmentLock(() =>
-      this.autolockDeviceExclusive(
-        deviceId,
-        platform,
-        mcpSessionId,
-        sourceImage,
-        childProcess,
-        expectedIdentity,
-        readinessReservationOwners,
-        verifiedAndroidAvdIdentity,
-        achievedReadiness,
-        collectCancellationSettlement,
-      ),
-    );
+    return this.pool.withTargetDeviceDiscovery({
+      deviceId,
+      sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
+      unavailableMessage: this.unavailableMessage(deviceId),
+      platform,
+      operation: (snapshot) =>
+        this.autolockDeviceExclusive({
+          snapshot,
+          deviceId,
+          platform,
+          mcpSessionId,
+          sourceImage,
+          childProcess,
+          expectedIdentity,
+          readinessReservationOwners,
+          verifiedAndroidAvdIdentity,
+          achievedReadiness,
+          collectCancellationSettlement,
+        }),
+    });
   }
 
-  private async autolockDeviceExclusive(
-    deviceId: string,
-    platform: Platform,
-    mcpSessionId?: string,
-    sourceImage?: DeviceInfo,
-    childProcess?: DeviceAutolockChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-    verifiedAndroidAvdIdentity?: DeviceInfo,
-    achievedReadiness: DeviceReadinessLevel = "automationReady",
-    collectCancellationSettlement?: (settlement: Promise<void>) => void,
-  ): Promise<string> {
+  private async autolockDeviceExclusive({
+    snapshot,
+    deviceId,
+    platform,
+    mcpSessionId,
+    sourceImage,
+    childProcess,
+    expectedIdentity,
+    readinessReservationOwners,
+    verifiedAndroidAvdIdentity,
+    achievedReadiness,
+    collectCancellationSettlement,
+  }: AutolockAcquisitionOptions): Promise<string | undefined> {
     throwIfRequestAborted();
     const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
 
-    // Ensure device is in the pool (it may have been freshly booted)
-    const alreadyPooled = this.pool.getDevice(deviceId) !== undefined;
-    if (!alreadyPooled) {
-      const bootedDevices = await this.pool.getDeviceManager().getBootedDevices(platform);
-      const booted = bootedDevices.find((d) => d.deviceId === deviceId);
-      if (booted) {
-        await this.pool.addDevice(
-          booted,
-          androidAvdIdentity,
-          this.pool.identityEvidenceForBootedDevice(booted),
-        );
-      }
-    }
-
+    // The shared discovery pass has added a freshly booted target under the lock.
+    const alreadyPooled = snapshot.capturedEntry !== undefined;
     // Assign the device to the generated session
     throwIfRequestAborted();
     let device = this.pool.getDevice(deviceId);
     if (!device) {
-      throw new ActionableError(
-        `Device '${deviceId}' is not available for autolock.\n` +
-          `The device may have been shut down or disconnected.\n\n` +
-          `Options:\n` +
-          `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-          `  - Use the returned sessionUuid to target this specific device\n` +
-          `  - Use 'listDevices' to see currently available devices`,
-      );
+      throw new ActionableError(this.unavailableMessage(deviceId));
     }
     this.assertMcpSessionCanAutolockDevice(mcpSessionId, device);
     this.pool.assertRuntimeIdentity(device, expectedIdentity);
@@ -181,7 +174,7 @@ export class DeviceAutolockManager {
     );
     if (alreadyPooled) {
       this.pool.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
-      this.pool.notifyDeviceReady(deviceId);
+      this.pool.notifyTargetDeviceReady({ device, snapshot });
     }
     await this.pool.trackStartedDeviceProcess(
       {
@@ -195,24 +188,26 @@ export class DeviceAutolockManager {
       throw new ActionableError(`Device '${deviceId}' exited before it could be autolocked.`);
     }
     this.throwIfFreshStartAlreadyBound(device, sourceImage, mcpSessionId);
-    await this.pool.assertIdleDeviceAssignable(
+    this.pool.assertIdleDeviceAssignable({
       device,
-      `Device '${deviceId}' is not available for autolock.\n` +
+      unavailableMessage:
+        `Device '${deviceId}' is not available for autolock.\n` +
         `The device may have been shut down or disconnected.`,
       readinessReservationOwners,
-    );
+      snapshot,
+    });
 
-    device = await this.pool.validateOrReloadIdlePooledDevice(
+    const validatedDevice = await this.pool.validateOrReloadIdlePooledDevice({
       device,
       expectedIdentity,
-      `Device '${deviceId}' is not available for autolock.\n` +
-        `The device may have been shut down or disconnected.\n\n` +
-        `Options:\n` +
-        `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-        `  - Use the returned sessionUuid to target this specific device\n` +
-        `  - Use 'listDevices' to see currently available devices`,
+      unavailableMessage: this.unavailableMessage(deviceId),
       readinessReservationOwners,
-    );
+      snapshot,
+    });
+    if (!validatedDevice) {
+      return undefined;
+    }
+    device = validatedDevice;
 
     throwIfRequestAborted();
     const reusedSessionId = await this.reuseOwnedAutolockSession(
@@ -224,6 +219,9 @@ export class DeviceAutolockManager {
       return reusedSessionId;
     }
 
+    if (this.pool.getDevice(deviceId) !== device) {
+      return undefined;
+    }
     this.pool.assertDeviceCleanupComplete(deviceId);
     const sessionId = this.idGenerator.next();
     const assignmentSnapshot = this.pool.snapshotSessionAssignment(device);
@@ -279,6 +277,17 @@ export class DeviceAutolockManager {
       `Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`,
     );
     return sessionId;
+  }
+
+  private unavailableMessage(deviceId: string): string {
+    return (
+      `Device '${deviceId}' is not available for autolock.\n` +
+      `The device may have been shut down or disconnected.\n\n` +
+      `Options:\n` +
+      `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
+      `  - Use the returned sessionUuid to target this specific device\n` +
+      `  - Use 'listDevices' to see currently available devices`
+    );
   }
 
   private async persistAcquiredAutolockSession(

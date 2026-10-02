@@ -408,6 +408,32 @@ export interface ShutdownIdentityReservation {
 
 const ALLOCATION_SNAPSHOT_STALE_RETRIES = 3;
 
+/** Evidence belongs only to the entry captured before this target's discovery. */
+export interface TargetDeviceDiscoverySnapshot {
+  capturedEntry: PooledDevice | undefined;
+  /** addDevice already published readiness for this entry during an earlier pass. */
+  readyNotifiedEntry?: PooledDevice;
+  bootedDevices?: BootedDevice[];
+  iosLiveness?: IosLivenessSnapshot;
+  androidPresence?: BootedDeviceDiscovery;
+}
+
+export interface TargetDeviceDiscoveryOptions {
+  deviceId: string;
+  sourceImage?: DeviceInfo;
+  unavailableMessage: string;
+  platform: Platform;
+  operation: (snapshot: TargetDeviceDiscoverySnapshot) => Promise<string | undefined>;
+}
+
+export interface TargetDeviceValidationOptions {
+  device: PooledDevice;
+  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
+  unavailableMessage: string;
+  readinessReservationOwners?: ReadonlySet<symbol>;
+  snapshot: TargetDeviceDiscoverySnapshot;
+}
+
 interface AllocationDiscoverySnapshots {
   capturedEntries: ReadonlySet<PooledDevice>;
   iosLiveness?: IosLivenessSnapshot;
@@ -956,25 +982,21 @@ export class DevicePool {
     this.autolockManager = new DeviceAutolockManager(
       {
         getSessionManager: () => this.sessionManager,
-        getDeviceManager: () => this.deviceManager,
         getDaemonSessionId: () => this.daemonSessionId,
         getDevice: (id) => this.devices.get(id),
         withAssignmentLock: (operation) => this.assignmentMutex.runExclusive(operation),
-        addDevice: (device, image, evidence) => this.addDevice(device, image, true, evidence),
-        identityEvidenceForBootedDevice: (device) =>
-          this.runtimeIdentity.identityEvidenceForBootedDevice(device),
+        withTargetDeviceDiscovery: (options) => this.withTargetDeviceDiscovery(options),
         assertRuntimeIdentity: (device, identity) =>
           this.runtimeIdentity.assertRuntimeIdentity(device, identity),
         assertNotReservedForShutdown: (device, message) =>
           this.assertNotReservedForShutdown(device, message),
         recordSourceAndroidAvd: (id, image) => this.recordSourceAndroidAvd(id, image),
-        notifyDeviceReady: (id) => this.notifyDeviceReady(id),
+        notifyTargetDeviceReady: (options) => this.notifyTargetDeviceReady(options),
         trackStartedDeviceProcess: (device, process) =>
           this.trackStartedDeviceProcess(device, process),
-        assertIdleDeviceAssignable: (device, message, owners) =>
-          this.assertIdleDeviceAssignable(device, message, owners),
-        validateOrReloadIdlePooledDevice: (device, identity, message, owners) =>
-          this.validateOrReloadIdlePooledDevice(device, identity, message, owners),
+        assertIdleDeviceAssignable: (options) => this.assertIdleDeviceAssignable(options),
+        validateOrReloadIdlePooledDevice: (options) =>
+          this.validateOrReloadIdlePooledDevice(options),
         assertDeviceCleanupComplete: (id) => this.assertDeviceCleanupComplete(id),
         snapshotSessionAssignment: (device) => this.snapshotSessionAssignment(device),
         nextLastUsedAt: () => this.nextLastUsedAt(),
@@ -4242,11 +4264,12 @@ export class DevicePool {
     return await this.idleDeviceReaper.pruneStaleIdleIosDevices(candidates);
   }
 
-  private async assertIdleDeviceAssignable(
-    device: PooledDevice,
-    unavailableMessage: string,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-  ): Promise<void> {
+  private assertIdleDeviceAssignable({
+    device,
+    unavailableMessage,
+    readinessReservationOwners,
+    snapshot,
+  }: TargetDeviceValidationOptions): void {
     this.assertDeviceCleanupComplete(device.id);
     if (device.status !== "idle" || device.sessionId) {
       return;
@@ -4263,22 +4286,40 @@ export class DevicePool {
       throw new ActionableError(unavailableMessage);
     }
 
-    const iosLiveness =
-      device.platform === "ios" ? await this.idleDeviceReaper.getIosLivenessSnapshot() : undefined;
     if (this.devices.get(device.id) !== device) {
       throw new ActionableError(unavailableMessage);
     }
+    this.assertTargetDeviceLiveness({ device, unavailableMessage, snapshot });
+  }
+
+  private notifyTargetDeviceReady({
+    device,
+    snapshot,
+  }: {
+    device: PooledDevice;
+    snapshot: TargetDeviceDiscoverySnapshot;
+  }): void {
+    if (device !== snapshot.readyNotifiedEntry) {
+      this.notifyDeviceReady(device.id);
+    }
+  }
+
+  private assertTargetDeviceLiveness({
+    device,
+    unavailableMessage,
+    snapshot,
+  }: {
+    device: Pick<PooledDevice, "id" | "platform">;
+    unavailableMessage: string;
+    snapshot: TargetDeviceDiscoverySnapshot;
+  }): void {
+    const iosLiveness = snapshot.iosLiveness;
     const status = this.idleDeviceReaper.getIdleDeviceLivenessStatus(device, iosLiveness);
     if (status === "assignable") {
       return;
     }
-
     if (status === "stale") {
-      logger.warn(
-        `[DevicePool] Removing idle iOS ${this.idleDeviceReaper.iosDeviceNoun(device.id)} ${device.id}: ` +
-          "iOS discovery no longer reports it as booted",
-      );
-      await this.removeDevice(device.id, true, device);
+      // Absence observed before the lock never retires this pool incarnation.
       throw new ActionableError(unavailableMessage);
     }
 
@@ -5216,132 +5257,134 @@ export class DevicePool {
     expectedExistingSessionDeviceId?: string,
     mcpSessionId?: string,
   ): Promise<string> {
-    return await this.assignmentMutex.runExclusive(async () => {
-      throwIfRequestAborted();
-      const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
-      const alreadyPooled = this.devices.has(deviceId);
-      if (!alreadyPooled) {
-        const bootedDevices = await this.deviceManager.getBootedDevices(platform);
-        const booted = bootedDevices.find((d) => d.deviceId === deviceId);
-        if (booted) {
-          await this.addDevice(
-            booted,
-            androidAvdIdentity,
-            true,
-            this.runtimeIdentity.identityEvidenceForBootedDevice(booted),
-          );
+    return await this.withTargetDeviceDiscovery({
+      deviceId,
+      sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
+      unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
+      platform,
+      operation: async (snapshot) => {
+        throwIfRequestAborted();
+        const androidAvdIdentity = verifiedAndroidAvdIdentity ?? sourceImage;
+        const alreadyPooled = snapshot.capturedEntry !== undefined;
+        let device = this.devices.get(deviceId);
+        if (!device) {
+          throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
         }
-      }
-
-      throwIfRequestAborted();
-      let device = this.devices.get(deviceId);
-      if (!device) {
-        throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
-      }
-      this.runtimeIdentity.assertRuntimeIdentity(device, expectedIdentity);
-      this.assertNotReservedForShutdown(
-        device,
-        `Device '${deviceId}' is shutting down and cannot be assigned.`,
-      );
-      if (alreadyPooled) {
-        this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
-        this.notifyDeviceReady(deviceId);
-      }
-      await this.trackStartedDeviceProcess(
-        {
-          deviceId: device.id,
-          name: device.name,
-          platform: device.platform,
-        },
-        childProcess,
-      );
-      if (this.devices.get(deviceId) !== device) {
-        throw new ActionableError(`Device '${deviceId}' exited before it could be assigned.`);
-      }
-      await this.assertIdleDeviceAssignable(
-        device,
-        `Device '${deviceId}' is not available in the device pool.`,
-        readinessReservationOwners,
-      );
-
-      device = await this.validateOrReloadIdlePooledDevice(
-        device,
-        expectedIdentity,
-        `Device '${deviceId}' is not available in the device pool. ` +
-          "It may have been shut down or disconnected.",
-        readinessReservationOwners,
-      );
-
-      throwIfRequestAborted();
-      this.assertDeviceCleanupComplete(deviceId);
-      if (device.sessionId) {
-        const existingSession = this.sessionManager.getSession(device.sessionId);
-        if (
-          existingSession &&
-          existingSession.assignedDevice === deviceId &&
-          existingSession.platform === device.platform
-        ) {
-          this.assertExistingRecoverySessionOwner(
-            existingSession,
-            sessionId,
-            deviceId,
-            expectedExistingSessionDeviceId,
-          );
-          const confirmedSameOwner = this.assertMcpSessionOwnsDeviceSession(
-            mcpSessionId,
-            existingSession,
-            device,
-          );
-          return this.reuseExistingDeviceSession(
-            deviceId,
-            existingSession.sessionId,
-            sourceImage,
-            confirmedSameOwner,
-          );
+        this.runtimeIdentity.assertRuntimeIdentity(device, expectedIdentity);
+        this.assertNotReservedForShutdown(
+          device,
+          `Device '${deviceId}' is shutting down and cannot be assigned.`,
+        );
+        if (alreadyPooled) {
+          this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
+          this.notifyTargetDeviceReady({ device, snapshot });
         }
-
-        if (existingSession) {
-          throw new ActionableError(
-            `Device '${deviceId}' is already assigned to session ${device.sessionId}.`,
-          );
+        await this.trackStartedDeviceProcess(
+          {
+            deviceId: device.id,
+            name: device.name,
+            platform: device.platform,
+          },
+          childProcess,
+        );
+        if (this.devices.get(deviceId) !== device) {
+          throw new ActionableError(`Device '${deviceId}' exited before it could be assigned.`);
         }
+        this.assertIdleDeviceAssignable({
+          device,
+          unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
+          readinessReservationOwners,
+          snapshot,
+        });
 
-        // Looking up an expired owner may itself start its release.
+        const validatedDevice = await this.validateOrReloadIdlePooledDevice({
+          device,
+          expectedIdentity,
+          unavailableMessage:
+            `Device '${deviceId}' is not available in the device pool. ` +
+            "It may have been shut down or disconnected.",
+          readinessReservationOwners,
+          snapshot,
+        });
+        if (!validatedDevice) {
+          return undefined;
+        }
+        device = validatedDevice;
+
+        throwIfRequestAborted();
+        if (this.devices.get(deviceId) !== device) {
+          return undefined;
+        }
         this.assertDeviceCleanupComplete(deviceId);
-        device.sessionId = null;
-        device.status = "idle";
-      }
+        if (device.sessionId) {
+          const existingSession = this.sessionManager.getSession(device.sessionId);
+          if (
+            existingSession &&
+            existingSession.assignedDevice === deviceId &&
+            existingSession.platform === device.platform
+          ) {
+            this.assertExistingRecoverySessionOwner(
+              existingSession,
+              sessionId,
+              deviceId,
+              expectedExistingSessionDeviceId,
+            );
+            const confirmedSameOwner = this.assertMcpSessionOwnsDeviceSession(
+              mcpSessionId,
+              existingSession,
+              device,
+            );
+            return this.reuseExistingDeviceSession(
+              deviceId,
+              existingSession.sessionId,
+              sourceImage,
+              confirmedSameOwner,
+            );
+          }
 
-      const assignmentSnapshot = this.snapshotSessionAssignment(device);
-      const previousSession = this.sessionManager.getSession(sessionId);
-      this.assertExpectedRecoverySession(
-        previousSession,
-        sessionId,
-        deviceId,
-        platform,
-        expectedExistingSessionDeviceId,
-      );
-      device.sessionId = sessionId;
-      device.status = "busy";
-      device.lastUsedAt = this.nextLastUsedAt();
-      device.assignmentCount++;
-      device.errorCount = 0;
+          if (existingSession) {
+            throw new ActionableError(
+              `Device '${deviceId}' is already assigned to session ${device.sessionId}.`,
+            );
+          }
 
-      await this.createSessionOrRestore(
-        device,
-        assignmentSnapshot,
-        this.createSessionForBinding(
+          // Looking up an expired owner may itself start its release.
+          this.assertDeviceCleanupComplete(deviceId);
+          device.sessionId = null;
+          device.status = "idle";
+        }
+
+        const assignmentSnapshot = this.snapshotSessionAssignment(device);
+        const previousSession = this.sessionManager.getSession(sessionId);
+        this.assertExpectedRecoverySession(
           previousSession,
           sessionId,
           deviceId,
           platform,
-          allowSessionRebind,
-          this.stableDeviceIdFor(device),
-        ),
-      );
-      this.recordMcpSessionOwnership(mcpSessionId, sessionId);
-      logger.info(`Bound device ${deviceId} to session ${sessionId}`);
-      return sessionId;
+          expectedExistingSessionDeviceId,
+        );
+        device.sessionId = sessionId;
+        device.status = "busy";
+        device.lastUsedAt = this.nextLastUsedAt();
+        device.assignmentCount++;
+        device.errorCount = 0;
+
+        await this.createSessionOrRestore(
+          device,
+          assignmentSnapshot,
+          this.createSessionForBinding(
+            previousSession,
+            sessionId,
+            deviceId,
+            platform,
+            allowSessionRebind,
+            this.stableDeviceIdFor(device),
+          ),
+        );
+        this.recordMcpSessionOwnership(mcpSessionId, sessionId);
+        logger.info(`Bound device ${deviceId} to session ${sessionId}`);
+        return sessionId;
+      },
     });
   }
 
@@ -5375,26 +5418,137 @@ export class DevicePool {
     }
   }
 
+  /** Snapshot first, then serialize assertions and claim; replacements retry unlocked. */
+  private async withTargetDeviceDiscovery({
+    deviceId,
+    sourceImage,
+    unavailableMessage,
+    platform,
+    operation,
+  }: TargetDeviceDiscoveryOptions): Promise<string> {
+    let staleRetries = 0;
+    let readyNotifiedEntry: PooledDevice | undefined;
+    while (true) {
+      throwIfRequestAborted();
+      const capturedEntry = this.devices.get(deviceId);
+      const removalFence = this.refreshCoordinator.captureDeviceRemovalFence(deviceId);
+      const shutdownMarker = this.intentionalShutdowns.get(deviceId);
+      const shutdownReserved = this.shutdownReservationCoordinator.isDeviceUnderShutdown(deviceId);
+      let result: string | undefined;
+      try {
+        const snapshot = await raceWithDeadline(
+          async (): Promise<TargetDeviceDiscoverySnapshot> => {
+            const targetPlatform = capturedEntry?.platform ?? platform;
+            if (targetPlatform === "android") {
+              const androidPresence = await this.takeFreshPresenceDiscovery("android");
+              return { capturedEntry, androidPresence, bootedDevices: androidPresence.devices };
+            }
+            if (capturedEntry) {
+              return {
+                capturedEntry,
+                iosLiveness: await this.idleDeviceReaper.getIosLivenessSnapshot(),
+              };
+            }
+            const discovery = await this.takeFreshPresenceDiscovery("ios");
+            return {
+              capturedEntry,
+              bootedDevices: discovery.devices,
+              iosLiveness: await this.idleDeviceReaper.getIosLivenessSnapshot({ discovery }),
+            };
+          },
+          { timer: this.timer, signal: getAbortSignal(), label: "Exact device discovery" },
+        );
+        snapshot.readyNotifiedEntry = readyNotifiedEntry;
+        result = await this.assignmentMutex.runExclusive(async () => {
+          throwIfRequestAborted();
+          if (this.devices.get(deviceId) !== capturedEntry) {
+            return undefined;
+          }
+          if (capturedEntry) {
+            return operation(snapshot);
+          }
+          // Undefined -> added -> retired -> undefined is also a changed incarnation.
+          // Refuse before addDevice can clear a recorded intentional shutdown.
+          if (
+            removalFence.wasRemoved() ||
+            shutdownReserved ||
+            this.shutdownReservationCoordinator.isDeviceUnderShutdown(deviceId) ||
+            shutdownMarker !== this.intentionalShutdowns.get(deviceId) ||
+            shutdownMarker !== undefined
+          ) {
+            throw new ActionableError(unavailableMessage);
+          }
+          // A failed iOS source may return no target or a retained last-good
+          // target. Either way, it cannot authorize a new pooled assignment.
+          if (platform === "ios") {
+            this.assertTargetDeviceLiveness({
+              device: { id: deviceId, platform },
+              unavailableMessage,
+              snapshot,
+            });
+          }
+          const booted = snapshot.bootedDevices?.find((device) => device.deviceId === deviceId);
+          if (booted) {
+            const addition = this.addDevice(
+              booted,
+              sourceImage,
+              true,
+              this.runtimeIdentity.identityEvidenceForBootedDevice(booted),
+            );
+            const addedEntry = this.devices.get(deviceId);
+            await addition;
+            readyNotifiedEntry = addedEntry;
+            if (this.devices.get(deviceId) !== addedEntry) {
+              return undefined;
+            }
+          }
+          return operation(snapshot);
+        });
+      } finally {
+        removalFence.release();
+      }
+      if (result !== undefined) {
+        return result;
+      }
+      if (staleRetries++ >= ALLOCATION_SNAPSHOT_STALE_RETRIES) {
+        throw new ActionableError(unavailableMessage);
+      }
+    }
+  }
+
   private async validateOrReloadIdlePooledDevice(
-    device: PooledDevice,
-    expectedIdentity:
-      | Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">
-      | undefined,
-    unavailableMessage: string,
-    readinessReservationOwners?: ReadonlySet<symbol>,
-  ): Promise<PooledDevice> {
-    // Runs under assignmentMutex, so a recovery reboot is detached (#6391).
-    if (await this.ensurePooledDevicePresentForUse(device, true, true)) {
+    options: TargetDeviceValidationOptions,
+  ): Promise<PooledDevice | undefined> {
+    const { device, expectedIdentity, unavailableMessage, snapshot } = options;
+    const presence = snapshot.androidPresence;
+    // Existing pooled targets retain on source failure. A just-installed target
+    // cannot use a failed confirmation pass as identity evidence. Authoritative
+    // absence also stops before the liveness helper's eviction/recovery branch.
+    if (
+      presence &&
+      (didSourceSucceedForDevice(presence, device.platform, device.id)
+        ? !presence.devices.some((booted) => booted.deviceId === device.id)
+        : snapshot.readyNotifiedEntry !== undefined)
+    ) {
+      throw new ActionableError(unavailableMessage);
+    }
+    // iOS uses the per-source liveness snapshot; Android reconciles the supplied evidence.
+    if (await this.ensurePooledDevicePresentForUse(device, true, true, false, presence)) {
+      if (this.devices.get(device.id) !== device) {
+        return undefined;
+      }
+      this.assertIdleDeviceAssignable(options);
+      // A reusable serial's initial listing predates installation in the pool.
+      // Confirm it with a fresh unlocked pass before handing out the entry.
+      if (!snapshot.capturedEntry && this.missingDeviceLiveness.hasReusableSerial(device)) {
+        return undefined;
+      }
       return device;
     }
     const replacement = this.devices.get(device.id);
     if (!replacement || (replacement === device && device.status === "error")) {
       throw new ActionableError(unavailableMessage);
     }
-    // An exact-device request names the serial, and the quarantine is precisely
-    // the pool's inability to say which runtime answers on it — so this refuses
-    // rather than falling through to the unavailable message, which would invite
-    // a retry against the same unknown runtime (#6863 review).
     if (replacement.identityUnresolved === true) {
       throw new ActionableError(
         this.runtimeIdentity.describeUnresolvedPooledIdentity(
@@ -5404,12 +5558,9 @@ export class DevicePool {
       );
     }
     this.runtimeIdentity.assertRuntimeIdentity(replacement, expectedIdentity);
-    await this.assertIdleDeviceAssignable(
-      replacement,
-      unavailableMessage,
-      readinessReservationOwners,
-    );
-    return replacement;
+    // Reconciliation's replacement cannot inherit the captured entry's evidence.
+    // Retry outside the mutex before judging or claiming that incarnation.
+    return undefined;
   }
 
   private createSessionForBinding(

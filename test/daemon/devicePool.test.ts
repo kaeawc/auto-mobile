@@ -2423,7 +2423,7 @@ describe("DevicePool", () => {
       expect(connectedDeviceIds).toEqual(["emulator-5554"]);
     });
 
-    test("notifies before binding validates an existing serial", async () => {
+    test("notifies after binding discovery and before claiming an existing serial", async () => {
       const connectedDeviceIds: string[] = [];
       const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
       devicePool = new DevicePool(
@@ -2442,7 +2442,7 @@ describe("DevicePool", () => {
       const binding = devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
       await deferredDeviceManager.waitForDiscoveryStart();
       try {
-        expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+        expect(connectedDeviceIds).toEqual([]);
       } finally {
         deferredDeviceManager.releaseDiscovery();
         await binding;
@@ -2580,7 +2580,7 @@ describe("DevicePool", () => {
       }
     });
 
-    test("notifies before autolock validates an existing serial", async () => {
+    test("notifies after autolock discovery and before claiming an existing serial", async () => {
       const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       const connectedDeviceIds: string[] = [];
       const deferredDeviceManager = new DeferredDiscoveryFakeDeviceManager();
@@ -2602,10 +2602,11 @@ describe("DevicePool", () => {
         const binding = devicePool.autolockDevice("emulator-5554", "android", "mcp-session-1");
         await deferredDeviceManager.waitForDiscoveryStart();
         try {
-          expect(connectedDeviceIds).toEqual(["emulator-5554"]);
+          expect(connectedDeviceIds).toEqual([]);
         } finally {
           deferredDeviceManager.releaseDiscovery();
           await binding;
+          expect(connectedDeviceIds).toEqual(["emulator-5554"]);
         }
       } finally {
         if (originalAutolock === undefined) {
@@ -2614,8 +2615,6 @@ describe("DevicePool", () => {
           process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = originalAutolock;
         }
       }
-
-      expect(connectedDeviceIds).toEqual(["emulator-5554"]);
     });
   });
 
@@ -4729,11 +4728,11 @@ describe("DevicePool", () => {
       await expect(
         devicePool.bindOrReuseDeviceSession("session-stale", "sim-stale", "ios"),
       ).rejects.toThrow(/not available/);
-      expect(devicePool.getDevice("sim-stale")).toBeNull();
+      expect(devicePool.getDevice("sim-stale")?.status).toBe("idle");
       expect(sessionManager.getSession("session-stale")).toBeNull();
     });
 
-    test("evicts a stale pooled Android emulator before direct binding", async () => {
+    test("retains a stale pooled Android emulator when direct binding rejects", async () => {
       await devicePool.initializeWithDevices([
         createBootedDevice("emulator-5554", "android", "Pixel 8"),
       ]);
@@ -4743,11 +4742,11 @@ describe("DevicePool", () => {
         devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android"),
       ).rejects.toThrow(/not available|shut down|disconnected/);
 
-      expect(devicePool.getDevice("emulator-5554")).toBeNull();
+      expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
       expect(sessionManager.getSession("session-1")).toBeNull();
     });
 
-    test("releases an active session when its Android emulator is stale before reuse", async () => {
+    test("preserves an active session when a pre-lock absent snapshot rejects reuse", async () => {
       await initializeLiveDevices([createBootedDevice("emulator-5554", "android", "Pixel 8")]);
       await devicePool.bindOrReuseDeviceSession("session-1", "emulator-5554", "android");
       fakeDeviceManager.bootedDevices = [];
@@ -4756,12 +4755,12 @@ describe("DevicePool", () => {
         devicePool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"),
       ).rejects.toThrow(/not available|shut down|disconnected/);
 
-      expect(devicePool.getDevice("emulator-5554")).toBeNull();
-      expect(sessionManager.getSession("session-1")).toBeNull();
+      expect(devicePool.getDevice("emulator-5554")?.status).toBe("busy");
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("emulator-5554");
       expect(sessionManager.getSession("session-2")).toBeNull();
     });
 
-    test("evicts a stale pooled Android emulator before autolock", async () => {
+    test("retains a stale pooled Android emulator when autolock rejects", async () => {
       const originalAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
       try {
         process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
@@ -4774,7 +4773,7 @@ describe("DevicePool", () => {
           devicePool.autolockDevice("emulator-5554", "android", "mcp-session-1"),
         ).rejects.toThrow(/not available|shut down|disconnected/);
 
-        expect(devicePool.getDevice("emulator-5554")).toBeNull();
+        expect(devicePool.getDevice("emulator-5554")?.status).toBe("idle");
         expect(
           devicePool.resolveAutolockSessionForMcpSession("mcp-session-1", "android"),
         ).toBeUndefined();

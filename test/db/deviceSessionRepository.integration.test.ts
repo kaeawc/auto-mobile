@@ -13,6 +13,7 @@ import { logger } from "../../src/utils/logger";
 import { createTestDatabase } from "./testDbHelper";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
@@ -797,6 +798,8 @@ describe("DeviceSessionRepository", () => {
         timer: timer,
         deviceManager: fakeDeviceUtils,
         deviceSessionRepository: repo,
+        deviceSessionContinuityEnabled: true,
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
       }),
     );
 
@@ -807,9 +810,12 @@ describe("DeviceSessionRepository", () => {
       fakeDeviceUtils.markDeviceAsStopped("Pixel 7");
       fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
 
+      const pooledDevice = pool.getDevice("emulator-5554");
+      expect(pooledDevice).not.toBeNull();
+      expect(pooledDevice!.androidImage).toBeUndefined();
       await expect(
-        pool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"),
-      ).rejects.toThrow(/not available|shut down|disconnected/);
+        pool.recoverSessionBoundDeviceAfterLoss("emulator-5554", undefined, pooledDevice!),
+      ).resolves.toBe("released");
 
       const row = await repo.getSession("session-1");
       expect(row!.release_reason).toBe(deviceRestartReleaseReason(androidDevice.name));
@@ -840,9 +846,18 @@ describe("DeviceSessionRepository", () => {
       await pool.bindOrReuseDeviceSession("physical-session", physicalDevice.deviceId, "android");
       fakeDeviceUtils.setBootedDevices("android", []);
 
-      await expect(
-        pool.bindOrReuseDeviceSession("replacement-session", physicalDevice.deviceId, "android"),
-      ).rejects.toThrow(/not available|shut down|disconnected/);
+      const pooledDevice = pool.getDevice(physicalDevice.deviceId);
+      await sessionManager.releaseSession(
+        "physical-session",
+        deviceLossCancellationReason(physicalDevice.deviceId),
+      );
+      await pool.releaseDevice(physicalDevice.deviceId, "physical-session");
+      await pool.removeDisconnectedDevice(
+        physicalDevice.deviceId,
+        true,
+        undefined,
+        pooledDevice ?? undefined,
+      );
 
       expect(sessionManager.getSession("physical-session")).toBeNull();
       expect(await repo.getSession("physical-session")).toMatchObject({
@@ -852,6 +867,94 @@ describe("DeviceSessionRepository", () => {
       await expect(
         sessionManager.getOrCreateSession("physical-session", pool, "android"),
       ).rejects.toThrow("terminal");
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("bind against a pool entry discovery shows absent persists no release and leaves the session row active", async () => {
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    const androidDevice = {
+      name: "Pixel 7",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    const sessionManager = new SessionManager(timer, repo);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer,
+        deviceManager: fakeDeviceUtils,
+        deviceSessionRepository: repo,
+      }),
+    );
+
+    try {
+      await pool.initializeWithDevices([androidDevice]);
+      await pool.bindOrReuseDeviceSession("session-1", androidDevice.deviceId, "android");
+      const pooledDevice = pool.getDevice(androidDevice.deviceId);
+      fakeDeviceUtils.setBootedDevices("android", []);
+
+      await expect(
+        pool.bindOrReuseDeviceSession("session-2", androidDevice.deviceId, "android"),
+      ).rejects.toThrow(/not available/);
+
+      expect(await repo.getSession("session-1")).toMatchObject({
+        status: "active",
+        release_reason: null,
+        released_at_ms: null,
+      });
+      expect(pool.getDevice(androidDevice.deviceId)).toBe(pooledDevice);
+      expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({ sessionId: "session-1" });
+      expect(await repo.getSession("session-2")).toBeUndefined();
+    } finally {
+      sessionManager.stopCleanupTimer();
+    }
+  });
+
+  test("autolock against a pool entry discovery shows absent persists no release and leaves the session row active", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    const androidDevice = {
+      name: "Pixel 7",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    const sessionManager = new SessionManager(timer, repo);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessionManager, "daemon-session-1", {
+        timer,
+        deviceManager: fakeDeviceUtils,
+        deviceSessionRepository: repo,
+      }),
+    );
+
+    try {
+      await pool.initializeWithDevices([androidDevice]);
+      const sessionId = await pool.autolockDevice(
+        androidDevice.deviceId,
+        "android",
+        "mcp-session-1",
+      );
+      expect(sessionId).toBeDefined();
+      const pooledDevice = pool.getDevice(androidDevice.deviceId);
+      fakeDeviceUtils.setBootedDevices("android", []);
+
+      await expect(
+        pool.autolockDevice(androidDevice.deviceId, "android", "mcp-session-2"),
+      ).rejects.toThrow(`Device '${androidDevice.deviceId}' is not available for autolock.`);
+
+      expect(await repo.getSession(sessionId!)).toMatchObject({
+        status: "active",
+        release_reason: null,
+        released_at_ms: null,
+      });
+      expect(pool.getDevice(androidDevice.deviceId)).toBe(pooledDevice);
+      expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
+        sessionId,
+        autolockSessionId: sessionId,
+      });
     } finally {
       sessionManager.stopCleanupTimer();
     }

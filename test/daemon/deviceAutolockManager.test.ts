@@ -11,10 +11,6 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import type { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
 
-const unavailable = (): never => {
-  throw new Error("Unexpected pool operation");
-};
-
 function harness() {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -39,7 +35,6 @@ function harness() {
   };
   const port: DeviceAutolockPoolPort = {
     getSessionManager: () => sessions,
-    getDeviceManager: () => deviceManager,
     getDaemonSessionId: () => daemonSessionId,
     getDevice: (id) => devices.get(id),
     withAssignmentLock: async (operation) => {
@@ -48,19 +43,31 @@ function harness() {
       events.push("unlock");
       return result;
     },
-    addDevice: unavailable,
-    identityEvidenceForBootedDevice: unavailable,
+    withTargetDeviceDiscovery: async ({ operation, deviceId }) => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const capturedEntry = devices.get(deviceId);
+        const bootedDevices = capturedEntry ? undefined : await deviceManager.getBootedDevices();
+        events.push("lock");
+        const result = await operation({ capturedEntry, bootedDevices });
+        events.push("unlock");
+        if (result !== undefined) {
+          return result;
+        }
+        events.push("retry");
+      }
+      throw new Error("Snapshot retries exhausted");
+    },
     assertRuntimeIdentity: () => events.push("identity"),
     assertNotReservedForShutdown: () => events.push("shutdown-check"),
     recordSourceAndroidAvd: () => events.push("source"),
-    notifyDeviceReady: () => events.push("ready"),
+    notifyTargetDeviceReady: () => events.push("ready"),
     trackStartedDeviceProcess: async () => {
       events.push("process");
     },
-    assertIdleDeviceAssignable: async () => {
+    assertIdleDeviceAssignable: () => {
       events.push("idle-check");
     },
-    validateOrReloadIdlePooledDevice: async (pooled) => pooled,
+    validateOrReloadIdlePooledDevice: async ({ device: pooled }) => pooled,
     assertDeviceCleanupComplete: () => events.push("cleanup-check"),
     snapshotSessionAssignment: (pooled): SessionAssignmentSnapshot => ({
       sessionId: pooled.sessionId,
@@ -94,6 +101,7 @@ function harness() {
   );
   return {
     manager,
+    port,
     sessions,
     timer,
     device,
@@ -144,6 +152,47 @@ describe("DeviceAutolockManager", () => {
       "persist",
       "unlock",
     ]);
+    sessions.stopCleanupTimer();
+  });
+
+  test("retries when validation replaces the captured entry", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const { manager, port, devices, device, events, sessions } = harness();
+    const replacement = { ...device, incarnation: 2 };
+    port.validateOrReloadIdlePooledDevice = async ({ device: current }) => {
+      if (current === device) {
+        devices.set(device.id, replacement);
+        return undefined;
+      }
+      return current;
+    };
+    const id = await manager.autolockDevice(device.id, "android", "mcp-1");
+    expect(events.filter((event) => event === "retry")).toHaveLength(1);
+    expect(device.sessionId).toBeNull();
+    expect(replacement.sessionId).toBe(id);
+    expect(replacement.assignmentCount).toBe(1);
+    expect(events.filter((event) => event === "persist")).toHaveLength(1);
+    sessions.stopCleanupTimer();
+  });
+
+  test("retries when the entry changes after owned-session reuse yields", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const { manager, port, devices, device, events, sessions } = harness();
+    const replacement = { ...device, incarnation: 2 };
+    port.validateOrReloadIdlePooledDevice = async ({ device: current }) => {
+      if (current === device) {
+        // Validation returns this entry first; reuseOwnedAutolockSession's await
+        // then lets a newer pool incarnation win before the final claim guard.
+        queueMicrotask(() => devices.set(device.id, replacement));
+      }
+      return current;
+    };
+    const id = await manager.autolockDevice(device.id, "android", "mcp-1");
+    expect(events.filter((event) => event === "retry")).toHaveLength(1);
+    expect(device.sessionId).toBeNull();
+    expect(replacement.sessionId).toBe(id);
+    expect(replacement.assignmentCount).toBe(1);
+    expect(events.filter((event) => event === "persist")).toHaveLength(1);
     sessions.stopCleanupTimer();
   });
 

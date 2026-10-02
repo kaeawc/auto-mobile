@@ -380,7 +380,7 @@ describe("DevicePool autolock", () => {
       await expect(pool.autolockDevice("sim-stale", "ios")).rejects.toThrow(
         /not available for autolock/,
       );
-      expect(pool.getDevice("sim-stale")).toBeNull();
+      expect(pool.getDevice("sim-stale")?.status).toBe("idle");
     });
 
     it("maps an MCP session to its generated autolock session", async () => {

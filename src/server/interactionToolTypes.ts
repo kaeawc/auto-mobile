@@ -1,3 +1,4 @@
+import type { TapAtOptions } from "../models/TapAtOptions";
 /**
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
@@ -96,18 +97,11 @@ export interface TapOnArgs {
   project?: "full" | "skeleton";
 }
 
-export interface TapAtArgs {
-  display?: string;
-  snapshotId?: string;
-  x: number;
-  y: number;
-  coordinateSpace?: "absolute" | "normalized" | "percent";
-  action?: "tap" | "longPress" | "doubleTap";
-  durationMs?: number;
+export type TapAtArgs = TapAtOptions & {
   platform?: Platform;
   raw?: boolean;
   project?: "full" | "skeleton";
-}
+};
 
 export interface TapAnyArgs {
   container?: {

@@ -76,6 +76,38 @@ the right and bottom endpoints resolve to the last in-bounds native point.
 Values outside those ranges and non-finite values are rejected. The result
 includes the resolved native `x` and `y`.
 
+For hierarchy-derived points use native `tapAt({ x, y })` (the default
+`coordinateSpace: "absolute"`). For screenshot-derived points prefer:
+
+```ts
+tapAt({
+  image: {
+    unit: "normalized",
+    x: 0.25,
+    y: 0.5,
+    source: { crop: observation.crop, rotation: observation.rotation },
+  },
+  snapshotId: observation.snapshotReference.snapshotId,
+});
+```
+
+Pass back the whole `crop` object from the same observe; `cropPath` is optional
+and ignored. For a full screenshot use `source: { screenshot: { screenSize,
+screenshotOrientation, rotation } }` from that observe instead. Native-oriented
+rasters require `rotation`; display-oriented rasters need no turn. Image input
+is mutually exclusive with outer `x`, `y`, and `coordinateSpace`. Add `snapshotId`
+for existing stale-frame validation; changed screen dimensions always reject.
+
+Fractions survive preview resizing. `unit: "pixels"` is for callers measuring
+the real file, with half-open ranges `[0, imageWidth)` / `[0, imageHeight)`;
+full-screen pixels additionally require caller-supplied `imageSize: { width,
+height }`, since observe does not return full raster dimensions. Out-of-range
+unit mix-ups reject; in-range mix-ups cannot be detected, so agents should use
+`normalized`. Normalized endpoints 1 resolve just inside the image. For fractional
+crops, normalized spans the clipped native bounds; pixels preserve the raw
+floor/ceil-snapped raster padding using its origin and actual scale. Orientation
+is aligned automatically, and results report native `x` / `y`.
+
 Set `action: "longPress"` or `"doubleTap"` for another coordinate gesture.
 Long press defaults to 1000 ms and accepts `durationMs` from 500 to 10000;
 `durationMs` is valid only for long press. Double tap uses two native taps

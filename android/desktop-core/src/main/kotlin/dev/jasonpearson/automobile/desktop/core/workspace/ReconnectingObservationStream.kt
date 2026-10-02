@@ -6,8 +6,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import kotlinx.coroutines.delay
@@ -92,6 +94,14 @@ fun rememberReconnectingObservationState(
   }
 
   val active = observationState.stream
+  val onSuperseded by rememberUpdatedState(LocalDeviceSessionSupersededHandler.current)
+  LaunchedEffect(active, deviceId) {
+    active?.deviceEvents?.collect { event ->
+      if (event is DeviceStreamEvent.DeviceSessionSuperseded && event.deviceId == deviceId) {
+        onSuperseded(event)
+      }
+    }
+  }
   // Reconnect loop, keyed on the live stream so it restarts for a new device and is cancelled on
   // dispose (which ends reconnection). Driven by the stream's connection state — the single source
   // of truth the real client updates on connect success/failure and on EOF ("Stream ended").

@@ -7,10 +7,11 @@
     "build": {
       "description": "Compile TypeScript source to dist/",
       "outputs": ["dist/**"],
-      "inputs": ["src/**", "build.ts", "schemas/**", "package.json"],
+      "inputs": ["src/**", "build.ts", "scripts/build/**", "schemas/**", "package.json"],
       "outputLogs": "new-only",
       "env": [
         "AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS",
+        "AUTOMOBILE_SOURCEMAP_STRIP_SOURCES",
         "RELEASE_VERSION",
         "APK_SHA256_CHECKSUM",
         "IOS_CTRL_PROXY_SHA256_CHECKSUM"

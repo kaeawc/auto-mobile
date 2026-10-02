@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -10,6 +10,9 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 
 const captureSchema = z
   .object({
@@ -53,6 +56,14 @@ async function callCaptureTool(
 
 describe("MCP session autolock routing", () => {
   let fixture: McpTestFixture | undefined;
+  let restorePipelineOverrides: (() => void) | undefined;
+
+  beforeEach(() => {
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+  });
 
   afterEach(async () => {
     if (fixture) {
@@ -60,6 +71,9 @@ describe("MCP session autolock routing", () => {
       fixture = undefined;
     }
     ToolRegistry.clearTools();
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
+    PlatformDeviceManagerFactory.reset();
   });
 
   test("strips proxy-injected session keys before schema validation and passes them to handlers", async () => {

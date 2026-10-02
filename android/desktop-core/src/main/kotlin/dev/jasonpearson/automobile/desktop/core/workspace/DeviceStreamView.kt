@@ -34,6 +34,7 @@ import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.video.LiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.QualityController
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamEndReason
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
@@ -203,6 +204,7 @@ fun DeviceStreamView(
     }
   }
   val state by source.state.collectAsState()
+  val readOnly by source.readOnly.collectAsState()
   val newestFrame = liveFrame ?: retainedFrame
   // Grace window for CONTROL across transient non-Streaming windows (a quality-step re-subscribe,
   // a brief relay drop before auto-reconnect): the clock starts when the stream LEAVES Streaming
@@ -253,21 +255,47 @@ fun DeviceStreamView(
       control = control,
       controlSnapshot = controlSnapshot,
       enableDeviceControl = enableDeviceControl,
+      readOnly = readOnly,
       settingsLaunchFailure = settingsLaunchFailure,
       onSettingsLaunchFailure = { settingsLaunchFailure = it },
       screenRecordingSettingsLauncher = screenRecordingSettingsLauncher,
       source = source,
     )
     retainedStreamStatus(newestFrame != null, state)?.let { status ->
-      Text(
-        status,
-        color = MaterialTheme.colorScheme.onSurface,
-        style = MaterialTheme.typography.bodySmall,
-        textAlign = TextAlign.Center,
+      Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier =
           Modifier.align(Alignment.BottomCenter)
             .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
             .padding(12.dp),
+      ) {
+        Text(
+          status,
+          color = MaterialTheme.colorScheme.onSurface,
+          style = MaterialTheme.typography.bodySmall,
+          textAlign = TextAlign.Center,
+        )
+        if (state is VideoStreamState.Ended) {
+          Button(
+            onClick = {
+              source.disconnect()
+              source.connect(column.deviceId)
+            }
+          ) {
+            Text("Reconnect")
+          }
+        }
+      }
+    }
+    if (readOnly) {
+      Text(
+        "Read-only: another session now controls this device",
+        color = MaterialTheme.colorScheme.onSurface,
+        style = MaterialTheme.typography.bodySmall,
+        modifier =
+          Modifier.align(Alignment.TopStart)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.9f))
+            .padding(6.dp),
       )
     }
     // Quality overlay: only on the focused pane (controller present) and never over the permission
@@ -277,7 +305,8 @@ fun DeviceStreamView(
     if (
       qualityController != null &&
         state !is VideoStreamState.PermissionRequired &&
-        state !is VideoStreamState.Unavailable
+        state !is VideoStreamState.Unavailable &&
+        state !is VideoStreamState.Ended
     ) {
       val actualFps by qualityController.actualFps.collectAsState()
       var autoAdjust by
@@ -311,7 +340,17 @@ internal fun stallReconnectPolicy(platform: Platform, heartbeatMs: Long?): Long?
   if (heartbeatMs != null || platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null
 
 internal fun retainedStreamStatus(hasFrame: Boolean, state: VideoStreamState): String? =
-  if (hasFrame && state is VideoStreamState.Unavailable) streamStatusHint(state) else null
+  if (hasFrame && (state is VideoStreamState.Unavailable || state is VideoStreamState.Ended))
+    streamStatusHint(state)
+  else null
+
+internal fun controlArmed(
+  enableDeviceControl: Boolean,
+  hasControl: Boolean,
+  hasSnapshot: Boolean,
+  hasFrame: Boolean,
+  readOnly: Boolean,
+): Boolean = enableDeviceControl && hasControl && hasSnapshot && hasFrame && !readOnly
 
 /**
  * The pane's video surface: permission gate, armed interactive video, or plain mirror/hint. Split
@@ -331,6 +370,7 @@ private fun DeviceStreamContent(
   control: WorkspaceDeviceControlState?,
   controlSnapshot: DeviceFrameSnapshot?,
   enableDeviceControl: Boolean,
+  readOnly: Boolean,
   settingsLaunchFailure: Boolean,
   onSettingsLaunchFailure: (Boolean) -> Unit,
   screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher,
@@ -355,7 +395,13 @@ private fun DeviceStreamContent(
       },
     )
   } else if (
-    enableDeviceControl && control != null && controlSnapshot != null && armedFrame != null
+    controlArmed(
+      enableDeviceControl,
+      control != null,
+      controlSnapshot != null,
+      armedFrame != null,
+      readOnly,
+    ) && control != null && controlSnapshot != null && armedFrame != null
   ) {
     // Armed WITH live video: the pane's pixels are ALWAYS the live H.264 mirror — never the
     // observation screenshot. The armed surface requires [armedFrame]: a decoded frame from a
@@ -418,13 +464,25 @@ private fun DeviceStreamContent(
           contentScale = ContentScale.Fit,
         )
       } else {
-        Text(
-          streamStatusHint(state),
-          color = MaterialTheme.colorScheme.outline,
-          style = MaterialTheme.typography.bodySmall,
-          textAlign = TextAlign.Center,
-          modifier = Modifier.padding(12.dp),
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+          Text(
+            streamStatusHint(state),
+            color = MaterialTheme.colorScheme.outline,
+            style = MaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(12.dp),
+          )
+          if (state is VideoStreamState.Ended) {
+            Button(
+              onClick = {
+                source.disconnect()
+                source.connect(column.deviceId)
+              }
+            ) {
+              Text("Reconnect")
+            }
+          }
+        }
       }
     }
   }
@@ -488,6 +546,7 @@ internal fun streamStatusHint(state: VideoStreamState): String =
     // Streaming with no frame yet: the subscribe was accepted but nothing has decoded.
     is VideoStreamState.Streaming -> "Waiting for the first frame…"
     is VideoStreamState.PermissionRequired -> "Screen Recording needs approval"
+    is VideoStreamState.Ended -> "Live mirroring stopped: ${streamEndReasonText(state.reason)}"
     is VideoStreamState.Unavailable ->
       when (state.cause) {
         VideoStreamState.UnavailableCause.NO_RELAY ->
@@ -500,4 +559,12 @@ internal fun streamStatusHint(state: VideoStreamState): String =
           }
         VideoStreamState.UnavailableCause.OTHER -> state.reason
       }
+  }
+
+internal fun streamEndReasonText(reason: VideoStreamEndReason): String =
+  when (reason) {
+    VideoStreamEndReason.DeviceRemoved -> "The device was removed."
+    VideoStreamEndReason.IdentityQuarantined -> "The device's identity changed."
+    VideoStreamEndReason.DaemonShutdown -> "The AutoMobile daemon shut down."
+    VideoStreamEndReason.SessionEnded -> "This session ended."
   }

@@ -9,6 +9,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
+import dev.jasonpearson.automobile.desktop.core.video.VideoStreamEndReason
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -178,6 +179,75 @@ class AutoMobileContentWatchdogTest {
     assertEquals(VideoStreamState.Unavailable("dropped"), source.state.value)
     composition.tick()
     assertEquals(10L, delays.last())
+    composition.close()
+  }
+
+  @Test
+  fun `session ended never starts retry or watchdog reconnect`() = runTest {
+    val source = FakeVideoStreamSource()
+    val delays = mutableListOf<Long>()
+    val permits = Channel<Unit>(Channel.UNLIMITED)
+    val composition = VirtualComposition(this)
+    composition.setContent {
+      rememberLiveVideoFrame(
+        source,
+        "device",
+        autoReconnect = true,
+        reconnectInitialMs = 10,
+        delayMs = {
+          delays += it
+          permits.receive()
+        },
+        nowMs = { testScheduler.currentTime },
+        stallReconnectMs = 20,
+        firstFrameTimeoutMs = 20,
+        stallCheckIntervalMs = 10,
+      )
+    }
+    assertEquals(1, source.connectCalls)
+    source.endWith(VideoStreamEndReason.SessionEnded)
+    composition.tick()
+    advanceTimeBy(1_000)
+    runCurrent()
+    assertEquals(emptyList(), delays)
+    assertEquals(1, source.connectCalls)
+    assertEquals(VideoStreamState.Ended(VideoStreamEndReason.SessionEnded), source.state.value)
+    composition.close()
+  }
+
+  @Test
+  fun `device removed still retries with exponential backoff`() = runTest {
+    val source = FakeVideoStreamSource(refuseWith = "offline")
+    val delays = mutableListOf<Long>()
+    val permits = Channel<Unit>(Channel.UNLIMITED)
+    val composition = VirtualComposition(this)
+    composition.setContent {
+      rememberLiveVideoFrame(
+        source,
+        "device",
+        autoReconnect = true,
+        reconnectInitialMs = 10,
+        delayMs = {
+          delays += it
+          permits.receive()
+        },
+        nowMs = { testScheduler.currentTime },
+        stallReconnectMs = null,
+        firstFrameTimeoutMs = null,
+      )
+    }
+    source.becomeStreaming()
+    composition.tick()
+    delays.clear()
+    source.endWith(VideoStreamEndReason.DeviceRemoved)
+    composition.tick()
+    assertEquals(listOf(10L), delays)
+    assertEquals(1, source.connectCalls)
+    permits.trySend(Unit).getOrThrow()
+    runCurrent()
+    assertEquals(2, source.connectCalls)
+    // The refused retry changes state to Unavailable, which can repeat the current backoff.
+    assertEquals(listOf(10L, 20L), delays.take(2))
     composition.close()
   }
 }

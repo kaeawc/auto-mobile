@@ -16,6 +16,158 @@ import kotlin.test.assertTrue
  */
 class VideoStreamParserTest {
 
+  // Packet layout: 12-byte header, int64 BE ptsAndFlags then int32 BE length.
+  // A notice is (flag bit 61 | code), length 0; no video payload follows it.
+  private fun notice(code: Long): ByteArray =
+    ByteBuffer.allocate(12)
+      .order(ByteOrder.BIG_ENDIAN)
+      .putLong((1L shl 61) or code)
+      .putInt(0)
+      .array()
+
+  private fun sampleH264(): ByteArray =
+    checkNotNull(javaClass.classLoader.getResourceAsStream("sample.h264")).use { it.readBytes() }
+
+  private fun assertNotice(code: Long, expected: VideoStreamNotice) {
+    val parser = VideoStreamParser()
+    val notices = mutableListOf<VideoStreamNotice>()
+    val packets = mutableListOf<VideoPacket>()
+    parser.onBytes(
+      streamHeader() + notice(code),
+      onHeader = {},
+      onPacket = packets::add,
+      onNotice = notices::add,
+    )
+    assertEquals(listOf(expected), notices)
+    assertTrue(packets.isEmpty())
+    assertEquals(expected is VideoStreamNotice.Ended, parser.hasEnded)
+  }
+
+  @Test fun `code 1 downgrades to viewer`() = assertNotice(1, VideoStreamNotice.Downgraded)
+
+  @Test
+  fun `code 2 ends on device removal`() =
+    assertNotice(2, VideoStreamNotice.Ended(VideoStreamEndReason.DeviceRemoved))
+
+  @Test
+  fun `code 3 ends on identity quarantine`() =
+    assertNotice(3, VideoStreamNotice.Ended(VideoStreamEndReason.IdentityQuarantined))
+
+  @Test
+  fun `code 4 ends on daemon shutdown`() =
+    assertNotice(4, VideoStreamNotice.Ended(VideoStreamEndReason.DaemonShutdown))
+
+  @Test
+  fun `code 5 ends on session ending`() =
+    assertNotice(5, VideoStreamNotice.Ended(VideoStreamEndReason.SessionEnded))
+
+  @Test
+  fun `unknown notice is typed and does not end or emit video`() =
+    assertNotice(99, VideoStreamNotice.Unknown(99))
+
+  @Test
+  fun `downgrade between captured frames preserves ordering across split reads`() {
+    val video = sampleH264()
+    val first = packet(video, ptsUs = 1, isKeyFrame = true)
+    val last = packet(video, ptsUs = 2)
+    val bytes = streamHeader() + first + notice(1) + last
+    val split = 12 + first.size + 7
+    val parser = VideoStreamParser()
+    val events = mutableListOf<Any>()
+    for (chunk in listOf(bytes.copyOfRange(0, split), bytes.copyOfRange(split, bytes.size))) {
+      parser.onBytes(chunk, onHeader = {}, onPacket = events::add, onNotice = events::add)
+    }
+    assertEquals(
+      listOf(
+        VideoPacket(video, 1, false, true),
+        VideoStreamNotice.Downgraded,
+        VideoPacket(video, 2, false, false),
+      ),
+      events,
+    )
+    assertTrue(!parser.hasEnded)
+  }
+
+  private fun assertTerminalTail(byteByByte: Boolean) {
+    val line =
+      """{"type":"video_stream_response","terminal":true,"reason":"session_ended"}
+"""
+        .toByteArray()
+    val bytes = streamHeader() + notice(5) + line
+    val parser = VideoStreamParser()
+    val notices = mutableListOf<VideoStreamNotice>()
+    val packets = mutableListOf<VideoPacket>()
+    val chunks = if (byteByByte) bytes.map { byteArrayOf(it) } else listOf(bytes)
+    for (chunk in chunks) {
+      parser.onBytes(chunk, onHeader = {}, onPacket = packets::add, onNotice = notices::add)
+    }
+    // EOF supplies no additional bytes. JSON must never be decoded as a binary packet header.
+    parser.onBytes(byteArrayOf(), onHeader = {}, onPacket = packets::add, onNotice = notices::add)
+    assertTrue(parser.hasEnded)
+    assertContentEquals(line, parser.trailingBytes)
+    assertEquals(
+      listOf<VideoStreamNotice>(VideoStreamNotice.Ended(VideoStreamEndReason.SessionEnded)),
+      notices,
+    )
+    assertTrue(packets.isEmpty())
+  }
+
+  @Test
+  fun `end notice retains terminal JSON instead of parsing it as binary`() =
+    assertTerminalTail(false)
+
+  @Test
+  fun `end notice and terminal JSON fed byte by byte retain identical tail`() =
+    assertTerminalTail(true)
+
+  @Test
+  fun `rotation config key and nonempty P frames are never notices`() {
+    val video = sampleH264()
+    val packets = mutableListOf<VideoPacket>()
+    val notices = mutableListOf<VideoStreamNotice>()
+    VideoStreamParser()
+      .onBytes(
+        streamHeader() +
+          packet(video, isConfig = true, rotation = 0) +
+          packet(video, isKeyFrame = true, rotation = 0) +
+          packet(video, rotation = 0),
+        onHeader = {},
+        onPacket = packets::add,
+        onNotice = notices::add,
+      )
+    assertEquals(3, packets.size)
+    packets.forEach { assertContentEquals(video, it.payload) }
+    assertEquals(0, packets.first().rotation)
+    assertTrue(notices.isEmpty())
+  }
+
+  @Test
+  fun `heartbeat drops and empty key or config with bit 61 are not notices`() {
+    val packets = mutableListOf<VideoPacket>()
+    val notices = mutableListOf<VideoStreamNotice>()
+    val flags =
+      listOf(
+        (1L shl 60),
+        (1L shl 59) or 7,
+        (1L shl 63) or (1L shl 61),
+        (1L shl 62) or (1L shl 61),
+        (1L shl 60) or (1L shl 61),
+        (1L shl 59) or (1L shl 61) or 7,
+      )
+    val bytes =
+      flags.fold(streamHeader()) { acc, flag ->
+        acc + ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).putLong(flag).putInt(0).array()
+      }
+    VideoStreamParser()
+      .onBytes(bytes, onHeader = {}, onPacket = packets::add, onNotice = notices::add)
+    assertEquals(6, packets.size)
+    assertTrue(packets[0].heartbeat)
+    assertEquals(7L, packets[1].droppedFrames)
+    assertTrue(packets[4].heartbeat)
+    assertEquals(7L, packets[5].droppedFrames)
+    assertTrue(notices.isEmpty())
+  }
+
   private fun streamHeader(width: Int = 0, height: Int = 0): ByteArray =
     ByteBuffer.allocate(12)
       .order(ByteOrder.BIG_ENDIAN)

@@ -11,6 +11,15 @@ private const val PACKET_HEADER_BYTES = 12
 private const val FLAG_CONFIG = 1L shl 63
 private const val FLAG_KEY_FRAME = 1L shl 62
 
+// Mirror src/daemon/videoStreamFraming.ts: PACKET_FLAG_SUBSCRIPTION_NOTICE and
+// SUBSCRIPTION_NOTICE_CODES. Bit 61 is also ROTATION_PRESENT on CONFIG packets.
+private const val FLAG_SUBSCRIPTION_NOTICE = 1L shl 61
+private const val NOTICE_DOWNGRADED_TO_VIEWER = 1L
+private const val NOTICE_DEVICE_REMOVED = 2L
+private const val NOTICE_IDENTITY_QUARANTINED = 3L
+private const val NOTICE_DAEMON_SHUTDOWN = 4L
+private const val NOTICE_SESSION_ENDED = 5L
+
 /**
  * Bit 61: ROTATION_PRESENT (issue #4786). Set on a CONFIG packet whose bits 60-59 attest a display
  * rotation (`0..3`). The daemon relay leaves it clear when its source cannot prove rotation
@@ -35,6 +44,35 @@ private const val FLAG_HEARTBEAT = 1L shl 60
  * and field; backward compatible because a real microsecond PTS never reaches bit 59.
  */
 private const val PTS_MASK = (1L shl ROTATION_SHIFT) - 1
+
+enum class VideoStreamEndReason(val wire: String) {
+  DeviceRemoved("device_removed"),
+  IdentityQuarantined("identity_quarantined"),
+  DaemonShutdown("daemon_shutdown"),
+  SessionEnded("session_ended");
+
+  companion object {
+    fun fromWire(value: String?): VideoStreamEndReason? = entries.firstOrNull { it.wire == value }
+  }
+}
+
+sealed interface VideoStreamNotice {
+  data object Downgraded : VideoStreamNotice
+
+  data class Ended(val reason: VideoStreamEndReason) : VideoStreamNotice
+
+  data class Unknown(val code: Long) : VideoStreamNotice
+}
+
+private fun subscriptionNotice(code: Long): VideoStreamNotice =
+  when (code) {
+    NOTICE_DOWNGRADED_TO_VIEWER -> VideoStreamNotice.Downgraded
+    NOTICE_DEVICE_REMOVED -> VideoStreamNotice.Ended(VideoStreamEndReason.DeviceRemoved)
+    NOTICE_IDENTITY_QUARANTINED -> VideoStreamNotice.Ended(VideoStreamEndReason.IdentityQuarantined)
+    NOTICE_DAEMON_SHUTDOWN -> VideoStreamNotice.Ended(VideoStreamEndReason.DaemonShutdown)
+    NOTICE_SESSION_ENDED -> VideoStreamNotice.Ended(VideoStreamEndReason.SessionEnded)
+    else -> VideoStreamNotice.Unknown(code)
+  }
 
 /** Dimensions advertised by the stream header. Both are zero unless the client sent a size hint. */
 data class VideoStreamHeader(val width: Int, val height: Int)
@@ -100,10 +138,17 @@ class VideoStreamFormatException(message: String) : Exception(message)
 class VideoStreamParser {
   private var buffer = ByteArray(0)
   private var headerSeen = false
+  var hasEnded: Boolean = false
+    private set
+
+  /** Raw bytes after the end notice, including a terminal JSON line if the relay sent one. */
+  val trailingBytes: ByteArray
+    get() = buffer.copyOf()
 
   /**
    * Feeds the first [length] bytes of [chunk], invoking [onHeader] once for the stream header and
-   * [onPacket] for each complete packet. Both may be called zero or many times per chunk.
+   * [onPacket] for each complete video/telemetry packet and [onNotice] for subscription notices.
+   * After an end notice, binary parsing stops and subsequent bytes are retained in [trailingBytes].
    *
    * [length] lets a caller pass a reused read buffer without slicing it first (the reader fills a
    * fixed 64KB buffer and only `read` bytes are valid). When there is no buffered remainder from a
@@ -116,13 +161,15 @@ class VideoStreamParser {
     chunk: ByteArray,
     onHeader: (VideoStreamHeader) -> Unit,
     onPacket: (VideoPacket) -> Unit,
-  ) = onBytes(chunk, chunk.size, onHeader, onPacket)
+    onNotice: (VideoStreamNotice) -> Unit = {},
+  ) = onBytes(chunk, chunk.size, onHeader, onPacket, onNotice)
 
   fun onBytes(
     chunk: ByteArray,
     length: Int,
     onHeader: (VideoStreamHeader) -> Unit,
     onPacket: (VideoPacket) -> Unit,
+    onNotice: (VideoStreamNotice) -> Unit = {},
   ) {
     if (length <= 0) return
 
@@ -140,6 +187,11 @@ class VideoStreamParser {
       System.arraycopy(chunk, 0, src, buffer.size, length)
       srcLen = src.size
       buffer = EMPTY
+    }
+
+    if (hasEnded) {
+      buffer = src.copyOfRange(0, srcLen)
+      return
     }
 
     var offset = 0
@@ -177,13 +229,29 @@ class VideoStreamParser {
       val isConfig = (ptsAndFlags and FLAG_CONFIG) != 0L
       val isDroppedFrames = !isConfig && size == 0 && (ptsAndFlags and FLAG_DROPPED_FRAMES) != 0L
       val isHeartbeat = !isConfig && size == 0 && (ptsAndFlags and FLAG_HEARTBEAT) != 0L
+      val isKeyFrame = (ptsAndFlags and FLAG_KEY_FRAME) != 0L
+      if (
+        !isConfig &&
+          !isKeyFrame &&
+          size == 0 &&
+          !isHeartbeat &&
+          !isDroppedFrames &&
+          (ptsAndFlags and FLAG_SUBSCRIPTION_NOTICE) != 0L
+      ) {
+        val notice = subscriptionNotice(ptsAndFlags and PTS_MASK)
+        offset = start
+        if (notice is VideoStreamNotice.Ended) hasEnded = true
+        onNotice(notice)
+        if (hasEnded) break
+        continue
+      }
       onPacket(
         VideoPacket(
           payload = src.copyOfRange(start, start + size),
           // Bit 63 makes the int64 negative, so mask before reading the timestamp.
           presentationTimeUs = ptsAndFlags and PTS_MASK,
           isConfig = isConfig,
-          isKeyFrame = (ptsAndFlags and FLAG_KEY_FRAME) != 0L,
+          isKeyFrame = isKeyFrame,
           // Rotation is attested only on a config packet carrying the presence bit (issue #4786).
           rotation =
             if (isConfig && (ptsAndFlags and FLAG_ROTATION_PRESENT) != 0L) {

@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -163,6 +164,7 @@ import dev.jasonpearson.automobile.desktop.core.video.LiveVideoFrame
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamClient
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import dev.jasonpearson.automobile.desktop.core.video.autoReconnects
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlDecision
 import dev.jasonpearson.automobile.desktop.domain.DeviceControlInputs
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
@@ -344,7 +346,11 @@ internal fun rememberLiveVideoFrame(
     source.state.collectLatest { state ->
       resetBackoffAfterFrame()
       if (state is VideoStreamState.Streaming) backoffMs = reconnectInitialMs
-      if (state is VideoStreamState.Unavailable || state is VideoStreamState.PermissionRequired) {
+      if (
+        state is VideoStreamState.Unavailable ||
+          state is VideoStreamState.PermissionRequired ||
+          state is VideoStreamState.Ended
+      ) {
         // Auto-reconnecting consumers (the workspace video pane) RETAIN the last decoded frame
         // across a relay drop: the pane keeps rendering the freshest video it ever had while the
         // retry below re-subscribes, instead of flashing a non-video fallback for the whole
@@ -353,7 +359,7 @@ internal fun rememberLiveVideoFrame(
         // The plain path (IDE plugin / AutoMobileContent) keeps the original clear-and-blend
         // semantics, where screenshot updates ARE the designed fallback surface.
         if (!autoReconnect) liveFrame = null
-        if (autoReconnect && deviceId != null) {
+        if (autoReconnect && deviceId != null && state.autoReconnects()) {
           while (isActive) {
             resetBackoffAfterFrame()
             // Cancelled by composition disposal or a real state change, so a torn-down or
@@ -433,8 +439,8 @@ internal fun rememberLiveVideoFrame(
           }
         }
         else -> {
-          // Unavailable / PermissionRequired: the Unavailable-driven retry owns recovery. Keep the
-          // clock fresh so a recovered session gets a full window before being judged.
+          // Unavailable / PermissionRequired / Ended: the state-driven retry owns recovery.
+          // Keep the clock fresh so a recovered session gets a full window before being judged.
           noProgressSinceMs = nowMs()
           lastSeenSequence = -1L
           lastSeenActivityMs = source.lastActivityMs.value
@@ -931,6 +937,7 @@ fun AutoMobileContent(
       }
     }
   val liveVideoFrame = rememberLiveVideoFrame(liveVideoSource, activeDeviceId)
+  val liveVideoReadOnly = liveVideoSource?.readOnly?.collectAsState()?.value ?: false
   // Forces the control-availability decision to be re-evaluated on a timer, not only when an
   // observation source produces an update (issue #3348). A stalled observation stream produces
   // nothing at all — its staleness is visible only as time passing — so without this a frozen
@@ -1922,7 +1929,7 @@ fun AutoMobileContent(
           val deviceControlDecision =
             deviceControlSession.evaluate(
               DeviceControlInputs(
-                enabled = enableDeviceControl,
+                enabled = enableDeviceControl && !liveVideoReadOnly,
                 realDeviceMode = dataSourceMode == DataSourceMode.Real,
                 selectedDeviceId = activeDeviceId,
                 transportSupportsInput =

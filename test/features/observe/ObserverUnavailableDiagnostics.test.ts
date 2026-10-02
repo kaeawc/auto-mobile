@@ -60,6 +60,7 @@ test.each(["android", "ios"] as const)(
     const clientClass = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
     const existing = spyOn(clientClass, "getExistingInstance").mockReturnValue(client);
     const transient = spyOn(clientClass, "createForObservationRead");
+    let starts = 0;
     try {
       const screen = new RealObserveScreen(
         device,
@@ -69,7 +70,16 @@ test.each(["android", "ios"] as const)(
           window: new FakeWindow(),
           cacheStore: new FakeObserveCacheStore(timer),
           screenshotStateStore: new FakeScreenshotStateStore(timer),
-          hierarchyCapture: createDeviceHierarchyCapture(device, { adbFactory: factory, timer }),
+          hierarchyCapture: createDeviceHierarchyCapture(device, {
+            adbFactory: factory,
+            timer,
+            observationServiceStart: {
+              start: async () => {
+                starts++;
+                throw new Error("owned setup must never run");
+              },
+            },
+          }),
           screenshot: {
             execute: async () => ({ success: true, path: "/fake/observer.png" }),
             generateScreenshotPath: () => "/fake/observer.png",
@@ -94,6 +104,7 @@ test.each(["android", "ios"] as const)(
       expect(result.screenshotPath).toBe("/fake/observer.png");
       expect(client.isConnected()).toBe(false);
       expect(transient).not.toHaveBeenCalled();
+      expect(starts).toBe(0);
       expect(owner).toEqual({ sessionId: "owner", poolStatus: "assigned" });
     } finally {
       existing.mockRestore();

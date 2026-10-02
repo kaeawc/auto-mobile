@@ -42,6 +42,7 @@ export interface VirtualDeviceLifecycleLease {
 }
 
 export interface VirtualDeviceLifecycleCoordinator {
+  isReserved(identity: VirtualDeviceLifecycleIdentity): boolean;
   reserve(
     identity: VirtualDeviceLifecycleIdentity,
     options: VirtualDeviceLifecycleReservationOptions,
@@ -103,6 +104,11 @@ export class InMemoryVirtualDeviceLifecycleCoordinator implements VirtualDeviceL
   constructor(
     private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout"> = defaultTimer,
   ) {}
+
+  isReserved(identity: VirtualDeviceLifecycleIdentity): boolean {
+    const state = this.states.get(lifecycleIdentityKey(identity));
+    return state?.owner !== undefined || (state?.waiters.length ?? 0) > 0;
+  }
 
   async reserve(
     identity: VirtualDeviceLifecycleIdentity,

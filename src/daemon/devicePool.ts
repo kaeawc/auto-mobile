@@ -5239,6 +5239,46 @@ export class DevicePool {
     );
   }
 
+  /** Conservative, read-only admission for session-less hierarchy service setup. */
+  isSafeForObservationServiceStart(deviceId: string): boolean {
+    const device = this.devices.get(deviceId);
+    if (!device || device.sessionId || device.status !== "idle") {
+      return false;
+    }
+    const stableId = this.stableDeviceIdFor(device);
+    if (stableId === undefined) {
+      return false;
+    }
+    const recovery = this.getRecoveringAndroidTargets();
+    const blocked = [
+      this.assignmentMutex.isLocked(),
+      this.isReservedForAssignment(device),
+      this.deferredDeviceReleases.has(deviceId),
+      this.sessionManager.hasDeviceCleanupInProgress(deviceId),
+      this.sessionManager.getSessionForDevice(deviceId) !== null,
+      !!this.getDeviceHealthMarker(deviceId),
+      !!device.identityUnresolved,
+      !!device.identityReconcileOwner,
+      !!device.adbServerResetSessionId,
+      device.platform === "android" &&
+        this.adbServerResetQuarantine.isLeasedForAndroidStartup(stableId),
+      recovery.serials.has(deviceId),
+      recovery.names.has(device.name),
+      recovery.names.has(stableId),
+      Array.from(this.recoveringSessionLosses.values()).some(
+        (record) => record.deviceId === deviceId && record.state !== "finalized",
+      ),
+      Array.from(this.mcpSessionRecoveryDevices.values()).some((lease) => lease.device === device),
+      this.lifecycleCoordinator.isReserved({ kind: "stable", platform: device.platform, stableId }),
+      this.lifecycleCoordinator.isReserved({
+        kind: "selector",
+        platform: device.platform,
+        selector: device.name,
+      }),
+    ];
+    return !blocked.some(Boolean);
+  }
+
   private isReservedForAssignment(device: PooledDevice): boolean {
     return (
       this.isReservedForReadiness(device.id) ||

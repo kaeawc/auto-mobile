@@ -484,6 +484,9 @@ export interface ObserveResult {
    */
   accessibilityAuditSkipped?: "settled_capture_adopted";
 
+  /** Present only when this session-less read participated in starting the hierarchy service. */
+  hierarchyServiceStarted?: boolean;
+
   /**
    * Freshness metadata for the observation
    * Helps agents understand if the data reflects a recent interaction

@@ -13,6 +13,7 @@ import {
   checkXcodeInstallation,
   checkXcrunAvailable,
   createIosDoctorDependencies,
+  type IosDoctorDependencies,
   DOCTOR_EXEC_TIMEOUT_MS,
 } from "../doctor/checks/ios";
 import type { CheckResult, DoctorProbeOptions } from "../doctor/types";
@@ -20,6 +21,8 @@ import { errorMessage } from "../utils/describeUnknownError";
 import {
   formatCoreDeviceVersion,
   REQUIRED_SIMULATOR_COREDEVICE_VERSION,
+  type SimulatorBootSummary,
+  type CoreDeviceCapabilities,
 } from "../utils/ios-cmdline-tools/CoreDeviceCapabilityProbe";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -37,7 +40,8 @@ export interface HostToolchainEntry {
   coreDevice?: {
     status: CoreDeviceDiagnostic["status"];
     requiredVersion: string;
-    simulatorBootState: "not checked";
+    simulatorBootState: SimulatorBootSummary;
+    capabilities: CoreDeviceCapabilities;
     downgradeGuard: "not checked";
   };
 }
@@ -55,6 +59,7 @@ export interface HostToolchainResourceContent {
 type DoctorCheck = (probe: DoctorProbeOptions) => Promise<CheckResult>;
 
 export interface HostToolchainResourceDependencies {
+  iosDependencies?: IosDoctorDependencies;
   now: () => Date;
   timer?: Timer;
   checkAdbInstallation: DoctorCheck;
@@ -68,8 +73,10 @@ export interface HostToolchainResourceDependencies {
   probeCoreDeviceVersion: (probe: DoctorProbeOptions) => Promise<CoreDeviceDiagnostic>;
 }
 
-function createDefaultDependencies(): HostToolchainResourceDependencies {
-  const iosDependencies = createIosDoctorDependencies();
+function createDefaultDependencies(options: {
+  iosDependencies?: IosDoctorDependencies;
+}): HostToolchainResourceDependencies {
+  const iosDependencies = options.iosDependencies ?? createIosDoctorDependencies();
   return {
     now: () => new Date(),
     timer: defaultTimer,
@@ -196,7 +203,11 @@ function devicectlEntry(diagnostic: CoreDeviceDiagnostic): HostToolchainEntry {
     coreDevice: {
       status: diagnostic.status,
       requiredVersion: formatCoreDeviceVersion(REQUIRED_SIMULATOR_COREDEVICE_VERSION),
-      simulatorBootState: "not checked",
+      simulatorBootState: diagnostic.simulatorBootState ?? {
+        status: "unavailable",
+        reason: "simulator state unavailable",
+      },
+      capabilities: diagnostic.capabilities ?? { status: "not probed", entries: [] },
       downgradeGuard: "not checked",
     },
   };
@@ -214,7 +225,7 @@ function timestamp(now: () => Date): string {
 export function createHostToolchainResourceHandler(
   overrides: Partial<HostToolchainResourceDependencies> = {},
 ): () => Promise<ResourceContent> {
-  const dependencies = { ...createDefaultDependencies(), ...overrides };
+  const dependencies = { ...createDefaultDependencies(overrides), ...overrides };
   const timer = dependencies.timer ?? defaultTimer;
   return async () => {
     const lastUpdated = timestamp(dependencies.now);
@@ -284,12 +295,14 @@ export function createHostToolchainResourceHandler(
   };
 }
 
-export function registerHostToolchainResources(): void {
+export function registerHostToolchainResources(
+  options: { iosDependencies?: IosDoctorDependencies } = {},
+): void {
   ResourceRegistry.register(
     HOST_TOOLCHAIN_RESOURCE_URI,
     "Host Toolchain",
     "Read-only diagnostic status for Android and Apple host tooling.",
     "application/json",
-    createHostToolchainResourceHandler(),
+    createHostToolchainResourceHandler(options),
   );
 }

@@ -348,6 +348,8 @@ import { registerAppFileResources } from "./appFileResources";
 import { registerSessionLogResources } from "./sessionLogResources";
 import { registerSharedStorageResources } from "./sharedStorageResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
+import { createIosDoctorDependencies, type IosDoctorDependencies } from "../doctor/checks/ios";
+import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { registerHostToolchainResources } from "./hostToolchainResources";
 import { registerToolCatalogResources } from "./toolCatalogResource";
 import { registerNetworkResources } from "./networkResources";
@@ -376,6 +378,7 @@ import {
 } from "./toolSelectionProfileRegistry";
 
 export interface McpServerOptions {
+  iosDependencies?: IosDoctorDependencies;
   debug?: boolean;
   sessionContext?: {
     sessionId?: string;
@@ -638,6 +641,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerMcpTools(daemonMode);
   startupBenchmark.endPhase("toolRegistration");
 
+  const iosDependencies =
+    options.iosDependencies ??
+    createIosDoctorDependencies({ coreDeviceProbe: createProductionCoreDeviceProbe() });
+
   // Register all resources
   startupBenchmark.startPhase("resourceRegistration");
   registerObservationResources();
@@ -662,7 +669,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerSessionLogResources();
   registerSharedStorageResources();
   registerFeatureFlagResources();
-  registerHostToolchainResources();
+  registerHostToolchainResources({ iosDependencies });
   registerToolCatalogResources();
   registerNetworkResources();
   registerEmulatorLossIncidentResources();

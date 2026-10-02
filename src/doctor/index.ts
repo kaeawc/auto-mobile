@@ -10,9 +10,15 @@ import {
   CheckResult,
   type DoctorDiagnosticProfile,
 } from "./types";
+import { createProductionCoreDeviceProbe } from "../utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { runSystemChecks } from "./checks/system";
 import { runAndroidChecks, runPostRepairAndroidChecks } from "./checks/android";
-import { runIosChecks, runPostRepairIosChecks } from "./checks/ios";
+import {
+  runIosChecks,
+  runPostRepairIosChecks,
+  createIosDoctorDependencies,
+  type IosDoctorDependencies,
+} from "./checks/ios";
 import {
   runAutoMobileChecks,
   runPostRepairAutoMobileChecks,
@@ -76,6 +82,7 @@ function collectRecommendations(allChecks: CheckResult[]): string[] {
  * exercised without real ADB / socket / iOS I/O. Defaults call the real runners.
  */
 export interface RunDoctorDependencies {
+  iosDependencies?: IosDoctorDependencies;
   runSystemChecks?: () => CheckResult[];
   runAndroidChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
   runIosChecks?: (options: DoctorOptions) => Promise<CheckResult[]>;
@@ -102,13 +109,17 @@ interface ResolvedDoctorRunners {
  * orchestrator's cyclomatic complexity past the ratchet.
  */
 function resolveDoctorRunners(dependencies: RunDoctorDependencies): ResolvedDoctorRunners {
+  const ios =
+    dependencies.iosDependencies ??
+    createIosDoctorDependencies({ coreDeviceProbe: createProductionCoreDeviceProbe() });
   return {
     system: dependencies.runSystemChecks ?? runSystemChecks,
     android: dependencies.runAndroidChecks ?? runAndroidChecks,
-    ios: dependencies.runIosChecks ?? runIosChecks,
+    ios: dependencies.runIosChecks ?? ((options) => runIosChecks(options, ios)),
     autoMobile: dependencies.runAutoMobileChecks ?? runAutoMobileChecks,
     postRepairAndroid: dependencies.runPostRepairAndroidChecks ?? runPostRepairAndroidChecks,
-    postRepairIos: dependencies.runPostRepairIosChecks ?? runPostRepairIosChecks,
+    postRepairIos:
+      dependencies.runPostRepairIosChecks ?? ((options) => runPostRepairIosChecks(options, ios)),
     postRepairAutoMobile:
       dependencies.runPostRepairAutoMobileChecks ?? runPostRepairAutoMobileChecks,
   };

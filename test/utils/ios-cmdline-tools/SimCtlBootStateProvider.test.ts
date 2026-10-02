@@ -9,6 +9,8 @@ import {
   FakeDevicectlCommandInvoker,
   FakeDevicectlVersionSource,
 } from "../../fakes/FakeCoreDeviceCapabilityDependencies";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import type { DeviceInfo } from "../../../src/models";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 
 const deviceId = "sim-1";
@@ -94,5 +96,65 @@ describe("SimCtlBootStateProvider", () => {
       );
     }
     expect(commandInvoker.calls).toHaveLength(0);
+  });
+  test("diagnostics use a cheap bounded summary read, while boot checks bypass its cache", async () => {
+    const timer = new FakeTimer();
+    const calls: Array<{ timeoutMs?: number; bypassCache?: boolean }> = [];
+    const devices: DeviceInfo[] = [
+      { deviceId: "sim-1", name: "one", platform: "ios", state: "Booted", deviceType: "nonDuo" },
+      { deviceId: "sim-2", name: "two", platform: "ios", state: "Shutdown" },
+      { deviceId: "sim-3", name: "three", platform: "ios", state: "Booting" },
+    ];
+    const provider = new SimCtlBootStateProvider(
+      {
+        getDeviceInfo: async () => {
+          throw new Error("unbounded seam must not run");
+        },
+        listSimulatorImages: async (timeoutMs, options) => {
+          calls.push({ timeoutMs, bypassCache: options?.bypassCache });
+          return devices;
+        },
+      },
+      { timer, timeoutMs: 5000 },
+    );
+    expect(await provider.readSummary()).toEqual({
+      status: "available",
+      booted: 1,
+      shutdown: 1,
+      unknown: 1,
+    });
+    await provider.readSummary();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual({ timeoutMs: 5000, bypassCache: true });
+    expect(await provider.getBootState("sim-1")).toBe("booted");
+    expect(provider.getCapabilityScope("sim-1")).toBe("nonDuo");
+    devices[0].state = "Shutdown";
+    expect(await provider.getBootState("sim-1")).toBe("shutdown");
+    timer.advanceTime(1000);
+    expect(await provider.readSummary()).toMatchObject({ booted: 0, shutdown: 2 });
+    expect(calls).toHaveLength(4);
+  });
+
+  test("coalesces diagnostic reads and retries rejected reads without stale fallback", async () => {
+    const timer = new FakeTimer();
+    let calls = 0;
+    let fail = true;
+    const provider = new SimCtlBootStateProvider(
+      {
+        getDeviceInfo: async () => null,
+        listSimulatorImages: async () => {
+          calls += 1;
+          if (fail) {
+            throw new Error("lookup failed");
+          }
+          return [];
+        },
+      },
+      { timer, timeoutMs: 5000 },
+    );
+    await expect(provider.readSummary()).rejects.toThrow("lookup failed");
+    fail = false;
+    await Promise.all([provider.readSummary(), provider.readSummary()]);
+    expect(calls).toBe(2);
   });
 });

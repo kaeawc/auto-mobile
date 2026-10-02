@@ -34,6 +34,7 @@ export class FakeCoreDeviceGuardVersionProvider implements CoreDeviceGuardVersio
 }
 
 export class FakeSimulatorBootStateProvider implements SimulatorBootStateProvider {
+  getCapabilityScope?: (deviceId: string) => string;
   state: "booted" | "shutdown" | "unknown" = "booted";
   calls = 0;
 

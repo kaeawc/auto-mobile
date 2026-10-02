@@ -60,8 +60,29 @@ const capturedCoreDeviceVersion = readFileSync(
   "utf8",
 );
 
+const coreDeviceState = {
+  recordVersion: () => {},
+  refreshVersion: async (
+    read: () => Promise<
+      import("../../src/utils/ios-cmdline-tools/CoreDeviceCapabilityProbe").CoreDeviceVersionMeasurement
+    >,
+  ) => read(),
+  getCachedVersion: () => ({
+    kind: "available" as const,
+    version: [651, 13, 4] as [number, number, number],
+  }),
+  getCapabilities: () => ({ status: "not probed" as const, entries: [] }),
+  readSimulatorBootState: async () => ({
+    status: "available" as const,
+    booted: 1,
+    shutdown: 2,
+    unknown: 1,
+  }),
+};
+
 const baseDependencies: IosDoctorDependencies = {
   platform: () => "darwin",
+  getCoreDeviceProbe: () => coreDeviceState,
   execFile: async () => createExecResult(""),
   xcodebuild: {
     executeCommand: async () => createExecResult(""),
@@ -117,8 +138,152 @@ describe("iOS doctor checks", () => {
       });
       expect(result).toMatchObject({ name: "CoreDevice", status: "pass", value: "651.13.4" });
       expect(result.message).toContain("requires CoreDevice >= 651.0.0");
+      expect(result.message).toStartWith(
+        "CoreDevice 651.13.4 installed (requires CoreDevice >= 651.0.0); ",
+      );
       expect(result.message).toContain("not checked");
+      expect(result.message).toContain(
+        "simulator boot state: 1 booted, 2 shutdown, 1 unknown; capabilities: not probed; downgrade guard not checked",
+      );
       expect(calls).toEqual([{ file: "xcrun", args: ["devicectl", "--version"] }]);
+    });
+
+    test.each([
+      [
+        "meets",
+        capturedCoreDeviceVersion,
+        "darwin",
+        "pass",
+        "651.13.4",
+        "CoreDevice 651.13.4 installed (requires CoreDevice >= 651.0.0); ",
+      ],
+      [
+        "below",
+        "650.2.0",
+        "darwin",
+        "warn",
+        "650.2.0",
+        "CoreDevice 650.2.0 installed (below required); requires CoreDevice >= 651.0.0; devicectl-only simulator features will be unavailable; simctl-based features are unaffected; ",
+      ],
+      [
+        "missing",
+        undefined,
+        "darwin",
+        "warn",
+        undefined,
+        "devicectl missing: devicectl not functional: command not found; devicectl-only simulator features will be unavailable; simctl-based features are unaffected; ",
+      ],
+      [
+        "unparsable",
+        "unexpected output",
+        "darwin",
+        "warn",
+        undefined,
+        "CoreDevice version unreadable: devicectl returned an unrecognized CoreDevice version; devicectl-only simulator features will be unavailable; simctl-based features are unaffected; ",
+      ],
+      [
+        "non-darwin",
+        capturedCoreDeviceVersion,
+        "linux",
+        "skip",
+        undefined,
+        "iOS development requires macOS; ",
+      ],
+    ] as const)(
+      "preserves the exact HEAD doctor version portion for %s",
+      async (_outcome, output, platform, status, value, prefix) => {
+        const calls: Array<{
+          file: string;
+          args: string[];
+          timeoutMs?: number;
+          signal?: AbortSignal;
+        }> = [];
+        const controller = new AbortController();
+        const result = await checkCoreDeviceVersion(
+          {
+            ...baseDependencies,
+            platform: () => platform,
+            logger: new FakeLogger(),
+            execFile: async (file, args, options) => {
+              calls.push({ file, args, ...options });
+              if (output === undefined) {
+                throw new Error("command not found");
+              }
+              return createExecResult(output);
+            },
+          },
+          { timeoutMs: 123, signal: controller.signal },
+        );
+        const suffix =
+          platform === "darwin"
+            ? "simulator boot state: 1 booted, 2 shutdown, 1 unknown; capabilities: not probed; downgrade guard not checked"
+            : "simulator boot state: unavailable (simulator state unavailable); capabilities: not probed; downgrade guard not checked";
+        expect(result).toEqual({
+          name: "CoreDevice",
+          status,
+          message: prefix + suffix,
+          ...(value ? { value } : {}),
+        });
+        expect(calls).toEqual(
+          platform === "darwin"
+            ? [
+                {
+                  file: "xcrun",
+                  args: ["devicectl", "--version"],
+                  timeoutMs: 123,
+                  signal: controller.signal,
+                },
+              ]
+            : [],
+        );
+      },
+    );
+
+    test("a boot summary failure preserves the HEAD version result", async () => {
+      const logger = new FakeLogger();
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        logger,
+        execFile: async () => createExecResult(capturedCoreDeviceVersion),
+        getCoreDeviceProbe: () => ({
+          ...coreDeviceState,
+          readSimulatorBootState: async () => {
+            throw new Error("state read failed");
+          },
+        }),
+      });
+      expect(result).toMatchObject({
+        status: "pass",
+        value: "651.13.4",
+        message: expect.stringContaining(
+          "CoreDevice 651.13.4 installed (requires CoreDevice >= 651.0.0); simulator boot state: unavailable (state read failed);",
+        ),
+      });
+      expect(logger.at("warn")).toHaveLength(1);
+    });
+
+    test("reports memoized feature IDs and supported commands", async () => {
+      const result = await checkCoreDeviceVersion({
+        ...baseDependencies,
+        execFile: async () => createExecResult(capturedCoreDeviceVersion),
+        getCoreDeviceProbe: () => ({
+          ...coreDeviceState,
+          getCapabilities: () => ({
+            status: "probed",
+            entries: [
+              {
+                scope: "nonDuo",
+                command: "info lockState",
+                featureId: "com.apple.coredevice.feature.getlockstate",
+                status: "unsupported",
+              },
+              { scope: "nonDuo", command: "info displays", status: "supported" },
+            ],
+          }),
+        }),
+      });
+      expect(result.message).toContain("com.apple.coredevice.feature.getlockstate unsupported");
+      expect(result.message).toContain("info displays supported");
     });
 
     test("reports a below-required version", async () => {

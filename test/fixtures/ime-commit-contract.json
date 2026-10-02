@@ -1,0 +1,162 @@
+{
+  "host": {
+    "baseMs": 10000,
+    "perSegmentMs": 750,
+    "perCharMs": 20,
+    "capMs": 25000
+  },
+  "device": {
+    "pollIntervalMs": 40,
+    "maxPollAttempts": 12,
+    "commitBudgetMs": 4000,
+    "serviceReadyTimeoutMs": 2000,
+    "serviceReadyPollMs": 50,
+    "inputConnectionTimeoutMs": 2000,
+    "inputConnectionPollMs": 50
+  },
+  "cappedWorkPolicy": "The device self-bound excludes activation and binding, and assumes blocking reads return. Work with a settle extension beyond the 25000 ms host cap is expected to be cancelled by the host. Blocking reads consume the fixed 4000 ms active-work budget; settle waits alone extend it. Host perCharMs uses UTF-16 code units, not graphemes.",
+  "segmentCases": [
+    {
+      "text": "",
+      "segments": 1
+    },
+    {
+      "text": "plain text",
+      "segments": 1
+    },
+    {
+      "text": "*one*",
+      "segments": 1
+    },
+    {
+      "text": "*one* and `two`",
+      "segments": 2
+    },
+    {
+      "text": "*one* tail",
+      "segments": 2
+    },
+    {
+      "text": "**bold**",
+      "segments": 1
+    },
+    {
+      "text": "~~strike~~",
+      "segments": 1
+    },
+    {
+      "text": "`code`",
+      "segments": 1
+    },
+    {
+      "text": "```",
+      "segments": 1
+    },
+    {
+      "text": "```code```",
+      "segments": 2
+    },
+    {
+      "text": "_italic_",
+      "segments": 1
+    },
+    {
+      "text": "~tilde~",
+      "segments": 1
+    },
+    {
+      "text": "*one**two*",
+      "segments": 2
+    },
+    {
+      "text": "**bold**~~strike~~`code` tail",
+      "segments": 4
+    },
+    {
+      "text": "日本 *😀* 👨‍👩‍👧 _é_",
+      "segments": 2
+    },
+    {
+      "text": "**unclosed",
+      "segments": 1
+    },
+    {
+      "text": "*one*\nnext",
+      "segments": 2
+    }
+  ],
+  "timeoutCases": [
+    {
+      "text": "",
+      "hostTimeoutMs": 10000
+    },
+    {
+      "text": "plain text",
+      "hostTimeoutMs": 10200
+    },
+    {
+      "text": "*one*",
+      "hostTimeoutMs": 10100
+    },
+    {
+      "text": "*one* and `two`",
+      "hostTimeoutMs": 11050
+    },
+    {
+      "text": "*one* tail",
+      "hostTimeoutMs": 10950
+    },
+    {
+      "text": "**bold**",
+      "hostTimeoutMs": 10160
+    },
+    {
+      "text": "~~strike~~",
+      "hostTimeoutMs": 10200
+    },
+    {
+      "text": "`code`",
+      "hostTimeoutMs": 10120
+    },
+    {
+      "text": "```",
+      "hostTimeoutMs": 10060
+    },
+    {
+      "text": "```code```",
+      "hostTimeoutMs": 10950
+    },
+    {
+      "text": "_italic_",
+      "hostTimeoutMs": 10160
+    },
+    {
+      "text": "~tilde~",
+      "hostTimeoutMs": 10140
+    },
+    {
+      "text": "*one**two*",
+      "hostTimeoutMs": 10950
+    },
+    {
+      "text": "**bold**~~strike~~`code` tail",
+      "hostTimeoutMs": 12830
+    },
+    {
+      "text": "日本 *😀* 👨‍👩‍👧 _é_",
+      "hostTimeoutMs": 11170
+    },
+    {
+      "text": "**unclosed",
+      "hostTimeoutMs": 10200
+    },
+    {
+      "text": "*one*\nnext",
+      "hostTimeoutMs": 10950
+    },
+    {
+      "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "hostTimeoutMs": 25000
+    }
+  ]
+}

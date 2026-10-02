@@ -26,8 +26,18 @@ export interface SetKeyboardProfileResult {
 
 export interface ImeCommitActionResult extends BaseResult {
   partialApplication?: boolean;
+  /** Device upper bound on dispatched editing units; absent/zero means unknown or none. */
+  committedUnits?: number;
   /** Cancellation could not be acknowledged; the host must retain the temporary IME. */
   sessionUnsafe?: boolean;
+}
+
+/** Preserve old APK result shapes: absent/zero count conveys no known dispatch progress. */
+export function imeCommitUnitFields(
+  result: Pick<ImeCommitActionResult, "committedUnits">,
+): Pick<ImeCommitActionResult, "committedUnits"> {
+  const { committedUnits } = result;
+  return committedUnits !== undefined && committedUnits > 0 ? { committedUnits } : {};
 }
 
 // Match ImeCommitDriver's inline span boundaries. Only non-terminal spans incur
@@ -44,9 +54,21 @@ export function imeCommitSegmentCount(text: string): number {
   return matches.length + (last.index + last[0].length < text.length ? 1 : 0);
 }
 
+export const IME_COMMIT_TIMEOUT = {
+  baseMs: 10_000,
+  perSegmentMs: 750,
+  perCharMs: 20,
+  capMs: 25_000,
+} as const;
+
 export function imeCommitTimeoutMs(text: string): number {
   // Reserve 5s of the 30s tool budget for cancellation, IME restoration, and observation.
-  return Math.min(25_000, 10_000 + 750 * (imeCommitSegmentCount(text) - 1) + 20 * text.length);
+  return Math.min(
+    IME_COMMIT_TIMEOUT.capMs,
+    IME_COMMIT_TIMEOUT.baseMs +
+      IME_COMMIT_TIMEOUT.perSegmentMs * (imeCommitSegmentCount(text) - 1) +
+      IME_COMMIT_TIMEOUT.perCharMs * text.length,
+  );
 }
 
 export class CtrlProxyText extends SharedTextDelegate {
@@ -148,6 +170,7 @@ export class CtrlProxyText extends SharedTextDelegate {
         success: boolean;
         targetRequestId?: string;
         partialApplication?: boolean;
+        committedUnits?: number;
         error?: string;
       }>(this.context, {
         idPrefix: "cancelImeCommit",
@@ -161,6 +184,7 @@ export class CtrlProxyText extends SharedTextDelegate {
         return {
           ...result,
           partialApplication: result.partialApplication || ack.partialApplication,
+          ...imeCommitUnitFields(ack),
         };
       }
     } catch (error) {

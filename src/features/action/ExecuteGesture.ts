@@ -1,9 +1,15 @@
+import { StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, Point } from "../../models";
 import { FingerPath } from "../../models";
 import { GestureOptions } from "../../models";
-import { BaseVisualChange } from "./BaseVisualChange";
+import {
+  BaseVisualChange,
+  resolveDisplayFence,
+  type DisplayFence,
+  type DisplayFenceOption,
+} from "./BaseVisualChange";
 import { SwipeResult } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -12,6 +18,10 @@ import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+
+export interface FencedGestureOptions extends GestureOptions {
+  displayFence?: DisplayFence;
+}
 
 /**
  * Executes gestures using platform-specific commands
@@ -41,7 +51,7 @@ export class ExecuteGesture extends BaseVisualChange {
     y1: number,
     x2: number,
     y2: number,
-    options: GestureOptions = {},
+    options: FencedGestureOptions = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
@@ -73,7 +83,7 @@ export class ExecuteGesture extends BaseVisualChange {
     y1: number,
     x2: number,
     y2: number,
-    options: GestureOptions = {},
+    options: FencedGestureOptions = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
@@ -82,13 +92,17 @@ export class ExecuteGesture extends BaseVisualChange {
 
     // Use accessibility service swipe if requested
     if (scrollMode === "a11y") {
-      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, perf, signal);
+      return await this.executeA11ySwipe(x1, y1, x2, y2, duration, perf, signal, {
+        displayFence: options.displayFence,
+      });
     }
 
     // Default ADB mode
     try {
       await perf.track("adbInputSwipe", async () => {
         throwIfAborted(signal);
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        options.displayFence?.assertCurrent();
         await this.adb.executeCommand(
           `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
           undefined,
@@ -99,6 +113,9 @@ export class ExecuteGesture extends BaseVisualChange {
       });
       throwIfAborted(signal);
     } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
       throwIfAborted(signal);
       logger.warn(`[SWIPE] ADB swipe failed: ${errorMessage(error)}`);
       return { success: false, x1, y1, x2, y2, duration, error: errorMessage(error) };
@@ -134,7 +151,9 @@ export class ExecuteGesture extends BaseVisualChange {
     duration: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<SwipeResult> {
+    const fence = resolveDisplayFence(fenceOptions);
     let dispatched = false;
     const indeterminateResult = (reason: string): SwipeResult => ({
       success: false,
@@ -145,18 +164,20 @@ export class ExecuteGesture extends BaseVisualChange {
       duration,
       error: `Swipe outcome is indeterminate: the request was dispatched but no result was confirmed (${reason}). Do not retry automatically.`,
     });
+    let fallbackReason: string | undefined;
+    let fallbackSource = "failure";
     try {
       throwIfAborted(signal);
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-
       const result = await perf.track("a11ySwipe", async () => {
         throwIfAborted(signal);
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence.assertCurrent();
         return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf, undefined, () => {
           dispatched = true;
         });
       });
       throwIfAborted(signal);
-
       if (result.success) {
         logger.info(
           `[SWIPE] A11y swipe successful: deviceTotal=${result.totalTimeMs}ms, gesture=${result.gestureTimeMs}ms`,
@@ -171,95 +192,62 @@ export class ExecuteGesture extends BaseVisualChange {
           a11yTotalTimeMs: result.totalTimeMs,
           a11yGestureTimeMs: result.gestureTimeMs,
         };
-      } else {
-        if (dispatched) {
-          logger.warn(`[SWIPE] A11y swipe outcome indeterminate: ${result.error}`);
-          return indeterminateResult(result.error ?? "unknown error");
-        }
-        logger.warn(`[SWIPE] A11y swipe failed: ${result.error}, falling back to ADB`);
-        // Fall back to ADB on failure
-        try {
-          await perf.track("adbInputSwipeFallback", async () => {
-            throwIfAborted(signal);
-            await this.adb.executeCommand(
-              `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
-              undefined,
-              undefined,
-              undefined,
-              signal,
-            );
-          });
-          throwIfAborted(signal);
-        } catch (error) {
-          throwIfAborted(signal);
-          logger.warn(`[SWIPE] ADB fallback failed after a11y failure: ${errorMessage(error)}`);
-          return {
-            success: false,
-            x1,
-            y1,
-            x2,
-            y2,
-            duration,
-            fallbackReason: result.error,
-            error: `Accessibility swipe failed: ${result.error ?? "unknown error"}; ADB fallback failed: ${errorMessage(error)}`,
-          };
-        }
-        return {
-          success: true,
-          x1,
-          y1,
-          x2,
-          y2,
-          duration,
-          fallbackReason: result.error,
-        };
       }
+      if (dispatched) {
+        logger.warn(`[SWIPE] A11y swipe outcome indeterminate: ${result.error}`);
+        return indeterminateResult(result.error ?? "unknown error");
+      }
+      logger.warn(`[SWIPE] A11y swipe failed: ${result.error}, falling back to ADB`);
+      fallbackReason = result.error;
     } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
+      }
       throwIfAborted(signal);
       if (dispatched) {
         logger.warn(`[SWIPE] A11y swipe outcome indeterminate: ${error}`);
         return indeterminateResult(`${error}`);
       }
       logger.warn(`[SWIPE] A11y swipe exception: ${error}, falling back to ADB`);
-      // Fall back to ADB on exception
-      try {
-        await perf.track("adbInputSwipeFallback", async () => {
-          throwIfAborted(signal);
-          await this.adb.executeCommand(
-            `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
-            undefined,
-            undefined,
-            undefined,
-            signal,
-          );
-        });
+      fallbackReason = errorMessage(error);
+      fallbackSource = "exception";
+    }
+
+    // Both pre-dispatch rejection paths share the same fenced ADB fallback.
+    try {
+      await perf.track("adbInputSwipeFallback", async () => {
         throwIfAborted(signal);
-      } catch (fallbackError) {
-        throwIfAborted(signal);
-        logger.warn(
-          `[SWIPE] ADB fallback failed after a11y exception: ${errorMessage(fallbackError)}`,
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence.assertCurrent();
+        await this.adb.executeCommand(
+          `shell input swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+          undefined,
+          undefined,
+          undefined,
+          signal,
         );
-        return {
-          success: false,
-          x1,
-          y1,
-          x2,
-          y2,
-          duration,
-          fallbackReason: errorMessage(error),
-          error: `Accessibility swipe failed: ${errorMessage(error)}; ADB fallback failed: ${errorMessage(fallbackError)}`,
-        };
+      });
+      throwIfAborted(signal);
+    } catch (error) {
+      if (error instanceof StaleDisplayError) {
+        throw error;
       }
+      throwIfAborted(signal);
+      logger.warn(
+        `[SWIPE] ADB fallback failed after a11y ${fallbackSource}: ${errorMessage(error)}`,
+      );
       return {
-        success: true,
+        success: false,
         x1,
         y1,
         x2,
         y2,
         duration,
-        fallbackReason: errorMessage(error),
+        fallbackReason,
+        error: `Accessibility swipe failed: ${fallbackReason ?? "unknown error"}; ADB fallback failed: ${errorMessage(error)}`,
       };
     }
+    return { success: true, x1, y1, x2, y2, duration, fallbackReason };
   }
 
   /**
@@ -278,12 +266,22 @@ export class ExecuteGesture extends BaseVisualChange {
     y1: number,
     x2: number,
     y2: number,
-    options: GestureOptions = {},
+    options: FencedGestureOptions = {},
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<SwipeResult> {
     const duration = options.duration || 300;
-    return await this.executeXCTestSwipe(x1, y1, x2, y2, duration, perf, signal, options.timeoutMs);
+    return await this.executeXCTestSwipe(
+      x1,
+      y1,
+      x2,
+      y2,
+      duration,
+      perf,
+      signal,
+      options.timeoutMs,
+      { displayFence: options.displayFence },
+    );
   }
 
   /**
@@ -307,12 +305,16 @@ export class ExecuteGesture extends BaseVisualChange {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
     timeoutMs?: number,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<SwipeResult> {
+    const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
     const client = IOSCtrlProxyClient.getInstance(this.device);
 
     const result = await perf.track("xctestSwipe", async () => {
       throwIfAborted(signal);
+      // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+      fence?.assertCurrent();
       return await client.requestSwipe(
         x1,
         y1,
@@ -365,14 +367,16 @@ export class ExecuteGesture extends BaseVisualChange {
     path: Point[] | FingerPath[],
     duration: number = 300,
     signal?: AbortSignal,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<any> {
+    const fence = fenceOptions.displayFence;
     throwIfAborted(signal);
     // Platform-specific gesture execution (no observedInteraction - caller handles observation)
     switch (this.device.platform) {
       case "android":
-        return await this.executeAndroidGesture(path, duration, signal);
+        return await this.executeAndroidGesture(path, duration, signal, { displayFence: fence });
       case "ios":
-        return await this.executeiOSGesture(path, duration, signal);
+        return await this.executeiOSGesture(path, duration, signal, { displayFence: fence });
       default:
         throw unsupportedPlatformError(this.device.platform, "execute gesture");
     }
@@ -385,7 +389,9 @@ export class ExecuteGesture extends BaseVisualChange {
     path: Point[] | FingerPath[],
     duration: number,
     signal?: AbortSignal,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<any> {
+    const fence = fenceOptions.displayFence;
     // Generate and execute adb touch events
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
@@ -399,6 +405,8 @@ export class ExecuteGesture extends BaseVisualChange {
           const end = points[points.length - 1];
 
           throwIfAborted(signal);
+          // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+          fence?.assertCurrent();
           await this.adb.executeCommand(
             `shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${duration}`,
             undefined,
@@ -425,7 +433,9 @@ export class ExecuteGesture extends BaseVisualChange {
     path: Point[] | FingerPath[],
     duration: number,
     signal?: AbortSignal,
+    fenceOptions: DisplayFenceOption = {},
   ): Promise<any> {
+    const fence = fenceOptions.displayFence;
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
         const fingers = path as FingerPath[];
@@ -433,6 +443,8 @@ export class ExecuteGesture extends BaseVisualChange {
         if (swipe) {
           throwIfAborted(signal);
           const client = IOSCtrlProxyClient.getInstance(this.device);
+          // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+          fence?.assertCurrent();
           const result = await client.requestMultiFingerSwipe(
             swipe.start.x,
             swipe.start.y,
@@ -458,6 +470,8 @@ export class ExecuteGesture extends BaseVisualChange {
 
           throwIfAborted(signal);
           const client = IOSCtrlProxyClient.getInstance(this.device);
+          // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+          fence?.assertCurrent();
           await client.requestSwipe(start.x, start.y, end.x, end.y, duration);
           throwIfAborted(signal);
         }

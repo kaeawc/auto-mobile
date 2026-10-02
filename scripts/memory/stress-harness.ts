@@ -318,30 +318,13 @@ export async function createStressHarness(): Promise<StressHarness> {
         bounds: { left: 0, top: 0, right: 100, bottom: 50 },
         "resource-id": "com.example:id/button",
       };
-      await (tapOnElement as unknown as any).executeAndroidTap(
-        "tap",
-        10,
-        10,
-        50,
-        element,
-        undefined,
-        undefined,
-        undefined,
-        [],
-      );
+      await tapOnElement.executeAndroidTap("tap", 10, 10, 50, element);
     },
     swipeOn: async () => {
-      await (swipeOn as unknown as any).talkBackExecutor.executeSwipeGesture(
-        10,
-        10,
-        200,
-        10,
-        "right",
-        null,
-      );
+      await swipeOn["talkBackExecutor"].executeSwipeGesture(10, 10, 200, 10, "right", null);
     },
     inputText: async () => {
-      await (inputText as unknown as any).executeAndroidTextInput("memory-test");
+      await inputText["executeAndroidTextInput"]("memory-test");
     },
   };
 

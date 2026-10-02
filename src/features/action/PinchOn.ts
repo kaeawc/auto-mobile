@@ -202,6 +202,7 @@ export class PinchOn extends BaseVisualChange {
     }
 
     try {
+      const fence = options.display === undefined ? this.captureDisplayFence() : undefined;
       const target = await perf.track("resolveTarget", () =>
         this.resolveTarget(options, signal, displayTarget?.observation),
       );
@@ -219,6 +220,8 @@ export class PinchOn extends BaseVisualChange {
       const dispatchAndroidPinch = async () => {
         throwIfAborted(signal);
         displayTarget?.assertCurrent();
+        // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+        fence?.assertCurrent();
         const result = await AndroidCtrlProxyClient.getInstance(
           this.device,
           this.adbFactory,
@@ -243,6 +246,8 @@ export class PinchOn extends BaseVisualChange {
         async () => {
           throwIfAborted(signal);
           if (this.device.platform === "ios") {
+            // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+            fence?.assertCurrent();
             const result = await IOSCtrlProxyClient.getInstance(this.device).requestPinch(
               centerX,
               centerY,

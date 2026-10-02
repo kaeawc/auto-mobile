@@ -252,7 +252,7 @@ export class DragAndDrop extends BaseVisualChange {
       let iosDispatchTimestamp: number | undefined;
 
       const result = await this.observedInteraction(
-        async (observeResult: ObserveResult) => {
+        async (observeResult: ObserveResult, fence) => {
           throwIfAborted(signal);
           const viewHierarchy = await this.resolveViewHierarchy(signal);
           if (!viewHierarchy) {
@@ -264,6 +264,8 @@ export class DragAndDrop extends BaseVisualChange {
           const sourcePoint = this.geometry.getElementCenter(source);
           const targetPoint = this.geometry.getElementCenter(target);
 
+          // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+          fence?.assertCurrent();
           const dragResult = await this.executeDrag(
             sourcePoint.x,
             sourcePoint.y,

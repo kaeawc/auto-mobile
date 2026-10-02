@@ -1,3 +1,4 @@
+import type { DisplayFence } from "../action/BaseVisualChange";
 import type { Element } from "../../models/Element";
 import type { ScreenSize } from "../../models/ScreenSize";
 import {
@@ -15,6 +16,7 @@ import { FocusElementMatcher } from "./FocusElementMatcher";
 import { FocusPathCalculator, type FocusNavigationPath } from "./FocusPathCalculator";
 
 interface NavigationOptions {
+  displayFence?: DisplayFence;
   maxSwipes?: number;
   verificationInterval?: number;
   swipeDelay?: number;
@@ -202,7 +204,7 @@ export class FocusNavigationExecutor {
     }
 
     while (remainingSwipes > 0) {
-      await this.performFocusSwipe(driver, currentPath.direction, screenSize);
+      await this.performFocusSwipe(driver, currentPath.direction, screenSize, options.displayFence);
       totalSwipes += 1;
       remainingSwipes -= 1;
 
@@ -326,8 +328,11 @@ export class FocusNavigationExecutor {
     driver: FocusNavigationDriver,
     direction: "forward" | "backward",
     screenSize: ScreenSize,
+    fence?: DisplayFence,
   ): Promise<void> {
     const { x1, y1, x2, y2 } = this.getSwipeCoordinates(direction, screenSize);
+    // Once beforeSend lands, also pass this as the dispatch's beforeSend.
+    fence?.assertCurrent();
     const result = await driver.requestSwipe(
       x1,
       y1,

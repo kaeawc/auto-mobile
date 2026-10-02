@@ -1,9 +1,9 @@
+import type { FencedGestureOptions } from "../ExecuteGesture";
 import { unsupportedPlatformError } from "../../../models/ActionableError";
 import {
   ActionableError,
   BootedDevice,
   Element,
-  GestureOptions,
   ObserveResult,
   SwipeDirection,
   SwipeOnOptions,
@@ -39,7 +39,7 @@ import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordin
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { exponentialBackoff } from "../../../utils/Backoff";
 import { computeHierarchyFingerprint, waitForScrollIdle } from "../../../utils/scrollIdle";
-import type { ProgressCallback } from "../BaseVisualChange";
+import type { DisplayFence, ProgressCallback } from "../BaseVisualChange";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { throwIfAborted } from "../../../utils/toolUtils";
 
@@ -74,8 +74,9 @@ interface ScrollUntilVisibleDependencies {
   getDuration: (options: SwipeOnResolvedOptions) => number;
   resolveBoomerangConfig: (options: SwipeOnResolvedOptions) => BoomerangConfig | undefined;
   buildPredictionArgs: (options: SwipeOnOptions) => Record<string, unknown>;
+  captureDisplayFence?: () => DisplayFence;
   observedInteraction: <T>(
-    action: (observeResult: ObserveResult) => Promise<T>,
+    action: (observeResult: ObserveResult, fence?: DisplayFence) => Promise<T>,
     options: {
       changeExpected: boolean;
       timeoutMs?: number;
@@ -145,6 +146,7 @@ export class ScrollUntilVisible {
       `[SwipeOn] Starting scroll-until-visible: direction=${options.direction}, lookFor=${JSON.stringify(options.lookFor)}`,
     );
 
+    const observationFence = this.deps.captureDisplayFence?.();
     // Get initial observation
     let lastObservation = await perf.track("initialObserve", () =>
       this.deps.observeScreen.execute({
@@ -311,7 +313,7 @@ export class ScrollUntilVisible {
       );
 
       const boomerang = this.deps.resolveBoomerangConfig(options);
-      const gestureOptions: GestureOptions = {
+      const gestureOptions: FencedGestureOptions = {
         duration: activeDuration,
         scrollMode: options.scrollMode,
       };
@@ -319,7 +321,13 @@ export class ScrollUntilVisible {
       // Execute swipe with observedInteraction
       let iosDispatchTimestamp: number | undefined;
       const swipeResult = await this.deps.observedInteraction(
-        async () => {
+        async (_observeResult, fence) => {
+          gestureOptions.displayFence = {
+            assertCurrent: () => {
+              observationFence?.assertCurrent();
+              fence?.assertCurrent();
+            },
+          };
           throwIfAborted(signal);
           const swipeRunner =
             this.deps.device.platform === "ios"

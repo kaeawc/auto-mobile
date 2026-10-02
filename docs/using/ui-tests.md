@@ -317,7 +317,8 @@ A separate recording test starts on the opened panel, folds, then unfolds. On
 Pixel Fold it checks that `metadata.recordedPanel` remains the inner panel and
 that `metadata.transitions` reports the cover then inner changes in order.
 Both profiles require `startedAt + durationMs` to cover the post-unfold settled screenshot's host timestamp within a 100 ms timestamp/finalization tolerance.
-Resizable checks that the opened panel is reported. The stop result does not
+Resizable only checks span coverage and that a recording is produced, because
+its single display emits no `recordedPanel`/`transitions` metadata. The stop result does not
 expose measured video dimensions, so a size-based check for a letterboxed union
 canvas is deferred. Recordings and stop metadata are copied under
 `scratch/foldable-lane/recordings/`, included in the nightly failure artifact.

@@ -335,14 +335,15 @@ describeLane("foldable posture round trips through the daemon", () => {
     // Timer.now), comparable to recording startedAt on the same stable host clock.
     // Android freshness.actualTimestamp and updatedAt can use the device clock.
     assertRecordingSpansObservation(metadata, Date.parse(reopened.screenshotCapturedAt ?? ""));
-    expect(metadata?.recordedPanel?.key).toBeTruthy();
-    expect(metadata?.recordedPanel).toMatchObject({
-      key: opened!.display.key,
-      role: opened!.display.role,
-    });
     // config.resolution is a requested size, not measured output dimensions;
     // the stop result cannot assert the absence of a letterboxed union canvas.
+    // Resizable's single-display AVD leaves device.displays undefined, so no panel metadata is emitted.
     if (isFold) {
+      expect(metadata?.recordedPanel?.key).toBeTruthy();
+      expect(metadata?.recordedPanel).toMatchObject({
+        key: opened!.display.key,
+        role: opened!.display.role,
+      });
       expect(metadata?.recordedPanel?.role).toBe("inner");
       const transitions = metadata?.transitions ?? [];
       const toCover = transitions.findIndex(

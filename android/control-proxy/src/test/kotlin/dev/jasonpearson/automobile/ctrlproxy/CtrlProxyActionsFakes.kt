@@ -7,7 +7,7 @@ import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
  * override just those. Keeps partial test doubles concise now that the interface is non-optional.
  */
 open class NoOpCtrlProxyActions : CtrlProxyActions {
-  override fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {}
+  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {}
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {}
 
@@ -69,7 +69,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     cancel: Boolean,
   ) {}
 
-  override fun requestSetText(
+  override suspend fun requestSetText(
     requestId: String?,
     text: String,
     resourceId: String?,
@@ -231,7 +231,7 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     calls.add(name to args.toList())
   }
 
-  override fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
+  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
     record("requestHierarchy", disableAllFiltering, requestId)
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) =
@@ -319,14 +319,14 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     cancel: Boolean,
   ) = record("requestGestureEnd", requestId, gestureId, x, y, cancel)
 
-  override fun requestSetText(
+  override suspend fun requestSetText(
     requestId: String?,
     text: String,
     resourceId: String?,
     dismissKeyboard: Boolean,
   ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard)
 
-  override fun requestSetText(
+  override suspend fun requestSetText(
     requestId: String?,
     text: String,
     resourceId: String?,

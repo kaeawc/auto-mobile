@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,14 +18,14 @@ class HierarchyDebouncerErrorEmitTest {
    * the Error (#3608).
    */
   @Test
-  fun `extraction failure emits an Error on the flow`() {
+  fun `extraction failure emits an Error on the flow`() = runTest {
     val debouncer =
       HierarchyDebouncer(
         scope = CoroutineScope(Dispatchers.Unconfined),
         extractHierarchy = { _: Boolean, _: HierarchySnapshotOptions -> null as ViewHierarchy? },
       )
 
-    debouncer.extractNowBlocking()
+    debouncer.extractImmediately()
 
     val last = debouncer.hierarchyFlow.replayCache.lastOrNull()
     assertTrue("expected a HierarchyResult.Error, got $last", last is HierarchyResult.Error)

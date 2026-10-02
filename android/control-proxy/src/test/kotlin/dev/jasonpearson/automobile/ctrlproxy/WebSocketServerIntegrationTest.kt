@@ -1541,7 +1541,10 @@ class WebSocketServerIntegrationTest {
         messageHandler =
           CtrlProxyMessageHandler(
             object : NoOpCtrlProxyActions() {
-              override fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {
+              override suspend fun requestHierarchy(
+                disableAllFiltering: Boolean,
+                requestId: String?,
+              ) {
                 // Mirror production: success broadcasts a hierarchy_update with no requestId.
                 testScope.launch {
                   hierarchyServer.broadcast("""{"type":"hierarchy_update","hierarchy":{}}""")

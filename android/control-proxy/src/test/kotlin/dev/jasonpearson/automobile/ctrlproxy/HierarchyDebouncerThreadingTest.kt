@@ -150,8 +150,8 @@ class HierarchyDebouncerThreadingTest {
         extractHierarchy = { _, _ -> hierarchy("same") },
       )
 
-    debouncer.extractNowBlocking()
-    debouncer.extractNowBlocking()
+    debouncer.extractImmediately()
+    debouncer.extractImmediately()
     val state = debouncer.getState()
     assertTrue(state.inAnimationMode)
     assertEquals(time.now + 100, state.animationModeEndTime)
@@ -208,7 +208,7 @@ class HierarchyDebouncerThreadingTest {
     val caller =
       worker("fake-read-loop") { i ->
         when (i % 3) {
-          0 -> debouncer.extractNowBlocking()
+          0 -> runBlocking { debouncer.extractImmediately() }
           1 -> debouncer.extractNow()
           else -> debouncer.getState()
         }

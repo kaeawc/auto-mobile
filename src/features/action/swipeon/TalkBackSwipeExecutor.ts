@@ -8,6 +8,7 @@ import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDe
 import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
+import { getReturnDuration, resolveBoomerangConfig } from "./swipeTiming";
 import { Timer } from "../../../utils/interfaces/Timer";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -36,9 +37,6 @@ export function scrollActionForFingerDirection(
 }
 
 export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
-  private static readonly DEFAULT_APEX_PAUSE_MS = 100;
-  private static readonly DEFAULT_RETURN_SPEED = 1;
-
   constructor(
     private readonly device: BootedDevice,
     private readonly executeGesture: GestureExecutor,
@@ -379,7 +377,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   }
 
   getReturnDuration(forwardDuration: number, returnSpeed: number): number {
-    return Math.max(1, Math.round(forwardDuration / returnSpeed));
+    return getReturnDuration({ forwardDuration, returnSpeed });
   }
 
   sumOptional(a?: number, b?: number): number | undefined {
@@ -394,13 +392,6 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
     apexPause?: number;
     returnSpeed?: number;
   }): BoomerangConfig | undefined {
-    if (!options.boomerang) {
-      return undefined;
-    }
-
-    return {
-      apexPauseMs: options.apexPause ?? TalkBackSwipeExecutor.DEFAULT_APEX_PAUSE_MS,
-      returnSpeed: options.returnSpeed ?? TalkBackSwipeExecutor.DEFAULT_RETURN_SPEED,
-    };
+    return resolveBoomerangConfig(options);
   }
 }

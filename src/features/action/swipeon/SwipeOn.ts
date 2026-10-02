@@ -51,6 +51,12 @@ import {
   VoiceOverSwipeRunner,
   AutoTargetSelectorService,
 } from "./types";
+import {
+  resolveSwipeDuration,
+  resolveBoomerangConfig,
+  getReturnDuration,
+  validateSwipeTimingOptions,
+} from "./swipeTiming";
 import { OverlayDetector } from "./OverlayDetector";
 import { AutoTargetSelector } from "./AutoTargetSelector";
 import { TalkBackSwipeExecutor } from "./TalkBackSwipeExecutor";
@@ -110,9 +116,6 @@ export class SwipeOn extends BaseVisualChange {
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
   private visionAnalyzer: VisionAnalyzer | undefined;
-
-  private static readonly DEFAULT_APEX_PAUSE_MS = 100;
-  private static readonly DEFAULT_RETURN_SPEED = 1;
 
   constructor(
     device: BootedDevice,
@@ -266,11 +269,58 @@ export class SwipeOn extends BaseVisualChange {
       throw new ActionableError("Swipe container not found on selected display");
     }
     const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, bounds);
-    const duration = options.duration ?? 300;
+    const duration = resolveSwipeDuration({ ...options, geometry: this.geometry });
     const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
       this.accessibilityService,
       target.displayId,
     );
+    await this.dispatchDisplaySwipeLeg({ x1, y1, x2, y2, duration, target, useCtrlProxy, signal });
+    const boomerang = resolveBoomerangConfig(options);
+    let totalDuration = duration;
+    if (boomerang) {
+      if (boomerang.apexPauseMs > 0) {
+        await this.timer.sleep(boomerang.apexPauseMs);
+      }
+      target.assertCurrent();
+      throwIfAborted(signal);
+      const returnDuration = getReturnDuration({
+        forwardDuration: duration,
+        returnSpeed: boomerang.returnSpeed,
+      });
+      await this.dispatchDisplaySwipeLeg({
+        x1: x2,
+        y1: y2,
+        x2: x1,
+        y2: y1,
+        duration: returnDuration,
+        target,
+        useCtrlProxy,
+        signal,
+      });
+      totalDuration += boomerang.apexPauseMs + returnDuration;
+    }
+    return {
+      success: true,
+      targetType: bounds ? "element" : "screen",
+      x1,
+      y1,
+      x2,
+      y2,
+      duration: totalDuration,
+    };
+  }
+
+  private async dispatchDisplaySwipeLeg(options: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    duration: number;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    useCtrlProxy: boolean;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const { x1, y1, x2, y2, duration, target, useCtrlProxy, signal } = options;
     target.assertCurrent();
     throwIfAborted(signal);
     if (useCtrlProxy) {
@@ -301,15 +351,6 @@ export class SwipeOn extends BaseVisualChange {
         target.assertCurrent,
       );
     }
-    return {
-      success: true,
-      targetType: bounds ? "element" : "screen",
-      x1,
-      y1,
-      x2,
-      y2,
-      duration,
-    };
   }
 
   private selectedDisplayContainerBounds(
@@ -334,20 +375,14 @@ export class SwipeOn extends BaseVisualChange {
     if (options.display !== undefined) {
       try {
         const unsupported = (
-          [
-            "lookFor",
-            "focusTarget",
-            "boomerang",
-            "apexPause",
-            "returnSpeed",
-            "speed",
-            "autoTarget",
-            "includeSystemInsets",
-            "scrollMode",
-          ] as const
+          ["lookFor", "focusTarget", "autoTarget", "includeSystemInsets", "scrollMode"] as const
         ).find((key) => options[key] !== undefined);
         if (unsupported) {
           throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
+        }
+        const validationError = validateSwipeTimingOptions(options);
+        if (validationError) {
+          throw new ActionableError(validationError);
         }
         const target = await prepareTargetDisplayAction(
           this.device,
@@ -593,26 +628,7 @@ export class SwipeOn extends BaseVisualChange {
       }
     }
 
-    if (options.boomerang && options.lookFor) {
-      return "boomerang cannot be used with lookFor";
-    }
-
-    if (
-      !options.boomerang &&
-      (options.apexPause !== undefined || options.returnSpeed !== undefined)
-    ) {
-      return "apexPause/returnSpeed require boomerang=true";
-    }
-
-    if (options.apexPause !== undefined && options.apexPause < 0) {
-      return "apexPause must be >= 0";
-    }
-
-    if (options.returnSpeed !== undefined && options.returnSpeed <= 0) {
-      return "returnSpeed must be > 0";
-    }
-
-    return null;
+    return validateSwipeTimingOptions(options);
   }
 
   private buildPredictionArgs(options: SwipeOnOptions): Record<string, unknown> {
@@ -855,21 +871,10 @@ export class SwipeOn extends BaseVisualChange {
   }
 
   private getDuration(options: SwipeOnResolvedOptions): number {
-    if (options.duration !== undefined) {
-      return options.duration;
-    }
-
-    return this.geometry.getSwipeDurationFromSpeed(options.speed);
+    return resolveSwipeDuration({ ...options, geometry: this.geometry });
   }
 
   private resolveBoomerangConfig(options: SwipeOnResolvedOptions): BoomerangConfig | undefined {
-    if (!options.boomerang) {
-      return undefined;
-    }
-
-    return {
-      apexPauseMs: options.apexPause ?? SwipeOn.DEFAULT_APEX_PAUSE_MS,
-      returnSpeed: options.returnSpeed ?? SwipeOn.DEFAULT_RETURN_SPEED,
-    };
+    return resolveBoomerangConfig(options);
   }
 }

@@ -39,6 +39,7 @@ and re-observe instruction in `error`. Android gestures use CtrlProxy with the
 selected panel's logical `displayId` when the APK advertises `gesture_display_id_v1`.
 Older APKs retain `input touchscreen -d` routing for taps, swipes, and drags;
 `pinchOn` on a non-default display reports the existing support limitation.
+`swipeOn` on a non-default Android display honours `speed`, `boomerang`, `apexPause`, and `returnSpeed` (each boomerang leg re-checks the display fence), while `lookFor`, `focusTarget`, `autoTarget`, `includeSystemInsets`, and `scrollMode` are still rejected with `display`.
 Default-display gestures omit `displayId`. A CtrlProxy display-dispatch failure
 is returned directly without retrying through adb. iOS accepts only its live panel.
 On iOS, `tapOn`, `swipeOn`, `dragAndDrop`, and `pinchOn` validate the selected

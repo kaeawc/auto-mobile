@@ -1,3 +1,5 @@
+import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
 import {
@@ -168,3 +170,23 @@ describe("FailuresPushSocketServer device-session attribution (#5259)", () => {
     expect(pushed(socket).map((m) => m.data.occurrenceId)).toEqual(["occ-kept"]);
   });
 });
+
+class AuthFailuresServer extends FailuresPushSocketServer {
+  private subscribed = 0;
+  constructor(timer: FakeTimer, authenticator: StreamSocketAuthenticator) {
+    super("/fake/failures.sock", timer, { authenticator });
+  }
+  receive(socket: Socket, line: string): Promise<void> {
+    return this.processLine(socket, line);
+  }
+  protected override onSubscribed(): void {
+    this.subscribed++;
+  }
+  effects(): number {
+    return this.subscribed;
+  }
+}
+streamSubscribeAuthCases(
+  "failures-push",
+  (timer, authenticator) => new AuthFailuresServer(timer, authenticator),
+);

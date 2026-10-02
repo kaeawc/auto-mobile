@@ -1,3 +1,7 @@
+import {
+  createDefaultStreamSocketAuthenticator,
+  type StreamSocketAuthenticator,
+} from "./streamSocketAuth";
 import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
@@ -124,8 +128,20 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   constructor(
     socketPath: string = getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
+    options: { authenticator?: StreamSocketAuthenticator } = {},
   ) {
     super(socketPath, timer, "TelemetryPush");
+    this.authenticator =
+      options.authenticator ??
+      createDefaultStreamSocketAuthenticator("telemetryPush", { allowObserverSessions: true });
+  }
+
+  private readonly authenticator: StreamSocketAuthenticator;
+
+  protected override authorizeSubscription(request: Record<string, unknown>): void {
+    this.authenticator.authorize({
+      sessionUuid: typeof request.sessionUuid === "string" ? request.sessionUuid : undefined,
+    });
   }
 
   /** Wire the serial↔`deviceSessionUuid` resolver used to stamp and route events. */

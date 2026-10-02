@@ -2,9 +2,28 @@ package dev.jasonpearson.automobile.desktop.core.failures
 
 import dev.jasonpearson.automobile.desktop.core.time.FakeClock
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class FailuresDashboardTest {
+
+  @Test
+  fun `fallback client reads the supplied session provider through registration and release`() {
+    var sessionUuid: String? = null
+    val client = createFailuresDashboardPushClient(sessionUuidProvider = { sessionUuid })
+    try {
+      assertNull(client.subscribeRequest(type = null, severity = null).sessionUuid)
+      sessionUuid = "registered-desktop"
+      assertEquals(
+        sessionUuid,
+        client.subscribeRequest(type = null, severity = null).sessionUuid,
+      )
+      sessionUuid = null
+      assertNull(client.subscribeRequest(type = null, severity = null).sessionUuid)
+    } finally {
+      client.dispose()
+    }
+  }
 
   @Test
   fun `formatTimeAgo returns Just now for timestamps less than 1 minute ago`() {

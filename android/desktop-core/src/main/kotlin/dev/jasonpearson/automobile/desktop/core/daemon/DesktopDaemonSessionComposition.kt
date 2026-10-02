@@ -4,12 +4,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +31,7 @@ data class DesktopDaemonSessionBinding(val deviceId: String, val platform: Strin
 data class DesktopDaemonSessionState(
   val session: DesktopDaemonSession?,
   val boundDeviceId: String?,
+  val isRegistered: Boolean = false,
 ) {
   val sessionUuidProvider: () -> String?
     get() = session?.sessionUuidProvider ?: { null }
@@ -76,24 +79,33 @@ fun rememberDesktopDaemonSession(
     val generation = bindingGeneration.incrementAndGet()
     val target = binding.value
     boundDeviceId = null
-    if (target == null) return@LaunchedEffect
     if (session == null) {
-      boundDeviceId = target.deviceId
+      boundDeviceId = target?.deviceId
       return@LaunchedEffect
     }
 
     var refreshAfterRecovery = false
+    var failureLogged = false
     while (isActive && bindingGeneration.get() == generation) {
       val registered = runCatching {
         bindingMutex.withLock {
           if (bindingGeneration.get() != generation) return@LaunchedEffect
           withContext(Dispatchers.IO) {
-            session.client.setActiveDevice(target.deviceId, target.platform)
+            if (target == null) {
+              session.ensureRegistered()
+            } else {
+              session.client.setActiveDevice(target.deviceId, target.platform)
+              session.deviceBound()
+            }
           }
         }
       }
         .onFailure { error ->
-          LOG.warn("Failed to bind desktop session to ${target.deviceId}: ${error.message}")
+          if (error is CancellationException) throw error
+          if (!failureLogged) {
+            LOG.warn("Failed to register desktop session: ${error.message}")
+            failureLogged = true
+          }
         }
         .isSuccess
       if (bindingGeneration.get() != generation) return@LaunchedEffect
@@ -102,7 +114,8 @@ fun rememberDesktopDaemonSession(
         continue
       }
 
-      boundDeviceId = target.deviceId
+      failureLogged = false
+      boundDeviceId = target?.deviceId
       if (refreshAfterRecovery) {
         refreshAfterRecovery =
           !runCatching { onDaemonRecovered() }
@@ -116,6 +129,7 @@ fun rememberDesktopDaemonSession(
         withContext(Dispatchers.IO) { session.heartbeat() }
       }
         .onFailure { error ->
+          if (error is CancellationException) throw error
           LOG.warn("Desktop daemon session lapsed, re-registering: ${error.message}")
         }
         .isSuccess
@@ -126,5 +140,10 @@ fun rememberDesktopDaemonSession(
     }
   }
 
-  return DesktopDaemonSessionState(session = session, boundDeviceId = boundDeviceId)
+  val registered = session?.isRegistered?.collectAsState()?.value ?: false
+  return DesktopDaemonSessionState(
+    session = session,
+    boundDeviceId = boundDeviceId,
+    isRegistered = registered,
+  )
 }

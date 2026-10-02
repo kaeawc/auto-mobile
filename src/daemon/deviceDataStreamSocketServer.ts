@@ -495,6 +495,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     timer: Timer = defaultTimer,
     private readonly authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
       "observationStream",
+      { allowObserverSessions: true },
     ),
   ) {
     super(socketPath, timer, "DeviceDataStream");
@@ -1149,53 +1150,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
     // Handle subscribe with onSubscriberConnected callback
     if (request.command === "subscribe") {
-      let deviceSessionUuid: string | null;
-      try {
-        // JSON parsing does not validate fields at runtime. Do it before the
-        // base server creates a subscription so malformed keys cannot quietly
-        // become all-device subscriptions.
-        deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
-      } catch (error) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: errorMessage(error),
-          ...deviceSessionErrorFields(error),
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      const subscribedDeviceId =
-        deviceSessionUuid === null
-          ? null
-          : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
-      if (deviceSessionUuid !== null && subscribedDeviceId === null) {
-        const errorResponse: SubscriptionResponse = {
-          id: request.id,
-          type: "error",
-          success: false,
-          error: this.deviceSessionResolver.getSessionError(deviceSessionUuid).message,
-          ...deviceSessionErrorFields(
-            this.deviceSessionResolver.getSessionError(deviceSessionUuid),
-          ),
-        };
-        this.sendJson(socket, errorResponse);
-        return;
-      }
-
-      // Let base class handle the subscription
-      await super.processLine(socket, line);
-
-      // The wire now targets a deviceSessionUuid; the cadence/connect machinery is
-      // serial-scoped, so resolve to the current serial. A missing UUID is an
-      // intentional all-device subscription; an unresolvable UUID schedules no
-      // device and must not be treated as that all-device case.
-      if (deviceSessionUuid === null || subscribedDeviceId !== null) {
-        this.notifyScreenshotCadenceChanged(subscribedDeviceId);
-        this.notifyHierarchyCadenceChanged(subscribedDeviceId);
-      }
+      await this.handleObservationSubscribe(socket, request, line);
       return;
     }
 
@@ -1246,6 +1201,60 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
     // Delegate to base class for standard commands (subscribe, unsubscribe, pong)
     await super.processLine(socket, line);
+  }
+
+  private async handleObservationSubscribe(
+    socket: Socket,
+    request: { id?: string; sessionUuid?: string; deviceSessionUuid?: string },
+    line: string,
+  ): Promise<void> {
+    let deviceSessionUuid: string | null;
+    try {
+      this.authenticator.authorize({ sessionUuid: request.sessionUuid });
+      // JSON parsing does not validate fields at runtime. Do it before the
+      // base server creates a subscription so malformed keys cannot quietly
+      // become all-device subscriptions.
+      deviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+    } catch (error) {
+      logger.warn(`Observation subscribe rejected: ${errorMessage(error)}`, error);
+      const errorResponse: SubscriptionResponse = {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: errorMessage(error),
+        ...deviceSessionErrorFields(error),
+      };
+      this.sendJson(socket, errorResponse);
+      return;
+    }
+
+    const subscribedDeviceId =
+      deviceSessionUuid === null
+        ? null
+        : this.deviceSessionResolver.resolveDeviceId(deviceSessionUuid);
+    if (deviceSessionUuid !== null && subscribedDeviceId === null) {
+      const errorResponse: SubscriptionResponse = {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: this.deviceSessionResolver.getSessionError(deviceSessionUuid).message,
+        ...deviceSessionErrorFields(this.deviceSessionResolver.getSessionError(deviceSessionUuid)),
+      };
+      this.sendJson(socket, errorResponse);
+      return;
+    }
+
+    // Let base class handle the subscription
+    await super.processLine(socket, line);
+
+    // The wire now targets a deviceSessionUuid; the cadence/connect machinery is
+    // serial-scoped, so resolve to the current serial. A missing UUID is an
+    // intentional all-device subscription; an unresolvable UUID schedules no
+    // device and must not be treated as that all-device case.
+    if (deviceSessionUuid === null || subscribedDeviceId !== null) {
+      this.notifyScreenshotCadenceChanged(subscribedDeviceId);
+      this.notifyHierarchyCadenceChanged(subscribedDeviceId);
+    }
   }
 
   protected onSubscribed(subscriptionId: string, filter: DeviceDataFilter, _socket: Socket): void {

@@ -1,4 +1,5 @@
 import type { StreamSubscriptionIdentity } from "./streamSubscriptionPolicy";
+import type { ObserverSessionStore } from "./observerSessionRegistry";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { ActionableError } from "../models";
 import { DaemonState } from "./daemonState";
@@ -154,7 +155,8 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
       throw new ActionableError(
         `${this.operation} requires an authenticated daemon session. Connect through the AutoMobile ` +
           `daemon and include its sessionUuid on the request; set ${STREAM_SOCKET_AUTH_ENV}=0 to disable ` +
-          `this check (not recommended).`,
+          `this check (not recommended).` +
+          this.registrationGuidance,
       );
     }
 
@@ -170,20 +172,30 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     // identity the daemon tracks, exactly as the main socket does (#4611/#4655).
     const baseSessionUuid = this.resolveSessionIdentity(uuid) ?? uuid;
     const session = sessionManager.getSession(baseSessionUuid);
-    if (!session) {
+    if (!session && !this.admitObserver(baseSessionUuid, sessionManager)) {
       throw new ActionableError(
-        `${this.operation} rejected: session ${uuid} is not an active daemon session (unknown or expired).`,
+        `${this.operation} rejected: session ${uuid} is not an active daemon session (unknown or expired).` +
+          this.registrationGuidance,
       );
     }
     if (isSessionReleasing(sessionManager, baseSessionUuid, session)) {
       throw new ActionableError(
-        `${this.operation} rejected: session ${uuid} is not an active daemon session (being released).`,
+        `${this.operation} rejected: session ${uuid} is not an active daemon session (being released).` +
+          this.registrationGuidance,
       );
     }
 
     if (deviceId) {
       this.assertDeviceScope(sessionManager, deviceId, baseSessionUuid, requireOwnership);
     }
+  }
+
+  protected get registrationGuidance(): string {
+    return "";
+  }
+
+  protected admitObserver(_sessionUuid: string, _manager: StreamAuthSessionManager): boolean {
+    return false;
   }
 
   /**
@@ -215,6 +227,36 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
   }
 }
 
+export interface ObserverStreamAuthenticatorOptions {
+  resolveSessionManager: () => StreamAuthSessionManager | null;
+  operation: string;
+  env?: NodeJS.ProcessEnv;
+  resolveObserverRegistry: () => Pick<ObserverSessionStore, "resolveObserverScope"> | null;
+}
+
+/** Opt-in admission for observation and push paths only; device scope remains unchanged. */
+export class ObserverAdmittingStreamAuthenticator extends SessionScopedStreamAuthenticator {
+  constructor(private readonly options: ObserverStreamAuthenticatorOptions) {
+    super(options.resolveSessionManager, options.operation, options.env);
+  }
+
+  protected override get registrationGuidance(): string {
+    return ` Register a session with daemon/registerSession (or acquire a device session) and include its sessionUuid; set ${STREAM_SOCKET_AUTH_ENV}=0 to disable this check (not recommended).`;
+  }
+
+  protected override admitObserver(
+    sessionUuid: string,
+    manager: StreamAuthSessionManager,
+  ): boolean {
+    // A releasing device session cannot fall back to a stale observer registration.
+    return (
+      !manager.getReleasingSession?.(sessionUuid) &&
+      (this.options.resolveObserverRegistry()?.resolveObserverScope(sessionUuid).kind ??
+        "denied") !== "denied"
+    );
+  }
+}
+
 /**
  * The production authenticator, wired to the daemon's singleton session
  * registry. Fails closed: when the daemon is not initialized the registry is
@@ -222,9 +264,21 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
  */
 export function createDefaultStreamSocketAuthenticator(
   operation: string,
+  options: { allowObserverSessions?: boolean } = {},
 ): StreamSocketAuthenticator {
-  return new SessionScopedStreamAuthenticator(() => {
+  const resolveSessionManager = () => {
     const state = DaemonState.getInstance();
     return state.isInitialized() ? state.getSessionManager() : null;
-  }, operation);
+  };
+  if (options.allowObserverSessions) {
+    return new ObserverAdmittingStreamAuthenticator({
+      resolveSessionManager,
+      operation,
+      resolveObserverRegistry: () => {
+        const state = DaemonState.getInstance();
+        return state.isInitialized() ? (state.getObserverSessionRegistry() ?? null) : null;
+      },
+    });
+  }
+  return new SessionScopedStreamAuthenticator(resolveSessionManager, operation);
 }

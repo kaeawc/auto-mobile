@@ -8,7 +8,9 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.daemon.StreamSessionRejectedException
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
+import kotlin.test.assertFailsWith
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -56,6 +58,30 @@ class DeviceThumbnailTest {
     )
     assertEquals("desktop-session", receivedProviders.last()())
     assertEquals(listOf(1_000L, 2_000L), delays) // exponential backoff between the failed attempts
+  }
+
+  @Test
+  fun `production screenshot source makes no requests before session registration`() = runTest {
+    assertNull(ObservationScreenshotSource.latest("unused-device") { null })
+  }
+
+  @Test
+  fun `session rejection stops thumbnail retry after one attempt`() = runTest {
+    var attempts = 0
+    val source =
+      object : DeviceThumbnailScreenshotSource {
+        override suspend fun latest(
+          deviceId: String,
+          sessionUuidProvider: () -> String?,
+        ): ImageBitmap? {
+          attempts++
+          throw StreamSessionRejectedException("register with daemon/registerSession")
+        }
+      }
+    assertFailsWith<StreamSessionRejectedException> {
+      captureScreenshotWithRetry("d", source, { "session" }, delayMs = { error("must not retry") })
+    }
+    assertEquals(1, attempts)
   }
 
   @Test

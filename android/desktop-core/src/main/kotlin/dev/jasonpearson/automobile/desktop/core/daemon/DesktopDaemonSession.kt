@@ -10,7 +10,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  * separate stream sockets therefore authenticate as the same owner. Releasing is idempotent so a
  * Compose disposal and an explicit process swap cannot double-release the daemon session.
  */
-class DesktopDaemonSession(val client: McpDaemonClient) : AutoCloseable {
+class DesktopDaemonSession(
+  val client: McpDaemonClient,
+  private val registration: DesktopSessionRegistration =
+    DesktopSessionRegistration(
+      register = {
+        check(
+          client.registerSession(requireNotNull(client.sessionUuid), "AutoMobile Desktop").accepted
+        ) {
+          "Daemon rejected desktop session registration"
+        }
+      },
+      heartbeat = { client.heartbeatSession() },
+    ),
+) : AutoCloseable {
 
   val sessionUuid: String =
     requireNotNull(client.sessionUuid) { "DesktopDaemonSession requires a session-bound client" }
@@ -18,18 +31,29 @@ class DesktopDaemonSession(val client: McpDaemonClient) : AutoCloseable {
   private val released = AtomicBoolean(false)
 
   /** Provider passed to stream clients; released sessions fail closed by omitting the UUID. */
-  val sessionUuidProvider: () -> String?
-    get() = { sessionUuid.takeUnless { released.get() } }
+  val sessionUuidProvider: () -> String? = {
+    sessionUuid.takeIf { registration.isRegistered.value && !released.get() }
+  }
+
+  val isRegistered = registration.isRegistered
+
+  fun ensureRegistered() {
+    check(!released.get()) { "Desktop session has been released" }
+    registration.ensureRegistered()
+  }
+
+  fun deviceBound() = registration.deviceBound()
 
   fun release() {
     if (released.compareAndSet(false, true)) {
+      registration.clear()
       client.releaseSession()
     }
   }
 
   fun heartbeat() {
     if (!released.get()) {
-      client.heartbeatSession()
+      registration.heartbeat()
     }
   }
 

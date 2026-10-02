@@ -92,6 +92,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingConfigClien
 import dev.jasonpearson.automobile.desktop.core.daemon.VideoRecordingSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.WebRtcStreamSocketClient
+import dev.jasonpearson.automobile.desktop.core.daemon.isStreamSessionRejection
 import dev.jasonpearson.automobile.desktop.core.daemon.rememberDesktopDaemonSession
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
@@ -1347,13 +1348,21 @@ fun AutoMobileContent(
 
   // Create, connect, and dispose socket clients based on active device and data source mode.
   // Clients are only allocated when a device is connected, eliminating startup overhead.
-  DisposableEffect(activeDeviceId, dataSourceMode) {
+  DisposableEffect(
+    activeDeviceId,
+    dataSourceMode,
+    desktopDaemonSession,
+    desktopSessionState.isRegistered,
+  ) {
     val deviceId = activeDeviceId
     var obsClient: ObservationStreamClient? = null
     var failClient: FailuresPushSocketClient? = null
     var telClient: TelemetryPushSocketClient? = null
 
-    if (deviceId != null) {
+    if (
+      deviceId != null &&
+        (dataSourceMode != DataSourceMode.Real || desktopSessionState.isRegistered)
+    ) {
       obsClient =
         ObservationStreamClient(
           sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null }
@@ -1367,12 +1376,14 @@ fun AutoMobileContent(
       observationStreamClient = obsClient
 
       if (dataSourceMode == DataSourceMode.Real) {
-        failClient = FailuresPushSocketClient()
+        failClient =
+          FailuresPushSocketClient(sessionUuidProvider = desktopSessionState.sessionUuidProvider)
         LOG.info("Connecting failures push client")
         failClient.connect()
         failuresPushClient = failClient
 
-        telClient = TelemetryPushSocketClient()
+        telClient =
+          TelemetryPushSocketClient(sessionUuidProvider = desktopSessionState.sessionUuidProvider)
         LOG.info("Connecting telemetry push client for device: $deviceId")
         telClient.connect(deviceId = deviceId)
         telemetryPushClient = telClient
@@ -1404,6 +1415,9 @@ fun AutoMobileContent(
     val deviceId = activeDeviceId ?: return@LaunchedEffect
     while (true) {
       kotlinx.coroutines.delay(5000)
+      val state = client.connectionState.value
+      if (state is ConnectionState.Error && isStreamSessionRejection(state.message))
+        return@LaunchedEffect
       if (!client.isConnected()) {
         if (!ObservationStreamClient.socketExists()) {
           LOG.info("Observation stream socket missing, daemon appears down - skipping reconnect")
@@ -1433,6 +1447,9 @@ fun AutoMobileContent(
     val client = failuresPushClient ?: return@LaunchedEffect
     while (true) {
       kotlinx.coroutines.delay(5000)
+      val state = client.connectionState.value
+      if (state is ConnectionState.Error && isStreamSessionRejection(state.message))
+        return@LaunchedEffect
       if (!client.isConnected()) {
         LOG.info("Failures push disconnected, attempting reconnect")
         client.connect()
@@ -1445,6 +1462,9 @@ fun AutoMobileContent(
     val client = telemetryPushClient ?: return@LaunchedEffect
     while (true) {
       kotlinx.coroutines.delay(5000)
+      val state = client.connectionState.replayCache.lastOrNull()
+      if (state is ConnectionState.Error && isStreamSessionRejection(state.message))
+        return@LaunchedEffect
       if (!client.isConnected()) {
         if (!TelemetryPushSocketClient.socketExists()) {
           LOG.info("Telemetry push socket missing, daemon appears down - skipping reconnect")

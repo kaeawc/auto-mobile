@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import {
-  startDeviceDataStreamSocketServer,
+  DeviceDataStreamSocketServer,
+  installDeviceDataStreamSocketServerForTesting,
   stopDeviceDataStreamSocketServer,
 } from "../../../../src/daemon/deviceDataStreamSocketServer";
 import type { BootedDevice } from "../../../../src/models";
@@ -39,13 +40,12 @@ describe("IOSCtrlProxyClient observation-stream provenance", () => {
 
   const startStreamServer = async (): Promise<FakeSocket> => {
     await stopDeviceDataStreamSocketServer();
-    const server = await startDeviceDataStreamSocketServer(fakeTimer);
+    const server = new DeviceDataStreamSocketServer("/fake/device-data-stream.sock", fakeTimer, {
+      authorize: () => {},
+    });
+    installDeviceDataStreamSocketServerForTesting(server);
     const socket = new FakeSocket();
-    await (
-      server as unknown as {
-        processLine(socket: FakeSocket, line: string): Promise<void>;
-      }
-    ).processLine(
+    await server.dispatchLineForTesting(
       socket,
       JSON.stringify({
         id: "subscribe-capture-provenance",

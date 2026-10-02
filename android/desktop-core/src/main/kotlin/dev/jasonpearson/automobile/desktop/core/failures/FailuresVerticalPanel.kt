@@ -39,6 +39,7 @@ fun FailuresVerticalPanel(
   dataSourceMode: DataSourceMode = DataSourceMode.Fake,
   clientProvider: (() -> AutoMobileClient)? = null,
   streamingDataSource: StreamingFailuresDataSourceInterface? = null,
+  sessionUuidProvider: (() -> String?)? = null,
   failuresPushClient: FailuresPushSocketClient? = null,
   modifier: Modifier = Modifier,
 ) {
@@ -78,6 +79,7 @@ fun FailuresVerticalPanel(
         clientProvider = clientProvider,
         streamingDataSource = streamingDataSource,
         failuresPushClient = failuresPushClient,
+        sessionUuidProvider = sessionUuidProvider,
         modifier = Modifier.fillMaxSize(),
       )
     }

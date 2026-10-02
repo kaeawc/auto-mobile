@@ -93,7 +93,7 @@ private class SocketChannelTransport(private val channel: SocketChannel) :
 class ObservationStreamClient(
   private val transportFactory: ObservationStreamTransportFactory = SocketChannelTransportFactory,
   private val socketPathProvider: () -> String = { getSocketPath() },
-  private val sessionUuidProvider: () -> String? = { null },
+  private val sessionUuidProvider: (() -> String?)? = null,
   // Test seam: invoked when a readMessages() invocation returns (superseded or not), so a test can
   // await a specific read loop's completion deterministically. No-op in production.
   private val onReadLoopExit: () -> Unit = {},
@@ -101,7 +101,7 @@ class ObservationStreamClient(
   // is written. No-op in production.
   private val beforeStorageRequestSend: () -> Unit = {},
 ) : ObservationStream {
-  internal fun authenticatedSessionUuid(): String? = sessionUuidProvider()
+  internal fun authenticatedSessionUuid(): String? = sessionUuidProvider?.invoke()
 
   companion object {
     private const val STORAGE_UPDATE_BUFFER_CAPACITY = 64
@@ -243,7 +243,11 @@ class ObservationStreamClient(
    *
    * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
    */
+  @Volatile private var sessionRejected = false
+
   override fun connect(deviceId: String?, deviceSessionUuid: String?) {
+    if (sessionRejected || (sessionUuidProvider != null && authenticatedSessionUuid() == null))
+      return
     if (_connectionState.value.isConnected) {
       log.info("Already connected to observation stream")
       return
@@ -382,6 +386,7 @@ class ObservationStreamClient(
       StreamRequest(
         id = UUID.randomUUID().toString(),
         command = "subscribe",
+        sessionUuid = authenticatedSessionUuid(),
         deviceId = deviceId,
         deviceSessionUuid = deviceSessionUuid,
         screenshotIntervalMs = requestedScreenshotIntervalMs,
@@ -458,6 +463,8 @@ class ObservationStreamClient(
     request: StreamRequest,
     expectedConnectionGeneration: Long? = null,
   ): Boolean {
+    if (sessionRejected || (sessionUuidProvider != null && authenticatedSessionUuid() == null))
+      return false
     val message = json.encodeToString(serializer<StreamRequest>(), request)
     return synchronized(writerLock) {
       if (expectedConnectionGeneration == null) {
@@ -1022,7 +1029,12 @@ class ObservationStreamClient(
     streamSubscriptionRequestId = null
     subscriptionId = null
     pendingCadenceUpdate = false
-    _connectionState.update { ConnectionState.Disconnected(error ?: "Subscription failed") }
+    sessionRejected = isStreamSessionRejection(error)
+    _connectionState.update {
+      if (sessionRejected) ConnectionState.Error(error ?: "Session registration required")
+      else ConnectionState.Disconnected(error ?: "Subscription failed")
+    }
+    if (sessionRejected) releaseActiveTransport()
     log.warn("Subscription failed: ${error ?: "unknown error"}")
     return true
   }

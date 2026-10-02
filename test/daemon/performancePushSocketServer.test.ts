@@ -1,3 +1,5 @@
+import { streamSubscribeAuthCases } from "../helpers/streamSubscribeAuthCases";
+import type { StreamSocketAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
 import {
@@ -616,3 +618,23 @@ describe("PerformancePushSocketServer", () => {
     });
   });
 });
+
+class AuthPerformanceServer extends PerformancePushSocketServer {
+  private subscribed = 0;
+  constructor(timer: FakeTimer, authenticator: StreamSocketAuthenticator) {
+    super("/fake/performance.sock", timer, { authenticator });
+  }
+  receive(socket: Socket, line: string): Promise<void> {
+    return this.processLine(socket, line);
+  }
+  protected override onSubscribed(): void {
+    this.subscribed++;
+  }
+  effects(): number {
+    return this.subscribed;
+  }
+}
+streamSubscribeAuthCases(
+  "performance-push",
+  (timer, authenticator) => new AuthPerformanceServer(timer, authenticator),
+);

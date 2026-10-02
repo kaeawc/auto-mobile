@@ -538,7 +538,9 @@ fun AutoMobileDesktopApp(
                     WorkspaceFacet(
                       column,
                       tool,
-                      sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                      // Capture registration readiness so a newly registered session recomposes
+                      // the facets even though the session's underlying provider is stable.
+                      sessionUuidProvider = { desktopSessionState.sessionUuidProvider() },
                     )
                   },
                   observationStreamFactory = {
@@ -589,6 +591,7 @@ fun AutoMobileDesktopApp(
                         column = column,
                         clientProvider = workspaceControlClientProvider,
                         enabled = controlActive,
+                        sessionUuidProvider = { desktopSessionState.sessionUuidProvider() },
                       )
                     DeviceStreamView(
                       column,
@@ -715,15 +718,15 @@ private fun WorkspaceFacet(
   sessionUuidProvider: () -> String? = { null },
 ) {
   when (tool) {
-    Tool.Logs -> LogsFacet(column)
+    Tool.Logs -> LogsFacet(column, sessionUuidProvider = sessionUuidProvider)
     // Storage works on both platforms now that iOS key-value mutations carry the platform to the
     // daemon and target the correct iOS device (#4708).
     Tool.Storage -> StorageFacet(column, sessionUuidProvider = sessionUuidProvider)
     // Network reads per-device via the getNetworkGraph MCP tool call (deviceId is an argument),
     // not the broadcast observation stream, so panes don't cross-contaminate.
     Tool.Network -> NetworkFacet(column)
-    Tool.Performance -> PerformanceFacet(column)
-    Tool.Failures -> FailuresFacet(column)
+    Tool.Performance -> PerformanceFacet(column, sessionUuidProvider = sessionUuidProvider)
+    Tool.Failures -> FailuresFacet(column, sessionUuidProvider = sessionUuidProvider)
     // Navigation is app-scoped (#4837 Phase C): the facet resolves the pane device's foreground app
     // from the stream, then pulls that app's persisted graph by appId — so same-app panes share the
     // graph and a foreign broadcast can't overwrite a pane (the #4838 contamination).

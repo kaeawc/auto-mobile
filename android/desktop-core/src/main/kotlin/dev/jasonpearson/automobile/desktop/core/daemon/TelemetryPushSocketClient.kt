@@ -74,6 +74,11 @@ private class ChannelTelemetrySocket(path: String) : TelemetrySocket {
  *
  * Socket path: ~/.auto-mobile/telemetry-push.sock
  */
+internal data class TelemetryPushSocketOptions(
+  val beforeSocketPublish: () -> Unit = {},
+  val sessionUuidProvider: (() -> String?)? = null,
+)
+
 class TelemetryPushSocketClient
 internal constructor(
   private val openSocket: (String) -> TelemetrySocket,
@@ -81,15 +86,17 @@ internal constructor(
   private val scope: CoroutineScope,
   private val socketAvailable: (String) -> Boolean,
   private val log: Logger = LoggerFactory.getLogger(TelemetryPushSocketClient::class.java),
-  private val beforeSocketPublish: () -> Unit = {},
+  private val options: TelemetryPushSocketOptions = TelemetryPushSocketOptions(),
 ) : TelemetryPushClient {
-  constructor() :
-    this(
-      ::ChannelTelemetrySocket,
-      TelemetryRetryDelay { delay(it) },
-      CoroutineScope(SupervisorJob() + Dispatchers.IO),
-      { Files.exists(Path.of(it)) },
-    )
+  constructor(
+    sessionUuidProvider: (() -> String?)? = null
+  ) : this(
+    ::ChannelTelemetrySocket,
+    TelemetryRetryDelay { delay(it) },
+    CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    { Files.exists(Path.of(it)) },
+    options = TelemetryPushSocketOptions(sessionUuidProvider = sessionUuidProvider),
+  )
 
   companion object {
     internal const val MAX_RECONNECT_ATTEMPTS = 5
@@ -98,6 +105,8 @@ internal constructor(
 
     fun socketExists(): Boolean = Files.exists(Path.of(getSocketPath()))
   }
+
+  @Volatile private var sessionRejected = false
 
   private val json = DaemonJson
   private val socket = AtomicReference<TelemetrySocket?>()
@@ -146,6 +155,11 @@ internal constructor(
    * @param deviceId Optional device ID for server-side filtering. Null subscribes to all devices.
    */
   override fun connect(deviceId: String?) {
+    if (
+      sessionRejected ||
+        (options.sessionUuidProvider != null && options.sessionUuidProvider.invoke() == null)
+    )
+      return
     synchronized(connectionLock) {
       if (_isConnected || connectionJob?.isActive == true) {
         log.info("Telemetry push connection already active")
@@ -172,7 +186,7 @@ internal constructor(
         }
         currentSocket = openSocket(socketPath)
         currentCoroutineContext().ensureActive()
-        beforeSocketPublish()
+        options.beforeSocketPublish()
         synchronized(connectionLock) {
           // Cancellation may race the last ensureActive check. Only this attempt may publish.
           if (generation != connectionGeneration) return
@@ -254,14 +268,17 @@ internal constructor(
     scope.coroutineContext[Job]?.cancel()
   }
 
+  internal fun subscribeRequest(): TelemetryPushRequest =
+    TelemetryPushRequest(
+      id = UUID.randomUUID().toString(),
+      command = "subscribe",
+      sessionUuid = options.sessionUuidProvider?.invoke(),
+      category = null, // subscribe to all categories, filter client-side
+      deviceId = subscribedDeviceId,
+    )
+
   private fun subscribe(currentSocket: TelemetrySocket) {
-    val request =
-      TelemetryPushRequest(
-        id = UUID.randomUUID().toString(),
-        command = "subscribe",
-        category = null, // subscribe to all categories, filter client-side
-        deviceId = subscribedDeviceId,
-      )
+    val request = subscribeRequest()
 
     if (!sendRequest(request, currentSocket)) {
       throw IllegalStateException("Failed to send telemetry subscription")
@@ -332,7 +349,8 @@ internal constructor(
       "subscription_response" -> {
         log.info("Telemetry push subscription response: success=${response.success}")
         if (response.success != true) {
-          log.warn("Telemetry subscription failed: ${response.error}")
+          rejectSession(response.error)
+          if (!sessionRejected) log.warn("Telemetry subscription failed: ${response.error}")
         }
         response.success == true
       }
@@ -363,13 +381,22 @@ internal constructor(
         false
       }
       "error" -> {
-        log.warn("Telemetry push error: ${response.error}")
+        rejectSession(response.error)
+        if (!sessionRejected) log.warn("Telemetry push error: ${response.error}")
         false
       }
       else -> {
         log.warn("Unknown telemetry push message type: ${response.type}")
         false
       }
+    }
+  }
+
+  private fun rejectSession(error: String?) {
+    if (!sessionRejected && isStreamSessionRejection(error)) {
+      sessionRejected = true
+      _state.value = ConnectionState.Error(error ?: "Session registration required")
+      log.warn("Subscription failed: $error")
     }
   }
 

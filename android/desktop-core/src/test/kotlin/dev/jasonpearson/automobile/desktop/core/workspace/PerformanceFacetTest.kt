@@ -22,11 +22,70 @@ import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.update.FakeUpdateController
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
 class PerformanceFacetTest {
+
+  @Test
+  fun `default client reads the supplied session provider through registration and release`() {
+    var sessionUuid: String? = null
+    val client = createPerformanceObservationClient(sessionUuidProvider = { sessionUuid })
+    try {
+      assertNull(client.authenticatedSessionUuid())
+      sessionUuid = "registered-desktop"
+      assertEquals(sessionUuid, client.authenticatedSessionUuid())
+      sessionUuid = null
+      assertNull(client.authenticatedSessionUuid())
+    } finally {
+      client.dispose()
+    }
+  }
+
+  @Test
+  fun `waits for registration and disposes on release and replacement`() = runComposeUiTest {
+    val sessionUuid = mutableStateOf<String?>(null)
+    val provider: () -> String? = { sessionUuid.value }
+    val streams = mutableListOf<FakeObservationStream>()
+    val graph = fakeGraph()
+    setContent {
+      CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
+        MaterialTheme {
+          PerformanceFacet(
+            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            sessionUuidProvider = provider,
+            observationStreamFactory = { FakeObservationStream().also { streams.add(it) } },
+          )
+        }
+      }
+    }
+    waitForIdle()
+    assertTrue(streams.isEmpty())
+
+    runOnIdle { sessionUuid.value = "registered-desktop" }
+    waitForIdle()
+    assertEquals(1, streams.size)
+    assertEquals("dev-1", streams.single().lastConnectedDeviceId)
+    assertEquals(1, streams.single().connectCallCount)
+
+    runOnIdle { sessionUuid.value = "replacement-desktop" }
+    waitForIdle()
+    assertEquals(2, streams.size)
+    assertTrue(streams.first().disconnectCallCount >= 1)
+    assertEquals(1, streams.last().connectCallCount)
+
+    runOnIdle { sessionUuid.value = null }
+    waitForIdle()
+    assertTrue(streams.last().disconnectCallCount >= 1)
+    assertEquals(2, streams.size)
+
+    runOnIdle { sessionUuid.value = "reregistered-desktop" }
+    waitForIdle()
+    assertEquals(3, streams.size)
+    assertEquals(1, streams.last().connectCallCount)
+  }
 
   /**
    * A DI graph backed by a [FakeAutoMobileClient] so the dashboard's audit-history fallback

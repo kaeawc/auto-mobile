@@ -29,7 +29,7 @@ import { AndroidOfflineProbeError } from "../utils/android-cmdline-tools/Android
 import { MultiPlatformDeviceManager } from "../devices/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager, type ActiveSessionExecutionQuery, type Session } from "./sessionManager";
-import { SessionScopedStreamAuthenticator } from "./streamSocketAuth";
+import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -1856,10 +1856,9 @@ export class Daemon {
     );
 
     server.setOnObservationRequested(async ({ deviceId, sessionUuid, signal }) => {
-      const authenticator = new SessionScopedStreamAuthenticator(
-        () => this.sessionManager,
-        "observationStream",
-      );
+      const authenticator = createDefaultStreamSocketAuthenticator("observationStream", {
+        allowObserverSessions: true,
+      });
       const pooledDevices = deviceId
         ? [this.devicePool.getDevice(deviceId)].filter((device) => device !== null)
         : this.devicePool.getAllDevices();
@@ -1944,10 +1943,9 @@ export class Daemon {
       .getAllDevices()
       .filter((device) => deviceId === null || device.id === deviceId);
     const refusals: string[] = [];
-    const authenticator = new SessionScopedStreamAuthenticator(
-      () => this.sessionManager,
-      "observationStream",
-    );
+    const authenticator = createDefaultStreamSocketAuthenticator("observationStream", {
+      allowObserverSessions: true,
+    });
     for (const device of devices) {
       if (device.platform !== "android") {
         continue;

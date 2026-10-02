@@ -18,6 +18,9 @@ import dev.jasonpearson.automobile.desktop.core.telemetry.LogsPanel
 private fun Platform.toLogPlatform(): LogPlatform =
   if (this == Platform.Ios) LogPlatform.Ios else LogPlatform.Android
 
+internal fun createLogsTelemetryClient(sessionUuidProvider: (() -> String?)? = null) =
+  TelemetryPushSocketClient(sessionUuidProvider = sessionUuidProvider)
+
 /**
  * Docked-facet body for [Tool.Logs]: a logs-only event stream with an always-on filter bar
  * (per-level chips + free-text search), scoped to a single pane's device. A [TelemetryPushClient]
@@ -31,16 +34,23 @@ private fun Platform.toLogPlatform(): LogPlatform =
 @Composable
 fun LogsFacet(
   column: DeviceColumn,
-  telemetryClientFactory: (String) -> TelemetryPushClient = { TelemetryPushSocketClient() },
+  // An omitted provider retains legacy behavior; a supplied provider gates registration/release.
+  sessionUuidProvider: (() -> String?)? = null,
+  telemetryClientFactory: (String) -> TelemetryPushClient = {
+    createLogsTelemetryClient(sessionUuidProvider = sessionUuidProvider)
+  },
 ) {
   val graph = LocalAutoMobileGraph.current
+  val sessionReady = sessionUuidProvider == null || sessionUuidProvider.invoke() != null
   var client by remember(column.deviceId) { mutableStateOf<TelemetryPushClient?>(null) }
-  DisposableEffect(column.deviceId) {
+  DisposableEffect(column.deviceId, sessionUuidProvider, sessionReady) {
     val connected =
-      telemetryClientFactory(column.deviceId).also { it.connect(deviceId = column.deviceId) }
+      if (sessionReady) {
+        telemetryClientFactory(column.deviceId).also { it.connect(deviceId = column.deviceId) }
+      } else null
     client = connected
     onDispose {
-      connected.dispose()
+      connected?.dispose()
       client = null
     }
   }

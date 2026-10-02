@@ -85,9 +85,99 @@ class ObservationStreamClientTest {
   }
 
   @Test
+  fun `subscribe uses current session UUID`() {
+    assertAuthenticatedFrame("subscribe") {}
+  }
+
+  @Test
+  fun `registration precedes subscribe and observation polling`() = runBlocking {
+    val socketPath = Files.createTempFile("obs-stream-register-order", ".sock")
+    val events = mutableListOf<String>()
+    val registration = DesktopSessionRegistration({ events += "register" }, {})
+    val session =
+      DesktopDaemonSession(
+        McpDaemonClient(socketPathValue = "/unused", sessionUuid = "desktop-session"),
+        registration,
+      )
+    val factory = RecordingTransportFactory(blocking = true)
+    val client =
+      ObservationStreamClient(
+        transportFactory = factory,
+        socketPathProvider = { socketPath.toString() },
+        sessionUuidProvider = session.sessionUuidProvider,
+      )
+    try {
+      client.connect("emulator-5554")
+      client.requestObservation("emulator-5554")
+      assertTrue(factory.opened.isEmpty())
+      session.ensureRegistered()
+      client.connect("emulator-5554")
+      val transport = factory.opened.single()
+      transport.awaitReadEntered()
+      events +=
+        wireJson
+          .decodeFromString(StreamRequest.serializer(), transport.writtenFrames().trim())
+          .command
+      client.requestObservation("emulator-5554")
+      val requests =
+        transport
+          .writtenFrames()
+          .lineSequence()
+          .filter { it.isNotBlank() }
+          .map { wireJson.decodeFromString(StreamRequest.serializer(), it) }
+          .toList()
+      assertEquals(listOf("register", "subscribe"), events)
+      assertEquals(listOf("subscribe", "request_observation"), requests.map { it.command })
+      assertTrue(requests.all { it.sessionUuid == "desktop-session" })
+    } finally {
+      client.dispose()
+      factory.opened.forEach { it.releaseEof() }
+      Files.deleteIfExists(socketPath)
+    }
+  }
+
+  @Test
+  fun `session rejection remains terminal through repeated connect and poll attempts`() =
+    runBlocking {
+      val socketPath = Files.createTempFile("obs-stream-session-rejected", ".sock")
+      val factory = RecordingTransportFactory(blocking = true)
+      val client =
+        ObservationStreamClient(
+          transportFactory = factory,
+          socketPathProvider = { socketPath.toString() },
+          sessionUuidProvider = { "unknown" },
+        )
+      try {
+        client.connect("emulator-5554")
+        val transport = factory.opened.single()
+        transport.awaitReadEntered()
+        val subscribe =
+          wireJson.decodeFromString(StreamRequest.serializer(), transport.writtenFrames().trim())
+        val error =
+          "session unknown is not an active daemon session; register with daemon/registerSession"
+        client.handleMessage(
+          """{"id":"${subscribe.id}","type":"error","success":false,"error":"$error"}"""
+        )
+        repeat(3) {
+          client.connect("emulator-5554")
+          client.requestObservation("emulator-5554")
+        }
+        assertEquals(ConnectionState.Error(error), client.connectionState.value)
+        assertEquals(1, factory.opened.size)
+        assertEquals(1, transport.writtenFrames().lineSequence().count { it.isNotBlank() })
+        assertEquals(1, transport.closeCount)
+      } finally {
+        client.dispose()
+        factory.opened.forEach { it.releaseEof() }
+        Files.deleteIfExists(socketPath)
+      }
+    }
+
+  @Test
   fun `authenticated commands omit session UUID with default provider`() {
     for (command in
       listOf(
+        "subscribe",
         "request_navigation_graph",
         "request_observation",
         "subscribe_storage",
@@ -131,6 +221,9 @@ class ObservationStreamClientTest {
       val invoke =
         action
           ?: when (command) {
+            "subscribe" -> { _: ObservationStreamClient ->
+              Unit
+            }
             "request_navigation_graph" -> { stream: ObservationStreamClient ->
               stream.requestNavigationGraph("com.example")
             }

@@ -9,8 +9,10 @@ class DesktopDaemonSessionStreamClientsTest {
   fun `observation WebRTC and video requests use one session UUID for the same device`() {
     val session =
       DesktopDaemonSession(
-        McpDaemonClient(socketPathValue = "/unused/test-socket", sessionUuid = "app-session")
+        McpDaemonClient(socketPathValue = "/unused/test-socket", sessionUuid = "app-session"),
+        DesktopSessionRegistration({}, {}),
       )
+    session.ensureRegistered()
     val observationClient =
       ObservationStreamClient(sessionUuidProvider = session.sessionUuidProvider)
     val webRtcClient =

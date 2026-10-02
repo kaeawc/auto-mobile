@@ -217,6 +217,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     socket: Socket,
     request: SubscriptionCommand & Record<string, unknown>,
   ): Promise<void> {
+    this.authorizeSubscription(request);
     const subscriptionId = `${this.serverName.toLowerCase()}-${++this.subscriptionCounter}`;
     const filter = this.parseSubscriptionFilter(request);
 
@@ -248,6 +249,9 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
 
     this.onSubscribed(subscriptionId, filter, socket);
   }
+
+  /** Generic subscription mechanics have no admission policy; concrete data servers opt in. */
+  protected authorizeSubscription(_request: SubscriptionCommand & Record<string, unknown>): void {}
 
   /**
    * Called after a new subscriber is added. Override to send backfill data.

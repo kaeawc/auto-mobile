@@ -23,11 +23,13 @@ import dev.jasonpearson.automobile.desktop.core.failures.FailuresDashboard
 @Composable
 fun FailuresFacet(
   column: DeviceColumn,
+  sessionUuidProvider: (() -> String?)? = null,
   dataSourceMode: DataSourceMode = DataSourceMode.Real,
 ) {
   val graph = LocalAutoMobileGraph.current
   FailuresDashboard(
     dataSourceMode = dataSourceMode,
     clientProvider = { graph.autoMobileClient },
+    sessionUuidProvider = sessionUuidProvider,
   )
 }

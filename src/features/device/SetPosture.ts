@@ -184,7 +184,7 @@ async function setEmulatorPosture(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  if ((requested === "closed" || requested === "opened") && supportsRearDisplay) {
+  if (supportsRearDisplay && ["closed", "opened"].includes(requested)) {
     throwIfAborted(signal);
     await awaitWhileRequestIsLive(adb.executeCommand("shell cmd device_state state reset"), signal);
   }
@@ -195,12 +195,30 @@ async function setEmulatorPosture(
         ? "emu unfold"
         : `emu posture ${EMULATOR_POSTURE_IDS[requested]}`;
   throwIfAborted(signal);
-  await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
-  if (displayPreset) {
-    throwIfAborted(signal);
-    await awaitWhileRequestIsLive(
-      adb.executeCommand(`emu resize-display ${DISPLAY_PRESET_IDS[displayPreset]}`),
-      signal,
+  let presetPending = Boolean(displayPreset);
+  try {
+    await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
+    if (displayPreset) {
+      throwIfAborted(signal);
+      presetPending = false;
+      await awaitWhileRequestIsLive(
+        adb.executeCommand(`emu resize-display ${DISPLAY_PRESET_IDS[displayPreset]}`),
+        signal,
+      );
+    }
+  } catch (error) {
+    const cancelled = signal?.aborted;
+    if (cancelled && presetPending) {
+      throw new ActionableError(
+        "Posture request cancelled; posture command sent, display preset not applied",
+        { cause: error },
+      );
+    }
+    throw toActionableError(
+      error,
+      cancelled
+        ? "Posture request cancelled; device may still complete the change"
+        : "Failed to set device posture",
     );
   }
 }

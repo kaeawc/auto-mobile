@@ -25,6 +25,8 @@ import {
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
+import { FakeAwaitIdle } from "../fakes/FakeAwaitIdle";
 import { createExecResult } from "../../src/utils/execResult";
 
 const device: BootedDevice = { name: "Foldable", deviceId: "emulator-cancel", platform: "android" };
@@ -183,7 +185,7 @@ describe("registered interaction handlers honor cancellation", () => {
     expect(adb.getExecutedCommands()).toEqual(commands);
   });
 
-  test("rotate aborts its rotation wait without restoring settings or reading again", async () => {
+  test("rotate cancellation during waitForRotation restores auto-rotate without further reads", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     adb.setCommandResponse(
@@ -226,6 +228,9 @@ describe("registered interaction handlers honor cancellation", () => {
       expect(settled).toBe(true);
       await expect(pending).rejects.toThrow("device may still complete the change");
       expect(timer.now()).toBe(0);
+      expect(adb.getExecutedCommands()).toContain(
+        "shell settings put system accelerometer_rotation 1",
+      );
       const commands = adb.getExecutedCommands();
       const puts = settingsPut.mock.calls.length;
       timer.advanceTime(5000);
@@ -260,7 +265,7 @@ describe("registered interaction handlers honor cancellation", () => {
         undefined,
         controller.signal,
       ),
-    ).rejects.toThrow("device may still complete the change");
+    ).rejects.toThrow("posture command sent, display preset not applied");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
       "emu unfold",
@@ -268,7 +273,7 @@ describe("registered interaction handlers honor cancellation", () => {
     expect(observe.getExecuteCallCount()).toBe(0);
   });
 
-  test("rotate cancellation after disabling auto-rotate skips target write and rollback", async () => {
+  test("rotate cancellation after disabling auto-rotate skips target write and sends restore", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
     const controller = new AbortController();
@@ -294,9 +299,342 @@ describe("registered interaction handlers honor cancellation", () => {
       expect(adb.getExecutedCommands()).toEqual([
         'shell dumpsys window | grep -i "mRotation="',
         "shell settings put system accelerometer_rotation 0",
+        "shell settings put system accelerometer_rotation 1",
       ]);
-      expect(settingsPut.mock.calls).toHaveLength(1);
+      expect(settingsPut.mock.calls).toHaveLength(2);
       expect(timer.getSleepHistory()).toEqual([]);
+    } finally {
+      observed.mockRestore();
+      settingsGet.mockRestore();
+      settingsPut.mockRestore();
+      AndroidCtrlProxyClient.resetInstances();
+    }
+  });
+
+  test("rotate cancellation after state reads but before a write sends no restore", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const settingsGet = spyOn(
+      AndroidCtrlProxyClient.prototype,
+      "requestSettingsGet",
+    ).mockImplementation(async () => {
+      controller.abort();
+      return { success: true, found: true, value: "1" };
+    });
+    const settingsPut = spyOn(
+      AndroidCtrlProxyClient.prototype,
+      "requestSettingsPut",
+    ).mockResolvedValue({ success: false });
+    setRotateFactory(() => new Rotate(device, adb, timer));
+    const observed = bypassObservation();
+    try {
+      await expect(
+        handler("rotate")(device, { orientation: "landscape" }, undefined, controller.signal),
+      ).rejects.toThrow("Operation cancelled");
+      expect(settingsPut.mock.calls).toHaveLength(0);
+      expect(
+        adb.getExecutedCommands().filter((command) => command.includes("settings put")),
+      ).toEqual([]);
+    } finally {
+      observed.mockRestore();
+      settingsGet.mockRestore();
+      settingsPut.mockRestore();
+      AndroidCtrlProxyClient.resetInstances();
+    }
+  });
+
+  test.each([
+    { state: "1", lockOrientation: true },
+    { state: "0", lockOrientation: undefined },
+    { state: "0", lockOrientation: false },
+  ])(
+    "rotate cancellation preserves an intended or unchanged lock: %j",
+    async ({ state, lockOrientation }) => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      adb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=0", ""),
+      );
+      adb.abortAfterCommand("shell settings put system accelerometer_rotation 0", controller);
+      const settingsGet = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsGet",
+      ).mockResolvedValue({ success: true, found: true, value: state });
+      const settingsPut = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsPut",
+      ).mockResolvedValue({ success: false });
+      setRotateFactory(() => new Rotate(device, adb, timer));
+      const observed = bypassObservation();
+      try {
+        await expect(
+          handler("rotate")(
+            device,
+            {
+              orientation: "landscape",
+              ...(lockOrientation === undefined ? {} : { lockOrientation }),
+            },
+            undefined,
+            controller.signal,
+          ),
+        ).rejects.toThrow("Operation cancelled");
+        expect(
+          adb.getExecutedCommands().filter((command) => command.includes("settings put")),
+        ).toEqual(["shell settings put system accelerometer_rotation 0"]);
+      } finally {
+        observed.mockRestore();
+        settingsGet.mockRestore();
+        settingsPut.mockRestore();
+        AndroidCtrlProxyClient.resetInstances();
+      }
+    },
+  );
+
+  test.each(["disable", "target", "restore"])(
+    "rotate awaits a pending %s write before restoring on cancellation",
+    async (phase) => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const heldWrite = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+      const started = Promise.withResolvers<void>();
+      const writes: string[] = [];
+      const heldCommand =
+        phase === "disable"
+          ? "shell settings put system accelerometer_rotation 0"
+          : phase === "target"
+            ? "shell settings put system user_rotation 1"
+            : "shell settings put system accelerometer_rotation 1";
+      const execute = spyOn(adb, "executeCommand").mockImplementation(async (command) => {
+        if (command.startsWith("shell settings put")) {
+          writes.push(command);
+          if (command === heldCommand) {
+            started.resolve();
+            return heldWrite.promise;
+          }
+          if (command.endsWith("accelerometer_rotation 1")) {
+            expect(getAbortSignal()).toBeUndefined();
+          }
+        }
+        return createExecResult("mRotation=0", "");
+      });
+      const settingsGet = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsGet",
+      ).mockResolvedValue({ success: true, found: true, value: "1" });
+      const settingsPut = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsPut",
+      ).mockResolvedValue({ success: false });
+      const rotate = new Rotate(device, adb, timer);
+      rotate.awaitIdle = new FakeAwaitIdle();
+      setRotateFactory(() => rotate);
+      const observed = bypassObservation();
+      try {
+        const pending = runWithAbortSignal(controller.signal, () =>
+          handler("rotate")(device, { orientation: "landscape" }, undefined, controller.signal),
+        );
+        let settled = false;
+        void pending.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        await started.promise;
+        controller.abort();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(false);
+        expect(writes.at(-1)).toBe(heldCommand);
+        expect(
+          writes.filter((command) => command.endsWith("accelerometer_rotation 1")),
+        ).toHaveLength(phase === "restore" ? 1 : 0);
+        heldWrite.resolve(createExecResult("", ""));
+        await expect(pending).rejects.toThrow("Operation cancelled");
+        expect(writes.at(-1)).toBe("shell settings put system accelerometer_rotation 1");
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        execute.mockRestore();
+        observed.mockRestore();
+        settingsGet.mockRestore();
+        settingsPut.mockRestore();
+        AndroidCtrlProxyClient.resetInstances();
+      }
+    },
+  );
+
+  test.each(["settled", "deadline"])(
+    "rotate orders CtrlProxy restore after its pending disable write: %s",
+    async (mode) => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const disable = Promise.withResolvers<{ success: boolean }>();
+      const started = Promise.withResolvers<void>();
+      adb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=0", ""),
+      );
+      const settingsGet = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsGet",
+      ).mockResolvedValue({ success: true, found: true, value: "1" });
+      const settingsPut = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsPut",
+      ).mockImplementation(async (_namespace, _key, value) => {
+        if (value === "0") {
+          started.resolve();
+          return disable.promise;
+        }
+        return { success: true };
+      });
+      setRotateFactory(() => new Rotate(device, adb, timer));
+      const observed = bypassObservation();
+      try {
+        const pending = handler("rotate")(
+          device,
+          { orientation: "landscape" },
+          undefined,
+          controller.signal,
+        );
+        let settled = false;
+        void pending.then(
+          () => {
+            settled = true;
+          },
+          () => {
+            settled = true;
+          },
+        );
+        await started.promise;
+        controller.abort();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(settled).toBe(false);
+        expect(settingsPut.mock.calls.map((call) => call[2])).toEqual(["0"]);
+        if (mode === "deadline") {
+          timer.advanceTime(1000);
+          await expect(pending).rejects.toThrow("accelerometer_rotation may be left changed");
+          expect(settingsPut.mock.calls.map((call) => call[2])).toEqual(["0"]);
+        }
+        disable.resolve({ success: true });
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        if (mode === "settled") {
+          await expect(pending).rejects.toThrow("Operation cancelled");
+        }
+        expect(settingsPut.mock.calls.map((call) => call[2])).toEqual(["0", "1"]);
+        expect(
+          adb.getExecutedCommands().filter((command) => command.includes("settings put")),
+        ).toEqual([]);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        observed.mockRestore();
+        settingsGet.mockRestore();
+        settingsPut.mockRestore();
+        AndroidCtrlProxyClient.resetInstances();
+      }
+    },
+  );
+
+  test.each(["failure", "timeout"])(
+    "rotate cancellation reports accelerometer_rotation when cleanup ends in %s",
+    async (mode) => {
+      const adb = new FakeAdbExecutor();
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const restoreStarted = Promise.withResolvers<void>();
+      const restore = Promise.withResolvers<ReturnType<typeof createExecResult>>();
+      adb.abortAfterCommand("shell settings put system accelerometer_rotation 0", controller);
+      adb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=0", ""),
+      );
+      const originalExecute = adb.executeCommand.bind(adb);
+      const execute = spyOn(adb, "executeCommand").mockImplementation(async (command) => {
+        if (command === "shell settings put system accelerometer_rotation 1") {
+          restoreStarted.resolve();
+          if (mode === "failure") {
+            throw new Error("settings provider refused write");
+          }
+          return restore.promise;
+        }
+        return originalExecute(command);
+      });
+      const settingsGet = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsGet",
+      ).mockResolvedValue({ success: true, found: true, value: "1" });
+      const settingsPut = spyOn(
+        AndroidCtrlProxyClient.prototype,
+        "requestSettingsPut",
+      ).mockResolvedValue({ success: false });
+      setRotateFactory(() => new Rotate(device, adb, timer));
+      const observed = bypassObservation();
+      try {
+        const pending = handler("rotate")(
+          device,
+          { orientation: "landscape" },
+          undefined,
+          controller.signal,
+        );
+        void pending.then(undefined, () => {});
+        await restoreStarted.promise;
+        if (mode === "timeout") {
+          timer.advanceTime(1000);
+        }
+        await expect(pending).rejects.toThrow(
+          "Rotation cancelled; accelerometer_rotation may be left changed",
+        );
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        restore.resolve(createExecResult("", ""));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      } finally {
+        execute.mockRestore();
+        observed.mockRestore();
+        settingsGet.mockRestore();
+        settingsPut.mockRestore();
+        AndroidCtrlProxyClient.resetInstances();
+      }
+    },
+  );
+
+  test("rotate cancellation between restore transports still sends the ADB restore", async () => {
+    const adb = new FakeAdbExecutor();
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    adb.setCommandResponse(
+      'shell dumpsys window | grep -i "mRotation="',
+      createExecResult("mRotation=0", ""),
+    );
+    const settingsGet = spyOn(
+      AndroidCtrlProxyClient.prototype,
+      "requestSettingsGet",
+    ).mockResolvedValue({ success: true, found: true, value: "1" });
+    const settingsPut = spyOn(
+      AndroidCtrlProxyClient.prototype,
+      "requestSettingsPut",
+    ).mockImplementation(async (_namespace, key, value) => {
+      if (key === "accelerometer_rotation" && value === "1") {
+        controller.abort();
+      }
+      return { success: false };
+    });
+    const rotate = new Rotate(device, adb, timer);
+    rotate.awaitIdle = new FakeAwaitIdle();
+    setRotateFactory(() => rotate);
+    const observed = bypassObservation();
+    try {
+      await expect(
+        handler("rotate")(device, { orientation: "landscape" }, undefined, controller.signal),
+      ).rejects.toThrow("Operation cancelled");
+      expect(adb.getExecutedCommands().at(-1)).toBe(
+        "shell settings put system accelerometer_rotation 1",
+      );
     } finally {
       observed.mockRestore();
       settingsGet.mockRestore();

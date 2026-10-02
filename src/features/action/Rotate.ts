@@ -1,5 +1,5 @@
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
-import { toActionableError } from "../../models/ActionableError";
+import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
@@ -12,6 +12,15 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { parseWindowManagerRotation } from "../../utils/android-cmdline-tools/parseWindowManagerRotation";
+import { runWithAbortSignal } from "../../utils/AbortContext";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+
+interface RotationSettingCleanup {
+  pendingWrite?: Promise<unknown>;
+  needed: boolean;
+}
+
+const ROTATION_SETTING_CLEANUP_TIMEOUT_MS = 1000;
 
 type AlreadyAppliedOrientationDecision =
   | { kind: "handled"; result: RotateResult }
@@ -296,17 +305,16 @@ export class Rotate extends BaseVisualChange {
   private async restoreAutoRotateAndConfirmOrientation(
     requestedOrientation: "portrait" | "landscape",
     signal?: AbortSignal,
+    cleanup: RotationSettingCleanup = { needed: false },
   ): Promise<{
     achievedOrientation: string;
     warning: string | undefined;
     restoreConfirmed: boolean;
   }> {
-    throwIfAborted(signal);
     let restoreWriteError: unknown;
     try {
-      await this.writeSystemSetting("accelerometer_rotation", "1", signal);
+      await this.restoreAutoRotateSetting(cleanup);
     } catch (firstError) {
-      throwIfAborted(signal);
       // A single transient failure (e.g. a momentary CtrlProxy/ADB hiccup)
       // must not be treated as ambiguous on its own — retry once, the same
       // idempotent write, before falling back to the ambiguous-outcome path
@@ -315,9 +323,8 @@ export class Rotate extends BaseVisualChange {
         `[Rotate] accelerometer_rotation restore write failed on first attempt, retrying once: ${firstError}`,
       );
       try {
-        await this.writeSystemSetting("accelerometer_rotation", "1", signal);
+        await this.restoreAutoRotateSetting(cleanup);
       } catch (retryError) {
-        throwIfAborted(signal);
         restoreWriteError = retryError;
         logger.warn(
           `[Rotate] accelerometer_rotation restore write failed after retry (ambiguous outcome) after confirming rotation to ${requestedOrientation}: ${retryError}`,
@@ -325,6 +332,12 @@ export class Rotate extends BaseVisualChange {
       }
     }
 
+    if (signal?.aborted && restoreWriteError !== undefined) {
+      throw new ActionableError(
+        "Rotation cancelled; accelerometer_rotation may be left changed (auto-rotate may remain disabled)",
+        { cause: restoreWriteError },
+      );
+    }
     const restoreConfirmed = restoreWriteError === undefined;
     const { achievedOrientation, warning: confirmWarning } =
       await this.confirmOrientationAfterAutoRotateRestore(
@@ -744,18 +757,43 @@ export class Rotate extends BaseVisualChange {
     return (await this.getAutoRotateState(signal)) === "locked";
   }
 
+  private async restoreAutoRotateSetting(cleanup: RotationSettingCleanup): Promise<void> {
+    await raceWithDeadline(
+      () =>
+        runWithAbortSignal(undefined, async () => {
+          if (cleanup.pendingWrite) {
+            try {
+              await cleanup.pendingWrite;
+            } catch (error) {
+              // A failed write may have applied; its settlement still orders the restore.
+              logger.warn("[Rotate] Pending setting write failed before cleanup", error);
+            }
+          }
+          await this.writeSystemSetting("accelerometer_rotation", "1", undefined, cleanup);
+          cleanup.needed = false;
+        }),
+      {
+        timer: this.timer,
+        timeoutMs: ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+        label: "Restore accelerometer_rotation=1",
+      },
+    );
+  }
+
   private async writeSystemSetting(
     key: string,
     value: string,
     signal?: AbortSignal,
+    cleanup?: RotationSettingCleanup,
   ): Promise<void> {
     throwIfAborted(signal);
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const a11yResult = await awaitWhileRequestIsLive(
-        a11y.requestSettingsPut("system", key, value, "int"),
-        signal,
-      );
+      const write = a11y.requestSettingsPut("system", key, value, "int");
+      if (cleanup) {
+        cleanup.pendingWrite = write;
+      }
+      const a11yResult = await awaitWhileRequestIsLive(write, signal);
       if (a11yResult.success) {
         return;
       }
@@ -765,10 +803,11 @@ export class Rotate extends BaseVisualChange {
       logger.debug(`[Rotate] a11y settings put threw for ${key}: ${error}`);
     }
     throwIfAborted(signal);
-    await awaitWhileRequestIsLive(
-      this.adb.executeCommand(`shell settings put system ${key} ${value}`),
-      signal,
-    );
+    const write = this.adb.executeCommand(`shell settings put system ${key} ${value}`);
+    if (cleanup) {
+      cleanup.pendingWrite = write;
+    }
+    await awaitWhileRequestIsLive(write, signal);
   }
 
   async execute(
@@ -897,13 +936,22 @@ export class Rotate extends BaseVisualChange {
       // the other's temporary accelerometer_rotation=0 as the "prior state"
       // (#6199 review). Different devices use independent locks and never
       // wait on each other.
-      () =>
-        awaitWhileRequestIsLive(
-          this.getRotationLock().runExclusive(() =>
-            this.performAndroidRotation(orientation, perf, lockOrientation, signal),
-          ),
-          signal,
-        ),
+      async () => {
+        const acquisition = this.getRotationLock().acquire();
+        let release: () => void;
+        try {
+          release = await awaitWhileRequestIsLive(acquisition, signal);
+        } catch (error) {
+          // Cancelled waiters must release their eventual acquisition without dispatching.
+          void acquisition.then((unlock) => unlock());
+          throw toActionableError(error, "Could not acquire the device rotation lock");
+        }
+        try {
+          return await this.performAndroidRotation(orientation, perf, lockOrientation, signal);
+        } finally {
+          release();
+        }
+      },
       {
         changeExpected: true,
         timeoutMs: 5000,
@@ -966,6 +1014,7 @@ export class Rotate extends BaseVisualChange {
     // while explicit false restores automatic rotation even after a previous
     // persistent request.
 
+    const cleanup: RotationSettingCleanup = { needed: false };
     try {
       this.logAutoRotatePlan(autoRotateState, preserveLock, restoreAutomaticRotation);
 
@@ -974,13 +1023,15 @@ export class Rotate extends BaseVisualChange {
           // user_rotation is honored only after automatic rotation is disabled.
           // Keeping these writes ordered avoids a target write racing ahead of
           // the lock on devices where the settings provider completes slowly.
-          await this.writeSystemSetting("accelerometer_rotation", "0", signal);
+          throwIfAborted(signal);
+          cleanup.needed = shouldRestoreAutoRotate && autoRotateState !== "locked";
+          await this.writeSystemSetting("accelerometer_rotation", "0", signal, cleanup);
         } else {
           logger.debug(
             "[Rotate] accelerometer_rotation is unconfirmed; writing user_rotation without changing the lock state",
           );
         }
-        await this.writeSystemSetting("user_rotation", String(value), signal);
+        await this.writeSystemSetting("user_rotation", String(value), signal, cleanup);
       });
 
       // Wait for rotation to complete (also serves as verification)
@@ -1000,7 +1051,7 @@ export class Rotate extends BaseVisualChange {
 
       if (shouldRestoreAutoRotate) {
         ({ achievedOrientation, warning, restoreConfirmed } =
-          await this.restoreAutoRotateAndConfirmOrientation(orientation, signal));
+          await this.restoreAutoRotateAndConfirmOrientation(orientation, signal, cleanup));
       }
 
       return this.finalizeAndroidRotation(
@@ -1016,20 +1067,27 @@ export class Rotate extends BaseVisualChange {
         signal,
       );
     } catch (error) {
-      throwIfAborted(signal);
       logger.warn("Failed to change device orientation", error);
       // Restore auto-rotate on a failed temporary/explicit-unlock operation.
       // A persistent request intentionally leaves its lock in place.
-      if (shouldRestoreAutoRotate) {
+      let restoreFailure: ActionableError | undefined;
+      if (signal?.aborted ? cleanup.needed : shouldRestoreAutoRotate) {
         try {
-          await this.writeSystemSetting("accelerometer_rotation", "1", signal);
+          await this.restoreAutoRotateSetting(cleanup);
           logger.info("Restored auto-rotate after error");
         } catch (restoreError) {
-          throwIfAborted(signal);
-          logger.warn(`Failed to restore auto-rotate: ${restoreError}`);
+          logger.warn("Failed to restore auto-rotate", restoreError);
+          restoreFailure = toActionableError(restoreError, "Failed to restore auto-rotate");
         }
       }
 
+      if (signal?.aborted && restoreFailure) {
+        throw new ActionableError(
+          "Rotation cancelled; accelerometer_rotation may be left changed (auto-rotate may remain disabled)",
+          { cause: restoreFailure },
+        );
+      }
+      throwIfAborted(signal);
       return {
         success: false,
         orientation,

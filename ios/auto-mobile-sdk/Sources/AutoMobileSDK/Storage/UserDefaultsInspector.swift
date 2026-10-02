@@ -534,10 +534,10 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReadi
     /// - `data` → base64
     /// - `array` / `dictionary` → JSON via `JSONSerialization`
     ///
-    /// `array`/`dictionary` fall back to interpolation only when the collection
-    /// holds non-JSON-native leaves (e.g. a nested `Data`/`Date`), which
-    /// `JSONSerialization` cannot represent; the historic lossy form is strictly
-    /// better than dropping the value.
+    /// Collections recursively encode dates as ISO-8601, data as base64, and
+    /// non-finite numbers as `"nan"`/`"inf"`/`"-inf"`. Unsupported leaves use
+    /// interpolation individually; the whole collection falls back only if
+    /// serialization of the converted tree fails.
     static func encode(_ value: Any, as type: KeyValueType) -> String {
         switch type {
         case .date:
@@ -551,17 +551,45 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, PersistentDomainReadi
             }
             return "\(value)"
         case .array, .dictionary:
+            let compatible = jsonCompatible(value)
             // `.sortedKeys` makes dictionary encoding deterministic: the snapshot
             // diff compares encoded strings, and an unchanged dictionary re-read
             // with unstable key order would otherwise surface as a phantom modify.
-            if JSONSerialization.isValidJSONObject(value),
-               let json = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+            if JSONSerialization.isValidJSONObject(compatible),
+               let json = try? JSONSerialization.data(withJSONObject: compatible, options: [.sortedKeys]),
                let string = String(data: json, encoding: .utf8)
             {
                 return string
             }
             return "\(value)"
         case .string, .int, .double, .bool, .unknown:
+            return "\(value)"
+        }
+    }
+
+    /// Dictionaries with non-string keys are unsupported leaves, avoiding key collisions
+    /// from stringification. Preserve their description like other unsupported objects.
+    private static func jsonCompatible(_ value: Any) -> Any {
+        switch value {
+        case let date as Date:
+            // Same formatter as top-level dates: UTC with exactly three fractional
+            // digits (yyyy-MM-dd'T'HH:mm:ss.SSS'Z'), matching the host plist route.
+            return iso8601.string(from: date)
+        case let data as Data:
+            return data.base64EncodedString()
+        case let number as NSNumber:
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return number }
+            let double = number.doubleValue
+            if double.isNaN { return "nan" }
+            if double.isInfinite { return double < 0 ? "-inf" : "inf" }
+            return number
+        case is String, is NSNull:
+            return value
+        case let array as [Any]:
+            return array.map { jsonCompatible($0) }
+        case let dictionary as [String: Any]:
+            return dictionary.mapValues { jsonCompatible($0) }
+        default:
             return "\(value)"
         }
     }

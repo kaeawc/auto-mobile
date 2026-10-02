@@ -1017,12 +1017,79 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
         XCTAssertEqual(DefaultUserDefaultsDriver.encode(true, as: .bool), "true")
     }
 
-    func testNonJsonNativeCollectionFallsBackToInterpolation() {
-        // An array holding a nested Data leaf is not JSON-serializable; the
-        // encoder must fall back to interpolation rather than drop the value.
-        let array: [Any] = [Data([0x01])]
+    func testEncodesNestedDateAndDataInArray() throws {
+        let array: [Any] = [Date(timeIntervalSince1970: 1_700_000_000.123), Data([1, 2, 3])]
         let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
-        XCTAssertFalse(encoded.isEmpty)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String])
+        XCTAssertEqual(decoded, ["2023-11-14T22:13:20.123Z", "AQID"])
+    }
+
+    func testEncodesNestedDateAndDataInDictionaryDeterministically() throws {
+        let dictionary: [String: Any] = [
+            "date": Date(timeIntervalSince1970: 1_700_000_000.123), "data": Data([1, 2, 3]),
+        ]
+        let encoded = DefaultUserDefaultsDriver.encode(dictionary, as: .dictionary)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: String])
+        XCTAssertEqual(decoded, ["date": "2023-11-14T22:13:20.123Z", "data": "AQID"])
+        XCTAssertEqual(encoded, "{\"data\":\"AQID\",\"date\":\"2023-11-14T22:13:20.123Z\"}")
+        for _ in 0 ..< 5 {
+            XCTAssertEqual(DefaultUserDefaultsDriver.encode(dictionary, as: .dictionary), encoded)
+        }
+    }
+
+    func testEncodesDateAndDataThroughMultipleCollectionLevels() throws {
+        let leaves: [String: Any] = [
+            "date": Date(timeIntervalSince1970: 1_700_000_000.123), "data": Data([1, 2, 3]),
+        ]
+        let dictionary: [String: Any] = ["outer": [leaves] as [Any]]
+        let encoded = DefaultUserDefaultsDriver.encode(dictionary, as: .dictionary)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String: Any])
+        let outer = try XCTUnwrap(decoded["outer"] as? [[String: String]])
+        XCTAssertEqual(outer, [["date": "2023-11-14T22:13:20.123Z", "data": "AQID"]])
+    }
+
+    func testEncodesNonFiniteCollectionNumbersAsStrings() throws {
+        let array: [Any] = [
+            Double.nan, Double.infinity, -Double.infinity,
+            NSNumber(value: Double.nan), NSNumber(value: Double.infinity), NSNumber(value: -Double.infinity),
+        ]
+        let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [String])
+        XCTAssertEqual(decoded, ["nan", "inf", "-inf", "nan", "inf", "-inf"])
+    }
+
+    func testUnsupportedLeavesDoNotDiscardSiblingEncodings() throws {
+        let unsupported = DescribedPreferenceLeaf()
+        let nonStringKeys = [1: "one"]
+        let array: [Any] = [
+            unsupported, Date(timeIntervalSince1970: 1_700_000_000.123), Data([1, 2, 3]),
+            42, NSNull(), nonStringKeys,
+        ]
+        let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [Any])
+        XCTAssertEqual(decoded.count, 6)
+        XCTAssertEqual(decoded[0] as? String, "unsupported-leaf")
+        XCTAssertEqual(decoded[1] as? String, "2023-11-14T22:13:20.123Z")
+        XCTAssertEqual(decoded[2] as? String, "AQID")
+        XCTAssertEqual(decoded[3] as? Int, 42)
+        XCTAssertTrue(decoded[4] is NSNull)
+        XCTAssertEqual(decoded[5] as? String, String(describing: nonStringKeys))
+    }
+
+    func testCollectionNumbersPreserveBooleanAndNumericTypes() throws {
+        let array: [Any] = [true, false, 42, 3.5, NSNumber(value: true), NSNumber(value: 42), NSNumber(value: 3.5)]
+        let encoded = DefaultUserDefaultsDriver.encode(array, as: .array)
+        XCTAssertEqual(encoded, "[true,false,42,3.5,true,42,3.5]")
+        let decoded = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(encoded.utf8)) as? [Any])
+        XCTAssertEqual(decoded.map { DefaultUserDefaultsDriver.typeOf($0) }, [
+            .bool,
+            .bool,
+            .int,
+            .double,
+            .bool,
+            .int,
+            .double,
+        ])
     }
 
     // MARK: - typeOf NSNumber classification (#3628)
@@ -1057,4 +1124,8 @@ final class UserDefaultsValueEncodingTests: XCTestCase {
         XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "frac")!), .double)
         XCTAssertEqual(DefaultUserDefaultsDriver.typeOf(defaults.object(forKey: "label")!), .string)
     }
+}
+
+private final class DescribedPreferenceLeaf: CustomStringConvertible {
+    var description: String { "unsupported-leaf" }
 }

@@ -255,15 +255,22 @@ gets a full private daemon namespace in a unique short `am-bench-` directory
 under the OS temp directory: lifecycle socket/PID/lock, auxiliary and WebRTC
 sockets, data, logs, database, and launch working directory. Conflicting DB
 settings and legacy aliases are removed from the child's environment; the
-parent environment stays unchanged. Guards verify that exact private namespace
-before either MCP launch or the namespace-scoped `--daemon stop` cleanup.
+parent environment stays unchanged. Each run selects an OS-assigned ephemeral TCP
+port by briefly binding port zero on `127.0.0.1`; the child receives
+`--port N --strict-port`, so an intervening bind fails rather than falling back
+to the resident daemon's 3000..3010 range. A shared guard verifies the exact
+private paths, rejects resident/default locations and ports, and checks exact
+argv before either MCP launch or namespace-scoped `--daemon stop` cleanup.
 The script refuses to target the resident daemon. Cleanup closes MCP, stops
 the private daemon, then removes the run directory. A failed or timed-out stop
 logs a warning and retains the directory and PID record for the operator;
-cleanup errors do not replace the primary error. Stop waits are bounded at 30
+cleanup errors do not replace the primary error. SIGINT/SIGTERM share the same
+idempotent cleanup and exit with status 130/143. Stop waits are bounded at 30
 seconds without signalling any process.
 
-Private-namespace start/stop no longer interacts with a resident daemon (#8762).
+Private-namespace start/stop scopes ownership to that run (#8762). The guard
+cannot change daemon-manager internals: its degraded process-table probe still
+includes the default port 3000 and may encounter a resident daemon.
 A private daemon startup failure is reported like any other failed call, with
 its error message in JSON and the table; an all-failed series is INVALID and
 exits non-zero unless `--allow-failures` is passed.

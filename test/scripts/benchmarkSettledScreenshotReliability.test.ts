@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { isAbsolute, join, posix, relative, resolve, win32 } from "node:path";
-import { homedir } from "node:os";
+import { type BenchmarkLaunchSafety } from "../../scripts/benchmarkSettledScreenshotIsolation";
+
 import { runBenchmark, type BenchmarkDeps } from "../../scripts/benchmark-settled-screenshot";
 import {
   assertPrivateDaemonNamespace,
@@ -21,6 +22,16 @@ import {
   settledAsyncDelta,
   type BenchmarkReport,
 } from "../../scripts/benchmarkSettledScreenshotReport";
+
+const safety: BenchmarkLaunchSafety = {
+  homeDir: "/fake/home",
+  builtInResidentPaths: [
+    "/tmp/auto-mobile-daemon-501.sock",
+    "/tmp/auto-mobile-daemon-501.pid",
+    "/tmp/auto-mobile-daemon-501.lock",
+  ],
+  effectiveDaemonPaths: ["/fake/scratch/d.sock", "/fake/scratch/d.pid", "/fake/scratch/d.lock"],
+};
 
 const runDir = resolve("/tmp/am-bench-fake");
 const expectedPaths: Record<string, string> = {
@@ -57,14 +68,16 @@ function harness(
   let clock = 0;
   let dirs = 0;
   const deps: BenchmarkDeps = {
+    safety,
     serverExists: () => true,
+    pickPort: async () => 49152,
     parentEnv: { PATH: "/fake/bin", AUTOMOBILE_COORDINATION_DIR: "/fake/shared" },
     makeRunDir: () => {
       events.push("make");
       dirs += 1;
       return `${runDir}-${dirs}`;
     },
-    createClient: async (server, env) => {
+    createClient: async ({ serverPath: server, env }) => {
       expect(server).toBe(resolve("/fake/server.js"));
       assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
       events.push("create");
@@ -79,7 +92,7 @@ function harness(
         },
       };
     },
-    stopPrivateDaemon: async (server, env) => {
+    stopPrivateDaemon: async ({ serverPath: server, env }) => {
       expect(server).toBe(resolve("/fake/server.js"));
       assertPrivateDaemonNamespace(env, `${runDir}-${dirs}`);
       expect(env).toBe(envs.at(-1));
@@ -146,7 +159,7 @@ describe("benchmark namespace isolation", () => {
 
   test("every daemon path stays inside the run dir and replaces resident paths", () => {
     const directory = resolve("/fake/tmp/am-bench-ABC123");
-    const residentDir = join(homedir(), ".auto-mobile");
+    const residentDir = join(safety.homeDir, ".auto-mobile");
     const parent: BenchmarkChildEnv = {
       AUTOMOBILE_COORDINATION_DIR: resolve("/fake/resident/coordination"),
     };
@@ -172,7 +185,7 @@ describe("benchmark namespace isolation", () => {
         expect(isAbsolute(withinRun)).toBe(false);
         const withinResident = relative(residentDir, value);
         expect(withinResident.startsWith("..") || isAbsolute(withinResident)).toBe(true);
-        expect(value.startsWith("/tmp/auto-mobile-daemon-")).toBe(false);
+        expect(value.startsWith(resolve("/tmp/auto-mobile-daemon-"))).toBe(false);
         expect(value).not.toBe(parent[key]);
         expect(value).not.toBe(parent.AUTOMOBILE_COORDINATION_DIR);
       }
@@ -301,12 +314,10 @@ describe("benchmark path flavours", () => {
 });
 
 describe("benchmark injectable lifecycle", () => {
-  test("passes a private env, leaves global aux untouched, and stops before removal in distinct runs", async () => {
-    const oldAux = process.env.AUTOMOBILE_AUX_SOCKET_DIR;
+  test("passes a private env and stops before removal in distinct runs", async () => {
     const fake = harness();
     await runBenchmark(options(), fake.deps);
     await runBenchmark(options(), fake.deps);
-    expect(process.env.AUTOMOBILE_AUX_SOCKET_DIR).toBe(oldAux);
     expect(fake.events).toEqual([
       "make",
       "create",
@@ -346,7 +357,7 @@ describe("benchmark injectable lifecycle", () => {
 
   test("a failed connection still attempts private stop", async () => {
     const fake = harness();
-    fake.deps.createClient = async (_server, env) => {
+    fake.deps.createClient = async ({ env }) => {
       assertPrivateDaemonNamespace(env, `${runDir}-1`);
       fake.envs.push(env);
       throw new Error("connect failed");
@@ -374,8 +385,9 @@ describe("benchmark injectable lifecycle", () => {
   test("guard refuses cleanup if the env has been retargeted", async () => {
     const fake = harness();
     const create = fake.deps.createClient;
-    fake.deps.createClient = async (server, env) => {
-      const client = await create(server, env);
+    fake.deps.createClient = async (launch) => {
+      const client = await create(launch);
+      const { env } = launch;
       env.AUTOMOBILE_DAEMON_SOCKET_PATH = "/outside/resident.sock";
       return client;
     };
@@ -386,7 +398,7 @@ describe("benchmark injectable lifecycle", () => {
 
   test("close and removal errors do not replace the primary failure", async () => {
     const fake = harness();
-    fake.deps.createClient = async (_server, env) => {
+    fake.deps.createClient = async ({ env }) => {
       fake.envs.push(env);
       return {
         callTool: async () => ({

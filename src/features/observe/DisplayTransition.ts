@@ -44,6 +44,7 @@ export interface PushedDisplayTransition {
 
 /** Entry points shared by observe-detected and CtrlProxy-pushed transitions. */
 export interface DisplayTransitionSink {
+  revision(deviceId: string): number;
   identityRevision(deviceId: string): number;
   notifyTransition(deviceId: string, reason: string): void;
   rememberIosPosture(

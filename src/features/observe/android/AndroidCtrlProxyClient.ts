@@ -1690,7 +1690,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.idGenerator = idGenerator;
     this.transientObserver = transientObserver === true;
     this.autoReconnectEnabled = transientObserver !== true;
-    this.physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver(this.timer);
+    this.physicalDisplayIdResolver = new AndroidPhysicalDisplayIdResolver({ timer: this.timer });
     this.installedAppsRepository = installedAppsRepository ?? null;
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
     this.deviceConnectionLostNotifier =

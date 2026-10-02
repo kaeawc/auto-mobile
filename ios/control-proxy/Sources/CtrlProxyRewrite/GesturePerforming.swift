@@ -100,8 +100,8 @@ public protocol GesturePerforming: Sendable {
     /// keyboard is visible after the requested action.
     /// Returns true when caret movement was checked, false when it could not be checked,
     /// and nil for keys without a caret post-condition.
-    func pressKey(key: String, modifiers: [String]) throws -> Bool?
-    func pressKeyOutcome(key: String, modifiers: [String]) throws -> PressKeyOutcome
+    func pressKey(key: String, modifiers: [String]) async throws -> Bool?
+    func pressKeyOutcome(key: String, modifiers: [String]) async throws -> PressKeyOutcome
     func keyboard(action: String) async throws -> KeyboardActionResult
 
     // MARK: - Clipboard
@@ -181,8 +181,8 @@ public protocol GesturePerforming: Sendable {
 }
 
 extension GesturePerforming {
-    public func pressKeyOutcome(key: String, modifiers: [String]) throws -> PressKeyOutcome {
-        try PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers))
+    public func pressKeyOutcome(key: String, modifiers: [String]) async throws -> PressKeyOutcome {
+        try await PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers))
     }
 
     public func getScreenshotCapture() throws -> ScreenshotCapture {

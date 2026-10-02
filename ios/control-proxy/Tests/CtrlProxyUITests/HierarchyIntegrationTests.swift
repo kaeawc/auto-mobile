@@ -181,7 +181,7 @@ final class HierarchyIntegrationTests: XCTestCase {
         }
     }
 
-    func testPressKeyBackspaceDeletesFocusedText() throws {
+    func testPressKeyBackspaceDeletesFocusedText() async throws {
         let app = XCUIApplication()
         app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"
         app.launch()
@@ -207,18 +207,20 @@ final class HierarchyIntegrationTests: XCTestCase {
             predicate: NSPredicate(format: "value == %@", "hello"),
             object: messageTextView
         )
-        XCTAssertEqual(XCTWaiter().wait(for: [typedTextExpectation], timeout: 5), .completed)
+        let typedTextResult = await XCTWaiter().fulfillment(of: [typedTextExpectation], timeout: 5)
+        XCTAssertEqual(typedTextResult, .completed)
 
-        try gestures.pressKey(key: "backspace", modifiers: [])
+        try await gestures.pressKey(key: "backspace", modifiers: [])
         let deletedTextExpectation = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "hell"),
             object: messageTextView
         )
-        XCTAssertEqual(XCTWaiter().wait(for: [deletedTextExpectation], timeout: 5), .completed)
+        let deletedTextResult = await XCTWaiter().fulfillment(of: [deletedTextExpectation], timeout: 5)
+        XCTAssertEqual(deletedTextResult, .completed)
         XCTAssertEqual(messageTextView.value as? String, "hell")
     }
 
-    func testPressKeyForwardDeleteRemovesFollowingCharacter() throws {
+    func testPressKeyForwardDeleteRemovesFollowingCharacter() async throws {
         let app = XCUIApplication()
         app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"
         app.launch()
@@ -244,21 +246,25 @@ final class HierarchyIntegrationTests: XCTestCase {
             predicate: NSPredicate(format: "value == %@", "abcde"),
             object: messageTextView
         )
-        XCTAssertEqual(XCTWaiter().wait(for: [typedTextExpectation], timeout: 5), .completed)
+        let typedTextResult = await XCTWaiter().fulfillment(of: [typedTextExpectation], timeout: 5)
+        XCTAssertEqual(typedTextResult, .completed)
 
-        XCTAssertEqual(try gestures.pressKey(key: "arrow_left", modifiers: []), true)
-        XCTAssertEqual(try gestures.pressKey(key: "arrow_left", modifiers: []), true)
-        try gestures.pressKey(key: "delete", modifiers: [])
+        let firstArrow = try await gestures.pressKey(key: "arrow_left", modifiers: [])
+        let secondArrow = try await gestures.pressKey(key: "arrow_left", modifiers: [])
+        XCTAssertEqual(firstArrow, true)
+        XCTAssertEqual(secondArrow, true)
+        try await gestures.pressKey(key: "delete", modifiers: [])
         let deletedTextExpectation = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "abce"),
             object: messageTextView
         )
-        XCTAssertEqual(XCTWaiter().wait(for: [deletedTextExpectation], timeout: 5), .completed)
+        let deletedTextResult = await XCTWaiter().fulfillment(of: [deletedTextExpectation], timeout: 5)
+        XCTAssertEqual(deletedTextResult, .completed)
         XCTAssertEqual((messageTextView.value as? String)?.count, 4)
         XCTAssertEqual(messageTextView.value as? String, "abce")
     }
 
-    func testPressKeyForwardDeleteAtEndOfTextFailsClosed() throws {
+    func testPressKeyForwardDeleteAtEndOfTextFailsClosed() async throws {
         let app = XCUIApplication()
         app.launchEnvironment["CTRL_PROXY_SNAPSHOT_GAP_TEST_MODE"] = "1"
         app.launch()
@@ -284,10 +290,14 @@ final class HierarchyIntegrationTests: XCTestCase {
             predicate: NSPredicate(format: "value == %@", "hello"),
             object: messageTextView
         )
-        XCTAssertEqual(XCTWaiter().wait(for: [typedTextExpectation], timeout: 5), .completed)
+        let typedTextResult = await XCTWaiter().fulfillment(of: [typedTextExpectation], timeout: 5)
+        XCTAssertEqual(typedTextResult, .completed)
 
         // A caret at the end has no following character; report that boundary explicitly.
-        XCTAssertThrowsError(try gestures.pressKey(key: "delete", modifiers: [])) { error in
+        do {
+            try await gestures.pressKey(key: "delete", modifiers: [])
+            XCTFail("Forward delete at the end must fail")
+        } catch {
             XCTAssertTrue(error.localizedDescription.contains("no following character at the caret"))
         }
         XCTAssertEqual((messageTextView.value as? String)?.count, 5)

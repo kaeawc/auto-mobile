@@ -113,22 +113,6 @@ final class KeyboardCloseKeySelectionTests: XCTestCase {
         let decoded = try JSONDecoder().decode(KeyboardResponse.self, from: JSONEncoder().encode(response))
         XCTAssertEqual(decoded.error, error)
     }
-
-    func testClosePollRespectsAttemptAndOverallDeadlines() {
-        XCTAssertEqual(GesturePerformer.closePollDelay(now: 1, attemptDeadline: 1.6, closeDeadline: 4.5) ?? -1, 0.1)
-        XCTAssertEqual(
-            GesturePerformer.closePollDelay(now: 1.55, attemptDeadline: 1.6, closeDeadline: 4.5) ?? -1,
-            0.05,
-            accuracy: 0.0001
-        )
-        XCTAssertEqual(
-            GesturePerformer.closePollDelay(now: 4.45, attemptDeadline: 5, closeDeadline: 4.5) ?? -1,
-            0.05,
-            accuracy: 0.0001
-        )
-        XCTAssertNil(GesturePerformer.closePollDelay(now: 1.6, attemptDeadline: 1.6, closeDeadline: 4.5))
-        XCTAssertNil(GesturePerformer.closePollDelay(now: 4.5, attemptDeadline: 5, closeDeadline: 4.5))
-    }
 }
 
 // Host-testable pure helpers of the rewrite's `@MainActor` `GesturePerformer`, mirroring

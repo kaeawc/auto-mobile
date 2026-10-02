@@ -68,10 +68,16 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
 
     func testPressKeyRequiresKeyboardFocusBeforeSynthesis() throws {
         let pressKey = try gesturePerformerFunction(named: "performPressKey(")
+        XCTAssertTrue(pressKey.contains("async throws"))
+        XCTAssertTrue(pressKey.contains("try await KeyboardWait.destructivePostCondition("))
         let focusGuard = try XCTUnwrap(pressKey.range(of: "try requireKeyboardFocus("))
         let keyPressFocus = try XCTUnwrap(pressKey.range(of: "forKeyPress: true"))
         let synthesis = try XCTUnwrap(pressKey.range(of: "app.typeKey(keyboardKey, modifierFlags: modifierFlags)"))
 
+        XCTAssertFalse(
+            pressKey[..<synthesis.lowerBound].contains("await "),
+            "pressKey must not suspend before its first XCUITest dispatch"
+        )
         XCTAssertLessThan(focusGuard.lowerBound, keyPressFocus.lowerBound)
         XCTAssertLessThan(
             keyPressFocus.lowerBound,

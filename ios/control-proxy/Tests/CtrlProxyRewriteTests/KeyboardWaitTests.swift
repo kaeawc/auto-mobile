@@ -278,6 +278,256 @@ final class KeyboardWaitTests: XCTestCase {
         XCTAssertEqual(result.iterations, 2)
     }
 
+    func testCloseSucceedsBeforeTimeout() async throws {
+        let clock = KeyboardTestClock()
+        var probes = 0
+        let closed = try await KeyboardWait.close(
+            clock: clock, closeDeadline: clock.now.advanced(by: .milliseconds(3500))
+        ) {
+            probes += 1
+            return probes < 4
+        }
+        XCTAssertTrue(closed)
+        XCTAssertEqual(probes, 4)
+        XCTAssertEqual(clock.sleeps, Array(repeating: .milliseconds(100), count: 3))
+        XCTAssertEqual(clock.elapsedMs, 300)
+    }
+
+    func testCloseTimeoutMatchesOldLoopIncludingShortenedLastSleep() async throws {
+        for start in [Duration.zero, .milliseconds(3150)] {
+            let clock = KeyboardTestClock()
+            let closeDeadline = clock.now.advanced(by: .milliseconds(3500))
+            clock.advance(by: start)
+            var probes = 0
+            let closed = try await KeyboardWait.close(clock: clock, closeDeadline: closeDeadline) {
+                probes += 1
+                return true
+            }
+
+            // Old loop: visibility first (including after the final sleep), then
+            // closePollDelay = min(100ms, min(attemptDeadline, closeDeadline) - now).
+            var oldElapsed = start
+            let oldAttemptDeadline = min(start + .milliseconds(600), .milliseconds(3500))
+            var oldProbes = 0
+            var oldSleeps: [Duration] = []
+            var oldClosed = true
+            while true {
+                oldProbes += 1 // isKeyboardVisible is always true in this reference.
+                let remaining = min(oldAttemptDeadline, .milliseconds(3500)) - oldElapsed
+                guard remaining > .zero else {
+                    oldClosed = false
+                    break
+                }
+                let delay = min(.milliseconds(100), remaining)
+                oldSleeps.append(delay)
+                oldElapsed += delay
+            }
+            XCTAssertEqual(closed, oldClosed)
+            XCTAssertFalse(closed)
+            XCTAssertEqual(probes, oldProbes)
+            XCTAssertEqual(clock.sleeps, oldSleeps)
+            XCTAssertEqual(clock.now.offset, oldElapsed)
+            if start == .zero {
+                XCTAssertEqual(probes, 7)
+                XCTAssertEqual(clock.elapsedMs, 600)
+            } else {
+                XCTAssertEqual(clock.sleeps.last, .milliseconds(50))
+                XCTAssertEqual(clock.elapsedMs, 3500)
+            }
+        }
+    }
+
+    func testClosePollDelayRespectsAttemptAndWholeActionDeadlines() {
+        func instant(_ milliseconds: Int64) -> KeyboardTestClock.Instant {
+            KeyboardTestClock.Instant(offset: .milliseconds(milliseconds))
+        }
+        XCTAssertEqual(KeyboardWait.closePollDelay(
+            now: instant(1000), attemptDeadline: instant(1600), closeDeadline: instant(4500)
+        ), .milliseconds(100))
+        XCTAssertEqual(KeyboardWait.closePollDelay(
+            now: instant(1550), attemptDeadline: instant(1600), closeDeadline: instant(4500)
+        ), .milliseconds(50))
+        XCTAssertEqual(KeyboardWait.closePollDelay(
+            now: instant(4450), attemptDeadline: instant(5000), closeDeadline: instant(4500)
+        ), .milliseconds(50))
+        XCTAssertNil(KeyboardWait.closePollDelay(
+            now: instant(1600), attemptDeadline: instant(1600), closeDeadline: instant(4500)
+        ))
+        XCTAssertNil(KeyboardWait.closePollDelay(
+            now: instant(4500), attemptDeadline: instant(5000), closeDeadline: instant(4500)
+        ))
+    }
+
+    func testCloseProbesBeforeCheckingExpiredBudget() async throws {
+        for visible in [true, false] {
+            let clock = KeyboardTestClock()
+            var probes = 0
+            let closed = try await KeyboardWait.close(clock: clock, closeDeadline: clock.now) {
+                probes += 1
+                return visible
+            }
+            XCTAssertEqual(closed, !visible)
+            XCTAssertEqual(probes, 1)
+            XCTAssertTrue(clock.sleeps.isEmpty)
+        }
+    }
+
+    func testDestructivePostConditionSucceedsBeforeTimeout() async throws {
+        let clock = KeyboardTestClock()
+        var probes = 0
+        let satisfied = try await KeyboardWait.destructivePostCondition(clock: clock) {
+            probes += 1
+            return probes == 4
+        }
+        XCTAssertTrue(satisfied)
+        XCTAssertEqual(probes, 4)
+        XCTAssertEqual(clock.sleeps, Array(repeating: .milliseconds(50), count: 3))
+        XCTAssertEqual(clock.elapsedMs, 150)
+    }
+
+    func testDestructivePostConditionTimeoutMatchesOldLoopAndFinalRead() async throws {
+        let clock = KeyboardTestClock()
+        var probes = 0
+        let satisfied = try await KeyboardWait.destructivePostCondition(clock: clock) {
+            probes += 1
+            return false
+        }
+        // Old loop: check the deadline, exists/value read, then a full 50ms sleep.
+        // On timeout it always performs one final exists/value read.
+        var oldElapsed = Duration.zero
+        var oldProbes = 0
+        var oldSleeps: [Duration] = []
+        while oldElapsed < .seconds(1) {
+            oldProbes += 1
+            oldSleeps.append(.milliseconds(50))
+            oldElapsed += .milliseconds(50)
+        }
+        oldProbes += 1
+        let oldSatisfied = false
+        XCTAssertEqual(satisfied, oldSatisfied)
+        XCTAssertFalse(satisfied)
+        XCTAssertEqual(probes, oldProbes)
+        XCTAssertEqual(probes, 21)
+        XCTAssertEqual(clock.sleeps, oldSleeps)
+        XCTAssertEqual(clock.now.offset, oldElapsed)
+        XCTAssertEqual(clock.elapsedMs, 1000)
+    }
+
+    func testRemainingWaitsObserveSuccessDuringOverrunningSleep() async throws {
+        for close in [true, false] {
+            let clock = KeyboardTestClock(sleepOvershoot: .seconds(1))
+            var probes = 0
+            let result: Bool
+            if close {
+                result = try await KeyboardWait.close(
+                    clock: clock, closeDeadline: clock.now.advanced(by: .milliseconds(3500))
+                ) {
+                    probes += 1
+                    return clock.elapsedMs < 600
+                }
+            } else {
+                result = try await KeyboardWait.destructivePostCondition(clock: clock) {
+                    probes += 1
+                    return clock.elapsedMs >= 1000
+                }
+            }
+            XCTAssertTrue(result)
+            XCTAssertEqual(probes, 2)
+            XCTAssertEqual(clock.sleeps, [close ? .milliseconds(100) : .milliseconds(50)])
+            XCTAssertEqual(clock.elapsedMs, close ? 1100 : 1050)
+        }
+    }
+
+    func testRemainingWaitsPropagateInitialAndFinalProbeErrors() async {
+        for close in [true, false] {
+            for finalProbe in [false, true] {
+                let clock = KeyboardTestClock(sleepOvershoot: .seconds(1))
+                var probes = 0
+                let probe = {
+                    probes += 1
+                    if !finalProbe || probes == 2 { throw ProbeError.failed }
+                    return close
+                }
+                do {
+                    if close {
+                        _ = try await KeyboardWait.close(
+                            clock: clock, closeDeadline: clock.now.advanced(by: .milliseconds(3500)), probe: probe
+                        )
+                    } else {
+                        _ = try await KeyboardWait.destructivePostCondition(clock: clock, probe: probe)
+                    }
+                    XCTFail("Probe error was swallowed")
+                } catch {
+                    XCTAssertTrue(error is ProbeError)
+                }
+                XCTAssertEqual(probes, finalProbe ? 2 : 1)
+                XCTAssertEqual(clock.sleeps, finalProbe ? [close ? .milliseconds(100) : .milliseconds(50)] : [])
+            }
+        }
+    }
+
+    func testRemainingWaitsPropagateCancellationDuringSleep() async {
+        for close in [true, false] {
+            let clock = KeyboardTestClock(manual: true)
+            var probes = 0
+            let task = Task { @MainActor in
+                if close {
+                    return try await KeyboardWait.close(
+                        clock: clock, closeDeadline: clock.now.advanced(by: .milliseconds(3500))
+                    ) {
+                        probes += 1
+                        return true
+                    }
+                }
+                return try await KeyboardWait.destructivePostCondition(clock: clock) {
+                    probes += 1
+                    return false
+                }
+            }
+            await clock.waitUntilSleeping()
+            task.cancel()
+            do {
+                _ = try await task.value
+                XCTFail("Cancellation was swallowed")
+            } catch {
+                XCTAssertTrue(error is CancellationError)
+            }
+            XCTAssertEqual(probes, 1)
+            XCTAssertEqual(clock.sleeps, [close ? .milliseconds(100) : .milliseconds(50)])
+        }
+    }
+
+    func testMainActorMakesProgressWhileRemainingWaitsAreSuspended() async throws {
+        for close in [true, false] {
+            let clock = KeyboardTestClock(manual: true)
+            var probes = 0
+            let task = Task { @MainActor in
+                if close {
+                    return try await KeyboardWait.close(
+                        clock: clock, closeDeadline: clock.now.advanced(by: .milliseconds(3500))
+                    ) {
+                        probes += 1
+                        return probes < 2
+                    }
+                }
+                return try await KeyboardWait.destructivePostCondition(clock: clock) {
+                    probes += 1
+                    return probes == 2
+                }
+            }
+            await clock.waitUntilSleeping()
+            var progress = 0
+            await Task { @MainActor in progress += 1 }.value
+            XCTAssertEqual(progress, 1)
+            XCTAssertEqual(probes, 1)
+            clock.release()
+            let result = try await task.value
+            XCTAssertTrue(result)
+            XCTAssertEqual(probes, 2)
+            XCTAssertEqual(clock.sleeps, [close ? .milliseconds(100) : .milliseconds(50)])
+        }
+    }
+
     func testTaskLocalSurvivesAwaitedKeyboardWait() async throws {
         // Guards a task-local surviving an await in general, not production setText coverage.
         let clock = KeyboardTestClock()
@@ -317,6 +567,8 @@ final class KeyboardWaitTests: XCTestCase {
         for (name, poller) in [
             ("tapAndAwaitKeyboardFocus", "KeyboardWait.focus("),
             ("waitForKeyboardVisibility", "KeyboardWait.visibility("),
+            ("waitForKeyboardClose<C: Clock>", "KeyboardWait.close("),
+            ("performPressKey", "KeyboardWait.destructivePostCondition("),
         ] {
             let start = try XCTUnwrap(source.range(of: "private func \(name)("))
             let remaining = source[start.upperBound...]
@@ -326,6 +578,23 @@ final class KeyboardWaitTests: XCTestCase {
             XCTAssertTrue(function.contains("try await " + poller))
             XCTAssertFalse(function.contains("RunLoop.current.run"))
             XCTAssertFalse(function.contains("Date()"))
+            if name == "performPressKey" {
+                // The horizontal-arrow budget is intentionally unchanged.
+                let pollStart = try XCTUnwrap(function.range(of: "var valueAfterKeyPress = valueBeforeKeyPress"))
+                XCTAssertFalse(function[pollStart.lowerBound...].contains("systemUptime"))
+                XCTAssertTrue(function.contains("catchingObjCException({ focusedElement.exists })"))
+            } else {
+                XCTAssertFalse(function.contains("systemUptime"))
+            }
+        }
+        let closeStart = try XCTUnwrap(source.range(of: "private func closeKeyboard<C: Clock>("))
+        let closeEnd = try XCTUnwrap(source[closeStart.upperBound...].range(of: "\n        @discardableResult"))
+        let closeAction = String(source[closeStart.lowerBound ..< closeEnd.lowerBound])
+        XCTAssertTrue(closeAction.contains("clock.now.advanced(by: .milliseconds(3500))"))
+        XCTAssertEqual(closeAction.components(separatedBy: "guard clock.now < closeDeadline").count - 1, 3)
+        XCTAssertTrue(closeAction.contains("try await waitForKeyboardClose("))
+        for forbidden in ["RunLoop.current.run", "Date()", "systemUptime"] {
+            XCTAssertFalse(closeAction.contains(forbidden))
         }
     }
 }

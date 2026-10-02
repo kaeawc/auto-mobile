@@ -1,10 +1,21 @@
-import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
 import { logger, LogLevel } from "../../src/utils/logger";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 
 /**
  * End-to-end proof that the `--tool-results-no-structured-content` strip runs at
@@ -19,6 +30,10 @@ import { logger, LogLevel } from "../../src/utils/logger";
 describe("CallTool wire boundary strips structuredContent (issue #2899)", () => {
   let fixture: McpTestFixture;
   const TOOL = "__strip_probe_2899__";
+
+  beforeEach(() => {
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+  });
 
   beforeAll(async () => {
     ToolRegistry.register(
@@ -40,7 +55,12 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
       },
     );
     fixture = new McpTestFixture();
-    await fixture.setup();
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+    try {
+      await fixture.setup();
+    } finally {
+      PlatformDeviceManagerFactory.reset();
+    }
   });
 
   afterAll(async () => {
@@ -53,6 +73,7 @@ describe("CallTool wire boundary strips structuredContent (issue #2899)", () => 
 
   afterEach(() => {
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
+    PlatformDeviceManagerFactory.reset();
   });
 
   test("gate off: structuredContent is present on the wire", async () => {
@@ -102,6 +123,14 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
   const NOSCHEMA_TOOL = "__strip_log_noschema_2962__";
   const PLAIN_TOOL = "__strip_log_plain_2962__";
 
+  beforeEach(() => {
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+  });
+
+  afterEach(() => {
+    PlatformDeviceManagerFactory.reset();
+  });
+
   // Match ONLY the exact omission trace emitted at the strip site (index.ts):
   // exact message equality plus the structured fields argument (issue #3216),
   // scoped to the probe tool, returning the `reason` field. This is precise on
@@ -145,7 +174,12 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       async () => ({ content: [{ type: "text", text: "no structuredContent here" }] }),
     );
     fixture = new McpTestFixture();
-    await fixture.setup();
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+    try {
+      await fixture.setup();
+    } finally {
+      PlatformDeviceManagerFactory.reset();
+    }
   });
 
   afterAll(async () => {

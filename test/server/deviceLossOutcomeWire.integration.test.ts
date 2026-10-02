@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import { ActionableError } from "../../src/models";
@@ -8,6 +8,8 @@ import { TerminalSessionError } from "../../src/daemon/sessionManager";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { executionTracker } from "../../src/server/executionTracker";
 import { McpTestFixture, MCP_TEST_REQUEST_TIMEOUT_MS } from "../fixtures/mcpTestFixture";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 
 describe("device loss MCP outcome", () => {
   const toolName = "__device_lost_wire_probe__";
@@ -20,6 +22,10 @@ describe("device loss MCP outcome", () => {
   let fixture: McpTestFixture | undefined;
   const originalObserveExecute = RealObserveScreen.prototype.execute;
 
+  beforeEach(() => {
+    PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+  });
+
   afterEach(async () => {
     if (fixture) {
       await fixture.teardown();
@@ -27,6 +33,7 @@ describe("device loss MCP outcome", () => {
     }
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
+    PlatformDeviceManagerFactory.reset();
     RealObserveScreen.prototype.execute = originalObserveExecute;
     ToolRegistry.unregister(toolName);
   });

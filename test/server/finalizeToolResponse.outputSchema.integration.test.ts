@@ -1,5 +1,5 @@
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import Ajv2020 from "ajv/dist/2020";
 import { createMcpServer } from "../../src/server/index";
 import {
@@ -8,6 +8,16 @@ import {
 } from "../../src/server/finalizeToolResponse";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+
+beforeEach(() => {
+  PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+});
+
+afterEach(() => {
+  PlatformDeviceManagerFactory.reset();
+});
 
 type ObjectOutputSchema = {
   shape: Record<string, { isOptional(): boolean }>;
@@ -67,7 +77,12 @@ function minimalFieldValue(schema: unknown): unknown {
 }
 
 // Populate the singleton before test collection, matching schema.integration.test.ts.
-createMcpServer();
+PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+try {
+  createMcpServer();
+} finally {
+  PlatformDeviceManagerFactory.reset();
+}
 
 // Non-object output schemas have no top-level required field contract to preserve.
 // This representative roster deliberately includes every advertised registered

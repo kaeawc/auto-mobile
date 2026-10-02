@@ -35,6 +35,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type {
@@ -658,6 +659,7 @@ describe("killDevice handler", () => {
     process.env.AUTOMOBILE_ANDROID_REBOOT_ON_DEATH = "1";
     delete process.env.AUTO_MOBILE_ANDROID_REBOOT_ON_DEATH;
     manager = new FailingKillDeviceManager();
+    PlatformDeviceManagerFactory.setInstance(manager);
     await setVideoRecordingManagerDependencies({
       videoRecorderService: {} as never,
       recordingRepository: {
@@ -685,6 +687,7 @@ describe("killDevice handler", () => {
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
     resetDeviceToolsDependencies();
+    PlatformDeviceManagerFactory.reset();
     resetVideoRecordingManagerDependencies();
     DaemonState.getInstance().reset();
     sessionManager?.stopCleanupTimer();

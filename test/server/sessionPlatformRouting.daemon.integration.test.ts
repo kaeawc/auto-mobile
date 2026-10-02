@@ -34,6 +34,7 @@ import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import {
@@ -54,6 +55,7 @@ let androidSession: string | undefined;
 let iosSession: string | undefined;
 let previousAutolock: string | undefined;
 let originalRepository: unknown;
+let restorePipelineOverrides: (() => void) | undefined;
 
 beforeEach(async () => {
   previousAutolock = process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
@@ -86,11 +88,16 @@ beforeEach(async () => {
   await pool.initializeWithDevices(devices);
   DaemonState.getInstance().initialize(manager, pool);
   ToolRegistry.clearTools();
+  restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+    displayInventory: new FakeDisplayInventoryProvider(),
+  });
   originalRepository = (ToolRegistry as any).toolCallRepository;
   (ToolRegistry as any).toolCallRepository = { recordToolCall: async () => {} };
 });
 
 afterEach(async () => {
+  restorePipelineOverrides?.();
+  restorePipelineOverrides = undefined;
   PlatformDeviceManagerFactory.setInstance(null);
   (ToolRegistry as any).toolCallRepository = originalRepository;
   ToolRegistry.clearTools();

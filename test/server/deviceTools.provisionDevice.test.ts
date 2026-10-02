@@ -26,6 +26,7 @@ import type {
 } from "../../src/db/provisionDeviceOperationRepository";
 import { ProvisionDeviceOperationConflictError } from "../../src/db/provisionDeviceOperationRepository";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceTeardownOperationStore } from "../fakes/FakeDeviceTeardownOperationStore";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -619,8 +620,12 @@ describe("provisionDevice handler", () => {
   let exactProvisioner: FakeExactDeviceProvisioner;
   let operationStore: FakeProvisionDeviceOperationStore;
   let teardownOperationStore: FakeDeviceTeardownOperationStore;
+  let restorePipelineOverrides: (() => void) | undefined;
 
   beforeEach(() => {
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     deviceManager = new FakeDeviceUtils();
     exactProvisioner = new FakeExactDeviceProvisioner();
     operationStore = new FakeProvisionDeviceOperationStore();
@@ -638,6 +643,8 @@ describe("provisionDevice handler", () => {
   });
 
   afterEach(() => {
+    restorePipelineOverrides?.();
+    restorePipelineOverrides = undefined;
     resetDeviceToolsDependencies();
     resetProvisionedDeviceTransportFenceForTests();
     DaemonState.getInstance().reset();

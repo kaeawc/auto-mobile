@@ -33,6 +33,7 @@ import {
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
+  appendHeartbeatExpiryMessage,
 } from "./deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
@@ -70,9 +71,11 @@ function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
   return {
     error: {
       code: "session_ownership_lost",
-      message:
+      message: appendHeartbeatExpiryMessage(
         `Session ownership lost for ${error.sessionUuid}: ${error.reason}. ` +
-        DEVICE_SESSION_RECOVERY_PROMPT,
+          DEVICE_SESSION_RECOVERY_PROMPT,
+        error.release,
+      ),
       sessionUuid: error.sessionUuid,
       reason: error.reason,
       retryable: true,

@@ -33,8 +33,10 @@ function clearAutolockEnv(): void {
 describe("SessionHeartbeatMonitor", () => {
   let timer: FakeTimer;
   let sessionManager: SessionManager;
+  let savedEnv: Array<[string, string | undefined]>;
 
   beforeEach(() => {
+    savedEnv = AUTOLOCK_ENV_KEYS.map((key) => [key, process.env[key]]);
     clearAutolockEnv();
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -43,6 +45,11 @@ describe("SessionHeartbeatMonitor", () => {
   afterEach(() => {
     sessionManager.stopCleanupTimer();
     clearAutolockEnv();
+    for (const [key, value] of savedEnv) {
+      if (value !== undefined) {
+        process.env[key] = value;
+      }
+    }
   });
 
   describe("scheduling", () => {
@@ -89,6 +96,58 @@ describe("SessionHeartbeatMonitor", () => {
   });
 
   describe("tick reaping decision", () => {
+    it("reaps a heartbeating default session only after the default timeout boundary", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      sessionManager.recordHeartbeat("s1");
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        timer,
+      );
+
+      timer.advanceTime(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(1);
+      await monitor.tick();
+      expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
+    });
+
+    it("moves the default-source session boundary with the heartbeat timeout environment override", async () => {
+      const timeoutMs = SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS * 2;
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = String(timeoutMs);
+      const session = await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      expect(session.heartbeatTimeoutSource).toBe("default");
+      expect(session.heartbeatTimeoutMs).toBe(timeoutMs);
+      sessionManager.recordHeartbeat("s1");
+      const reaped: Array<{ sessionId: string; reason: string }> = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async (sessionId, reason) => {
+          reaped.push({ sessionId, reason });
+        },
+        timer,
+      );
+
+      timer.advanceTime(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS + 1);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(timeoutMs - SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS - 1);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(1);
+      await monitor.tick();
+      expect(reaped).toEqual([{ sessionId: "s1", reason: "heartbeat-timeout" }]);
+    });
+
     it("uses a rehydrated session's own timeout while it awaits its owner", async () => {
       await sessionManager.createSession(
         "rehydrated-session",

@@ -86,6 +86,17 @@ enable/disable conflicts fail startup. Repeatable `--enable-tool` and
 `--disable-tool` flags override these environment values; persisted
 `setToolEnabled` choices override startup defaults.
 
+## Session heartbeat timeout
+
+`AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS` (alias
+`AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS`) defaults to `10000` ms. It controls
+the heartbeat leash for heartbeat-policy sessions, not `cli-idle` sessions.
+The proxy's default heartbeat cadence derives from this timeout.
+
+```bash
+export AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS=20000
+```
+
 ## CLI session lifetime
 
 Each `--cli` invocation is its own process, so it cannot send the periodic

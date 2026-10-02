@@ -5,6 +5,7 @@ import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { formatRotateMessage } from "../../../src/server/interactionTools";
 import { rotateResultSchema } from "../../../src/server/toolOutputSchemas";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import { ActionableError } from "../../../src/models/ActionableError";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -119,6 +120,397 @@ describe("Rotate", () => {
     expect(result.observation?.freshness?.warning).toBe(
       "Observation may be stale after interaction",
     );
+  });
+
+  describe("rotation session ownership and rollback", () => {
+    function useSession() {
+      let original:
+        | { accelerometerRotation: 0 | 1 | null; userRotation: number | null }
+        | undefined;
+      rotate = new Rotate(mockDevice, fakeAdb, fakeTimer, {
+        sessionRotation: async (mutation) =>
+          mutation({
+            get: () => original,
+            record: (state) => {
+              original ??= state;
+            },
+            clear: () => {
+              original = undefined;
+            },
+          }),
+      });
+      Object.assign(rotate, {
+        awaitIdle: fakeAwaitIdle,
+        observeScreen: fakeObserveScreen,
+        window: fakeWindow,
+      });
+      return () => original;
+    }
+
+    function settingsSequence(auto: string[]) {
+      fakeAdb.setCommandResponseSequence(
+        "shell settings get system accelerometer_rotation",
+        auto.map(createExecResult),
+      );
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=0"),
+        createExecResult("mRotation=1"),
+      ]);
+    }
+
+    test("session default holds auto-rotate off and records originals before writes", async () => {
+      const original = useSession();
+      settingsSequence(["1", "0"]);
+      const result = await rotate.execute("landscape");
+      expect(result.success).toBe(true);
+      expect(result.orientationLockState).toBe("locked");
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
+        false,
+      );
+      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+      const calls = fakeAdb.getExecutedCommands();
+      expect(calls.indexOf("shell settings get system user_rotation")).toBeLessThan(
+        calls.indexOf("shell settings put system accelerometer_rotation 0"),
+      );
+    });
+
+    test("session true records the same restore slot and stays locked", async () => {
+      const original = useSession();
+      settingsSequence(["1", "0"]);
+      const result = await rotate.execute("landscape", undefined, true);
+      expect(result.orientationLockState).toBe("locked");
+      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+    });
+
+    test("session already-matching orientation locks and records before its first write", async () => {
+      const original = useSession();
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=1"),
+      );
+      fakeAdb.setCommandResponseSequence("shell settings get system accelerometer_rotation", [
+        createExecResult("1"),
+        createExecResult("0"),
+      ]);
+      const result = await rotate.execute("landscape");
+      expect(result.success).toBe(true);
+      expect(result.orientationLockState).toBe("locked");
+      expect(original()).toEqual({ accelerometerRotation: 1, userRotation: 0 });
+    });
+
+    test("session unknown initial auto-rotate preserves guard and records null", async () => {
+      const original = useSession();
+      settingsSequence(["null"]);
+      const result = await rotate.execute("landscape");
+      expect(result.orientationLockState).toBe("unknown");
+      expect(original()).toEqual({ accelerometerRotation: null, userRotation: 0 });
+      expect(
+        fakeAdb
+          .getExecutedCommands()
+          .filter((command) =>
+            command.startsWith("shell settings put system accelerometer_rotation"),
+          ),
+      ).toEqual([]);
+    });
+
+    test.each([
+      { key: "accelerometer_rotation", live: 0 },
+      { key: "accelerometer_rotation", live: 1 },
+      { key: "user_rotation", live: 0 },
+      { key: "user_rotation", live: 1 },
+    ])(
+      "session unreadable $key refuses an explicit lock before any write or slot (live $live)",
+      async ({ key, live }) => {
+        const original = useSession();
+        fakeAdb.setCommandResponse(
+          'shell dumpsys window | grep -i "mRotation="',
+          createExecResult(`mRotation=${live}`),
+        );
+        fakeAdb.setCommandResponse(`shell settings get system ${key}`, createExecResult("null"));
+        await expect(rotate.execute("landscape", undefined, true)).rejects.toBeInstanceOf(
+          ActionableError,
+        );
+        expect(original()).toBeUndefined();
+        expect(
+          fakeAdb.getExecutedCommands().filter((c) => c.startsWith("shell settings put system")),
+        ).toEqual([]);
+        expect(
+          fakeAdb.getExecutedCommands().filter((c) => c === `shell settings get system ${key}`),
+        ).toHaveLength(2);
+      },
+    );
+
+    test.each(["accelerometer_rotation", "user_rotation"])(
+      "session retries unreadable %s once and records the real original",
+      async (key) => {
+        const original = useSession();
+        settingsSequence(["1", "0"]);
+        fakeAdb.setCommandResponseSequence(`shell settings get system ${key}`, [
+          createExecResult("null"),
+          createExecResult(key === "user_rotation" ? "2" : "1"),
+          createExecResult("0"),
+        ]);
+        const result = await rotate.execute("landscape", undefined, true);
+        expect(result.success).toBe(true);
+        expect(original()).toEqual({
+          accelerometerRotation: 1,
+          userRotation: key === "user_rotation" ? 2 : 0,
+        });
+      },
+    );
+
+    test.each(["match", "mismatch", "unreadable"])(
+      "waitForRotation exception confirms live outcome %s before deciding rollback",
+      async (outcome) => {
+        useSession();
+        settingsSequence(["1", "0"]);
+        fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+          createExecResult("mRotation=0"),
+          createExecResult(
+            outcome === "unreadable" ? "" : outcome === "match" ? "mRotation=1" : "mRotation=0",
+          ),
+        ]);
+        fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+          createExecResult("2"),
+          createExecResult("1"),
+          createExecResult("2"),
+        ]);
+        const wait = spyOn(fakeAwaitIdle, "waitForRotation").mockRejectedValue(
+          new Error("rotation wait failed"),
+        );
+        try {
+          const result = await rotate.execute("landscape");
+          expect(result.success).toBe(outcome === "match");
+          expect(result.currentOrientation).toBe(
+            outcome === "unreadable" ? "unknown" : outcome === "match" ? "landscape" : "portrait",
+          );
+          expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(
+            outcome === "mismatch",
+          );
+          if (outcome === "unreadable") {
+            expect(result.warning).toContain("unconfirmed");
+          }
+          if (outcome === "match") {
+            expect(result.warning).toContain("rotation wait failed");
+          }
+        } finally {
+          wait.mockRestore();
+        }
+      },
+    );
+
+    test("stalled live confirmation is bounded by FakeTimer and never rolls back", async () => {
+      useSession();
+      settingsSequence(["1", "0"]);
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
+      const confirmation = Promise.withResolvers<ExecResult>();
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      let liveReads = 0;
+      const read = spyOn(fakeAdb, "executeCommand").mockImplementation(async (command, ...args) => {
+        if (command.includes("dumpsys window") && ++liveReads > 1) {
+          return confirmation.promise;
+        }
+        return execute(command, ...args);
+      });
+      const wait = spyOn(fakeAwaitIdle, "waitForRotation").mockRejectedValue(
+        new Error("rotation wait failed"),
+      );
+      try {
+        const result = await rotate.execute("landscape");
+        expect(result.success).toBe(false);
+        expect(result.currentOrientation).toBe("unknown");
+        expect(result.warning).toContain("unconfirmed");
+        expect(result.warning).toContain("timed out after 1000ms");
+        expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(false);
+      } finally {
+        confirmation.resolve(createExecResult(""));
+        wait.mockRestore();
+        read.mockRestore();
+      }
+    });
+
+    test.each([
+      { path: "success path", actorValue: "3" },
+      { path: "catch path", actorValue: "3" },
+      { path: "success path", actorValue: "2" },
+      { path: "catch path", actorValue: "2" },
+    ])(
+      "confirmed mismatch preserves another actor's user_rotation $actorValue on the $path",
+      async ({ path, actorValue }) => {
+        fakeAdb.setCommandResponse(
+          'shell dumpsys window | grep -i "mRotation="',
+          createExecResult("mRotation=0"),
+        );
+        fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+          createExecResult("2"),
+          createExecResult(actorValue),
+        ]);
+        const wait =
+          path === "catch path"
+            ? spyOn(fakeAwaitIdle, "waitForRotation").mockRejectedValue(
+                new Error("rotation wait failed"),
+              )
+            : undefined;
+        try {
+          const result = await rotate.execute("landscape");
+          expect(result.success).toBe(false);
+          expect(result.warning).toContain("another actor");
+          expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(
+            false,
+          );
+        } finally {
+          wait?.mockRestore();
+        }
+      },
+    );
+
+    test("confirmed direct reversion rolls user_rotation back to its pre-call value", async () => {
+      fakeAdb.setCommandResponse(
+        'shell dumpsys window | grep -i "mRotation="',
+        createExecResult("mRotation=0"),
+      );
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("2"),
+        createExecResult("1"),
+        createExecResult("2"),
+      ]);
+      const result = await rotate.execute("landscape");
+      expect(result.success).toBe(false);
+      expect(result.currentOrientation).toBe("portrait");
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
+        true,
+      );
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(true);
+    });
+
+    test("waitForRotation failure rolls user_rotation back only after confirmed mismatch", async () => {
+      settingsSequence(["1"]);
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=0"),
+      ]);
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("2"),
+        createExecResult("1"),
+        createExecResult("2"),
+      ]);
+      const wait = spyOn(fakeAwaitIdle, "waitForRotation").mockRejectedValue(
+        new Error("rotation wait failed"),
+      );
+      try {
+        const result = await rotate.execute("landscape");
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("rotation wait failed");
+        expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(true);
+      } finally {
+        wait.mockRestore();
+      }
+    });
+
+    test("a user_rotation write that applies then rejects still rolls back", async () => {
+      settingsSequence(["1"]);
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=0"),
+      ]);
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("2"),
+        createExecResult("1"),
+        createExecResult("2"),
+      ]);
+      const execute = fakeAdb.executeCommand.bind(fakeAdb);
+      const write = spyOn(fakeAdb, "executeCommand").mockImplementation(
+        async (command, ...args) => {
+          const result = await execute(command, ...args);
+          if (command === "shell settings put system user_rotation 1") {
+            throw new Error("write applied but failed");
+          }
+          return result;
+        },
+      );
+      try {
+        const result = await rotate.execute("landscape");
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("write applied but failed");
+        expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(true);
+      } finally {
+        write.mockRestore();
+      }
+    });
+
+    test("rollback write failure adds warning and preserves the original rotation failure", async () => {
+      settingsSequence(["1"]);
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=0"),
+      ]);
+      fakeAdb.setCommandResponseSequence("shell settings get system user_rotation", [
+        createExecResult("2"),
+        createExecResult("1"),
+      ]);
+      fakeAdb.setCommandError(
+        "shell settings put system user_rotation 2",
+        new Error("rollback failed"),
+      );
+      const wait = spyOn(fakeAwaitIdle, "waitForRotation").mockRejectedValue(
+        new Error("rotation wait failed"),
+      );
+      try {
+        const result = await rotate.execute("landscape");
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("rotation wait failed");
+        expect(result.warning).toContain("rollback failed");
+      } finally {
+        wait.mockRestore();
+      }
+    });
+
+    test.each(["null", "1"])(
+      "failed rotation skips rollback for unreadable or unchanged pre-call user_rotation %s",
+      async (previous) => {
+        settingsSequence(["1"]);
+        fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+          createExecResult("mRotation=0"),
+        ]);
+        fakeAdb.setCommandResponse(
+          "shell settings get system user_rotation",
+          createExecResult(previous),
+        );
+        const wait = spyOn(fakeAwaitIdle, "waitForRotation").mockRejectedValue(
+          new Error("rotation wait failed"),
+        );
+        try {
+          const result = await rotate.execute("landscape");
+          expect(result.success).toBe(false);
+          expect(
+            fakeAdb
+              .getExecutedCommands()
+              .filter((c) => c.startsWith("shell settings put system user_rotation")),
+          ).toEqual(["shell settings put system user_rotation 1"]);
+        } finally {
+          wait.mockRestore();
+        }
+      },
+    );
+
+    test("unknown achieved orientation never rolls user_rotation back", async () => {
+      fakeAdb.setCommandResponseSequence('shell dumpsys window | grep -i "mRotation="', [
+        createExecResult("mRotation=0"),
+        createExecResult(""),
+      ]);
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
+      const result = await rotate.execute("landscape");
+      expect(result.currentOrientation).toBe("unknown");
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(false);
+    });
+
+    test("abort after a user_rotation write never rolls it back", async () => {
+      settingsSequence(["1"]);
+      const controller = new AbortController();
+      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
+      fakeAdb.abortAfterCommand("shell settings put system user_rotation 1", controller);
+      await expect(
+        rotate.execute("landscape", undefined, undefined, controller.signal),
+      ).rejects.toThrow();
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 2")).toBe(false);
+    });
   });
 
   describe("getCurrentOrientation", () => {

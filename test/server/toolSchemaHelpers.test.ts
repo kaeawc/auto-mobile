@@ -508,7 +508,7 @@ describe("generated tool definitions", () => {
 
     expect(rotate?.inputSchema?.properties?.lockOrientation).toEqual({
       description:
-        "Android only. true keeps the requested orientation locked after rotation; false explicitly restores automatic rotation after a persistent request. Omit to preserve the existing behavior.",
+        "Android only. In a device session, omission or true holds the orientation until false or session release; an unreadable initial auto-rotate setting is left unchanged by omission. Direct calls restore auto-rotate at the end unless true. false enables automatic rotation, even if originally locked; in a session it also restores original user_rotation. orientationLockState reports the confirmed lock.",
       type: "boolean",
     });
   });

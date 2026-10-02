@@ -853,27 +853,42 @@ the structured result with `success: false` and set the MCP `isError` flag.
 
 ### Keeping an Android orientation locked
 
-`rotate` preserves its existing behavior when `lockOrientation` is omitted: it
-temporarily disables auto-rotate when necessary, then restores the prior
-setting. A confirmed reversion to the sensor-held orientation returns
-`success: false` with the achieved `currentOrientation`; `rotationPerformed` is
-false when the display ended in its previous orientation. An unreadable final
-orientation retains success with a warning because no mismatch was confirmed.
-To keep portrait or landscape orientation in effect for subsequent
-actions, pass `lockOrientation: true`:
+With an Android device session (`sessionUuid` and an available session manager),
+`rotate` holds the requested orientation by default: auto-rotate stays off until
+`lockOrientation: false`, session release, or rebind away from the device. The
+session records the original `accelerometer_rotation` and `user_rotation` before
+its first settings write and restores both on release or rebind. An already
+locked no-op records nothing. If the initial auto-rotate setting is unreadable,
+omission leaves it unchanged rather than forcing a lock.
+
+In direct mode (no session or session manager), omission temporarily disables
+auto-rotate when necessary and restores it at the end of the call. To keep the
+orientation locked past a direct call, pass `lockOrientation: true`:
 
 ```json
 { "orientation": "landscape", "lockOrientation": true }
 ```
 
-The result reports `orientationLockState` as `locked`, `unlocked`, or `unknown`.
-A persistent request succeeds only after live rotation and the lock are
-confirmed. If lock verification fails, `currentOrientation` reports the latest
-confirmed live orientation, or `unknown` when it cannot be read.
+`true` differs from the default only in direct mode, where it is the sole way to
+hold the lock past the call. In session mode it explicitly requests the same
+lock, also recording the restore slot so release restores the original settings;
+unlike omission, an explicit lock can force an unreadable initial setting off.
+
+The existing `orientationLockState` reports `locked`, `unlocked`, or `unknown`.
+A confirmed final orientation mismatch returns `success: false` with the achieved
+`currentOrientation`. `rotationPerformed` is false when the display ended in its
+previous orientation. Confirmed failures roll `user_rotation` back to its value
+before the call; cancellation and unknown final orientation do not. An unreadable
+final orientation retains success with a warning when no mismatch was confirmed.
+A persistent lock requires confirmation of the lock and live orientation.
 
 To restore automatic rotation, pass `lockOrientation: false`, for example
-`{ "orientation": "landscape", "lockOrientation": false }`. These lock options
-are supported only on Android.
+`{ "orientation": "landscape", "lockOrientation": false }`. This rotates to the
+requested orientation and enables auto-rotate, deliberately overriding an
+originally locked `accelerometer_rotation=0`. In session mode, once auto-rotate
+is confirmed on, it additionally restores the original `user_rotation` and clears
+the slot. A failed user-setting restore adds a warning and retains the slot for
+release to retry. These options are supported only on Android.
 
 ### Acquiring a device: `avdName`, `udid`, and the `deviceId` alias
 

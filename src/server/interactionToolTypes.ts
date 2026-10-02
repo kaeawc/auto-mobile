@@ -199,10 +199,13 @@ export interface RecentAppsArgs {
 }
 
 export interface RotateArgs {
+  sessionUuid?: string; // Existing device-targeting input supplied by the tool registry.
   orientation: "portrait" | "landscape";
   /**
-   * Android only. `true` keeps the requested orientation locked; `false`
-   * explicitly restores automatic rotation; omit to preserve prior behavior.
+   * Android only. Session omission or `true` holds until `false` or release
+   * (omission leaves unreadable initial auto-rotate unchanged). Direct omission
+   * restores at call end; `true` persists. `false` enables automatic rotation even
+   * if originally locked, restores the session's original user_rotation, and clears ownership.
    */
   lockOrientation?: boolean;
   platform?: Platform;

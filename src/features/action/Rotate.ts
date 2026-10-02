@@ -2,7 +2,7 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, ObserveResult, OrientationLockState, RotateResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -16,7 +16,34 @@ import { runWithAbortSignal } from "../../utils/AbortContext";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { verifyIosRotation } from "./iosRotateVerification";
 
+export interface RotationRestoreState {
+  accelerometerRotation: 0 | 1 | null;
+  userRotation: number | null;
+}
+
+export interface RotationRestoreSlot {
+  get(): RotationRestoreState | undefined;
+  record(state: RotationRestoreState): void;
+  clear(): void;
+}
+
+export interface RotateOptions {
+  sessionRotation?: <T>(mutation: (slot?: RotationRestoreSlot) => Promise<T>) => Promise<T>;
+}
+
+interface RotationCallSettings {
+  previousUserRotation: number | null;
+  started: boolean;
+  writtenUserRotation: number | null;
+  beforeWrite(options?: {
+    accelerometerRotation?: boolean;
+    captureUserRotation?: boolean;
+    userRotation?: number;
+  }): Promise<void>;
+}
+
 interface RotationSettingCleanup {
+  assertCurrentDevice?: () => void;
   pendingWrite?: Promise<unknown>;
   needed: boolean;
 }
@@ -54,7 +81,12 @@ export class Rotate extends BaseVisualChange {
   private static readonly SETTLE_WAIT_POLL_INTERVAL_MS = 150;
   private static readonly SETTLE_WAIT_STABLE_READS = 2;
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    timer: Timer = defaultTimer,
+    private readonly options: RotateOptions = {},
+  ) {
     super(device, adb, timer);
   }
 
@@ -99,6 +131,140 @@ export class Rotate extends BaseVisualChange {
       logger.warn(`Failed to read system setting ${key}: ${error}`);
       return null;
     }
+  }
+
+  /** Restore recorded settings through the same CtrlProxy-first/ADB fallback as rotation. */
+  async restoreRotationSettings(state: RotationRestoreState, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    await this.getRotationLock().runExclusive(() => this.writeRotationSettings({ state, signal }));
+  }
+
+  private async writeRotationSettings(options: {
+    state: RotationRestoreState;
+    signal?: AbortSignal;
+    assertCurrentDevice?: () => void;
+  }): Promise<void> {
+    const { state, signal, assertCurrentDevice } = options;
+    const cleanup: RotationSettingCleanup = { needed: false, assertCurrentDevice };
+    // No observation or device discovery is needed for a settings-only restoration.
+    // Teardown drains admitted mutations before restoring; late setup hands off after writes settle.
+    await runWithAbortSignal(signal, async () => {
+      if (state.userRotation !== null) {
+        await this.writeSystemSetting("user_rotation", String(state.userRotation), signal, cleanup);
+      }
+      if (state.accelerometerRotation !== null) {
+        await this.writeSystemSetting(
+          "accelerometer_rotation",
+          String(state.accelerometerRotation),
+          signal,
+          cleanup,
+        );
+      }
+      for (const [key, expected] of [
+        ["user_rotation", state.userRotation],
+        ["accelerometer_rotation", state.accelerometerRotation],
+      ] as const) {
+        if (expected !== null && (await this.readSystemSetting(key, signal)) !== String(expected)) {
+          throw new ActionableError(
+            `Restoration of ${key}=${expected} did not verify by read-back.`,
+          );
+        }
+      }
+    });
+  }
+
+  private async readUserRotation(signal?: AbortSignal): Promise<number | null> {
+    const raw = await this.readSystemSetting("user_rotation", signal);
+    if (raw === null || raw.trim() === "") {
+      return null;
+    }
+    const value = Number(raw);
+    return Number.isSafeInteger(value) ? value : null;
+  }
+
+  private async rollbackUserRotation(options: {
+    previous: number | null;
+    written: number | null;
+    signal?: AbortSignal;
+    slot?: RotationRestoreSlot;
+  }): Promise<string | undefined> {
+    const { previous, written, signal, slot } = options;
+    if (written === null || signal?.aborted || previous === null) {
+      return;
+    }
+    try {
+      slot?.get();
+      const current = await this.readUserRotation(signal);
+      if (current !== written) {
+        return "Skipped user_rotation rollback: its current value no longer matches this call's write (another actor may have changed it).";
+      }
+      if (current === previous) {
+        return;
+      }
+      await raceWithDeadline(
+        () =>
+          this.writeRotationSettings({
+            state: { userRotation: previous, accelerometerRotation: null },
+            signal,
+            assertCurrentDevice: () => {
+              slot?.get();
+            },
+          }),
+        {
+          timer: this.timer,
+          timeoutMs: ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+          signal,
+          label: "Rollback user_rotation",
+        },
+      );
+    } catch (error) {
+      logger.warn("Failed to roll back user_rotation after rotation failure", error);
+      return `Failed to roll back user_rotation: ${error}`;
+    }
+  }
+
+  private async completeSessionRestore(
+    result: RotateResult,
+    lockOrientation: boolean | undefined,
+    slot?: RotationRestoreSlot,
+    signal?: AbortSignal,
+  ): Promise<RotateResult> {
+    if (lockOrientation !== false || result.orientationLockState !== "unlocked" || !slot) {
+      return result;
+    }
+    const state = slot.get();
+    if (!state) {
+      return result;
+    }
+    try {
+      await raceWithDeadline(
+        () =>
+          this.writeRotationSettings({
+            state: { userRotation: state.userRotation, accelerometerRotation: null },
+            signal,
+            assertCurrentDevice: () => {
+              slot.get();
+            },
+          }),
+        {
+          timer: this.timer,
+          timeoutMs: ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+          signal,
+          label: "Restore original user_rotation",
+        },
+      );
+      // Explicit unlock applies immediately; retain the first originals until
+      // release/rebind so a subsequent rotate cannot redefine the session baseline.
+    } catch (error) {
+      logger.warn(
+        "Failed to restore original user_rotation after explicit automatic rotation",
+        error,
+      );
+      result.warning = [result.warning, `Failed to restore original user_rotation: ${error}`]
+        .filter(Boolean)
+        .join(" ");
+    }
+    return result;
   }
 
   /**
@@ -450,9 +616,11 @@ export class Rotate extends BaseVisualChange {
     orientation: "portrait" | "landscape",
     value: number,
     currentOrientation: string,
+    options: { beforeWrite: RotationCallSettings["beforeWrite"]; cleanup: RotationSettingCleanup },
     signal?: AbortSignal,
   ): Promise<AlreadyAppliedOrientationDecision> {
     throwIfAborted(signal);
+    const { beforeWrite, cleanup } = options;
     const liveRotation = await this.readLiveRotation(signal);
     if (liveRotation === null) {
       // The normal rotation path can still establish the requested orientation
@@ -466,12 +634,17 @@ export class Rotate extends BaseVisualChange {
       return { kind: "requires-rotation", reason: "live-orientation-changed" };
     }
 
+    // Capture both originals before the first write; an unreadable session
+    // baseline is a structured failure, never an unrestorable mutation.
+    await beforeWrite({ accelerometerRotation: true, captureUserRotation: true });
     try {
       // Android applies user_rotation when auto-rotate is disabled. Persist
       // the exact live value before the lock so stale settings cannot rotate
       // an already-matching (including reverse) display.
-      await this.writeSystemSetting("user_rotation", String(liveRotation), signal);
-      await this.writeSystemSetting("accelerometer_rotation", "0", signal);
+      await beforeWrite({ userRotation: liveRotation });
+      await this.writeSystemSetting("user_rotation", String(liveRotation), signal, cleanup);
+      await beforeWrite();
+      await this.writeSystemSetting("accelerometer_rotation", "0", signal, cleanup);
       await this.awaitIdle.waitForRotation(liveRotation, undefined, signal);
     } catch (error) {
       throwIfAborted(signal);
@@ -550,11 +723,16 @@ export class Rotate extends BaseVisualChange {
     value: number,
     currentOrientation: string,
     autoRotateState: "locked" | "enabled" | "unknown",
-    plan: { preserveLock: boolean; restoreAutomaticRotation: boolean },
+    plan: {
+      preserveLock: boolean;
+      restoreAutomaticRotation: boolean;
+      beforeWrite: RotationCallSettings["beforeWrite"];
+      cleanup: RotationSettingCleanup;
+    },
     signal?: AbortSignal,
   ): Promise<AlreadyAppliedOrientationDecision> {
     throwIfAborted(signal);
-    const { preserveLock, restoreAutomaticRotation } = plan;
+    const { preserveLock, restoreAutomaticRotation, beforeWrite, cleanup } = plan;
     if (currentOrientation !== orientation) {
       return { kind: "requires-rotation", reason: "orientation-differs" };
     }
@@ -589,16 +767,24 @@ export class Rotate extends BaseVisualChange {
     }
 
     if (preserveLock) {
-      return this.lockAlreadyAppliedOrientation(orientation, value, currentOrientation, signal);
+      return this.lockAlreadyAppliedOrientation(
+        orientation,
+        value,
+        currentOrientation,
+        { beforeWrite, cleanup },
+        signal,
+      );
     }
 
     if (!restoreAutomaticRotation) {
       return { kind: "requires-rotation", reason: "orientation-differs" };
     }
 
+    await beforeWrite({ accelerometerRotation: true });
     const { achievedOrientation, warning } = await this.restoreAutoRotateAndConfirmOrientation(
       orientation,
       signal,
+      cleanup,
     );
     const orientationLockState = await this.getOrientationLockState(signal);
     if (orientationLockState !== "unlocked") {
@@ -637,6 +823,7 @@ export class Rotate extends BaseVisualChange {
   private resolveAutoRotatePlan(
     autoRotateState: "locked" | "enabled" | "unknown",
     lockOrientation: boolean | undefined,
+    sessionMode = false,
   ): {
     preserveLock: boolean;
     restoreAutomaticRotation: boolean;
@@ -644,7 +831,9 @@ export class Rotate extends BaseVisualChange {
     shouldRestoreAutoRotate: boolean;
     canForceAutoRotateOff: boolean;
   } {
-    const preserveLock = lockOrientation === true;
+    const preserveLock =
+      lockOrientation === true ||
+      (sessionMode && lockOrientation === undefined && autoRotateState !== "unknown");
     const restoreAutomaticRotation = lockOrientation === false;
     const wasAutoRotateEnabled = autoRotateState === "enabled";
     return {
@@ -807,8 +996,10 @@ export class Rotate extends BaseVisualChange {
     cleanup?: RotationSettingCleanup,
   ): Promise<void> {
     throwIfAborted(signal);
+    cleanup?.assertCurrentDevice?.();
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      cleanup?.assertCurrentDevice?.();
       const write = a11y.requestSettingsPut("system", key, value, "int");
       if (cleanup) {
         cleanup.pendingWrite = write;
@@ -823,6 +1014,7 @@ export class Rotate extends BaseVisualChange {
       logger.debug(`[Rotate] a11y settings put threw for ${key}: ${error}`);
     }
     throwIfAborted(signal);
+    cleanup?.assertCurrentDevice?.();
     const write = this.adb.executeCommand(`shell settings put system ${key} ${value}`);
     if (cleanup) {
       cleanup.pendingWrite = write;
@@ -961,12 +1153,11 @@ export class Rotate extends BaseVisualChange {
           throw toActionableError(error, "Could not acquire the device rotation lock");
         }
         try {
-          const result = await this.performAndroidRotation(
-            orientation,
-            perf,
-            lockOrientation,
-            signal,
-          );
+          const mutation = (slot?: RotationRestoreSlot) =>
+            this.performAndroidRotation(orientation, perf, lockOrientation, signal, slot);
+          const result = this.options.sessionRotation
+            ? await this.options.sessionRotation(mutation)
+            : await mutation();
           // Decide from the completed action under the lock, not a racy pre-read.
           // Successful no-ops still receive a fresh observation without requiring a diff.
           if (result.success && result.rotationPerformed === false) {
@@ -981,6 +1172,104 @@ export class Rotate extends BaseVisualChange {
     );
   }
 
+  private async captureSessionRotationOriginals(options: {
+    state: RotationRestoreState;
+    captureAccelerometer: boolean;
+    captureUser: boolean;
+    signal?: AbortSignal;
+  }): Promise<void> {
+    const { state, captureAccelerometer, captureUser, signal } = options;
+    // Retry only originals for settings this path will change. Unknown,
+    // untouched auto-rotate still preserves the direct-mode #6199 guard.
+    if (captureAccelerometer && state.accelerometerRotation === null) {
+      const retry = await this.getAutoRotateState(signal);
+      if (retry === "unknown") {
+        throw new ActionableError(
+          "The current rotation setting accelerometer_rotation could not be read; retry rotation when settings are readable.",
+        );
+      }
+      state.accelerometerRotation = retry === "locked" ? 0 : 1;
+    }
+    if (captureUser && state.userRotation === null) {
+      const retry = await this.readUserRotation(signal);
+      if (retry === null) {
+        throw new ActionableError(
+          "The current rotation setting user_rotation could not be read; retry rotation when settings are readable.",
+        );
+      }
+      state.userRotation = retry;
+    }
+  }
+
+  private rotationCallSettings(
+    autoRotateState: "locked" | "enabled" | "unknown",
+    slot?: RotationRestoreSlot,
+    signal?: AbortSignal,
+  ): RotationCallSettings {
+    const accelerometerRotation =
+      autoRotateState === "locked" ? 0 : autoRotateState === "enabled" ? 1 : null;
+    const settings: RotationCallSettings = {
+      previousUserRotation: null,
+      started: false,
+      writtenUserRotation: null,
+      beforeWrite: async (options = {}) => {
+        const original = slot?.get(); // Retirement fences every admitted write.
+        if (!settings.started) {
+          settings.previousUserRotation = await this.readUserRotation(signal);
+        }
+        const state = original ?? {
+          accelerometerRotation,
+          userRotation: settings.previousUserRotation,
+        };
+        if (slot) {
+          await this.captureSessionRotationOriginals({
+            state,
+            captureAccelerometer: options.accelerometerRotation === true,
+            captureUser: options.captureUserRotation === true || options.userRotation !== undefined,
+            signal,
+          });
+          if (!settings.started && settings.previousUserRotation === null) {
+            settings.previousUserRotation = state.userRotation;
+          }
+          throwIfAborted(signal);
+          slot.get();
+          if (!original) {
+            slot.record(state);
+          }
+        }
+        settings.started = true;
+        if (options.userRotation !== undefined) {
+          settings.writtenUserRotation = options.userRotation;
+        }
+      },
+    };
+    return settings;
+  }
+
+  private async finishAndroidRotation(
+    result: RotateResult,
+    settings: RotationCallSettings,
+    lockOrientation: boolean | undefined,
+    slot?: RotationRestoreSlot,
+    signal?: AbortSignal,
+  ): Promise<RotateResult> {
+    if (
+      settings.started &&
+      !result.success &&
+      result.currentOrientation !== "unknown" &&
+      result.currentOrientation !== result.orientation
+    ) {
+      const warning = await this.rollbackUserRotation({
+        previous: settings.previousUserRotation,
+        written: settings.writtenUserRotation,
+        signal,
+        slot,
+      });
+      result.warning = [result.warning, warning].filter(Boolean).join(" ") || undefined;
+    }
+    return this.completeSessionRestore(result, lockOrientation, slot, signal);
+  }
+
   /**
    * The read-auto-rotate -> disable -> rotate -> restore-auto-rotate critical
    * section for Android rotation. Callers MUST run this under
@@ -991,6 +1280,7 @@ export class Rotate extends BaseVisualChange {
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     lockOrientation: boolean | undefined,
     signal?: AbortSignal,
+    slot?: RotationRestoreSlot,
   ): Promise<RotateResult> {
     throwIfAborted(signal);
     const value = orientation === "portrait" ? 0 : 1;
@@ -1000,23 +1290,37 @@ export class Rotate extends BaseVisualChange {
       Promise.all([this.getCurrentOrientation(signal), this.getAutoRotateState(signal)]),
     );
 
+    const settings = this.rotationCallSettings(autoRotateState, slot, signal);
+    const plan = this.resolveAutoRotatePlan(autoRotateState, lockOrientation, slot !== undefined);
     const {
       preserveLock,
       restoreAutomaticRotation,
       wasAutoRotateEnabled,
       shouldRestoreAutoRotate,
       canForceAutoRotateOff,
-    } = this.resolveAutoRotatePlan(autoRotateState, lockOrientation);
+    } = plan;
+    const cleanup: RotationSettingCleanup = {
+      needed: false,
+      assertCurrentDevice: () => {
+        slot?.get();
+      },
+    };
     const alreadyApplied = await this.handleAlreadyAppliedOrientation(
       orientation,
       value,
       currentOrientation,
       autoRotateState,
-      { preserveLock, restoreAutomaticRotation },
+      { preserveLock, restoreAutomaticRotation, beforeWrite: settings.beforeWrite, cleanup },
       signal,
     );
     if (alreadyApplied.kind === "handled") {
-      return alreadyApplied.result;
+      return this.finishAndroidRotation(
+        alreadyApplied.result,
+        settings,
+        lockOrientation,
+        slot,
+        signal,
+      );
     }
     logger.debug(
       `[Rotate] Continuing with requested rotation: ${alreadyApplied.reason.replaceAll("-", " ")}`,
@@ -1030,11 +1334,14 @@ export class Rotate extends BaseVisualChange {
     // while explicit false restores automatic rotation even after a previous
     // persistent request.
 
-    const cleanup: RotationSettingCleanup = { needed: false };
     try {
       this.logAutoRotatePlan(autoRotateState, preserveLock, restoreAutomaticRotation);
 
       await perf.track("setRotation", async () => {
+        await settings.beforeWrite({
+          accelerometerRotation: canForceAutoRotateOff,
+          captureUserRotation: true,
+        });
         if (canForceAutoRotateOff) {
           // user_rotation is honored only after automatic rotation is disabled.
           // Keeping these writes ordered avoids a target write racing ahead of
@@ -1047,6 +1354,7 @@ export class Rotate extends BaseVisualChange {
             "[Rotate] accelerometer_rotation is unconfirmed; writing user_rotation without changing the lock state",
           );
         }
+        await settings.beforeWrite({ userRotation: value });
         await this.writeSystemSetting("user_rotation", String(value), signal, cleanup);
       });
 
@@ -1070,7 +1378,7 @@ export class Rotate extends BaseVisualChange {
           await this.restoreAutoRotateAndConfirmOrientation(orientation, signal, cleanup));
       }
 
-      return this.finalizeAndroidRotation(
+      const result = await this.finalizeAndroidRotation(
         orientation,
         value,
         currentOrientation,
@@ -1082,39 +1390,175 @@ export class Rotate extends BaseVisualChange {
         wasAutoRotateEnabled,
         signal,
       );
+      return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
     } catch (error) {
-      logger.warn("Failed to change device orientation", error);
-      // Restore auto-rotate on a failed temporary/explicit-unlock operation.
-      // A persistent request intentionally leaves its lock in place.
-      let restoreFailure: ActionableError | undefined;
-      if (signal?.aborted ? cleanup.needed : shouldRestoreAutoRotate) {
-        try {
-          await this.restoreAutoRotateSetting(cleanup);
-          logger.info("Restored auto-rotate after error");
-        } catch (restoreError) {
-          logger.warn("Failed to restore auto-rotate", restoreError);
-          restoreFailure = toActionableError(restoreError, "Failed to restore auto-rotate");
-        }
-      }
-
-      if (signal?.aborted && restoreFailure) {
-        throw new ActionableError(
-          "Rotation cancelled; accelerometer_rotation may be left changed (auto-rotate may remain disabled)",
-          { cause: restoreFailure },
-        );
-      }
-      throwIfAborted(signal);
-      return {
-        success: false,
+      return this.recoverAndroidRotation({
+        error,
         orientation,
         value,
         currentOrientation,
-        previousOrientation: currentOrientation,
-        rotationPerformed: false,
-        orientationLockHandled: wasAutoRotateEnabled,
-        orientationLockState: await this.getOrientationLockState(signal),
-        error: `Failed to change device orientation: ${error}`,
-      };
+        settings,
+        cleanup,
+        plan,
+        lockOrientation,
+        slot,
+        signal,
+      });
     }
+  }
+
+  private async confirmAndroidRotationAfterError(options: {
+    orientation: "portrait" | "landscape";
+    settings: RotationCallSettings;
+    slot?: RotationRestoreSlot;
+    signal?: AbortSignal;
+  }): Promise<{ achievedOrientation: string; warning?: string }> {
+    const { orientation, settings, slot, signal } = options;
+    if (settings.writtenUserRotation === null) {
+      return { achievedOrientation: "unknown" };
+    }
+    try {
+      slot?.get();
+      const liveRotation = await raceWithDeadline(
+        () => this.readLiveRotationWithSettleWait(orientation, signal),
+        {
+          timer: this.timer,
+          timeoutMs: ROTATION_SETTING_CLEANUP_TIMEOUT_MS,
+          signal,
+          label: "Confirm rotation after error",
+        },
+      );
+      if (liveRotation !== null) {
+        return {
+          achievedOrientation: liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape",
+        };
+      }
+      return {
+        achievedOrientation: "unknown",
+        warning:
+          "Orientation is unconfirmed; user_rotation was left unchanged because the rotation outcome is unknown.",
+      };
+    } catch (error) {
+      logger.warn("Failed to confirm orientation after rotation error", error);
+      return { achievedOrientation: "unknown", warning: `Orientation is unconfirmed: ${error}` };
+    }
+  }
+
+  private async restoreAutoRotateAfterError(options: {
+    settings: RotationCallSettings;
+    cleanup: RotationSettingCleanup;
+    shouldRestoreAutoRotate: boolean;
+    signal?: AbortSignal;
+  }): Promise<ActionableError | undefined> {
+    const { settings, cleanup, shouldRestoreAutoRotate, signal } = options;
+    // Restore temporary/explicit-unlock operations, including cancelled pending
+    // writes. Persistent requests retain their lock; retirement fences cleanup.
+    let restoreFailure: ActionableError | undefined;
+    if (signal?.aborted ? cleanup.needed : settings.started && shouldRestoreAutoRotate) {
+      try {
+        await this.restoreAutoRotateSetting(cleanup);
+        logger.info("Restored auto-rotate after error");
+      } catch (error) {
+        logger.warn("Failed to restore auto-rotate", error);
+        restoreFailure = toActionableError(error, "Failed to restore auto-rotate");
+      }
+    }
+    if (signal?.aborted && restoreFailure) {
+      throw new ActionableError(
+        "Rotation cancelled; accelerometer_rotation may be left changed (auto-rotate may remain disabled)",
+        { cause: restoreFailure },
+      );
+    }
+    throwIfAborted(signal);
+    return restoreFailure;
+  }
+
+  private async recoverAndroidRotation(options: {
+    error: unknown;
+    orientation: "portrait" | "landscape";
+    value: number;
+    currentOrientation: string;
+    settings: RotationCallSettings;
+    cleanup: RotationSettingCleanup;
+    plan: ReturnType<Rotate["resolveAutoRotatePlan"]>;
+    lockOrientation?: boolean;
+    slot?: RotationRestoreSlot;
+    signal?: AbortSignal;
+  }): Promise<RotateResult> {
+    const {
+      error,
+      orientation,
+      value,
+      currentOrientation,
+      settings,
+      cleanup,
+      plan,
+      lockOrientation,
+      slot,
+      signal,
+    } = options;
+    const {
+      shouldRestoreAutoRotate,
+      preserveLock,
+      restoreAutomaticRotation,
+      wasAutoRotateEnabled,
+    } = plan;
+    logger.warn("Failed to change device orientation", error);
+    if (!settings.started && error instanceof ActionableError) {
+      throw error;
+    }
+    const restoreFailure = await this.restoreAutoRotateAfterError({
+      settings,
+      cleanup,
+      shouldRestoreAutoRotate,
+      signal,
+    });
+    const confirmation = await this.confirmAndroidRotationAfterError({
+      orientation,
+      settings,
+      slot,
+      signal,
+    });
+    const { achievedOrientation } = confirmation;
+    let { warning } = confirmation;
+    if (achievedOrientation === orientation) {
+      const result = await this.finalizeAndroidRotation(
+        orientation,
+        value,
+        currentOrientation,
+        achievedOrientation,
+        [restoreFailure?.message, `Rotation was confirmed after an earlier error: ${error}`]
+          .filter(Boolean)
+          .join(" "),
+        !restoreFailure,
+        preserveLock,
+        restoreAutomaticRotation,
+        wasAutoRotateEnabled,
+        signal,
+      );
+      return this.finishAndroidRotation(result, settings, lockOrientation, slot, signal);
+    }
+    if (achievedOrientation !== "unknown" && achievedOrientation !== orientation) {
+      const rollbackWarning = await this.rollbackUserRotation({
+        previous: settings.previousUserRotation,
+        written: settings.writtenUserRotation,
+        signal,
+        slot,
+      });
+      warning = [warning, rollbackWarning].filter(Boolean).join(" ") || undefined;
+    }
+    warning = [warning, restoreFailure?.message].filter(Boolean).join(" ") || undefined;
+    return {
+      success: false,
+      warning,
+      orientation,
+      value,
+      currentOrientation: achievedOrientation,
+      previousOrientation: currentOrientation,
+      rotationPerformed: false,
+      orientationLockHandled: wasAutoRotateEnabled,
+      orientationLockState: await this.getOrientationLockState(signal),
+      error: `Failed to change device orientation: ${error}`,
+    };
   }
 }

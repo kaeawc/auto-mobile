@@ -373,6 +373,15 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
+### Android back stack user IDs
+
+`observe.backStack.activities[]` lists activities across Android users/profiles.
+Each activity and `currentActivity` includes optional `userId`, the Android
+user/profile ID when printed by `dumpsys` (including `0` for the personal user).
+`tasks[].userId` comes from the task header. Task IDs are global across users;
+`currentTaskId` identifies the foreground task, and `depth` counts that task's
+activities minus one. Other users' tasks do not contribute to its depth.
+
 ### Observe a booted device by ID
 
 `observe {"deviceId":"emulator-5554"}` returns the normal screen observation,

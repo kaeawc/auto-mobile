@@ -72,12 +72,14 @@ const HEADER_USER_ID = /(?:^|\s)U=(\d+)(?=\s|})/;
  * unrecognized tail leaves the task id to fall back to the enclosing header
  * rather than rejecting the whole activity.
  */
-const ACTIVITY_LINE = /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u\d+\s+([^\s}]+)([^\n]*\})/;
+const ACTIVITY_LINE = /Hist\s+#(\d+):\s+ActivityRecord\{\S+\s+u(\d+)\s+([^\s}]+)([^\n]*\})/;
 
 /** A parsed "Hist #N" row: its index within the task and its component. */
 interface HistRow {
   /** Counts UP from the task root, so #0 is the root, not the top. */
   histIndex: number;
+  /** Android user/profile ID from this row's own "uNN" token. */
+  userId: number;
   /** Verbatim "pkg/.Cls" -- the same shape legacy `realActivity=` prints. */
   component: string;
   /** The row's own "tNN" token, when it carries one. */
@@ -90,10 +92,11 @@ function parseHistRow(line: string): HistRow | undefined {
     return undefined;
   }
   // Standalone "tNN" token in the tail, on either side of a closing brace.
-  const taskId = match[3].match(/(?:^|[\s}])t(\d+)(?=[\s}]|$)/);
+  const taskId = match[4].match(/(?:^|[\s}])t(\d+)(?=[\s}]|$)/);
   return {
     histIndex: parseInt(match[1], 10),
-    component: match[2],
+    userId: parseInt(match[2], 10),
+    component: match[3],
     taskId: taskId ? parseInt(taskId[1], 10) : undefined,
   };
 }
@@ -280,6 +283,7 @@ export class GetBackStack implements BackStack {
         const activity: ActivityInfo = {
           name: activityName,
           taskId: taskIdFromActivity,
+          userId: hist.userId,
           taskAffinity: currentTaskAffinity,
           // Index-derived fallback, authoritative only on API <= 29; overridden
           // below by the block's own rootOfTask= line when one is printed.
@@ -540,7 +544,11 @@ export class GetBackStack implements BackStack {
     const scoped = parseResumedActivityForDisplay(dumpsysOutput, displayId);
     if (scoped.displayCount > 0) {
       return scoped.activity
-        ? { name: scoped.activity.activityName, taskId: scoped.activity.taskId }
+        ? {
+            name: scoped.activity.activityName,
+            taskId: scoped.activity.taskId,
+            userId: scoped.activity.userId,
+          }
         : undefined;
     }
     const lines = dumpsysOutput.split(/\r?\n/);
@@ -549,11 +557,12 @@ export class GetBackStack implements BackStack {
       // Match mResumedActivity or mFocusedActivity
       // Format: "mResumedActivity: ActivityRecord{...} u0 com.example/.MainActivity t123"
       const resumedMatch = line.match(
-        /(mResumedActivity|mFocusedActivity|topResumedActivity)\s*[:=].*?u\d+\s+([^\s]+)(?:\s+t(\d+))?/,
+        /(mResumedActivity|mFocusedActivity|topResumedActivity)\s*[:=].*?u(\d+)\s+([^\s]+)(?:\s+t(\d+))?/,
       );
       if (resumedMatch) {
-        const fullName = resumedMatch[2];
-        const taskId = resumedMatch[3] ? parseInt(resumedMatch[3], 10) : -1;
+        const userId = parseInt(resumedMatch[2], 10);
+        const fullName = resumedMatch[3];
+        const taskId = resumedMatch[4] ? parseInt(resumedMatch[4], 10) : -1;
 
         const parts = fullName.split("/");
         const packageName = parts[0];
@@ -567,6 +576,7 @@ export class GetBackStack implements BackStack {
         return {
           name: activityName,
           taskId,
+          userId,
         };
       }
     }

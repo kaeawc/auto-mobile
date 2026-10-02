@@ -39,24 +39,28 @@ describe("GetBackStack", function () {
       {
         name: "com.android.launcher3.Launcher",
         taskId: 1,
+        userId: 0,
         taskAffinity: "com.android.launcher3",
         isTaskRoot: true,
       },
       {
         name: "dev.jasonpearson.automobile.playground.DetailActivity",
         taskId: 123,
+        userId: 0,
         taskAffinity: "dev.jasonpearson.automobile.playground",
         isTaskRoot: false,
       },
       {
         name: "dev.jasonpearson.automobile.playground.ListActivity",
         taskId: 123,
+        userId: 0,
         taskAffinity: "dev.jasonpearson.automobile.playground",
         isTaskRoot: false,
       },
       {
         name: "dev.jasonpearson.automobile.playground.MainActivity",
         taskId: 123,
+        userId: 0,
         taskAffinity: "dev.jasonpearson.automobile.playground",
         isTaskRoot: true,
       },
@@ -95,6 +99,7 @@ describe("GetBackStack", function () {
     expect(result.currentActivity).toEqual({
       name: "dev.jasonpearson.automobile.playground.DetailActivity",
       taskId: 123,
+      userId: 0,
     });
   });
 

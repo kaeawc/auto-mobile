@@ -18,6 +18,8 @@ export interface ActivityInfo {
   name: string;
   /** Task ID this activity belongs to */
   taskId: number;
+  /** Android user/profile ID of this activity, when printed by dumpsys */
+  userId?: number;
   /** Task affinity */
   taskAffinity?: string;
   /** Whether this activity is the task root */

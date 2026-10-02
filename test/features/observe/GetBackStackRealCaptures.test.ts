@@ -5,6 +5,7 @@ import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { BackStackInfo, BootedDevice } from "../../../src/models";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**
  * `GetBackStack` asserted against REAL `dumpsys activity activities` captures
@@ -44,7 +45,7 @@ function readCapture(file: string): string {
 async function parse(stdout: string): Promise<BackStackInfo> {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponse("dumpsys activity activities", { stdout, stderr: "" });
-  return new GetBackStack(device, new FakeAdbClientFactory(adb)).execute();
+  return new GetBackStack(device, new FakeAdbClientFactory(adb), new FakeTimer()).execute();
 }
 
 /**
@@ -199,6 +200,15 @@ describe("GetBackStack against real captures (#4329)", () => {
         expect(raw).toContain(result.currentActivity!.name.split(".").pop()!);
       });
 
+      test("retains user 0 on every captured activity and the current activity", async () => {
+        const result = await parse(readCapture(file));
+        expect(result.activities.length).toBeGreaterThan(0);
+        for (const activity of result.activities) {
+          expect(activity.userId).toBe(0);
+        }
+        expect(result.currentActivity?.userId).toBe(0);
+      });
+
       test("marks at least one activity as the task root", async () => {
         const result = await parse(readCapture(file));
         expect(result.activities.length).toBeGreaterThan(0);
@@ -300,6 +310,118 @@ describe("GetBackStack against real captures (#4329)", () => {
       });
     });
   }
+
+  describe("multi-user cases derived from committed captures (#6642)", () => {
+    // Derived from the committed capture by rewriting the user token; a real
+    // work-profile capture (managed profile, user 10, contacts in both users)
+    // is still owed (#6642 device ground truth).
+    for (const capture of [
+      {
+        file: "api36-home-settings-secondapp.log",
+        taskId: 10,
+        records: ["ActivityRecord{38881191 u0 "],
+        depth: 0,
+      },
+      {
+        file: "api33-home-settings-secondapp.log",
+        taskId: 11,
+        records: ["ActivityRecord{2d7ccd4 u0 ", "ActivityRecord{f354699 u0 "],
+        depth: 1,
+      },
+    ]) {
+      test(`${capture.file}: derived foreground user 10 keeps depth scoped to its task`, async () => {
+        const original = readCapture(capture.file);
+        const baseline = await parse(original);
+        let derived = original;
+        for (const record of capture.records) {
+          derived = derived.replaceAll(record, record.replace(" u0 ", " u10 "));
+        }
+        derived = derived.replace(
+          new RegExp(`(\\*\\s*Task\\{\\S+ #${capture.taskId} [^\\n]*?) U=0\\b`, "g"),
+          "$1 U=10",
+        );
+        const result = await parse(derived);
+
+        expect(result.currentTaskId).toBe(capture.taskId);
+        expect(result.currentActivity?.userId).toBe(10);
+        expect(result.currentActivity?.name).toBe(baseline.currentActivity?.name);
+        expect(result.depth).toBe(capture.depth);
+        expect(result.depth).toBe(baseline.depth);
+        const foreground = result.activities.filter(
+          (activity) => activity.taskId === capture.taskId,
+        );
+        expect(foreground).toHaveLength(capture.depth + 1);
+        expect(result.depth).toBe(foreground.length - 1);
+        expect(result.activities.some((activity) => activity.taskId !== capture.taskId)).toBe(true);
+        expect(result.activities.map(({ userId, ...activity }) => activity)).toEqual(
+          baseline.activities.map(({ userId, ...activity }) => activity),
+        );
+        for (const task of result.tasks) {
+          expect(task.userId).toBe(task.id === capture.taskId ? 10 : 0);
+        }
+        for (const activity of result.activities) {
+          expect(activity.userId).toBe(activity.taskId === capture.taskId ? 10 : 0);
+          expect(activity.userId).toBe(
+            result.tasks.find((task) => task.id === activity.taskId)?.userId,
+          );
+        }
+      });
+    }
+
+    test("derived API 36 Settings tasks sharing a package retain different user IDs", async () => {
+      // Derived by rewriting only task 9's user tokens; same capture debt above.
+      const original = readCapture("api36-home-settings-secondapp.log");
+      const derived = original
+        .replaceAll("ActivityRecord{74880956 u0 ", "ActivityRecord{74880956 u10 ")
+        .replaceAll(
+          "Task{221345 #9 type=standard A=1000:com.android.settings U=0",
+          "Task{221345 #9 type=standard A=1000:com.android.settings U=10",
+        );
+      const result = await parse(derived);
+      const settings = result.activities.filter((activity) =>
+        activity.name.startsWith("com.android.settings."),
+      );
+
+      expect(
+        settings.map((activity) => ({ taskId: activity.taskId, userId: activity.userId })),
+      ).toEqual([
+        { taskId: 9, userId: 10 },
+        { taskId: 8, userId: 0 },
+      ]);
+      for (const activity of result.activities) {
+        expect(activity.userId).toBe(activity.taskId === 9 ? 10 : 0);
+        expect(activity.userId).toBe(
+          result.tasks.find((task) => task.id === activity.taskId)?.userId,
+        );
+      }
+      expect(result.tasks.find((task) => task.id === 9)?.userId).toBe(10);
+      expect(result.tasks.find((task) => task.id === 8)?.userId).toBe(0);
+      expect(result.currentActivity?.userId).toBe(0);
+      expect(result.currentTaskId).toBe(10);
+      expect(result.depth).toBe(0);
+    });
+
+    test("derived API 24 resumed and focused excerpts retain user 10 in the legacy fallback", async () => {
+      // Derived from the committed capture by rewriting the user token; a real
+      // work-profile capture (managed profile, user 10, contacts in both users)
+      // is still owed (#6642 device ground truth).
+      const original = readCapture("api24-home-settings-secondapp.log");
+      for (const marker of ["mResumedActivity:", "mFocusedActivity:"]) {
+        const line = original.split("\n").find((entry) => entry.includes(marker));
+        expect(line).toBeDefined();
+        const result = await parse(
+          line!.replace("ActivityRecord{3005b0 u0 ", "ActivityRecord{3005b0 u10 "),
+        );
+
+        expect(result.displayCount).toBe(0);
+        expect(result.currentActivity).toEqual({
+          name: "com.android.contacts.activities.PeopleActivity",
+          taskId: 5,
+          userId: 10,
+        });
+      }
+    });
+  });
 
   // Exact spot-checks against two representative captures. Values are copied
   // from the committed (immutable) fixtures, so they pin real, observed output

@@ -48,6 +48,7 @@ describe("display-scoped resumed activity", () => {
     expect(backStack.currentActivity).toEqual({
       name: "com.google.android.gms.auth.uiflows.minutemaid.MinuteMaidActivity",
       taskId: 10,
+      userId: 0,
     });
   });
 

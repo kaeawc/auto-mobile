@@ -23,6 +23,11 @@ import {
   getRequiredIosRunnerFeatureFlags,
 } from "../../features/observe/ios/IOSCtrlProxyClient";
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
+import {
+  getMissingIosRunnerFeatureCommands,
+  type IosRunnerEnvironment,
+  type IosRunnerCommandRequirements,
+} from "../../features/observe/ios/iosRunnerFeatureCommands";
 import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import {
@@ -55,6 +60,8 @@ const IOS_RUNNER_REBUILD_RECOMMENDATION =
 
 /** Per-simulator runner identity gathered by the inspector. */
 export interface IosRunnerInspection {
+  /** Defaults to simulator: the production inspector only inspects booted simulators. */
+  environment?: IosRunnerEnvironment;
   deviceId: string;
   name: string;
   installed: boolean;
@@ -126,6 +133,7 @@ export interface IosDoctorDependencies {
   logger: Logger;
   createSimctlClient: () => SimCtl;
   runnerInspector: IosCtrlProxyRunnerInspector;
+  runnerCommandRequirements?: IosRunnerCommandRequirements;
   observeRoundTripInspector: IosObserveRoundTripInspector;
 }
 
@@ -1152,6 +1160,7 @@ interface IosRunnerClassification {
 function classifyRunner(
   inspection: IosRunnerInspection,
   expectedVersion: string,
+  requirements?: IosRunnerCommandRequirements,
 ): IosRunnerClassification {
   let status: IosRunnerVersionStatus;
   let missingCommands: string[] = [];
@@ -1165,7 +1174,11 @@ function classifyRunner(
     status = "unknown";
   } else {
     const advertised = new Set(inspection.supportedCommands);
-    missingCommands = IOS_RUNNER_FEATURE_COMMANDS.filter((command) => !advertised.has(command));
+    missingCommands = getMissingIosRunnerFeatureCommands(
+      advertised,
+      inspection.environment ?? "simulator",
+      requirements,
+    );
     // supportedFeatures === null is the immutable 0.0.66 IPA, which predates the
     // feature handshake and cannot advertise feature flags at all. Grandfather
     // it: the required-flag gate (getRequiredIosRunnerFeatureFlags, min release
@@ -1296,7 +1309,7 @@ export async function checkIosCtrlProxyRunner(
     // against the newest registry entry (#2746).
     const expectedVersion = resolveAssetVersion(resolvePinnedVersion());
     const classifications = inspections.map((inspection) =>
-      classifyRunner(inspection, expectedVersion),
+      classifyRunner(inspection, expectedVersion, dependencies.runnerCommandRequirements),
     );
 
     const message = classifications.map((classification) => classification.line).join(" | ");

@@ -7,6 +7,7 @@ import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IosDoctorDependencies } from "../../src/doctor/checks/ios";
+import { IOS_RUNNER_COMMAND_APPLICABILITY } from "../../src/features/observe/ios/iosRunnerFeatureCommands";
 import {
   checkAppleDeveloperAccount,
   checkBootedSimulators,
@@ -982,6 +983,37 @@ describe("checkIosCtrlProxyRunner", () => {
     ...baseDependencies,
     runnerInspector: { inspectBootedRunners: async () => inspections },
   });
+
+  for (const environment of ["simulator", "physical", undefined] as const) {
+    for (const missing of ["set_hinge_angle", "set_voiceover_state", "request_shake"] as const) {
+      test(`classifies missing ${missing} on ${environment ?? "default simulator"}`, async () => {
+        const commands = [...IOS_RUNNER_FEATURE_COMMANDS, "set_hinge_angle", "set_voiceover_state"];
+        const stale =
+          missing === "request_shake" ||
+          (missing === "set_hinge_angle" && environment !== "physical") ||
+          (missing === "set_voiceover_state" && environment === "physical");
+        const result = await checkIosCtrlProxyRunner({
+          ...withRunners([
+            inspection({
+              environment,
+              supportedCommands: commands.filter((command) => command !== missing),
+            }),
+          ]),
+          runnerCommandRequirements: {
+            requiredCommands: commands,
+            applicability: IOS_RUNNER_COMMAND_APPLICABILITY,
+          },
+        });
+        expect(result.status).toBe(stale ? "warn" : "pass");
+        expect(result.message).toContain(`versionStatus=${stale ? "stale" : "compatible"}`);
+        if (stale) {
+          expect(result.message).toContain(`missingCommands=${missing}`);
+        } else {
+          expect(result.message).not.toContain("missingCommands=");
+        }
+      });
+    }
+  }
 
   test("passes when a booted runner advertises every feature command", async () => {
     const result = await checkIosCtrlProxyRunner(withRunners([inspection()]));

@@ -145,7 +145,8 @@ describe("TapAtCoordinate", () => {
   test.each([androidDevice, iosDevice])(
     "cancels during the double-tap gap on %s",
     async (device) => {
-      const { tapAt, timer, androidDispatches, iosDispatches } = createTapAt(device);
+      const { tapAt, timer, androidDispatches, iosDispatches, iosCacheInvalidations } =
+        createTapAt(device);
       const gapTimer = new FakeTimer();
       const controller = new AbortController();
       let gapStarted!: () => void;
@@ -174,6 +175,7 @@ describe("TapAtCoordinate", () => {
         });
         const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
         expect(dispatches).toHaveLength(1);
+        expect(iosCacheInvalidations()).toBe(device.platform === "ios" ? 1 : 0);
         gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
         await Promise.resolve();
         expect(dispatches).toHaveLength(1);
@@ -896,6 +898,148 @@ describe("TapAtCoordinate", () => {
     expect(observeScreen.getExecuteOptions()[1]?.minTimestamp).toBe(150);
     expect(observeScreen.getExecuteCallCount()).toBe(3);
     expect(result.observation.updatedAt).toBe(175);
+  });
+
+  test("iOS double tap invalidates once after both taps", async () => {
+    const { tapAt, iosDispatches, iosCacheInvalidations } = createTapAt(iosDevice);
+
+    const result = await tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
+
+    expect(result).toMatchObject({ success: true, action: "doubleTap" });
+    expect(iosDispatches).toHaveLength(2);
+    expect(iosCacheInvalidations()).toBe(1);
+  });
+
+  test("iOS double tap invalidates after a rejected second tap", async () => {
+    const { tapAt, iosDispatches, iosCacheInvalidations } = createTapAt(
+      iosDevice,
+      10,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      2,
+    );
+
+    const result = await tapAt.execute({ x: 1, y: 2, action: "doubleTap" });
+
+    expect(result).toMatchObject({ success: false, action: "doubleTap" });
+    expect(iosDispatches).toHaveLength(2);
+    expect(iosCacheInvalidations()).toBe(1);
+  });
+
+  test("explicit-display iOS gestures invalidate after dispatch", async () => {
+    const displayDevice: BootedDevice = {
+      ...iosDevice,
+      displays: {
+        panels: [{ key: "main", role: "unknown", sizePx: { width: 10, height: 10 } }],
+        postures: [],
+      },
+    };
+    const lastRenderedObservation = () => ({ display: { key: "main" } });
+    const display = {
+      key: "main",
+      role: "unknown" as const,
+      posture: "unknown" as const,
+      generation: 0,
+    };
+    const completed = createTapAt(
+      displayDevice,
+      10,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lastRenderedObservation,
+    );
+    completed.observeScreen.setObserveResult({
+      ...observation(10, 10),
+      display,
+    } as ObserveResult);
+    const completedResult = await completed.tapAt.execute({
+      x: 1,
+      y: 2,
+      action: "doubleTap",
+      display: "main",
+    });
+    expect(completedResult.success).toBe(true);
+    expect(completed.iosDispatches).toHaveLength(2);
+    expect(completed.iosCacheInvalidations()).toBe(1);
+
+    const rejected = createTapAt(
+      displayDevice,
+      10,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      2,
+      lastRenderedObservation,
+    );
+    rejected.observeScreen.setObserveResult({ ...observation(10, 10), display } as ObserveResult);
+    const rejectedResult = await rejected.tapAt.execute({
+      x: 1,
+      y: 2,
+      action: "doubleTap",
+      display: "main",
+    });
+    expect(rejectedResult).toMatchObject({ success: false, action: "doubleTap" });
+    expect(rejected.iosCacheInvalidations()).toBe(1);
+
+    const aborted = createTapAt(
+      displayDevice,
+      10,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lastRenderedObservation,
+    );
+    aborted.observeScreen.setObserveResult({ ...observation(10, 10), display } as ObserveResult);
+    const gapTimer = new FakeTimer();
+    const controller = new AbortController();
+    let gapStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      gapStarted = resolve;
+    });
+    const sleep = spyOn(aborted.timer, "sleep").mockImplementation((ms) => {
+      const pending = gapTimer.sleep(ms);
+      gapStarted();
+      return pending;
+    });
+    try {
+      const pending = aborted.tapAt.execute(
+        { x: 1, y: 2, action: "doubleTap", display: "main" },
+        undefined,
+        controller.signal,
+      );
+      await started;
+      controller.abort();
+      expect(await pending).toMatchObject({ success: false, action: "doubleTap" });
+      expect(aborted.iosDispatches).toHaveLength(1);
+      expect(aborted.iosCacheInvalidations()).toBe(1);
+    } finally {
+      gapTimer.resolveAll();
+      sleep.mockRestore();
+    }
+
+    const plain = createTapAt(
+      displayDevice,
+      10,
+      10,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lastRenderedObservation,
+    );
+    plain.observeScreen.setObserveResult({ ...observation(10, 10), display } as ObserveResult);
+    expect(await plain.tapAt.execute({ x: 1, y: 2, display: "main" })).toMatchObject({
+      success: true,
+    });
+    expect(plain.iosCacheInvalidations()).toBe(1);
   });
 
   test("rejected iOS tap leaves the cache valid", async () => {

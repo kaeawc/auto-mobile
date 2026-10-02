@@ -1,6 +1,7 @@
 import { TapAtCoordinate } from "../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../src/features/action/coordinateTapDispatch";
 import type { SnapshotReferenceStore } from "../../src/features/observe/SnapshotReferenceStore";
+import type { RenderedObservationReader } from "../../src/features/action/TargetDisplayAction";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
@@ -37,6 +38,8 @@ export function createTapAt(
   onIosDispatch?: (timer: FakeTimer) => void,
   renderedDisplayRevision?: () => number | undefined,
   snapshotReferences?: SnapshotReferenceStore,
+  rejectIosDispatchAt?: number,
+  lastRenderedObservation?: RenderedObservationReader,
 ) {
   const observeScreen = new FakeObserveScreen();
   observeScreen.setObserveResult(observation(width, height));
@@ -51,6 +54,7 @@ export function createTapAt(
   }> = [];
   const iosDispatches: Array<{ x: number; y: number; duration: number; frameContext?: string }> =
     [];
+  let iosDispatchCount = 0;
   const unusedClient: CoordinateTapClient = {
     requestTapCoordinates: async () => ({ success: true }),
   };
@@ -58,6 +62,7 @@ export function createTapAt(
     timer,
     renderedDisplayRevision,
     snapshotReferences,
+    lastRenderedObservation,
     androidClient: unusedClient,
     iosClient: unusedClient,
     dispatchAndroidCoordinateTap: async (_client, _adb, x, y, duration, frameContext) => {
@@ -65,7 +70,11 @@ export function createTapAt(
     },
     dispatchIosCoordinateTap: async (_client, x, y, duration, frameContext) => {
       iosDispatches.push({ x, y, duration, frameContext });
+      iosDispatchCount++;
       onIosDispatch?.(timer);
+      if (iosDispatchCount === rejectIosDispatchAt) {
+        throw new Error("Synthetic iOS tap rejection");
+      }
     },
     invalidateIosCache: () => {
       iosCacheInvalidations++;

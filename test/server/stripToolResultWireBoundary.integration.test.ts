@@ -1,3 +1,15 @@
+import Ajv2020 from "ajv/dist/2020";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
+import { finalizeToolResponse } from "../../src/server/finalizeToolResponse";
+import {
+  rotateHandler,
+  setPostureHandler,
+  setRotateFactory,
+  resetRotateFactory,
+  setSetPostureFactory,
+  resetSetPostureFactory,
+} from "../../src/server/interactionTools";
 import {
   afterAll,
   afterEach,
@@ -342,4 +354,95 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
       stdoutSpy.mockRestore();
     }
   });
+});
+
+// Exercise the real registrations and handlers while replacing device routing
+// with a fixed fake device. The MCP boundary and finalizer remain production code.
+describe("rotate and setPosture ordinary-client structured output", () => {
+  const device = { name: "fake", deviceId: "fake-8747", platform: "android" as const };
+  let fixture: McpTestFixture;
+  let restoreHermetic: () => void;
+  const validators = new Map<string, ReturnType<Ajv2020["compile"]>>();
+
+  beforeAll(async () => {
+    restoreHermetic = installHermeticServerFixture();
+    fixture = new McpTestFixture({
+      sessionToolSelectionService: {
+        isEnabled: async () => true,
+        getOverride: async () => undefined,
+        setEnabled: async () => {},
+        deleteSession: async () => {},
+      },
+    });
+    await fixture.setup();
+    const ajv = new Ajv2020({ strict: false });
+    for (const name of ["rotate", "setPosture"]) {
+      const advertised = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
+        (definition) => definition.name === name,
+      )!.outputSchema!;
+      validators.set(name, ajv.compile(advertised));
+    }
+  });
+
+  afterAll(async () => {
+    await fixture.teardown();
+    restoreHermetic();
+  });
+
+  afterEach(() => {
+    resetRotateFactory();
+    resetSetPostureFactory();
+    serverConfig.setToolResultsNoStructuredContentEnabled(false);
+  });
+
+  test.each(["rotate", "setPosture"] as const)(
+    "%s retains structuredContent for an ordinary client and respects suppression",
+    async (name) => {
+      setRotateFactory(() => ({
+        execute: async () => ({
+          success: true,
+          orientation: "portrait",
+          value: 0,
+          rotationPerformed: false,
+        }),
+      }));
+      setSetPostureFactory(() => ({
+        execute: async () => ({
+          posture: "opened",
+          display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+        }),
+      }));
+      const tool = ToolRegistry.getRegisteredTool(name)!;
+      expect(tool.outputSchema).toBeDefined();
+      const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
+        const response =
+          name === "rotate"
+            ? await rotateHandler(device, { orientation: "portrait" })
+            : await setPostureHandler(device, { posture: "opened" });
+        return finalizeToolResponse(response, {
+          name,
+          outputSchema: tool.outputSchema,
+          artifactWriter: new FakeArtifactWriter(),
+        });
+      });
+      try {
+        const args = name === "rotate" ? { orientation: "portrait" } : { posture: "opened" };
+        const result = await fixture.client.callTool({ name, arguments: args });
+        expect(result.isError).toBeUndefined();
+        expect(result.structuredContent).toBeDefined();
+        expect(result.structuredContent).toEqual(
+          JSON.parse((result.content[0] as { text: string }).text),
+        );
+        expect(tool.outputSchema.safeParse(result.structuredContent).success).toBe(true);
+        expect(validators.get(name)!(result.structuredContent)).toBe(true);
+
+        serverConfig.setToolResultsNoStructuredContentEnabled(true);
+        const stripped = await fixture.client.callTool({ name, arguments: args });
+        expect(stripped.structuredContent).toBeUndefined();
+        expect(stripped.content).toEqual(result.content);
+      } finally {
+        handlerSpy.mockRestore();
+      }
+    },
+  );
 });

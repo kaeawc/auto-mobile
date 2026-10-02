@@ -1218,6 +1218,40 @@ export const observationOutputSchema = z.union([
   toolOutputArtifactMetadataSchema,
 ]);
 
+/** Rotation results include failures and successful orientation no-ops. */
+export const rotateResultSchema = z
+  .object({
+    success: z.boolean(),
+    orientation: z.string(),
+    value: z.number(),
+    message: z.string(),
+    currentOrientation: z.string().optional(),
+    previousOrientation: z.string().optional(),
+    rotationPerformed: z.boolean().optional(),
+    orientationLockHandled: z.boolean().optional(),
+    orientationLockState: z.enum(["locked", "unlocked", "unknown"]).optional(),
+    warning: z.string().optional(),
+    observation: observationOutputSchema.optional(),
+    observationDiff: observationDiffMetadataSchema.optional(),
+    effect: tapEffectSchema.optional(),
+    error: z.string().optional(),
+    staleDisplay: staleDisplaySchema.optional(),
+    warnings: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
+/** Unsupported iOS posture requests are results; operational failures throw. */
+export const setPostureResultSchema = z
+  .object({
+    message: z.string(),
+    status: z.literal("unsupported").optional(),
+    posture: observationDisplaySchema.unwrap().shape.posture.exclude(["unknown"]).optional(),
+    display: observationDisplaySchema,
+    locked: z.boolean().optional(),
+    warnings: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
 export const tapOnResultSchema = z
   .object({
     success: z.boolean(),

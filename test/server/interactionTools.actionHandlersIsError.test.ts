@@ -8,6 +8,9 @@ import {
   resetSelectAllTextFactory,
   resetTapAnyElementFactory,
   rotateHandler,
+  setPostureHandler,
+  setSetPostureFactory,
+  resetSetPostureFactory,
   selectAllTextHandler,
   setDragAndDropFactory,
   setPressButtonFactory,
@@ -274,5 +277,35 @@ describe("rotateHandler (registered handler wiring)", () => {
 
     expect(response.isError).toBeUndefined();
     expect(receivedLockOrientation).toBe(true);
+  });
+});
+
+describe("setPostureHandler structured result", () => {
+  afterEach(() => resetSetPostureFactory());
+
+  test.each([
+    {
+      posture: "opened",
+      display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
+    },
+    { status: "unsupported", message: "Physical iOS hinge posture can only be read, not set." },
+  ] as const)("keeps the text payload unchanged for %j", async (result) => {
+    setSetPostureFactory(() => ({ execute: async () => result }));
+    const response = await setPostureHandler(fakeDevice, { posture: "opened" });
+    const message = "status" in result ? result.message : "Set device posture to opened";
+    expect(response.structuredContent).toEqual({ message, ...result });
+    expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
+    expect(response.isError).toBeUndefined();
+  });
+
+  test("operational failures still throw actionable errors", async () => {
+    setSetPostureFactory(() => ({
+      execute: async () => {
+        throw new Error("posture failed");
+      },
+    }));
+    await expect(setPostureHandler(fakeDevice, { posture: "opened" })).rejects.toThrow(
+      "Failed to set device posture: posture failed",
+    );
   });
 });

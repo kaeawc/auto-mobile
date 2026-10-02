@@ -10,9 +10,11 @@ KeystoreTestState is a code-only opt-in, disabled by default. The app declares a
 exact scope name and explicit alias set; no prefixes, globs, or cross-app access.
 The provider exists only in the SDK debug variant and executes in the target
 app's security context under the existing shell/root/self/CtrlProxy caller check.
-Android and iOS authorization use parallel implementations under this written
+This contract is implemented for Android only in this change. Any iOS (Keychain)
+counterpart is a future implementation that must follow the same written
 contract: explicit app opt-in, exact allowlists, caller authorization, no secret
-export, and explicit support boundaries. No shared gate is extracted here.
+export, and explicit support boundaries. It is tracked by #5161 and does not
+exist today. No shared gate is extracted here.
 
 The version-1 JSON envelope contains `capability`, `outcome`, optional stable
 `reason`, `bridgeAvailable`, `metadata: supported`,

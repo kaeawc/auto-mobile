@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { afterEach, describe, expect, test } from "bun:test";
 import { displayTransitions } from "../../../src/features/observe/DisplayTransition";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
@@ -20,10 +21,11 @@ function setup() {
   const timer = new FakeTimer();
   timer.setCurrentTime(1_700_000_000_000);
   const cacheStore = new FakeObserveCacheStore(timer);
+  const protection = new FakeScreenshotPathProtection(timer);
   const screen = new RealObserveScreen(
     device,
     new FakeAdbClientFactory(new FakeAdbExecutor()),
-    { cacheStore },
+    { cacheStore, screenshotPathProtection: protection },
     timer,
   );
   const result = screen.createBaseResult();
@@ -40,7 +42,7 @@ function setup() {
     now: timer.now(),
     verified: true,
   });
-  return { timer, cacheStore, screen, result };
+  return { timer, cacheStore, screen, result, protection };
 }
 
 describe("ObserveScreen cached freshness", () => {
@@ -110,4 +112,18 @@ describe("ObserveScreen cached freshness", () => {
       category: "cache_age",
     });
   });
+});
+
+test("a cached observe result recomputes and extends its screenshot return deadline", async () => {
+  const { timer, cacheStore, screen, result, protection } = setup();
+  result.screenshotPath = "/cached.png";
+  result.screenshotExpiresAt = 1;
+  await cacheStore.put(device.deviceId, result);
+  const first = await screen.getMostRecentCachedObserveResult();
+  expect(first.screenshotExpiresAt).toBe(timer.now() + 600_000);
+  timer.advanceTime(100_000);
+  const second = await screen.getMostRecentCachedObserveResult();
+  expect(second.screenshotExpiresAt).toBe(timer.now() + 600_000);
+  timer.advanceTime(500_001);
+  expect(protection.isProtected("/cached.png")).toBe(true);
 });

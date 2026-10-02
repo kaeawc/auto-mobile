@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -184,6 +185,7 @@ test.each(["active", "all"])(
       () => "/fake",
       undefined,
       false,
+      { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
     );
     directory = mkdtempSync(join(tmpdir(), "observer-owner-state-"));
     const store = new FileSystemObserveCacheStore(
@@ -496,6 +498,7 @@ test("observer screenshot buffer failure never falls back to writing or pulling 
     () => "/fake",
     undefined,
     false,
+    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
   );
   expect(await screenshot.executeObservationRead({ format: "png", displayId: 0 })).toEqual({
     success: false,

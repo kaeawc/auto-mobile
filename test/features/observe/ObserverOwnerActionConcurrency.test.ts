@@ -1,3 +1,4 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { BootedDevice, ExecResult } from "../../../src/models";
@@ -84,6 +85,7 @@ function screenshot(adb: FakeAdbExecutor, timer: FakeTimer, ids: CountingIdGener
     undefined,
     undefined,
     false,
+    { pathProtection: new FakeScreenshotPathProtection(new FakeTimer()) },
   );
   return { capture, writer };
 }

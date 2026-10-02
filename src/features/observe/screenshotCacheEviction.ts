@@ -17,17 +17,7 @@ export interface ScreenshotCacheFile {
   mtimeMs: number;
 }
 
-/**
- * Returned paths receive 30 seconds from publication in this process: the
- * shortest existing retention floor (formerly measured only from file mtime).
- * This is not a measured client-consumption duration. Other processes still
- * honor the same 30-second mtime floor, but cannot see process-local protection.
- */
-export const SCREENSHOT_MIN_LIFETIME_MS = 30_000;
 export const SCREENSHOT_CACHE_MAX_SIZE_BYTES = 128 * 1024 * 1024;
-/** Same 24-hour stale-age policy as automatic tool-output artifacts; far beyond
- * the 30-second return window and other processes' five-minute cache TTL. */
-export const SCREENSHOT_STALE_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface ScreenshotEvictionPlan {
   /** Oldest-first paths to delete. */

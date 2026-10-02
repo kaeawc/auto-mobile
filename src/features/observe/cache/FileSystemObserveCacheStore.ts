@@ -186,7 +186,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
         deviceId,
         observationId: result.observationId,
         filename,
-        observeResult: structuredClone(result),
+        observeResult: cloneWithoutScreenshotDeadlines(result),
       });
       await this.saveObserveResultToDisk(filename, result);
       await this.reapExpiredDiskFiles(deviceId);
@@ -218,7 +218,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   getRecentInMemoryEntry(): RecentObserveCacheEntry | undefined {
     const entry = this.collectLiveMostRecent();
     return entry
-      ? { deviceId: entry.deviceId, result: structuredClone(entry.observeResult) }
+      ? { deviceId: entry.deviceId, result: cloneWithoutScreenshotDeadlines(entry.observeResult) }
       : undefined;
   }
 
@@ -344,7 +344,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   private findMostRecentInMemory(deviceId?: string): ObserveResult | undefined {
     const result = this.collectLiveMostRecent(deviceId)?.observeResult;
-    return result ? structuredClone(result) : undefined;
+    return result ? cloneWithoutScreenshotDeadlines(result) : undefined;
   }
 
   private checkInMemory(deviceId: string): ObserveResult | undefined {
@@ -363,7 +363,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       logger.debug(
         `[OBSERVE_CACHE] Found most recent in-memory result for device ${deviceId} (age: ${age}ms)`,
       );
-      return structuredClone(entry.observeResult);
+      return cloneWithoutScreenshotDeadlines(entry.observeResult);
     }
 
     logger.debug(`[OBSERVE_CACHE] No valid entries in in-memory cache for device ${deviceId}`);
@@ -448,7 +448,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
         observeResult: cachedResult,
       });
       logger.debug(`[OBSERVE_CACHE] Updated in-memory cache from disk cache`);
-      return structuredClone(cachedResult);
+      return cloneWithoutScreenshotDeadlines(cachedResult);
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Error checking disk cache: ${error}`);
       return undefined;
@@ -511,7 +511,10 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   ): Promise<void> {
     try {
       const filePath = path.join(this.cacheDir, filename);
-      await this.writeFile(filePath, JSON.stringify(observeResult, null, 2));
+      await this.writeFile(
+        filePath,
+        JSON.stringify(cloneWithoutScreenshotDeadlines(observeResult), null, 2),
+      );
       logger.debug(`[OBSERVE_CACHE] Saved observe result to disk: ${filename}`);
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Failed to save observe result to disk: ${error}`);
@@ -603,4 +606,17 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     ).then(() => {});
     this.pendingDiskCleanup = this.pendingDiskCleanup.then(() => cleanup);
   }
+}
+
+/** Return deadlines describe publication, never a cache entry's original capture. */
+function cloneWithoutScreenshotDeadlines(result: ObserveResult): ObserveResult {
+  const copy = structuredClone(result);
+  delete copy.screenshotExpiresAt;
+  for (const panel of copy.displays ?? []) {
+    delete panel.screenshotExpiresAt;
+  }
+  if (copy.crop) {
+    delete copy.crop.expiresAt;
+  }
+  return copy;
 }

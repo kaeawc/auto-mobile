@@ -38,9 +38,16 @@ export const defaultScreenshotFileWriter: ScreenshotFileWriter = {
     try {
       await fsPromises.unlink(filePath);
     } catch (error) {
-      // The file may never have reached disk (a failed write, or a path this
-      // process already cleaned up); either way there is nothing to recover.
-      logger.debug(`[SCREENSHOT] Failed to remove capture ${filePath}: ${errorMessage(error)}`);
+      // Missing captures are expected after failed writes or cancellation.
+      // Other failures leave the file for the retention sweep to retry.
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        logger.debug(`[SCREENSHOT] Capture already absent: ${filePath}`, error);
+      } else {
+        logger.warn(
+          `[SCREENSHOT] Failed to remove capture ${filePath}: ${errorMessage(error)}`,
+          error,
+        );
+      }
     }
   },
 };

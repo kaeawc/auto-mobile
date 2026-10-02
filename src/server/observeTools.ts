@@ -1,9 +1,9 @@
-import { screenshotPathProtection } from "../features/observe/ScreenshotPathProtection";
+import { publishScreenshotPaths } from "../features/observe/ScreenshotRetention";
 import { readObservationForInteractions } from "./identifyInteractionsObservation";
 import {
-  SCREENSHOT_MIN_LIFETIME_MS,
-  SCREENSHOT_STALE_AGE_MS,
-} from "../features/observe/screenshotCacheEviction";
+  screenshotPathProtection,
+  type ScreenshotPathProtection,
+} from "../features/observe/ScreenshotPathProtection";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -1743,6 +1743,7 @@ export function invalidateReadinessForDisabledAccessibility(
 
 interface ObserveToolDependencies {
   crop?: ObserveCropDependencies;
+  pathProtection?: ScreenshotPathProtection;
   timer?: Timer;
   createScreen?: (
     device: BootedDevice,
@@ -1784,9 +1785,10 @@ function screenForObserve(
 async function withCapturedScreenshotImage(
   result: ObserveToolPayload,
   screenshotPath: string | undefined,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
 ): Promise<ObserveResponse> {
-  const delivery = await inlineScreenshotImage(screenshotPath, result, signal);
+  const delivery = await inlineScreenshotImage(screenshotPath, result, options.signal);
+  await publishScreenshotPaths(result, options.protection);
   const response = createStructuredToolResponse({
     ...result,
     screenshotImage: delivery.screenshotImage,
@@ -1806,23 +1808,14 @@ type ObserveResponse = Omit<StructuredToolResponse<ObserveToolPayload>, "content
 async function createObserveResponse(
   result: ObserveToolPayload,
   includeScreenshotImage: boolean | undefined,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
 ): Promise<ObserveResponse> {
-  if (result.screenshotPath) {
-    await screenshotPathProtection.protect(result.screenshotPath);
-  }
-  if (result.crop) {
-    await screenshotPathProtection.protect(result.crop.cropPath);
-  }
+  const { signal, protection = screenshotPathProtection } = options;
+  await publishScreenshotPaths(result, protection);
   const response = includeScreenshotImage
-    ? await withCapturedScreenshotImage(result, result.screenshotPath, signal)
+    ? await withCapturedScreenshotImage(result, result.screenshotPath, { signal, protection })
     : createStructuredToolResponse(result);
-  if (result.screenshotPath) {
-    await screenshotPathProtection.protect(result.screenshotPath);
-  }
-  if (result.crop) {
-    await screenshotPathProtection.protect(result.crop.cropPath);
-  }
+  await publishScreenshotPaths(result, protection, false);
   return response;
 }
 
@@ -1906,7 +1899,7 @@ function createObserveWaitResponse(
   result: ObserveToolPayload,
   waitOutcome: WaitForObservationOutcome,
   includeScreenshotImage?: boolean,
-  signal?: AbortSignal,
+  options: { signal?: AbortSignal; protection?: ScreenshotPathProtection } = {},
 ): Promise<ObserveResponse> | ObserveResponse {
   const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
     awaitedElement: waitOutcome.awaitedElement,
@@ -1923,14 +1916,14 @@ function createObserveWaitResponse(
   return createObserveResponse(
     { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
     includeScreenshotImage,
-    signal,
+    options,
   );
 }
 
 async function attachObserveCrop(
   args: ObserveArgs,
   result: ObserveResult,
-  platform: BootedDevice["platform"],
+  device: BootedDevice,
   dependencies?: ObserveCropDependencies,
 ): Promise<void> {
   if (!args.crop) {
@@ -1947,8 +1940,8 @@ async function attachObserveCrop(
       : result;
   result.crop = await createObserveCrop(
     args.crop,
-    result,
-    platform,
+    { ...result, deviceId: device.deviceId },
+    device.platform,
     dependencies,
     selectorObservation,
   );
@@ -1992,7 +1985,10 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
           : null;
       const result = deviceRead
         ? await observeScreen.executeDeviceRead(signal, screenshotMode, encoding, {
-            requireFreshScreenshot: args.crop !== undefined,
+            requireFreshScreenshot:
+              args.crop !== undefined ||
+              args.screenshot === "settled" ||
+              args.includeScreenshotImage === true,
             timeoutMs,
           })
         : waitOutcome
@@ -2007,7 +2003,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
             });
 
       if (!aggregate) {
-        await attachObserveCrop(args, result, device.platform, dependencies.crop);
+        await attachObserveCrop(args, result, device, dependencies.crop);
       }
 
       if (!deviceRead && !aggregate) {
@@ -2063,15 +2059,16 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       if (waitOutcome) {
-        return await createObserveWaitResponse(
-          result,
-          waitOutcome,
-          args.includeScreenshotImage,
+        return await createObserveWaitResponse(result, waitOutcome, args.includeScreenshotImage, {
           signal,
-        );
+          protection: dependencies.pathProtection,
+        });
       }
 
-      return await createObserveResponse(result, args.includeScreenshotImage, signal);
+      return await createObserveResponse(result, args.includeScreenshotImage, {
+        signal,
+        protection: dependencies.pathProtection,
+      });
     } catch (error) {
       throw toActionableError(error, `Failed to execute observe`);
     }
@@ -2111,7 +2108,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    `Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for ${SCREENSHOT_MIN_LIFETIME_MS / 1000} seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after ${SCREENSHOT_STALE_AGE_MS / (60 * 60 * 1000)} hours on capture construction. Copy files needed longer.`,
+    `Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid creates no session, assigns no device and leaves an idle device idle. It may start an unowned device's hierarchy service using session setup within the read deadline, serialized with acquisition, guarded against ownership/pool transitions, and shared across concurrent reads. hierarchyServiceStarted: true reports this; the service and resident client remain running. Owned devices stay connect-only: this read never starts, restarts or reconfigures their service. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Each screenshot path is valid for at least 10 minutes after the response that returned it; expiresAt metadata uses the host clock. Returning cached paths extends their lifetime. The shared 128 MiB / 4096-file cap refuses new captures without deleting live paths: default screenshot provenance degrades with a reason; explicit settled, crop and inline-image requests fail. Release and device removal leave files until their guarantees expire. Restart uses a ten-minute process-start grace; other processes can only honor the ten-minute mtime floor. Capacity uses a per-process in-memory inventory reconciled on sweeps and near either cap. Concurrent processes can exceed the aggregate cap before reconciliation; discovered files count against subsequent admission. Expired files are swept at initial inventory, near capacity and every minute while idle. Copy files needed beyond the guarantee.`,
     observeSchema,
     observeHandler,
     {

@@ -1,6 +1,7 @@
+import { ScreenshotRetentionCapacityError } from "../../src/features/observe/ScreenshotRetention";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { SCREENSHOT_MIN_LIFETIME_MS } from "../../src/features/observe/screenshotCacheEviction";
+import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
 import { afterEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -56,6 +57,7 @@ describe("snapshotOf tool", () => {
       const bounds = { left: 0, top: 0, right: 200, bottom: 100 };
       const writes: Buffer[] = [];
       registerSnapshotOfTools({
+        pathProtection: new FakeScreenshotPathProtection(new FakeTimer()),
         hierarchyCaptureFactory: () => ({
           capture: async (request) => ({
             captureId: "capture",
@@ -149,7 +151,7 @@ describe("snapshotOf tool", () => {
     );
     const result = JSON.parse(response.content[0].text);
     expect(protection.isProtected(result.path)).toBe(true);
-    timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS);
+    timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS);
     expect(protection.isProtected(result.path)).toBe(false);
     expect(captures).toBe(1);
     expect(result).toMatchObject({
@@ -157,6 +159,7 @@ describe("snapshotOf tool", () => {
       imageSize: { width: 2, height: 2 },
       clipped: false,
       unit: "pixels",
+      expiresAt: SCREENSHOT_PATH_MIN_LIFETIME_MS,
     });
     expect(JSON.stringify(result)).not.toContain("png-crop");
     expect(await fs.readFile(result.path, "utf8")).toBe("png-crop");
@@ -172,4 +175,30 @@ describe("snapshotOf tool", () => {
     ).rejects.toThrow("ambiguous");
     expect(captures).toBe(1);
   });
+});
+
+test("snapshotOf preserves a typed screenshot capacity failure", async () => {
+  const failure = new ScreenshotRetentionCapacityError(128 * 1024 * 1024, 2, 600_000);
+  registerSnapshotOfTools({
+    hierarchyCaptureFactory: () => ({
+      capture: async () => ({
+        captureId: "capture",
+        platform: "android",
+        requestedFreshness: "fresh",
+        receivedAt: 0,
+        hierarchy,
+        nodes: new SearchableHierarchy().project(hierarchy),
+      }),
+    }),
+    screenshotFactory: () => ({
+      execute: async () => ({ success: false, error: failure.message, actionableError: failure }),
+    }),
+  });
+  const tool = ToolRegistry.getTool("snapshotOf")!;
+  await expect(
+    tool.deviceAwareHandler!(
+      device,
+      tool.schema.parse({ rectangle: { left: 1, top: 1, right: 3, bottom: 3 } }),
+    ),
+  ).rejects.toBe(failure);
 });

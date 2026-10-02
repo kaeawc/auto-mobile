@@ -181,6 +181,7 @@ export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
   "screenshotPixelsPerNativeUnit",
   "screenshotScaleProvenance",
   "screenshotPath",
+  "screenshotExpiresAt",
   "screenshotSource",
   "screenshotCaptureSource",
   "screenshotCapturedAt",
@@ -536,6 +537,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
               "truncationReasons",
               "windowTruncations",
               "screenshotPath",
+              "screenshotExpiresAt",
               "observeScope",
             ]),
           } satisfies DisplayObservation;

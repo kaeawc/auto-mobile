@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
 import os from "os";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { FileSystemObserveCacheStore } from "../../../../src/features/observe/cache/FileSystemObserveCacheStore";
 import type { ObserveResultCacheStore } from "../../../../src/features/observe/cache/ObserveResultCacheStore";
@@ -80,4 +80,28 @@ describe("getRecentInMemoryEntry same-tick tie-break parity", function () {
       expect(entry?.result).toEqual(newer);
     }
   });
+});
+
+test("file-backed observe cache strips return deadlines from memory and persisted JSON", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "observe-deadlines-"));
+  const written: string[] = [];
+  try {
+    const store = new FileSystemObserveCacheStore(
+      new FakeTimer(),
+      directory,
+      async (_path, data) => {
+        written.push(String(data));
+      },
+    );
+    await store.put("device", {
+      ...makeResult("deadline"),
+      screenshotPath: "/old.png",
+      screenshotExpiresAt: 600_000,
+    });
+    expect(store.getRecentInMemoryForDevice("device")?.screenshotExpiresAt).toBeUndefined();
+    expect(written).toHaveLength(1);
+    expect(JSON.parse(written[0])).not.toHaveProperty("screenshotExpiresAt");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

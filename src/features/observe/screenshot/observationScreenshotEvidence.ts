@@ -14,6 +14,7 @@ export interface ScreenshotEvidenceFiles {
 
 export interface ObservationScreenshotEvidence {
   screenshotPath: string;
+  screenshotExpiresAt: number;
   screenshotSource: "fresh" | "cached";
   screenshotCaptureSource: "device" | "observation-cache";
   screenshotCapturedAt: string;
@@ -43,10 +44,13 @@ export async function observationScreenshotEvidence(
   path: string,
   source: "fresh" | "cached",
   freshFailure?: string,
-  files: ScreenshotEvidenceFiles = fs,
-  timer: Timer = defaultTimer,
-  protection: ScreenshotPathProtection = screenshotPathProtection,
+  options: {
+    files?: ScreenshotEvidenceFiles;
+    timer?: Timer;
+    protection?: ScreenshotPathProtection;
+  } = {},
 ): Promise<ObservationScreenshotEvidence> {
+  const { files = fs, timer = defaultTimer, protection = screenshotPathProtection } = options;
   // Arm before stat so a concurrent local sweep cannot select a usable path.
   await protection.protect(path);
   const stat = await files.stat(path);
@@ -56,9 +60,10 @@ export async function observationScreenshotEvidence(
   const capturedAt = Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : timer.now();
   const screenshotFormat = screenshotFormatForPath(path);
   // Filesystem latency must not consume the caller's return window.
-  await protection.protect(path);
+  const screenshotExpiresAt = await protection.protect(path);
   return {
     screenshotPath: path,
+    screenshotExpiresAt,
     screenshotSource: source,
     screenshotCaptureSource: source === "fresh" ? "device" : "observation-cache",
     screenshotCapturedAt: new Date(capturedAt).toISOString(),

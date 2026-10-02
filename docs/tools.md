@@ -254,20 +254,41 @@ native coordinate space described above. For a fresh screenshot matching an
 observation, call `observe({ screenshot: "settled" })` and read its
 `screenshotPath`.
 
-Returned full-screen fresh (settled or device-read), cached fallback, per-panel/per-display,
-and crop (`crop-*` from `observe({ crop })` and `snapshot-of-*`) paths are protected
-in the returning process for **30 seconds
-from return**, including when a cached path is returned again. Other processes sharing
-this directory honor a 30-second file-mtime floor, but cannot see these process-local
-protections. Protection bookkeeping is bounded to 4096 paths across devices and sessions;
-on overload the oldest protection is dropped with a warning, so that path may lose its
-return-time guarantee. Release or device removal drops the cache references; it does not
-delete the file early. Eligible unreferenced, unprotected files may be removed by size
-cleanup after the minimum lifetime (128 MiB target). Recent or referenced files can
-temporarily keep the directory over budget. Stale unreferenced, unprotected screenshot
-files are swept after **24 hours** by mtime on capture construction, including the first
-cleanup after restart; idle processes do not sweep. Callers needing a path longer
-**must copy the file**. Return-time protection ends on process exit or crash.
+Every returned full-screen fresh (settled or device-read), cached fallback, per-display,
+and crop (`crop-*` and `snapshot-of-*`) path exists for **at least 10 minutes after
+return**. A flat `<x>Path` has a sibling `<x>ExpiresAt`: top-level and per-display
+`screenshotExpiresAt`; objects owning a path have `expiresAt` (`crop.expiresAt`
+and snapshotOf's `expiresAt`). These optional numbers are host-clock epoch milliseconds.
+Returning a cached path again extends its guarantee and recomputes the deadline.
+
+Admission enforces a hard cap of **128 MiB and 4096 files** for the shared screenshots
+directory across all devices and sessions in a process. New captures fail at capacity; no live path is deleted to
+make room. An oversized new frame is removed before publication. Default screenshot
+provenance degrades to an observation without a path and with a failure reason; an
+existing cached path can still be returned. Explicit `screenshot: "settled"`, `crop`,
+`includeScreenshotImage`, and `snapshotOf` requests surface an actionable capacity error
+with the earliest guarantee expiry. Observations without screenshots are unaffected.
+A per-process in-memory inventory tracks capacity. It reconciles with the directory on
+periodic or explicit sweeps and near either cap, picking up files from other processes.
+Concurrent processes can exceed the aggregate cap before reconciliation; discovered
+files count against subsequent admission.
+Cleanup failures are logged and retried; retained files whose cleanup failed still count
+against admission, so failure cannot allow unbounded growth.
+
+The guarantee is the maximum of the return lease, file mtime plus ten minutes, and
+process-start grace. At the first sweep/capture after restart, pre-existing files without
+an in-memory lease receive grace through process start plus ten minutes: the previous
+process could have returned an old cached path immediately before it crashed. No
+persisted index is required. Other processes sharing the directory cannot see local
+leases and only honor the ten-minute mtime floor; re-return leases are guaranteed by
+the returning process's cleaners, with this cross-process limitation.
+
+Expired, unreferenced files are swept at initial inventory, near capacity, and every
+minute on an unref'd host Timer while idle; size eviction also skips live files. Session
+release and device removal only drop cache references: their files remain until expiry and a subsequent
+sweep. Abandoned files are recovered after restart and swept when the grace expires.
+Copy files needed beyond the reported window; no copy is needed within that window
+when using one returning process.
 
 For encoded captures, pass `screenshotOptions` with `screenshot: "settled"`,
 `includeScreenshotImage: true`, or `crop`,

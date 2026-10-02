@@ -212,6 +212,8 @@ export interface ObserveResult {
   screenshotScaleProvenance?: "raster-dimensions" | "native-scale-confirmed";
   /** Local path to this observation's validated settled screenshot. */
   screenshotPath?: string;
+  /** Host-clock epoch milliseconds through which this returned path is retained. */
+  screenshotExpiresAt?: number;
   /** Upright display-oriented PNG crop; its orientation is independent of the full screenshot. */
   crop?: import("../features/observe/screenshot/observeCrop").ObserveCropResult;
   /** Provenance of the screenshot returned with this observation. */
@@ -587,6 +589,7 @@ export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &
     | "truncationReasons"
     | "windowTruncations"
     | "screenshotPath"
+    | "screenshotExpiresAt"
     | "observeScope"
   > & {
     freshness: NonNullable<ObserveResult["freshness"]>;

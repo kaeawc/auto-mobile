@@ -1,3 +1,9 @@
+import { FakeFileSystem } from "../fakes/FakeFileSystem";
+import {
+  BoundedScreenshotPathProtection,
+  ScreenshotRetentionCapacityError,
+} from "../../src/features/observe/ScreenshotRetention";
+import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../src/features/observe/ScreenshotRetention";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -30,10 +36,7 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 
 import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
-import {
-  SCREENSHOT_MIN_LIFETIME_MS,
-  selectScreenshotsToEvict,
-} from "../../src/features/observe/screenshotCacheEviction";
+import { selectScreenshotsToEvict } from "../../src/features/observe/screenshotCacheEviction";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 
 const device: BootedDevice = { deviceId: "crop-device", name: "Fake", platform: "android" };
@@ -98,7 +101,9 @@ function register(extra: Parameters<typeof registerObserveTools>[0] = {}) {
         getMostRecentCachedObserveResult: fake.getMostRecentCachedObserveResult.bind(fake),
       };
     },
+    pathProtection: new FakeScreenshotPathProtection(timer),
     crop: {
+      pathProtection: new FakeScreenshotPathProtection(timer),
       imageBackend: image,
       outputDirectory: () => "/fake/screenshots",
       ids: new CountingIdGenerator("test"),
@@ -233,27 +238,38 @@ describe("observe crop validation", () => {
 });
 
 describe("observe crop capture and output", () => {
-  test("returned crop path is protected from the next size sweep for 30 seconds", async () => {
+  test("returned crop path reports ten minutes and survives the next size sweep", async () => {
     const protection = new FakeScreenshotPathProtection(timer);
     const protect = spyOn(screenshotPathProtection, "protect").mockImplementation(
       protection.protect.bind(protection),
     );
     try {
       timer.advanceTime(60_000);
+      register({
+        pathProtection: protection,
+        crop: {
+          pathProtection: protection,
+          imageBackend: image,
+          outputDirectory: () => "/fake/screenshots",
+          ids: new CountingIdGenerator("test"),
+          readFile: async () => source,
+          writer: { write: async () => {}, remove: async () => {} },
+        },
+      });
       const response = await call({ crop: { rect } });
       const crop = getStructuredField<ObserveCropResult>(response, "crop")!;
-      expect(protection.calls.filter((path) => path === crop.cropPath)).toHaveLength(2);
+      expect(protection.calls.filter((path) => path === crop.cropPath)).toHaveLength(3);
+      expect(crop.expiresAt).toBe(timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS);
       const files = [{ path: crop.cropPath, size: 129 * 1024 * 1024, mtimeMs: 0 }];
       const sweep = () =>
         selectScreenshotsToEvict(
           files,
           128 * 1024 * 1024,
-          SCREENSHOT_MIN_LIFETIME_MS,
           timer.now(),
           () => false,
           protection.isProtected.bind(protection),
         );
-      timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS - 1);
+      timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
       expect(sweep().toEvict).toEqual([]);
       timer.advanceTime(1);
       expect(sweep().toEvict).toEqual([crop.cropPath]);
@@ -269,6 +285,7 @@ describe("observe crop capture and output", () => {
     expect(modes).toEqual(["settled"]);
     expect(reads).toEqual(["/fake/final.png"]);
     expect(crop).toEqual({
+      expiresAt: timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS,
       cropPath: path.join("/fake/screenshots", "crop-test-1.png"),
       unit: "pixels",
       requestedBounds: { left: 10, top: 20, right: 40, bottom: 60 },
@@ -597,6 +614,7 @@ describe("observe crop failures", () => {
   test("crop write failure fails the entire observe result", async () => {
     register({
       crop: {
+        pathProtection: new FakeScreenshotPathProtection(timer),
         imageBackend: image,
         readFile: async () => source,
         outputDirectory: () => "/fake",
@@ -762,4 +780,30 @@ describe("observe crop failures", () => {
       await fs.rm(directory, { recursive: true, force: true });
     }
   });
+});
+
+test("crop writer refuses capacity with a typed error and retains both devices' paths", async () => {
+  const files = new FakeFileSystem();
+  files.setFile("/screenshots/screenshot_0_deviceA.png", "a");
+  files.setFile("/screenshots/screenshot_0_deviceB.png", "b");
+  files.stat = async () => ({ isFile: () => true, size: 64 * 1024 * 1024, mtimeMs: timer.now() });
+  const protection = new BoundedScreenshotPathProtection(timer, undefined);
+  register({
+    crop: {
+      pathProtection: protection,
+      fileSystem: files,
+      readFile: async () => source,
+      outputDirectory: () => "/screenshots",
+      imageBackend: image,
+      writer: {
+        write: async () => {
+          throw new Error("must not write at capacity");
+        },
+        remove: async () => {},
+      },
+    },
+  });
+  await expect(call({ crop: { rect } })).rejects.toBeInstanceOf(ScreenshotRetentionCapacityError);
+  expect(files.existsSync("/screenshots/screenshot_0_deviceA.png")).toBe(true);
+  expect(files.existsSync("/screenshots/screenshot_0_deviceB.png")).toBe(true);
 });

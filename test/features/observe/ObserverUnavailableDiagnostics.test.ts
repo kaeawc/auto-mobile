@@ -1,5 +1,5 @@
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
-import { SCREENSHOT_MIN_LIFETIME_MS } from "../../../src/features/observe/screenshotCacheEviction";
+import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -198,9 +198,10 @@ test.each([
         "No screenshot could be captured: this unowned physical iOS device has no reachable runner. Physical iOS has no host-side screenshot capture path without the runner.",
       );
       if (cached && fileExists) {
+        expect(result.screenshotExpiresAt).toBe(timer.now() + SCREENSHOT_PATH_MIN_LIFETIME_MS);
         timer.advanceTime(2);
         expect(protection.isProtected("/fake/cached.png")).toBe(true);
-        timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS - 2);
+        timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 2);
         expect(protection.isProtected("/fake/cached.png")).toBe(false);
       }
       expect(writer.written).toEqual([]);

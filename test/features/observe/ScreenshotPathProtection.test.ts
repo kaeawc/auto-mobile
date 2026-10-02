@@ -1,12 +1,11 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import path from "node:path";
 import {
   BoundedScreenshotPathProtection,
   MAX_SCREENSHOT_PATH_PROTECTIONS,
 } from "../../../src/features/observe/ScreenshotPathProtection";
-import { SCREENSHOT_MIN_LIFETIME_MS } from "../../../src/features/observe/screenshotCacheEviction";
+import { SCREENSHOT_PATH_MIN_LIFETIME_MS } from "../../../src/features/observe/ScreenshotRetention";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { logger } from "../../../src/utils/logger";
 
 test("win32 protection shares separator and case variants without covering other files", async () => {
   const registry = new BoundedScreenshotPathProtection(new FakeTimer(), path.win32);
@@ -78,35 +77,29 @@ test("publication extends a lease and expiry follows FakeTimer exactly", async (
   const timer = new FakeTimer();
   const registry = new BoundedScreenshotPathProtection(timer);
   await registry.protect("cached");
-  timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS - 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
   await registry.protect("cached");
   timer.advanceTime(1);
   expect(registry.isProtected("cached")).toBe(true);
-  timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS - 1);
+  timer.advanceTime(SCREENSHOT_PATH_MIN_LIFETIME_MS - 1);
   expect(registry.isProtected("cached")).toBe(false);
 });
 
-test("hard ceiling drops oldest protection with a warning; rearmed entries stay newest", async () => {
+test("publication never drops a live lease under count pressure", async () => {
   const timer = new FakeTimer();
   const registry = new BoundedScreenshotPathProtection(timer);
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    for (let i = 0; i < MAX_SCREENSHOT_PATH_PROTECTIONS; i++) {
-      await registry.protect(`path-${i}`);
-    }
-    await registry.protect("path-0");
-    await registry.protect("overflow");
-    expect(registry.isProtected("path-0")).toBe(true);
-    expect(registry.isProtected("path-1")).toBe(false);
-    expect(registry.isProtected("overflow")).toBe(true);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toContain("dropped oldest protection");
-    timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS);
-    await registry.protect("after-expiry");
-    expect(warn).toHaveBeenCalledTimes(1);
-  } finally {
-    warn.mockRestore();
+  for (let i = 0; i <= MAX_SCREENSHOT_PATH_PROTECTIONS; i++) {
+    await registry.protect(`path-${i}`);
   }
+  expect(registry.isProtected("path-0")).toBe(true);
+});
+
+test("protect reports exactly ten minutes from the last return", async () => {
+  const timer = new FakeTimer();
+  const registry = new BoundedScreenshotPathProtection(timer);
+  expect(await registry.protect("cached")).toBe(600_000);
+  timer.advanceTime(500_000);
+  expect(await registry.protect("cached")).toBe(1_100_000);
 });
 
 test("publication waits for an already-started unlink before validating a path", async () => {

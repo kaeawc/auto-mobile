@@ -224,7 +224,7 @@ wiring_requires_yq() {
   local diagnose_index emulator_index upload_index
   diagnose_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.name == "Diagnose foldable emulator shared libraries") | .key' "$NIGHTLY")"
   emulator_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.uses == "./.github/actions/android-emulator") | .key' "$NIGHTLY")"
-  upload_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.name == "Upload foldable diagnostics and screenshots") | .key' "$NIGHTLY")"
+  upload_index="$(yq -r '.jobs.foldable-posture-tests.steps | to_entries[] | select(.value.name == "Upload foldable diagnostics, screenshots and recordings") | .key' "$NIGHTLY")"
   [ "$diagnose_index" -eq "$((emulator_index + 1))" ]
   [ "$upload_index" -eq "$((diagnose_index + 1))" ]
   [ "$(yq -r '.jobs.foldable-posture-tests.steps[] | select(.name == "Diagnose foldable emulator shared libraries") | .if' "$NIGHTLY")" = 'always()' ]

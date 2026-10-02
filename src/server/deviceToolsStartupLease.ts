@@ -4,6 +4,7 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool } from "../daemon/devicePool";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import {
@@ -128,6 +129,7 @@ export async function reserveAndroidStartupLease(
   if (!devicePool) {
     return undefined;
   }
+  signal?.throwIfAborted();
   const exactAvdName = await resolveAndroidStartupLeaseAvdName({
     args,
     budgets,
@@ -137,6 +139,7 @@ export async function reserveAndroidStartupLease(
     timer,
     signal,
   });
+  signal?.throwIfAborted();
   // Read after the resolution above so the wait reflects the budget it left.
   const remainingMs = bootDeadlineMs - timer.now();
   const requestedName = exactAvdName ?? args.name;
@@ -154,13 +157,10 @@ export async function reserveAndroidStartupLease(
     );
   const abortForCaller = () =>
     timeoutController.abort(signal?.reason ?? new Error("Device preparation cancelled"));
-  if (signal?.aborted) {
-    abortForCaller();
-  } else {
-    signal?.addEventListener("abort", abortForCaller, { once: true });
-  }
+  // The synchronous section after throwIfAborted cannot miss a caller abort.
+  signal?.addEventListener("abort", abortForCaller, { once: true });
   const timeout = timer.setTimeout(abortForTimeout, remainingMs);
-  try {
+  const reservation = (async () => {
     const ownsOfflineRecovery = await ownsAndroidStartupOfflineRecovery(
       exactAvdName,
       devicePool,
@@ -169,12 +169,48 @@ export async function reserveAndroidStartupLease(
       timer,
       timeoutController.signal,
     );
+    // Classification can finish after cancellation; do not queue new work then.
+    timeoutController.signal.throwIfAborted();
     return await devicePool.reserveAndroidStartupLease(
       requestedName,
       exactAvdName !== undefined,
       timeoutController.signal,
       ownsOfflineRecovery,
     );
+  })();
+  const releaseLateGrant = async (release: () => Promise<void>) => {
+    try {
+      await release();
+    } catch (error) {
+      logger.warn(
+        `[DeviceTools] Late Android startup lease release failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  };
+  let grantedRelease: (() => Promise<void>) | undefined;
+  try {
+    grantedRelease = await raceWithDeadline(reservation, {
+      timer,
+      signal: timeoutController.signal,
+      label: "Android startup lease",
+    });
+    timeoutController.signal.throwIfAborted();
+    return grantedRelease;
+  } catch (error) {
+    // The pool's mutex queue ignores abort until acquisition. Attach after the
+    // failed race so even a simultaneous grant cannot escape cleanup ownership.
+    if (grantedRelease) {
+      void releaseLateGrant(grantedRelease);
+    } else {
+      void reservation.then(releaseLateGrant, (lateError: unknown) => {
+        logger.warn(
+          `[DeviceTools] Abandoned Android startup lease wait failed: ${errorMessage(lateError)}`,
+          lateError,
+        );
+      });
+    }
+    throw error;
   } finally {
     timer.clearTimeout(timeout);
     signal?.removeEventListener("abort", abortForCaller);

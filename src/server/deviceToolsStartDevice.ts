@@ -21,8 +21,12 @@ import {
 } from "../utils/deviceReadinessLock";
 import {
   createDefaultRunnerReadinessService,
+  RunnerReadinessError,
   type RunnerReadinessRequest,
 } from "../utils/RunnerReadinessService";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { runWithAbortSignal } from "../utils/AbortContext";
+import type { Timer } from "../utils/SystemTimer";
 import { DEFAULT_START_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { VirtualDeviceLifecycleLease } from "../devices/virtualDeviceLifecycleCoordinator";
 import { registerDirectSessionDevice } from "./directSessionDeviceRegistry";
@@ -68,6 +72,36 @@ type StartDeviceHooks = {
   ) => Promise<StructuredToolResponse>;
   stripInternalAcquisitionParams: (rawArgs: object) => Record<string, unknown>;
 };
+
+/** Bound a request's wait; shared removal cleanup must retain its own lifetime. */
+async function waitForDevicePreparation<T>(
+  operation: (signal?: AbortSignal) => Promise<T>,
+  options: {
+    timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+    deadlineMs: number;
+    signal?: AbortSignal;
+    timeoutError: () => Error;
+    cancelOperation?: boolean;
+  },
+): Promise<T> {
+  const { timer, deadlineMs, signal, timeoutError, cancelOperation } = options;
+  // Caller cancellation takes precedence even when the deadline is already past.
+  signal?.throwIfAborted();
+  const remainingMs = Math.floor(deadlineMs - timer.now());
+  if (remainingMs <= 0) {
+    throw timeoutError();
+  }
+  if (cancelOperation) {
+    return await runOperationWithinDeadline(timer, deadlineMs, signal, timeoutError, operation);
+  }
+  return await raceWithDeadline(() => runWithAbortSignal(undefined, () => operation()), {
+    timer,
+    timeoutMs: remainingMs,
+    signal,
+    label: "Device preparation",
+    timeoutError,
+  });
+}
 
 export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   const { prepareDevice, stripInternalAcquisitionParams } = hooks;
@@ -176,12 +210,59 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       initializedDevicePool()?.getDevice(state.boot.device.deviceId)?.androidImage,
     );
     const daemonState = DaemonState.getInstance();
-    await reserveInitialDeviceForReadiness(
-      daemonState,
-      state.boot,
-      releaseReadinessReservations,
-      args.__mcpSessionId,
-    );
+    const initialReservations: DeviceReadinessReservation[] = [];
+    let reservationAccepted = false;
+    let reservationAbandoned = false;
+    const releaseInitialReservations = async () => {
+      for (const release of initialReservations.splice(0)) {
+        try {
+          await release();
+        } catch (error) {
+          logger.warn(
+            `[DeviceTools] Late initial readiness reservation release failed: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }
+    };
+    try {
+      await waitForDevicePreparation(
+        async (reservationSignal) => {
+          await reserveInitialDeviceForReadiness(
+            daemonState,
+            state.boot!,
+            initialReservations,
+            args.__mcpSessionId,
+          );
+          // A grant can win the mutex just as the caller loses its deadline race.
+          // Never publish that orphan into the caller's already-drained release list.
+          if (reservationAbandoned || reservationSignal?.aborted) {
+            await releaseInitialReservations();
+            reservationSignal?.throwIfAborted();
+          }
+        },
+        {
+          timer: deps.timer,
+          deadlineMs: budgets.automationDeadlineMs,
+          signal,
+          cancelOperation: true,
+          timeoutError: () =>
+            acquisitionLifecycleTimeoutError(
+              budgets,
+              requestedIdentity,
+              "reserving the device for readiness",
+            ),
+        },
+      );
+      releaseReadinessReservations.push(...initialReservations.splice(0));
+      reservationAccepted = true;
+    } finally {
+      if (!reservationAccepted) {
+        reservationAbandoned = true;
+        // Do not let a release queued behind the same mutex hold up cancellation.
+        void releaseInitialReservations();
+      }
+    }
 
     // A new incarnation must not inherit a prior intentional-shutdown marker
     // while its per-device runner setup is in flight.
@@ -190,9 +271,23 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
     if (state.boot.device.platform === "ios") {
       IOSCtrlProxyClient.resumeAfterDeviceStart(state.boot.device.deviceId);
       // Removal cleanup can still be draining after simctl reports the new boot.
-      await IOSCtrlProxyManager.getExistingInstance(
-        state.boot.device.deviceId,
-      )?.rearmAfterDeviceReappearance();
+      await waitForDevicePreparation(
+        async () =>
+          await IOSCtrlProxyManager.getExistingInstance(
+            state.boot!.device.deviceId,
+          )?.rearmAfterDeviceReappearance(),
+        {
+          timer: deps.timer,
+          deadlineMs: budgets.automationDeadlineMs,
+          signal,
+          timeoutError: () =>
+            acquisitionLifecycleTimeoutError(
+              budgets,
+              requestedIdentity,
+              "waiting for iOS runner removal cleanup",
+            ),
+        },
+      );
     }
 
     const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
@@ -399,15 +494,42 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
   async function ensureCtrlProxyReady(request: RunnerReadinessRequest): Promise<void> {
     request.perf?.startOperation("ensureCtrlProxy");
     try {
+      const timer = getDeviceToolsDependencies().timer;
+      const preparationOptions = {
+        timer,
+        deadlineMs: request.totalDeadlineMs,
+        signal: request.signal,
+        timeoutError: () =>
+          new RunnerReadinessError(
+            `${request.operationName ?? "startDevice"} automation runner readiness failed: ` +
+              `platform=${request.device.platform} requested=[${request.requestedIdentity}] ` +
+              `resolved=[${request.device.name} (${request.device.deviceId})] phase=runner-setup ` +
+              "attempts=0 remainingBudgetMs=0: device preparation deadline exhausted",
+            false,
+            true,
+            "runner-setup",
+            0,
+          ),
+      };
       const pool = getStartDevicePool(DaemonState.getInstance());
-      if (pool && (await pool.isShutdownReserved(request.device.deviceId))) {
+      if (
+        pool &&
+        (await waitForDevicePreparation(
+          async () => await pool.isShutdownReserved(request.device.deviceId),
+          preparationOptions,
+        ))
+      ) {
         throw new ActionableError(`Device '${request.device.deviceId}' is shutting down.`);
       }
       if (request.device.platform === "ios") {
         IOSCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
-        await IOSCtrlProxyManager.getExistingInstance(
-          request.device.deviceId,
-        )?.rearmAfterDeviceReappearance();
+        await waitForDevicePreparation(
+          async () =>
+            await IOSCtrlProxyManager.getExistingInstance(
+              request.device.deviceId,
+            )?.rearmAfterDeviceReappearance(),
+          preparationOptions,
+        );
       } else if (request.device.platform === "android") {
         AndroidCtrlProxyClient.resumeAfterDeviceStart(request.device.deviceId);
       }

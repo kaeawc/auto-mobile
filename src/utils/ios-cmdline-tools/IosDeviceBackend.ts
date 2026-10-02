@@ -104,3 +104,65 @@ export function resolveIosLaunchBackend(
     ? new SimulatorIosLaunchBackend(deps.simctl)
     : new PhysicalIosLaunchBackend(deviceId, deps.deviceAppLauncher);
 }
+
+/**
+ * Physical-device app terminator. `DeviceAppManager` satisfies this
+ * structurally (via `xcrun devicectl device process terminate --kill`); tests
+ * inject a fake so the physical path is exercised without a real device. Mirrors
+ * the `DeviceAppUninstaller`/`DeviceAppLauncher` injection in the sibling tools.
+ */
+export interface DeviceAppTerminator {
+  terminateApp(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<{ wasInstalled: boolean; wasRunning: boolean }>;
+}
+
+type TerminateResult = { wasInstalled: boolean; wasRunning: boolean };
+
+export interface IosTerminateBackend {
+  /** simctl needs the action's live listing pre-check; devicectl checks internally. */
+  readonly requiresInstalledAppCheck: boolean;
+  terminateApp(bundleId: string): Promise<TerminateResult>;
+}
+
+export interface IosTerminateBackendDeps {
+  simctl: Pick<SimCtlClient, "terminateApp">;
+  deviceAppTerminator: DeviceAppTerminator;
+}
+
+export class SimulatorIosTerminateBackend implements IosTerminateBackend {
+  readonly requiresInstalledAppCheck = true;
+
+  constructor(
+    private readonly deviceId: string,
+    private readonly simctl: Pick<SimCtlClient, "terminateApp">,
+  ) {}
+
+  async terminateApp(bundleId: string): Promise<TerminateResult> {
+    await this.simctl.terminateApp(bundleId, this.deviceId);
+    return { wasInstalled: true, wasRunning: true };
+  }
+}
+
+export class PhysicalIosTerminateBackend implements IosTerminateBackend {
+  readonly requiresInstalledAppCheck = false;
+
+  constructor(
+    private readonly deviceId: string,
+    private readonly deviceAppTerminator: DeviceAppTerminator,
+  ) {}
+
+  terminateApp(bundleId: string): Promise<TerminateResult> {
+    return this.deviceAppTerminator.terminateApp(this.deviceId, bundleId);
+  }
+}
+
+export function resolveIosTerminateBackend(
+  deviceId: string,
+  deps: IosTerminateBackendDeps,
+): IosTerminateBackend {
+  return isIosSimulatorUdid(deviceId)
+    ? new SimulatorIosTerminateBackend(deviceId, deps.simctl)
+    : new PhysicalIosTerminateBackend(deviceId, deps.deviceAppTerminator);
+}

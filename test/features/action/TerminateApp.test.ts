@@ -51,9 +51,14 @@ describe("TerminateApp (iOS)", () => {
   test("terminates installed app via simctl", async () => {
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
 
-    const terminateApp = new TerminateApp(iosDevice, null, fakeSimctl, fakeTimer);
+    const terminator = new FakeDeviceAppTerminator();
+    const terminateApp = new TerminateApp(iosDevice, null, fakeSimctl, fakeTimer, terminator);
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
+    expect(fakeSimctl.getMethodCalls("terminateApp")).toEqual([
+      { bundleId: "com.example.app", deviceId: iosDevice.deviceId },
+    ]);
+    expect(terminator.terminateCalls).toEqual([]);
     expect(result.success).toBe(true);
     expect(result.wasInstalled).toBe(true);
     expect(result.wasRunning).toBe(true);
@@ -196,6 +201,7 @@ describe("TerminateApp (iOS physical device)", () => {
     expect(result.wasRunning).toBe(true);
     expect(result.wasForeground).toBe(false);
     expect(result.packageName).toBe("com.example.app");
+    expect(fakeSimctl.wasMethodCalled("listApps")).toBe(false);
     // Physical path must route through devicectl terminator, never simctl.
     expect(terminator.terminateCalls).toEqual([
       { deviceUdid: "00008110-001A2B3C4D5E6F70", bundleId: "com.example.app" },

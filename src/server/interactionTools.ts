@@ -246,6 +246,7 @@ export async function setKeyboardProfileForTool(
   device: BootedDevice,
   profile: KeyboardArgs["profile"],
   client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "setKeyboardProfile">,
+  signal?: AbortSignal,
 ): Promise<{ activeProfileId?: string; previousProfileId?: string }> {
   if (!profile) {
     throw new ActionableError(
@@ -256,13 +257,20 @@ export async function setKeyboardProfileForTool(
     throw new ActionableError("Keyboard profiles are Android-only; select an Android device.");
   }
   const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
-  if (!(await profileClient.supportsCommand("request_set_keyboard_profile"))) {
+  const supported = await profileClient.supportsCommand("request_set_keyboard_profile");
+  throwIfAborted(signal);
+  if (!supported) {
     throw new ActionableError(
       "The installed control-proxy build does not support keyboard profiles; update/re-cut the APK.",
     );
   }
-  const result = await withAndroidImeLock(device.deviceId, () =>
-    profileClient.setKeyboardProfile(profile),
+  const result = await withAndroidImeLock(
+    device.deviceId,
+    () => {
+      throwIfAborted(signal);
+      return profileClient.setKeyboardProfile(profile);
+    },
+    signal,
   );
   if (!result.success) {
     throw new ActionableError(result.error ?? "Failed to set keyboard profile.");
@@ -273,6 +281,7 @@ export async function setKeyboardProfileForTool(
 export async function listKeyboardProfilesForTool(
   device: BootedDevice,
   client?: Pick<AndroidCtrlProxyClient, "supportsCommand" | "listKeyboardProfiles">,
+  signal?: AbortSignal,
 ): Promise<KeyboardProfileCatalog> {
   if (device.platform !== "android") {
     throw new ActionableError(
@@ -281,7 +290,9 @@ export async function listKeyboardProfilesForTool(
   }
   const profileClient = client ?? AndroidCtrlProxyClient.getInstance(device);
   const command = "request_list_keyboard_profiles";
-  if (!(await profileClient.supportsCommand(command))) {
+  const supported = await profileClient.supportsCommand(command);
+  throwIfAborted(signal);
+  if (!supported) {
     throw new ActionableError(
       "The installed control-proxy build does not support keyboard profile catalogs; update/re-cut the APK.",
     );
@@ -3051,11 +3062,14 @@ export function registerInteractionTools() {
     signal?: AbortSignal,
   ) => {
     try {
+      throwIfAborted(signal);
       if (args.action === "setProfile") {
-        return createJSONToolResponse(await setKeyboardProfileForTool(device, args.profile));
+        return createJSONToolResponse(
+          await setKeyboardProfileForTool(device, args.profile, undefined, signal),
+        );
       }
       if (args.action === "listProfiles") {
-        return createJSONToolResponse(await listKeyboardProfilesForTool(device));
+        return createJSONToolResponse(await listKeyboardProfilesForTool(device, undefined, signal));
       }
       if (args.action === "listImes" || args.action === "setIme" || args.action === "tapImeKey") {
         return handleInstalledImeAction(device, args, signal);
@@ -3098,10 +3112,12 @@ export function registerInteractionTools() {
     device: BootedDevice,
     args: any,
     progress?: ProgressCallback,
+    signal?: AbortSignal,
   ) => {
     try {
+      throwIfAborted(signal);
       const homeScreen = new HomeScreen(device);
-      const result = await homeScreen.execute(progress);
+      const result = await homeScreen.execute(progress, signal);
 
       return createJSONToolResponse({
         message: "Pressed home button to return to the home screen",
@@ -3109,6 +3125,7 @@ export function registerInteractionTools() {
         ...result,
       });
     } catch (error) {
+      throwIfAborted(signal);
       throw toActionableError(error, `Failed to go to home screen`);
     }
   };

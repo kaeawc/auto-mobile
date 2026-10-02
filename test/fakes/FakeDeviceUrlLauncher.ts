@@ -25,7 +25,12 @@ export class FakeDeviceUrlLauncher implements DeviceUrlLauncher {
     return this.available;
   }
 
-  async launchWithPayloadUrl(deviceUdid: string, bundleId: string, url: string): Promise<void> {
+  async launchWithPayloadUrl(
+    deviceUdid: string,
+    bundleId: string,
+    url: string,
+    _signal?: AbortSignal,
+  ): Promise<void> {
     this.launchCalls.push({ deviceUdid, bundleId, url });
     if (this.launchError) {
       throw this.launchError;

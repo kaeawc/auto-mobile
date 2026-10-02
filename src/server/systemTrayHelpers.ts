@@ -98,8 +98,20 @@ export interface SystemTrayIosClient {
     x2: number,
     y2: number,
     duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; error?: string }>;
-  requestTapCoordinates(x: number, y: number): Promise<{ success: boolean; error?: string }>;
+  requestTapCoordinates(
+    x: number,
+    y: number,
+    duration?: number,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    frameContext?: string,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string }>;
 }
 
 export interface SystemTrayDependencies {
@@ -124,12 +136,12 @@ let systemTrayDependencies: SystemTrayDependencies | null = null;
 const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = (device) => {
   const client = IOSCtrlProxyClient.getInstance(device);
   return {
-    requestSwipe: async (x1, y1, x2, y2, duration) => {
-      const result = await client.requestSwipe(x1, y1, x2, y2, duration);
+    requestSwipe: async (...args) => {
+      const result = await client.requestSwipe(...args);
       return { success: result.success, error: result.error };
     },
-    requestTapCoordinates: async (x, y) => {
-      const result = await client.requestTapCoordinates(x, y);
+    requestTapCoordinates: async (...args) => {
+      const result = await client.requestTapCoordinates(...args);
       return { success: result.success, error: result.error };
     },
   };

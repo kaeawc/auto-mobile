@@ -297,6 +297,27 @@ describe("finalizeToolResponse", () => {
     expect(output.displays?.[0].activeWindow).toBeUndefined();
   });
 
+  test("windowTruncations follows the skeleton projection into each display entry", () => {
+    const active = loadAndroidHomeObserve().observe;
+    const external = loadAndroidHomeObserve().observe;
+    external.viewHierarchy!.windows![0].truncationReasons = ["max_depth"];
+    const finalized = finalizeToolResponse(
+      createStructuredToolResponse({
+        ...active,
+        displays: [active, { ...external, freshness: { isFresh: true } }],
+      }),
+      { name: "observe", args: { display: "all", project: "skeleton" } },
+    );
+    const output = structuredPayload(finalized);
+    expect(output.displays?.[0].windowTruncations).toBeUndefined();
+    expect(output.displays?.[1].windowTruncations).toEqual([
+      {
+        windowId: external.viewHierarchy!.windows![0].id,
+        reasons: ["max_depth"],
+      },
+    ]);
+  });
+
   test("an oversized all result retains every projected panel in the artifact", () => {
     const observation = loadAndroidHomeObserve().observe;
     observation.observationId = "capture";
@@ -1729,6 +1750,47 @@ describe("finalizeToolResponse", () => {
       expect(obsSc.truncationReasons).toBeUndefined();
       expect("truncationReasons" in JSON.parse(finalized.content[0].text).observation).toBe(false);
     });
+
+    test.each([{ project: "skeleton" }, { project: "full" }, { raw: true }])(
+      "windowTruncations on a diff describes only the current capture (%j)",
+      (args) => {
+        const { store } = makeStore();
+        const baseline = loadAndroidHomeObserve().observe;
+        baseline.viewHierarchy!.windows![0].truncationReasons = ["cancelled"];
+        finalizeToolResponse(createStructuredToolResponse(baseline), {
+          name: "observe",
+          sessionUuid: "s1",
+          baselineStore: store,
+        });
+        const next = loadAndroidHomeObserve().observe;
+        next.viewHierarchy!.windows![1].truncationReasons = ["max_nodes"];
+        const finalized = finalizeToolResponse(
+          createStructuredToolResponse({ success: true, observation: next }),
+          { name: "tapOn", sessionUuid: "s1", baselineStore: store, args },
+        );
+        const diff = structuredPayload(finalized).observation;
+        expect(diff.isDiff).toBe(true);
+        expect(diff.windowTruncations).toEqual([
+          {
+            windowId: next.viewHierarchy!.windows![1].id,
+            reasons: ["max_nodes"],
+          },
+        ]);
+        expect(JSON.parse(finalized.content[0].text).observation.windowTruncations).toEqual(
+          diff.windowTruncations,
+        );
+        const complete = finalizeToolResponse(
+          createStructuredToolResponse({
+            success: true,
+            observation: loadAndroidHomeObserve().observe,
+          }),
+          { name: "tapOn", sessionUuid: "s1", baselineStore: store, args },
+        );
+        expect(structuredPayload(complete).observation.isDiff).toBe(true);
+        expect("windowTruncations" in structuredPayload(complete).observation).toBe(false);
+        expect("windowTruncations" in JSON.parse(complete.content[0].text).observation).toBe(false);
+      },
+    );
 
     // Issue #6933: the opposite transition from the #6601 thread above. The
     // BASELINE observation (stored capped, first 64 of 70 rows) carries the

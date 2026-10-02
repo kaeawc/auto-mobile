@@ -3930,6 +3930,31 @@
                     "type": "string"
                   }
                 },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
+                  }
+                },
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
@@ -5492,6 +5517,20 @@
                               },
                               "hierarchy": {
                                 "$ref": "#/$defs/__schema0"
+                              },
+                              "truncationReasons": {
+                                "description": "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+                                "anyOf": [
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": {}
@@ -5907,6 +5946,31 @@
                   "type": "array",
                   "items": {
                     "type": "string"
+                  }
+                },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
                   }
                 },
                 "settled": {
@@ -8779,6 +8843,20 @@
                             },
                             "hierarchy": {
                               "$ref": "#/$defs/__schema0"
+                            },
+                            "truncationReasons": {
+                              "description": "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+                              "anyOf": [
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             }
                           },
                           "additionalProperties": {}
@@ -9387,6 +9465,31 @@
                 "type": "array",
                 "items": {
                   "type": "string"
+                }
+              },
+              "windowTruncations": {
+                "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "windowId": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "package": {
+                      "type": "string"
+                    },
+                    "reasons": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": ["windowId", "reasons"],
+                  "additionalProperties": false
                 }
               },
               "screenshotPath": {
@@ -10474,6 +10577,20 @@
                       },
                       "hierarchy": {
                         "$ref": "#/$defs/__schema0"
+                      },
+                      "truncationReasons": {
+                        "description": "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       }
                     },
                     "additionalProperties": {}
@@ -10889,6 +11006,31 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "windowTruncations": {
+          "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "windowId": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "package": {
+                "type": "string"
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["windowId", "reasons"],
+            "additionalProperties": false
           }
         },
         "skeleton": {
@@ -14428,6 +14570,31 @@
                     "type": "string"
                   }
                 },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
+                  }
+                },
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
@@ -15990,6 +16157,20 @@
                               },
                               "hierarchy": {
                                 "$ref": "#/$defs/__schema0"
+                              },
+                              "truncationReasons": {
+                                "description": "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+                                "anyOf": [
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": {}
@@ -16405,6 +16586,31 @@
                   "type": "array",
                   "items": {
                     "type": "string"
+                  }
+                },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
                   }
                 },
                 "settled": {
@@ -19100,6 +19306,31 @@
                     "type": "string"
                   }
                 },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
+                  }
+                },
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
@@ -20662,6 +20893,20 @@
                               },
                               "hierarchy": {
                                 "$ref": "#/$defs/__schema0"
+                              },
+                              "truncationReasons": {
+                                "description": "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+                                "anyOf": [
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": {}
@@ -21077,6 +21322,31 @@
                   "type": "array",
                   "items": {
                     "type": "string"
+                  }
+                },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
                   }
                 },
                 "settled": {
@@ -25981,6 +26251,31 @@
                     "type": "string"
                   }
                 },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
+                  }
+                },
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
@@ -27543,6 +27838,20 @@
                               },
                               "hierarchy": {
                                 "$ref": "#/$defs/__schema0"
+                              },
+                              "truncationReasons": {
+                                "description": "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+                                "anyOf": [
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": {}
@@ -27958,6 +28267,31 @@
                   "type": "array",
                   "items": {
                     "type": "string"
+                  }
+                },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
                   }
                 },
                 "settled": {
@@ -29515,6 +29849,31 @@
                     "type": "string"
                   }
                 },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
+                  }
+                },
                 "settled": {
                   "description": "Same name/meaning as a full observation's `settled` (issue #6866): whether the observation this diff was computed from passed the hierarchy-stability gate. Populated from the post-action observation, not by `diffObserveResult` itself, so a diff-mode client has the same accessor as a full-mode one.",
                   "type": "boolean"
@@ -31077,6 +31436,20 @@
                               },
                               "hierarchy": {
                                 "$ref": "#/$defs/__schema0"
+                              },
+                              "truncationReasons": {
+                                "description": "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+                                "anyOf": [
+                                  {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": {}
@@ -31492,6 +31865,31 @@
                   "type": "array",
                   "items": {
                     "type": "string"
+                  }
+                },
+                "windowTruncations": {
+                  "description": "Current capture's incomplete windows: one entry per window with non-empty capture reasons, identified by windowId; package is included only from that window or its linked root. Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled (capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. Present only in skeleton/diff output, including each display:all entry; absent when none are truncated or the APK predates per-window reasons. Diff entries describe only the current capture, not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "windowId": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "package": {
+                        "type": "string"
+                      },
+                      "reasons": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": ["windowId", "reasons"],
+                    "additionalProperties": false
                   }
                 },
                 "settled": {

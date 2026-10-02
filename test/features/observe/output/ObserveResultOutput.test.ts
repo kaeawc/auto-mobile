@@ -1044,6 +1044,69 @@ describe("sanitizeObserveResult", () => {
       expect(out.truncationReasons).toEqual(["max_nodes"]);
     });
 
+    test("windowTruncations attributes only the truncated captured window and preserves flat reasons", () => {
+      const { observe } = loadAndroidHomeObserve();
+      const windows = observe.viewHierarchy!.windows!;
+      windows[0].truncationReasons = ["max_nodes"];
+      observe.viewHierarchy!.truncationReasons = ["max_nodes", "cancelled"];
+      const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
+      expect(out.windowTruncations).toEqual([{ windowId: windows[0].id, reasons: ["max_nodes"] }]);
+      expect(out.truncationReasons).toEqual(["max_nodes", "cancelled"]);
+      expect(windows[1].truncationReasons).toBeUndefined();
+    });
+
+    test("windowTruncations normalizes unknown, duplicate, and host-output codes without reordering", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.viewHierarchy!.windows![1].truncationReasons = [
+        "future_code",
+        "max_depth",
+        "future_code",
+        "cancelled",
+        "max_nodes",
+        "max_children[node kept 64 of 70]",
+        "",
+      ];
+      const out = sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" });
+      expect(out.windowTruncations).toEqual([
+        {
+          windowId: observe.viewHierarchy!.windows![1].id,
+          reasons: ["future_code", "max_depth", "cancelled", "max_nodes"],
+        },
+      ]);
+    });
+
+    test.each(["missing", "empty", "null", "windows missing"])(
+      "windowTruncations disappears byte-identically when reasons become %s",
+      (variant) => {
+        const { observe } = loadAndroidHomeObserve();
+        const cfg = { ...COMPACT, project: "skeleton" as const };
+        const before = JSON.stringify(sanitizeObserveResult(observe, cfg));
+        observe.viewHierarchy!.windows![0].truncationReasons = ["max_nodes"];
+        expect(sanitizeObserveResult(observe, cfg).windowTruncations).toBeDefined();
+        if (variant === "windows missing") {
+          delete observe.viewHierarchy!.windows;
+        } else if (variant === "missing") {
+          delete observe.viewHierarchy!.windows![0].truncationReasons;
+        } else {
+          observe.viewHierarchy!.windows![0].truncationReasons = variant === "empty" ? [] : null;
+        }
+        const out = sanitizeObserveResult(observe, cfg);
+        expect("windowTruncations" in out).toBe(false);
+        expect(JSON.stringify(out)).toBe(before);
+      },
+    );
+
+    test("windowTruncations stays unduplicated under the full projection", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.viewHierarchy!.windows![0].truncationReasons = ["max_nodes"];
+      expect(
+        sanitizeObserveResult(observe, { ...COMPACT, project: "skeleton" }).windowTruncations,
+      ).toBeDefined();
+      const out = sanitizeObserveResult(observe, { ...COMPACT, project: "full" });
+      expect("windowTruncations" in out).toBe(false);
+      expect(out.viewHierarchy?.windows?.[0].truncationReasons).toEqual(["max_nodes"]);
+    });
+
     // Issue #6933: with `--raw-element-search`, `DefaultObserveElementCollector`
     // follows the raw (uncapped) hierarchy attached by `attachRawViewHierarchy`,
     // so the projected skeleton can list every child past the filtered tree's

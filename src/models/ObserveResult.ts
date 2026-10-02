@@ -277,6 +277,9 @@ export interface ObserveResult {
    */
   truncationReasons?: string[];
 
+  /** Current capture's incomplete windows; skeleton/diff only, absent when none are truncated. */
+  windowTruncations?: Array<{ windowId: number; package?: string; reasons: string[] }>;
+
   /**
    * Interactable Skeleton Projection (issue #4388): a flat, actionable-only
    * summary emitted in place of `viewHierarchy` / `elements`. The `"skeleton"`
@@ -579,6 +582,7 @@ export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &
     | "context"
     | "keyboard"
     | "truncationReasons"
+    | "windowTruncations"
     | "screenshotPath"
     | "observeScope"
   > & {

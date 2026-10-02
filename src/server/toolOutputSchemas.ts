@@ -599,8 +599,34 @@ const viewHierarchyWindowSchema = z
   .object({
     bounds: elementBoundsSchema.optional(),
     hierarchy: viewHierarchyNodeSchema.optional(),
+    truncationReasons: z
+      .array(z.string())
+      .nullish()
+      .describe(
+        "Per-window capture truncation codes (max_nodes, max_depth, cancelled, or newer APK codes). " +
+          "Absent or null when unavailable; complete windows omit reasons. Full/raw output keeps these here.",
+      ),
   })
   .passthrough();
+
+const windowTruncationsSchema = z
+  .array(
+    z.object({
+      windowId: z.number().int(),
+      package: z.string().optional(),
+      reasons: z.array(z.string()),
+    }),
+  )
+  .optional()
+  .describe(
+    "Current capture's incomplete windows: one entry per window with non-empty capture reasons, " +
+      "identified by windowId; package is included only from that window or its linked root. " +
+      "Codes include max_nodes (window node budget exhausted), max_depth (depth cap), cancelled " +
+      "(capture cancelled), and unknown codes passed through unchanged. Host-output caps are excluded. " +
+      "Present only in skeleton/diff output, including each display:all entry; absent when none are " +
+      "truncated or the APK predates per-window reasons. Diff entries describe only the current capture, " +
+      "not the baseline. Full/raw observations retain viewHierarchy.windows[].truncationReasons instead.",
+  );
 
 /**
  * The `viewHierarchy` sub-tree of an observe result (issue #3025). The
@@ -987,6 +1013,7 @@ export const observationSummarySchema = z
           "`skeleton`/`context` omit rows. A host-output max_children[<node> kept N of M] " +
           "cap trims only rendered `viewHierarchy` and is not lifted here.",
       ),
+    windowTruncations: windowTruncationsSchema,
     settled: z
       .boolean()
       .optional()
@@ -1256,6 +1283,7 @@ export const observeDiffSchema = z
           "comparison may be incomplete, not that this diff's own `skeleton`/`context` " +
           "omit rows.",
       ),
+    windowTruncations: windowTruncationsSchema,
     settled: z
       .boolean()
       .optional()
@@ -1642,6 +1670,7 @@ export const displayObservationSchema = z.object({
   context: z.array(skeletonElementSchema).optional(),
   keyboard: z.object({ visible: z.literal(true), package: z.string() }).optional(),
   truncationReasons: z.array(z.string()).optional(),
+  windowTruncations: windowTruncationsSchema,
   screenshotPath: z.string().optional(),
   observeScope: observeScopeMetadataSchema.optional(),
   freshness: freshnessSchema,
@@ -1691,6 +1720,7 @@ export const observeResultSchema = z
           "current capture), so its presence means the comparison may be incomplete rather " +
           "than that the current `skeleton`/`context` omit rows (issue #6933).",
       ),
+    windowTruncations: windowTruncationsSchema,
     skeleton: z.array(skeletonElementSchema).optional(),
     context: z
       .array(skeletonElementSchema)

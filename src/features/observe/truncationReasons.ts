@@ -1,3 +1,6 @@
+import type { ObserveResult } from "../../models/ObserveResult";
+import { nodeAttributes, type ViewHierarchyWindowInfo } from "../../models/ViewHierarchyResult";
+
 /**
  * The truncation-reason vocabulary shared by the producer (`ViewHierarchy`) and
  * the consumers that judge a capture's fidelity (`PerformanceAuditor`).
@@ -24,6 +27,53 @@
  * when it trims a pathological container for the rendered payload.
  */
 export const HOST_OUTPUT_CHILD_CAP_REASON_PREFIX = "max_children[";
+
+/** Known device capture codes; newer APK codes remain valid on the wire. */
+export const WINDOW_TRUNCATION_REASON_MEANINGS = {
+  max_nodes: "This window's share of the node budget was exhausted.",
+  max_depth: "The tree was deeper than the depth cap.",
+  cancelled: "The capture was cancelled mid-walk.",
+} as const;
+
+export type WindowTruncationReason = keyof typeof WINDOW_TRUNCATION_REASON_MEANINGS;
+
+/** Normalize capture reasons without hiding unknown codes or changing their order. */
+export function normalizeWindowTruncationReasons(reasons: unknown): string[] {
+  if (!Array.isArray(reasons)) {
+    return [];
+  }
+  return [
+    ...new Set(
+      reasons.filter(
+        (reason): reason is string =>
+          typeof reason === "string" && reason.length > 0 && !isHostOutputTruncationReason(reason),
+      ),
+    ),
+  ];
+}
+
+/** Attribute capture loss to explicit window IDs and authoritative window/root packages only. */
+export function collectWindowTruncations(
+  windows: readonly ViewHierarchyWindowInfo[] | null | undefined,
+): ObserveResult["windowTruncations"] {
+  const entries: NonNullable<ObserveResult["windowTruncations"]> = [];
+  for (const window of windows ?? []) {
+    const reasons = normalizeWindowTruncationReasons(window.truncationReasons);
+    if (window.id === undefined || !Number.isInteger(window.id) || reasons.length === 0) {
+      continue;
+    }
+    const root = window.hierarchy ? nodeAttributes(window.hierarchy) : undefined;
+    const packageName = [window.packageName, root?.packageName, root?.package].find(
+      (value): value is string => typeof value === "string" && value.length > 0,
+    );
+    entries.push({
+      windowId: window.id,
+      ...(packageName ? { package: packageName } : {}),
+      reasons,
+    });
+  }
+  return entries.length > 0 ? entries : undefined;
+}
 
 /** Whether this reason describes host-side output trimming rather than a partial capture. */
 export function isHostOutputTruncationReason(reason: string): boolean {

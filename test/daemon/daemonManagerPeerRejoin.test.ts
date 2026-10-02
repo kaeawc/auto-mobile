@@ -8,6 +8,7 @@ import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import type { DaemonSocketReachabilityLike } from "../../src/daemon/daemonSocketReachability";
 import type { PidFileData } from "../../src/daemon/types";
 import { readPidFileDataSync } from "../../src/daemon/daemonFiles";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
 import {
   FakeDaemonProcessTable,
@@ -125,10 +126,46 @@ function expectNoPending(h: ReturnType<typeof harness>) {
 describe("daemon peer rejoin through injected process discovery", () => {
   test("joins a marked namespace peer after the child's exit with exactly two scans", async () => {
     const h = harness();
-    h.timer.enableAutoAdvance();
     h.table.script = (call) => (call === 1 ? [] : [namespaceDaemonProcess(999999, h.socketPath)]);
-    h.reachability.reachable = (call) => call >= 2;
+    h.reachability.reachable = (call) => {
+      if (call === 1) {
+        // Rejoin starts only after exit formatting has aborted the launch readiness wait.
+        h.timer.enableAutoAdvance();
+      }
+      return call >= 2;
+    };
     await expect(h.manager.start()).resolves.toBe("joined");
+    expect(h.table.scanCalls).toBe(2);
+    expect(h.table.scanTimeouts).toHaveLength(2);
+    for (const timeout of h.table.scanTimeouts) {
+      expect(timeout).toBeGreaterThan(0);
+      expect(timeout).toBeLessThanOrEqual(5000);
+    }
+    expect(h.reachability.calls).toBe(2);
+    expectNoSignals(h);
+  });
+
+  test("joins a marked namespace peer with exactly two scans despite delayed exit formatting", async () => {
+    const h = harness();
+    h.table.script = (call) => (call === 1 ? [] : [namespaceDaemonProcess(999999, h.socketPath)]);
+    h.reachability.reachable = (call) => {
+      if (call === 1) {
+        h.timer.enableAutoAdvance();
+      }
+      return call >= 2;
+    };
+    // No injected formatter seam exists. Preserve the private method's inferred
+    // signature and real log I/O while delaying delivery on this instance only.
+    const formatExitFailure = h.manager["createDaemonExitFailure"];
+    h.manager["createDaemonExitFailure"] = async (...args) => {
+      await defaultTimer.sleep(20);
+      return formatExitFailure.call(h.manager, ...args);
+    };
+    try {
+      await expect(h.manager.start()).resolves.toBe("joined");
+    } finally {
+      h.manager["createDaemonExitFailure"] = formatExitFailure;
+    }
     expect(h.table.scanCalls).toBe(2);
     expect(h.table.scanTimeouts).toHaveLength(2);
     for (const timeout of h.table.scanTimeouts) {

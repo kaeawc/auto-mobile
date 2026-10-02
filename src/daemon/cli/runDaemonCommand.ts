@@ -1,3 +1,4 @@
+import { isSessionReleasing } from "../sessionReleaseState";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError } from "../../models";
 import { resolveDaemonInstallSpecifier } from "../../constants/release";
@@ -424,7 +425,9 @@ export async function runDaemonCommand(
         const daemonState = manager.getDaemonState();
         if (daemonState.isInitialized()) {
           const sessionManager = daemonState.getSessionManager();
-          if (!sessionManager.getSession(sessionId)) {
+          const session =
+            sessionManager.getSession(sessionId) ?? sessionManager.getReleasingSession(sessionId);
+          if (!session || isSessionReleasing(sessionManager, sessionId, session)) {
             throw new ActionableError(`Session not found: ${sessionId}`);
           }
           sessionManager.recordHeartbeat(sessionId);

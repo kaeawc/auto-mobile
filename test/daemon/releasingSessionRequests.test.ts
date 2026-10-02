@@ -15,6 +15,7 @@ import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
 
 const sessionId = "00000000-0000-4000-8000-000000000001";
 const deviceId = "emulator-fake";
@@ -287,6 +288,38 @@ describe("requests during device session release", () => {
       expect(replacement.livenessOwnershipClaims).toBeUndefined();
     });
   }
+
+  test("ownership claim accepts the same terminal-fenced session when no release is in flight", async () => {
+    const h = releasingSessionHarness();
+    try {
+      const session = await h.create();
+      h.holdTerminalFence(session);
+      // Ordinary lookup hides terminal fences; expose the still-registered object
+      // to isolate the handler's post-claim check from lookup's admission policy.
+      h.manager.getSession = (id) => (id === sessionId ? session : null);
+      expect(h.manager.getSession(sessionId)).toBe(session);
+      expect(h.manager.isAdmittedForAutomation(session)).toBe(false);
+      expect(h.manager.getReleasingSession(sessionId)).toBeNull();
+      expect(
+        await handleDaemonRequest(
+          request("daemon/heartbeat", {
+            sessionId,
+            livenessOwnerToken: "new-owner",
+            claimLivenessOwnership: true,
+            livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+            idleTimeoutMs: 60000,
+          }),
+          h.state,
+        ),
+      ).toEqual({
+        success: true,
+        result: { sessionId, livenessPolicy: "cli-idle", idleTimeoutMs: 60000 },
+      });
+      expect(session.livenessOwnerToken).toBe("new-owner");
+    } finally {
+      h.dispose();
+    }
+  });
 
   test("direct recordHeartbeat during Phase A does not mutate or persist activity", async () => {
     const { session, release } = await beginPhaseA("explicit-release");

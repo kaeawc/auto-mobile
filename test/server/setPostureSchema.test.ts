@@ -11,10 +11,116 @@ import {
   HINGE_ANGLE_MIN_DEGREES,
   HINGE_ANGLE_MAX_DEGREES,
 } from "../../src/features/device/SetPosture";
-import type { BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
+import {
+  INTERNAL_EXECUTION_ID_PARAM,
+  INTERNAL_EXECUTION_START_TIME_PARAM,
+  INTERNAL_MCP_SESSION_PARAM,
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
+  INTERNAL_TOOL_PARAM_NAMES,
+} from "../../src/daemon/constants";
 
 describe("setPosture hinge angle contract", () => {
   afterEach(resetSetPostureFactory);
+  const device: BootedDevice = { name: "Fold", platform: "android", deviceId: "emulator-5554" };
+  const serverMetadata = {
+    [INTERNAL_EXECUTION_ID_PARAM]: "exec",
+    [INTERNAL_EXECUTION_START_TIME_PARAM]: 0,
+    [INTERNAL_MCP_SESSION_PARAM]: "session",
+    [INTERNAL_MCP_REQUEST_TIMEOUT_PARAM]: 10_000,
+    [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: 10_000,
+  };
+  test.each([
+    { selector: "posture", metadata: serverMetadata },
+    { selector: "hingeAngle", metadata: serverMetadata },
+    {
+      selector: "posture",
+      metadata: Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true])),
+    },
+    {
+      selector: "hingeAngle",
+      metadata: Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, true])),
+    },
+  ])("handler accepts injected metadata: %j", async ({ selector, metadata }) => {
+    const calls: unknown[] = [];
+    const signal = new AbortController().signal;
+    const result = {
+      posture: "opened" as const,
+      display: { key: "inner", role: "inner" as const, posture: "opened" as const, generation: 1 },
+    };
+    setSetPostureFactory((receivedDevice) => {
+      expect(receivedDevice).toBe(device);
+      return {
+        execute: async (...args) => {
+          calls.push(args);
+          return result;
+        },
+        executeHingeAngle: async (...args) => {
+          calls.push(args);
+          return { ...result, hingeAngle: args[0] };
+        },
+      };
+    });
+    const postureArgs = Object.freeze({
+      posture: "opened" as const,
+      displayPreset: "tablet" as const,
+      ...metadata,
+    });
+    const angleArgs = Object.freeze({ hingeAngle: 90, ...metadata });
+    const args = selector === "posture" ? postureArgs : angleArgs;
+    await setPostureHandler(device, args, undefined, signal);
+    expect(calls).toEqual(
+      selector === "posture"
+        ? [["opened", "tablet", signal]]
+        : [[90, { displayPreset: undefined, signal }]],
+    );
+    expect(args).toMatchObject(metadata);
+  });
+  test.each([{}, { posture: "opened" as const, hingeAngle: 90 }])(
+    "handler rejects neither/both with an actionable message: %j",
+    async (args) => {
+      let created = false;
+      setSetPostureFactory(() => {
+        created = true;
+        throw new Error("Unexpected action");
+      });
+      const promise = setPostureHandler(device, { ...args, ...serverMetadata });
+      await expect(promise).rejects.toBeInstanceOf(ActionableError);
+      await expect(promise).rejects.toMatchObject({
+        message: "Specify exactly one of posture or hingeAngle.",
+      });
+      expect(created).toBe(false);
+    },
+  );
+  test("handler rejects displayPreset with hingeAngle before creating the action", async () => {
+    setSetPostureFactory(() => {
+      throw new Error("Unexpected action");
+    });
+    const promise = setPostureHandler(device, {
+      hingeAngle: 90,
+      displayPreset: "phone",
+      ...serverMetadata,
+    });
+    await expect(promise).rejects.toBeInstanceOf(ActionableError);
+    await expect(promise).rejects.toMatchObject({
+      message: "displayPreset requires posture and cannot be combined with hingeAngle.",
+    });
+  });
+  test("handler preserves an actionable device error without wrapping it again", async () => {
+    const error = new ActionableError("Unsupported posture on this device.");
+    setSetPostureFactory(() => ({
+      execute: async () => {
+        throw error;
+      },
+      executeHingeAngle: async () => {
+        throw error;
+      },
+    }));
+    await expect(setPostureHandler(device, { posture: "opened", ...serverMetadata })).rejects.toBe(
+      error,
+    );
+  });
   test("schema bounds use the action's exported constants", () => {
     const json = z.toJSONSchema(setPostureSchema.shape.hingeAngle);
     expect(json.minimum).toBe(HINGE_ANGLE_MIN_DEGREES);

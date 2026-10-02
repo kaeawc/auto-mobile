@@ -2,7 +2,7 @@ import { ActionableError } from "../models";
 import type { DeviceMatchCriteria } from "../models/DeviceMatchCriteria";
 import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
-import { INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM } from "../daemon/constants";
+import { deleteInternalToolParams } from "../daemon/constants";
 import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
@@ -447,13 +447,7 @@ export function createAcquisitionHandlers(hooks: AcquisitionHooks) {
   // platform identity and readiness budgets are explicit.
   const stripInternalAcquisitionParams = (rawArgs: object) => {
     const externalArgs = { ...rawArgs } as Record<string, unknown>;
-    delete externalArgs.__mcpSessionId;
-    delete externalArgs.__executionId;
-    delete externalArgs.__executionStartTime;
-    delete externalArgs.__mcpRequestTimeoutMs;
-    delete externalArgs.__mcpRequestDeadlineMs;
-    delete externalArgs.__mcpLiveDeadlineKey;
-    delete externalArgs[INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM];
+    deleteInternalToolParams(externalArgs);
     return externalArgs;
   };
   const getAndroidHandler = async (

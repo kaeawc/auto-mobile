@@ -141,9 +141,12 @@ describe("iOS doctor checks", () => {
       expect(result.message).toStartWith(
         "CoreDevice 651.13.4 installed (requires CoreDevice >= 651.0.0); ",
       );
-      expect(result.message).toContain("not checked");
+      expect(result.message).not.toContain("downgrade");
       expect(result.message).toContain(
-        "simulator boot state: 1 booted, 2 shutdown, 1 unknown; capabilities: not probed; downgrade guard not checked",
+        "simulator boot state: 1 booted, 2 shutdown, 1 unknown; capabilities: not probed",
+      );
+      expect(result.detail).toBe(
+        "simulator boot state: 1 booted, 2 shutdown, 1 unknown; capabilities: not probed",
       );
       expect(calls).toEqual([{ file: "xcrun", args: ["devicectl", "--version"] }]);
     });
@@ -216,12 +219,13 @@ describe("iOS doctor checks", () => {
         );
         const suffix =
           platform === "darwin"
-            ? "simulator boot state: 1 booted, 2 shutdown, 1 unknown; capabilities: not probed; downgrade guard not checked"
-            : "simulator boot state: unavailable (simulator state unavailable); capabilities: not probed; downgrade guard not checked";
+            ? "simulator boot state: 1 booted, 2 shutdown, 1 unknown; capabilities: not probed"
+            : "simulator boot state: unavailable (simulator state unavailable); capabilities: not probed";
         expect(result).toEqual({
           name: "CoreDevice",
           status,
           message: prefix + suffix,
+          detail: suffix,
           ...(value ? { value } : {}),
         });
         expect(calls).toEqual(
@@ -284,6 +288,8 @@ describe("iOS doctor checks", () => {
       });
       expect(result.message).toContain("com.apple.coredevice.feature.getlockstate unsupported");
       expect(result.message).toContain("info displays supported");
+      expect(result.detail).toContain("com.apple.coredevice.feature.getlockstate unsupported");
+      expect(result.detail).toContain("info displays supported");
     });
 
     test("reports a below-required version", async () => {
@@ -309,7 +315,7 @@ describe("iOS doctor checks", () => {
       expect(result.message).toContain("devicectl missing");
       expect(result.message).toContain("devicectl-only simulator features will be unavailable");
       expect(result.message).toContain("simctl-based features are unaffected");
-      expect(result.message).toContain("not checked");
+      expect(result.message).not.toContain("downgrade");
       expect(logger.at("warn")).toHaveLength(1);
     });
 
@@ -324,7 +330,7 @@ describe("iOS doctor checks", () => {
       expect(result.message).toContain("version unreadable");
       expect(result.message).toContain("devicectl-only simulator features will be unavailable");
       expect(result.message).toContain("simctl-based features are unaffected");
-      expect(result.message).toContain("not checked");
+      expect(result.message).not.toContain("downgrade");
       expect(logger.at("warn")).toHaveLength(1);
     });
 
@@ -339,9 +345,10 @@ describe("iOS doctor checks", () => {
       });
       expect(result.status).toBe("warn");
       expect(result.message).toContain("platform probe failed");
+      expect(result.detail).toBe("simulator boot state: unavailable; capabilities: not probed");
       expect(result.message).toContain("devicectl-only simulator features will be unavailable");
       expect(result.message).toContain("simctl-based features are unaffected");
-      expect(result.message).toContain("not checked");
+      expect(result.message).not.toContain("downgrade");
       expect(logger.at("warn")).toHaveLength(1);
     });
 

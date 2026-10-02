@@ -59,6 +59,9 @@ export function formatConsoleOutput(report: DoctorReport, useColors: boolean = t
   lines.push("--- System ---");
   for (const check of report.system.checks) {
     lines.push(formatCheckLine(check, useColors));
+    if (check.detail) {
+      lines.push(`       ${check.detail}`);
+    }
   }
   lines.push("");
 
@@ -67,6 +70,9 @@ export function formatConsoleOutput(report: DoctorReport, useColors: boolean = t
     lines.push("--- Android Platform ---");
     for (const check of report.android.checks) {
       lines.push(formatCheckLine(check, useColors));
+      if (check.detail) {
+        lines.push(`       ${check.detail}`);
+      }
       if (check.recommendation && (check.status === "warn" || check.status === "fail")) {
         lines.push(`       Tip: ${check.recommendation}`);
       }
@@ -79,6 +85,9 @@ export function formatConsoleOutput(report: DoctorReport, useColors: boolean = t
     lines.push("--- iOS Platform ---");
     for (const check of report.ios.checks) {
       lines.push(formatCheckLine(check, useColors));
+      if (check.detail) {
+        lines.push(`       ${check.detail}`);
+      }
       if (check.recommendation && (check.status === "warn" || check.status === "fail")) {
         lines.push(`       Tip: ${check.recommendation}`);
       }
@@ -90,6 +99,9 @@ export function formatConsoleOutput(report: DoctorReport, useColors: boolean = t
   lines.push("--- AutoMobile ---");
   for (const check of report.autoMobile.checks) {
     lines.push(formatCheckLine(check, useColors));
+    if (check.detail) {
+      lines.push(`       ${check.detail}`);
+    }
     if (check.recommendation && (check.status === "warn" || check.status === "fail")) {
       lines.push(`       Tip: ${check.recommendation}`);
     }

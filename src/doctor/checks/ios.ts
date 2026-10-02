@@ -817,7 +817,7 @@ function describeCoreDeviceState(result: CoreDeviceDiagnostic): string {
         .map((entry) => `${entry.featureId ?? entry.command} ${entry.status} (${entry.scope})`)
         .join(", ")
     : "not probed";
-  return `simulator boot state: ${bootState}; capabilities: ${capabilities}; downgrade guard not checked`;
+  return `simulator boot state: ${bootState}; capabilities: ${capabilities}`;
 }
 
 export async function checkCoreDeviceVersion(
@@ -826,21 +826,21 @@ export async function checkCoreDeviceVersion(
 ): Promise<CheckResult> {
   const name = "CoreDevice";
   const required = formatCoreDeviceVersion(REQUIRED_SIMULATOR_COREDEVICE_VERSION);
-  let unchecked =
-    "simulator boot state: unavailable; capabilities: not probed; downgrade guard not checked";
+  let unchecked = "simulator boot state: unavailable; capabilities: not probed";
   const unavailable =
     "devicectl-only simulator features will be unavailable; simctl-based features are unaffected";
   try {
     const result = await probeCoreDeviceVersion(dependencies, probe);
     unchecked = describeCoreDeviceState(result);
     if (result.status === "non-darwin") {
-      return { name, status: "skip", message: `${result.reason}; ${unchecked}` };
+      return { name, status: "skip", message: `${result.reason}; ${unchecked}`, detail: unchecked };
     }
     if (result.status === "missing") {
       return {
         name,
         status: "warn",
         message: `devicectl missing: ${result.reason}; ${unavailable}; ${unchecked}`,
+        detail: unchecked,
       };
     }
     if (result.status === "unparsable") {
@@ -848,6 +848,7 @@ export async function checkCoreDeviceVersion(
         name,
         status: "warn",
         message: `CoreDevice version unreadable: ${result.reason}; ${unavailable}; ${unchecked}`,
+        detail: unchecked,
       };
     }
     if (result.status === "below-required") {
@@ -855,6 +856,7 @@ export async function checkCoreDeviceVersion(
         name,
         status: "warn",
         message: `CoreDevice ${result.version} installed (below required); requires CoreDevice >= ${required}; ${unavailable}; ${unchecked}`,
+        detail: unchecked,
         value: result.version,
       };
     }
@@ -862,6 +864,7 @@ export async function checkCoreDeviceVersion(
       name,
       status: "pass",
       message: `CoreDevice ${result.version} installed (requires CoreDevice >= ${required}); ${unchecked}`,
+      detail: unchecked,
       value: result.version,
     };
   } catch (error) {
@@ -870,6 +873,7 @@ export async function checkCoreDeviceVersion(
       name,
       status: "warn",
       message: `CoreDevice version unreadable: ${errorMessage(error)}; ${unavailable}; ${unchecked}`,
+      detail: unchecked,
     };
   }
 }

@@ -1,4 +1,5 @@
 import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
+import type { SelectedDisplayReadPolicy } from "./SelectedDisplayRead";
 import type { HierarchyCapture } from "./HierarchyCapture";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import type { ViewHierarchy } from "./interfaces/ViewHierarchy";
@@ -30,6 +31,8 @@ export interface ObserveScreenDependencies {
   // Data sources
   viewHierarchy?: ViewHierarchy;
   hierarchyCapture?: HierarchyCapture;
+  /** Retry policy for explicit Android display reads only. */
+  selectedDisplayRead?: SelectedDisplayReadPolicy;
   window?: Window;
   screenshot?: ScreenshotService;
   backStack?: BackStack;

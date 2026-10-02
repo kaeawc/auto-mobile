@@ -3,7 +3,17 @@ import {
   screenshotPathProtection,
   type ScreenshotPathProtection,
 } from "./ScreenshotPathProtection";
-import { createDeviceHierarchyCapture } from "./DeviceHierarchyCapture";
+import {
+  createDeviceHierarchyCapture,
+  DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+} from "./DeviceHierarchyCapture";
+import {
+  classifySelectedDisplayReadFailure,
+  readSelectedDisplayWithRetry,
+  SelectedDisplayReadError,
+  type SelectedDisplayReadPolicy,
+} from "./SelectedDisplayRead";
+import { StaleDisplayError, staleDisplayError } from "../../models/StaleDisplayError";
 import { ObserverPendingRequestTimeoutError } from "./DeviceServiceClient";
 import {
   identifyObservedHierarchy,
@@ -100,7 +110,7 @@ import {
 } from "../../utils/androidSystemUiAnr";
 import { DaemonState } from "../../daemon/daemonState";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
-import { displayTransitions } from "./DisplayTransition";
+import { displayTransitions, type DisplayCaptureStart } from "./DisplayTransition";
 import {
   assertAllDisplayObserveSupported,
   DisplaySelectionError,
@@ -571,6 +581,7 @@ export class RealObserveScreen implements ObserveScreen {
 
   private viewHierarchy: ViewHierarchyInterface;
   private readonly hierarchyCapture: HierarchyCapture;
+  private readonly selectedDisplayRead: SelectedDisplayReadPolicy;
   private predictiveUIState: PredictiveUIStateInterface;
 
   private screenshotRecorder: ObserveScreenshotRecorder;
@@ -679,6 +690,7 @@ export class RealObserveScreen implements ObserveScreen {
     this.timer = timer;
     this.observedAndroidDisplayCache = new ObservedAndroidDisplayCache(timer);
     this.requestedDisplay = dependencies?.display;
+    this.selectedDisplayRead = dependencies?.selectedDisplayRead ?? {};
     this.idGenerator = idGenerator;
 
     // Data sources (either injected or default)
@@ -836,6 +848,73 @@ export class RealObserveScreen implements ObserveScreen {
       await this.pathProtection.protect(result.screenshotPath);
     }
     return result;
+  }
+
+  private async captureSelectedDisplayHierarchy(options: {
+    request: HierarchyCaptureRequest;
+    panelKey: string | undefined;
+    captureStart: DisplayCaptureStart;
+  }): Promise<ViewHierarchyResult> {
+    const { request, panelKey, captureStart } = options;
+    const captured = await readSelectedDisplayWithRetry({
+      ...this.selectedDisplayRead,
+      timer: this.timer,
+      budgetMs: request.timeoutMs ?? DEFAULT_HIERARCHY_READ_TIMEOUT_MS,
+      timeoutMs: request.timeoutMs,
+      signal: request.signal,
+      read: (attempt) =>
+        this.hierarchyCapture.capture(
+          attempt.number === 1 ? request : { ...request, timeoutMs: attempt.timeoutMs },
+        ),
+      classify: (error) => classifySelectedDisplayReadFailure(error, { signal: request.signal }),
+      assertFenceCurrent: () => {
+        const deviceId = this.device.deviceId;
+        if (displayTransitions.revision(deviceId) !== captureStart.revision) {
+          throw staleDisplayError(
+            captureStart.identityRevision,
+            displayTransitions.identityRevision(deviceId),
+            displayTransitions.currentObservedPanel(deviceId)?.key,
+          );
+        }
+      },
+      wrap: (error, info) => {
+        const message = `Unable to read selected display "${panelKey}": ${String(error)}`;
+        return info.exhausted
+          ? new SelectedDisplayReadError(message, {
+              cause: error,
+              kind: info.kind,
+              attempts: info.attempts,
+            })
+          : new DisplaySelectionError(message, { cause: error });
+      },
+    });
+    return captured.hierarchy;
+  }
+
+  private shouldPropagateCaptureError(
+    error: unknown,
+    context: {
+      display: string | undefined;
+      signal: AbortSignal | undefined;
+    },
+  ): boolean {
+    if (
+      error instanceof StrictSettledScreenshotCaptureError ||
+      error instanceof DisplaySelectionError
+    ) {
+      return true;
+    }
+    const explicitAndroidDisplay =
+      this.device.platform === "android" &&
+      context.display !== undefined &&
+      context.display !== "active";
+    if (!explicitAndroidDisplay) {
+      return false;
+    }
+    return (
+      error instanceof StaleDisplayError ||
+      (context.signal?.aborted === true && error === context.signal.reason)
+    );
   }
 
   private async captureObserverHierarchy(
@@ -1337,15 +1416,11 @@ export class RealObserveScreen implements ObserveScreen {
       if (observerMode) {
         capturedHierarchy = await this.captureObserverHierarchy(captureRequest);
       } else if (requestedDisplayId !== undefined) {
-        const captured = await this.hierarchyCapture
-          .capture(captureRequest)
-          .catch((error: unknown) => {
-            throw new DisplaySelectionError(
-              `Unable to read selected display "${requestedPanel?.key}": ${String(error)}`,
-              { cause: error },
-            );
-          });
-        capturedHierarchy = captured.hierarchy;
+        capturedHierarchy = await this.captureSelectedDisplayHierarchy({
+          request: captureRequest,
+          panelKey: requestedPanel?.key,
+          captureStart,
+        });
       } else if (options?.freshness) {
         try {
           const captured = await this.hierarchyCapture.capture(captureRequest);
@@ -1791,10 +1866,7 @@ export class RealObserveScreen implements ObserveScreen {
       if (observerMode || preserveDisplayState) {
         throw toActionableError(err, `Unable to observe device ${this.device.deviceId}`);
       }
-      if (
-        err instanceof StrictSettledScreenshotCaptureError ||
-        err instanceof DisplaySelectionError
-      ) {
+      if (this.shouldPropagateCaptureError(err, { display: displayRequest, signal })) {
         throw err;
       }
       const errorMessage = err instanceof Error ? err.stack || err.message : String(err);

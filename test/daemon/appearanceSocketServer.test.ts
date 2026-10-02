@@ -14,7 +14,7 @@ import {
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
-import { ActionableError, type AppearanceConfig, type BootedDevice } from "../../src/models";
+import { type AppearanceConfig, type BootedDevice } from "../../src/models";
 
 /**
  * Drives requests through the real inherited processLine dispatch (queue +
@@ -24,6 +24,7 @@ const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} }
 const emptyDeviceSource: AppearanceDeviceSource = {
   getPooledDevices: () => [],
   getCurrentDevice: () => undefined,
+  getSessionForDevice: () => null,
 };
 const initialConfig: AppearanceConfig = {
   syncWithHost: false,
@@ -55,6 +56,37 @@ function sessionManager(): StreamAuthSessionManager {
   };
 }
 
+function ownedDeviceSource({
+  manager,
+  pooled,
+  current,
+}: {
+  manager: StreamAuthSessionManager;
+  pooled: string[];
+  current?: string;
+}): AppearanceDeviceSource {
+  return {
+    getPooledDevices: () => pooled.map(device),
+    getCurrentDevice: () => (current ? device(current) : undefined),
+    getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId),
+  };
+}
+
+function ownershipManager(): StreamAuthSessionManager {
+  const owners = new Map([
+    ["own", "live"],
+    ["label-owned", "live:phone"],
+    ["other", "different"],
+    ["hung", "live"],
+    ["ready", "live"],
+  ]);
+  return {
+    getSession: (uuid) => (["live", "different", "no-device"].includes(uuid) ? {} : null),
+    getSessionForDevice: (deviceId) => owners.get(deviceId) ?? null,
+    getDeviceLabels: (uuid) => (uuid === "live" ? { phone: "live:phone" } : undefined),
+  };
+}
+
 function device(deviceId: string): BootedDevice {
   return { deviceId, name: deviceId, platform: "android" } as BootedDevice;
 }
@@ -65,15 +97,8 @@ class TestableAppearanceSocketServer extends AppearanceSocketServer {
     authenticator: StreamSocketAuthenticator = allowAllAuthenticator,
     deviceSource: AppearanceDeviceSource = emptyDeviceSource,
     dependencies: AppearanceSocketServerDependencies = fakeDependencies(),
-    useDefaultAuthenticator = false,
   ) {
-    super(
-      "/fake/path/appearance.sock",
-      timer,
-      useDefaultAuthenticator ? undefined : authenticator,
-      deviceSource,
-      dependencies,
-    );
+    super("/fake/path/appearance.sock", timer, authenticator, deviceSource, dependencies);
   }
 
   async startFake(): Promise<void> {
@@ -115,17 +140,21 @@ describe("AppearanceSocketServer", () => {
     dependencies.triggerSync = async () => {
       triggered = true;
     };
-    const source: AppearanceDeviceSource = {
-      getPooledDevices: () => [device("hung"), device("ready")],
-      getCurrentDevice: () => undefined,
-    };
-    server = new TestableAppearanceSocketServer(timer, allowAllAuthenticator, source, dependencies);
+    const manager = ownershipManager();
+    const source = ownedDeviceSource({ manager, pooled: ["hung", "ready", "unowned"] });
+    const auth = new SessionScopedStreamAuthenticator(() => manager, "appearance", {});
+    server = new TestableAppearanceSocketServer(timer, auth, source, dependencies);
     await server.startFake();
     let finished = false;
     const request = server
       .simulateLine(
         socket,
-        JSON.stringify({ id: "bounded", command: "set_appearance", mode: "dark" }),
+        JSON.stringify({
+          id: "bounded",
+          command: "set_appearance",
+          sessionUuid: "live",
+          mode: "dark",
+        }),
       )
       .then(() => {
         finished = true;
@@ -307,81 +336,156 @@ describe("AppearanceSocketServer", () => {
     );
   });
 
-  it("applies only to devices owned by the caller or unowned", async () => {
+  for (const command of ["set_appearance", "set_appearance_sync"] as const) {
+    it(`${command} applies only to caller-owned devices, excluding other owners and unowned devices`, async () => {
+      const applied: string[] = [];
+      const manager = ownershipManager();
+      const dependencies = fakeDependencies(applied);
+      let syncs = 0;
+      dependencies.triggerSync = async () => {
+        syncs++;
+      };
+      const authServer = new TestableAppearanceSocketServer(
+        timer,
+        new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
+        ownedDeviceSource({ manager, pooled: ["own", "other", "unowned"], current: "own" }),
+        dependencies,
+      );
+      await authServer.startFake();
+      await authServer.simulateLine(
+        socket,
+        JSON.stringify({
+          id: "scoped",
+          command,
+          sessionUuid: "live",
+          mode: "dark",
+          enabled: true,
+        }),
+      );
+      const mode = command === "set_appearance" ? "dark" : "light";
+      expect(applied).toEqual([`own:${mode}`]);
+      expect(syncs).toBe(1);
+      expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toMatchObject({
+        success: true,
+        result: { appliedMode: mode },
+      });
+    });
+
+    it(`${command} persists config and succeeds without appliedMode when a live caller owns no device`, async () => {
+      const applied: string[] = [];
+      const manager = ownershipManager();
+      const dependencies = fakeDependencies(applied);
+      let syncs = 0;
+      dependencies.triggerSync = async () => {
+        syncs++;
+      };
+      const authServer = new TestableAppearanceSocketServer(
+        timer,
+        new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
+        ownedDeviceSource({ manager, pooled: ["own", "unowned"], current: "unowned-current" }),
+        dependencies,
+      );
+      await authServer.startFake();
+      await authServer.simulateLine(
+        socket,
+        JSON.stringify({
+          id: "no-device",
+          command,
+          sessionUuid: "no-device",
+          mode: "dark",
+          enabled: true,
+        }),
+      );
+      const expectedConfig =
+        command === "set_appearance"
+          ? { ...initialConfig, defaultMode: "dark", syncWithHost: false }
+          : { ...initialConfig, syncWithHost: true };
+      expect(applied).toEqual([]);
+      expect(await dependencies.getConfig()).toEqual(expectedConfig);
+      expect(syncs).toBe(1);
+      expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toEqual({
+        id: "no-device",
+        type: "appearance_response",
+        success: true,
+        result: { config: expectedConfig },
+      });
+    });
+  }
+
+  it("keeps two sessions' appearance changes confined to their own devices", async () => {
     const applied: string[] = [];
-    const source: AppearanceDeviceSource = {
-      getPooledDevices: () => [device("own"), device("other"), device("unowned")],
-      getCurrentDevice: () => device("own"),
-    };
-    const ownerByDevice = new Map([
-      ["own", "live"],
-      ["other", "different"],
-    ]);
-    const auth: StreamSocketAuthenticator = {
-      authorize: ({ sessionUuid, deviceId }) => {
-        if (sessionUuid !== "live") {
-          throw new ActionableError("unknown session");
-        }
-        if (deviceId && ownerByDevice.get(deviceId) === "different") {
-          throw new ActionableError("different daemon session");
-        }
-      },
-    };
+    const manager = ownershipManager();
     const authServer = new TestableAppearanceSocketServer(
       timer,
-      auth,
-      source,
+      new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
+      ownedDeviceSource({ manager, pooled: ["own", "other", "unowned"] }),
+      fakeDependencies(applied),
+    );
+    await authServer.startFake();
+    for (const [sessionUuid, mode, expected] of [
+      ["live", "dark", "own:dark"],
+      ["different", "light", "other:light"],
+    ]) {
+      applied.length = 0;
+      const callerSocket = new FakeSocket();
+      await authServer.simulateLine(
+        callerSocket,
+        JSON.stringify({
+          id: sessionUuid,
+          command: "set_appearance",
+          sessionUuid,
+          mode,
+        }),
+      );
+      expect(applied).toEqual([expected]);
+      expect(callerSocket.getWrittenMessages<AppearanceSocketResponse>()[0].success).toBe(true);
+    }
+  });
+
+  it("never applies to an unowned current device when the caller owns a pooled device", async () => {
+    const applied: string[] = [];
+    const manager = ownershipManager();
+    const authServer = new TestableAppearanceSocketServer(
+      timer,
+      new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
+      ownedDeviceSource({ manager, pooled: ["own"], current: "unowned-current" }),
       fakeDependencies(applied),
     );
     await authServer.startFake();
     await authServer.simulateLine(
       socket,
       JSON.stringify({
-        id: "scoped",
+        id: "current",
         command: "set_appearance",
         sessionUuid: "live",
         mode: "dark",
       }),
     );
-    expect(applied).toEqual(["own:dark", "unowned:dark"]);
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toMatchObject({
-      success: true,
-      result: { appliedMode: "dark" },
-    });
+    expect(applied).toEqual(["own:dark"]);
+    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0].success).toBe(true);
   });
 
-  it("allows an owning session to apply sync mode", async () => {
+  it("resolves both label callers and label owners to the base session's devices", async () => {
     const applied: string[] = [];
-    const source: AppearanceDeviceSource = {
-      getPooledDevices: () => [device("own")],
-      getCurrentDevice: () => undefined,
-    };
-    const auth = new SessionScopedStreamAuthenticator(
-      () => ({ ...sessionManager(), getSessionForDevice: () => "live" }),
-      "appearance",
-      {} as NodeJS.ProcessEnv,
-    );
+    const manager = ownershipManager();
     const authServer = new TestableAppearanceSocketServer(
       timer,
-      auth,
-      source,
+      new SessionScopedStreamAuthenticator(() => manager, "appearance", {}),
+      ownedDeviceSource({ manager, pooled: ["own", "label-owned", "other", "unowned"] }),
       fakeDependencies(applied),
     );
     await authServer.startFake();
     await authServer.simulateLine(
       socket,
       JSON.stringify({
-        id: "owned",
-        command: "set_appearance_sync",
-        sessionUuid: "live",
-        enabled: true,
+        id: "label",
+        command: "set_appearance",
+        sessionUuid: " live:phone ",
+        mode: "dark",
       }),
     );
-    expect(applied).toEqual(["own:light"]);
-    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toMatchObject({
-      success: true,
-      result: { appliedMode: "light" },
-    });
+    expect(applied).toEqual(["own:dark", "label-owned:dark"]);
+    expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0].success).toBe(true);
   });
 
   it("keeps get_appearance_config available without a session", async () => {
@@ -400,38 +504,42 @@ describe("AppearanceSocketServer", () => {
     });
   });
 
-  it("honors the default authenticator's escape hatch without a session", async () => {
-    const applied: string[] = [];
-    const source: AppearanceDeviceSource = {
-      getPooledDevices: () => [device("pooled")],
-      getCurrentDevice: () => undefined,
-    };
-    const prior = process.env[STREAM_SOCKET_AUTH_ENV];
-    process.env[STREAM_SOCKET_AUTH_ENV] = "0";
-    try {
+  for (const sessionUuid of [undefined, "live:phone"]) {
+    it(`auth disabled preserves all-candidate targeting with session ${sessionUuid}`, async () => {
+      const applied: string[] = [];
+      const manager = ownershipManager();
+      const source = ownedDeviceSource({
+        manager,
+        pooled: ["own", "other", "unowned"],
+        current: "unowned-current",
+      });
+      // Auth-off is intentionally the existing all-devices behavior, even with a supplied UUID.
+      source.getSessionForDevice = () => {
+        throw new Error("auth-off must not look up ownership");
+      };
       const authServer = new TestableAppearanceSocketServer(
         timer,
-        allowAllAuthenticator,
+        new SessionScopedStreamAuthenticator(() => manager, "appearance", {
+          [STREAM_SOCKET_AUTH_ENV]: "0",
+        }),
         source,
         fakeDependencies(applied),
-        true,
       );
       await authServer.startFake();
       await authServer.simulateLine(
         socket,
-        JSON.stringify({ id: "opt-out", command: "set_appearance", mode: "dark" }),
+        JSON.stringify({
+          id: "opt-out",
+          command: "set_appearance",
+          sessionUuid,
+          mode: "dark",
+        }),
       );
-      expect(applied).toEqual(["pooled:dark"]);
+      expect(applied).toEqual(["own:dark", "other:dark", "unowned:dark", "unowned-current:dark"]);
       expect(socket.getWrittenMessages<AppearanceSocketResponse>()[0]).toMatchObject({
         success: true,
         result: { appliedMode: "dark" },
       });
-    } finally {
-      if (prior === undefined) {
-        delete process.env[STREAM_SOCKET_AUTH_ENV];
-      } else {
-        process.env[STREAM_SOCKET_AUTH_ENV] = prior;
-      }
-    }
-  });
+    });
+  }
 });

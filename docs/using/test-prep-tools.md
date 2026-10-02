@@ -27,6 +27,12 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
 }
 ```
 
+`putAppFile` never terminates the app. After a successful `app_containers` write,
+`result.warning` appears when the target app is known to be running (on Android,
+in the written user profile): it may not see the change until it re-reads the file
+or is relaunched. The warning is omitted when running state is unknown or the
+app is not running, and for `user_files` and `media_library` writes.
+
 On Android, `putAppFile` accepts optional `userId` (a non-negative safe integer).
 An explicit ID selects that profile without discovery. Omission checks package
 installation for every user: use the sole installed user; with several candidates,

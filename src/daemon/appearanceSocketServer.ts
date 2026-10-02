@@ -36,6 +36,8 @@ const VALID_MODES = new Set(["light", "dark", "auto"]);
 export interface AppearanceDeviceSource {
   getPooledDevices(): BootedDevice[];
   getCurrentDevice(): BootedDevice | undefined;
+  /** Session registry owner, including derived device-label session IDs. */
+  getSessionForDevice(deviceId: string): string | null;
 }
 
 const defaultDeviceSource: AppearanceDeviceSource = {
@@ -54,6 +56,12 @@ const defaultDeviceSource: AppearanceDeviceSource = {
       }));
   },
   getCurrentDevice: () => DeviceSessionManager.getInstance().getCurrentDevice(),
+  getSessionForDevice: (deviceId) => {
+    const daemonState = DaemonState.getInstance();
+    return daemonState.isInitialized()
+      ? daemonState.getSessionManager().getSessionForDevice(deviceId)
+      : null;
+  },
 };
 
 export interface AppearanceSocketServerDependencies {
@@ -206,17 +214,26 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
       targets.set(current.deviceId, current);
     }
 
-    const authorized: BootedDevice[] = [];
-    for (const device of targets.values()) {
-      try {
-        this.authenticator.authorize({ sessionUuid, deviceId: device.deviceId });
-        authorized.push(device);
-      } catch (error) {
-        // A device owned by another session is an expected exclusion from a pool-wide request.
-        logger.debug(`[Appearance] Excluded device ${device.deviceId}: ${error}`);
-      }
+    if (this.authenticator.isAuthenticationEnforced?.() === false) {
+      // AUTOMOBILE_DAEMON_STREAM_AUTH=0 leaves no verified caller identity;
+      // preserve the existing all-pooled-plus-current targeting in auth-off mode.
+      return [...targets.values()];
     }
-    return authorized;
+
+    const callerBase =
+      this.authenticator.resolveSessionIdentity?.(sessionUuid) ?? sessionUuid?.trim();
+    const owned = [...targets.values()].filter((device) => {
+      const owner = this.deviceSource.getSessionForDevice(device.deviceId);
+      if (!callerBase || !owner) {
+        return false;
+      }
+      const ownerBase = this.authenticator.resolveSessionIdentity?.(owner) ?? owner;
+      return ownerBase === callerBase;
+    });
+    if (owned.length === 0) {
+      logger.info(`[Appearance] Session ${callerBase ?? "unknown"} owns no device; config stored`);
+    }
+    return owned;
   }
 }
 

@@ -665,6 +665,12 @@ normalized relative `destinationPath` and exactly one of `sourcePath`,
 `contentText`, or `contentBase64`. Device selection uses the existing `platform`,
 `deviceId`, or `sessionUuid` fields. Optional `userId` selects an Android profile.
 
+`putAppFile` never terminates the app. After a successful `app_containers` write,
+`result.warning` appears when the target app is known to be running (on Android,
+in the written user profile): it may not see the change until it re-reads the file
+or is relaunched. The warning is omitted when running state is unknown or the
+app is not running, and for `user_files` and `media_library` writes.
+
 Android app containers (private containers require a debuggable app):
 
 ```json

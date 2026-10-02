@@ -17,7 +17,7 @@ export async function readAndroidPackageProcesses(
   adb: AdbExecutor,
   packageName: string,
   options: { userId?: number; signal?: AbortSignal; timer?: Timer } = {},
-): Promise<{ processes: AndroidPackageProcess[]; isRunning: boolean }> {
+): Promise<{ processes: AndroidPackageProcess[]; isRunning: boolean; stdout: string }> {
   const output = await new DefaultRetryExecutor(options.timer ?? defaultTimer).executeOrThrow(
     () =>
       adb.executeCommand(
@@ -36,6 +36,7 @@ export async function readAndroidPackageProcesses(
   );
   const processes = findAndroidPackageProcesses(output.stdout, packageName);
   return {
+    stdout: output.stdout,
     processes,
     isRunning: processes.some(
       (process) => options.userId === undefined || process.userId === options.userId,

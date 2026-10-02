@@ -54,6 +54,8 @@ export interface StreamSocketAuthenticator {
   authorize(input: StreamAuthorizeInput): void;
   /** Canonical base identity for lease ownership, when available. */
   resolveSessionIdentity?(sessionUuid?: string): string | undefined;
+  /** Whether caller identity is verified; absent implementations default to enforced. */
+  isAuthenticationEnforced?(): boolean;
 }
 
 /** Check the device selected by discovery before starting device-side work. */
@@ -82,12 +84,16 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     private readonly env: NodeJS.ProcessEnv = process.env,
   ) {}
 
+  isAuthenticationEnforced(): boolean {
+    return authEnforced(this.env);
+  }
+
   resolveSessionIdentity(sessionUuid?: string): string | undefined {
     const uuid = typeof sessionUuid === "string" ? sessionUuid.trim() : "";
     if (!uuid) {
       return undefined;
     }
-    if (!authEnforced(this.env)) {
+    if (!this.isAuthenticationEnforced()) {
       return uuid;
     }
     const sessionManager = this.resolveSessionManager();
@@ -97,7 +103,7 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
   }
 
   authorize({ sessionUuid, deviceId, requireOwnership }: StreamAuthorizeInput): void {
-    if (!authEnforced(this.env)) {
+    if (!this.isAuthenticationEnforced()) {
       // Auth-off subscribers may have no session, so ownership changes cannot revoke them.
       return;
     }

@@ -50,6 +50,9 @@ import {
   SimctlIosSimulatorMediaClient,
   type IosSimulatorMediaClient,
 } from "./iosSimulatorMediaClient";
+import { findIosSimulatorAppProcess } from "../features/action/CrashApp";
+import { readAndroidPackageProcesses } from "../utils/android-cmdline-tools/androidProcessState";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { findBootedDeviceForResource } from "./resourceDeviceResolver";
 
 const APP_FILE_PUSH_TIMEOUT_MS = 120_000;
@@ -114,6 +117,7 @@ export interface AppFileWriteProvider {
 }
 
 interface AppFileProviderWriteResult {
+  appRunning?: boolean;
   effects?: PutAppFileWriteResult["effects"];
   resourceUserId?: number;
 }
@@ -169,6 +173,7 @@ export interface ForegroundAppLookup {
 }
 
 export interface AppFileServiceDependencies {
+  timer?: Timer;
   foregroundAppLookup?: ForegroundAppLookup;
   adbFactory?: AdbClientFactory;
   simctlFactory?: (device: BootedDevice) => SimCtlClient;
@@ -239,6 +244,7 @@ export function createAppFileServiceForTesting(
   deps: AppFileServiceDependencies = {},
 ): AppFileService {
   const resolvedDeps = {
+    timer: deps.timer ?? defaultTimer,
     adbFactory: deps.adbFactory ?? defaultDependencies.adbFactory,
     simctlFactory: deps.simctlFactory ?? defaultDependencies.simctlFactory,
     fileSystem: deps.fileSystem ?? defaultDependencies.fileSystem,
@@ -260,7 +266,8 @@ export function createAppFileServiceForTesting(
 }
 
 function createDefaultProviders(
-  deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">>,
+  deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">> &
+    Pick<AppFileServiceDependencies, "timer">,
   idGenerator: IdGenerator = defaultIdGenerator,
   sharedStorageService: SharedStorageService | undefined = undefined,
   iosSimulatorMediaClient: IosSimulatorMediaClient = new SimctlIosSimulatorMediaClient(
@@ -269,7 +276,11 @@ function createDefaultProviders(
   foregroundAppLookup?: ForegroundAppLookup,
 ): AppFileProvider[] {
   return [
-    new AndroidAppFileProvider(deps.adbFactory, idGenerator, foregroundAppLookup),
+    new AndroidAppFileProvider(deps.adbFactory, {
+      idGenerator,
+      foregroundAppLookup,
+      timer: deps.timer,
+    }),
     new AndroidUserFilesProvider(sharedStorageService),
     new AndroidMediaLibraryProvider(sharedStorageService),
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
@@ -503,6 +514,12 @@ class DefaultAppFileService implements AppFileService {
         platform: request.device.platform,
         target,
         files: results,
+        ...(target.domain === "app_containers" &&
+        providerResults.some((entry) => entry?.appRunning === true)
+          ? {
+              warning: `App ${target.appId} is running and may not see the change until it re-reads the file or is relaunched.`,
+            }
+          : {}),
       };
       if (!legacy) {
         return result;
@@ -518,6 +535,7 @@ class DefaultAppFileService implements AppFileService {
         destinationPath: file.destinationPath,
         byteCount: file.byteCount,
         resourceUri: file.resourceUri!,
+        ...(result.warning ? { warning: result.warning } : {}),
       };
     } finally {
       await Promise.all(prepared.map((source) => source.cleanup?.()));
@@ -727,12 +745,18 @@ class AndroidAppFileProvider
 {
   readonly platform = "android" as const;
   readonly domain = "app_containers" as const;
+  private readonly idGenerator: IdGenerator;
+  private readonly foregroundAppLookup?: ForegroundAppLookup;
+  private readonly timer: Timer;
 
   constructor(
     private readonly adbFactory: AdbClientFactory,
-    private readonly idGenerator: IdGenerator = defaultIdGenerator,
-    private readonly foregroundAppLookup?: ForegroundAppLookup,
-  ) {}
+    options: Pick<AppFileServiceDependencies, "idGenerator" | "foregroundAppLookup" | "timer"> = {},
+  ) {
+    this.idGenerator = options.idGenerator ?? defaultIdGenerator;
+    this.foregroundAppLookup = options.foregroundAppLookup;
+    this.timer = options.timer ?? defaultTimer;
+  }
 
   async putFile(request: PutAppFileProviderRequest): Promise<AppFileProviderWriteResult> {
     return (await this.putFiles([request]))[0]!;
@@ -771,6 +795,31 @@ class AndroidAppFileProvider
     for (const file of requests) {
       await this.writeFile(file, adb, userId);
       results.push({ resourceUserId: pinInResourceUri ? userId : undefined });
+    }
+    try {
+      const state = await readAndroidPackageProcesses(adb, appTarget.appId, {
+        userId,
+        signal: request.signal,
+        timer: this.timer,
+      });
+      if (state.isRunning) {
+        for (const result of results) {
+          result.appRunning = true;
+        }
+      } else if (
+        state.processes.length === 0 &&
+        !state.stdout.includes("ACTIVITY MANAGER RUNNING PROCESSES")
+      ) {
+        logger.warn(
+          `Unable to read Android running state for ${appTarget.appId}: unparseable process output`,
+        );
+      }
+    } catch (error) {
+      // Running-state confirmation is best effort after the entire write has succeeded.
+      logger.warn(
+        `Failed to check Android running state for ${appTarget.appId}: ${errorMessage(error)}`,
+        error,
+      );
     }
     return results;
   }
@@ -1269,11 +1318,11 @@ class IosSimulatorAppFileProvider
     private readonly fileSystem: AppFileFileSystem,
   ) {}
 
-  async putFile(request: PutAppFileProviderRequest): Promise<void> {
-    await this.putFiles([request]);
+  async putFile(request: PutAppFileProviderRequest): Promise<AppFileProviderWriteResult> {
+    return (await this.putFiles([request]))[0]!;
   }
 
-  async putFiles(requests: PutAppFileProviderRequest[]): Promise<void[]> {
+  async putFiles(requests: PutAppFileProviderRequest[]): Promise<AppFileProviderWriteResult[]> {
     const roots = new Map<string, string>();
     const targets: string[] = [];
     for (const request of requests) {
@@ -1291,7 +1340,46 @@ class IosSimulatorAppFileProvider
       }
       targets.push(join(root, normalizeAppFileRelativePath(request.destinationPath)));
     }
-    return Promise.all(requests.map((request, index) => this.writeFile(request, targets[index]!)));
+    await Promise.all(requests.map((request, index) => this.writeFile(request, targets[index]!)));
+    // Keep confirmation separate from container resolution and atomic writes.
+    const runningStates = new Map<string, boolean | undefined>();
+    for (const request of requests) {
+      const appTarget = requireAppContainersTarget(request.target);
+      const key = JSON.stringify([request.device.deviceId, appTarget.appId]);
+      if (runningStates.has(key)) {
+        continue;
+      }
+      try {
+        const output = await this.simctlFactory(request.device).executeCommandArgs(
+          ["spawn", request.device.deviceId, "launchctl", "list"],
+          5_000,
+          request.signal,
+        );
+        const process = findIosSimulatorAppProcess(output.stdout, appTarget.appId);
+        if (process) {
+          runningStates.set(key, true);
+        } else if (/^PID\s+Status\s+Label\s*$/m.test(output.stdout)) {
+          runningStates.set(key, false);
+        } else {
+          logger.warn(
+            `Unable to read iOS running state for ${appTarget.appId}: unparseable launchctl output`,
+          );
+          runningStates.set(key, undefined);
+        }
+      } catch (error) {
+        // A failed or aborted optional check cannot undo a completed file write.
+        logger.warn(
+          `Failed to check iOS running state for ${appTarget.appId}: ${errorMessage(error)}`,
+          error,
+        );
+        runningStates.set(key, undefined);
+      }
+    }
+    return requests.map((request) => ({
+      appRunning: runningStates.get(
+        JSON.stringify([request.device.deviceId, requireAppContainersTarget(request.target).appId]),
+      ),
+    }));
   }
 
   private async writeFile(request: PutAppFileProviderRequest, target: string): Promise<void> {

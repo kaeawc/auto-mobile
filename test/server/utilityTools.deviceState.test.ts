@@ -1,3 +1,4 @@
+import { createJSONToolResponse } from "../../src/utils/toolUtils";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import Ajv from "ajv";
@@ -35,6 +36,18 @@ describe("device state tools", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     registerUtilityTools();
+    for (const name of ["getDeviceState", "setDeviceState"]) {
+      const tool = ToolRegistry.getTool(name)!;
+      const handler = tool.deviceAwareHandler!;
+      tool.deviceAwareHandler = async (...args) => {
+        const response = await handler(...args);
+        expect(tool.outputSchema!.parse(response.structuredContent)).toBeDefined();
+        expect(response.content).toEqual(
+          createJSONToolResponse(response.structuredContent).content,
+        );
+        return response;
+      };
+    }
   });
 
   afterEach(() => {
@@ -345,6 +358,58 @@ describe("device state tools", () => {
     expect(payload.success).toBe(false);
     expect(payload.error).toContain("cannot be honored in direct/sessionless mode");
   });
+
+  test.each([false, true])(
+    "biometric capture failure retains structured output with combined fields (%s)",
+    async (combined) => {
+      const timer = new FakeTimer();
+      const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(sessions, "fake-daemon", {
+          timer,
+          installedAppsRepository: new FakeInstalledAppsRepository(),
+          deviceManager: new FakeDeviceManager([], []),
+          retryExecutor: new DefaultRetryExecutor(timer),
+        }),
+      );
+      DaemonState.getInstance().initialize(sessions, pool);
+      const device = createBootedDevice("fake-ios", "ios");
+      await sessions.createSession("fake-session", device.deviceId, "ios");
+      const capture = spyOn(DeviceState.prototype, "getBiometricEnrollmentState").mockResolvedValue(
+        { supported: true, error: "capture failed" },
+      );
+      const mutation = spyOn(DeviceState.prototype, "setState").mockResolvedValue({
+        success: true,
+        deviceId: device.deviceId,
+        platform: "ios",
+        doNotDisturb: { supported: true, enabled: false },
+      });
+      try {
+        const response = await ToolRegistry.getTool("setDeviceState")!.deviceAwareHandler!(device, {
+          sessionUuid: "fake-session",
+          biometrics: { enrollment: "enrolled" },
+          ...(combined ? { doNotDisturb: { enabled: false } } : {}),
+        });
+        const payload = {
+          message: "capture failed",
+          success: false,
+          deviceId: device.deviceId,
+          platform: "ios",
+          ...(combined ? { doNotDisturb: { supported: true, enabled: false } } : {}),
+          biometrics: { supported: true, error: "capture failed" },
+          error: "capture failed",
+        };
+        expect(response.structuredContent).toEqual(payload);
+        expect(response.content).toEqual(createJSONToolResponse(payload).content);
+        expect(response.isError).toBeUndefined();
+        expect(mutation).toHaveBeenCalledTimes(combined ? 1 : 0);
+      } finally {
+        capture.mockRestore();
+        mutation.mockRestore();
+        sessions.stopCleanupTimer();
+      }
+    },
+  );
 
   test("does not register a network restore slot for an unsupported (iOS) platform", async () => {
     // #6012 (review #2): the slot's presence is authoritative evidence a device

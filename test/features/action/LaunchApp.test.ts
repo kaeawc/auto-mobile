@@ -1,3 +1,12 @@
+import {
+  beforeEach as beforeOutputSchema,
+  afterEach as afterOutputSchema,
+  spyOn as spyOnOutputSchema,
+} from "bun:test";
+import { launchAppResultSchema } from "../../../src/server/toolOutputSchemas";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { promises as fsp } from "fs";
 import * as os from "os";
@@ -3530,3 +3539,24 @@ describe("LaunchApp", () => {
     });
   });
 });
+
+// Validate the actual fake-backed branch results before and after finalization.
+const executeForOutputSchema = LaunchApp.prototype.execute;
+let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  executeOutputSchemaSpy = spyOnOutputSchema(LaunchApp.prototype, "execute").mockImplementation(
+    async function (this: LaunchApp, ...args: Parameters<LaunchApp["execute"]>) {
+      const result = await executeForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(launchAppResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "launchApp",
+        outputSchema: launchAppResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(launchAppResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());

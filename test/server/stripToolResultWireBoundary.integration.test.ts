@@ -1,3 +1,18 @@
+import { DeviceState } from "../../src/features/utility/DeviceState";
+import {
+  setLaunchAppToolDependencies,
+  resetLaunchAppToolDependencies,
+  setTerminateAppToolDependencies,
+  resetTerminateAppToolDependencies,
+  setInstalledAppResourceRefresh,
+  resetInstalledAppResourceRefresh,
+} from "../../src/server/appTools";
+import {
+  setPressButtonFactory,
+  resetPressButtonFactory,
+  setWakeAndUnlockFactory,
+  resetWakeAndUnlockFactory,
+} from "../../src/server/interactionTools";
 import Ajv2020 from "ajv/dist/2020";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { FakeArtifactWriter } from "../fakes/FakeArtifactWriter";
@@ -358,7 +373,7 @@ describe("CallTool wire boundary debug-logs structuredContent omission (issue #2
 
 // Exercise the real registrations and handlers while replacing device routing
 // with a fixed fake device. The MCP boundary and finalizer remain production code.
-describe("rotate and setPosture ordinary-client structured output", () => {
+describe("device lifecycle ordinary-client structured output", () => {
   const device = { name: "fake", deviceId: "fake-8747", platform: "android" as const };
   let fixture: McpTestFixture;
   let restoreHermetic: () => void;
@@ -376,7 +391,16 @@ describe("rotate and setPosture ordinary-client structured output", () => {
     });
     await fixture.setup();
     const ajv = new Ajv2020({ strict: false });
-    for (const name of ["rotate", "setPosture"]) {
+    for (const name of [
+      "rotate",
+      "setPosture",
+      "wakeAndUnlock",
+      "pressButton",
+      "launchApp",
+      "terminateApp",
+      "getDeviceState",
+      "setDeviceState",
+    ]) {
       const advertised = ToolRegistry.getToolDefinitions({ includeUnavailable: true }).find(
         (definition) => definition.name === name,
       )!.outputSchema!;
@@ -392,10 +416,24 @@ describe("rotate and setPosture ordinary-client structured output", () => {
   afterEach(() => {
     resetRotateFactory();
     resetSetPostureFactory();
+    resetPressButtonFactory();
+    resetWakeAndUnlockFactory();
+    resetLaunchAppToolDependencies();
+    resetTerminateAppToolDependencies();
+    resetInstalledAppResourceRefresh();
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
   });
 
-  test.each(["rotate", "setPosture"] as const)(
+  test.each([
+    "rotate",
+    "setPosture",
+    "wakeAndUnlock",
+    "pressButton",
+    "launchApp",
+    "terminateApp",
+    "getDeviceState",
+    "setDeviceState",
+  ] as const)(
     "%s retains structuredContent for an ordinary client and respects suppression",
     async (name) => {
       setRotateFactory(() => ({
@@ -412,13 +450,57 @@ describe("rotate and setPosture ordinary-client structured output", () => {
           display: { key: "inner", role: "inner", posture: "opened", generation: 1 },
         }),
       }));
+      setPressButtonFactory(() => ({
+        execute: async () => ({ success: true, button: "home", keyCode: 3 }),
+      }));
+      setWakeAndUnlockFactory(() => ({
+        execute: async () => ({
+          success: true,
+          platform: "android",
+          wasAsleep: false,
+          wasLocked: false,
+          unlocked: true,
+        }),
+      }));
+      setLaunchAppToolDependencies({
+        createLaunchApp: () => ({
+          execute: async () => ({ success: true, packageName: "com.example" }),
+        }),
+      });
+      setTerminateAppToolDependencies({
+        createTerminateApp: () => ({
+          execute: async () => ({
+            success: true,
+            packageName: "com.example",
+            wasForeground: false,
+          }),
+        }),
+      });
+      setInstalledAppResourceRefresh(async () => {});
+      const state = { success: true, deviceId: device.deviceId, platform: device.platform };
+      const getStateSpy = spyOn(DeviceState.prototype, "getState").mockResolvedValue(state);
+      const setStateSpy = spyOn(DeviceState.prototype, "setState").mockResolvedValue(state);
       const tool = ToolRegistry.getRegisteredTool(name)!;
       expect(tool.outputSchema).toBeDefined();
+      const args =
+        name === "rotate"
+          ? { orientation: "portrait" }
+          : name === "setPosture"
+            ? { posture: "opened" }
+            : name === "pressButton"
+              ? { button: "home" }
+              : name === "launchApp" || name === "terminateApp"
+                ? { appId: "com.example" }
+                : name === "setDeviceState"
+                  ? { doNotDisturb: { enabled: true } }
+                  : {};
       const handlerSpy = spyOn(tool, "handler").mockImplementation(async () => {
         const response =
           name === "rotate"
             ? await rotateHandler(device, { orientation: "portrait" })
-            : await setPostureHandler(device, { posture: "opened" });
+            : name === "setPosture"
+              ? await setPostureHandler(device, { posture: "opened" })
+              : await tool.deviceAwareHandler!(device, args);
         return finalizeToolResponse(response, {
           name,
           outputSchema: tool.outputSchema,
@@ -426,7 +508,6 @@ describe("rotate and setPosture ordinary-client structured output", () => {
         });
       });
       try {
-        const args = name === "rotate" ? { orientation: "portrait" } : { posture: "opened" };
         const result = await fixture.client.callTool({ name, arguments: args });
         expect(result.isError).toBeUndefined();
         expect(result.structuredContent).toBeDefined();
@@ -442,7 +523,26 @@ describe("rotate and setPosture ordinary-client structured output", () => {
         expect(stripped.content).toEqual(result.content);
       } finally {
         handlerSpy.mockRestore();
+        getStateSpy.mockRestore();
+        setStateSpy.mockRestore();
       }
     },
   );
+
+  test("displayConfig still has no schema and is stripped for an ordinary client", async () => {
+    const tool = ToolRegistry.getRegisteredTool("displayConfig")!;
+    expect(tool.outputSchema).toBeUndefined();
+    const payload = { message: "Display configuration", success: false };
+    const handler = spyOn(tool, "handler").mockResolvedValue({
+      content: [{ type: "text", text: JSON.stringify(payload) }],
+      structuredContent: payload,
+    });
+    try {
+      const result = await fixture.client.callTool({ name: "displayConfig", arguments: {} });
+      expect(result.structuredContent).toBeUndefined();
+      expect(JSON.parse((result.content[0] as { text: string }).text)).toEqual(payload);
+    } finally {
+      handler.mockRestore();
+    }
+  });
 });

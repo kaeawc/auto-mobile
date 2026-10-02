@@ -1,3 +1,12 @@
+import {
+  beforeEach as beforeOutputSchema,
+  afterEach as afterOutputSchema,
+  spyOn as spyOnOutputSchema,
+} from "bun:test";
+import { wakeAndUnlockResultSchema } from "../../../src/server/toolOutputSchemas";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { logger } from "../../../src/utils/logger";
 import { WakeAndUnlock } from "../../../src/features/action/WakeAndUnlock";
@@ -938,3 +947,24 @@ describe("WakeAndUnlock", () => {
     expect(timer.now()).toBe(5_000);
   });
 });
+
+// Validate the actual fake-backed branch results before and after finalization.
+const executeForOutputSchema = WakeAndUnlock.prototype.execute;
+let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  executeOutputSchemaSpy = spyOnOutputSchema(WakeAndUnlock.prototype, "execute").mockImplementation(
+    async function (this: WakeAndUnlock, ...args: Parameters<WakeAndUnlock["execute"]>) {
+      const result = await executeForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(wakeAndUnlockResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "wakeAndUnlock",
+        outputSchema: wakeAndUnlockResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(wakeAndUnlockResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());

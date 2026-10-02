@@ -1,3 +1,12 @@
+import {
+  beforeEach as beforeOutputSchema,
+  afterEach as afterOutputSchema,
+  spyOn as spyOnOutputSchema,
+} from "bun:test";
+import { pressButtonResultSchema } from "../../../src/server/toolOutputSchemas";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, spyOn, test } from "bun:test";
 import { PressButton } from "../../../src/features/action/PressButton";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
@@ -461,3 +470,65 @@ describe("PressButton", () => {
     }
   });
 });
+
+// Validate the actual fake-backed branch results before and after finalization.
+const executeForOutputSchema = PressButton.prototype.execute;
+let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  executeOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "execute").mockImplementation(
+    async function (this: PressButton, ...args: Parameters<PressButton["execute"]>) {
+      const result = await executeForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(pressButtonResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "pressButton",
+        outputSchema: pressButtonResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(pressButtonResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());
+// Validate the actual fake-backed branch results before and after finalization.
+const pressForOutputSchema = PressButton.prototype.press;
+let pressOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  pressOutputSchemaSpy = spyOnOutputSchema(PressButton.prototype, "press").mockImplementation(
+    async function (this: PressButton, ...args: Parameters<PressButton["press"]>) {
+      const result = await pressForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(pressButtonResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "pressButton",
+        outputSchema: pressButtonResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(pressButtonResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterOutputSchema(() => pressOutputSchemaSpy.mockRestore());
+
+// Existing dispatch tests intentionally exercise the private transport seam.
+const dispatchPrototype = PressButton.prototype as unknown as {
+  executeiOSButtonPress: PressButton["press"];
+};
+const dispatchForOutputSchema = dispatchPrototype.executeiOSButtonPress;
+let dispatchOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  dispatchOutputSchemaSpy = spyOnOutputSchema(
+    dispatchPrototype,
+    "executeiOSButtonPress",
+  ).mockImplementation(async function (
+    this: PressButton,
+    ...args: Parameters<PressButton["press"]>
+  ) {
+    const result = await dispatchForOutputSchema.apply(this, args);
+    expect(pressButtonResultSchema.parse({ message: "Result", ...result })).toBeDefined();
+    return result;
+  });
+});
+afterOutputSchema(() => dispatchOutputSchemaSpy.mockRestore());

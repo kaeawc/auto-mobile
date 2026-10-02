@@ -1,3 +1,10 @@
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
+import {
+  getDeviceStateResultSchema,
+  setDeviceStateResultSchema,
+} from "../../../src/server/toolOutputSchemas";
 import { beforeEach, afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -51,8 +58,11 @@ function harness() {
       invalidations.push(deviceId);
     },
   };
-  const write = (input: SetDeviceClockInput) =>
-    writeDeviceClock(android, adapter, input, slot, dependencies);
+  const write = async (input: SetDeviceClockInput) => {
+    const clock = await writeDeviceClock(android, adapter, input, slot, dependencies);
+    expect(setDeviceStateResultSchema.parse({ message: "Clock result", clock })).toBeDefined();
+    return clock;
+  };
   return { adapter, timer, slot, invalidations, dependencies, write };
 }
 describe("device clock", () => {
@@ -560,3 +570,44 @@ describe("device clock", () => {
     });
   });
 });
+// Validate the actual fake-backed branch results before and after finalization.
+const getStateForOutputSchema = DeviceState.prototype.getState;
+let getStateOutputSchemaSpy: ReturnType<typeof spyOn>;
+beforeEach(() => {
+  getStateOutputSchemaSpy = spyOn(DeviceState.prototype, "getState").mockImplementation(
+    async function (this: DeviceState, ...args: Parameters<DeviceState["getState"]>) {
+      const result = await getStateForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(getDeviceStateResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "getDeviceState",
+        outputSchema: getDeviceStateResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(getDeviceStateResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterEach(() => getStateOutputSchemaSpy.mockRestore());
+
+// Validate the actual fake-backed branch results before and after finalization.
+const setStateForOutputSchema = DeviceState.prototype.setState;
+let setStateOutputSchemaSpy: ReturnType<typeof spyOn>;
+beforeEach(() => {
+  setStateOutputSchemaSpy = spyOn(DeviceState.prototype, "setState").mockImplementation(
+    async function (this: DeviceState, ...args: Parameters<DeviceState["setState"]>) {
+      const result = await setStateForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(setDeviceStateResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "setDeviceState",
+        outputSchema: setDeviceStateResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(setDeviceStateResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterEach(() => setStateOutputSchemaSpy.mockRestore());

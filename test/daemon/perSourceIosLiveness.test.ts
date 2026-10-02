@@ -258,7 +258,7 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     expect(devicePool.getDevice(SIMULATOR_UDID)).toBeDefined();
   });
 
-  test("an unidentified devicectl record replays the idle iPhone without pruning it", async () => {
+  test("a skipped unrelated devicectl record keeps a still-present idle iPhone fresh and assignable", async () => {
     await pool([PHYSICAL, SIMULATOR]);
     const timer = new FakeTimer();
     // DERIVED mixed inventory: only reality/udid/platform change on a captured simulator.
@@ -285,14 +285,14 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
       lister,
     );
     expect((await lister.listConnectedDevices()).complete).toBe(true);
-    // DERIVED schema drift in the physical record while the phone remains connected.
-    phone.properties.hardware.reality = "future";
+    // DERIVED unknown platform in a DIFFERENT record; the recognized phone remains present.
+    listing.result.devices[0].properties.hardware.platform = "futureOS";
     timer.advanceTime(3_000);
     const discovery = await manager.getBootedDevicesDetailed("ios");
     expect(discovery.devices.map((device) => device.deviceId)).toContain(PHYSICAL_UDID);
-    expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
-    expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(false);
-    expect(discovery.sourceErrors?.["ios-physical"]?.code).toBe("failed");
+    expect(discovery.succeededSources!.has("ios-physical")).toBe(true);
+    expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(true);
+    expect(discovery.sourceErrors?.["ios-physical"]).toBeUndefined();
     const reaper = new IdleDeviceReaper(
       {
         getDevice: (id) => devicePool.getDevice(id),
@@ -303,18 +303,24 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     );
     const device = devicePool.getDevice(PHYSICAL_UDID)!;
     const snapshot = await reaper.getIosLivenessSnapshot();
-    expect(reaper.getIdleDeviceLivenessStatus(device, snapshot)).toBe("unknown");
+    expect(reaper.getIdleDeviceLivenessStatus(device, snapshot)).toBe("assignable");
     expect(await reaper.pruneStaleIdleIosDevices([device])).toBe(0);
 
-    // Feed the same incomplete contract into the pool's existing fake manager.
+    // Feed the complete listing into the pool's existing fake manager.
     deviceManager.bootedDevices = discovery.devices;
-    deviceManager.failedSources.add("ios-physical");
-    deviceManager.retainedSources.add("ios-physical");
 
     await expect(
       devicePool.bindOrReuseDeviceSession("session-d", PHYSICAL_UDID, "ios"),
-    ).rejects.toThrow(/Unable to verify iOS device/);
-    expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
+    ).resolves.toBeDefined();
+    expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-d");
+
+    // A complete listing genuinely missing the phone is still authoritative.
+    listing.result.devices = listing.result.devices.filter((record) => record !== phone);
+    timer.advanceTime(3_000);
+    const absent = await manager.getBootedDevicesDetailed("ios");
+    expect(absent.succeededSources!.has("ios-physical")).toBe(true);
+    expect(absent.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(false);
+    expect(absent.devices.map((record) => record.deviceId)).not.toContain(PHYSICAL_UDID);
   });
 
   test("a retained-but-unverified iPhone is not assignable when both sources fail", async () => {

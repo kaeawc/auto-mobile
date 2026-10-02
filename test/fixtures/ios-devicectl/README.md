@@ -23,11 +23,9 @@ declare `sameStateAs` to require identical classification to another capture; te
 also pair every record of the current two captures by identifier and compare its
 classification and device fields.
 
-`complete: true` requires a recognized successful envelope and positive
-classification of every record: a physical iOS device, a simulator, or an
-explicitly known unavailable/non-iOS device. Unidentified records make the
-listing incomplete and replay retained last-good physical devices instead of
-clearing them. Both captures remain complete with zero unidentified records.
+`complete: true` requires a recognized successful envelope. A record that cannot
+be positively classified is skipped: it contributes no device and does not make
+the listing incomplete. Both captures contain zero unidentified records.
 
 All captured simulators have an iOS platform, `reality: "simulated"`, and a
 simulator-shaped hardware UDID. These three fields identify simulators before

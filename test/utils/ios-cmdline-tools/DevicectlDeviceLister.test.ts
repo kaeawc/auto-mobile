@@ -10,7 +10,10 @@ import { FakeDiscoveryObservationSequence } from "../../fakes/FakeDiscoveryObser
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { join } from "path";
 import { DefaultHostCommandExecutor } from "../../../src/utils/HostCommandExecutor";
-import { loadDerivedDevicectlListing } from "../../helpers/devicectlListFixtures";
+import {
+  loadDerivedDevicectlListing,
+  derivePhysicalDevicectlRecord,
+} from "../../helpers/devicectlListFixtures";
 
 const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 const LEGACY_UDID = "a".repeat(40);
@@ -325,7 +328,7 @@ describe("DevicectlDeviceLister", () => {
     expect(options?.signal).toBeUndefined();
   });
 
-  test("a partially unreadable sweep without last-good inventory includes recognized devices", async () => {
+  test("a sweep with an unidentifiable record is complete and includes recognized devices", async () => {
     const lister = makeLister({
       readFile: async () =>
         JSON.stringify(
@@ -336,7 +339,7 @@ describe("DevicectlDeviceLister", () => {
     const discovery = await lister.listConnectedDevices();
 
     expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
-    expect(discovery).toMatchObject({ complete: false, error: { code: "failed" } });
+    expect(discovery.complete).toBe(true);
   });
 
   test("retains the last good listing across a failing sweep, then lets it go stale", async () => {
@@ -792,13 +795,15 @@ describe("devicectl invocation failures (constructed errors)", () => {
     });
   });
 
-  test("unidentified sets warn on changes and debug across uncached sweeps", async () => {
+  test("unidentified sets debug once per change while recognized phones stay complete", async () => {
     const timer = new FakeTimer();
     const warnings: string[] = [];
     const debug: string[] = [];
     // DERIVED from the captured listing: remove reality and visibility from one connected simulator.
     const listing = loadDerivedDevicectlListing();
     const record = listing.result.devices[0];
+    const phone = derivePhysicalDevicectlRecord(record, PHYSICAL_UDID);
+    listing.result.devices = [record, phone];
     delete record.properties.hardware.reality;
     delete record.visibilityClass;
     delete record.properties.state.visibilityClass;
@@ -815,29 +820,27 @@ describe("devicectl invocation failures (constructed errors)", () => {
       },
     });
     expect(await lister.listConnectedDevices()).toMatchObject({
-      devices: [],
-      complete: false,
-      error: { code: "failed" },
+      devices: [{ deviceId: PHYSICAL_UDID }],
+      complete: true,
     });
+    const unidentifiedDebug = () =>
+      debug.filter((message) => message.includes("could not be identified"));
+    expect(unidentifiedDebug()).toHaveLength(1);
+    expect(unidentifiedDebug()[0]).toContain("platform=ios, reality=missing, udid-shape=simulator");
+    expect(unidentifiedDebug()[0]).toContain("connection-state=connected");
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
-    const unidentifiedWarnings = () =>
-      warnings.filter((message) => message.includes("could not be identified"));
-    expect(unidentifiedWarnings()).toHaveLength(1);
-    expect(unidentifiedWarnings()[0]).toContain(
-      "platform=ios, reality=missing, udid-shape=simulator",
-    );
-    expect(unidentifiedWarnings()[0]).toContain("connection-state=connected");
-    expect(debug.filter((message) => message.includes("could not be identified"))).toHaveLength(2);
+    expect(unidentifiedDebug()).toHaveLength(1);
+    expect(warnings).toEqual([]);
     // DERIVED unknown values may contain identifiers; diagnostics must only report fixed labels.
     record.properties.hardware.reality = record.identifier;
     record.properties.hardware.platform = record.identifier;
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
-    expect(unidentifiedWarnings()).toHaveLength(2);
-    expect(unidentifiedWarnings()[1]).toContain("platform=unknown, reality=unknown");
+    expect(unidentifiedDebug()).toHaveLength(2);
+    expect(unidentifiedDebug()[1]).toContain("platform=unknown, reality=unknown");
     for (const message of [...warnings, ...debug]) {
       expect(message).not.toContain(record.identifier);
       expect(message).not.toContain(String(record.properties.hardware.udid));
@@ -849,7 +852,8 @@ describe("devicectl invocation failures (constructed errors)", () => {
     listing.result.devices = [record];
     timer.advanceTime(3_000);
     await lister.listConnectedDevices();
-    expect(unidentifiedWarnings()).toHaveLength(3);
+    expect(unidentifiedDebug()).toHaveLength(3);
+    expect(warnings).toEqual([]);
   });
 
   test("failure transitions warn, repeats debug, and recovery resets suppression", async () => {

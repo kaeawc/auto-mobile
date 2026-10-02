@@ -83,7 +83,7 @@ export interface DevicectlListingError {
   coreDeviceError?: DevicectlFailureEnvelope;
 }
 
-/** Invocation, envelope, or unidentified-record failures replay retained devices as incomplete. */
+/** Invocation or envelope failures replay retained devices as incomplete. */
 export type PhysicalIosDeviceDiscovery =
   | { devices: BootedDevice[]; complete: true }
   | { devices: BootedDevice[]; complete: false; error: DevicectlListingError };
@@ -572,13 +572,6 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
         return this.failedListing("failed", parsed.reason);
       }
       this.logUnidentified(parsed.unidentified);
-      if (parsed.unidentified.length > 0) {
-        return this.failedListing(
-          "failed",
-          "listing contains unidentified records",
-          parsed.physical,
-        );
-      }
       this.deps.logger.debug(
         `[DevicectlDeviceLister] dropped ${parsed.simulators.length} simulator record(s); simctl owns simulator discovery`,
       );
@@ -640,14 +633,11 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   private logUnidentified(reasons: string[]): void {
     // Sorted reasons plus occurrence indexes identify changes without retaining record contents.
     const key = JSON.stringify(reasons.toSorted().map((reason, index) => [reason, index]));
-    if (reasons.length > 0) {
-      const message = `[DevicectlDeviceLister] ${reasons.length} devicectl record(s) could not be identified: ${reasons.join("; ")}`;
-      if (key === this.previousUnidentifiedKey) {
-        // Persistent drift follows failedListing's repeated-failure debug convention.
-        this.deps.logger.debug(message);
-      } else {
-        this.deps.logger.warn(message);
-      }
+    if (reasons.length > 0 && key !== this.previousUnidentifiedKey) {
+      // Owner decision: an unrecognisable record is not evidence that a known device disappeared.
+      this.deps.logger.debug(
+        `[DevicectlDeviceLister] ${reasons.length} devicectl record(s) could not be identified: ${reasons.join("; ")}`,
+      );
     }
     this.previousUnidentifiedKey = key;
   }

@@ -61,10 +61,13 @@ interface DerivedDevicectlRecord {
   visibilityClass?: string;
   properties: {
     hardware: Record<string, unknown>;
-    state: { bootState: string; visibilityClass?: string };
+    state: { bootState: string; name: string; visibilityClass?: string };
     connection: { state: string };
+    software: { osVersionNumber: { stringValue: string } };
   };
   hardwareProperties?: Record<string, unknown>;
+  deviceProperties?: { bootState: string; name: string; osVersionNumber: string };
+  connectionProperties?: { tunnelState: string };
 }
 
 /** DERIVED in memory from a capture; never represents additional host evidence. */

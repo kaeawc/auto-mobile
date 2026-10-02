@@ -1,3 +1,4 @@
+import { drainUntil, settleWithFakeTime } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
@@ -2221,12 +2222,17 @@ test("failed-release fence becomes reaper eligible and a successful reap finaliz
 test("failed-release reaper retries back off exponentially and stop at five minutes", async () => {
   const { pool, timer, monitor, releases, record, persistence } = await setupFailedReleaseFence();
   persistence.failure = "release";
-  timer.enableAutoAdvance();
   timer.advanceTime(20_001);
   for (const [index, delay] of [
     5_000, 10_000, 20_000, 40_000, 80_000, 160_000, 300_000, 300_000,
   ].entries()) {
-    await expect(monitor.tick()).rejects.toThrow("persist release failed");
+    await expect(
+      settleWithFakeTime(timer, monitor.tick(), {
+        stepMs: 1000,
+        maxSteps: 2,
+        description: "failed terminal release retries",
+      }),
+    ).rejects.toThrow("persist release failed");
     expect(record.failedReleaseAttempts).toBe(index + 1);
     expect(timer.getSleepHistory()).toEqual(Array((index + 1) * 2).fill(1_000));
     expect(record.deferredUntil).toBe(timer.now() + delay);
@@ -2286,11 +2292,14 @@ test("idle cleanup retries a failed terminal release and honors its backoff", as
   );
   session.expiresAt = 0;
   timer.advanceTime(1);
-  timer.enableAutoAdvance();
   sessions.cleanupExpiredSessions();
-  await expect(pool.waitForSessionPreservingRecovery("session")).rejects.toThrow(
-    "persist release failed",
-  );
+  await expect(
+    settleWithFakeTime(timer, pool.waitForSessionPreservingRecovery("session"), {
+      stepMs: 1000,
+      maxSteps: 2,
+      description: "idle terminal release retries",
+    }),
+  ).rejects.toThrow("persist release failed");
   await flush();
   expect(record.failedReleaseAttempts).toBe(1);
   expect(record.deferredUntil).toBe(timer.now() + 5_000);
@@ -2428,7 +2437,9 @@ test("same-AVD replacement is reserved while session tracking persistence stalls
       },
       () => {},
     );
-    await flush();
+    await drainUntil(() => timer.getPendingSleepCount() > 0, {
+      description: "competing allocator parked behind recovery",
+    });
     expect(allocated).toBe(false);
     expect(pool.getDevice(replacement.deviceId)?.sessionId).toBeNull();
     finishTracking.resolve();
@@ -2439,8 +2450,14 @@ test("same-AVD replacement is reserved while session tracking persistence stalls
         .androidRecoveryHandoffOwners.size,
     ).toBe(0);
     // End the ordinary allocator's bounded wait without any wall-clock timers.
-    timer.enableAutoAdvance();
-    timer.advanceTime(1_000);
+    await settleWithFakeTime(
+      timer,
+      competing.then(
+        () => undefined,
+        () => undefined,
+      ),
+      { stepMs: 1000, maxSteps: 60, description: "competing allocation timeout" },
+    );
     await expect(competing).rejects.toThrow();
   } finally {
     finishTracking.resolve();

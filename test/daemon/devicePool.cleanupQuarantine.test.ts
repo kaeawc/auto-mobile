@@ -1,3 +1,4 @@
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -71,7 +72,10 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
             expect(manager.getSession("old-owner")).toBeNull();
           }
           if (phase === "pending-cleanup") {
-            await timer.advanceTimeAsync(1000);
+            await drainUntil(() => timer.getPendingTimeouts().includes(1_000), {
+              description: "bounded cleanup timeout parked",
+            });
+            timer.advanceTime(1000);
             await release;
             await pool.releaseDevice(device.deviceId, "old-owner");
             expect(manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();

@@ -23,19 +23,20 @@ internal class GestureStreamRouter(
   private val terminalFailures = linkedMapOf<String, Outcome>()
   private var closed = false
 
-  fun start(requestId: String?, gestureId: String, x: Float, y: Float) = runOnGestureThread {
-    if (closed) return@runOnGestureThread
-    if (sessions.containsKey(gestureId)) {
-      onResult(requestId, false, "Gesture $gestureId is already active")
-      return@runOnGestureThread
+  fun start(requestId: String?, gestureId: String, x: Float, y: Float, displayId: Int? = null) =
+    runOnGestureThread {
+      if (closed) return@runOnGestureThread
+      if (sessions.containsKey(gestureId)) {
+        onResult(requestId, false, "Gesture $gestureId is already active")
+        return@runOnGestureThread
+      }
+      // A new stream with the same wire id supersedes an unclaimed old result.
+      terminalFailures.remove(gestureId)
+      val session = newSession { success, error -> finish(gestureId, success, error) }
+      sessions[gestureId] = session
+      session.start(x, y, displayId)
+      onResult(requestId, true, null)
     }
-    // A new stream with the same wire id supersedes an unclaimed old result.
-    terminalFailures.remove(gestureId)
-    val session = newSession { success, error -> finish(gestureId, success, error) }
-    sessions[gestureId] = session
-    session.start(x, y)
-    onResult(requestId, true, null)
-  }
 
   fun move(requestId: String?, gestureId: String, x: Float, y: Float) = runOnGestureThread {
     if (closed) return@runOnGestureThread

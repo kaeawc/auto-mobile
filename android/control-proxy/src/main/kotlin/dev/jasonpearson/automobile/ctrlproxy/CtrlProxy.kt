@@ -1768,6 +1768,108 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun requestScreenshot(requestId: String?, displayId: Int?) =
     broadcastScreenshot(requestId, displayId)
 
+  override fun requestTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
+    performTapCoordinates(requestId, x, y, duration, frameContext, displayId)
+  }
+
+  override fun requestSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
+    performSwipe(requestId, x1, y1, x2, y2, duration, frameContext, displayId)
+  }
+
+  override fun requestTwoFingerSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    offset: Int,
+    displayId: Int?,
+  ) {
+    performTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset, displayId)
+  }
+
+  override fun requestDrag(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) {
+    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
+    performDrag(
+      requestId,
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+      frameContext,
+      displayId,
+    )
+  }
+
+  override fun requestPinch(
+    requestId: String?,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
+    rotationDegrees: Float,
+    duration: Long,
+    displayId: Int?,
+  ) {
+    performPinch(
+      requestId,
+      centerX,
+      centerY,
+      distanceStart,
+      distanceEnd,
+      rotationDegrees,
+      duration,
+      displayId,
+    )
+  }
+
+  override fun requestGestureStart(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+    displayId: Int?,
+  ) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
+      return
+    }
+    gestureStreamRouter.start(requestId, gestureId, x.toFloat(), y.toFloat(), displayId)
+  }
+
   override fun requestSwipe(
     requestId: String?,
     x1: Double,
@@ -1821,8 +1923,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       stroke: GestureDescription.StrokeDescription,
       onComplete: () -> Unit,
       onFailed: (error: String) -> Unit,
+      displayId: Int?,
     ) {
-      val gesture = GestureDescription.Builder().addStroke(stroke).build()
+      val gesture = gestureBuilder(displayId).addStroke(stroke).build()
       val dispatched =
         try {
           dispatchGesture(
@@ -3834,6 +3937,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
   }
 
+  /** Preserve legacy routing when absent; explicit displays share the validated API gate. */
+  private fun gestureBuilder(displayId: Int?): GestureDescription.Builder =
+    GestureDescription.Builder().apply {
+      GestureDisplayRouting.apply(displayId, Build.VERSION.SDK_INT) { id ->
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setDisplayId(id)
+      }
+    }
+
   /**
    * Perform a swipe gesture using AccessibilityService's dispatchGesture API. This is significantly
    * faster than ADB's input swipe command.
@@ -3846,6 +3957,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y2: Double,
     duration: Long,
     frameContext: String? = null,
+    displayId: Int? = null,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performSwipe: ($x1, $y1) -> ($x2, $y2) duration=${duration}ms")
@@ -3862,7 +3974,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Build the gesture description
       val gesture =
-        GestureDescription.Builder()
+        gestureBuilder(displayId)
           .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
           .build()
       perfProvider.endOperation("buildPath")
@@ -3931,6 +4043,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     dragDurationMs: Long,
     holdDurationMs: Long,
     frameContext: String? = null,
+    displayId: Int? = null,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(
@@ -3941,7 +4054,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
     try {
       perfProvider.startOperation("buildPath")
-      val gestureBuilder = GestureDescription.Builder()
+      val gestureBuilder = gestureBuilder(displayId)
       val startX = x1.toFloat()
       val startY = y1.toFloat()
       val endX = x2.toFloat()
@@ -4119,6 +4232,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y: Double,
     duration: Long = 10,
     frameContext: String? = null,
+    displayId: Int? = null,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performTapCoordinates: ($x, $y) duration=${duration}ms")
@@ -4131,7 +4245,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Build the gesture description
       val gesture =
-        GestureDescription.Builder()
+        gestureBuilder(displayId)
           .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
           .build()
       perfProvider.endOperation("buildPath")
@@ -4203,6 +4317,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y2: Double,
     duration: Long,
     offset: Int = 100,
+    displayId: Int? = null,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(
@@ -4228,7 +4343,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
       // Build the gesture description with two strokes
       val gesture =
-        GestureDescription.Builder()
+        gestureBuilder(displayId)
           .addStroke(GestureDescription.StrokeDescription(path1, 0, duration))
           .addStroke(GestureDescription.StrokeDescription(path2, 0, duration))
           .build()
@@ -4284,6 +4399,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     distanceEnd: Double,
     rotationDegrees: Float,
     duration: Long,
+    displayId: Int? = null,
   ) {
     val startTime = System.currentTimeMillis()
     Log.d(
@@ -4311,7 +4427,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
 
       val gesture =
-        GestureDescription.Builder()
+        gestureBuilder(displayId)
           .addStroke(GestureDescription.StrokeDescription(path1, 0, duration))
           .addStroke(GestureDescription.StrokeDescription(path2, 0, duration))
           .build()

@@ -110,6 +110,81 @@ interface CtrlProxyActions {
     duration: Long,
   )
 
+  fun requestTapCoordinates(
+    requestId: String?,
+    x: Double,
+    y: Double,
+    duration: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) = requestTapCoordinates(requestId, x, y, duration, frameContext)
+
+  fun requestSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) = requestSwipe(requestId, x1, y1, x2, y2, duration, frameContext)
+
+  fun requestTwoFingerSwipe(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    duration: Long,
+    offset: Int,
+    displayId: Int?,
+  ) = requestTwoFingerSwipe(requestId, x1, y1, x2, y2, duration, offset)
+
+  fun requestDrag(
+    requestId: String?,
+    x1: Double,
+    y1: Double,
+    x2: Double,
+    y2: Double,
+    pressDurationMs: Long,
+    dragDurationMs: Long,
+    holdDurationMs: Long,
+    frameContext: String?,
+    displayId: Int?,
+  ) =
+    requestDrag(
+      requestId,
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+      frameContext,
+    )
+
+  fun requestPinch(
+    requestId: String?,
+    centerX: Double,
+    centerY: Double,
+    distanceStart: Double,
+    distanceEnd: Double,
+    rotationDegrees: Float,
+    duration: Long,
+    displayId: Int?,
+  ) =
+    requestPinch(requestId, centerX, centerY, distanceStart, distanceEnd, rotationDegrees, duration)
+
+  fun requestGestureStart(
+    requestId: String?,
+    gestureId: String,
+    x: Double,
+    y: Double,
+    displayId: Int?,
+  ) = requestGestureStart(requestId, gestureId, x, y)
+
   // Streaming gesture input: one live drag arrives as a start, incremental moves sharing a
   // `gestureId`, and an end. The runner chains them into a single continued AccessibilityService
   // gesture so the device tracks the pointer in real time. Coordinates are `Double` for the same

@@ -4,6 +4,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.jupiter.api.Test
 
@@ -11,6 +12,37 @@ class WebSocketRequestTest {
   private val json = Json {
     classDiscriminator = "type"
     ignoreUnknownKeys = true
+  }
+
+  @Test
+  fun `gesture display ids decode with absent null and explicit values and round trip`() {
+    val payloads =
+      listOf(
+        "request_tap_coordinates" to "\"x\":1,\"y\":2",
+        "request_swipe" to "\"x1\":1,\"y1\":2,\"x2\":3,\"y2\":4",
+        "request_two_finger_swipe" to "\"x1\":1,\"y1\":2,\"x2\":3,\"y2\":4",
+        "request_drag" to "\"x1\":1,\"y1\":2,\"x2\":3,\"y2\":4",
+        "request_pinch" to "\"centerX\":1,\"centerY\":2,\"distanceStart\":3,\"distanceEnd\":4",
+        "request_gesture_start" to "\"gestureId\":\"g\",\"x\":1,\"y\":2",
+      )
+    for ((type, fields) in payloads) {
+      for ((suffix, expected) in
+        listOf("" to null, ",\"displayId\":null" to null, ",\"displayId\":7" to 7)) {
+        val request = json.decodeFromString<WebSocketRequest>("{\"type\":\"$type\",$fields$suffix}")
+        val displayId =
+          when (request) {
+            is RequestTapCoordinates -> request.displayId
+            is RequestSwipe -> request.displayId
+            is RequestTwoFingerSwipe -> request.displayId
+            is RequestDrag -> request.displayId
+            is RequestPinch -> request.displayId
+            is RequestGestureStart -> request.displayId
+            else -> error("Unexpected gesture request $type")
+          }
+        assertEquals(expected, displayId, type)
+        assertEquals(request, json.decodeFromString<WebSocketRequest>(json.encodeToString(request)))
+      }
+    }
   }
 
   @Test

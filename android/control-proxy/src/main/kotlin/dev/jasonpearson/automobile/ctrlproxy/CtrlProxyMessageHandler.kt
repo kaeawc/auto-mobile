@@ -77,10 +77,10 @@ import kotlinx.serialization.json.Json
  *
  * The handler performs no Android I/O — it only decodes fields and calls [actions] — so it can be
  * unit-tested without Robolectric. Almost every command is fire-and-forget (the action broadcasts
- * its own response asynchronously), so [handleMessage] returns `null`. The one exception is the
- * non-finite gesture-coordinate guard (see [firstNonFinite]), which returns a synchronous
- * per-command error response that [WebSocketServer] broadcasts to the client — the Android analog
- * of iOS `CommandHandler.requireFinite` (#2964, mirror of #2928 / PR #2957).
+ * its own response asynchronously), so [handleMessage] returns `null`. Gesture display validation
+ * and the non-finite coordinate guard (see [firstNonFinite]) instead return synchronous per-command
+ * error responses that [WebSocketServer] broadcasts to the client — the Android analog of iOS
+ * `CommandHandler.requireFinite` (#2964, mirror of #2928 / PR #2957).
  *
  * @param actions the device actions to dispatch to (the [CtrlProxy] service in production, a fake
  *   in tests).
@@ -91,6 +91,7 @@ import kotlinx.serialization.json.Json
 class CtrlProxyMessageHandler(
   private val actions: CtrlProxyActions,
   private val log: (String) -> Unit = {},
+  private val sdkInt: () -> Int = { android.os.Build.VERSION.SDK_INT },
 ) : WebSocketMessageHandler {
 
   /** JSON used to re-encode the typed network mock rules into the string the SDK store expects. */
@@ -113,6 +114,17 @@ class CtrlProxyMessageHandler(
       is SetHierarchyInterval -> actions.setHierarchyInterval(request.intervalMs)
       is RequestScreenshot -> actions.requestScreenshot(request.requestId, request.displayId)
       is RequestSwipe -> {
+        if (request.displayId != null) {
+          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+            return SwipeResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = error,
+            )
+          }
+        }
         firstNonFinite(
             "x1" to request.x1,
             "y1" to request.y1,
@@ -130,9 +142,21 @@ class CtrlProxyMessageHandler(
           request.y2,
           request.duration,
           request.frameContext,
+          request.displayId,
         )
       }
       is RequestTapCoordinates -> {
+        if (request.displayId != null) {
+          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+            return TapCoordinatesResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = error,
+            )
+          }
+        }
         firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
           return TapCoordinatesResult(
             timestamp = System.currentTimeMillis(),
@@ -148,9 +172,21 @@ class CtrlProxyMessageHandler(
           request.y,
           request.duration,
           request.frameContext,
+          request.displayId,
         )
       }
       is RequestTwoFingerSwipe -> {
+        if (request.displayId != null) {
+          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+            return SwipeResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = error,
+            )
+          }
+        }
         // Two-finger swipe shares the swipe_result response type. `offset` is an Int (a pixel gap),
         // so it cannot be non-finite and is not guarded.
         firstNonFinite(
@@ -170,9 +206,21 @@ class CtrlProxyMessageHandler(
           request.y2,
           request.duration,
           request.offset,
+          request.displayId,
         )
       }
       is RequestDrag -> {
+        if (request.displayId != null) {
+          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+            return DragResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = error,
+            )
+          }
+        }
         firstNonFinite(
             "x1" to request.x1,
             "y1" to request.y1,
@@ -198,9 +246,21 @@ class CtrlProxyMessageHandler(
           request.resolvedDragDurationMs,
           request.holdDurationMs,
           request.frameContext,
+          request.displayId,
         )
       }
       is RequestPinch -> {
+        if (request.displayId != null) {
+          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+            return PinchResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = error,
+            )
+          }
+        }
         // `rotationDegrees` is a Float (not a coordinate) but still flows into the gesture-path
         // math, so a computed non-finite value is guarded too (AC #4 of #2964).
         firstNonFinite(
@@ -227,13 +287,31 @@ class CtrlProxyMessageHandler(
           request.distanceEnd,
           request.rotationDegrees,
           request.duration,
+          request.displayId,
         )
       }
       is RequestGestureStart -> {
+        if (request.displayId != null) {
+          GestureDisplayRouting.error(request.displayId, sdkInt())?.let { error ->
+            return SwipeResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = request.requestId,
+              success = false,
+              totalTimeMs = 0L,
+              error = error,
+            )
+          }
+        }
         firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->
           return swipeError(request.requestId, field, value)
         }
-        actions.requestGestureStart(request.requestId, request.gestureId, request.x, request.y)
+        actions.requestGestureStart(
+          request.requestId,
+          request.gestureId,
+          request.x,
+          request.y,
+          request.displayId,
+        )
       }
       is RequestGestureMove -> {
         firstNonFinite("x" to request.x, "y" to request.y)?.let { (field, value) ->

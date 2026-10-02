@@ -22,7 +22,12 @@ class GestureTeardownTest {
 
     override fun continueStroke(previous: FakeStroke, segment: GestureSegment) = FakeStroke(segment)
 
-    override fun dispatch(stroke: FakeStroke, onComplete: () -> Unit, onFailed: (String) -> Unit) {
+    override fun dispatch(
+      stroke: FakeStroke,
+      onComplete: () -> Unit,
+      onFailed: (String) -> Unit,
+      displayId: Int?,
+    ) {
       strokes.add(stroke.segment)
       complete = onComplete
     }

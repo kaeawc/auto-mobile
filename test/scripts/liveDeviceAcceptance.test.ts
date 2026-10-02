@@ -2009,7 +2009,7 @@ describe("live device acceptance harness", () => {
 
   test("returns by the absolute deadline when an injected MCP connection ignores AbortSignal", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
+    const connectStarted = Promise.withResolvers<void>();
     let aborted = false;
     const harness = createHarness();
     const createMcpClient = harness.dependencies.createMcpClient!;
@@ -2018,6 +2018,7 @@ describe("live device acceptance harness", () => {
       if (owner !== "provision") {
         return await createMcpClient(owner, signal, presentationOrder);
       }
+      connectStarted.resolve();
       signal.addEventListener("abort", () => {
         aborted = true;
       });
@@ -2025,14 +2026,12 @@ describe("live device acceptance harness", () => {
     };
     const result = runAcceptanceMatrix({ ...androidArgs, timeoutMs: 10_000 }, harness.dependencies);
 
-    await expect(
-      Promise.race([
-        result,
-        Bun.sleep(500).then(() => {
-          throw new Error("real outer bound elapsed");
-        }),
-      ]),
-    ).rejects.toThrow("Acceptance deadline elapsed during provision MCP connect");
+    await connectStarted.promise;
+    // Drive the connection deadline and its reaping reserve on fake time.
+    // A missing cancellation fence fails through the test runner's timeout.
+    await expect(timer.resolvePromise(result)).rejects.toThrow(
+      "Acceptance deadline elapsed during provision MCP connect",
+    );
     expect(aborted).toBe(true);
     expect(timer.now()).toBeLessThanOrEqual(10_000);
   });

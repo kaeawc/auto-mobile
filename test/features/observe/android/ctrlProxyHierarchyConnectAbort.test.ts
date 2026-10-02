@@ -14,7 +14,6 @@ import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/android/CtrlProxyHierarchy";
 import type { HierarchyDelegateContext } from "../../../../src/features/observe/android/types";
 import { RequestManager } from "../../../../src/utils/RequestManager";
-import { defaultTimer } from "../../../../src/utils/SystemTimer";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
 interface Harness {
@@ -49,30 +48,6 @@ function createHangingConnectHarness(): Harness {
   };
 
   return { hierarchy: new CtrlProxyHierarchy(context), connectStarted };
-}
-
-/**
- * Fail loudly instead of hanging to the suite timeout when the fence is gone.
- * A real timer deliberately: what is under test is a read that must not
- * outlive a REAL-clock bound, and the harness drives no fake clock forward.
- */
-async function withinBound<T>(operation: Promise<T>): Promise<T> {
-  let timeout: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<never>((_resolve, reject) => {
-        timeout = defaultTimer.setTimeout(
-          () => reject(new Error("read outlived the caller's abort signal")),
-          500,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout) {
-      defaultTimer.clearTimeout(timeout);
-    }
-  }
 }
 
 describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
@@ -130,7 +105,7 @@ describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
 
     // Degrades the way every other failure in this read does: no hierarchy,
     // not fresh — and promptly, rather than 5s from now.
-    expect(await withinBound(pending)).toEqual({ hierarchy: null, fresh: false });
+    expect(await pending).toEqual({ hierarchy: null, fresh: false });
   });
 
   test("requestHierarchySync stops waiting on a wedged handshake when the caller aborts", async () => {
@@ -141,7 +116,7 @@ describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
     await h.connectStarted;
     controller.abort();
 
-    expect(await withinBound(pending)).toBeNull();
+    expect(await pending).toBeNull();
   });
 
   test("an already-aborted signal never enters the handshake at all", async () => {
@@ -149,8 +124,13 @@ describe("Android CtrlProxyHierarchy connection abort (#6890)", () => {
     const controller = new AbortController();
     controller.abort();
 
-    const result = await withinBound(
-      h.hierarchy.getLatestHierarchy(false, 1000, undefined, false, 0, controller.signal),
+    const result = await h.hierarchy.getLatestHierarchy(
+      false,
+      1000,
+      undefined,
+      false,
+      0,
+      controller.signal,
     );
 
     expect(result).toEqual({ hierarchy: null, fresh: false });

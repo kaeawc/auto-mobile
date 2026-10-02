@@ -445,6 +445,7 @@ describe("device lifecycle ordinary-client structured output", () => {
         }),
       }));
       setSetPostureFactory(() => ({
+        executeHingeAngle: async () => ({ status: "unsupported", message: "unused angle fake" }),
         execute: async () => ({
           posture: "opened",
           display: { key: "inner", role: "inner", posture: "opened", generation: 1 },

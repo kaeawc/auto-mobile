@@ -26,15 +26,49 @@ import {
   type DeviceReadinessLockRelease,
 } from "../../utils/deviceReadinessLock";
 
+import {
+  AdbAndroidHingeAngleConsole,
+  type AndroidHingeAngleConsole,
+} from "./AndroidHingeAngleConsole";
+
+export const HINGE_ANGLE_MIN_DEGREES = 0;
+export const HINGE_ANGLE_MAX_DEGREES = 180;
+
 export type RequestedPosture = Exclude<Posture, "unknown">;
 export type DisplayPreset = "phone" | "unfolded" | "tablet";
 
-export interface SetPostureResult {
-  posture: RequestedPosture;
+interface SetPostureResultBase {
   display: DisplayRef;
   locked?: boolean;
   warnings?: string[];
 }
+
+export type SetPostureResult = SetPostureResultBase &
+  (
+    | {
+        posture: RequestedPosture;
+        hingeAngle?: never;
+        observedHingeAngle?: never;
+        postureReason?: never;
+      }
+    | { posture: Posture; hingeAngle: number; observedHingeAngle?: number; postureReason?: string }
+  );
+
+export interface SetHingeAngleOptions {
+  displayPreset?: DisplayPreset;
+  signal?: AbortSignal;
+}
+
+type PostureRequest =
+  | { posture: RequestedPosture; hingeAngle?: never }
+  | { hingeAngle: number; posture?: never };
+type PostureReadBack = { posture: Posture; postureReason?: string };
+type FinalPostureRequest =
+  | RequestedPosture
+  | {
+      hingeAngle: number;
+      resolvePosture(observation: Awaited<ReturnType<ObserveScreen["execute"]>>): PostureReadBack;
+    };
 
 export interface SetPostureUnsupportedResult {
   status: "unsupported";
@@ -45,6 +79,7 @@ export type SetPostureOutput = SetPostureResult | SetPostureUnsupportedResult;
 
 export interface SetPostureDependencies {
   adbFactory?: AdbClientFactory;
+  androidHingeAngleConsole?: AndroidHingeAngleConsole;
   observeFactory?: (device: BootedDevice) => ObserveScreen;
   iosClientProvider?: (device: BootedDevice) => IOSCtrlProxy;
   timer?: Timer;
@@ -401,6 +436,7 @@ async function readSupportedAndroidStates(
 
 export class SetPosture {
   private readonly adbFactory: AdbClientFactory;
+  private readonly androidHingeAngleConsole: AndroidHingeAngleConsole;
   private readonly observeFactory: (device: BootedDevice) => ObserveScreen;
   private readonly iosClientProvider: (device: BootedDevice) => IOSCtrlProxy;
   private readonly timer: Timer;
@@ -411,6 +447,8 @@ export class SetPosture {
     dependencies: SetPostureDependencies = {},
   ) {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
+    this.androidHingeAngleConsole =
+      dependencies.androidHingeAngleConsole ?? new AdbAndroidHingeAngleConsole();
     this.observeFactory =
       dependencies.observeFactory ?? ((target) => new RealObserveScreen(target));
     this.iosClientProvider =
@@ -424,6 +462,21 @@ export class SetPosture {
     displayPreset?: DisplayPreset,
     signal?: AbortSignal,
   ): Promise<SetPostureOutput> {
+    return this.executeRequest({ posture: requested }, { displayPreset, signal });
+  }
+
+  async executeHingeAngle(
+    angle: number,
+    options: SetHingeAngleOptions = {},
+  ): Promise<SetPostureOutput> {
+    return this.executeRequest({ hingeAngle: angle }, options);
+  }
+
+  private async executeRequest(
+    request: PostureRequest,
+    options: SetHingeAngleOptions,
+  ): Promise<SetPostureOutput> {
+    const { displayPreset, signal } = options;
     throwIfAborted(signal);
     let release: DeviceReadinessLockRelease = () => {};
     let token: number | undefined;
@@ -438,7 +491,10 @@ export class SetPosture {
       },
     };
     try {
-      const iosAngle = this.validateRequest(requested, displayPreset);
+      const iosAngle =
+        request.hingeAngle !== undefined
+          ? this.validateHingeAngle(request.hingeAngle, displayPreset)
+          : this.validateRequest(request.posture, displayPreset);
       if (typeof iosAngle === "object") {
         return iosAngle;
       }
@@ -468,10 +524,11 @@ export class SetPosture {
       throwIfAborted(signal);
       token = ++nextPostureToken;
       latestPostureTokens.set(this.device.deviceId, token);
-      const result =
-        iosAngle !== undefined
-          ? await this.executeIos(requested, iosAngle, operation)
-          : await this.executeAndroid(requested, displayPreset, operation);
+      const result = await this.executeValidatedRequest(
+        request,
+        { displayPreset, iosAngle },
+        operation,
+      );
       operation.assertCurrent();
       return result;
     } catch (error) {
@@ -489,6 +546,235 @@ export class SetPosture {
       }
       release();
     }
+  }
+
+  private executeValidatedRequest(
+    request: PostureRequest,
+    options: { displayPreset?: DisplayPreset; iosAngle?: number },
+    operation: PostureOperation,
+  ): Promise<SetPostureOutput> {
+    if (request.hingeAngle !== undefined) {
+      return this.device.platform === "ios"
+        ? this.executeIosHingeAngle(request.hingeAngle, operation)
+        : this.executeAndroidHingeAngle(request.hingeAngle, operation);
+    }
+    return options.iosAngle !== undefined
+      ? this.executeIos(request.posture, options.iosAngle, operation)
+      : this.executeAndroid(request.posture, options.displayPreset, operation);
+  }
+
+  private validateHingeAngle(
+    angle: number,
+    displayPreset?: DisplayPreset,
+  ): SetPostureUnsupportedResult | undefined {
+    if (
+      !Number.isFinite(angle) ||
+      angle < HINGE_ANGLE_MIN_DEGREES ||
+      angle > HINGE_ANGLE_MAX_DEGREES
+    ) {
+      throw new ActionableError(
+        `hingeAngle must be finite and between ${HINGE_ANGLE_MIN_DEGREES} and ${HINGE_ANGLE_MAX_DEGREES} degrees inclusive. Nothing was changed.`,
+      );
+    }
+    if (displayPreset !== undefined) {
+      throw new ActionableError(
+        "displayPreset requires posture and cannot be combined with hingeAngle. Nothing was changed.",
+      );
+    }
+    if (this.device.platform === "ios") {
+      const supported = this.validateIosPosture("opened");
+      if (typeof supported === "object") {
+        return supported;
+      }
+      if (
+        !this.device.displays?.panels.some((panel) => panel.role === "cover") ||
+        !this.device.displays.panels.some((panel) => panel.role === "inner")
+      ) {
+        return { status: "unsupported", message: "This iOS simulator is not a foldable device." };
+      }
+    } else if (!isEmulator(this.device)) {
+      return {
+        status: "unsupported",
+        message:
+          "Setting a hinge angle needs the Android emulator console; physical Android devices are unsupported. Nothing was changed.",
+      };
+    }
+    return undefined;
+  }
+
+  private async executeAndroidHingeAngle(
+    angle: number,
+    operation: PostureOperation,
+  ): Promise<SetPostureOutput> {
+    const { signal, assertCurrent } = operation;
+    assertCurrent();
+    const adb = this.adbFactory.create(this.device);
+    const consoleResult = await awaitWhileRequestIsLive(
+      this.androidHingeAngleConsole.setHingeAngle(adb, angle, { signal }),
+      signal,
+    );
+    assertCurrent();
+    if (!consoleResult.ok) {
+      return {
+        status: "unsupported",
+        message: `Emulator console rejected 'sensor set hinge-angle0 ${angle}': ${consoleResult.reason}. Hinge angle is best effort; the syntax is unconfirmed on real emulators. Nothing was changed.`,
+      };
+    }
+    const states = await readAndroidStates(adb, operation);
+    assertCurrent();
+    const readBack = await this.readAndroidHingePosture(adb, states, operation);
+    assertCurrent();
+    const observe = () => {
+      assertCurrent();
+      ObservedAndroidDisplayCache.clear(this.device.deviceId);
+      return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+    };
+    return this.observeFinalPosture(
+      {
+        hingeAngle: angle,
+        resolvePosture: (observation) => {
+          const observed = observation.display.posture;
+          if (
+            readBack.posture !== "unknown" &&
+            observed !== "unknown" &&
+            readBack.posture !== observed
+          ) {
+            throw new ActionableError(
+              `Hinge angle command returned OK, but committed device posture '${readBack.posture}' disagrees with final observed posture '${observed}'. Re-observe the device before acting.`,
+            );
+          }
+          return readBack;
+        },
+      },
+      observe,
+      observe,
+      operation,
+    );
+  }
+
+  private async readAndroidHingePosture(
+    adb: ReturnType<AdbClientFactory["create"]>,
+    states: AndroidDeviceState[],
+    operation: PostureOperation,
+  ): Promise<PostureReadBack> {
+    const { signal, assertCurrent } = operation;
+    const startedAt = this.timer.now();
+    do {
+      assertCurrent();
+      throwIfAborted(signal);
+      try {
+        const { stdout } = await awaitWhileRequestIsLive(
+          adb.executeCommand("shell cmd device_state state"),
+          signal,
+        );
+        assertCurrent();
+        const identifier = parseAndroidCommittedStateIdentifier(stdout);
+        const posture = states.find((state) => state.identifier === identifier)?.posture;
+        if (posture && posture !== "unknown") {
+          return { posture };
+        }
+      } catch (error) {
+        assertCurrent();
+        throwIfAborted(signal);
+        if (!/can't find service: device_state/i.test(errorMessage(error))) {
+          throw toActionableError(
+            error,
+            "Could not read Android posture after the hinge angle command returned OK",
+          );
+        }
+        logger.warn(`Android device_state service is unavailable: ${errorMessage(error)}`);
+        return {
+          posture: "unknown",
+          postureReason:
+            "The hinge angle command returned OK, but the Android device_state service is unavailable.",
+        };
+      }
+      const elapsed = this.timer.now() - startedAt;
+      if (elapsed >= ANDROID_POSTURE_TIMEOUT_MS) {
+        break;
+      }
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(
+          Math.min(ANDROID_POSTURE_POLL_INTERVAL_MS, ANDROID_POSTURE_TIMEOUT_MS - elapsed),
+        ),
+        signal,
+      );
+      assertCurrent();
+    } while (true);
+    return {
+      posture: "unknown",
+      postureReason:
+        "The hinge angle command returned OK, but no committed device state could be mapped to a known posture within 3000 ms.",
+    };
+  }
+
+  private async executeIosHingeAngle(
+    angle: number,
+    operation: PostureOperation,
+  ): Promise<SetPostureOutput> {
+    const { signal, assertCurrent } = operation;
+    assertCurrent();
+    const client = this.iosClientProvider(this.device);
+    const commands = await awaitWhileRequestIsLive(
+      client.getSupportedCommands?.() ?? Promise.resolve(null),
+      signal,
+    );
+    assertCurrent();
+    if (!commands?.includes("set_hinge_angle")) {
+      return {
+        status: "unsupported",
+        message:
+          "Hinge angle requires an iOS runner re-cut/updated to advertise set_hinge_angle (#8547). Nothing was changed.",
+      };
+    }
+    ObservedAndroidDisplayCache.clear(this.device.deviceId);
+    const result = await awaitWhileRequestIsLive(client.requestSetHingeAngle(angle), signal);
+    assertCurrent();
+    if (!result.success) {
+      throw new ActionableError(
+        `Could not set iPhone Duo hinge angle: ${result.error ?? "unknown runner error"}`,
+      );
+    }
+    this.transitionSink.notifyTransition(
+      this.device.deviceId,
+      "setPosture changed the iPhone Duo hinge angle",
+    );
+    const observe = () => this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+    const settled = await this.observeFinalPosture(
+      {
+        hingeAngle: angle,
+        resolvePosture: (observation) => {
+          const panel = classifyIosPostureObservation(
+            observation,
+            this.device.displays?.panels,
+            "cover",
+          );
+          if (panel === "expected") {
+            return { posture: "closed" };
+          }
+          if (panel === "old") {
+            return {
+              posture:
+                observation.display.posture === "unknown" ? "opened" : observation.display.posture,
+            };
+          }
+          return {
+            posture: "unknown",
+            postureReason:
+              "The runner accepted the hinge angle, but the active iPhone Duo panel could not be determined.",
+          };
+        },
+      },
+      observe,
+      observe,
+      operation,
+    );
+    assertCurrent();
+    return {
+      ...settled,
+      hingeAngle: angle,
+      ...(result.angle !== undefined ? { observedHingeAngle: result.angle } : {}),
+    };
   }
 
   private validateRequest(
@@ -579,7 +865,7 @@ export class SetPosture {
   }
 
   private async observeFinalPosture(
-    requested: RequestedPosture,
+    requested: FinalPostureRequest,
     observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
     observeRetry: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
     operation: PostureOperation,
@@ -599,20 +885,32 @@ export class SetPosture {
     }
     throwIfAborted(signal);
     let display = observation.display;
+    const readBack =
+      typeof requested === "string"
+        ? { posture: requested }
+        : stale
+          ? {
+              posture: "unknown" as const,
+              postureReason:
+                "The final observation has stale or missing display provenance; re-observe to establish the device posture.",
+            }
+          : requested.resolvePosture(observation);
     if (this.device.platform === "ios") {
       assertCurrent();
       this.transitionSink.notifyTransition(
         this.device.deviceId,
         "setPosture settled on the iPhone Duo display",
       );
-      if (!stale) {
+      if (!stale && typeof requested === "string") {
         assertCurrent();
         display = this.transitionSink.rememberIosPosture(this.device, display, requested);
       }
     }
     assertCurrent();
     return {
-      posture: requested,
+      ...(typeof requested === "string"
+        ? { posture: requested }
+        : { ...readBack, hingeAngle: requested.hingeAngle }),
       display: {
         ...display,
         // Never certify old coordinates with a newer transition's generation.

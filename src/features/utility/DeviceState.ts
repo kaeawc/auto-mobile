@@ -564,7 +564,7 @@ const ANDROID_PHYSICAL_NETWORK_CONDITION_UNSUPPORTED_ERROR =
  * a convention the generic adb-shell heuristic (`exception`/`error:`) does not
  * cover, so check for the `KO` sentinel as well.
  */
-function emulatorConsoleReportsFailure(stdout: string, stderr: string): boolean {
+export function emulatorConsoleReportsFailure(stdout: string, stderr: string): boolean {
   const combined = `${stdout}\n${stderr}`.trim();
   if (!combined) {
     return false;

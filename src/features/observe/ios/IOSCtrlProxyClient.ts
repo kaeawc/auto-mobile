@@ -314,6 +314,7 @@ import type {
  */
 // oxlint-disable-next-line auto-mobile/naming-convention -- IOS is an acronym, not a Hungarian-notation interface prefix
 export interface IOSCtrlProxy extends CtrlProxyClient {
+  getSupportedCommands?(): Promise<string[] | null>;
   connectWithoutSetup(signal?: AbortSignal): Promise<boolean>;
   getLatestHierarchy(
     waitForFresh?: boolean,

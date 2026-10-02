@@ -20,6 +20,7 @@ import {
 } from "../../../src/features/observe/ObservationDisplay";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAndroidHingeAngleConsole } from "../../fakes/FakeAndroidHingeAngleConsole";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createExecResult } from "../../../src/utils/execResult";
@@ -618,6 +619,387 @@ describe("SetPosture", () => {
     });
     return { feature, client, timer, sequence, getObserveCount: () => observeCount };
   }
+
+  describe("best effort hinge angles", () => {
+    test.each([-1, 181, NaN, Infinity, -Infinity])(
+      "direct angle %s is actionable",
+      async (angle) => {
+        const adb = new FakeAdbExecutor();
+        const { feature } = makeFeature(makeDevice(), adb);
+        await expect(feature.executeHingeAngle(angle)).rejects.toBeInstanceOf(ActionableError);
+        expect(adb.getExecutedCommands()).toEqual([]);
+      },
+    );
+
+    test("angle plus preset rejects without I/O", async () => {
+      const adb = new FakeAdbExecutor();
+      const { feature } = makeFeature(makeDevice(), adb);
+      await expect(feature.executeHingeAngle(90, { displayPreset: "phone" })).rejects.toThrow(
+        "displayPreset",
+      );
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test.each([0, 90, 180])(
+      "Android OK at %s reports committed fixture posture and one generation",
+      async (angle) => {
+        const adb = new FakeAdbExecutor();
+        const command = `emu sensor set hinge-angle0 ${angle}`;
+        adb.setCommandResponse(command, createExecResult("OK", ""));
+        adb.setCommandResponse(
+          "shell cmd device_state print-states",
+          createExecResult(foldStates, ""),
+        );
+        adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+        const observed = { ...observation, display: { ...display, posture: "closed" as const } };
+        const device = makeDevice();
+        const h = makeFeature(device, adb, new FakeTimer(), observed);
+        const send = spyOn(adb, "executeCommand");
+        const result = await h.feature.executeHingeAngle(angle);
+        expect(result).toMatchObject({
+          hingeAngle: angle,
+          posture: "closed",
+          display: { generation: 1 },
+        });
+        expect("observedHingeAngle" in result).toBe(false);
+        expect(adb.getExecutedCommands()).toEqual([
+          command,
+          "shell cmd device_state print-states",
+          "shell cmd device_state state",
+        ]);
+        expect(send.mock.calls[0]).toEqual([command, undefined, undefined, true, undefined]);
+        const postureAdb = new FakeAdbExecutor();
+        postureAdb.setCommandResponse(
+          "shell cmd device_state print-states",
+          createExecResult(foldStates, ""),
+        );
+        postureAdb.setCommandResponse(
+          "shell cmd device_state state",
+          createExecResult(closedState, ""),
+        );
+        const posture = await makeFeature(
+          device,
+          postureAdb,
+          new FakeTimer(),
+          observed,
+        ).feature.execute("closed");
+        expect("display" in result && result.display.generation).toBe(
+          "display" in posture && posture.display.generation,
+        );
+        expect(h.tracker.identityRevision(device.deviceId)).toBe(1);
+        send.mockRestore();
+      },
+    );
+
+    test.each(["stdout", "stderr"] as const)(
+      "console KO in %s is unsupported with raw first line and no side effects",
+      async (channel) => {
+        const adb = new FakeAdbExecutor();
+        const raw = "  KO: bad delay";
+        adb.setCommandResponse(
+          "emu sensor set",
+          createExecResult(
+            channel === "stdout" ? `\n${raw}\n` : "",
+            channel === "stderr" ? `\n${raw}\n` : "",
+          ),
+        );
+        const h = makeFeature(makeDevice(), adb);
+        const result = await h.feature.executeHingeAngle(90);
+        expect(result).toMatchObject({
+          status: "unsupported",
+          message: expect.stringContaining(raw),
+        });
+        expect(adb.getExecutedCommands()).toEqual(["emu sensor set hinge-angle0 90"]);
+        expect(h.getObserveCount()).toBe(0);
+        expect(h.tracker.identityRevision("emulator-5554")).toBe(0);
+      },
+    );
+
+    test("console command errors remain operational failures", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandError("emu sensor set", new Error("adb unreachable"));
+      const h = makeFeature(makeDevice(), adb);
+      await expect(h.feature.executeHingeAngle(90)).rejects.toBeInstanceOf(ActionableError);
+      expect(adb.getExecutedCommands()).toEqual(["emu sensor set hinge-angle0 90"]);
+      expect(h.getObserveCount()).toBe(0);
+    });
+
+    test("known committed and observed postures must agree", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("emu sensor set", createExecResult("OK", ""));
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+      const h = makeFeature(makeDevice(), adb);
+      const attempt = h.feature.executeHingeAngle(90);
+      await expect(attempt).rejects.toBeInstanceOf(ActionableError);
+      await expect(attempt).rejects.toThrow("returned OK");
+      await expect(attempt).rejects.toThrow("closed");
+      await expect(attempt).rejects.toThrow("half_opened");
+    });
+
+    test.each(["unmapped", "unavailable", "unreadable"])(
+      "%s device state is unknown rather than an angle guess",
+      async (mode) => {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse("emu sensor set", createExecResult("OK", ""));
+        adb.setCommandResponse(
+          "shell cmd device_state print-states",
+          createExecResult(mode === "unmapped" ? phoneStates : foldStates, ""),
+        );
+        if (mode === "unavailable") {
+          adb.setCommandError(
+            "shell cmd device_state state",
+            new Error("Can't find service: device_state"),
+          );
+        } else {
+          adb.setCommandResponse(
+            "shell cmd device_state state",
+            createExecResult(mode === "unreadable" ? "" : closedState, ""),
+          );
+        }
+        const h = makeFeature(makeDevice(), adb);
+        expect(await h.feature.executeHingeAngle(90)).toMatchObject({
+          hingeAngle: 90,
+          posture: "unknown",
+          postureReason: expect.any(String),
+        });
+        if (mode !== "unavailable") {
+          expect(h.timer.now()).toBe(3000);
+        }
+      },
+    );
+
+    test("a known committed posture remains device read-back when observation posture is unknown", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("emu sensor set", createExecResult("OK", ""));
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+      const h = makeFeature(makeDevice(), adb, new FakeTimer(), {
+        ...observation,
+        display: { ...display, posture: "unknown" },
+      });
+      expect(await h.feature.executeHingeAngle(90)).toMatchObject({
+        hingeAngle: 90,
+        posture: "closed",
+      });
+    });
+
+    test("polls a temporarily unreadable committed state within the injected budget", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("emu sensor set", createExecResult("OK", ""));
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponseSequence("shell cmd device_state state", [
+        createExecResult("", ""),
+        createExecResult(closedState, ""),
+      ]);
+      const h = makeFeature(makeDevice(), adb, new FakeTimer(), {
+        ...observation,
+        display: { ...display, posture: "closed" },
+      });
+      expect(await h.feature.executeHingeAngle(90)).toMatchObject({ posture: "closed" });
+      expect(h.timer.now()).toBe(250);
+      expect(h.timer.getSleepHistory()).toContain(250);
+    });
+
+    test("unavailable state inventory cannot guess a posture from the final display", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("emu sensor set", createExecResult("OK", ""));
+      adb.setCommandError(
+        "shell cmd device_state print-states",
+        new Error("Can't find service: device_state"),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+      const h = makeFeature(makeDevice(), adb);
+      expect(await h.feature.executeHingeAngle(90)).toMatchObject({
+        posture: "unknown",
+        postureReason: expect.any(String),
+      });
+      expect(h.timer.now()).toBe(3000);
+    });
+
+    test("an operational committed-state error fails after console acceptance", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("emu sensor set", createExecResult("OK", ""));
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandError("shell cmd device_state state", new Error("adb timed out"));
+      const h = makeFeature(makeDevice(), adb);
+      await expect(h.feature.executeHingeAngle(90)).rejects.toThrow("adb timed out");
+      expect(h.getObserveCount()).toBe(0);
+    });
+
+    test("stale-twice Android angle observation preserves generation and reports unknown", async () => {
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse("emu sensor set", createExecResult("OK", ""));
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+      const tracker = new DisplayTransitionTracker(() => {});
+      const observed = new FakeObserveScreen();
+      observed.setObserveResult({ ...observation, displayRevision: undefined });
+      const feature = new SetPosture(makeDevice(), {
+        adbFactory: { create: () => adb },
+        observeFactory: () => observed,
+        transitionSink: tracker,
+        timer: new FakeTimer(),
+      });
+      expect(await feature.executeHingeAngle(90)).toMatchObject({
+        hingeAngle: 90,
+        posture: "unknown",
+        postureReason: expect.stringContaining("provenance"),
+        display: { generation: 4 },
+        warnings: expect.any(Array),
+      });
+      expect(observed.getExecuteOptions()).toHaveLength(2);
+    });
+
+    test("Android console can be replaced by the narrow fake", async () => {
+      const console = new FakeAndroidHingeAngleConsole();
+      console.result = { ok: false, reason: "KO: bad speed" };
+      const adb = new FakeAdbExecutor();
+      const feature = new SetPosture(makeDevice(), {
+        androidHingeAngleConsole: console,
+        adbFactory: { create: () => adb },
+        timer: new FakeTimer(),
+      });
+      expect(await feature.executeHingeAngle(90)).toMatchObject({
+        status: "unsupported",
+        message: expect.stringContaining("KO: bad speed"),
+      });
+      expect(console.calls).toEqual([{ degrees: 90, signal: undefined }]);
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test("physical Android angle is unsupported without sending anything", async () => {
+      const adb = new FakeAdbExecutor();
+      const h = makeFeature(makeDevice("R5CT123"), adb);
+      expect(await h.feature.executeHingeAngle(90)).toMatchObject({
+        status: "unsupported",
+        message: expect.stringContaining("emulator console"),
+      });
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test.each([0, 90, 180])(
+      "advertised iOS angle %s uses panel read-back and runner angle",
+      async (angle) => {
+        const h = makeIosFeature(duo, [
+          {
+            ...observation,
+            screenSize: { width: 2007, height: 2853 },
+            display: { ...display, posture: "half_opened" },
+          },
+        ]);
+        h.client.supportedCommands = ["set_hinge_angle"];
+        h.client.setHingeAngleResult({ success: true, angle: 89, totalTimeMs: 0 });
+        expect(await h.feature.executeHingeAngle(angle)).toMatchObject({
+          hingeAngle: angle,
+          observedHingeAngle: 89,
+          posture: "half_opened",
+          display: { generation: 2 },
+        });
+        expect(h.client.getHingeAngleHistory()).toEqual([angle]);
+        expect(h.sequence.filter((entry) => entry.startsWith("transition:"))).toHaveLength(2);
+      },
+    );
+
+    test("iOS cover reports closed even at an arbitrary angle and missing runner angle is omitted", async () => {
+      const h = makeIosFeature(duo, [
+        {
+          ...observation,
+          screenSize: { width: 1398, height: 2034 },
+          display: { ...display, role: "cover", posture: "closed" },
+        },
+      ]);
+      h.client.supportedCommands = ["set_hinge_angle"];
+      h.client.setHingeAngleResult({ success: true, totalTimeMs: 0 });
+      const result = await h.feature.executeHingeAngle(150);
+      expect(result).toMatchObject({ hingeAngle: 150, posture: "closed" });
+      expect("observedHingeAngle" in result).toBe(false);
+    });
+
+    test("indeterminate iOS panel reports unknown with a reason", async () => {
+      const h = makeIosFeature();
+      h.client.supportedCommands = ["set_hinge_angle"];
+      expect(await h.feature.executeHingeAngle(90)).toMatchObject({
+        hingeAngle: 90,
+        posture: "unknown",
+        postureReason: expect.any(String),
+      });
+    });
+
+    test.each([{ supported: null }, { supported: [] }, { supported: ["tap"] }])(
+      "unadvertised iOS runner %j requests a re-cut without sending or notifying",
+      async ({ supported }) => {
+        const h = makeIosFeature();
+        h.client.supportedCommands = supported;
+        expect(await h.feature.executeHingeAngle(90)).toMatchObject({
+          status: "unsupported",
+          message: expect.stringContaining("re-cut"),
+        });
+        expect(h.client.getHingeAngleHistory()).toEqual([]);
+        expect(h.sequence).toEqual([]);
+      },
+    );
+
+    test("absent iOS capability method requests a runner re-cut", async () => {
+      const h = makeIosFeature();
+      Object.defineProperty(h.client, "getSupportedCommands", { value: undefined });
+      const result = await h.feature.executeHingeAngle(90);
+      expect(result).toMatchObject({
+        status: "unsupported",
+        message: expect.stringContaining("8547"),
+      });
+      expect(h.client.getHingeAngleHistory()).toEqual([]);
+      expect(h.sequence).toEqual([]);
+    });
+
+    test("iOS runner failures after advertising remain actionable", async () => {
+      const h = makeIosFeature();
+      h.client.supportedCommands = ["set_hinge_angle"];
+      h.client.setHingeAngleResult({
+        success: false,
+        error: "Rejected hinge event",
+        totalTimeMs: 0,
+      });
+      await expect(h.feature.executeHingeAngle(90)).rejects.toThrow("Rejected hinge event");
+      expect(h.sequence).toEqual([]);
+    });
+
+    test("iOS angle requires a multi-panel simulator before capability probing", async () => {
+      const h = makeIosFeature({ ...duo, displays: { panels: [], postures: ["opened"] } });
+      h.client.supportedCommands = ["set_hinge_angle"];
+      expect(await h.feature.executeHingeAngle(90)).toEqual({
+        status: "unsupported",
+        message: "This iOS simulator is not a foldable device.",
+      });
+      expect(h.client.getHingeAngleHistory()).toEqual([]);
+    });
+
+    test.each([
+      { ...duo, deviceId: "physical-iphone" },
+      { ...duo, deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16" },
+    ])("unsupported iOS target %j sends nothing", async (device) => {
+      const h = makeIosFeature(device);
+      h.client.supportedCommands = ["set_hinge_angle"];
+      expect(await h.feature.executeHingeAngle(90)).toMatchObject({ status: "unsupported" });
+      expect(h.client.getHingeAngleHistory()).toEqual([]);
+      expect(h.sequence).toEqual([]);
+    });
+  });
 
   for (const invalidation of [
     "transition",
@@ -1309,6 +1691,7 @@ for (const platform of ["ios", "android"] as const) {
       const clears = () => clear.mock.calls.filter(([id]) => id === device.deviceId).length;
       const events: string[] = [];
       const client = new FakeIOSCtrlProxy(timer);
+      client.supportedCommands = ["set_hinge_angle"];
       const adb = new FakeAdbExecutor();
       let posture: Posture = "opened";
       let held: { stage: string; started: () => void; promise: Promise<void> } | undefined;
@@ -1406,6 +1789,63 @@ for (const platform of ["ios", "android"] as const) {
         await Promise.resolve();
       }
     }
+
+    test.each([false, true])(
+      "angle-first=%s shares the posture readiness lock",
+      async (angleFirst) => {
+        const h = harness();
+        const gate = h.block(
+          angleFirst
+            ? platform === "ios"
+              ? "hinge"
+              : "emu sensor set hinge-angle0 90"
+            : undefined,
+        );
+        const first = angleFirst
+          ? h.create().executeHingeAngle(90)
+          : h.create().execute(firstPosture);
+        await gate.started;
+        const before = h.sent();
+        const second = angleFirst ? h.create().execute("closed") : h.create().executeHingeAngle(90);
+        await drainMicrotasks();
+        expect(h.sent()).toBe(before);
+        gate.resolve();
+        h.timer.enableAutoAdvance();
+        try {
+          await first;
+          await expect(second).resolves.toMatchObject(
+            angleFirst ? { posture: "closed" } : { hingeAngle: 90 },
+          );
+          expect(pendingPostureOperationCountForTest()).toBe(0);
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+
+    test("a later angle supersedes a hung posture after the bounded wait", async () => {
+      const h = harness();
+      const gate = h.block();
+      const first = h.create().execute(firstPosture);
+      const outcome = first.catch((error: unknown) => error);
+      await gate.started;
+      const second = h.create().executeHingeAngle(90);
+      await drainMicrotasks();
+      h.timer.advanceTime(18_000);
+      await second;
+      const events = [...h.events];
+      gate.resolve();
+      h.timer.enableAutoAdvance();
+      try {
+        expect(await outcome).toMatchObject({
+          message: "Posture request cancelled; superseded by a later setPosture request",
+        });
+        expect(h.events).toEqual(events);
+        expect(pendingPostureOperationCountForTest()).toBe(0);
+      } finally {
+        h.cleanup();
+      }
+    });
 
     test("queues all device work until the preceding operation finishes", async () => {
       const h = harness();

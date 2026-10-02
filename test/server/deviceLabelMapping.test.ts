@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -7,7 +7,11 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../src/models";
-import { buildDeviceLabelMap, getDeviceLabelMap } from "../../src/server/deviceLabelMapping";
+import {
+  buildDeviceLabelMap,
+  getDeviceLabelMap,
+  registerDeviceLabelMap,
+} from "../../src/server/deviceLabelMapping";
 
 /**
  * Behavioral coverage for the device-label map's read/write path through the REAL
@@ -65,5 +69,82 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
   test("getDeviceLabelMap returns null when the daemon is not initialized", () => {
     DaemonState.getInstance().reset();
     expect(getDeviceLabelMap("base")).toBeNull();
+  });
+
+  test("registerDeviceLabelMap keeps the real single-label base setup and publication", async () => {
+    await sessionManager.createSession("base", androidA.deviceId, "android");
+    // Already-ready fake device: the real context path needs no CtrlProxy/ADB I/O.
+    sessionManager.setDeviceReadiness("base", "automationReady");
+    const originalSetup = sessionManager.trackSessionSetup.bind(sessionManager);
+    const setup = spyOn(sessionManager, "trackSessionSetup").mockImplementation((session, work) => {
+      expect(getDeviceLabelMap("base")).toEqual({ A: "base" });
+      return originalSetup(session, work);
+    });
+    try {
+      expect(
+        await registerDeviceLabelMap("base", ["A"], undefined, { keepScreenAwake: false }),
+      ).toEqual({ A: "base" });
+      expect(getDeviceLabelMap("base")).toEqual({ A: "base" });
+      expect(setup).toHaveBeenCalledTimes(1);
+      expect(setup.mock.calls[0][0].sessionId).toBe("base");
+      expect(sessionManager.getDeviceReadiness("base")).toBe("automationReady");
+    } finally {
+      setup.mockRestore();
+    }
+  });
+
+  test("failed label setup leaves published ownership intact without releasing sessions or devices", async () => {
+    await sessionManager.createSession("base", androidA.deviceId, "android");
+    sessionManager.setDeviceReadiness("base", "automationReady");
+    const pool = DaemonState.getInstance().getDevicePool();
+    for (const [label, deviceId] of [
+      ["B", "emulator-5556"],
+      ["C", "emulator-5558"],
+      ["D", "emulator-5560"],
+    ]) {
+      await pool.addDevice({ ...androidA, name: `Pixel ${label}`, deviceId });
+      await sessionManager.createSession(`base:${label}`, deviceId, "android");
+      sessionManager.setDeviceReadiness(`base:${label}`, "automationReady");
+    }
+    const failure = new Error("B readiness failed");
+    const originalSetup = sessionManager.trackSessionSetup.bind(sessionManager);
+    const setup = spyOn(sessionManager, "trackSessionSetup").mockImplementation((session, work) => {
+      if (session.sessionId === "base:B") {
+        return Promise.reject(failure);
+      }
+      return originalSetup(session, work);
+    });
+    const releaseSession = spyOn(sessionManager, "releaseSession");
+    const releaseDevice = spyOn(pool, "releaseDevice");
+    try {
+      const error = await registerDeviceLabelMap("base", ["A", "B", "C", "D"], undefined, {
+        keepScreenAwake: false,
+      }).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(error).toBe(failure);
+      expect(setup.mock.calls.map(([session]) => session.sessionId)).toEqual([
+        "base",
+        "base:B",
+        "base:C",
+        "base:D",
+      ]);
+      expect(getDeviceLabelMap("base")).toEqual({
+        A: "base",
+        B: "base:B",
+        C: "base:C",
+        D: "base:D",
+      });
+      for (const label of ["B", "C", "D"]) {
+        expect(sessionManager.getSession(`base:${label}`)).not.toBeNull();
+      }
+      expect(releaseSession).not.toHaveBeenCalled();
+      expect(releaseDevice).not.toHaveBeenCalled();
+    } finally {
+      setup.mockRestore();
+      releaseSession.mockRestore();
+      releaseDevice.mockRestore();
+    }
   });
 });

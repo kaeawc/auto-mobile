@@ -24,6 +24,40 @@ count_paren_depth() {
   paren_delta=$(( ${#opens} - ${#closes} ))
 }
 
+# Recognize an accessor list with a small token state machine. Attributes and
+# source order are retained; whitespace is normalized for either spelling.
+# Invalid/body-like groups fall back to emitting just the declaration.
+normalize_accessors() {
+  local rest="$1" word attribute last_accessor="" waiting=false seen=false
+  accessor_list_valid=false
+  accessor_text=""
+  while [[ -n "$rest" ]]; do
+    rest="${rest#"${rest%%[![:space:]]*}"}"
+    [[ -n "$rest" ]] || break
+    if [[ "$rest" == @* && "$rest" =~ $attribute_pattern ]]; then
+      attribute="${BASH_REMATCH[0]}"
+      rest="${rest#"$attribute"}"
+      attribute="${attribute%"${attribute##*[![:space:]]}"}"
+      accessor_text="${accessor_text:+$accessor_text }$attribute"
+      waiting=true
+      continue
+    fi
+    word="${rest%%[[:space:]]*}"
+    rest="${rest#"$word"}"
+    accessor_text="${accessor_text:+$accessor_text }$word"
+    case "$word" in
+      mutating|nonmutating) waiting=true; last_accessor="" ;;
+      get|set|_read|_modify|willSet|didSet)
+        last_accessor="$word"; waiting=false; seen=true ;;
+      async|throws) [[ "$last_accessor" == get && "$waiting" == false ]] || return 0 ;;
+      *) return 0 ;;
+    esac
+  done
+  if [[ "$seen" == true && "$waiting" == false ]]; then
+    accessor_list_valid=true
+  fi
+}
+
 # Strip the function body's opening brace from a declaration string.
 # Unlike ${var%%\{*}, this preserves braces inside default closure values
 # (e.g., `timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() }`)
@@ -37,26 +71,32 @@ strip_body_brace() {
   local i=0
   local len=${#s}
   local last_open_at=-1
+  local group_close_at=-1
   while (( i < len )); do
     local ch="${s:i:1}"
     if [[ "$ch" == "{" ]]; then
       if (( depth == 0 )); then
         last_open_at=$i
+        group_close_at=-1
       fi
       depth=$((depth + 1))
     elif [[ "$ch" == "}" ]]; then
       depth=$((depth - 1))
+      if (( depth == 0 )); then
+        group_close_at=$i
+      fi
     fi
     i=$((i + 1))
   done
   if (( last_open_at >= 0 )); then
-    local brace_group="${s:last_open_at}"
-    # Keep same-line accessor requirements. Multi-line accessor blocks still
-    # emit only the declaration; their get/set lines are not declarations.
-    if [[ "${2:-}" == protocol && "$brace_group" =~ ^\{[[:space:]]*(get|set|_read|_modify|willSet|didSet)([[:space:]}]|$) && "$brace_group" == *\}* ]]; then
-      stripped_signature="$s"
-    else
-      stripped_signature="${s:0:last_open_at}"
+    stripped_signature="${s:0:last_open_at}"
+    # Protocol accessor requirements use the same normalization as collected
+    # multi-line blocks; computed-property bodies remain declaration-only.
+    if [[ "${2:-}" == protocol ]] && (( group_close_at > last_open_at )); then
+      normalize_accessors "${s:last_open_at+1:group_close_at-last_open_at-1}"
+      if [[ "$accessor_list_valid" == true ]]; then
+        stripped_signature="${stripped_signature%"${stripped_signature##*[![:space:]]}"} { $accessor_text }${s:group_close_at+1}"
+      fi
     fi
   else
     stripped_signature="$s"
@@ -64,7 +104,9 @@ strip_body_brace() {
 }
 
 # Remove comments and string contents for scope tracking only; emitted signatures
-# still use the original text. This is a source scanner, not a Swift parser:
+# still use the original text. signature_code also removes comments but keeps
+# ordinary quoted strings for accessor attributes. This is a source scanner,
+# not a Swift parser:
 # nested block comments, string interpolation and custom raw-string delimiters
 # are not interpreted. Ordinary escaped strings and triple-quoted strings cover
 # the SDK's current sources. Conditional-compilation branches are all scanned.
@@ -72,6 +114,7 @@ scan_scope_code() {
   local rest="$1" token prefix
   local token_pattern='("""|"([^"\\]|\\.)*"|//.*|/\*)'
   scope_code=""
+  signature_code=""
   while [[ -n "$rest" ]]; do
     if [[ "$in_block_comment" == true ]]; then
       if [[ "$rest" != *\*/* ]]; then
@@ -89,14 +132,17 @@ scan_scope_code() {
       token="${BASH_REMATCH[0]}"
       prefix="${rest%%"$token"*}"
       scope_code="$scope_code$prefix "
+      signature_code="$signature_code$prefix"
       rest="${rest#*"$token"}"
       case "$token" in
         //*) break ;;
-        '/*') in_block_comment=true ;;
+        '/*') in_block_comment=true; signature_code="$signature_code " ;;
         '"""') in_multiline_string=true ;;
+        *) signature_code="$signature_code$token" ;;
       esac
     else
       scope_code="$scope_code$rest"
+      signature_code="$signature_code$rest"
       break
     fi
   done
@@ -106,6 +152,46 @@ scan_scope_code() {
 generate_api() {
   local current_file=""
   local paren_delta=0 stripped_signature=""
+  local accessor_list_valid=false accessor_text=""
+  local type_pattern='^((public|open|private|fileprivate|internal)[[:space:]]+)?((final|indirect)[[:space:]]+)?(class|struct|enum|protocol|extension|actor)[[:space:]]'
+  local type_name_pattern='^([[:alnum:]_]+)([[:space:]<{:]|$)'
+  local attribute_pattern='^@[[:alnum:]_.]+(\([^)]*\))?[[:space:]]*'
+  local public_types=" " swift_files
+  # Files are sorted by relative path in C-locale byte order. Declarations
+  # within each file stay in source order, under a '// <relpath>' header.
+  swift_files="$(find "$SDK_SOURCES" -name "*.swift" -not -name "PrivacyInfo*" | LC_ALL=C sort)"
+
+  # First pass: collect only public/open top-level type names module-wide.
+  # Reuse lexical handling so comments, strings and nested types cannot add
+  # names. No declaration/context machinery is needed in this cheap pass.
+  while IFS= read -r swift_file; do
+    [[ -n "$swift_file" ]] || continue
+    local brace_depth=0 scope_code="" signature_code=""
+    local in_block_comment=false in_multiline_string=false
+    while IFS= read -r line; do
+      local stripped="${line#"${line%%[![:space:]]*}"}"
+      if [[ "$in_block_comment" == true || "$in_multiline_string" == true || "$line" == *\"* || "$line" == */* ]]; then
+        scan_scope_code "$stripped"
+      else
+        scope_code="$stripped"
+      fi
+      if (( brace_depth == 0 )); then
+        local declaration="${scope_code#"${scope_code%%[![:space:]]*}"}"
+        while [[ "$declaration" == @* && "$declaration" =~ $attribute_pattern ]]; do
+          declaration="${declaration#"${BASH_REMATCH[0]}"}"
+        done
+        if [[ "$declaration" =~ $type_pattern ]]; then
+          local access="${BASH_REMATCH[2]}" type_kind="${BASH_REMATCH[5]}"
+          local type_name="${declaration#"${BASH_REMATCH[0]}"}"
+          if [[ ( "$access" == public || "$access" == open ) && "$type_kind" != extension && "$type_name" =~ $type_name_pattern ]]; then
+            public_types="$public_types${BASH_REMATCH[1]} "
+          fi
+        fi
+      fi
+      local opens="${scope_code//[^\{]/}" closes="${scope_code//[^\}]/}"
+      brace_depth=$((brace_depth + ${#opens} - ${#closes}))
+    done < "$swift_file"
+  done <<< "$swift_files"
 
   # Emit a file header comment when entering a new source file.
   emit_file_header() {
@@ -118,6 +204,7 @@ generate_api() {
   }
 
   while IFS= read -r swift_file; do
+    [[ -n "$swift_file" ]] || continue
     local rel_path="${swift_file#"$SDK_SOURCES/"}"
     local collecting_multiline=false
     local collecting_case=false
@@ -126,13 +213,12 @@ generate_api() {
     local brace_depth=0 context_count=0
     local context_depths=() context_kinds=() context_public=() context_default_public=()
     local pending_kind="" pending_public=false pending_depth=0
-    local pending_default_public=false public_types=" "
+    local pending_default_public=false
     local pending_attributes=""
     local held_member="" held_indent=""
-    local scope_code="" in_block_comment=false in_multiline_string=false
-    local type_pattern='^((public|open|private|fileprivate|internal)[[:space:]]+)?((final|indirect)[[:space:]]+)?(class|struct|enum|protocol|extension|actor)[[:space:]]'
-    local type_name_pattern='^([[:alnum:]_]+)([[:space:]<{:]|$)'
-    local attribute_pattern='^@[[:alnum:]_.]+(\([^)]*\))?[[:space:]]*'
+    local scope_code="" signature_code="" in_block_comment=false in_multiline_string=false
+    local accessor_pending=false collecting_accessors=false accessor_depth=0
+    local accessor_buffer="" requirement_accessors=false
     local member_pattern='^((static|class|mutating|nonmutating|optional|override|final|convenience|required|nonisolated|indirect)[[:space:]]+)*(func|var|let|init[?!]?|subscript|associatedtype|typealias)([[:space:](<]|$)'
     local class_member_pattern='^((public|open|private|fileprivate|internal)[[:space:]]+)?class[[:space:]]+(func|var|subscript)([[:space:](]|$)'
 
@@ -146,144 +232,188 @@ generate_api() {
         scan_scope_code "$stripped"
       else
         scope_code="$stripped"
+        signature_code="$stripped"
       fi
       local declaration="${scope_code#"${scope_code%%[![:space:]]*}"}"
       if [[ -z "$stripped" || "$stripped" == //* || ( -z "$declaration" && "$collecting_multiline" == false ) ]]; then
         continue
       fi
-      # Hold each completed signature until the next non-empty code line so
-      # a following where clause can join it. Flush before any other code.
-      local where_continuation=false
-      if [[ -n "$held_member" ]]; then
-        if [[ "$declaration" =~ ^where([[:space:]]|$) ]]; then
-          strip_body_brace "$stripped"
-          local where_words=()
-          read -r -a where_words <<< "$stripped_signature"
-          held_member="$held_member ${where_words[*]}"
-          where_continuation=true
-        fi
-        emit_file_header "$rel_path"
-        echo "$held_indent$held_member"
-        held_member=""
-      fi
-      while [[ "$declaration" == @* && "$declaration" =~ $attribute_pattern ]]; do
-        declaration="${declaration#"${BASH_REMATCH[0]}"}"
-      done
-      if [[ -z "$declaration" && "$stripped" == @* ]]; then
-        pending_attributes="${pending_attributes:+$pending_attributes }${stripped%"${stripped##*[![:space:]]}"}"
-        continue
-      fi
-
-      local kind="" visible=false at_type_depth=false default_public=false
-      if (( context_count > 0 )); then
-        local parent=$((context_count - 1))
-        if (( brace_depth == context_depths[parent] )); then
-          at_type_depth=true
-          kind="${context_kinds[parent]}"
-          visible="${context_public[parent]}"
-          default_public="${context_default_public[parent]}"
-        fi
-      fi
-
-      # Track non-public types too: a public enum nested in an internal type
-      # does not expose its cases. A pending context allows a next-line '{'.
-      if [[ "$collecting_multiline" == false && ( "$brace_depth" == 0 || "$at_type_depth" == true ) && ! "$declaration" =~ $class_member_pattern && "$declaration" =~ $type_pattern ]]; then
-        pending_kind="${BASH_REMATCH[5]}"
-        local access="${BASH_REMATCH[2]}"
-        local type_name="${declaration#"${BASH_REMATCH[0]}"}"
-        if [[ "$type_name" =~ $type_name_pattern ]]; then
-          type_name="${BASH_REMATCH[1]}"
-        else
-          type_name=""
-        fi
-        pending_depth=$brace_depth
-        pending_public=false
-        pending_default_public=false
-        if [[ "$access" == public || "$access" == open || ( -z "$access" && "$kind" == extension && "$default_public" == true ) ]]; then
-          if (( brace_depth == 0 )) || [[ "$at_type_depth" == true && "$visible" == true ]]; then
-            pending_public=true
-            pending_default_public=true
-          fi
-        fi
-        # Same-file earlier top-level declarations suffice; unqualified
-        # extensions do not grant public access to implicit members.
-        if (( brace_depth == 0 )) && [[ -n "$type_name" ]]; then
-          if [[ "$pending_kind" != extension && "$pending_public" == true ]]; then
-            public_types="$public_types$type_name "
-          elif [[ "$pending_kind" == extension && -z "$access" && "$public_types" == *" $type_name "* ]]; then
-            pending_public=true
-          fi
-        fi
-      fi
-
-      # If collecting a multi-line declaration, append
-      local signature="" indent="  "
-      if [[ "$where_continuation" == true ]]; then
-        :
-      elif [[ "$collecting_multiline" == true ]]; then
-        multiline_buffer="$multiline_buffer $stripped"
-        count_paren_depth "$scope_code"
-        paren_depth=$(( paren_depth + paren_delta ))
-        local continuation_code="${scope_code%"${scope_code##*[![:space:]]}"}"
-        # Cases also continue across a trailing comma after balanced parens.
-        if [[ $paren_depth -le 0 && ( "$collecting_case" == false || "$continuation_code" != *, ) ]]; then
-          collecting_multiline=false
-          collecting_case=false
-          signature="$multiline_buffer"
-        fi
-      elif [[ "$declaration" =~ ^public[[:space:]]+((final|indirect)[[:space:]]+)?(class|struct|enum|protocol|extension)[[:space:]] ]]; then
-        # Preserve the existing type headers and member formatting verbatim.
-        signature="$stripped"
-        indent=""
-      else
-        local record=false
-        if [[ "$declaration" =~ ^public[[:space:]] ]]; then
-          record=true
-        elif [[ "$at_type_depth" == true && "$visible" == true ]]; then
-          if [[ "$kind" == enum && "$declaration" =~ ^(indirect[[:space:]]+)?case[[:space:]] ]]; then
-            record=true
-          elif [[ ( "$kind" == protocol || ( "$kind" == extension && "$default_public" == true ) ) && "$declaration" =~ $member_pattern ]]; then
-            record=true
-          elif [[ "$kind" == extension && "$default_public" == true && "$declaration" =~ $type_pattern && -z "${BASH_REMATCH[2]}" ]]; then
-            record=true
-          fi
-        fi
-        if [[ "$record" == true ]]; then
-          count_paren_depth "$scope_code"
-          paren_depth=$paren_delta
-          collecting_case=false
-          if [[ "$kind" == enum && "$declaration" =~ ^(indirect[[:space:]]+)?case[[:space:]] ]]; then
-            collecting_case=true
-          fi
-          local case_code="${scope_code%"${scope_code##*[![:space:]]}"}"
-          if [[ $paren_depth -gt 0 || ( "$collecting_case" == true && "$case_code" == *, ) ]]; then
-            collecting_multiline=true
-            multiline_buffer="$stripped"
-          else
-            signature="$stripped"
-          fi
-        fi
-      fi
-
-      if [[ -n "$pending_attributes" ]]; then
-        if [[ -n "$signature" ]]; then
-          signature="$pending_attributes $signature"
-        elif [[ "$collecting_multiline" == true ]]; then
-          multiline_buffer="$pending_attributes $multiline_buffer"
-        fi
-        pending_attributes=""
-      fi
-
-      if [[ -n "$signature" ]]; then
-        local member
-        strip_body_brace "$signature" "$kind"
-        member="$stripped_signature"
-        member="${member%"${member##*[![:space:]]}"}"
-        held_member="$member"
-        held_indent="$indent"
-      fi
-
       local opens="${scope_code//[^\{]/}" closes="${scope_code//[^\}]/}"
+      local accessor_line_consumed=false
+      if [[ "$accessor_pending" == true ]]; then
+        accessor_pending=false
+        if [[ "$declaration" == \{* ]]; then
+          collecting_accessors=true
+          accessor_depth=$((brace_depth + 1))
+          local accessor_line="${signature_code#"${signature_code%%[![:space:]]*}"}"
+          accessor_buffer="${accessor_line#\{}"
+          accessor_line_consumed=true
+          if (( brace_depth + ${#opens} - ${#closes} < accessor_depth )); then
+            strip_body_brace "$held_member $accessor_line" protocol
+            held_member="$stripped_signature"
+            collecting_accessors=false
+          fi
+        fi
+      elif [[ "$collecting_accessors" == true ]]; then
+        accessor_line_consumed=true
+        if (( brace_depth + ${#opens} - ${#closes} < accessor_depth )); then
+          accessor_buffer="$accessor_buffer ${signature_code%%\}*}"
+          normalize_accessors "$accessor_buffer"
+          if [[ "$accessor_list_valid" == true ]]; then
+            held_member="$held_member { $accessor_text }"
+          fi
+          collecting_accessors=false
+        else
+          accessor_buffer="$accessor_buffer $signature_code"
+        fi
+      fi
+      # Accessor lines bypass declaration emission but still reach the shared
+      # brace/context update below, including a next-line opening brace.
+      if [[ "$accessor_line_consumed" == false ]]; then
+        # Hold each completed signature until the next non-empty code line so
+        # a following where clause can join it. Flush before any other code.
+        local where_continuation=false
+        if [[ -n "$held_member" ]]; then
+          if [[ "$declaration" =~ ^where([[:space:]]|$) ]]; then
+            strip_body_brace "$stripped"
+            local where_words=()
+            read -r -a where_words <<< "$stripped_signature"
+            held_member="$held_member ${where_words[*]}"
+            where_continuation=true
+          fi
+          emit_file_header "$rel_path"
+          echo "$held_indent$held_member"
+          held_member=""
+        fi
+        while [[ "$declaration" == @* && "$declaration" =~ $attribute_pattern ]]; do
+          declaration="${declaration#"${BASH_REMATCH[0]}"}"
+        done
+        if [[ -z "$declaration" && "$stripped" == @* ]]; then
+          pending_attributes="${pending_attributes:+$pending_attributes }${stripped%"${stripped##*[![:space:]]}"}"
+          continue
+        fi
+
+        local kind="" visible=false at_type_depth=false default_public=false
+        if (( context_count > 0 )); then
+          local parent=$((context_count - 1))
+          if (( brace_depth == context_depths[parent] )); then
+            at_type_depth=true
+            kind="${context_kinds[parent]}"
+            visible="${context_public[parent]}"
+            default_public="${context_default_public[parent]}"
+          fi
+        fi
+
+        # Track non-public types too: a public enum nested in an internal type
+        # does not expose its cases. A pending context allows a next-line '{'.
+        if [[ "$collecting_multiline" == false && ( "$brace_depth" == 0 || "$at_type_depth" == true ) && ! "$declaration" =~ $class_member_pattern && "$declaration" =~ $type_pattern ]]; then
+          pending_kind="${BASH_REMATCH[5]}"
+          local access="${BASH_REMATCH[2]}"
+          local type_name="${declaration#"${BASH_REMATCH[0]}"}"
+          if [[ "$type_name" =~ $type_name_pattern ]]; then
+            type_name="${BASH_REMATCH[1]}"
+          else
+            type_name=""
+          fi
+          pending_depth=$brace_depth
+          pending_public=false
+          pending_default_public=false
+          if [[ "$access" == public || "$access" == open || ( -z "$access" && "$kind" == extension && "$default_public" == true ) ]]; then
+            if (( brace_depth == 0 )) || [[ "$at_type_depth" == true && "$visible" == true ]]; then
+              pending_public=true
+              pending_default_public=true
+            fi
+          fi
+          # Module-wide top-level visibility is known before emitting any file.
+          # Unqualified extensions still give no default public member access.
+          if (( brace_depth == 0 )) && [[ -n "$type_name" && "$pending_kind" == extension && -z "$access" && "$public_types" == *" $type_name "* ]]; then
+            pending_public=true
+          fi
+        fi
+
+        # If collecting a multi-line declaration, append
+        local signature="" indent="  "
+        if [[ "$where_continuation" == true ]]; then
+          :
+        elif [[ "$collecting_multiline" == true ]]; then
+          multiline_buffer="$multiline_buffer $stripped"
+          count_paren_depth "$scope_code"
+          paren_depth=$(( paren_depth + paren_delta ))
+          local continuation_code="${scope_code%"${scope_code##*[![:space:]]}"}"
+          # Cases also continue across a trailing comma after balanced parens.
+          if [[ $paren_depth -le 0 && ( "$collecting_case" == false || "$continuation_code" != *, ) ]]; then
+            collecting_multiline=false
+            collecting_case=false
+            signature="$multiline_buffer"
+          fi
+        elif [[ "$declaration" =~ ^public[[:space:]]+((final|indirect)[[:space:]]+)?(class|struct|enum|protocol|extension)[[:space:]] ]]; then
+          # Preserve the existing type headers and member formatting verbatim.
+          signature="$stripped"
+          indent=""
+          requirement_accessors=false
+        else
+          local record=false
+          if [[ "$declaration" =~ ^public[[:space:]] ]]; then
+            record=true
+          elif [[ "$at_type_depth" == true && "$visible" == true ]]; then
+            if [[ "$kind" == enum && "$declaration" =~ ^(indirect[[:space:]]+)?case[[:space:]] ]]; then
+              record=true
+            elif [[ ( "$kind" == protocol || ( "$kind" == extension && "$default_public" == true ) ) && "$declaration" =~ $member_pattern ]]; then
+              record=true
+            elif [[ "$kind" == extension && "$default_public" == true && "$declaration" =~ $type_pattern && -z "${BASH_REMATCH[2]}" ]]; then
+              record=true
+            fi
+          fi
+          if [[ "$record" == true ]]; then
+            requirement_accessors=false
+            if [[ "$kind" == protocol && "$declaration" =~ $member_pattern && ( "${BASH_REMATCH[3]}" == var || "${BASH_REMATCH[3]}" == subscript ) ]]; then
+              requirement_accessors=true
+            fi
+            count_paren_depth "$scope_code"
+            paren_depth=$paren_delta
+            collecting_case=false
+            if [[ "$kind" == enum && "$declaration" =~ ^(indirect[[:space:]]+)?case[[:space:]] ]]; then
+              collecting_case=true
+            fi
+            local case_code="${scope_code%"${scope_code##*[![:space:]]}"}"
+            if [[ $paren_depth -gt 0 || ( "$collecting_case" == true && "$case_code" == *, ) ]]; then
+              collecting_multiline=true
+              multiline_buffer="$stripped"
+            else
+              signature="$stripped"
+            fi
+          fi
+        fi
+
+        if [[ -n "$pending_attributes" ]]; then
+          if [[ -n "$signature" ]]; then
+            signature="$pending_attributes $signature"
+          elif [[ "$collecting_multiline" == true ]]; then
+            multiline_buffer="$pending_attributes $multiline_buffer"
+          fi
+          pending_attributes=""
+        fi
+
+        if [[ -n "$signature" ]]; then
+          local member
+          strip_body_brace "$signature" "$kind"
+          member="$stripped_signature"
+          member="${member%"${member##*[![:space:]]}"}"
+          held_member="$member"
+          held_indent="$indent"
+          if [[ "$requirement_accessors" == true ]]; then
+            local ending="${scope_code%"${scope_code##*[![:space:]]}"}"
+            if [[ "$ending" == *\{ ]]; then
+              collecting_accessors=true
+              accessor_depth=$((brace_depth + 1))
+              accessor_buffer=""
+            elif [[ -z "$opens" ]]; then
+              accessor_pending=true
+            fi
+          fi
+        fi
+      fi
+
       if [[ -n "$pending_kind" && -n "$opens" ]]; then
         context_depths[context_count]=$((pending_depth + 1))
         context_kinds[context_count]="$pending_kind"
@@ -308,7 +438,7 @@ generate_api() {
       emit_file_header "$rel_path"
       echo "$held_indent$held_member"
     fi
-  done < <(find "$SDK_SOURCES" -name "*.swift" -not -name "PrivacyInfo*" | sort)
+  done <<< "$swift_files"
 }
 
 output="$(generate_api)"

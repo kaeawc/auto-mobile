@@ -1,11 +1,21 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import {
   pushInitialObservationFramesForSubscriber,
   selectObservationStreamDevices,
+  type InitialObservationFrame,
   type ObservationStreamAndroidClient,
   type ObservationStreamDevice,
   type ObservationStreamIosClient,
 } from "../../src/daemon/observationInitialFrame";
+import {
+  DefaultObservationInitialFrameCoordinator,
+  INITIAL_FRAME_FRESHNESS_WINDOW_MS,
+  INITIAL_FRAME_CAPTURE_DEADLINE_MS,
+} from "../../src/daemon/observationInitialFrameCoordinator";
+import type { InitialFrameSubscriber } from "../../src/daemon/deviceDataStreamSocketServer";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { ActionableError } from "../../src/models/ActionableError";
+import { logger } from "../../src/utils/logger";
 import type { ViewHierarchyResult } from "../../src/models";
 import type {
   AccessibilityHierarchy,
@@ -55,6 +65,7 @@ class FakeObservationStreamServer {
       nativeScale?: number;
       frameContext?: string;
       rotation?: number;
+      initialFrameSubscriber?: InitialFrameSubscriber;
     },
   ): void {
     const screenshotOptions =
@@ -1148,5 +1159,571 @@ describe("pushInitialObservationFramesForSubscriber", () => {
     expect(streamServer.hierarchyUpdates).toHaveLength(0);
     expect(streamServer.screenshotUpdates).toHaveLength(0);
     expect(androidClient.latestHierarchyCalls).toHaveLength(0);
+  });
+});
+
+class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
+  readonly deliveries = new Map<string, FakeObservationStreamServer>();
+  readonly scopes = new Map<string, string | null>();
+
+  readonly eligibility = new Map<string, (deviceId: string) => boolean>();
+
+  register(
+    id: string,
+    scope: string | null,
+    allowed: (deviceId: string) => boolean = () => true,
+  ): void {
+    this.deliveries.set(id, new FakeObservationStreamServer(42));
+    this.scopes.set(id, scope);
+    this.eligibility.set(id, allowed);
+  }
+
+  private destinations(
+    deviceId: string,
+    target?: InitialFrameSubscriber,
+  ): FakeObservationStreamServer[] {
+    if (
+      !target ||
+      target.signal.aborted ||
+      !this.eligibility.get(target.subscriptionId)?.(deviceId)
+    ) {
+      return [];
+    }
+    return [...this.deliveries].flatMap(([id, destination]) => {
+      const scope = this.scopes.get(id);
+      return (!target.replay || id === target.subscriptionId) &&
+        (scope === null || scope === deviceId) &&
+        this.eligibility.get(id)?.(deviceId)
+        ? [destination]
+        : [];
+    });
+  }
+
+  override pushHierarchyUpdate(
+    deviceId: string,
+    hierarchy: ViewHierarchyResult,
+    frameContext?: string,
+    target?: InitialFrameSubscriber,
+  ): number | null {
+    const destinations = this.destinations(deviceId, target);
+    for (const destination of destinations) {
+      destination.pushHierarchyUpdate(deviceId, hierarchy, frameContext);
+    }
+    return destinations.length > 0 ? 42 : null;
+  }
+
+  override pushScreenshotUpdate(
+    deviceId: string,
+    data: string,
+    width: number,
+    height: number,
+    metadata?: Record<string, unknown>,
+    options?: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[5],
+  ): void {
+    for (const destination of this.destinations(deviceId, options?.initialFrameSubscriber)) {
+      destination.pushScreenshotUpdate(deviceId, data, width, height, metadata, options);
+    }
+  }
+}
+
+function coalescingHarness(maxConcurrency = 2) {
+  const timer = new FakeTimer();
+  const coordinator = new DefaultObservationInitialFrameCoordinator(timer, maxConcurrency);
+  const server = new FakeTargetedInitialFrameServer();
+  const devices: ObservationStreamDevice[] = Array.from({ length: 5 }, (_, i) => ({
+    id: `device-${i}`,
+    name: `Pixel ${i}`,
+    platform: "android",
+  }));
+  const captures: string[] = [];
+  const clients: DeferredConnectionAndroidClient[] = [];
+  let connect: (id: string) => Promise<boolean> = async () => true;
+  let nextSubscriber = 0;
+  function request(
+    scope: string | null = null,
+    entitled = devices,
+    allowed: (id: string) => boolean = () => true,
+    maxConcurrency?: number,
+  ) {
+    const id = `pane-${nextSubscriber++}`;
+    const controller = new AbortController();
+    server.register(
+      id,
+      scope,
+      (deviceId) =>
+        !controller.signal.aborted &&
+        entitled.some((device) => device.id === deviceId) &&
+        allowed(deviceId),
+    );
+    const done = pushInitialObservationFramesForSubscriber(scope, entitled, {
+      streamServer: server,
+      coordinator,
+      maxConcurrency,
+      subscriber: { subscriptionId: id, signal: controller.signal },
+      isDeviceAllowed: allowed,
+      androidClientFactory: (device) => {
+        captures.push(device.deviceId);
+        const client = new DeferredConnectionAndroidClient(() => connect(device.deviceId));
+        clients.push(client);
+        return client;
+      },
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS client");
+      },
+    });
+    return { controller, done, frames: server.deliveries.get(id)! };
+  }
+  return {
+    timer,
+    coordinator,
+    server,
+    devices,
+    captures,
+    clients,
+    request,
+    setConnect: (fn: typeof connect) => {
+      connect = fn;
+    },
+  };
+}
+
+describe("coalesced subscriber initial frames", () => {
+  it("captures each device once across N concurrent subscribers and replays only to a new pane", async () => {
+    const h = coalescingHarness();
+    const panes = Array.from({ length: 8 }, () => h.request());
+    await Promise.all(panes.map((pane) => pane.done));
+    expect(h.captures.sort()).toEqual(h.devices.map((device) => device.id));
+    for (const pane of panes) {
+      expect(pane.frames.hierarchyUpdates).toHaveLength(5);
+      expect(pane.frames.screenshotUpdates).toHaveLength(5);
+    }
+    const cached = h.request();
+    await cached.done;
+    expect(h.captures).toHaveLength(5);
+    expect(h.clients.every((client) => client.forwardedInitialHierarchies.length === 1)).toBe(true);
+    expect(cached.frames.screenshotUpdates).toHaveLength(5);
+    expect(panes[0].frames.screenshotUpdates).toHaveLength(5);
+  });
+
+  it("enforces scope and per-request ownership during shared and cached delivery", async () => {
+    const h = coalescingHarness();
+    const gate = deferred<boolean>();
+    h.setConnect(() => gate.promise);
+    const owner = h.request(null, h.devices.slice(0, 2));
+    const scoped = h.request("device-1");
+    const foreign = h.request(null, []);
+    let allowed = true;
+    const revoked = h.request("device-0", h.devices, () => allowed);
+    allowed = false;
+    gate.resolve(true);
+    await Promise.all([owner.done, scoped.done, foreign.done, revoked.done]);
+    expect(scoped.frames.screenshotUpdates.map((frame) => frame.deviceId)).toEqual(["device-1"]);
+    expect(foreign.frames.hierarchyUpdates).toHaveLength(0);
+    expect(foreign.frames.screenshotUpdates).toHaveLength(0);
+    expect(revoked.frames.screenshotUpdates).toHaveLength(0);
+    const cachedForeign = h.request(null, [h.devices[0]], () => false);
+    const cachedScoped = h.request("device-1");
+    await Promise.all([cachedForeign.done, cachedScoped.done]);
+    expect(cachedForeign.frames.screenshotUpdates).toHaveLength(0);
+    expect(cachedForeign.frames.hierarchyUpdates).toHaveLength(0);
+    expect(cachedScoped.frames.screenshotUpdates.map((frame) => frame.deviceId)).toEqual([
+      "device-1",
+    ]);
+    expect(h.captures).toHaveLength(2);
+  });
+
+  it("one disconnect does not cancel the shared capture or delivery to other waiters", async () => {
+    const h = coalescingHarness();
+    const gate = deferred<boolean>();
+    h.setConnect(() => gate.promise);
+    const gone = h.request("device-0");
+    const live = h.request("device-0");
+    gone.controller.abort();
+    await gone.done;
+    gate.resolve(true);
+    await live.done;
+    expect(h.captures).toEqual(["device-0"]);
+    expect(gone.frames.screenshotUpdates).toHaveLength(0);
+    expect(live.frames.hierarchyUpdates).toHaveLength(1);
+    expect(live.frames.screenshotUpdates).toHaveLength(1);
+  });
+
+  it("drops queued captures with no waiters and discards ownerless in-flight results without caching", async () => {
+    const h = coalescingHarness();
+    const gate = deferred<boolean>();
+    const completed = deferred<void>();
+    h.setConnect(async () => {
+      await gate.promise;
+      completed.resolve();
+      return true;
+    });
+    const gone = h.request();
+    expect(h.captures).toEqual(["device-0", "device-1"]);
+    gone.controller.abort();
+    await gone.done;
+    gate.resolve(true);
+    await completed.promise;
+    // Joining an ownerless flight still shares it, rather than launching a duplicate capture.
+    const late = h.request("device-0");
+    await late.done;
+    expect(h.captures).toHaveLength(2);
+    expect(gone.frames.hierarchyUpdates).toHaveLength(0);
+    expect(gone.frames.screenshotUpdates).toHaveLength(0);
+    const recapture = h.request("device-1");
+    await recapture.done;
+    expect(h.captures).toEqual(["device-0", "device-1", "device-1"]);
+  });
+
+  it("logs a failed shared capture for each waiter, continues other devices, and retries", async () => {
+    const h = coalescingHarness();
+    const gate = deferred<boolean>();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      h.setConnect(async (id) => {
+        await gate.promise;
+        if (id === "device-0") {
+          throw new Error("capture failed");
+        }
+        return true;
+      });
+      const first = h.request(null, h.devices.slice(0, 2));
+      const second = h.request("device-0");
+      gate.resolve(true);
+      await Promise.all([first.done, second.done]);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes("Failed to push initial observation frame for device-0"),
+        ),
+      ).toHaveLength(2);
+      expect(first.frames.screenshotUpdates.map((frame) => frame.deviceId)).toEqual(["device-1"]);
+      h.setConnect(async () => true);
+      const retry = h.request("device-0");
+      await retry.done;
+      expect(h.captures.filter((id) => id === "device-0")).toHaveLength(2);
+      expect(retry.frames.screenshotUpdates).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("expires complete frames at the freshness boundary using FakeTimer", async () => {
+    const h = coalescingHarness();
+    await h.request("device-0").done;
+    h.timer.advanceTime(INITIAL_FRAME_FRESHNESS_WINDOW_MS - 1);
+    await h.request("device-0").done;
+    expect(h.captures).toHaveLength(1);
+    h.timer.advanceTime(1);
+    await h.request("device-0").done;
+    expect(h.captures).toHaveLength(2);
+  });
+
+  it("globally caps captures at two across disjoint and overlapping subscriber bursts", async () => {
+    const h = coalescingHarness();
+    const gates = h.devices.map(() => deferred<boolean>());
+    const starts = h.devices.map(() => deferred<void>());
+    let active = 0;
+    let peak = 0;
+    h.setConnect(async (id) => {
+      const index = h.devices.findIndex((device) => device.id === id);
+      active++;
+      peak = Math.max(peak, active);
+      starts[index].resolve();
+      await gates[index].promise;
+      active--;
+      return true;
+    });
+    const first = h.request("device-0");
+    const second = h.request("device-1");
+    const all = h.request();
+    expect(h.captures).toHaveLength(2);
+    gates[0].resolve(true);
+    await starts[2].promise;
+    gates[1].resolve(true);
+    await starts[3].promise;
+    gates[2].resolve(true);
+    await starts[4].promise;
+    gates[3].resolve(true);
+    gates[4].resolve(true);
+    await Promise.all([first.done, second.done, all.done]);
+    expect(peak).toBe(2);
+    expect(h.captures).toHaveLength(5);
+    expect(all.frames.screenshotUpdates).toHaveLength(5);
+  });
+
+  it("applies a dependency concurrency override to the global queue across subscribers", async () => {
+    const h = coalescingHarness();
+    const gate = deferred<boolean>();
+    h.setConnect(() => gate.promise);
+    const first = h.request(null, h.devices, () => true, 1);
+    const second = h.request("device-4");
+    expect(h.captures).toHaveLength(1);
+    gate.resolve(true);
+    await Promise.all([first.done, second.done]);
+    expect(h.captures).toHaveLength(5);
+    expect(second.frames.screenshotUpdates).toHaveLength(1);
+  });
+
+  it("honors a coordinator concurrency override and rejects invalid ranges", async () => {
+    for (const value of [0, -1, 1.5, Number.NaN]) {
+      expect(() => new DefaultObservationInitialFrameCoordinator(new FakeTimer(), value)).toThrow(
+        RangeError,
+      );
+    }
+    const h = coalescingHarness(1);
+    const gate = deferred<boolean>();
+    h.setConnect(() => gate.promise);
+    const all = h.request();
+    expect(h.captures).toHaveLength(1);
+    gate.resolve(true);
+    await all.done;
+    expect(h.captures).toHaveLength(5);
+  });
+
+  it("does not replace newer client geometry when a live hierarchy arrives during initial capture", async () => {
+    const h = coalescingHarness();
+    let generation = 0;
+    const streamServer = Object.assign(h.server, {
+      getCurrentFrameContextGeneration: () => generation,
+    });
+    const screenshotStarted = deferred<void>();
+    const screenshotGate = deferred<void>();
+    class DelayedScreenshotClient extends DeferredConnectionAndroidClient {
+      override async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
+        screenshotStarted.resolve();
+        await screenshotGate.promise;
+        return { success: true, data: "shot" };
+      }
+    }
+    const client = new DelayedScreenshotClient(async () => true);
+    streamServer.register("pane", null);
+    const done = pushInitialObservationFramesForSubscriber("device-0", h.devices, {
+      streamServer,
+      coordinator: h.coordinator,
+      subscriber: { subscriptionId: "pane", signal: new AbortController().signal },
+      androidClientFactory: () => client,
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS");
+      },
+    });
+    await screenshotStarted.promise;
+    generation++;
+    screenshotGate.resolve();
+    await done;
+    expect(client.forwardedInitialHierarchies).toHaveLength(0);
+    expect(streamServer.deliveries.get("pane")?.screenshotUpdates).toHaveLength(0);
+    expect(streamServer.deliveries.get("pane")?.hierarchyUpdates).toHaveLength(0);
+  });
+
+  it("reports a shared screenshot exception once per waiter, still delivers hierarchy, and retries", async () => {
+    const h = coalescingHarness();
+    const screenshotGate = deferred<void>();
+    let screenshots = 0;
+    class RejectingScreenshotClient extends DeferredConnectionAndroidClient {
+      override async captureScreenshotForObservationStream(): Promise<ScreenshotCaptureResult> {
+        screenshots++;
+        await screenshotGate.promise;
+        throw new Error("screenshot failed");
+      }
+    }
+    const client = new RejectingScreenshotClient(async () => true);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    let captures = 0;
+    const request = (id: string) => {
+      h.server.register(id, null);
+      return pushInitialObservationFramesForSubscriber("device-0", h.devices, {
+        streamServer: h.server,
+        coordinator: h.coordinator,
+        subscriber: { subscriptionId: id, signal: new AbortController().signal },
+        androidClientFactory: () => {
+          captures++;
+          return client;
+        },
+        iosClientFactory: () => {
+          throw new Error("unexpected iOS");
+        },
+      });
+    };
+    try {
+      const first = request("first");
+      const second = request("second");
+      screenshotGate.resolve();
+      await Promise.all([first, second]);
+      expect(screenshots).toBe(1);
+      expect(warn.mock.calls).toHaveLength(2);
+      for (const id of ["first", "second"]) {
+        expect(h.server.deliveries.get(id)?.hierarchyUpdates).toHaveLength(1);
+        expect(h.server.deliveries.get(id)?.screenshotUpdates).toHaveLength(0);
+      }
+      await request("retry");
+      expect(captures).toBe(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not cache a connected request with no hierarchy or no screenshot", async () => {
+    const androidDevice: ObservationStreamDevice = {
+      id: "device",
+      name: "Pixel",
+      platform: "android",
+    };
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const server = new FakeTargetedInitialFrameServer();
+    server.register("pane", null);
+    const client = new FakeAndroidInitialFrameClient(true, null);
+    let calls = 0;
+    const deps = {
+      streamServer: server,
+      coordinator,
+      subscriber: { subscriptionId: "pane", signal: new AbortController().signal },
+      androidClientFactory: () => {
+        calls++;
+        return client;
+      },
+      iosClientFactory: () => {
+        throw new Error("unexpected iOS");
+      },
+    };
+    await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
+    await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
+    expect(calls).toBe(2);
+    expect(server.deliveries.get("pane")?.screenshotUpdates).toHaveLength(0);
+    const partial = new FakeAndroidInitialFrameClient(
+      true,
+      {
+        updatedAt: 1,
+        packageName: "app",
+        hierarchy: {},
+      },
+      undefined,
+      true,
+      { success: false },
+    );
+    deps.androidClientFactory = () => {
+      calls++;
+      return partial;
+    };
+    await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
+    await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
+    expect(calls).toBe(4);
+    expect(server.deliveries.get("pane")?.hierarchyUpdates).toHaveLength(2);
+    const disconnected = new FakeAndroidInitialFrameClient(false, null);
+    deps.androidClientFactory = () => {
+      calls++;
+      return disconnected;
+    };
+    await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
+    await pushInitialObservationFramesForSubscriber(null, [androidDevice], deps);
+    expect(calls).toBe(6);
+  });
+});
+
+describe("initial capture deadline and diagnostics", () => {
+  const frame = (): InitialObservationFrame => ({
+    hierarchy: { hierarchy: { node: {} } },
+    screenshot: { data: "shot", width: 1, height: 1, metadata: {} },
+    recordHierarchy: () => {},
+  });
+  async function flushMicrotasks() {
+    for (let i = 0; i < 30; i++) {
+      await Promise.resolve();
+    }
+  }
+
+  it("releases two hung capture slots at the deadline and admits a third device", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const never = new Promise<InitialObservationFrame>(() => {});
+    const signal = new AbortController().signal;
+    const first = coordinator
+      .request("one", () => never, signal)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    const second = coordinator
+      .request("two", () => never, signal)
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    let started = false;
+    const third = coordinator.request(
+      "three",
+      async () => {
+        started = true;
+        return frame();
+      },
+      signal,
+    );
+    timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS - 1);
+    await flushMicrotasks();
+    expect(started).toBe(false);
+    timer.advanceTime(1);
+    await flushMicrotasks();
+    expect(started).toBe(true);
+    expect(await first).toBeInstanceOf(ActionableError);
+    expect(await second).toBeInstanceOf(ActionableError);
+    expect((await third)?.frame.screenshot?.data).toBe("shot");
+  });
+
+  it("ignores a capture resolving after its deadline without delivering or caching it", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const late = Promise.withResolvers<InitialObservationFrame>();
+    const signal = new AbortController().signal;
+    let result: unknown;
+    void coordinator
+      .request("device", () => late.promise, signal)
+      .then(
+        (value) => {
+          result = value;
+        },
+        (error: unknown) => {
+          result = error;
+        },
+      );
+    timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+    await flushMicrotasks();
+    expect(result).toBeInstanceOf(ActionableError);
+    late.resolve(frame());
+    await flushMicrotasks();
+    let recaptured = false;
+    const retry = await coordinator.request(
+      "device",
+      async () => {
+        recaptured = true;
+        return frame();
+      },
+      signal,
+    );
+    expect(recaptured).toBe(true);
+    expect(retry?.replay).toBe(false);
+  });
+
+  it("warns when a shared capture fails after all waiters abort", async () => {
+    const coordinator = new DefaultObservationInitialFrameCoordinator(new FakeTimer());
+    const gate = deferred<void>();
+    const controller = new AbortController();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const failure = new Error("ownerless capture failed");
+    try {
+      const done = coordinator.request(
+        "device",
+        async () => {
+          await gate.promise;
+          throw failure;
+        },
+        controller.signal,
+      );
+      controller.abort();
+      await done;
+      gate.resolve();
+      await flushMicrotasks();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("device"), failure);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

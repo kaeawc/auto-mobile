@@ -201,6 +201,7 @@ function pixelsMatchClaimedGeometry(
  * Per-push options for {@link DeviceDataStreamSocketServer.pushScreenshotUpdate}.
  */
 interface PushScreenshotOptions {
+  initialFrameSubscriber?: InitialFrameSubscriber;
   /** Caller already holds the decoded bytes of `screenshotBase64`; reuse them to measure geometry. */
   decodedImage?: Buffer;
   /**
@@ -264,13 +265,30 @@ interface DeviceDataFilter {
 interface DeviceDataPush {
   message: DeviceDataStreamMessage;
   targetDeviceSessionUuid: string | null;
+  targetFilter?: DeviceDataFilter;
 }
 
 /**
  * Callback invoked when a subscriber connects.
  * Can be used to trigger device WebSocket connections for real-time updates.
  */
-export type OnSubscriberConnectedCallback = (deviceId: string | null) => void;
+export interface InitialFrameSubscriber {
+  subscriptionId: string;
+  signal: AbortSignal;
+  /** Cached delivery must not restore an older frame's global input context or diff baseline. */
+  replay?: boolean;
+  /** Reuse the identity of a shared capture for joined and cached deliveries. */
+  captureSequence?: number;
+  frameContextGeneration?: number;
+  liveFrameGeneration?: number;
+  /** Routing identity bound before the initial capture starts. */
+  deviceSessionUuid?: string | null;
+}
+
+export type OnSubscriberConnectedCallback = (
+  deviceId: string | null,
+  subscriber: InitialFrameSubscriber,
+) => void;
 
 /**
  * Callback invoked when active screenshot cadence may have changed for a device.
@@ -371,14 +389,57 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   /** Most recent device-authored identity received for each device. Kept even when no IDE is
    * subscribed: daemon-side input validation must not depend on an inspector being open. */
   private readonly currentFrameContexts = new Map<string, string>();
-  /** Incremented for every hierarchy accepted from a device, including contextless frames. */
+  /** Advances for accepted hierarchies and full boundaries, including contextless frames. */
   private readonly frameContextGenerations = new Map<string, number>();
+  // Live pushes and device/session invalidation share this one initial-frame generation.
+  private readonly liveFrameGenerations = new Map<string, number>();
+  private nextFrameGeneration = 0;
+  // A full boundary can fence capture-only/removed serials without retaining map entries.
+  private untrackedLiveFrameGeneration = 0;
+
+  getLiveFrameGeneration(deviceId: string): number {
+    return this.liveFrameGenerations.get(deviceId) ?? this.untrackedLiveFrameGeneration;
+  }
+
+  private recordLiveFramePush(deviceId: string): void {
+    this.liveFrameGenerations.set(deviceId, ++this.nextFrameGeneration);
+  }
+
+  /** Fence initial captures/cache while preserving the unchanged screen's input and diff state. */
+  invalidateInitialDeviceFrames(deviceId: string): void {
+    this.recordLiveFramePush(deviceId);
+  }
+
+  /** Full boundary: neither initial nor explicit captures may restore pre-boundary input state. */
+  invalidateDeviceFrames(deviceId: string): void {
+    this.recordLiveFramePush(deviceId);
+    this.recordFrameContext(deviceId);
+    this.previousHierarchyByDevice.delete(deviceId);
+  }
+
+  /** Full removal followed by pruning; never reuse a removed serial's capture generation. */
+  removeDeviceFrames(deviceId: string): void {
+    this.invalidateDeviceFrames(deviceId);
+    this.untrackedLiveFrameGeneration = ++this.nextFrameGeneration;
+    this.liveFrameGenerations.delete(deviceId);
+    this.frameContextGenerations.delete(deviceId);
+  }
+
+  getDeviceSessionUuid(deviceId: string): string | null {
+    return this.deviceSessionResolver.resolveUuid(deviceId);
+  }
 
   getCurrentFrameContext(deviceId: string): string | undefined {
     return this.currentFrameContexts.get(deviceId);
   }
+
+  getCurrentFrameContextGeneration(deviceId: string): number {
+    return this.frameContextGenerations.get(deviceId) ?? this.untrackedLiveFrameGeneration;
+  }
+
   private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
   private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
+  private readonly initialFrameWaiters = new Map<string, AbortController>();
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
   private onScreenshotCadenceChanged: OnScreenshotCadenceChangedCallback | null = null;
   private onHierarchyCadenceChanged: OnHierarchyCadenceChangedCallback | null = null;
@@ -419,6 +480,16 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   /** Wire the serial↔`deviceSessionUuid` resolver used to stamp frames and route on the epoch key. */
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void {
+    // Full: a resolver can route the serial to another connection/incarnation even if
+    // its current answers agree. The floor also fences captures with no live pushes yet.
+    this.untrackedLiveFrameGeneration = ++this.nextFrameGeneration;
+    // Initial-only hierarchies install input/diff state without a live-generation entry.
+    for (const deviceId of new Set([
+      ...this.liveFrameGenerations.keys(),
+      ...this.frameContextGenerations.keys(),
+    ])) {
+      this.invalidateDeviceFrames(deviceId);
+    }
     this.deviceSessionResolver = resolver;
   }
 
@@ -443,14 +514,25 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * is quarantined reaches nobody, because the serial is the only attribution the
    * frame has and it is exactly what is in doubt (#6863 review).
    */
-  private pushForDevice(deviceId: string, message: DeviceDataStreamMessage): number {
+  private pushForDevice(
+    deviceId: string,
+    message: DeviceDataStreamMessage,
+    target?: InitialFrameSubscriber,
+  ): number {
     if (this.isDeviceRoutingSuspended(deviceId)) {
+      return 0;
+    }
+    const subscriber = target ? this.subscribers.get(target.subscriptionId) : undefined;
+    if (target && (target.signal.aborted || !subscriber || subscriber.socket.destroyed)) {
       return 0;
     }
     const deviceSessionUuid = this.deviceSessionResolver.resolveUuid(deviceId);
     return this.pushToSubscribers({
       message: { ...message, deviceSessionUuid },
       targetDeviceSessionUuid: deviceSessionUuid,
+      // A fresh initial capture advances shared state, so every entitled pane must see it.
+      // Cached/joined replays remain targeted and never advance that state.
+      targetFilter: target?.replay ? subscriber?.filter : undefined,
     });
   }
 
@@ -502,6 +584,16 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     this.onStorageSubscriptionRequested = callback;
   }
 
+  private recordFrameContext(deviceId: string, frameContext?: string): void {
+    this.frameContextGenerations.set(deviceId, ++this.nextFrameGeneration);
+    if (frameContext !== undefined) {
+      this.currentFrameContexts.set(deviceId, frameContext);
+    } else {
+      // A hierarchy with no proven token invalidates the previous input context.
+      this.currentFrameContexts.delete(deviceId);
+    }
+  }
+
   /**
    * Push a hierarchy update to all subscribers interested in this device.
    */
@@ -509,17 +601,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     deviceId: string,
     hierarchy: ViewHierarchyResult,
     frameContext?: string,
+    target?: InitialFrameSubscriber,
   ): number | null {
-    this.frameContextGenerations.set(
-      deviceId,
-      (this.frameContextGenerations.get(deviceId) ?? 0) + 1,
-    );
-    if (frameContext !== undefined) {
-      this.currentFrameContexts.set(deviceId, frameContext);
-    } else {
-      // The device could not prove which UI the hierarchy describes. Its previous token is no
-      // longer authoritative: keeping it would let stale non-gesture input pass the daemon gate.
-      this.currentFrameContexts.delete(deviceId);
+    if (!this.acceptObservationFramePush(deviceId, target)) {
+      return null;
+    }
+    if (!target?.replay) {
+      this.recordFrameContext(deviceId, frameContext);
     }
     // Skip the diff clone+walk when nobody is listening (the layout inspector is
     // usually closed): the frame would reach zero subscribers anyway. Drop the
@@ -530,28 +618,15 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       return null;
     }
 
-    // Annotate the frame with its per-node diff versus the last frame for this
-    // device (added/changed nodes carry a `diffState` attribute; a summary rides
-    // the message). The input is cloned, so the annotated copy pushed to clients
-    // never mutates the caller's hierarchy; the un-annotated original is retained
-    // as the next baseline.
-    const previous = this.previousHierarchyByDevice.get(deviceId) ?? null;
-    const { hierarchy: annotated, summary } = annotateHierarchyDiff(previous, hierarchy);
-    // Baseline the UN-annotated, UN-converted original so the next frame's diff is computed in the
-    // same (point) space the runner reports — the diff must not see the canonical-pixel rewrite.
-    this.previousHierarchyByDevice.set(deviceId, hierarchy);
-
-    // Convert to canonical pixels on the clone we own (never the caller's hierarchy or the baseline,
-    // so MCP observe keeps serving point-space bounds). Only when the runner supplied complete scale
-    // metadata; otherwise the frame stays point-space and is not stamped (legacy fallback).
-    const scaleMetadata = readScreenScaleMetadata(hierarchy);
-    if (scaleMetadata) {
-      convertHierarchyToCanonicalPixels(annotated, scaleMetadata);
-    }
+    const { annotated, summary, scaleMetadata } = this.annotateInitialOrLiveHierarchy(
+      deviceId,
+      hierarchy,
+      target,
+    );
 
     // Assign this capture's shared identity and RETURN it, so the caller can bind it to the
     // screenshot requests it initiates while this hierarchy is current.
-    const captureSequence = this.nextCaptureSequence++;
+    const captureSequence = target?.captureSequence ?? this.nextCaptureSequence++;
 
     const message: DeviceDataStreamMessage = {
       type: "hierarchy_update",
@@ -570,13 +645,61 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       rotation: hierarchy.rotation,
     };
 
-    const sentCount = this.pushForDevice(deviceId, message);
+    const sentCount = this.pushForDevice(deviceId, message, target);
     if (sentCount > 0) {
       logger.debug(
         `[DeviceDataStream] Pushed hierarchy_update to ${sentCount} subscribers (device: ${deviceId})`,
       );
     }
     return captureSequence;
+  }
+
+  /** Recheck initial-frame scope/provenance, or invalidate initial captures for a live push. */
+  private acceptObservationFramePush(deviceId: string, target?: InitialFrameSubscriber): boolean {
+    if (!target) {
+      // Generation only: the live push itself installs input context and advances the
+      // diff from the previous hierarchy; it must not erase that baseline first.
+      this.recordLiveFramePush(deviceId);
+      return true;
+    }
+    return (
+      this.initialFrameTargetWantsDevice(target, deviceId) &&
+      (target.liveFrameGeneration === undefined ||
+        target.liveFrameGeneration === this.getLiveFrameGeneration(deviceId)) &&
+      (target.deviceSessionUuid === undefined ||
+        target.deviceSessionUuid === this.getDeviceSessionUuid(deviceId)) &&
+      (target.frameContextGeneration === undefined ||
+        target.frameContextGeneration === this.getCurrentFrameContextGeneration(deviceId))
+    );
+  }
+
+  private annotateInitialOrLiveHierarchy(
+    deviceId: string,
+    hierarchy: ViewHierarchyResult,
+    target?: InitialFrameSubscriber,
+  ) {
+    // Annotate the frame with its per-node diff versus the last frame for this
+    // device (added/changed nodes carry a `diffState` attribute; a summary rides
+    // the message). The input is cloned, so the annotated copy pushed to clients
+    // never mutates the caller's hierarchy; the un-annotated original is retained
+    // as the next baseline.
+    const previous = target ? null : (this.previousHierarchyByDevice.get(deviceId) ?? null);
+    const { hierarchy: annotated, summary } = annotateHierarchyDiff(previous, hierarchy);
+    // Baseline the UN-annotated, UN-converted original so the next frame's diff is computed in the
+    // same (point) space the runner reports — the diff must not see the canonical-pixel rewrite.
+    if (!target?.replay) {
+      this.previousHierarchyByDevice.set(deviceId, hierarchy);
+    }
+
+    // Convert to canonical pixels on the clone we own (never the caller's hierarchy or the baseline,
+    // so MCP observe keeps serving point-space bounds). Only when the runner supplied complete scale
+    // metadata; otherwise the frame stays point-space and is not stamped (legacy fallback).
+    const scaleMetadata = readScreenScaleMetadata(hierarchy);
+    if (scaleMetadata) {
+      convertHierarchyToCanonicalPixels(annotated, scaleMetadata);
+    }
+
+    return { annotated, summary, scaleMetadata };
   }
 
   /**
@@ -590,6 +713,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     metadata: ScreenshotMetadata = {},
     options: PushScreenshotOptions = {},
   ): void {
+    if (!this.acceptObservationFramePush(deviceId, options.initialFrameSubscriber)) {
+      return;
+    }
     const {
       screenshotMimeType,
       screenshotFormat,
@@ -648,7 +774,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotByteLength,
       screenshotBase64Length,
     };
-    const sentCount = this.pushForDevice(deviceId, message);
+    const sentCount = this.pushForDevice(deviceId, message, options.initialFrameSubscriber);
     if (sentCount > 0) {
       logger.debug(
         `[DeviceDataStream] Pushed screenshot_update to ${sentCount} subscribers (device: ${deviceId})`,
@@ -696,10 +822,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * device-scoped pane and an all-device hub observe the transition.
    */
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
+    // Full: registry epoch start/replacement binds a new connection/incarnation.
+    this.invalidateDeviceFrames(record.deviceId);
     this.pushDeviceSessionLifecycle("device_session_started", record);
   }
 
   pushDeviceSessionEnded(record: DeviceSessionRecord, successorSessionUuid?: string): void {
+    // Full: epoch retirement/replacement ends trust in this connection/incarnation.
+    this.invalidateDeviceFrames(record.deviceId);
     this.pushDeviceSessionLifecycle("device_session_ended", record, successorSessionUuid);
   }
 
@@ -867,10 +997,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Notify subscribers that the underlying device control connection was lost.
    */
   onDeviceConnectionLost(deviceId: string): void {
-    // Drop the diff baseline: the next hierarchy after a reconnect is a fresh
-    // full frame, not a delta from the tree captured before the connection dropped.
-    this.previousHierarchyByDevice.delete(deviceId);
-    this.currentFrameContexts.delete(deviceId);
+    // Full: reconnect may see another screen/incarnation, so retire input and diff state.
+    this.invalidateDeviceFrames(deviceId);
     // Nothing to reset for capture identity: ids are never reused (the source is monotonic for the
     // process), and clients drop their own bindings when the connection goes away.
 
@@ -1026,23 +1154,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         return;
       }
 
-      // Start the device client setup before yielding to the base async subscription handler.
-      // The desktop client sends its remembered subscribe_storage commands immediately after
-      // subscribe; BaseSocketServer processes input lines concurrently, so delaying this callback
-      // until after `await super.processLine()` lets a storage command observe no CtrlProxy client
-      // following a daemon restart. The daemon callback creates the Android client synchronously
-      // before beginning its asynchronous initial-frame work.
-      if (
-        this.onSubscriberConnected &&
-        (deviceSessionUuid === null || subscribedDeviceId !== null)
-      ) {
-        try {
-          this.onSubscriberConnected(subscribedDeviceId);
-        } catch (error) {
-          logger.warn(`[DeviceDataStream] Error in onSubscriberConnected callback: ${error}`);
-        }
-      }
-
       // Let base class handle the subscription
       await super.processLine(socket, line);
 
@@ -1062,6 +1173,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         ? this.findSubscriber(socket, request.subscriptionId)?.filter
         : undefined;
       await super.processLine(socket, line);
+      this.abortRemovedInitialFrameWaiters();
       if (filter) {
         this.notifyCadenceChangedForFilter(filter);
       }
@@ -1105,9 +1217,53 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     await super.processLine(socket, line);
   }
 
+  protected onSubscribed(subscriptionId: string, filter: DeviceDataFilter, _socket: Socket): void {
+    const controller = new AbortController();
+    this.initialFrameWaiters.set(subscriptionId, controller);
+    try {
+      // Base registration calls this synchronously, before processLine yields. Android client
+      // creation must still precede immediately-following subscribe_storage commands.
+      this.onSubscriberConnected?.(filter.deviceId, { subscriptionId, signal: controller.signal });
+    } catch (error) {
+      logger.warn(
+        `[DeviceDataStream] Error in onSubscriberConnected callback: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
+  private initialFrameTargetWantsDevice(target: InitialFrameSubscriber, deviceId: string): boolean {
+    const subscriber = this.subscribers.get(target.subscriptionId);
+    return (
+      !target.signal.aborted &&
+      !!subscriber &&
+      !subscriber.socket.destroyed &&
+      !this.isDeviceRoutingSuspended(deviceId) &&
+      this.matchesFilter(subscriber.filter, {
+        message: { type: "hierarchy_update", deviceId, timestamp: this.timer.now() },
+        targetDeviceSessionUuid: this.deviceSessionResolver.resolveUuid(deviceId),
+      })
+    );
+  }
+
+  private abortRemovedInitialFrameWaiters(): void {
+    for (const [id, controller] of this.initialFrameWaiters) {
+      if (!this.subscribers.has(id) || this.subscribers.get(id)?.socket.destroyed) {
+        controller.abort();
+        this.initialFrameWaiters.delete(id);
+      }
+    }
+  }
+
+  protected onServerClosing(): void {
+    super.onServerClosing();
+    this.abortRemovedInitialFrameWaiters();
+  }
+
   protected onConnectionClose(socket: Socket): void {
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionClose(socket);
+    this.abortRemovedInitialFrameWaiters();
     this.releaseStorageSubscriptionsForSocket(socket, false);
     for (const filter of filters) {
       this.notifyCadenceChangedForFilter(filter);
@@ -1117,6 +1273,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   protected onConnectionError(socket: Socket, error: Error): void {
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionError(socket, error);
+    this.abortRemovedInitialFrameWaiters();
     this.releaseStorageSubscriptionsForSocket(socket, true);
     for (const filter of filters) {
       this.notifyCadenceChangedForFilter(filter);
@@ -1131,6 +1288,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       ]),
     );
     super.checkKeepalive();
+    this.abortRemovedInitialFrameWaiters();
     for (const [subscriptionId, filter] of filtersBySubscriptionId) {
       if (!this.subscribers.has(subscriptionId)) {
         this.notifyCadenceChangedForFilter(filter);
@@ -1153,6 +1311,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   protected matchesFilter(filter: DeviceDataFilter, data: DeviceDataPush): boolean {
+    if (data.targetFilter && data.targetFilter !== filter) {
+      return false;
+    }
     // Route on the stable epoch key. A `null` target reaches only all-device
     // (`null`-filter) subscribers — there is no cross-device broadcast, so a frame
     // for one device (or a retired epoch, which resolves to `null`) can never leak
@@ -1613,6 +1774,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         this.deviceSessionResolver.assertDeviceActionable(deviceId, "to observe");
       }
       const frameContextGenerationsAtStart = new Map(this.frameContextGenerations);
+      const untrackedGenerationAtStart = this.untrackedLiveFrameGeneration;
       const observations = await this.requestObservationWithTimeout({
         deviceId: deviceId ?? null,
         sessionUuid: request.sessionUuid,
@@ -1622,7 +1784,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         throw new Error("Observation request did not capture any devices");
       }
 
-      const failures = this.pushObservedHierarchies(observations, frameContextGenerationsAtStart);
+      const failures = this.pushObservedHierarchies(
+        observations,
+        frameContextGenerationsAtStart,
+        untrackedGenerationAtStart,
+      );
 
       if (failures.length > 0) {
         // Healthy devices already received their hierarchy_update pushes above;
@@ -1671,6 +1837,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private pushObservedHierarchies(
     observations: readonly RequestedObservation[],
     frameContextGenerationsAtStart: ReadonlyMap<string, number>,
+    untrackedGenerationAtStart: number,
   ): string[] {
     const failures: string[] = [];
     for (const { deviceId, observation } of observations) {
@@ -1687,11 +1854,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         continue;
       }
       if (
-        (this.frameContextGenerations.get(deviceId) ?? 0) !==
-        (frameContextGenerationsAtStart.get(deviceId) ?? 0)
+        this.getCurrentFrameContextGeneration(deviceId) !==
+        (frameContextGenerationsAtStart.get(deviceId) ?? untrackedGenerationAtStart)
       ) {
         logger.debug(
-          `[DeviceDataStream] Skipped stale explicit observation for ${deviceId}; a newer hierarchy arrived`,
+          `[DeviceDataStream] Skipped stale explicit observation for ${deviceId}; a newer hierarchy or full boundary intervened`,
         );
         continue;
       }

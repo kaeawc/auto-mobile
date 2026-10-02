@@ -1,10 +1,17 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
+import { DeviceDataStreamSocketServer } from "../../src/daemon/deviceDataStreamSocketServer";
+import { DefaultObservationInitialFrameCoordinator } from "../../src/daemon/observationInitialFrameCoordinator";
+import type { InitialObservationFrame } from "../../src/daemon/observationInitialFrame";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { UnixSocketServer } from "../../src/daemon/socketServer";
+import { installDeviceDataStreamSocketServerForTesting } from "../../src/daemon/deviceDataStreamSocketServer";
+import { createFakeDaemonState } from "./helpers/inputSocketHarness";
+import { FakeSocket } from "../fakes/FakeNetServer";
 import type { BootedDevice } from "../../src/models";
 import {
   OBSERVATION_BATCH_HEADROOM_MS,
@@ -32,10 +39,35 @@ import * as appearanceSyncScheduler from "../../src/utils/appearance/AppearanceS
 import type {
   OnNavigationGraphRequestedCallback,
   OnObservationRequestedCallback,
+  OnSubscriberConnectedCallback,
+  RequestedObservation,
 } from "../../src/daemon/deviceDataStreamSocketServer";
 
 interface RoutingTarget {
   setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
+}
+
+class StaticScreenStreamServer extends DeviceDataStreamSocketServer {
+  requestObservation(socket: FakeSocket): Promise<void> {
+    // All-device requests can start while a serial is quarantined; delivery still checks identity.
+    return this.processLine(socket, JSON.stringify({ command: "request_observation" }));
+  }
+
+  subscribe(socket: FakeSocket): void {
+    this.subscribers.set("static-pane", {
+      socket,
+      subscriptionId: "static-pane",
+      lastActivity: 0,
+      filter: {
+        deviceSessionUuid: null,
+        deviceId: null,
+        screenshotIntervalMs: null,
+        hierarchyIntervalMs: null,
+      },
+      backfilling: false,
+      drainPending: false,
+    });
+  }
 }
 
 interface RoutingTargets {
@@ -106,6 +138,20 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   screenshotCadenceChanged: ((deviceId: string | null) => void) | null = null;
   hierarchyCadenceChanged: ((deviceId: string | null) => void) | null = null;
 
+  invalidateDeviceFrames(_deviceId: string): void {}
+
+  invalidateInitialDeviceFrames(_deviceId: string): void {}
+
+  removeDeviceFrames(_deviceId: string): void {}
+
+  getDeviceSessionUuid(deviceId: string): string | null {
+    return this.resolver?.resolveUuid(deviceId) ?? null;
+  }
+
+  getLiveFrameGeneration(_deviceId: string): number {
+    return 0;
+  }
+
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
     this.started.push(record);
   }
@@ -124,9 +170,14 @@ class FakeDeviceDataStreamServer extends FakePushServer {
     this.navigationUpdates.push({ appId: streamData.appId, deviceId });
   }
 
-  setOnSubscriberConnected(handler: (deviceId: string | null) => void): void {
+  setOnSubscriberConnected(handler: OnSubscriberConnectedCallback): void {
     this.subscriberCallbackInstalled = true;
-    this.subscriberConnected = handler;
+    let subscriptions = 0;
+    this.subscriberConnected = (deviceId) =>
+      handler(deviceId, {
+        subscriptionId: `fake-pane-${subscriptions++}`,
+        signal: new AbortController().signal,
+      });
   }
 
   setOnScreenshotCadenceChanged(handler: (deviceId: string | null) => void): void {
@@ -176,12 +227,341 @@ async function flushNavigationUpdate(): Promise<void> {
 }
 
 describe("Daemon stream wiring", () => {
+  beforeAll(async () => {
+    // Migrations are fixture setup, not the lifecycle behavior under the 100 ms budget.
+    // Warm the shared template while keeping each test's cloned database independent.
+    const db = await createTestDatabase();
+    await db.destroy();
+  });
+
   afterEach(() => {
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
   });
+
+  const invalidationEvents: Array<{
+    name: string;
+    owned?: boolean;
+    quarantined?: boolean;
+    apply(daemon: Daemon, pool: DevicePool): Promise<void> | void;
+    additionalDevice?: string;
+    generationOnly?: boolean;
+  }> = [
+    {
+      name: "ownership acquisition",
+      generationOnly: true,
+      apply: async (daemon) => {
+        await daemon.getSessionManager().createSession("owner", "emulator-5554", "android");
+      },
+    },
+    {
+      name: "ownership release",
+      generationOnly: true,
+      owned: true,
+      apply: async (daemon) => {
+        await daemon.getSessionManager().releaseSession("owner");
+      },
+    },
+    {
+      name: "same-serial unchanged-runtime session rebind",
+      owned: true,
+      generationOnly: true,
+      apply: async (daemon) => {
+        await daemon.getSessionManager().rebindSession("owner", "emulator-5554", "android");
+      },
+    },
+    {
+      name: "same-serial session rebind",
+      owned: true,
+      apply: async (daemon) => {
+        await daemon
+          .getSessionManager()
+          .rebindSession("owner", "emulator-5554", "android", { force: true });
+      },
+    },
+    {
+      name: "replacement-serial session rebind",
+      owned: true,
+      additionalDevice: "emulator-5556",
+      apply: async (daemon) => {
+        await daemon.getSessionManager().rebindSession("owner", "emulator-5556", "android");
+      },
+    },
+    {
+      name: "terminal-release recovery rebind",
+      owned: true,
+      additionalDevice: "emulator-5556",
+      apply: async (daemon) => {
+        const manager = daemon.getSessionManager();
+        const session = manager.getSession("owner")!;
+        const releaseReservation = manager.reserveSessionForTerminalRelease(
+          session,
+          "emulator-5554",
+        );
+        try {
+          await manager.rebindSessionForTerminalReleaseRecovery(
+            session,
+            "emulator-5556",
+            "android",
+          );
+        } finally {
+          releaseReservation();
+        }
+      },
+    },
+    {
+      name: "pool reinitialization",
+      apply: async (_daemon, pool) => {
+        await pool.initializeWithDevices([
+          { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+        ]);
+      },
+    },
+    {
+      name: "pool removal",
+      apply: async (_daemon, pool) => {
+        await pool.removeDevice("emulator-5554");
+      },
+    },
+    {
+      name: "pool removal followed by serial re-add",
+      apply: async (daemon, pool) => {
+        await pool.removeDevice("emulator-5554");
+        const stream = (
+          daemon as unknown as { deviceDataStreamServer: DeviceDataStreamSocketServer }
+        ).deviceDataStreamServer;
+        expect(
+          (
+            stream as unknown as { liveFrameGenerations: ReadonlyMap<string, number> }
+          ).liveFrameGenerations.has("emulator-5554"),
+        ).toBe(false);
+        await pool.addDevice({ deviceId: "emulator-5554", name: "Pixel", platform: "android" });
+      },
+    },
+    {
+      name: "VM restore incarnation change",
+      apply: (_daemon, pool) => {
+        pool.bumpDeviceIncarnation("emulator-5554");
+      },
+    },
+    {
+      name: "identity quarantine entry",
+      apply: async (_daemon, pool) => {
+        await pool.reconcileDiscoveryObservation(
+          [
+            {
+              deviceId: "emulator-5554",
+              name: "Different AVD",
+              platform: "android",
+              observedAt: 1,
+            },
+          ],
+          "test",
+        );
+      },
+    },
+    {
+      name: "identity quarantine lift",
+      quarantined: true,
+      apply: async (_daemon, pool) => {
+        await pool.reconcileDiscoveryObservation(
+          [{ deviceId: "emulator-5554", name: "Pixel", platform: "android", observedAt: 2 }],
+          "test",
+        );
+      },
+    },
+  ];
+
+  for (const event of invalidationEvents) {
+    for (const state of ["in-flight", "cached"] as const) {
+      test(`invalidates ${state} device frames on ${event.name}`, async () => {
+        const timer = new FakeTimer();
+        const db = await createTestDatabase();
+        const graph = NavigationGraphManager.createForTesting(
+          new NavigationRepository(db),
+          new TestCoverageRepository(undefined, db),
+        );
+        const navigation = spyOn(NavigationGraphManager, "getInstanceForSession").mockReturnValue(
+          graph,
+        );
+        const daemon = new Daemon(
+          {},
+          new FakeInstalledAppsRepository(),
+          timer,
+          new FakeDeviceSessionRepository(),
+          new CountingIdGenerator("epoch"),
+          new FakeDatabaseInitializer(),
+          new FakeStartupFailureTracker(),
+        );
+        const internals = daemon as unknown as DaemonStreamInternals;
+        const stream = new StaticScreenStreamServer("/fake/unused.sock", timer, {
+          authorize: () => {},
+        });
+        internals.getDeviceSessionRoutingTargets = () => ({
+          deviceDataStream: stream,
+          performancePush: null,
+          failuresPush: null,
+          telemetryPush: null,
+        });
+        internals.setupNavigationGraphUpdateListener = () => {};
+        const pool = internals.devicePool as unknown as DevicePool;
+        try {
+          internals.setupDeviceSessionRouting();
+          await pool.initializeWithDevices([
+            { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+          ]);
+          if (event.owned) {
+            await daemon.getSessionManager().createSession("owner", "emulator-5554", "android");
+          }
+          if (event.quarantined) {
+            await pool.reconcileDiscoveryObservation(
+              [
+                {
+                  deviceId: "emulator-5554",
+                  name: "Different AVD",
+                  platform: "android",
+                  observedAt: 1,
+                },
+              ],
+              "test",
+            );
+          }
+          const pane = new FakeSocket();
+          stream.subscribe(pane);
+          const hierarchy = { hierarchy: { node: { $: { class: "Root", text: "unchanged" } } } };
+          stream.pushHierarchyUpdate("emulator-5554", hierarchy, "static-context");
+          const inputServer = new UnixSocketServer(
+            "/fake/input.sock",
+            "http://localhost:0/mcp",
+            createFakeDaemonState(),
+            timer,
+          );
+          const input = inputServer as unknown as {
+            requireCurrentFrameContext(
+              deviceId: string,
+              frameContext: string,
+              action: string,
+            ): void;
+          };
+          installDeviceDataStreamSocketServerForTesting(stream);
+          const coordinator = new DefaultObservationInitialFrameCoordinator(
+            timer,
+            2,
+            (id) => stream.getLiveFrameGeneration(id),
+            (id) => stream.getDeviceSessionUuid(id),
+          );
+          const frame: InitialObservationFrame = {
+            hierarchy: { hierarchy: {} },
+            screenshot: { data: "pixels", width: 1, height: 1, metadata: {} },
+            recordHierarchy: () => {},
+          };
+          const capture = Promise.withResolvers<InitialObservationFrame>();
+          const signal = new AbortController().signal;
+          let captures = 0;
+          const first = coordinator.request(
+            "emulator-5554",
+            () => {
+              captures++;
+              return capture.promise;
+            },
+            signal,
+          );
+          if (state === "cached") {
+            capture.resolve(frame);
+            expect((await first)?.replay).toBe(false);
+          }
+          const generation = stream.getLiveFrameGeneration("emulator-5554");
+          const otherGeneration = event.additionalDevice
+            ? stream.getLiveFrameGeneration(event.additionalDevice)
+            : undefined;
+          const observation = Promise.withResolvers<RequestedObservation[]>();
+          const observationStarted = Promise.withResolvers<void>();
+          stream.setOnObservationRequested(() => {
+            observationStarted.resolve();
+            return observation.promise;
+          });
+          const explicit = stream.requestObservation(pane);
+          await observationStarted.promise;
+          await event.apply(daemon, pool);
+          expect(stream.getLiveFrameGeneration("emulator-5554")).toBeGreaterThan(generation);
+          if (event.generationOnly) {
+            expect(() =>
+              input.requireCurrentFrameContext("emulator-5554", "static-context", "input/tap"),
+            ).not.toThrow();
+          } else {
+            expect(stream.getCurrentFrameContext("emulator-5554")).toBeUndefined();
+          }
+          if (state === "in-flight") {
+            capture.resolve(frame);
+            expect(await first).toBeUndefined();
+          }
+          const fresh = await coordinator.request(
+            "emulator-5554",
+            async () => {
+              captures++;
+              return { ...frame };
+            },
+            signal,
+          );
+          expect(captures).toBe(2);
+          expect(fresh?.replay).toBe(false);
+          expect(fresh?.frame.deviceSessionUuid).toBe(stream.getDeviceSessionUuid("emulator-5554"));
+          const frameCount = pane
+            .getWrittenMessages<{ type: string }>()
+            .filter((m) => m.type === "hierarchy_update").length;
+          observation.resolve([
+            {
+              deviceId: "emulator-5554",
+              observation: {
+                updatedAt: "2026-10-01T00:00:00Z",
+                screenSize: { width: 1, height: 1 },
+                systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+                viewHierarchy: { ...hierarchy, frameContext: "static-context" },
+              },
+            },
+          ]);
+          await explicit;
+          if (event.generationOnly) {
+            expect(
+              pane
+                .getWrittenMessages<{ type: string }>()
+                .filter((m) => m.type === "hierarchy_update"),
+            ).toHaveLength(frameCount + 1);
+            expect(
+              pane
+                .getWrittenMessages<{
+                  type: string;
+                  hierarchyDiff?: { hasBaseline: boolean; changed: number };
+                }>()
+                .filter((m) => m.type === "hierarchy_update")
+                .at(-1)?.hierarchyDiff,
+            ).toMatchObject({ hasBaseline: true, changed: 0 });
+            expect(() =>
+              input.requireCurrentFrameContext("emulator-5554", "static-context", "input/tap"),
+            ).not.toThrow();
+          } else {
+            expect(
+              pane
+                .getWrittenMessages<{ type: string }>()
+                .filter((m) => m.type === "hierarchy_update"),
+            ).toHaveLength(frameCount);
+            expect(stream.getCurrentFrameContext("emulator-5554")).toBeUndefined();
+          }
+          if (event.additionalDevice && otherGeneration !== undefined) {
+            expect(stream.getLiveFrameGeneration(event.additionalDevice)).toBeGreaterThan(
+              otherGeneration,
+            );
+          }
+        } finally {
+          installDeviceDataStreamSocketServerForTesting(null);
+          daemon.getSessionManager().stopCleanupTimer();
+          navigation.mockRestore();
+        }
+      });
+    }
+  }
 
   test("forwards a successor uuid only when the registry replaces a live epoch", () => {
     const daemon = new Daemon(
@@ -362,11 +742,11 @@ describe("Daemon stream wiring", () => {
           await Promise.resolve();
 
           expect(connectedDevices).toEqual(
-            environment.secret === undefined ? ["sim-a", "sim-a", "sim-a", "sim-a"] : [],
+            environment.secret === undefined ? ["sim-a", "sim-a", "sim-a"] : [],
           );
           expect(managerA.getCallCount("forceRestart")).toBe(1);
           expect(managerB.getCallCount("setup")).toBe(0);
-          expect(getInstance).toHaveBeenCalledTimes(environment.secret === undefined ? 2 : 0);
+          expect(getInstance).toHaveBeenCalledTimes(environment.secret === undefined ? 1 : 0);
           if (environment.secret === undefined) {
             expect(getExistingInstance).toHaveBeenCalledWith("sim-a");
           }

@@ -26,6 +26,7 @@ function unknownAndroidRuntimeName(deviceId: string): string {
 /** Mutable pool state is read at use time, including after every await. */
 export interface DeviceRuntimeIdentityPoolPort {
   getDevices(): Map<string, PooledDevice>;
+  notifyDeviceFramesInvalidated?(deviceId: string): void;
   getDeviceManager(): PlatformDeviceManager;
   getRetryExecutor(): RetryExecutor;
   getTimer(): Timer;
@@ -388,6 +389,8 @@ export class DeviceRuntimeIdentity {
       return;
     }
     delete pooled.identityUnresolved;
+    // Full: quarantine hid an untrusted runtime; lifting it needs a fresh trusted screen.
+    this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
     logger.info(
       `[DevicePool] Lifting the identity quarantine on ${pooled.id}: discovery read ` +
         `'${discovered.name}'`,
@@ -731,6 +734,8 @@ export class DeviceRuntimeIdentity {
       return;
     }
     pooled.identityUnresolved = true;
+    // Full: the serial may now identify another runtime, so its screen/context is untrusted.
+    this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
     logger.warn(`[DevicePool] Quarantining ${pooled.id}: ${reason}`);
     const sessionId = pooled.sessionId;
     if (!sessionId) {

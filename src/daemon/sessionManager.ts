@@ -658,7 +658,9 @@ export class SessionManager {
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
-  private readonly deviceOwnershipCallbacks = new Set<(deviceId: string) => void>();
+  private readonly deviceOwnershipCallbacks = new Set<
+    (deviceId: string, frameInvalidation: "generation-only" | "full") => void
+  >();
   private readonly releasePromises: Map<string, SessionReleaseOperation> = new Map();
   /** Every release still running, including an older session that reused a UUID. */
   private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
@@ -847,15 +849,20 @@ export class SessionManager {
   }
 
   /** Observe changes to the live device-owner map; returns a listener removal function. */
-  onDeviceOwnershipChange(callback: (deviceId: string) => void): () => void {
+  onDeviceOwnershipChange(
+    callback: (deviceId: string, frameInvalidation: "generation-only" | "full") => void,
+  ): () => void {
     this.deviceOwnershipCallbacks.add(callback);
     return () => this.deviceOwnershipCallbacks.delete(callback);
   }
 
-  private notifyDeviceOwnershipChange(deviceId: string): void {
+  private notifyDeviceOwnershipChange(
+    deviceId: string,
+    frameInvalidation: "generation-only" | "full" = "generation-only",
+  ): void {
     for (const callback of this.deviceOwnershipCallbacks) {
       try {
-        callback(deviceId);
+        callback(deviceId, frameInvalidation);
       } catch (error) {
         logger.warn(`Device ownership callback failed for ${deviceId}: ${error}`);
       }
@@ -1053,6 +1060,7 @@ export class SessionManager {
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
+    // Generation only: publishing an owner changes entitlement, not the screen/connection.
     this.notifyDeviceOwnershipChange(session.assignedDevice);
     this.notifySessionCreated(session);
     logger.info(`Created session ${session.sessionId} with device ${session.assignedDevice}`);
@@ -1782,6 +1790,8 @@ export class SessionManager {
       );
     }
     if (existing.assignedDevice === assignedDevice && !options.force) {
+      // Generation only: this no-op rebind retains the same serial, connection and incarnation.
+      this.notifyDeviceOwnershipChange(assignedDevice);
       return existing;
     }
 
@@ -1893,9 +1903,12 @@ export class SessionManager {
       this.deviceSessionMap.delete(previousDevice);
     }
     this.deviceSessionMap.set(assignedDevice, existing.sessionId);
-    this.notifyDeviceOwnershipChange(previousDevice);
+    // Full: different-serial rebinds switch runtimes; same-serial force explicitly
+    // means a restarted runtime. Terminal-release recovery also forces this path.
+    this.notifyDeviceOwnershipChange(previousDevice, "full");
     if (assignedDevice !== previousDevice) {
-      this.notifyDeviceOwnershipChange(assignedDevice);
+      // Full: the replacement (including the same AVD on another serial) has its own screen.
+      this.notifyDeviceOwnershipChange(assignedDevice, "full");
     }
     this.notifySessionDeviceUnbound(existing.sessionId, previousDevice);
     return existing;
@@ -4114,6 +4127,8 @@ export class SessionManager {
     this.networkConditionGeneration.delete(sessionId);
     this.networkConditionMutationQueues.delete(sessionId);
     if (ownedDevice) {
+      // Generation only: removing an owner leaves this device's screen/connection intact.
+      // Any restore, removal or disconnect separately publishes its full boundary.
       this.notifyDeviceOwnershipChange(session.assignedDevice);
     }
     return true;

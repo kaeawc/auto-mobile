@@ -1,3 +1,6 @@
+import { errorMessage } from "../utils/describeUnknownError";
+import type { InitialFrameSubscriber } from "./deviceDataStreamSocketServer";
+import type { ObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
 import { logger } from "../utils/logger";
 import type { BootedDevice, Platform, ViewHierarchyResult } from "../models";
 import type { DeviceDataStreamSocketServer } from "./deviceDataStreamSocketServer";
@@ -25,7 +28,7 @@ export type ObservationStreamPolicy = Pick<PassiveWorkPolicy, "allows">;
 
 const INITIAL_FRAME_HIERARCHY_TIMEOUT_MS = 3_000;
 const INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS = 3_000;
-const INITIAL_FRAME_MAX_CONCURRENCY = 2;
+export const INITIAL_FRAME_MAX_CONCURRENCY = 2;
 const ANDROID_DEFAULT_SCREEN_WIDTH = 1080;
 const ANDROID_DEFAULT_SCREEN_HEIGHT = 2340;
 const IOS_DEFAULT_SCREEN_WIDTH = 1170;
@@ -102,10 +105,19 @@ export interface ObservationStreamIosClient {
 }
 
 export interface ObservationInitialFrameDependencies {
-  streamServer: Pick<DeviceDataStreamSocketServer, "pushHierarchyUpdate" | "pushScreenshotUpdate">;
+  streamServer: Pick<DeviceDataStreamSocketServer, "pushHierarchyUpdate" | "pushScreenshotUpdate"> &
+    Partial<
+      Pick<
+        DeviceDataStreamSocketServer,
+        "getCurrentFrameContextGeneration" | "getLiveFrameGeneration" | "getDeviceSessionUuid"
+      >
+    >;
   androidClientFactory: (device: BootedDevice) => ObservationStreamAndroidClient;
   iosClientFactory: (device: BootedDevice) => ObservationStreamIosClient;
   maxConcurrency?: number;
+  coordinator?: ObservationInitialFrameCoordinator;
+  subscriber?: InitialFrameSubscriber;
+  isDeviceAllowed?: (deviceId: string) => boolean;
 }
 
 export async function pushInitialObservationFramesForSubscriber(
@@ -120,6 +132,41 @@ export async function pushInitialObservationFramesForSubscriber(
   const maxConcurrency = dependencies.maxConcurrency ?? INITIAL_FRAME_MAX_CONCURRENCY;
   if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
     throw new RangeError("Initial observation frame concurrency must be a positive integer");
+  }
+
+  if (dependencies.coordinator) {
+    if (!dependencies.subscriber) {
+      throw new Error("Coalesced initial frames require a subscriber target");
+    }
+    const { coordinator, subscriber } = dependencies;
+    await Promise.all(
+      targetDevices.map(async (device) => {
+        try {
+          const result = await coordinator.request(
+            device.id,
+            () => captureInitialObservationFrame(device, dependencies),
+            subscriber.signal,
+            dependencies.maxConcurrency,
+          );
+          if (
+            result &&
+            !subscriber.signal.aborted &&
+            (dependencies.isDeviceAllowed?.(device.id) ?? true)
+          ) {
+            deliverInitialObservationFrame(device.id, result.frame, dependencies, {
+              ...subscriber,
+              replay: result.replay,
+            });
+          }
+        } catch (error) {
+          logger.warn(
+            `[Daemon] Failed to push initial observation frame for ${device.id}: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }),
+    );
+    return;
   }
 
   let nextDeviceIndex = 0;
@@ -137,94 +184,269 @@ export async function pushInitialObservationFramesForSubscriber(
   );
 }
 
+export interface InitialObservationFrame {
+  hierarchy: ViewHierarchyResult;
+  frameContext?: string;
+  screenshot?: {
+    data: string;
+    width: number;
+    height: number;
+    metadata: ReturnType<typeof pickScreenshotMetadata>;
+    frameContext?: string;
+    rotation?: number;
+  };
+  screenshotFailure?: { error: unknown };
+  captureSequence?: number;
+  frameContextGeneration?: number;
+  liveFrameGeneration?: number;
+  deviceSessionUuid?: string | null;
+  recordHierarchy: (captureSequence: number | null) => void;
+}
+
 async function pushInitialObservationFrameForDevice(
   device: ObservationStreamDevice,
   dependencies: ObservationInitialFrameDependencies,
 ): Promise<void> {
+  try {
+    const frame = await captureInitialObservationFrame(device, dependencies);
+    if (frame) {
+      deliverInitialObservationFrame(device.id, frame, dependencies);
+    }
+  } catch (error) {
+    logger.warn(
+      `[Daemon] Failed to push initial observation frame for ${device.id}: ${errorMessage(error)}`,
+      error,
+    );
+  }
+}
+
+async function captureInitialObservationFrame(
+  device: ObservationStreamDevice,
+  dependencies: ObservationInitialFrameDependencies,
+): Promise<InitialObservationFrame | undefined> {
   const bootedDevice: BootedDevice = {
     deviceId: device.id,
     name: device.name,
     platform: device.platform,
   };
-
-  try {
-    if (device.platform === "android") {
-      await pushAndroidInitialObservationFrame(bootedDevice, dependencies);
-      return;
-    }
-
-    if (device.platform === "ios") {
-      await pushIosInitialObservationFrame(bootedDevice, dependencies);
-    }
-  } catch (error) {
-    logger.warn(`[Daemon] Failed to push initial observation frame for ${device.id}: ${error}`);
+  if (device.platform !== "android" && device.platform !== "ios") {
+    return undefined;
   }
-}
-
-async function pushAndroidInitialObservationFrame(
-  device: BootedDevice,
-  dependencies: ObservationInitialFrameDependencies,
-): Promise<void> {
-  const client = dependencies.androidClientFactory(device);
-  const connected = await client.ensureConnected();
-  if (!connected) {
-    logger.warn(`[Daemon] Failed to connect WebSocket to ${device.deviceId}`);
-    return;
+  // Bind provenance before connection setup, which can itself cross a device boundary.
+  const liveFrameGeneration = dependencies.streamServer.getLiveFrameGeneration?.(device.id);
+  const deviceSessionUuid = dependencies.streamServer.getDeviceSessionUuid?.(device.id);
+  // Narrow platform-specific calls before combining the common capture contract.
+  const source =
+    device.platform === "android"
+      ? androidCaptureSource(dependencies.androidClientFactory(bootedDevice))
+      : iosCaptureSource(dependencies.iosClientFactory(bootedDevice));
+  if (!(await source.client.ensureConnected())) {
+    throw new Error(`Failed to connect CtrlProxy to ${device.id}`);
   }
-
-  logger.info(`[Daemon] WebSocket connected to ${device.deviceId} for observation stream`);
-
-  const initialHierarchy = await getAndroidInitialHierarchy(client);
+  logger.info(`[Daemon] Capturing initial observation frame for ${device.id}`);
+  const frameContextGeneration = dependencies.streamServer.getCurrentFrameContextGeneration?.(
+    device.id,
+  );
+  const initialHierarchy = await source.hierarchy();
   if (!initialHierarchy) {
-    logger.warn(
-      `[Daemon] No hierarchy available for initial observation frame on ${device.deviceId}`,
+    throw new Error(`No hierarchy available for initial observation frame on ${device.id}`);
+  }
+  const hierarchy = initialHierarchy.hierarchy;
+  const frame: InitialObservationFrame = {
+    hierarchy,
+    frameContext: initialHierarchy.frameContext ?? hierarchy.frameContext,
+    frameContextGeneration,
+    liveFrameGeneration,
+    deviceSessionUuid,
+    recordHierarchy: (sequence) =>
+      source.client.recordInitialObservationStreamHierarchy(hierarchy, sequence),
+  };
+  // Return a typed partial frame so delivery reports a screenshot failure once per waiter,
+  // while retaining the hierarchy that the old initial-frame path already sent.
+  const screenshot = await Promise.resolve()
+    .then(() => source.screenshot())
+    .then(
+      (value) => value,
+      (error: unknown) => {
+        frame.screenshotFailure = { error };
+        return undefined;
+      },
     );
+  if (screenshot) {
+    const dimensions =
+      device.platform === "android"
+        ? getAndroidScreenshotDimensions(hierarchy)
+        : getIosScreenshotDimensions(hierarchy);
+    frame.screenshot = { ...screenshot, ...dimensions };
+  }
+  return frame;
+}
+
+function androidCaptureSource(client: ObservationStreamAndroidClient) {
+  return {
+    client,
+    hierarchy: async () => {
+      const initial = await getAndroidInitialHierarchy(client);
+      return initial
+        ? {
+            hierarchy: client.convertToViewHierarchyResult(initial.hierarchy),
+            frameContext: initial.frameContext,
+          }
+        : null;
+    },
+    screenshot: async () => {
+      const screenshot = await client.captureScreenshotForObservationStream();
+      return screenshot.success && screenshot.data
+        ? {
+            data: screenshot.data,
+            metadata: pickScreenshotMetadata(screenshot),
+            frameContext: screenshot.frameContext,
+            rotation: screenshot.rotation,
+          }
+        : undefined;
+    },
+  };
+}
+
+function iosCaptureSource(client: ObservationStreamIosClient) {
+  return {
+    client,
+    hierarchy: async () => {
+      const initial = await getIosInitialHierarchy(client);
+      return initial
+        ? {
+            hierarchy: client.convertToViewHierarchyResult(initial.hierarchy),
+            frameContext: initial.frameContext,
+          }
+        : null;
+    },
+    screenshot: async () => {
+      const screenshot = await client.requestScreenshotWithoutObservationStreamPush(
+        INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS,
+      );
+      return screenshot.success && screenshot.data
+        ? {
+            data: screenshot.data,
+            metadata: metadataForScreenshotFormat(
+              IOS_CTRLPROXY_SCREENSHOT_METADATA,
+              screenshot.format,
+            ),
+            frameContext: screenshot.frameContext,
+            rotation: screenshot.rotation,
+          }
+        : undefined;
+    },
+  };
+}
+
+function deliverInitialObservationFrame(
+  deviceId: string,
+  frame: InitialObservationFrame,
+  dependencies: ObservationInitialFrameDependencies,
+  subscriber?: InitialFrameSubscriber,
+): void {
+  // Recheck after awaiting the shared job/cache too: a live push may have occurred
+  // between coordinator completion and this subscriber's delivery continuation.
+  if (!isInitialObservationFrameCurrent(deviceId, frame, dependencies.streamServer)) {
     return;
   }
-
-  const viewHierarchy = client.convertToViewHierarchyResult(initialHierarchy.hierarchy);
-  const frameContext = initialHierarchy.frameContext ?? viewHierarchy.frameContext;
-  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(
-    device.deviceId,
-    viewHierarchy,
-    frameContext,
+  // The first fresh delivery reached every entitled current subscriber, including
+  // joined waiters. Only a subsequent cache hit needs a targeted replay.
+  if (subscriber && !subscriber.replay && frame.captureSequence !== undefined) {
+    // Each live request boundary still reports the shared screenshot failure.
+    if (frame.screenshotFailure) {
+      throw frame.screenshotFailure.error;
+    }
+    return;
+  }
+  const sequence = dependencies.streamServer.pushHierarchyUpdate(
+    deviceId,
+    frame.hierarchy,
+    frame.frameContext,
+    subscriber
+      ? {
+          ...subscriber,
+          liveFrameGeneration: frame.liveFrameGeneration,
+          deviceSessionUuid: frame.deviceSessionUuid,
+          captureSequence: frame.captureSequence,
+          frameContextGeneration: frame.frameContextGeneration,
+        }
+      : undefined,
   );
-  client.recordInitialObservationStreamHierarchy(viewHierarchy, captureSequence);
-
-  await pushAndroidInitialScreenshot(
-    device.deviceId,
-    client,
+  if (!subscriber || (frame.captureSequence === undefined && sequence !== null)) {
+    frame.recordHierarchy(sequence);
+  }
+  if (sequence !== null) {
+    frame.captureSequence = sequence;
+    frame.frameContextGeneration =
+      dependencies.streamServer.getCurrentFrameContextGeneration?.(deviceId);
+  }
+  pushInitialObservationScreenshot(
+    deviceId,
+    frame,
+    sequence,
     dependencies.streamServer,
-    viewHierarchy,
-    captureSequence,
-    frameContext,
+    subscriber,
   );
 }
 
-async function pushAndroidInitialScreenshot(
+function isInitialObservationFrameCurrent(
   deviceId: string,
-  client: ObservationStreamAndroidClient,
-  streamServer: Pick<DeviceDataStreamSocketServer, "pushScreenshotUpdate">,
-  viewHierarchy: ViewHierarchyResult,
-  captureSequence: number | null,
-  hierarchyFrameContext: string | undefined,
-): Promise<void> {
-  const screenshot = await client.captureScreenshotForObservationStream();
-  if (screenshot.success && screenshot.data) {
-    const dimensions = getAndroidScreenshotDimensions(viewHierarchy);
+  frame: InitialObservationFrame,
+  streamServer: ObservationInitialFrameDependencies["streamServer"],
+): boolean {
+  if (
+    frame.liveFrameGeneration !== undefined &&
+    streamServer.getLiveFrameGeneration &&
+    frame.liveFrameGeneration !== streamServer.getLiveFrameGeneration(deviceId)
+  ) {
+    return false;
+  }
+  if (
+    frame.deviceSessionUuid !== undefined &&
+    streamServer.getDeviceSessionUuid &&
+    frame.deviceSessionUuid !== streamServer.getDeviceSessionUuid(deviceId)
+  ) {
+    return false;
+  }
+  return (
+    frame.frameContextGeneration === undefined ||
+    frame.frameContextGeneration === streamServer.getCurrentFrameContextGeneration?.(deviceId)
+  );
+}
+
+function pushInitialObservationScreenshot(
+  deviceId: string,
+  frame: InitialObservationFrame,
+  sequence: number | null,
+  streamServer: ObservationInitialFrameDependencies["streamServer"],
+  subscriber?: InitialFrameSubscriber,
+): void {
+  const screenshot = frame.screenshot;
+  if (screenshot && (!subscriber || sequence !== null)) {
     streamServer.pushScreenshotUpdate(
       deviceId,
       screenshot.data,
-      dimensions.width,
-      dimensions.height,
-      pickScreenshotMetadata(screenshot),
+      screenshot.width,
+      screenshot.height,
+      screenshot.metadata,
       {
-        ...captureSequenceOptions(captureSequence, hierarchyFrameContext, screenshot.frameContext),
-        ...canonicalPixelScreenshotOptions(viewHierarchy),
+        ...captureSequenceOptions(sequence, frame.frameContext, screenshot.frameContext),
+        ...canonicalPixelScreenshotOptions(frame.hierarchy),
+        initialFrameSubscriber: subscriber
+          ? {
+              ...subscriber,
+              liveFrameGeneration: frame.liveFrameGeneration,
+              deviceSessionUuid: frame.deviceSessionUuid,
+            }
+          : undefined,
         rotation: screenshot.rotation,
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
       },
     );
+  }
+  if (frame.screenshotFailure) {
+    throw frame.screenshotFailure.error;
   }
 }
 
@@ -288,57 +510,6 @@ async function getAndroidInitialHierarchy(
   return syncHierarchy
     ? { hierarchy: syncHierarchy.hierarchy, frameContext: syncHierarchy.frameContext }
     : null;
-}
-
-async function pushIosInitialObservationFrame(
-  device: BootedDevice,
-  dependencies: ObservationInitialFrameDependencies,
-): Promise<void> {
-  const client = dependencies.iosClientFactory(device);
-  const connected = await client.ensureConnected();
-  if (!connected) {
-    logger.warn(`[Daemon] Failed to connect CtrlProxy iOS to ${device.deviceId}`);
-    return;
-  }
-
-  logger.info(`[Daemon] CtrlProxy iOS connected to ${device.deviceId} for observation stream`);
-
-  const initialHierarchy = await getIosInitialHierarchy(client);
-  if (!initialHierarchy) {
-    logger.warn(
-      `[Daemon] No hierarchy available for initial observation frame on ${device.deviceId}`,
-    );
-    return;
-  }
-
-  const viewHierarchy = client.convertToViewHierarchyResult(initialHierarchy.hierarchy);
-  const frameContext = initialHierarchy.frameContext ?? viewHierarchy.frameContext;
-  const captureSequence = dependencies.streamServer.pushHierarchyUpdate(
-    device.deviceId,
-    viewHierarchy,
-    frameContext,
-  );
-  client.recordInitialObservationStreamHierarchy(viewHierarchy, captureSequence);
-
-  const screenshot = await client.requestScreenshotWithoutObservationStreamPush(
-    INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS,
-  );
-  if (screenshot.success && screenshot.data) {
-    const dimensions = getIosScreenshotDimensions(viewHierarchy);
-    dependencies.streamServer.pushScreenshotUpdate(
-      device.deviceId,
-      screenshot.data,
-      dimensions.width,
-      dimensions.height,
-      metadataForScreenshotFormat(IOS_CTRLPROXY_SCREENSHOT_METADATA, screenshot.format),
-      {
-        ...captureSequenceOptions(captureSequence, frameContext, screenshot.frameContext),
-        ...canonicalPixelScreenshotOptions(viewHierarchy),
-        rotation: screenshot.rotation,
-        ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
-      },
-    );
-  }
 }
 
 async function getIosInitialHierarchy(

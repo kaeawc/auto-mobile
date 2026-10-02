@@ -699,8 +699,10 @@ and mutation-refused writes surface errors, preserving the app's opt-in policy.
 Read-back verification uses the successful write route and reports the type read
 back, while comparing according to the requested input type. SDK-redacted reads
 return `found: true`, `redacted: true`, `value: null`, and the original canonical
-type. This applies to every SDK type, including STRING: the protocol cannot
-distinguish a real string equal to the redaction sentinel from hidden content.
+type. The host honors the SDK's explicit `redacted: true` flag regardless of value,
+and falls back to the `[REDACTED]` sentinel for older SDKs when the flag is absent.
+New SDKs also omit the flag for ordinary values, so a literal `"[REDACTED]"` string
+remains indistinguishable from older SDK redaction and is treated as redacted.
 A successful write with redacted read-back returns `success: true`, `redacted: true`,
 `verified: false`, and a warning that the value was written but not compared;
 `verified: false` means equality was not established, not that the write failed.
@@ -726,8 +728,10 @@ and data values are ISO and base64 strings. Plist non-finite reals retain type
 `float` and values `"nan"`, `"inf"`, or `"-inf"` so JSON does not turn them into null;
 these strings are also preserved recursively inside collections.
 Arrays/dictionaries are JSON strings. SDK collections that parse as their declared
-JSON shape carry `valueFormat: "canonical-json"`. If the SDK falls back to Swift
-interpolation (for example, nested Date/Data), the raw description is retained,
+JSON shape carry `valueFormat: "canonical-json"`; current SDKs encode nested dates
+as ISO strings, data as base64, and non-finite numbers as `"nan"`, `"inf"`, or `"-inf"`.
+If an older SDK falls back to Swift interpolation (for example, nested Date/Data),
+the raw description is retained,
 `type` is `unknown`, and `valueFormat` is `"sdk-description"`, with a warning about
 lossy encoding. Reading via the container-plist route when the SDK is disconnected
 returns recursive JSON with ISO/base64 leaves. `valueFormat` is omitted for other

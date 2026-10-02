@@ -1865,6 +1865,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y: Double,
     displayId: Int?,
   ) {
+    rememberedInsert = null
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
       broadcastGestureResult(requestId, false, "Streaming gestures require Android 8.0 (API 26)")
       return

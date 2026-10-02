@@ -22,7 +22,7 @@ describe("isGitVersionProbe", () => {
   });
 
   test.each([
-    ["git", "grep", "-l", "--", "webrtc-coordination-server"],
+    ["git", "grep", "-l", "--", "some-pattern"],
     ["git", "ls-files"],
     ["git"],
     [],

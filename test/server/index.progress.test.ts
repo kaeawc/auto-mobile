@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -14,9 +15,11 @@ import type { ProgressCallback } from "../../src/server/toolRegistry";
  */
 describe("CallTool progress notifications echo the client's token (issue #6118)", () => {
   let fixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
   const TOOL = "__progress_probe_6118__";
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     ToolRegistry.register(
       TOOL,
       "probe tool that reports two progress ticks",
@@ -37,6 +40,7 @@ describe("CallTool progress notifications echo the client's token (issue #6118)"
       await fixture.teardown();
     }
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
+    restoreHermeticServer();
   });
 
   test("client onprogress receives ticks carrying the client's own token", async () => {

@@ -7,6 +7,7 @@
  * see `withSocketSessionAutolockKey` in `src/daemon/socketServer.ts`) may
  * have it honored and reattached onto the handler's arguments.
  */
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -23,7 +24,10 @@ const TOOL = "__internal_timeout_provenance_probe_6222__";
 const STRICT_TOOL = "__internal_strip_strict_probe_6917__";
 
 describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", () => {
+  let restoreHermeticServer: () => void;
+
   beforeAll(() => {
+    restoreHermeticServer = installHermeticServerFixture();
     ToolRegistry.register(
       TOOL,
       "probe tool that reports back whatever internal timeout param it received",
@@ -75,6 +79,7 @@ describe("internal `__mcpRequestTimeoutMs` provenance (issue #6222 P1 review)", 
   afterAll(() => {
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(STRICT_TOOL);
+    restoreHermeticServer();
   });
 
   describe("daemonMode: false (direct, non-daemon server)", () => {

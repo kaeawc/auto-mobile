@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { ActionableError } from "../../models";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
+import { appendBounded } from "./appendBounded";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import {
   DefaultHostCommandExecutor,
@@ -50,6 +51,9 @@ const JAXB_ERROR_MARKERS = [
   "javax.xml.bind",
 ];
 const TERMINATION_ESCALATION_MS = 1_000;
+const DEFAULT_MAX_OUTPUT_CHARS = 16_384;
+// Parsed lists can legitimately exceed 16 KiB; retain up to 1 MiB before refusing partial output.
+const MAX_LIST_STDOUT_CHARS = 1_048_576;
 
 // Route the default long-lived spawn through the shared host-process seam so the
 // client no longer reaches for `child_process.spawn` directly (issue #5459). The
@@ -78,7 +82,10 @@ function normalizePath(value: string): string {
 }
 
 function getFailureSummary(result: CommandResult): string {
-  return result.stderr.trim() || result.stdout.trim() || "Unknown error";
+  const stderr = result.stderr.trim();
+  const summary = stderr || result.stdout.trim() || "Unknown error";
+  const truncated = stderr ? result.stderrTruncated : result.stdoutTruncated;
+  return summary + (truncated ? "\n[output truncated]" : "");
 }
 
 function quoteForWindowsCmd(value: string): string {
@@ -122,6 +129,8 @@ interface CommandResult {
   stdout: string;
   stderr: string;
   exitCode: number | null;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
 }
 
 export class AvdManagerClient {
@@ -131,8 +140,14 @@ export class AvdManagerClient {
 
   async listDeviceImages(options: AvdManagerExecutionOptions = {}): Promise<AvdInfo[]> {
     const { path, env } = await this.resolve();
-    const result = await this.execute(path, ["list", "avd"], { env, timeoutMs: 60_000 }, options);
+    const result = await this.execute(
+      path,
+      ["list", "avd"],
+      { env, timeoutMs: 60_000, maxStdoutChars: MAX_LIST_STDOUT_CHARS },
+      options,
+    );
     this.throwIfUnsuccessful("Failed to list AVDs", path, result);
+    this.throwIfListTruncated("list avd", result);
     return this.parseAvdList(result.stdout);
   }
 
@@ -217,10 +232,11 @@ export class AvdManagerClient {
     const result = await this.execute(
       path,
       ["list", "device"],
-      { env, timeoutMs: 60_000 },
+      { env, timeoutMs: 60_000, maxStdoutChars: MAX_LIST_STDOUT_CHARS },
       options,
     );
     this.throwIfUnsuccessful("Failed to list devices", path, result);
+    this.throwIfListTruncated("list device", result);
     return this.parseDeviceList(result.stdout);
   }
 
@@ -344,7 +360,12 @@ export class AvdManagerClient {
   private execute(
     path: string,
     args: string[],
-    inputOptions: { input?: string; env?: NodeJS.ProcessEnv; timeoutMs: number },
+    inputOptions: {
+      input?: string;
+      env?: NodeJS.ProcessEnv;
+      timeoutMs: number;
+      maxStdoutChars?: number;
+    },
     options: AvdManagerExecutionOptions,
   ): Promise<CommandResult> {
     // One span per avdmanager invocation, named by the leading subcommand so
@@ -358,7 +379,12 @@ export class AvdManagerClient {
   private async executeInner(
     path: string,
     args: string[],
-    inputOptions: { input?: string; env?: NodeJS.ProcessEnv; timeoutMs: number },
+    inputOptions: {
+      input?: string;
+      env?: NodeJS.ProcessEnv;
+      timeoutMs: number;
+      maxStdoutChars?: number;
+    },
     options: AvdManagerExecutionOptions,
   ): Promise<CommandResult> {
     return new Promise((resolvePromise, reject) => {
@@ -377,6 +403,8 @@ export class AvdManagerClient {
       let forcedSettlementTimeout: NodeJS.Timeout | undefined;
       let stdout = "";
       let stderr = "";
+      let stdoutTruncated = false;
+      let stderrTruncated = false;
       const settle = (callback: () => void) => {
         if (settled) {
           return;
@@ -429,14 +457,22 @@ export class AvdManagerClient {
       this.dependencies.logger.info(`Executing: ${path} ${args.join(" ")}`);
       child.stdout?.on("data", (data) => {
         const output = data.toString();
-        stdout += output;
+        const appended = appendBounded(
+          stdout,
+          output,
+          inputOptions.maxStdoutChars ?? DEFAULT_MAX_OUTPUT_CHARS,
+        );
+        stdout = appended.value;
+        stdoutTruncated ||= appended.truncated;
         if (output.trim()) {
           this.dependencies.logger.info(`[${path}] ${output.trim()}`);
         }
       });
       child.stderr?.on("data", (data) => {
         const output = data.toString();
-        stderr += output;
+        const appended = appendBounded(stderr, output, DEFAULT_MAX_OUTPUT_CHARS);
+        stderr = appended.value;
+        stderrTruncated ||= appended.truncated;
         if (output.trim()) {
           this.dependencies.logger.warn(`[${path}] ${output.trim()}`);
         }
@@ -447,7 +483,7 @@ export class AvdManagerClient {
             reject(terminationError);
             return;
           }
-          resolvePromise({ stdout, stderr, exitCode: code });
+          resolvePromise({ stdout, stderr, exitCode: code, stdoutTruncated, stderrTruncated });
         }),
       );
       child.on("exit", () => {
@@ -489,6 +525,14 @@ export class AvdManagerClient {
     throw compatibility
       ? new ActionableError(compatibility)
       : new Error(`${prefix}: ${getFailureSummary(result)}`);
+  }
+
+  private throwIfListTruncated(command: string, result: CommandResult): void {
+    if (result.stdoutTruncated) {
+      throw new ActionableError(
+        `avdmanager ${command} output exceeded ${MAX_LIST_STDOUT_CHARS} characters and was truncated; refusing to parse partial output. Reduce the list size and retry.`,
+      );
+    }
   }
 
   private parseAvdList(output: string): AvdInfo[] {

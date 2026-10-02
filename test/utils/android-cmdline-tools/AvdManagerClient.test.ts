@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ActionableError } from "../../../src/models";
 import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -109,6 +110,101 @@ function createClient(overrides: Partial<ConstructorParameters<typeof AvdManager
 }
 
 describe("AvdManagerClient", () => {
+  test("returns failure stdout unchanged under the limit", async () => {
+    const { client, child } = createClient();
+    const pending = client.deleteAvd("pixel");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText("first ");
+    child.stdoutText("second");
+    child.close(1);
+    expect(await pending).toEqual({ success: false, message: "AVD deletion failed: first second" });
+  });
+
+  for (const operation of ["create", "delete"] as const) {
+    for (const stream of ["stdout", "stderr"] as const) {
+      test(`${operation} bounds multi-chunk ${stream} failure diagnostics`, async () => {
+        const { client, child } = createClient();
+        const pending =
+          operation === "create"
+            ? client.createAvd({ name: "pixel", package: "unused" })
+            : client.deleteAvd("pixel");
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        // Fill stdout in both cases; fill stderr only when it is the selected diagnostic.
+        for (let chunk = 0; chunk < 4; chunk++) {
+          child.stdoutText("x".repeat(10_000));
+          if (stream === "stderr") {
+            child.stderrText("e".repeat(10_000));
+          }
+        }
+        child.stdoutText("stdout-tail-marker");
+        if (stream === "stderr") {
+          child.stderrText("stderr-tail-marker");
+        }
+        child.close(1);
+        const result = await pending;
+        expect(result.success).toBe(false);
+        expect(result.message).toBe(
+          `AVD ${operation === "create" ? "creation" : "deletion"} failed: ${(stream === "stdout"
+            ? "x"
+            : "e"
+          ).repeat(16_384)}\n[output truncated]`,
+        );
+        expect(result.message.length).toBeLessThanOrEqual(16_384 + 50);
+        expect(result.message).not.toContain("tail-marker");
+      });
+    }
+  }
+
+  test("does not mark complete stderr diagnostics when only stdout was truncated", async () => {
+    const { client, child } = createClient();
+    const pending = client.deleteAvd("pixel");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.stdoutText("x".repeat(20_000));
+    child.stderrText("complete stderr");
+    child.close(1);
+    expect((await pending).message).toBe("AVD deletion failed: complete stderr");
+  });
+
+  for (const command of ["avd", "device"] as const) {
+    test(`refuses to parse truncated list ${command} stdout`, async () => {
+      const { client, child } = createClient();
+      const pending = command === "avd" ? client.listDeviceImages() : client.listDevices();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      child.stdoutText("x".repeat(600_000));
+      child.stdoutText("x".repeat(600_000));
+      child.close(0);
+      await expect(pending).rejects.toBeInstanceOf(ActionableError);
+      await expect(pending).rejects.toThrow(
+        `avdmanager list ${command} output exceeded 1048576 characters and was truncated; refusing to parse partial output`,
+      );
+    });
+
+    test(`reports nonzero list ${command} failure before stdout truncation`, async () => {
+      const { client, child } = createClient();
+      const pending = command === "avd" ? client.listDeviceImages() : client.listDevices();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      child.stdoutText("x".repeat(1_048_577));
+      child.stderrText("configuration failed");
+      child.close(1);
+      await expect(pending).rejects.toThrow(
+        `Failed to list ${command === "avd" ? "AVDs" : "devices"}: configuration failed`,
+      );
+      await expect(pending).rejects.not.toBeInstanceOf(ActionableError);
+    });
+  }
+
+  test("parses complete device stdout above 16 KiB despite truncated stderr", async () => {
+    const { client, child } = createClient();
+    const pending = client.listDevices();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(listDeviceOutput.length).toBeLessThan(1_048_576);
+    child.stdoutText("\n".repeat(16_384));
+    child.stdoutText(listDeviceOutput);
+    child.stderrText("e".repeat(20_000));
+    child.close(0);
+    expect(await pending).toHaveLength(96);
+  });
+
   test("parses cmdline-tools 23.0 device profiles with whitespace around field colons", async () => {
     const { client, child } = createClient();
     const pending = client.listDevices();

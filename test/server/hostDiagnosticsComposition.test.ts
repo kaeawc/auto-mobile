@@ -1,6 +1,6 @@
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import { expect, spyOn, test } from "bun:test";
+import { beforeAll, expect, spyOn, test } from "bun:test";
 import { createMcpServer } from "../../src/server/index";
 import * as doctorTools from "../../src/server/doctorTools";
 import { runDoctor } from "../../src/doctor";
@@ -16,6 +16,28 @@ import {
 import { createProductionCoreDeviceProbe } from "../../src/utils/ios-cmdline-tools/CoreDeviceProbeHolder";
 import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+beforeAll(async () => {
+  // Pay cold schema/SDK initialization outside the per-test timing budget.
+  const executor = new FakeHostCommandExecutor();
+  const probe = createProductionCoreDeviceProbe({ executor, timer: new FakeTimer() });
+  const ios = createIosDoctorDependencies({ coreDeviceProbe: probe });
+  const resourceRegistration = spyOn(
+    resources,
+    "registerHostToolchainResources",
+  ).mockImplementation(() => {});
+  PlatformDeviceManagerFactory.setInstance(new FakeDeviceManager());
+  try {
+    const previousDoctor = ToolRegistry.getTool("doctor");
+    const server = createMcpServer({ iosDependencies: ios });
+    await server.close();
+    expect(ToolRegistry.getTool("doctor")).toBe(previousDoctor);
+    expect(executor.getExecutedCommands()).toEqual([]);
+  } finally {
+    PlatformDeviceManagerFactory.reset();
+    resourceRegistration.mockRestore();
+  }
+});
 
 test("server composition injects the resource probe without adding a doctor tool or spawning", async () => {
   const executor = new FakeHostCommandExecutor();

@@ -250,8 +250,8 @@ function makeHarness(
     },
     platformProvider: () => options.platform ?? "darwin",
     fileSize: async () => options.sizeBytes ?? 4096,
-    now: options.now,
-    timer: options.timer,
+    now: options.now ?? (() => 1_000),
+    timer: options.timer ?? new FakeTimer(),
   });
 
   return { backend, ffmpeg, helper, lister, helperOptions };
@@ -844,6 +844,8 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
       createHelper: () => helper,
       platformProvider: () => "darwin",
       fileSize: async () => 1,
+      now: () => 1_000,
+      timer: new FakeTimer(),
     });
 
     await expect(backend.start(makeConfig())).rejects.toThrow("helper refused to start");
@@ -1087,6 +1089,8 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
       platformProvider: () => "darwin",
       fileSize: async () => 1,
       env: { AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER: "/local/build/screen-capture-helper" },
+      now: () => 1_000,
+      timer: new FakeTimer(),
       helperPathExists: (candidate) => candidate === "/local/build/screen-capture-helper",
     });
 

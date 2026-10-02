@@ -27,7 +27,6 @@ import {
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
@@ -94,10 +93,6 @@ export class InstallApp {
     this.setInstalledAppsRepository(installedAppsRepository);
   }
 
-  private isSimulator(): boolean {
-    return isIosSimulatorUdid(this.device.deviceId);
-  }
-
   private getIosInstallBackend(): IosInstallBackend {
     return (this.iosInstallBackendResolver ?? resolveIosInstallBackend)(this.device.deviceId, {
       simctl: this.simctl,
@@ -143,8 +138,8 @@ export class InstallApp {
     const ext = path.extname(artifactPath).toLowerCase();
 
     if (this.device.platform === "ios") {
-      this.validateiOSArtifact(ext);
       const backend = this.getIosInstallBackend();
+      this.validateiOSArtifact(ext, backend);
       if (ext === ".ipa") {
         const result = await perf.track("iOSPhysicalInstall", () =>
           this.executeiOSPhysical(artifactPath, perf, backend, signal),
@@ -460,8 +455,8 @@ export class InstallApp {
     return typeof bundleId === "string" ? bundleId.trim() || undefined : undefined;
   }
 
-  private validateiOSArtifact(ext: string): void {
-    const isSimulator = this.isSimulator();
+  private validateiOSArtifact(ext: string, backend: IosInstallBackend): void {
+    const isSimulator = backend.kind === "simulator";
     if (isSimulator && ext === ".ipa") {
       throw new Error(
         "iOS simulators do not support .ipa files. Use a .app bundle built for the simulator instead.",

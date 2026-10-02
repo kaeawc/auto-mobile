@@ -1658,6 +1658,7 @@ describe("ListInstalledApps backend injection", () => {
         iosAppListBackendResolver: (deviceId) => {
           calls.push(deviceId);
           return {
+            kind: "physical",
             listApps: async () => {
               throw error;
             },

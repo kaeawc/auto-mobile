@@ -15,6 +15,7 @@ import {
 
 /** The iOS operation currently shared by simulator and physical-device actions. */
 export interface IosDeviceBackend {
+  readonly kind: "simulator" | "physical";
   uninstallApp(bundleId: string): Promise<void>;
 }
 
@@ -28,6 +29,8 @@ export interface IosDeviceBackendDeps {
 }
 
 export class SimulatorIosDeviceBackend implements IosDeviceBackend {
+  readonly kind = "simulator";
+
   constructor(
     private readonly deviceId: string,
     private readonly deps: IosDeviceBackendDeps,
@@ -44,6 +47,8 @@ export class SimulatorIosDeviceBackend implements IosDeviceBackend {
 }
 
 export class PhysicalIosDeviceBackend implements IosDeviceBackend {
+  readonly kind = "physical";
+
   constructor(
     private readonly deviceId: string,
     private readonly deps: Pick<IosDeviceBackendDeps, "deviceAppUninstaller">,
@@ -75,6 +80,7 @@ export interface DeviceAppLauncher {
 }
 
 export interface IosLaunchBackend {
+  readonly kind: "simulator" | "physical";
   launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult>;
 }
 
@@ -84,6 +90,8 @@ export interface IosLaunchBackendDeps {
 }
 
 export class SimulatorIosLaunchBackend implements IosLaunchBackend {
+  readonly kind = "simulator";
+
   constructor(private readonly simctl: Pick<SimCtlClient, "launchApp">) {}
 
   launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult> {
@@ -92,6 +100,8 @@ export class SimulatorIosLaunchBackend implements IosLaunchBackend {
 }
 
 export class PhysicalIosLaunchBackend implements IosLaunchBackend {
+  readonly kind = "physical";
+
   constructor(
     private readonly deviceId: string,
     private readonly deviceAppLauncher: DeviceAppLauncher,
@@ -132,6 +142,7 @@ export interface DeviceAppTerminator {
 type TerminateResult = { wasInstalled: boolean; wasRunning: boolean };
 
 export interface IosTerminateBackend {
+  readonly kind: "simulator" | "physical";
   /** simctl needs the action's live listing pre-check; devicectl checks internally. */
   readonly requiresInstalledAppCheck: boolean;
   terminateApp(bundleId: string): Promise<TerminateResult>;
@@ -143,6 +154,8 @@ export interface IosTerminateBackendDeps {
 }
 
 export class SimulatorIosTerminateBackend implements IosTerminateBackend {
+  readonly kind = "simulator";
+
   readonly requiresInstalledAppCheck = true;
 
   constructor(
@@ -157,6 +170,8 @@ export class SimulatorIosTerminateBackend implements IosTerminateBackend {
 }
 
 export class PhysicalIosTerminateBackend implements IosTerminateBackend {
+  readonly kind = "physical";
+
   readonly requiresInstalledAppCheck = false;
 
   constructor(
@@ -179,6 +194,7 @@ export function resolveIosTerminateBackend(
 }
 
 export interface IosAppListBackend {
+  readonly kind: "simulator" | "physical";
   listApps(): Promise<IosInstalledAppRecord[]>;
 }
 
@@ -190,6 +206,8 @@ export interface IosAppListBackendDeps {
 }
 
 export class SimulatorIosAppListBackend implements IosAppListBackend {
+  readonly kind = "simulator";
+
   constructor(
     private readonly deviceId: string,
     private readonly simctl: IosAppListBackendDeps["simctl"],
@@ -201,6 +219,8 @@ export class SimulatorIosAppListBackend implements IosAppListBackend {
 }
 
 export class PhysicalIosAppListBackend implements IosAppListBackend {
+  readonly kind = "physical";
+
   constructor(
     private readonly deviceId: string,
     private readonly getPhysicalAppLister: IosAppListBackendDeps["getPhysicalAppLister"],
@@ -223,6 +243,7 @@ export function resolveIosAppListBackend(
 }
 
 export interface IosAppInfoBackend {
+  readonly kind: "simulator" | "physical";
   getAppInfo(bundleId: string): Promise<Record<string, unknown> | null>;
 }
 
@@ -235,6 +256,8 @@ export interface IosAppInfoBackendDeps {
 }
 
 export class SimulatorIosAppInfoBackend implements IosAppInfoBackend {
+  readonly kind = "simulator";
+
   constructor(
     private readonly deviceId: string,
     private readonly deps: IosAppInfoBackendDeps,
@@ -253,6 +276,8 @@ export class SimulatorIosAppInfoBackend implements IosAppInfoBackend {
 }
 
 export class PhysicalIosAppInfoBackend implements IosAppInfoBackend {
+  readonly kind = "physical";
+
   constructor(
     private readonly deviceId: string,
     private readonly iosSource: Pick<IosAppMetadataSource, "getPhysicalDeviceAppInfo">,
@@ -279,6 +304,7 @@ export function resolveIosAppInfoBackend(
 }
 
 export interface IosClearDataBackend {
+  readonly kind: "simulator" | "physical";
   clearAppData(bundleId: string): Promise<ClearAppDataResult>;
 }
 
@@ -293,6 +319,8 @@ export interface IosClearDataBackendDeps {
 }
 
 export class SimulatorIosClearDataBackend implements IosClearDataBackend {
+  readonly kind = "simulator";
+
   constructor(
     private readonly deviceId: string,
     private readonly deps: Pick<IosClearDataBackendDeps, "simctl" | "rm">,
@@ -334,6 +362,8 @@ export class SimulatorIosClearDataBackend implements IosClearDataBackend {
 }
 
 export class PhysicalIosClearDataBackend implements IosClearDataBackend {
+  readonly kind = "physical";
+
   constructor(
     private readonly deviceId: string,
     private readonly createReinstaller: () => IosClearDataReinstaller,
@@ -383,11 +413,12 @@ export function resolveIosColdStartTerminateBackend(
       },
     },
   });
-  return backend.requiresInstalledAppCheck ? backend : null;
+  return backend.kind === "simulator" ? backend : null;
 }
 
 /** Install transport and strict app listings used to verify the installed bundle. */
 export interface IosInstallBackend {
+  readonly kind: "simulator" | "physical";
   installApp(artifactPath: string): Promise<void>;
   listApps(): Promise<Record<string, unknown>[]>;
 }
@@ -403,6 +434,8 @@ export interface IosInstallBackendDeps {
 }
 
 export class SimulatorIosInstallBackend implements IosInstallBackend {
+  readonly kind = "simulator";
+
   constructor(
     private readonly deviceId: string,
     private readonly simctl: IosInstallBackendDeps["simctl"],
@@ -418,6 +451,8 @@ export class SimulatorIosInstallBackend implements IosInstallBackend {
 }
 
 export class PhysicalIosInstallBackend implements IosInstallBackend {
+  readonly kind = "physical";
+
   constructor(
     private readonly deviceId: string,
     private readonly deps: Pick<IosInstallBackendDeps, "deviceAppInstaller" | "physicalAppLister">,

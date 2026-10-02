@@ -82,6 +82,7 @@ describe("iOS app list and info backends", () => {
       expect(list).toBeInstanceOf(
         physicalList ? PhysicalIosAppListBackend : SimulatorIosAppListBackend,
       );
+      expect(list.kind).toBe(physicalList ? "physical" : "simulator");
       expect(physicalConstructions).toBe(0);
       expect(await list.listApps()).toEqual([app]);
       expect(physicalConstructions).toBe(physicalList ? 1 : 0);
@@ -93,6 +94,7 @@ describe("iOS app list and info backends", () => {
       expect(info).toBeInstanceOf(
         simulatorInfo ? SimulatorIosAppInfoBackend : PhysicalIosAppInfoBackend,
       );
+      expect(info.kind).toBe(simulatorInfo ? "simulator" : "physical");
       expect(await info.getAppInfo(bundleId)).toBe(app);
       expect(iosSource.listCalls).toEqual(simulatorInfo ? [deviceId] : []);
       expect(iosSource.infoCalls).toEqual(simulatorInfo ? [] : [{ deviceId, bundleId }]);

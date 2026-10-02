@@ -25,7 +25,6 @@ import {
   resolveIosLaunchBackend,
   resolveIosColdStartTerminateBackend,
 } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
 import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetricsCollector";
@@ -434,14 +433,6 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   /**
-   * True when the active iOS device is a simulator (simctl) rather than a
-   * physical device (devicectl). Same runtime signal used across the iOS tooling.
-   */
-  private isSimulator(): boolean {
-    return isIosSimulatorUdid(this.device.deviceId);
-  }
-
-  /**
    * Launch an iOS app by bundle identifier
    * @param bundleId - The bundle identifier to launch
    * @param clearAppData - Whether to wipe the app's data container before launch (iOS simulator)
@@ -486,7 +477,7 @@ export class LaunchApp extends BaseVisualChange {
             simctl: this.simctl,
             deviceAppLauncher: this.deviceAppLauncher,
           });
-          const simulator = this.isSimulator();
+          const simulator = backend.kind === "simulator";
 
           if (needsColdStart) {
             // Cold boot: use simctl (simulator) / devicectl (device) directly.

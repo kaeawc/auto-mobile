@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { NavigationGraphManager } from "../../src/features/navigation/NavigationGraphManager";
 import { IdentifyInteractions } from "../../src/features/observe/IdentifyInteractions";
 import { ActionableError, type BootedDevice, type ObserveResult } from "../../src/models";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
+import { FakeNavigationGraphManager } from "../fakes/FakeNavigationGraphManager";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
 import { FakeTimer } from "../fakes/FakeTimer";
-import {
-  installInMemoryNavManager,
-  type InMemoryNavManagerHarness,
-} from "../helpers/navigationTestHarness";
 
 const device: BootedDevice = {
   deviceId: "interactions-freshness",
@@ -20,7 +18,7 @@ const device: BootedDevice = {
 describe("identifyInteractions cached freshness", () => {
   let screen: FakeObserveScreen;
   let timer: FakeTimer;
-  let navigation: InMemoryNavManagerHarness;
+  let navigation: ReturnType<typeof spyOn<typeof NavigationGraphManager, "getInstance">>;
   let previousDebugMode: boolean;
   let analyze: ReturnType<typeof spyOn<IdentifyInteractions, "analyze">>;
 
@@ -61,10 +59,13 @@ describe("identifyInteractions cached freshness", () => {
     return JSON.parse(content.text);
   }
 
-  beforeEach(async () => {
+  beforeEach(() => {
     previousDebugMode = isDebugModeEnabled();
     setDebugModeEnabled(true);
-    navigation = await installInMemoryNavManager();
+    // Freshness only reads the current screen; avoid unrelated database migrations.
+    navigation = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
+      new FakeNavigationGraphManager() as unknown as NavigationGraphManager,
+    );
     timer = new FakeTimer();
     screen = new FakeObserveScreen();
     analyze = spyOn(IdentifyInteractions.prototype, "analyze");
@@ -80,12 +81,12 @@ describe("identifyInteractions cached freshness", () => {
     });
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     analyze.mockRestore();
     ToolRegistry.clearTools();
     setDebugModeEnabled(previousDebugMode);
     timer.reset();
-    await navigation.dispose();
+    navigation.mockRestore();
   });
 
   test("refetches stale usable cache exactly once and analyzes fresh elements", async () => {

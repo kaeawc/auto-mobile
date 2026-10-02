@@ -3501,6 +3501,42 @@
                   "minimum": 0,
                   "maximum": 3
                 },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -4511,6 +4547,42 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 3
+                },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -9490,6 +9562,42 @@
           "minimum": 0,
           "maximum": 3
         },
+        "screenshotImageSize": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": ["width", "height"],
+          "additionalProperties": false
+        },
+        "screenshotPixelsPerNativeUnit": {
+          "type": "object",
+          "properties": {
+            "x": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "y": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "required": ["x", "y"],
+          "additionalProperties": false
+        },
+        "screenshotScaleProvenance": {
+          "type": "string",
+          "enum": ["raster-dimensions", "native-scale-confirmed"]
+        },
         "screenshotSettled": {
           "type": "boolean"
         },
@@ -13864,6 +13972,42 @@
                   "minimum": 0,
                   "maximum": 3
                 },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -14874,6 +15018,42 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 3
+                },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -18464,6 +18644,42 @@
                   "minimum": 0,
                   "maximum": 3
                 },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -19474,6 +19690,42 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 3
+                },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -25273,6 +25525,42 @@
                   "minimum": 0,
                   "maximum": 3
                 },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -26283,6 +26571,42 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 3
+                },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
                 "screenshotSettled": {
                   "type": "boolean"
@@ -28735,6 +29059,42 @@
                   "minimum": 0,
                   "maximum": 3
                 },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
+                },
                 "screenshotSettled": {
                   "type": "boolean"
                 },
@@ -29745,6 +30105,42 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 3
+                },
+                "screenshotImageSize": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["width", "height"],
+                  "additionalProperties": false
+                },
+                "screenshotPixelsPerNativeUnit": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "y": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y"],
+                  "additionalProperties": false
+                },
+                "screenshotScaleProvenance": {
+                  "type": "string",
+                  "enum": ["raster-dimensions", "native-scale-confirmed"]
                 },
                 "screenshotSettled": {
                   "type": "boolean"

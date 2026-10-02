@@ -101,8 +101,6 @@ import {
 import { DaemonState } from "../../daemon/daemonState";
 import { ObservedAndroidDisplayCache, observedIosDisplay } from "./ObservationDisplay";
 import { displayTransitions } from "./DisplayTransition";
-import { readFile } from "node:fs/promises";
-import { readImageHeaderDimensions } from "../../utils/screenshot/imageHeaderDimensions";
 import {
   assertAllDisplayObserveSupported,
   DisplaySelectionError,
@@ -110,9 +108,9 @@ import {
 } from "./DisplaySelection";
 import type { DisplayObservation } from "../../models/ObserveResult";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { snapshotRasterGeometry } from "./screenshot/snapshotRasterGeometry";
 import {
   observationScreenshotEvidence,
-  screenshotFormatForPath,
   type ScreenshotEvidenceFiles,
 } from "./screenshot/observationScreenshotEvidence";
 
@@ -134,23 +132,6 @@ function reconcileIosDisplayTransition(
       result.display,
     );
   }
-}
-
-async function iosScreenshotOrientation(
-  screenshotPath: string,
-  screenSize: ObserveResult["screenSize"],
-): Promise<"native" | "display"> {
-  try {
-    const dimensions = readImageHeaderDimensions(await readFile(screenshotPath));
-    if (dimensions) {
-      return dimensions.width > dimensions.height === screenSize.width > screenSize.height
-        ? "display"
-        : "native";
-    }
-  } catch (error) {
-    logger.warn(`[OBSERVE] Could not read iOS screenshot orientation: ${describeError(error)}`);
-  }
-  return "native";
 }
 
 /**
@@ -914,6 +895,7 @@ export class RealObserveScreen implements ObserveScreen {
           this.pathProtection,
         ),
       );
+      await this.attachScreenshotRaster(result, capture.screenshotImageSize);
       result.screenshotSettled = true;
       return;
     }
@@ -936,13 +918,13 @@ export class RealObserveScreen implements ObserveScreen {
         `observe crop screenshot capture failed for device ${this.device.deviceId}: ${failure}. Retry with a fresh settled capture.`,
       );
     }
-    const cachedPath = this.eligibleCachedScreenshotPath(displayId);
-    if (cachedPath) {
+    const cachedScreenshot = this.eligibleCachedScreenshot(displayId);
+    if (cachedScreenshot) {
       try {
         Object.assign(
           result,
           await observationScreenshotEvidence(
-            cachedPath,
+            cachedScreenshot.path,
             "cached",
             failure,
             this.screenshotEvidenceFiles,
@@ -950,6 +932,7 @@ export class RealObserveScreen implements ObserveScreen {
             this.pathProtection,
           ),
         );
+        await this.attachScreenshotRaster(result, cachedScreenshot.imageSize);
       } catch (error) {
         logger.warn(`[OBSERVE] Cached screenshot unavailable: ${describeError(error)}`, error);
       }
@@ -977,9 +960,28 @@ export class RealObserveScreen implements ObserveScreen {
     return displayId;
   }
 
-  private eligibleCachedScreenshotPath(displayId?: number): string | undefined {
+  private eligibleCachedScreenshot(
+    displayId?: number,
+  ): { path: string; imageSize?: { width: number; height: number } } | undefined {
     const cached = getObserveCacheStore().getRecentInMemoryForDevice(this.device.deviceId);
     const explicitDisplay = Boolean(this.requestedDisplay && this.requestedDisplay !== "active");
+    if (!this.cachedScreenshotDisplayMatches(cached, displayId)) {
+      return undefined;
+    }
+    if (cached?.screenshotPath) {
+      return { path: cached.screenshotPath, imageSize: cached.screenshotImageSize };
+    }
+    const path =
+      !explicitDisplay && displayId === undefined
+        ? getScreenshotStateStore().getPath(this.device.deviceId)
+        : undefined;
+    return path ? { path } : undefined;
+  }
+
+  private cachedScreenshotDisplayMatches(
+    cached: ObserveResult | undefined,
+    displayId?: number,
+  ): boolean {
     const displayMatches = [
       undefined,
       "active",
@@ -987,15 +989,7 @@ export class RealObserveScreen implements ObserveScreen {
       cached?.display.role,
     ].includes(this.requestedDisplay);
     const displayIdMatches = [undefined, cached?.viewHierarchy?.displayId].includes(displayId);
-    if (!displayMatches || !displayIdMatches) {
-      return undefined;
-    }
-    if (cached?.screenshotPath) {
-      return cached.screenshotPath;
-    }
-    return !explicitDisplay && displayId === undefined
-      ? getScreenshotStateStore().getPath(this.device.deviceId)
-      : undefined;
+    return displayMatches && displayIdMatches;
   }
 
   /**
@@ -1953,7 +1947,6 @@ export class RealObserveScreen implements ObserveScreen {
         displayId,
         screenshotOptions,
       );
-      const screenshotFormat = screenshotFormatForPath(path);
       const screenshotEvidence = await observationScreenshotEvidence(
         path,
         "fresh",
@@ -1962,15 +1955,22 @@ export class RealObserveScreen implements ObserveScreen {
         this.timer,
         this.pathProtection,
       );
-      const screenshotOrientation =
-        this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1
-          ? await iosScreenshotOrientation(path, observation.screenSize)
-          : undefined;
       Object.assign(observation, screenshotEvidence);
-      observation.screenshotFormat = screenshotFormat;
-      observation.screenshotMimeType = `image/${screenshotFormat}`;
-      if (screenshotOrientation) {
-        observation.screenshotOrientation = screenshotOrientation;
+      const imageSize = getScreenshotStateStore().getImageSizeForObservation(
+        this.device.deviceId,
+        observation.observationId,
+        path,
+      );
+      await this.attachScreenshotRaster(observation, imageSize);
+      // Only settled multi-panel iOS captures refine the platform orientation preset.
+      if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
+        const rasterSize = observation.screenshotImageSize;
+        observation.screenshotOrientation =
+          rasterSize &&
+          rasterSize.width > rasterSize.height ===
+            observation.screenSize.width > observation.screenSize.height
+            ? "display"
+            : "native";
       }
       observation.screenshotSettled = true;
     } catch (error) {
@@ -1983,6 +1983,54 @@ export class RealObserveScreen implements ObserveScreen {
       logger.warn(
         `[OBSERVE] Settled screenshot unavailable: ${observation.screenshotSettledError}`,
       );
+    }
+  }
+
+  /** Best-effort raster evidence belongs to the returned path, never the screen-size guess. */
+  private async attachScreenshotRaster(
+    observation: ObserveResult,
+    imageSize: { width: number; height: number } | undefined,
+  ): Promise<void> {
+    delete observation.screenshotImageSize;
+    delete observation.screenshotPixelsPerNativeUnit;
+    delete observation.screenshotScaleProvenance;
+    try {
+      if (
+        !imageSize ||
+        ![imageSize.width, imageSize.height].every((value) => Number.isInteger(value) && value > 0)
+      ) {
+        logger.warn("[OBSERVE] Could not read screenshot raster dimensions");
+        return;
+      }
+      observation.screenshotImageSize = { width: imageSize.width, height: imageSize.height };
+      const hierarchy: Partial<ViewHierarchyResult> = observation.viewHierarchy ?? {};
+      const scale = snapshotRasterGeometry(
+        imageSize,
+        {
+          platform: this.device.platform,
+          screenSize: observation.screenSize,
+          rotation: hierarchy.rotation ?? observation.rotation,
+          nativeScale: hierarchy.nativeScale,
+          rasterOrientation:
+            this.device.platform === "ios" &&
+            !(
+              (this.device.displays?.panels.length ?? 0) > 1 &&
+              imageSize.width > imageSize.height ===
+                observation.screenSize.width > observation.screenSize.height
+            )
+              ? "native"
+              : "display",
+        },
+        "observe",
+      );
+      observation.screenshotPixelsPerNativeUnit = scale.pixelsPerNativeUnit;
+      observation.screenshotScaleProvenance = scale.scaleProvenance;
+    } catch (error) {
+      logger.warn(
+        `[OBSERVE] Could not derive screenshot raster scale: ${describeError(error)}`,
+        error,
+      );
+      return;
     }
   }
 

@@ -5,6 +5,7 @@ import {
 import type { Timer } from "../../src/utils/SystemTimer";
 
 interface FakeScreenshotState {
+  imageSize?: { width: number; height: number };
   path: string | null;
   error: string | null;
   timestamp: number;
@@ -41,12 +42,14 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
     observationId: string,
     path?: string,
     error?: string,
+    imageSize?: { width: number; height: number },
   ): void {
     const states = this.observationStates.get(deviceId) ?? new Map<string, FakeScreenshotState>();
     states.delete(observationId);
     states.set(observationId, {
       path: path ?? null,
       error: error ?? null,
+      ...(imageSize ? { imageSize } : {}),
       timestamp: this.currentTime,
     });
     this.observationStates.set(deviceId, states);
@@ -109,6 +112,11 @@ export class FakeScreenshotStateStore implements ScreenshotStateStore {
 
   getPathForObservation(deviceId: string, observationId: string): string | undefined {
     return this.observationStates.get(deviceId)?.get(observationId)?.path ?? undefined;
+  }
+
+  getImageSizeForObservation(deviceId: string, observationId: string, path: string) {
+    const state = this.observationStates.get(deviceId)?.get(observationId);
+    return state?.path === path ? state.imageSize : undefined;
   }
 
   getErrorForObservation(deviceId: string, observationId: string): string | undefined {

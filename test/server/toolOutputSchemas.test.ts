@@ -16,6 +16,7 @@ import {
   elementSchema,
   observationOutputSchema,
   observationSummarySchema,
+  observeCropResultSchema,
   observeDiffSchema,
   observeResultSchema,
   screenSizeSchema,
@@ -68,6 +69,37 @@ test("full action observation advertises the optional freshness reason fields", 
   expect(JSON.stringify(freshness)).toContain("unavailableDetail");
 });
 import { applyJsonSchemaOverride } from "../../src/server/toolSchemaHelpers";
+
+test("crop raster description documents upright output without changing full screenshot metadata", () => {
+  expect(toJSONSchema(observeCropResultSchema).properties?.imageSize.description).toBe(
+    "Pixel dimensions of the upright output crop PNG.",
+  );
+  expect(
+    toJSONSchema(observeResultSchema).properties?.screenshotImageSize.description,
+  ).toBeUndefined();
+});
+
+test("full screenshot geometry accepts shared crop scalars and rejects invalid raster sizes", () => {
+  const fields = {
+    screenshotImageSize: { width: 1080, height: 2400 },
+    screenshotPixelsPerNativeUnit: { x: 1, y: 1 },
+    screenshotScaleProvenance: "raster-dimensions",
+  };
+  const schema = observeResultSchema.pick({
+    screenshotImageSize: true,
+    screenshotPixelsPerNativeUnit: true,
+    screenshotScaleProvenance: true,
+  });
+  expect(schema.parse(fields)).toEqual(fields);
+  for (const width of [0, -1, 1.5]) {
+    expect(
+      schema.safeParse({ ...fields, screenshotImageSize: { width, height: 2400 } }).success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ ...fields, screenshotImageSize: { width: 1080, height: width } }).success,
+    ).toBe(false);
+  }
+});
 
 const observeTruncationReasonsDescription =
   "Why a served observation or diff may be incomplete (issues #6601, #6933). " +

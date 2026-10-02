@@ -296,6 +296,10 @@ Use `ime`, `a11y`, `eventAll`, or `auto` for complete grapheme delivery.
 `eventAll`. A failed `eventAll` insertion reports the failed grapheme code
 points and `committedGraphemes`, the count of complete clusters delivered
 before the failed run.
+A successful Android `eventAll` command may carry a `warning` if caret placement fails; all remaining text in that command is then inserted whole, using a remembered caret (same node, exact text, and unchanged reported selection, at most 5 seconds). Every insert refreshes the node; a previous insert's text is awaited for up to 300 ms, with a warning if it never matches. Gestures, text commands, focus/window changes, and changed selection reports invalidate the remembered caret.
+`eventLast` fails with partial application if its prefix insert cannot place the caret, because its tail requires a real key event. Segment warnings are retained on success and failure.
+Before insertion, preceding key-event text is awaited by exact suffix for up to 300 ms; an existing identical suffix can pass early, while IME transformations can time out with a warning.
+A lengths-only warning compares the planned UTF-16 length for `replace` when the final delivery is an insert and the APK returns a length; it skips `insert`, subsequent key events, old APKs, and other modes, and cannot detect field-side filtering.
 `SendKeysCommandResult.textLength` counts Unicode code points, rather than
 graphemes or UTF-16 code units. On iOS, XCUITest `typeText` supplies the text
 independently of the active keyboard layout; the UI regression corpus checks

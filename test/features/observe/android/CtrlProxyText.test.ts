@@ -426,3 +426,213 @@ describe("Android CtrlProxyText", () => {
     }
   });
 });
+
+test("sends expectedSuffix only when provided and resolves insert metadata", async () => {
+  const timer = new FakeTimer();
+  const socket = new CapturingWebSocket("ws://localhost", "none", 0, timer);
+  await waitForSocketOpen(socket);
+  const requestManager = new RequestManager(timer);
+  const context: DelegateContext = {
+    getWebSocket: () => socket as unknown as WebSocket,
+    requestManager,
+    timer,
+    ensureConnected: async () => true,
+    cancelScreenshotBackoff: () => {},
+  };
+  const delegate = new CtrlProxyText(context);
+  for (const suffix of ["x", undefined, ""]) {
+    socket.sentMessages.length = 0;
+    const resultPromise = delegate.requestInsertText("value", undefined, undefined, {
+      expectedSuffix: suffix,
+    });
+    const request = await waitForRequest(socket, "request_insert_text");
+    expect(request.acceptsCaretNotPlaced).toBe(true);
+    if (suffix) {
+      expect(request.expectedSuffix).toBe(suffix);
+    } else {
+      expect(request).not.toHaveProperty("expectedSuffix");
+    }
+    const metadata = {
+      success: true,
+      warning: "caret warning",
+      caretPlaced: false,
+      resultingTextLength: 5,
+    };
+    requestManager.resolve(request.requestId as string, metadata);
+    expect(await resultPromise).toEqual(metadata);
+  }
+  socket.close();
+});
+
+test("client insert_text_result projection preserves optional fields and old APK responses", async () => {
+  const timer = new FakeTimer();
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("forward", { stdout: "8765", stderr: "" });
+  adb.setScreenState(true);
+  const device: BootedDevice = {
+    deviceId: "insert-projection",
+    platform: "android",
+    name: "Test Device",
+  };
+  let socket: CapturingWebSocket | null = null;
+  const client = AndroidCtrlProxyClient.createForTesting(
+    device,
+    adb,
+    (url: string) => {
+      socket = new CapturingWebSocket(url, "none", 0, timer);
+      return socket;
+    },
+    timer,
+  );
+  try {
+    expect(await client.ensureConnected()).toBe(true);
+    if (!socket) {
+      throw new Error("Expected a socket");
+    }
+    await waitForSocketOpen(socket);
+    for (const metadata of [
+      { warning: "caret warning", caretPlaced: false, resultingTextLength: 5 },
+      {},
+    ]) {
+      socket.sentMessages.length = 0;
+      const promise = client.requestInsertText("value", undefined, undefined, {
+        expectedSuffix: "x",
+      });
+      const request = await waitForRequest(socket, "request_insert_text");
+      expect(request.expectedSuffix).toBe("x");
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "insert_text_result",
+          timestamp: 1,
+          requestId: request.requestId,
+          success: true,
+          totalTimeMs: 3,
+          ...metadata,
+        }),
+      );
+      const result = await promise;
+      expect(result).toEqual({
+        success: true,
+        totalTimeMs: 3,
+        error: undefined,
+        partialApplication: undefined,
+        perfTiming: undefined,
+        warning: undefined,
+        caretPlaced: undefined,
+        resultingTextLength: undefined,
+        ...metadata,
+      });
+    }
+  } finally {
+    await client.close();
+  }
+});
+
+test("insert caret-warning acceptance defaults on and can explicitly opt out for compatibility", async () => {
+  const timer = new FakeTimer();
+  const socket = new CapturingWebSocket("ws://localhost", "none", 0, timer);
+  await waitForSocketOpen(socket);
+  const requestManager = new RequestManager(timer);
+  const delegate = new CtrlProxyText({
+    getWebSocket: () => socket as unknown as WebSocket,
+    requestManager,
+    timer,
+    ensureConnected: async () => true,
+    cancelScreenshotBackoff: () => {},
+  });
+  for (const acceptsCaretNotPlaced of [undefined, true, false]) {
+    socket.sentMessages.length = 0;
+    const pending = delegate.requestInsertText(
+      "é",
+      undefined,
+      undefined,
+      acceptsCaretNotPlaced === undefined ? undefined : { acceptsCaretNotPlaced },
+    );
+    const request = await waitForRequest(socket, "request_insert_text");
+    expect(request.acceptsCaretNotPlaced).toBe(acceptsCaretNotPlaced ?? true);
+    const response =
+      acceptsCaretNotPlaced === false
+        ? {
+            success: false,
+            partialApplication: true,
+            error: "Text was inserted, but ACTION_SET_SELECTION returned false; do not retry",
+          }
+        : { success: true, warning: "caret could not be placed", caretPlaced: false };
+    requestManager.resolve(request.requestId as string, response);
+    expect(await pending).toEqual(response);
+  }
+  socket.close();
+});
+
+test("pre-dispatch state read round-trips and insert baseline is optional", async () => {
+  const timer = new FakeTimer();
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("forward tcp:9008 tcp:9008", "");
+  const device: BootedDevice = {
+    deviceId: "baseline-device",
+    platform: "android",
+    name: "Test Device",
+  };
+  let socket: CapturingWebSocket | null = null;
+  const client = AndroidCtrlProxyClient.createForTesting(
+    device,
+    adb,
+    (url: string) => {
+      socket = new CapturingWebSocket(url, "none", 0, timer);
+      return socket;
+    },
+    timer,
+  );
+  try {
+    expect(await client.ensureConnected()).toBe(true);
+    if (!socket) {
+      throw new Error("Expected a socket");
+    }
+    socket.simulateMessage(
+      JSON.stringify({
+        type: "connected",
+        supportedCommands: ["request_insert_text_state", "request_insert_text"],
+      }),
+    );
+    const promise = client.requestInsertTextState();
+    const request = await waitForRequest(socket, "request_insert_text_state");
+    const state = { text: "éx", isShowingHintText: false, selectionStart: 2, selectionEnd: 2 };
+    socket.simulateMessage(
+      JSON.stringify({
+        type: "insert_text_state_result",
+        requestId: request.requestId,
+        success: true,
+        state,
+      }),
+    );
+    expect(await promise).toEqual({ success: true, state });
+    for (const precedingState of [state, undefined]) {
+      socket.sentMessages.length = 0;
+      const insert = client.requestInsertText("😀", undefined, undefined, {
+        expectedSuffix: "x",
+        precedingState,
+      });
+      const wire = await waitForRequest(socket, "request_insert_text");
+      if (precedingState) {
+        expect(wire.precedingState).toEqual(state);
+      } else {
+        expect(wire).not.toHaveProperty("precedingState");
+      }
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "insert_text_result",
+          requestId: wire.requestId,
+          success: true,
+          totalTimeMs: 1,
+        }),
+      );
+      expect(await insert).toMatchObject({ success: true });
+    }
+    socket.sentMessages.length = 0;
+    socket.simulateMessage(JSON.stringify({ type: "connected", supportedCommands: [] }));
+    expect(await client.requestInsertTextState()).toEqual({ success: true });
+    expect(socket.sentMessages).toEqual([]);
+  } finally {
+    await client.close();
+  }
+});

@@ -4,10 +4,11 @@
  * Thin wrapper over SharedTextDelegate.
  */
 
+import type { InsertTextState } from "./ctrlProxyProtocol";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { BaseResult } from "../shared/types";
-import type { DelegateContext } from "./types";
+import type { A11ySetTextResult, DelegateContext } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 import {
   KEYBOARD_PROFILE_CATALOG_VERSIONS,
@@ -53,16 +54,37 @@ export class CtrlProxyText extends SharedTextDelegate {
     super(context);
   }
 
+  async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {
+    return sendCommand(this.context, {
+      idPrefix: "insertTextState",
+      responseType: "insert_text_state",
+      messageType: "request_insert_text_state",
+      params: {},
+      timeoutMs: 5000,
+      errorLabel: "Read insert text state",
+    });
+  }
+
   async requestInsertText(
     text: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-  ): Promise<BaseResult> {
-    return sendCommand<BaseResult>(this.context, {
+    options?: {
+      expectedSuffix?: string;
+      acceptsCaretNotPlaced?: boolean;
+      precedingState?: InsertTextState;
+    },
+  ): Promise<A11ySetTextResult> {
+    return sendCommand<A11ySetTextResult>(this.context, {
       idPrefix: "insertText",
       responseType: "insert_text",
       messageType: "request_insert_text",
-      params: { text },
+      params: {
+        text,
+        acceptsCaretNotPlaced: options?.acceptsCaretNotPlaced ?? true,
+        ...(options?.expectedSuffix ? { expectedSuffix: options.expectedSuffix } : {}),
+        ...(options?.precedingState ? { precedingState: options.precedingState } : {}),
+      },
       timeoutMs,
       perf,
       errorLabel: "Insert text",

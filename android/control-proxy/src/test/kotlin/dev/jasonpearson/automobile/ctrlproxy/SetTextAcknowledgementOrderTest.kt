@@ -56,8 +56,8 @@ class SetTextAcknowledgementOrderTest {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     val body = functionBody(source, "private fun performInsertText(")
     val passwordGuard = body.indexOf("if (targetNode.isPassword)")
-    val selectionPlan = body.indexOf("var plan = planForNode()")
-    val invalidSelection = body.indexOf("if (plan.usedFallbackCaret)")
+    val selectionPlan = body.indexOf("planInsertText(")
+    val refresh = body.indexOf("var snapshot = readFreshSnapshot()")
     val unsupportedAction = body.indexOf("val unsupportedAction")
     val setText = body.indexOf("targetNode.performAction(", startIndex = unsupportedAction)
 
@@ -67,12 +67,12 @@ class SetTextAcknowledgementOrderTest {
       selectionPlan > passwordGuard,
     )
     assertTrue(
-      "performInsertText must refresh an unknown selection",
-      invalidSelection > selectionPlan,
+      "performInsertText must refresh every node before planning",
+      refresh >= 0 && selectionPlan > refresh,
     )
     assertTrue(
       "performInsertText must validate the required accessibility actions",
-      unsupportedAction > invalidSelection,
+      unsupportedAction > selectionPlan,
     )
     assertTrue(
       "performInsertText must validate selection and actions before ACTION_SET_TEXT",
@@ -81,24 +81,82 @@ class SetTextAcknowledgementOrderTest {
   }
 
   @Test
-  fun `performInsertText identifies a partial application after caret restore failure`() {
+  fun `refresh replacements are validated before reading text and remembered state has hooks`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
     val body = functionBody(source, "private fun performInsertText(")
-    val partial = body.indexOf("val partialApplication = setTextSucceeded && !selectionSucceeded")
-    val broadcast = body.indexOf("broadcastInsertTextResult(", startIndex = partial)
-    val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
-    val partialGuard = broadcaster.indexOf("if (partialApplication)")
-    val partialField = broadcaster.indexOf("put(", startIndex = partialGuard)
+    val refresh = functionBody(body, "fun readFreshSnapshot()")
+    val guard =
+      refresh.indexOf(
+        "if (!targetNode.isEditable || !targetNode.isFocused || targetNode.isPassword)"
+      )
+    assertTrue(guard >= 0 && refresh.indexOf("targetNode.text?.toString()") > guard)
+    assertTrue(
+      body.contains("it == remembered &&") &&
+        body.contains("android.os.SystemClock.uptimeMillis() - it.second.atMs <= REMEMBER_TTL_MS")
+    )
+    for (signature in
+      listOf(
+        "private fun performSetText(",
+        "private fun performImeAction(",
+        "private fun performSelectAll(",
+        "private fun performNodeAction(",
+        "private fun performGlobalActionRequest(",
+        "override fun requestGestureStart(",
+        "override fun requestGestureMove(",
+        "override fun requestGestureEnd(",
+      )) {
+      assertTrue(
+        "$signature clears caret",
+        functionBody(source, signature).contains("rememberedInsert = null"),
+      )
+    }
+    val gestureStart = source.indexOf("private fun dispatchGestureWithResult(")
+    val gestureLifecycle = source.indexOf("val lifecycle", gestureStart)
+    assertTrue(source.substring(gestureStart, gestureLifecycle).contains("rememberedInsert = null"))
+    val events = functionBody(source, "override fun onAccessibilityEvent(")
+    assertTrue(events.indexOf("rememberedInsert = null") < events.indexOf("val connectionCount"))
+    assertTrue(events.contains("AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED"))
+  }
 
-    assertTrue("performInsertText must identify an applied text mutation", partial >= 0)
+  @Test
+  fun `performInsertText reports caret warnings after attempting selection`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    val body = functionBody(source, "private fun performInsertText(")
+    val selection = body.indexOf("val selectionSucceeded")
+    val selectionAction = body.indexOf("targetNode.performAction(", startIndex = selection)
+    val outcome = body.indexOf("insertTextOutcome(")
+    val broadcast = body.indexOf("broadcastInsertTextResult(", startIndex = outcome)
     assertTrue(
-      "performInsertText must include partial-application state in its result",
-      broadcast > partial,
+      "outcome must follow the selection attempt",
+      selectionAction > selection && outcome > selectionAction,
     )
+    assertTrue("acknowledgement must include the computed outcome", broadcast > outcome)
+    val broadcaster = functionBody(source, "private suspend fun broadcastInsertTextResult(")
+    val rawBroadcaster =
+      functionBody(readCtrlProxySource(), "private suspend fun broadcastInsertTextResult(")
     assertTrue(
-      "insert_text_result must serialize partial-application state",
-      partialGuard >= 0 && partialField > partialGuard,
+      "legacy partialApplication must be serialized",
+      "put(\"partialApplication\", true)" in rawBroadcaster,
     )
+    assertTrue("success must be serialized", "put(\"success\", success)" in rawBroadcaster)
+    assertTrue("partialApplication must be guarded", "if (partialApplication)" in broadcaster)
+    assertTrue(
+      "insert acknowledgements must be synchronous",
+      "webSocketServer.broadcastWithPerfSync" in broadcaster,
+    )
+    assertTrue("error must be serialized", "put(\"error\", error)" in rawBroadcaster)
+    for (field in listOf("warning", "caretPlaced", "resultingTextLength")) {
+      val guard = broadcaster.indexOf("if ($field != null)")
+      assertTrue("optional $field must be guarded", guard >= 0)
+      assertTrue(
+        "optional $field must serialize its value",
+        "put(\"$field\", $field)" in rawBroadcaster,
+      )
+      assertTrue(
+        "optional $field must be serialized after its guard",
+        broadcaster.indexOf("put(", startIndex = guard) > guard,
+      )
+    }
   }
 
   @Test

@@ -14,6 +14,7 @@
  * - CtrlProxyHighlights: Visual highlight overlays
  */
 
+import type { InsertTextState } from "./ctrlProxyProtocol";
 import { join } from "node:path";
 import WebSocket from "ws";
 import {
@@ -432,9 +433,17 @@ interface WsKeyboardProfilesResultMessage extends WsMessageBase {
   profiles?: KeyboardProfileCatalog["profiles"];
 }
 
+interface WsInsertTextStateResultMessage extends WsRequestBase {
+  type: "insert_text_state_result";
+  state?: InsertTextState;
+}
+
 interface WsInsertTextResultMessage extends WsRequestBase {
   type: "insert_text_result";
   partialApplication?: boolean;
+  warning?: string;
+  caretPlaced?: boolean;
+  resultingTextLength?: number;
 }
 
 interface WsImeActionResultMessage extends WsRequestBase {
@@ -915,6 +924,7 @@ type WebSocketMessage =
   | WsCancelImeCommitResultMessage
   | WsSetKeyboardProfileResultMessage
   | WsKeyboardProfilesResultMessage
+  | WsInsertTextStateResultMessage
   | WsInsertTextResultMessage
   | WsImeActionResultMessage
   | WsSelectAllResultMessage
@@ -1053,10 +1063,17 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
 
+  requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }>;
+
   requestInsertText(
     text: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: {
+      expectedSuffix?: string;
+      acceptsCaretNotPlaced?: boolean;
+      precedingState?: InsertTextState;
+    },
   ): Promise<A11ySetTextResult>;
 
   commitViaIme(
@@ -3057,12 +3074,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return this.text.requestSetText(text, options);
   }
 
+  async requestInsertTextState(): Promise<{ success: boolean; state?: InsertTextState }> {
+    // Older APKs do not know this optional command; absence retains legacy suffix settling.
+    if (!(await this.supportsCommand("request_insert_text_state"))) {
+      return { success: true };
+    }
+    return this.text.requestInsertTextState();
+  }
+
   async requestInsertText(
     text: string,
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: {
+      expectedSuffix?: string;
+      acceptsCaretNotPlaced?: boolean;
+      precedingState?: InsertTextState;
+    },
   ): Promise<A11ySetTextResult> {
-    return this.text.requestInsertText(text, timeoutMs, perf);
+    return this.text.requestInsertText(text, timeoutMs, perf, options);
   }
 
   async commitViaIme(
@@ -4903,12 +4933,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         error: message.error,
       })),
 
+    insert_text_state_result: (message) =>
+      this.resolvePendingResponse(message, (message) => ({
+        success: message.success,
+        state: message.state,
+      })),
+
     insert_text_result: (message) =>
       this.resolvePendingResponse(message, (message): A11ySetTextResult => ({
         success: message.success,
         totalTimeMs: message.totalTimeMs,
         error: message.error,
         partialApplication: message.partialApplication,
+        warning: message.warning,
+        caretPlaced: message.caretPlaced,
+        resultingTextLength: message.resultingTextLength,
         perfTiming: message.perfTiming,
       })),
 

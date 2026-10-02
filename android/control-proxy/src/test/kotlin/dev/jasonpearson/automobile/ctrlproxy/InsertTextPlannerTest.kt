@@ -107,4 +107,73 @@ class InsertTextPlannerTest {
       )
     }
   }
+
+  @Test
+  fun `remembered caret is used when text matches and selection is unreported`() {
+    assertEquals(
+      InsertTextPlan("hel🇯🇵Xlo", 8, false, true),
+      planInsertText("hel🇯🇵lo", false, -1, -1, "X", RememberedCaret("hel🇯🇵lo", 7, -1, -1)),
+    )
+    // UTF-16 offset 5 is between the flag's two regional indicators, not after the flag.
+    assertEquals(
+      InsertTextPlan("hel🇯X🇵lo", 6, false, true),
+      planInsertText("hel🇯🇵lo", false, -1, -1, "X", RememberedCaret("hel🇯🇵lo", 5, -1, -1)),
+    )
+  }
+
+  @Test
+  fun `remembered caret wins over a valid reported selection when text matches`() {
+    assertEquals(
+      InsertTextPlan("abXcd", 3, false, true),
+      planInsertText("abcd", false, 4, 4, "X", RememberedCaret("abcd", 2, 4, 4)),
+    )
+  }
+
+  @Test
+  fun `remembered caret is discarded when node text differs`() {
+    val remembered = RememberedCaret("abcd", 2, 4, 4)
+    assertEquals(
+      InsertTextPlan("abcdeX", 6, true),
+      planInsertText("abcde", false, -1, -1, "X", remembered),
+    )
+    assertEquals(
+      InsertTextPlan("aXbcde", 2, false),
+      planInsertText("abcde", false, 1, 1, "X", remembered),
+    )
+  }
+
+  @Test
+  fun `remembered caret out of range is ignored`() {
+    assertEquals(
+      InsertTextPlan("abX", 3, true),
+      planInsertText("ab", false, -1, -1, "X", RememberedCaret("ab", 9, -1, -1)),
+    )
+  }
+
+  @Test
+  fun `caret moved to end uses reported selection instead of remembered offset seven`() {
+    assertEquals(
+      InsertTextPlan("hel🇯🇵loé", 10, false),
+      planInsertText("hel🇯🇵lo", false, 9, 9, "é", RememberedCaret("hel🇯🇵lo", 7, -1, -1)),
+    )
+  }
+
+  @Test
+  fun `either reported selection endpoint changing invalidates remembered caret`() {
+    val remembered = RememberedCaret("abcd", 2, 4, 4)
+    assertEquals(
+      InsertTextPlan("aXd", 2, false),
+      planInsertText("abcd", false, 1, 3, "X", remembered),
+    )
+    assertEquals(
+      InsertTextPlan("abcX", 4, false),
+      planInsertText("abcd", false, 4, 3, "X", remembered),
+    )
+  }
+
+  @Test
+  fun `null remembered keeps today's behaviour`() {
+    assertEquals(InsertTextPlan("abXcd", 3, false), planInsertText("abcd", false, 2, 2, "X", null))
+    assertEquals(InsertTextPlan("abc", 3, true), planInsertText("Email", true, -1, -1, "abc", null))
+  }
 }

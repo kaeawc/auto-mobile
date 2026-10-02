@@ -204,10 +204,25 @@ data class RequestSetText(
 ) : WebSocketRequest()
 
 @Serializable
+data class InsertTextState(
+  val text: String? = null,
+  val isShowingHintText: Boolean = false,
+  val selectionStart: Int,
+  val selectionEnd: Int,
+)
+
+@Serializable
+@SerialName("request_insert_text_state")
+data class RequestInsertTextState(override val requestId: String? = null) : WebSocketRequest()
+
+@Serializable
 @SerialName("request_insert_text")
 data class RequestInsertText(
   override val requestId: String? = null,
   val text: String,
+  val expectedSuffix: String? = null,
+  val precedingState: InsertTextState? = null,
+  val acceptsCaretNotPlaced: Boolean = false,
 ) : WebSocketRequest()
 
 @Serializable

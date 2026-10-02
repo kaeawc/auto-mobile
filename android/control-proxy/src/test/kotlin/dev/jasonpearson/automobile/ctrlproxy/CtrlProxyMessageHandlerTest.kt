@@ -423,9 +423,40 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `request_insert_text with expectedSuffix routes the capability call`() = runTest {
+    dispatch("""{"type":"request_insert_text","requestId":"id","text":"t","expectedSuffix":"ab"}""")
+    assertEquals("requestInsertText" to listOf<Any?>("id", "t", "ab", false, null), lastCall)
+  }
+
+  @Test
+  fun `dispatches opted in request_insert_text`() = runTest {
+    dispatch(
+      """{"type":"request_insert_text","requestId":"id","text":"t","acceptsCaretNotPlaced":true}"""
+    )
+    assertEquals("requestInsertText" to listOf<Any?>("id", "t", null, true, null), lastCall)
+  }
+
+  @Test
   fun `dispatches request_insert_text`() = runTest {
     dispatch("""{"type":"request_insert_text","requestId":"txt2","text":" world"}""")
-    assertEquals("requestInsertText" to listOf<Any?>("txt2", " world"), lastCall)
+    assertEquals("requestInsertText" to listOf<Any?>("txt2", " world", null, false, null), lastCall)
+  }
+
+  @Test
+  fun `dispatches pre-dispatch state read`() = runTest {
+    dispatch("""{"type":"request_insert_text_state","requestId":"baseline"}""")
+    assertEquals("requestInsertTextState" to listOf<Any?>("baseline"), lastCall)
+  }
+
+  @Test
+  fun `dispatches optional pre-dispatch baseline`() = runTest {
+    dispatch(
+      """{"type":"request_insert_text","text":"😀","expectedSuffix":"x","precedingState":{"text":"éx","selectionStart":2,"selectionEnd":2}}"""
+    )
+    assertEquals(
+      dev.jasonpearson.automobile.protocol.InsertTextState("éx", false, 2, 2),
+      lastCall.second.last(),
+    )
   }
 
   @Test

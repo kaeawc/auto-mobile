@@ -216,7 +216,27 @@ interface CtrlProxyActions {
     frameContext: String?,
   ) = requestSetText(requestId, text, resourceId, dismissKeyboard)
 
+  fun requestInsertTextState(requestId: String?) {}
+
+  fun requestInsertText(
+    requestId: String?,
+    text: String,
+    expectedSuffix: String?,
+    acceptsCaretNotPlaced: Boolean,
+    precedingState: dev.jasonpearson.automobile.protocol.InsertTextState?,
+  ) = requestInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced)
+
   fun requestInsertText(requestId: String?, text: String)
+
+  fun requestInsertText(requestId: String?, text: String, expectedSuffix: String?) =
+    requestInsertText(requestId, text)
+
+  fun requestInsertText(
+    requestId: String?,
+    text: String,
+    expectedSuffix: String?,
+    acceptsCaretNotPlaced: Boolean,
+  ) = requestInsertText(requestId, text, expectedSuffix)
 
   fun requestCommitText(requestId: String?, text: String, priorImeId: String?)
 

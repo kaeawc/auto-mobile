@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -240,11 +242,55 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize pre-dispatch state read and optional insert baseline`() {
+    val capture =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text_state","requestId":"before"}"""
+      )
+    assertIs<RequestInsertTextState>(capture)
+    assertEquals("before", capture.requestId)
+    val insert =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text","text":"😀","precedingState":{"text":"éx","selectionStart":2,"selectionEnd":2}}"""
+      )
+    assertIs<RequestInsertText>(insert)
+    assertEquals(InsertTextState("éx", false, 2, 2), insert.precedingState)
+    val legacy =
+      json.decodeFromString<WebSocketRequest>("""{"type":"request_insert_text","text":"😀"}""")
+    assertIs<RequestInsertText>(legacy)
+    assertEquals(null, legacy.precedingState)
+    assertFalse(
+      json.encodeToString(WebSocketRequest.serializer(), legacy).contains("precedingState")
+    )
+  }
+
+  @Test
+  fun `deserialize request_insert_text with expectedSuffix`() {
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text","requestId":"id","text":"t","expectedSuffix":"ab"}"""
+      )
+    assertIs<RequestInsertText>(request)
+    assertEquals("ab", request.expectedSuffix)
+  }
+
+  @Test
+  fun `deserialize request_insert_text capability opt in`() {
+    val request =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text","text":"t","acceptsCaretNotPlaced":true}"""
+      ) as RequestInsertText
+    assertTrue(request.acceptsCaretNotPlaced)
+  }
+
+  @Test
   fun `deserialize request_insert_text`() {
     val message = """{"type":"request_insert_text","requestId":"insert-1","text":"Hello World"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestInsertText>(request)
+    assertEquals(null, request.expectedSuffix)
+    assertFalse(request.acceptsCaretNotPlaced)
     assertEquals("insert-1", request.requestId)
     assertEquals("Hello World", request.text)
   }

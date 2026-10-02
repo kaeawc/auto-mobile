@@ -1,0 +1,20 @@
+bun test v1.3.14 (0d9b296a)
+
+scratch/bun-failure-assertion.repro.ts:
+1 | import { expect, test } from "bun:test";
+2 | 
+3 | test("captured assertion failure", () => {
+4 |   expect(1).toBe(2);
+                ^
+error: expect(received).toBe(expected)
+
+Expected: 2
+Received: 1
+
+      at <anonymous> (/Users/jason/kaeawc/auto-mobile/.claude/worktrees/orch-i-cilog/scratch/bun-failure-assertion.repro.ts:4:13)
+(fail) captured assertion failure [1.43ms]
+
+ 0 pass
+ 1 fail
+ 1 expect() calls
+Ran 1 test across 1 file. [119.00ms]

@@ -72,7 +72,7 @@ elif grep -Eq 'error: An internal error occurred \(WriteFailed\)' "${log_file}" 
 fi
 
 echo "::group::Failing tests"
-grep -aE '\(fail\)|^error:|^Ran [0-9]+ tests' "${log_file}" || true
+bash "$(dirname "${BASH_SOURCE[0]}")/summarize-bun-failures.sh" "${log_file}" || true
 echo "::endgroup::"
 tail -n 200 "${log_file}"
 exit "${status}"

@@ -107,7 +107,7 @@ describe("DeviceAppManager.launchWithPayloadUrl", () => {
       ),
     ).rejects.toThrow("Operation cancelled");
     expect(commands).toEqual([]);
-  }, 100);
+  });
 
   test("launch forwards host command cancellation without wrapping it", async () => {
     const controller = new AbortController();
@@ -142,7 +142,7 @@ describe("DeviceAppManager.launchWithPayloadUrl", () => {
     controller.abort();
     await expect(pending).rejects.toThrow(/^Operation cancelled$/);
     expect(received?.signal).toBe(controller.signal);
-  }, 100);
+  });
 
   test("passes device, URL, and bundle id as argv", async () => {
     const { inspector, commands } = makeInspector();

@@ -32,48 +32,44 @@ describe("registered interaction handler cancellation", () => {
     ToolRegistry.clearTools();
   });
 
-  test.each(devices)(
-    "tapAt cancels during the double-tap gap on %s",
-    async (device) => {
-      const { tapAt, timer, androidDispatches, iosDispatches } = createTapAt(device);
-      setTapAtElementFactory(() => tapAt);
-      const gapTimer = new FakeTimer();
-      const controller = new AbortController();
-      let gapStarted!: () => void;
-      const started = new Promise<void>((resolve) => {
-        gapStarted = resolve;
-      });
-      const sleep = spyOn(timer, "sleep").mockImplementation((ms) => {
-        expect(ms).toBe(DOUBLE_TAP_GAP_MS);
-        const pending = gapTimer.sleep(ms);
-        gapStarted();
-        return pending;
-      });
-      try {
-        const pending = registeredHandler("tapAt")(
-          device,
-          { x: 1, y: 2, action: "doubleTap" },
-          undefined,
-          controller.signal,
-        );
-        await started;
-        const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
-        expect(dispatches).toHaveLength(1);
-        gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
-        controller.abort();
-        // Settle while the gap sleep is still pending: cancellation must not wait for it.
-        expect(await pending).toMatchObject({ isError: true });
-        expect(dispatches).toHaveLength(1);
-        gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
-        await Promise.resolve();
-        expect(dispatches).toHaveLength(1);
-      } finally {
-        gapTimer.resolveAll();
-        sleep.mockRestore();
-      }
-    },
-    100,
-  );
+  test.each(devices)("tapAt cancels during the double-tap gap on %s", async (device) => {
+    const { tapAt, timer, androidDispatches, iosDispatches } = createTapAt(device);
+    setTapAtElementFactory(() => tapAt);
+    const gapTimer = new FakeTimer();
+    const controller = new AbortController();
+    let gapStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      gapStarted = resolve;
+    });
+    const sleep = spyOn(timer, "sleep").mockImplementation((ms) => {
+      expect(ms).toBe(DOUBLE_TAP_GAP_MS);
+      const pending = gapTimer.sleep(ms);
+      gapStarted();
+      return pending;
+    });
+    try {
+      const pending = registeredHandler("tapAt")(
+        device,
+        { x: 1, y: 2, action: "doubleTap" },
+        undefined,
+        controller.signal,
+      );
+      await started;
+      const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
+      expect(dispatches).toHaveLength(1);
+      gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
+      controller.abort();
+      // Settle while the gap sleep is still pending: cancellation must not wait for it.
+      expect(await pending).toMatchObject({ isError: true });
+      expect(dispatches).toHaveLength(1);
+      gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
+      await Promise.resolve();
+      expect(dispatches).toHaveLength(1);
+    } finally {
+      gapTimer.resolveAll();
+      sleep.mockRestore();
+    }
+  });
 
   test.each(devices)("pre-aborted tapAt dispatches nothing on %s", async (device) => {
     const { tapAt, androidDispatches, iosDispatches } = createTapAt(device);

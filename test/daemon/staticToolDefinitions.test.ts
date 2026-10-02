@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
+import {
+  getStaticToolDefinitions,
+  getConnectedStaticToolDefinitions,
+} from "../../src/daemon/staticToolDefinitions";
+import committedDefinitions from "../../schemas/tool-definitions.json";
 
 // Issue #5879 / review: the static cold-start surface mirrors the runtime
 // `ToolRegistry.getToolDefinitions()` shape for the flag-independent fields
@@ -17,11 +21,33 @@ describe("getStaticToolDefinitions", () => {
     }
   });
 
-  test("never advertises outputSchema cold (reconciliation delivers it post-connect)", () => {
-    const anyOutputSchema = getStaticToolDefinitions().some(
-      (tool) => tool.outputSchema !== undefined,
-    );
-    expect(anyOutputSchema).toBe(false);
+  test("cold and connected static lists never emit an outputSchema key", () => {
+    for (const tools of [
+      getStaticToolDefinitions(),
+      getConnectedStaticToolDefinitions(),
+      getConnectedStaticToolDefinitions({ debug: true, embeddedSdk: true }),
+    ]) {
+      expect(tools.every((tool) => !Object.hasOwn(tool, "outputSchema"))).toBe(true);
+    }
+  });
+
+  test("cold wire payload equals committed definitions with only the established omissions", () => {
+    delete process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS;
+    const expected = committedDefinitions.map((tool) => {
+      const definition: Record<string, unknown> = { ...tool };
+      delete definition.outputSchema;
+      const meta: Record<string, unknown> = { ...tool._meta };
+      delete meta["automobile/debugOnly"];
+      delete meta["automobile/embeddedSdkOnly"];
+      delete meta["automobile/planOnly"];
+      if (Object.keys(meta).length) {
+        definition._meta = meta;
+      } else {
+        delete definition._meta;
+      }
+      return definition;
+    });
+    expect(getStaticToolDefinitions()).toEqual(expected);
   });
 
   test("preserves _meta (the MCP Apps UI pointer) for tools that carry it", () => {

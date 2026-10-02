@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.CommandPalette
 import dev.jasonpearson.automobile.desktop.core.workspace.DEVICE_LOCK_STATES_RESOURCE_URI
 import dev.jasonpearson.automobile.desktop.core.workspace.DaemonEmulatorControlExecutor
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceColumn
+import dev.jasonpearson.automobile.desktop.core.workspace.DeviceSessionSupersededForwarder
 import dev.jasonpearson.automobile.desktop.core.workspace.DeviceStreamView
 import dev.jasonpearson.automobile.desktop.core.workspace.FailuresFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.LayoutFacet
@@ -162,6 +163,15 @@ fun AutoMobileDesktopApp(
   val workspaceViewModel =
     remember(scope, controlExecutor) { WorkspaceViewModel(scope, controlExecutor) }
   val workspaceState by workspaceViewModel.state.collectAsState()
+  val supersededForwarder =
+    remember(workspaceViewModel) {
+      DeviceSessionSupersededForwarder(
+        columns = {
+          (workspaceViewModel.state.value as? WorkspaceUiState.Content)?.columns.orEmpty()
+        },
+        dispatch = workspaceViewModel::onAction,
+      )
+    }
 
   val resourceClient = remember(graph) { DaemonMcpResourceClient(graph.autoMobileClient) }
   val refreshDesktopSessionState: suspend () -> Boolean =
@@ -495,6 +505,7 @@ fun AutoMobileDesktopApp(
                 WorkspaceShell(
                   state = workspaceState,
                   onAction = workspaceViewModel::onAction,
+                  onDeviceSessionSuperseded = supersededForwarder::onSuperseded,
                   onOpenPicker = workspaceViewModel::openPicker,
                   onOpenPalette = { paletteOpen = true },
                   externalCaptureRequest = captureRequest,

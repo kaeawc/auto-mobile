@@ -1,3 +1,7 @@
+import {
+  isDeviceControlTargetOwnerValid,
+  isDeviceControlRoutingSessionValid,
+} from "./deviceControlSessionValidity";
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { createHash } from "node:crypto";
 import { unlink } from "node:fs/promises";
@@ -3029,12 +3033,7 @@ export class UnixSocketServer {
       return true;
     }
     try {
-      const session = this.daemonState.getSessionManager().getSession(identity.sessionUuid);
-      return Boolean(
-        session &&
-        session === identity.sessionIncarnation &&
-        (!identity.deviceId || session.assignedDevice === identity.deviceId),
-      );
+      return isDeviceControlTargetOwnerValid(this.daemonState.getSessionManager(), identity);
     } catch (error) {
       // Ownership must be provable to replay; a lookup failure leaves it unproven,
       // so fail closed to reject the recovery rather than risk a stale-owner replay.
@@ -3048,8 +3047,7 @@ export class UnixSocketServer {
       return true;
     }
     try {
-      const session = this.daemonState.getSessionManager().getSession(identity.routingSessionUuid);
-      return Boolean(session && session === identity.routingSessionIncarnation);
+      return isDeviceControlRoutingSessionValid(this.daemonState.getSessionManager(), identity);
     } catch (error) {
       // The routing session's grant must be provable to replay; an unverifiable
       // lookup fails closed so a superseded routing session cannot authorize it.
@@ -3543,6 +3541,8 @@ export class UnixSocketServer {
     return sessionUuid ? this.hasActiveDaemonSession(sessionUuid) : false;
   }
 
+  // Keep MCP route bindings through teardown; downstream tool admission waits for
+  // release to finish so bound-session loss retains the terminal release reason.
   private hasActiveDaemonSession(sessionUuid: string): boolean {
     if (!this.daemonState.isInitialized()) {
       return false;

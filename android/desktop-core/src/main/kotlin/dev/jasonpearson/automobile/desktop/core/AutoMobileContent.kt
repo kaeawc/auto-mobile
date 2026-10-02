@@ -184,6 +184,7 @@ internal fun activeDeviceConnectionLostEvent(
   activeDeviceId: String?,
 ): DeviceStreamEvent.DeviceConnectionLost? {
   return when (event) {
+    is DeviceStreamEvent.DeviceSessionSuperseded -> null
     is DeviceStreamEvent.DeviceConnectionLost ->
       event.takeIf { isActiveDeviceStreamFrame(it.deviceId, activeDeviceId) }
   }

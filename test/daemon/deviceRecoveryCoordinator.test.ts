@@ -19,6 +19,7 @@ function harness() {
   const port: DeviceRecoveryPoolPort = {
     getPooledDevice: () => undefined,
     getSessionForDevice: () => undefined,
+    waitForReleasingSession: () => undefined,
     getAndroidSessionPreservingRecoveryTarget: () => undefined,
     getSessionPreservingRecoveryTarget: () => undefined,
     isIOSSimulatorContinuityDevice: (device): device is PooledDevice & { platform: "ios" } =>
@@ -55,6 +56,25 @@ function harness() {
 const image = { name: "Pixel", platform: "android" as const, isRunning: false };
 
 describe("DeviceRecoveryCoordinator", () => {
+  for (const platform of ["android", "ios"] as const) {
+    for (const sessionId of [undefined, "live-session"]) {
+      test(`${platform} missing recovery target with ${sessionId ?? "no session"} leaves settlement to its caller`, async () => {
+        const { coordinator, port } = harness();
+        let finished = false;
+        port.getSessionForDevice = () => sessionId;
+        port.finishEmulatorLossIncident = async () => {
+          finished = true;
+        };
+        const result =
+          platform === "android"
+            ? await coordinator.recoverSessionBoundAndroidDeviceAfterLoss("device", "incident")
+            : await coordinator.recoverSessionBoundIOSSimulatorAfterLoss("device", "incident");
+        expect(result).toBe("not-attempted");
+        expect(finished).toBe(false);
+      });
+    }
+  }
+
   test("record finalization clears image, quarantine, and the exact ledger generation", () => {
     const { coordinator, records, quarantined } = harness();
     coordinator.setRecoveringAndroidImage("Pixel", image);

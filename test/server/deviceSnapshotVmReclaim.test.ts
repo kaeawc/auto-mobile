@@ -26,6 +26,7 @@ import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotC
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
 import { FakeAvdSnapshotService, fakeAvdSnapshotPath } from "../fakes/FakeAvdSnapshotService";
 import { VM_SNAPSHOT_SAVE_DISPATCHED } from "../../src/features/action/CaptureSnapshot";
+import type { SnapshotPathOptions } from "../../src/utils/DeviceSnapshotStore";
 import type { DeviceSnapshotRecord } from "../../src/db/deviceSnapshotRepository";
 import { sequenceBackoff } from "../../src/utils/Backoff";
 
@@ -337,6 +338,50 @@ describe("deviceSnapshotManager VM snapshot sizing and reclaim (#6490)", () => {
       ResourceRegistry.unregister(DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE);
     }
   });
+
+  test.each([EMULATOR.deviceId, "emulator-5554"])(
+    "failed same-AVD overwrite quarantines a valid VM row captured on %s",
+    async (priorSerial) => {
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest = { ...vmManifest("same-avd-overwrite", timestamp), deviceId: priorSerial };
+      await repository.insertSnapshot({
+        ...manifest,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: MB,
+        manifest,
+      });
+      avdSnapshots.setVmSnapshot(AVD_NAME, manifest.snapshotName, MB);
+      await setDeviceSnapshotManagerDependencies({
+        createCaptureProvider: () => ({
+          capture: async () => {
+            // Dispatched save may already have replaced the emulator-owned payload.
+            avdSnapshots.setVmSnapshot(AVD_NAME, manifest.snapshotName, 2 * MB);
+            const failure = new Error("overwrite save failed");
+            Object.assign(failure, { [VM_SNAPSHOT_SAVE_DISPATCHED]: true });
+            throw failure;
+          },
+        }),
+        createRestoreProvider: () => {
+          throw new Error("pending snapshot must not construct a restore provider");
+        },
+      });
+      await expect(
+        captureDeviceSnapshot(EMULATOR, { snapshotName: manifest.snapshotName }),
+      ).rejects.toThrow("overwrite save failed");
+      expect(await repository.getSnapshot(manifest.snapshotName)).toMatchObject({
+        pendingReclaim: true,
+        deviceId: EMULATOR.deviceId,
+        deviceName: AVD_NAME,
+        sizeBytes: 2 * MB,
+      });
+      expect(avdSnapshots.getDeleteCalls()).toEqual([]);
+      expect(avdSnapshots.hasVmSnapshot(AVD_NAME, manifest.snapshotName)).toBe(true);
+      await expect(
+        restoreDeviceSnapshot(EMULATOR, { snapshotName: manifest.snapshotName }),
+      ).rejects.toThrow("awaiting reclaim after a failed capture");
+    },
+  );
 
   test("preserves a valid same-named row on another AVD after a dispatched VM save fails", async () => {
     const otherDevice: BootedDevice = {
@@ -2430,7 +2475,7 @@ describe("reclaim never races a same-name capture (#6490 review)", () => {
     });
     (store as any).replaceSnapshotData = async (
       name: string,
-      options: unknown,
+      options: SnapshotPathOptions | undefined,
       capture: () => Promise<unknown>,
     ) => {
       const result = await replaceSnapshotData(name, options, capture);

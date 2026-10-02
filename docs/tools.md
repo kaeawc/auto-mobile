@@ -98,8 +98,8 @@ native absolute-input coordinates.
 native coordinate space described above. For a fresh screenshot matching an
 observation, call `observe({ screenshot: "settled" })` and read its
 `screenshotPath`.
-For encoded captures, pass `screenshotOptions` with `screenshot: "settled"` or
-`includeScreenshotImage: true`,
+For encoded captures, pass `screenshotOptions` with `screenshot: "settled"`,
+`includeScreenshotImage: true`, or `crop`,
 for example `observe({ screenshot: "settled", screenshotOptions: { format: "webp", quality: 80 } })`.
 Omitting options requests PNG. JPEG and WebP accept integer `quality` from 1 to 100. WebP also accepts `lossless: true`, which cannot be combined with
 `quality`; PNG accepts neither. The returned `screenshotFormat`,
@@ -163,11 +163,84 @@ behavior can all make the actual native event recipient differ from this
 estimate. Re-observe after navigation, scrolling, or animation before using the
 point with `tapAt`.
 
+### Cropping an observe screenshot
+
+`observe({ crop: { element: { text: "Gmail" } } })` saves a PNG of one exposed
+bounded element. `element` uses the same selector union as `tapOn`: `elementId`,
+`testTag`, `text`, `textAny`, or `accessibilityLink`. Resolution uses the shared
+`ElementResolver` with inspection intent, without promoting to a tap target.
+The match must be unique; there is no first/random choice or index fallback.
+`textAny` tries ordered variants and stops at the first matching variant;
+an ambiguous matching variant fails. Embedded semantic accessibility links have
+no independent element bounds and fail with an actionable request to select the
+owning element instead.
+
+For a screen rectangle, use
+`observe({ crop: { rect: { x: 10, y: 20, width: 30, height: 40 } } })`.
+Exactly one of `element` or `rect` is required inside `crop`. Rectangle numbers
+must be finite, with positive width and height. Units are physical pixels on
+Android and logical points on iOS, matching `screenSize` and `tapAt`.
+
+`crop` implies a settled screenshot when `screenshot` is omitted. Explicit
+`screenshot: "async"` or `"none"` is a validation error: async is rejected rather
+than upgraded because a crop requires waiting for the completed capture.
+`screenshotOptions` may encode the full screenshot as PNG, JPEG, or WebP;
+the crop always uses that captured raster and encodes PNG without resizing.
+Lossy full-screen encoding therefore also affects the crop's source pixels.
+`includeScreenshotImage` retains its existing meaning for the full screenshot
+only; crop bytes are never embedded. Cropping reads the captured file even when
+inline image delivery is disabled.
+
+Observe captures the screen once through its settled path, then crops that file
+using the returned hierarchy's screen size, rotation, and native scale. With
+`waitFor` (and its optional `settled` quiet gate), this is the final capture after
+polling completes. A timed-out wait retains observe's usual timeout metadata and
+crops its terminal observation. The original `screenshotPath` and
+`screenshotOrientation` remain present alongside `crop`:
+
+- `cropPath`: local filesystem path to the securely written PNG.
+- `unit`: `"pixels"` or `"points"`.
+- `requestedBounds`, `clippedBounds`: native `{ left, top, right, bottom }` bounds.
+- `clipped`: whether visible-screen clipping changed the requested bounds.
+- `screenSize`, `imageSize`: native screen dimensions and crop raster dimensions.
+- `pixelsPerNativeUnit`: raster scale `{ x, y }`; actual raster dimensions handle
+  Display Zoom and downsampled devices, with floor/ceil covering fractional points.
+- `scaleProvenance`: `"native-scale-confirmed"` or `"raster-dimensions"`.
+- `rasterBounds`: integer bounds in the captured raster.
+- `screenshotOrientation`: crop raster orientation, including iOS framebuffer
+  quarter turns and half turns. A raster already reported in display orientation
+  is not mapped through another rotation. No downscaling or orientation
+  normalization occurs.
+
+The hierarchy/elements are unchanged by crop. Element resolution uses the full
+filtered exposed hierarchy before raw append or skeleton projection; `raw` does
+not switch crop to a separately fetched raw tree. `project: "full"` (including
+raw's default full projection) applies `scope` to element lookup exactly as it
+does to the returned hierarchy. Skeleton projection already ignores structural
+scope transforms, so element lookup also retains the full exposed tree in that
+mode. Rectangles always use the selected display's full screen coordinates;
+`scope` does not shift their origin or clip them to a subtree.
+
+Sessionless `deviceId` reads support crop against that read's hierarchy and a
+fresh settled screenshot. Their existing `waitFor`, raw, and skipBackStack
+restrictions still apply. Crop rejects capture failures before cached screenshot
+fallback. `display` selects the same panel for hierarchy, screenshot and crop;
+non-default panel coordinates and dimensions are used. `display: "all"` is
+unsupported generally and explicitly rejected with crop; choose one panel.
+
+Invalid input forms or screenshot modes fail validation. Missing or ambiguous
+elements, empty/off-screen rectangles, missing hierarchy geometry, missing or
+invalid screenshots, capture failures and crop/write failures throw
+`ActionableError`. Partially visible rectangles are clipped to the screen.
+There is no full-screen fallback, cached crop, silent retargeting, or successful
+result with `screenshotSettled: false` for a crop request.
+
 ### Screenshot delivery to local and remote clients
 
 For a local client with access to the AutoMobile host filesystem, `observe` returns
 the screenshot path in its structured observation. This remains the default: omitting
-`includeScreenshotImage` or setting it to `false` never reads or embeds image bytes.
+`includeScreenshotImage` or setting it to `false` never embeds image bytes; without
+`crop`, it also avoids reading them for tool delivery.
 Use `screenshot: "settled"` when the path must correspond to the completed observation.
 
 For a remote client that cannot read that path, call
@@ -190,7 +263,7 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 | Tool                                 | What it does                                                              |
 | ------------------------------------ | ------------------------------------------------------------------------- |
-| 👀 <code>observe</code>              | Gets the current screen view hierarchy.                                   |
+| 👀 <code>observe</code>              | Gets screen hierarchy and screenshot, with optional PNG crop.             |
 | 🎯 <code>hitTest</code>              | Estimates hierarchy nodes beneath a coordinate without dispatching input. |
 | 🔍 <code>explore</code>              | Explores an app to build a navigation graph.                              |
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
@@ -264,6 +337,8 @@ The default `screenshot: "settled"` awaits a fresh validated capture; it does no
 wait for action history to settle. `screenshot: "async"` also awaits capture on
 device reads, while `"none"` skips it. Capture failures retain eligible cached
 screenshots with their cached label and failure details.
+With `crop`, capture failure throws before cached fallback; only a fresh validated
+settled screenshot is eligible.
 
 ## Interact with the UI
 

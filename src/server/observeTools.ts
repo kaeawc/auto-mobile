@@ -89,6 +89,16 @@ import {
 } from "../features/observe/automaticScreenshotPolicy";
 import { inlineScreenshotImage } from "../features/observe/screenshot/inlineScreenshotImage";
 
+import {
+  createObserveCrop,
+  observeCropSchema,
+  type ObserveCropDependencies,
+} from "../features/observe/screenshot/observeCrop";
+import {
+  applyObserveScopeExperiments,
+  buildObserveScopeConfig,
+} from "../features/observe/output/ObserveScopeExperiments";
+
 // Schema definitions
 // waitFor accepts legacy selectors plus richer predicates. Element predicates are
 // evaluated against the same node unless matchType is explicitly "any".
@@ -576,6 +586,11 @@ const observeBaseSchema = withJsonSchemaOverride(
           .describe(
             "Screenshot mode: await a fresh validated capture, use background capture, or skip",
           ),
+        crop: observeCropSchema
+          .optional()
+          .describe(
+            "Exactly one of element (tapOn selector) or rect {x,y,width,height} in native screen units. Implies settled capture; explicit async or none is rejected. Returns a PNG path and scalar metadata only.",
+          ),
         screenshotOptions: screenshotOptionsSchema
           .optional()
           .describe("Encoding for a settled screenshot; omitted uses PNG"),
@@ -608,6 +623,24 @@ const observeBaseSchema = withJsonSchemaOverride(
   )
     .superRefine(refineWaitForArgs)
     .superRefine((args, ctx) => {
+      if (args.crop && args.screenshot && args.screenshot !== "settled") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["screenshot"],
+          message:
+            "observe crop requires screenshot: settled (or omit screenshot); async and none cannot provide a completed crop. No capture was started.",
+        });
+      }
+      if (args.crop && args.display === "all") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["display"],
+          message:
+            "observe crop requires one display; select a panel key, role, or active instead of all.",
+        });
+      }
+    })
+    .superRefine((args, ctx) => {
       if (args.includeScreenshotImage && args.screenshot && args.screenshot !== "settled") {
         ctx.addIssue({
           code: "custom",
@@ -617,7 +650,7 @@ const observeBaseSchema = withJsonSchemaOverride(
       }
       if (
         args.screenshotOptions !== undefined &&
-        (args.includeScreenshotImage ? "settled" : args.screenshot) !== "settled"
+        (args.crop || args.includeScreenshotImage ? "settled" : args.screenshot) !== "settled"
       ) {
         ctx.addIssue({
           code: "custom",
@@ -1680,13 +1713,16 @@ export function invalidateReadinessForDisabledAccessibility(
 }
 
 interface ObserveToolDependencies {
+  crop?: ObserveCropDependencies;
+  timer?: Timer;
   createScreen?: (
     device: BootedDevice,
     display?: string,
   ) => Pick<
     RealObserveScreen,
     "execute" | "executeDeviceRead" | "appendRawViewHierarchy" | "getMostRecentCachedObserveResult"
-  >;
+  > &
+    Pick<ObserveScreen, "captureScreenshot">;
   deviceReadAccess?: DeviceObservationAccess;
 }
 
@@ -1749,12 +1785,22 @@ function createObserveResponse(
 }
 
 function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined {
+  if (args.crop && args.screenshot && args.screenshot !== "settled") {
+    throw new ActionableError(
+      "observe crop requires screenshot: 'settled' (or omit screenshot); async and none cannot provide a completed crop. No capture was started.",
+    );
+  }
+  if (args.crop && args.display === "all") {
+    throw new ActionableError(
+      "observe crop requires one display; select a panel key, role, or active instead of all.",
+    );
+  }
   if (args.includeScreenshotImage && args.screenshot && args.screenshot !== "settled") {
     throw new ActionableError(
       "includeScreenshotImage requires screenshot: 'settled' (or omit screenshot). No capture was started.",
     );
   }
-  return args.includeScreenshotImage ? "settled" : args.screenshot;
+  return args.crop || args.includeScreenshotImage ? "settled" : args.screenshot;
 }
 
 function attachSnapshotReference(deviceId: string, result: ObserveResult): void {
@@ -1795,6 +1841,58 @@ function assertObserveOptionsSupported(
   assertActiveWindowWaitForSupportedOnPlatform(platform, args.waitFor);
 }
 
+function createObserveWaitResponse(
+  result: ObserveToolPayload,
+  waitOutcome: WaitForObservationOutcome,
+  includeScreenshotImage?: boolean,
+  signal?: AbortSignal,
+): Promise<ObserveResponse> | ObserveResponse {
+  const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
+    awaitedElement: waitOutcome.awaitedElement,
+    awaitDuration: waitOutcome.awaitDuration,
+    awaitTimeout: waitOutcome.awaitTimeout,
+    matched: waitOutcome.matched,
+    settled: waitOutcome.settled,
+    timedOut: waitOutcome.timedOut,
+    polls: waitOutcome.polls,
+    waitMs: waitOutcome.waitMs,
+    matchedElement: waitOutcome.matchedElement,
+    candidates: waitOutcome.candidates,
+  };
+  return createObserveResponse(
+    { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
+    includeScreenshotImage,
+    signal,
+  );
+}
+
+async function attachObserveCrop(
+  args: ObserveArgs,
+  result: ObserveResult,
+  platform: BootedDevice["platform"],
+  dependencies?: ObserveCropDependencies,
+): Promise<void> {
+  if (!args.crop) {
+    return;
+  }
+  // The wire applies scope only to full projections. Resolve over that same
+  // exposed tree, before raw append or skeleton projection can replace it.
+  const selectorObservation =
+    args.project === "full" || (args.raw && args.project !== "skeleton")
+      ? applyObserveScopeExperiments(
+          result,
+          buildObserveScopeConfig({ focus: true, overview: true, region: true }, args.scope),
+        )
+      : result;
+  result.crop = await createObserveCrop(
+    args.crop,
+    result,
+    platform,
+    dependencies,
+    selectorObservation,
+  );
+}
+
 export function registerObserveTools(dependencies: ObserveToolDependencies = {}) {
   // Observe handler
   const observeHandler = async (
@@ -1825,7 +1923,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
               { ...args.waitFor, settled: args.settled },
               signal,
               args.skipBackStack ?? false,
-              defaultTimer,
+              dependencies.timer ?? defaultTimer,
               device.platform,
               screenshotMode,
               args.screenshotOptions,
@@ -1833,7 +1931,12 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
             )
           : null;
       const result = deviceRead
-        ? await observeScreen.executeDeviceRead(signal, screenshotMode, args.screenshotOptions)
+        ? await observeScreen.executeDeviceRead(
+            signal,
+            screenshotMode,
+            args.screenshotOptions,
+            args.crop !== undefined,
+          )
         : waitOutcome
           ? waitOutcome.observation
           : await observeScreen.execute({
@@ -1843,6 +1946,8 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
               screenshot: screenshotMode,
               screenshotOptions: args.screenshotOptions,
             });
+
+      await attachObserveCrop(args, result, device.platform, dependencies.crop);
 
       if (!deviceRead) {
         attachSnapshotReference(device.deviceId, result);
@@ -1897,20 +2002,9 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       if (waitOutcome) {
-        const waitMetadata: Omit<WaitForObservationOutcome, "observation"> = {
-          awaitedElement: waitOutcome.awaitedElement,
-          awaitDuration: waitOutcome.awaitDuration,
-          awaitTimeout: waitOutcome.awaitTimeout,
-          matched: waitOutcome.matched,
-          settled: waitOutcome.settled,
-          timedOut: waitOutcome.timedOut,
-          polls: waitOutcome.polls,
-          waitMs: waitOutcome.waitMs,
-          matchedElement: waitOutcome.matchedElement,
-          candidates: waitOutcome.candidates,
-        };
-        return await createObserveResponse(
-          { ...result, ...waitMetadata, timeoutReason: waitOutcome.timeoutReason },
+        return await createObserveWaitResponse(
+          result,
+          waitOutcome,
           args.includeScreenshotImage,
           signal,
         );

@@ -7,6 +7,8 @@ export interface SnapshotGeometry {
   screenSize: { width: number; height: number };
   rotation?: number;
   nativeScale?: number;
+  /** Known capture orientation; absent preserves the snapshotOf framebuffer mapping. */
+  rasterOrientation?: "native" | "display";
 }
 
 export interface SnapshotCropResult {
@@ -29,6 +31,7 @@ export async function cropSnapshot(
   requestedBounds: ElementBounds,
   geometry: SnapshotGeometry,
   backend: ImageBackend,
+  label: string = "snapshotOf",
 ): Promise<SnapshotCropResult> {
   const { width, height } = geometry.screenSize;
   const { left, top, right, bottom } = requestedBounds;
@@ -39,7 +42,7 @@ export async function cropSnapshot(
     right <= left ||
     bottom <= top
   ) {
-    throw new ActionableError("snapshotOf requires finite, nonempty bounds and screen dimensions");
+    throw new ActionableError(`${label} requires finite, nonempty bounds and screen dimensions`);
   }
   const clippedBounds = {
     left: Math.max(0, left),
@@ -48,25 +51,29 @@ export async function cropSnapshot(
     bottom: Math.min(height, bottom),
   };
   if (clippedBounds.right <= clippedBounds.left || clippedBounds.bottom <= clippedBounds.top) {
-    throw new ActionableError("snapshotOf rectangle is outside the visible screen");
+    throw new ActionableError(`${label} rectangle is outside the visible screen`);
   }
   const metadata = await backend.metadata(source);
   if (metadata.width <= 0 || metadata.height <= 0) {
-    throw new ActionableError("snapshotOf received an empty screenshot raster");
+    throw new ActionableError(`${label} received an empty screenshot raster`);
   }
   const quarterTurn =
     geometry.platform === "ios" &&
+    geometry.rasterOrientation !== "display" &&
     (geometry.rotation === 1 || geometry.rotation === 3) &&
     width > height &&
     metadata.width < metadata.height;
-  const halfTurn = geometry.platform === "ios" && geometry.rotation === 2;
+  const halfTurn =
+    geometry.platform === "ios" &&
+    geometry.rasterOrientation !== "display" &&
+    geometry.rotation === 2;
   const nativeWidth = quarterTurn ? height : width;
   const nativeHeight = quarterTurn ? width : height;
   const scaleX = metadata.width / nativeWidth;
   const scaleY = metadata.height / nativeHeight;
   if (Math.abs(scaleX - scaleY) > 0.02) {
     throw new ActionableError(
-      "snapshotOf screenshot and screen geometry have incompatible aspect ratios",
+      `${label} screenshot and screen geometry have incompatible aspect ratios`,
     );
   }
   const corners = [
@@ -99,7 +106,7 @@ export async function cropSnapshot(
     height: rasterBounds.bottom - rasterBounds.top,
   };
   if (imageSize.width <= 0 || imageSize.height <= 0) {
-    throw new ActionableError("snapshotOf rectangle covers no screenshot pixels");
+    throw new ActionableError(`${label} rectangle covers no screenshot pixels`);
   }
   const png = await backend.execute(source, {
     operations: [{ type: "crop", x: rasterBounds.left, y: rasterBounds.top, ...imageSize }],

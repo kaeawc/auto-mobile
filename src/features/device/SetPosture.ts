@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import type { BootedDevice, DisplayRef, Posture } from "../../models";
 import { RealObserveScreen } from "../observe/ObserveScreen";
@@ -112,17 +113,25 @@ async function observeIosPosture(
   panels: DisplayPanel[] | undefined,
   expectedRole: "cover" | "inner",
   timer: Timer,
+  signal?: AbortSignal,
 ): Promise<Awaited<ReturnType<ObserveScreen["execute"]>>> {
+  throwIfAborted(signal);
   const startedAt = timer.now();
-  let observation = await observe();
+  throwIfAborted(signal);
+  let observation = await awaitWhileRequestIsLive(observe(), signal);
   let match = classifyIosPostureObservation(observation, panels, expectedRole);
   while (match === "old") {
     const elapsed = timer.now() - startedAt;
     if (elapsed >= IOS_POSTURE_TIMEOUT_MS) {
       break;
     }
-    await timer.sleep(Math.min(IOS_POSTURE_POLL_INTERVAL_MS, IOS_POSTURE_TIMEOUT_MS - elapsed));
-    observation = await observe();
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      timer.sleep(Math.min(IOS_POSTURE_POLL_INTERVAL_MS, IOS_POSTURE_TIMEOUT_MS - elapsed)),
+      signal,
+    );
+    throwIfAborted(signal);
+    observation = await awaitWhileRequestIsLive(observe(), signal);
     match = classifyIosPostureObservation(observation, panels, expectedRole);
   }
   if (match === "old") {
@@ -172,9 +181,12 @@ async function setEmulatorPosture(
   requested: RequestedPosture,
   displayPreset?: DisplayPreset,
   supportsRearDisplay = false,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   if ((requested === "closed" || requested === "opened") && supportsRearDisplay) {
-    await adb.executeCommand("shell cmd device_state state reset");
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(adb.executeCommand("shell cmd device_state state reset"), signal);
   }
   const command =
     requested === "closed"
@@ -182,9 +194,14 @@ async function setEmulatorPosture(
       : requested === "opened"
         ? "emu unfold"
         : `emu posture ${EMULATOR_POSTURE_IDS[requested]}`;
-  await adb.executeCommand(command);
+  throwIfAborted(signal);
+  await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
   if (displayPreset) {
-    await adb.executeCommand(`emu resize-display ${DISPLAY_PRESET_IDS[displayPreset]}`);
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      adb.executeCommand(`emu resize-display ${DISPLAY_PRESET_IDS[displayPreset]}`),
+      signal,
+    );
   }
 }
 
@@ -192,7 +209,9 @@ async function setPhysicalPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   states: AndroidDeviceState[],
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   const match = states.find((state) => state.posture === requested);
   if (!match && requested !== "opened") {
     const supported = [...new Set(states.map((state) => state.posture))];
@@ -208,9 +227,11 @@ async function setPhysicalPosture(
     match &&
     states.some((state) => state.posture === "rear_display")
   ) {
-    await adb.executeCommand("shell cmd device_state state reset");
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(adb.executeCommand("shell cmd device_state state reset"), signal);
   }
-  await adb.executeCommand(command);
+  throwIfAborted(signal);
+  await awaitWhileRequestIsLive(adb.executeCommand(command), signal);
 }
 
 async function observeAndroidPosture(
@@ -218,14 +239,20 @@ async function observeAndroidPosture(
   requested: RequestedPosture,
   states: AndroidDeviceState[],
   timer: Timer,
+  signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   if (states.length === 0 || !states.some((state) => state.posture === requested)) {
     return;
   }
   const startedAt = timer.now();
   let actual: AndroidDeviceState | undefined;
   do {
-    const { stdout } = await adb.executeCommand("shell cmd device_state state");
+    throwIfAborted(signal);
+    const { stdout } = await awaitWhileRequestIsLive(
+      adb.executeCommand("shell cmd device_state state"),
+      signal,
+    );
     const identifier = parseAndroidCommittedStateIdentifier(stdout);
     actual = states.find((state) => state.identifier === identifier);
     if (actual?.posture === requested) {
@@ -235,8 +262,10 @@ async function observeAndroidPosture(
     if (elapsed >= ANDROID_POSTURE_TIMEOUT_MS) {
       break;
     }
-    await timer.sleep(
-      Math.min(ANDROID_POSTURE_POLL_INTERVAL_MS, ANDROID_POSTURE_TIMEOUT_MS - elapsed),
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      timer.sleep(Math.min(ANDROID_POSTURE_POLL_INTERVAL_MS, ANDROID_POSTURE_TIMEOUT_MS - elapsed)),
+      signal,
     );
   } while (true);
   throw new ActionableError(
@@ -246,11 +275,18 @@ async function observeAndroidPosture(
 
 async function readAndroidStates(
   adb: ReturnType<AdbClientFactory["create"]>,
+  signal?: AbortSignal,
 ): Promise<AndroidDeviceState[]> {
+  throwIfAborted(signal);
   try {
-    const { stdout } = await adb.executeCommand("shell cmd device_state print-states");
+    throwIfAborted(signal);
+    const { stdout } = await awaitWhileRequestIsLive(
+      adb.executeCommand("shell cmd device_state print-states"),
+      signal,
+    );
     return parseAndroidDeviceStates(stdout);
   } catch (error) {
+    throwIfAborted(signal);
     if (/can't find service: device_state/i.test(errorMessage(error))) {
       logger.warn(`Android device_state service is unavailable: ${errorMessage(error)}`);
       return [];
@@ -282,56 +318,75 @@ export class SetPosture {
   async execute(
     requested: RequestedPosture,
     displayPreset?: DisplayPreset,
+    signal?: AbortSignal,
   ): Promise<SetPostureOutput> {
-    if (this.device.platform === "ios") {
-      return this.executeIos(requested, displayPreset);
-    }
+    throwIfAborted(signal);
+    try {
+      if (this.device.platform === "ios") {
+        return await this.executeIos(requested, displayPreset, signal);
+      }
 
-    validateInventoryPosture(this.device, requested);
+      validateInventoryPosture(this.device, requested);
 
-    const adb = this.adbFactory.create(this.device);
-    const emulator = isEmulator(this.device);
-    if (displayPreset && !emulator) {
-      throw new ActionableError(
-        "displayPreset is supported only by the Resizable Android emulator.",
+      const adb = this.adbFactory.create(this.device);
+      const emulator = isEmulator(this.device);
+      if (displayPreset && !emulator) {
+        throw new ActionableError(
+          "displayPreset is supported only by the Resizable Android emulator.",
+        );
+      }
+
+      const states = await readAndroidStates(adb, signal);
+
+      if (requested === "rear_display") {
+        await setPhysicalPosture(adb, requested, states, signal);
+      } else if (emulator) {
+        await setEmulatorPosture(
+          adb,
+          requested,
+          displayPreset,
+          states.some((state) => state.posture === "rear_display") ||
+            Boolean(this.device.displays?.postures.includes("rear_display")),
+          signal,
+        );
+      } else {
+        await setPhysicalPosture(adb, requested, states, signal);
+      }
+
+      await observeAndroidPosture(adb, requested, states, this.timer, signal);
+
+      throwIfAborted(signal);
+      // A posture-only change need not produce a display push or new geometry.
+      ObservedAndroidDisplayCache.clear(this.device.deviceId);
+      const observation = await awaitWhileRequestIsLive(
+        this.observeFactory(this.device).execute({ signal }),
+        signal,
       );
+      return {
+        posture: requested,
+        display: {
+          ...observation.display,
+          generation: this.transitionSink.identityRevision(this.device.deviceId),
+        },
+        ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
+      };
+    } catch (error) {
+      if (signal?.aborted) {
+        throw toActionableError(
+          error,
+          "Posture request cancelled; device may still complete the change",
+        );
+      }
+      throw toActionableError(error, "Failed to set device posture");
     }
-
-    const states = await readAndroidStates(adb);
-
-    if (requested === "rear_display") {
-      await setPhysicalPosture(adb, requested, states);
-    } else if (emulator) {
-      await setEmulatorPosture(
-        adb,
-        requested,
-        displayPreset,
-        states.some((state) => state.posture === "rear_display") ||
-          (this.device.displays?.postures.includes("rear_display") ?? false),
-      );
-    } else {
-      await setPhysicalPosture(adb, requested, states);
-    }
-
-    await observeAndroidPosture(adb, requested, states, this.timer);
-
-    // A posture-only change need not produce a display push or new geometry.
-    ObservedAndroidDisplayCache.clear(this.device.deviceId);
-    const observation = await this.observeFactory(this.device).execute({});
-    return {
-      posture: requested,
-      display: {
-        ...observation.display,
-        generation: this.transitionSink.identityRevision(this.device.deviceId),
-      },
-      ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
-    };
   }
 
   private async executeIos(
     requested: RequestedPosture,
     displayPreset?: DisplayPreset,
+    signal?: AbortSignal,
   ): Promise<SetPostureOutput> {
+    throwIfAborted(signal);
     if (!isIosSimulatorUdid(this.device.deviceId)) {
       return {
         status: "unsupported",
@@ -355,7 +410,11 @@ export class SetPosture {
         `Posture '${requested}' is not supported by the iPhone Duo. Supported postures: closed, half_opened, opened.`,
       );
     }
-    const result = await this.iosClientProvider(this.device).requestSetHingeAngle(angle);
+    throwIfAborted(signal);
+    const result = await awaitWhileRequestIsLive(
+      this.iosClientProvider(this.device).requestSetHingeAngle(angle),
+      signal,
+    );
     if (!result.success) {
       throw new ActionableError(
         `Could not set iPhone Duo posture: ${result.error ?? "unknown runner error"}`,
@@ -367,10 +426,11 @@ export class SetPosture {
     );
     const expectedRole = requested === "closed" ? "cover" : "inner";
     const observation = await observeIosPosture(
-      () => this.observeFactory(this.device).execute({ freshness: "fresh" }),
+      () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
       this.device.displays?.panels,
       expectedRole,
       this.timer,
+      signal,
     );
     this.transitionSink.notifyTransition(
       this.device.deviceId,

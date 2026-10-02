@@ -1,3 +1,5 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
+import { toActionableError } from "../../models/ActionableError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { Mutex } from "async-mutex";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
@@ -59,21 +61,31 @@ export class Rotate extends BaseVisualChange {
    * Get the current device orientation
    * @returns Promise with current orientation ("portrait" or "landscape")
    */
-  private async readSystemSetting(key: string): Promise<string | null> {
+  private async readSystemSetting(key: string, signal?: AbortSignal): Promise<string | null> {
+    throwIfAborted(signal);
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const a11yResult = await a11y.requestSettingsGet("system", key);
+      const a11yResult = await awaitWhileRequestIsLive(
+        a11y.requestSettingsGet("system", key),
+        signal,
+      );
       if (a11yResult.success) {
         return a11yResult.found ? (a11yResult.value ?? null) : null;
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.debug(`[Rotate] a11y settings get failed for ${key}: ${error}`);
     }
+    throwIfAborted(signal);
     try {
-      const result = await this.adb.executeCommand(`shell settings get system ${key}`);
+      const result = await awaitWhileRequestIsLive(
+        this.adb.executeCommand(`shell settings get system ${key}`),
+        signal,
+      );
       const out = result.stdout.trim();
       return !out || out === "null" ? null : out;
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`Failed to read system setting ${key}: ${error}`);
       return null;
     }
@@ -89,13 +101,16 @@ export class Rotate extends BaseVisualChange {
    * (e.g. a cached TaskSnapshot) elsewhere in the dump (issue #6199).
    * @returns The parsed rotation value, or null if it could not be read
    */
-  private async readLiveRotation(): Promise<number | null> {
+  private async readLiveRotation(signal?: AbortSignal): Promise<number | null> {
+    throwIfAborted(signal);
     try {
-      const { stdout } = await this.adb.executeCommand(
-        'shell dumpsys window | grep -i "mRotation="',
+      const { stdout } = await awaitWhileRequestIsLive(
+        this.adb.executeCommand('shell dumpsys window | grep -i "mRotation="'),
+        signal,
       );
       return parseWindowManagerRotation(stdout);
     } catch (error) {
+      throwIfAborted(signal);
       logger.debug(`[Rotate] Failed to read live rotation via dumpsys window: ${error}`);
       return null;
     }
@@ -154,7 +169,9 @@ export class Rotate extends BaseVisualChange {
 
   private async readLiveRotationWithSettleWait(
     requestedOrientation: "portrait" | "landscape",
+    signal?: AbortSignal,
   ): Promise<number | null> {
+    throwIfAborted(signal);
     let lastValue: number | null = null;
     let lastAchieved: "portrait" | "landscape" | null = null;
     // Tracks consecutive matching samples for whichever orientation was last
@@ -171,7 +188,7 @@ export class Rotate extends BaseVisualChange {
       achieved: null,
     };
     for (let attempt = 1; attempt <= Rotate.SETTLE_WAIT_MAX_ATTEMPTS; attempt++) {
-      lastValue = await this.readLiveRotation();
+      lastValue = await this.readLiveRotation(signal);
       lastAchieved =
         lastValue === null ? null : lastValue === 0 || lastValue === 2 ? "portrait" : "landscape";
       this.updateOrientationStreak(lastAchieved, streak);
@@ -186,7 +203,10 @@ export class Rotate extends BaseVisualChange {
         }
       }
       if (attempt < Rotate.SETTLE_WAIT_MAX_ATTEMPTS) {
-        await this.timer.sleep(Rotate.SETTLE_WAIT_POLL_INTERVAL_MS);
+        await awaitWhileRequestIsLive(
+          this.timer.sleep(Rotate.SETTLE_WAIT_POLL_INTERVAL_MS),
+          signal,
+        );
       }
     }
     return this.resolveExhaustedSettleWait(lastAchieved, streak.count, lastConfirmed);
@@ -235,8 +255,13 @@ export class Rotate extends BaseVisualChange {
   private async confirmOrientationAfterAutoRotateRestore(
     requestedOrientation: "portrait" | "landscape",
     restoreConfirmed: boolean,
+    signal?: AbortSignal,
   ): Promise<{ achievedOrientation: string; warning: string | undefined }> {
-    const liveRotationValue = await this.readLiveRotationWithSettleWait(requestedOrientation);
+    throwIfAborted(signal);
+    const liveRotationValue = await this.readLiveRotationWithSettleWait(
+      requestedOrientation,
+      signal,
+    );
     if (liveRotationValue === null) {
       return {
         achievedOrientation: "unknown",
@@ -270,15 +295,18 @@ export class Rotate extends BaseVisualChange {
    */
   private async restoreAutoRotateAndConfirmOrientation(
     requestedOrientation: "portrait" | "landscape",
+    signal?: AbortSignal,
   ): Promise<{
     achievedOrientation: string;
     warning: string | undefined;
     restoreConfirmed: boolean;
   }> {
+    throwIfAborted(signal);
     let restoreWriteError: unknown;
     try {
-      await this.writeSystemSetting("accelerometer_rotation", "1");
+      await this.writeSystemSetting("accelerometer_rotation", "1", signal);
     } catch (firstError) {
+      throwIfAborted(signal);
       // A single transient failure (e.g. a momentary CtrlProxy/ADB hiccup)
       // must not be treated as ambiguous on its own — retry once, the same
       // idempotent write, before falling back to the ambiguous-outcome path
@@ -287,8 +315,9 @@ export class Rotate extends BaseVisualChange {
         `[Rotate] accelerometer_rotation restore write failed on first attempt, retrying once: ${firstError}`,
       );
       try {
-        await this.writeSystemSetting("accelerometer_rotation", "1");
+        await this.writeSystemSetting("accelerometer_rotation", "1", signal);
       } catch (retryError) {
+        throwIfAborted(signal);
         restoreWriteError = retryError;
         logger.warn(
           `[Rotate] accelerometer_rotation restore write failed after retry (ambiguous outcome) after confirming rotation to ${requestedOrientation}: ${retryError}`,
@@ -298,7 +327,11 @@ export class Rotate extends BaseVisualChange {
 
     const restoreConfirmed = restoreWriteError === undefined;
     const { achievedOrientation, warning: confirmWarning } =
-      await this.confirmOrientationAfterAutoRotateRestore(requestedOrientation, restoreConfirmed);
+      await this.confirmOrientationAfterAutoRotateRestore(
+        requestedOrientation,
+        restoreConfirmed,
+        signal,
+      );
     if (restoreConfirmed) {
       return { achievedOrientation, warning: confirmWarning, restoreConfirmed };
     }
@@ -343,17 +376,18 @@ export class Rotate extends BaseVisualChange {
     return `Successfully rotated from ${previousOrientation} to ${requestedOrientation}`;
   }
 
-  async getCurrentOrientation(): Promise<string> {
+  async getCurrentOrientation(signal?: AbortSignal): Promise<string> {
+    throwIfAborted(signal);
     // Prefer the live window-manager rotation: `user_rotation` only reflects
     // the last explicitly-requested rotation and goes stale as soon as
     // auto-rotate applies a sensor-driven rotation on top of it (#6129).
-    const liveRotation = await this.readLiveRotation();
+    const liveRotation = await this.readLiveRotation(signal);
     if (liveRotation !== null) {
       // 0 = portrait, 1 = landscape (90°), 2 = reverse portrait (180°), 3 = reverse landscape (270°)
       return liveRotation === 0 || liveRotation === 2 ? "portrait" : "landscape";
     }
 
-    const userRotationStr = await this.readSystemSetting("user_rotation");
+    const userRotationStr = await this.readSystemSetting("user_rotation", signal);
 
     if (!userRotationStr || !/^\d+$/.test(userRotationStr)) {
       logger.warn(`Invalid user_rotation value: ${userRotationStr}, defaulting to portrait`);
@@ -377,8 +411,11 @@ export class Rotate extends BaseVisualChange {
    * @returns "locked" (auto-rotation disabled), "enabled" (auto-rotation on),
    *   or "unknown" when the setting could not be confirmed
    */
-  private async getAutoRotateState(): Promise<"locked" | "enabled" | "unknown"> {
-    const val = await this.readSystemSetting("accelerometer_rotation");
+  private async getAutoRotateState(
+    signal?: AbortSignal,
+  ): Promise<"locked" | "enabled" | "unknown"> {
+    throwIfAborted(signal);
+    const val = await this.readSystemSetting("accelerometer_rotation", signal);
     if (val === null || !/^\d+$/.test(val)) {
       return "unknown";
     }
@@ -386,8 +423,9 @@ export class Rotate extends BaseVisualChange {
     return parseInt(val, 10) === 0 ? "locked" : "enabled";
   }
 
-  private async getOrientationLockState(): Promise<OrientationLockState> {
-    const autoRotateState = await this.getAutoRotateState();
+  private async getOrientationLockState(signal?: AbortSignal): Promise<OrientationLockState> {
+    throwIfAborted(signal);
+    const autoRotateState = await this.getAutoRotateState(signal);
     if (autoRotateState === "unknown") {
       return "unknown";
     }
@@ -398,8 +436,10 @@ export class Rotate extends BaseVisualChange {
     orientation: "portrait" | "landscape",
     value: number,
     currentOrientation: string,
+    signal?: AbortSignal,
   ): Promise<AlreadyAppliedOrientationDecision> {
-    const liveRotation = await this.readLiveRotation();
+    throwIfAborted(signal);
+    const liveRotation = await this.readLiveRotation(signal);
     if (liveRotation === null) {
       // The normal rotation path can still establish the requested orientation
       // when the exact live rotation is temporarily unavailable.
@@ -416,10 +456,11 @@ export class Rotate extends BaseVisualChange {
       // Android applies user_rotation when auto-rotate is disabled. Persist
       // the exact live value before the lock so stale settings cannot rotate
       // an already-matching (including reverse) display.
-      await this.writeSystemSetting("user_rotation", String(liveRotation));
-      await this.writeSystemSetting("accelerometer_rotation", "0");
-      await this.awaitIdle.waitForRotation(liveRotation);
+      await this.writeSystemSetting("user_rotation", String(liveRotation), signal);
+      await this.writeSystemSetting("accelerometer_rotation", "0", signal);
+      await this.awaitIdle.waitForRotation(liveRotation, undefined, signal);
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`Failed to lock the current ${orientation} orientation: ${error}`, error);
       return {
         kind: "handled",
@@ -431,14 +472,14 @@ export class Rotate extends BaseVisualChange {
           previousOrientation: currentOrientation,
           rotationPerformed: false,
           orientationLockHandled: false,
-          orientationLockState: await this.getOrientationLockState(),
+          orientationLockState: await this.getOrientationLockState(signal),
           error: `Failed to lock the device in its current ${orientation} orientation: ${error}`,
         },
       };
     }
 
-    const orientationLockState = await this.getOrientationLockState();
-    const confirmedRotation = await this.readLiveRotation();
+    const orientationLockState = await this.getOrientationLockState(signal);
+    const confirmedRotation = await this.readLiveRotation(signal);
     if (orientationLockState !== "locked" || confirmedRotation !== liveRotation) {
       const achievedOrientation =
         confirmedRotation === null
@@ -495,9 +536,11 @@ export class Rotate extends BaseVisualChange {
     value: number,
     currentOrientation: string,
     autoRotateState: "locked" | "enabled" | "unknown",
-    preserveLock: boolean,
-    restoreAutomaticRotation: boolean,
+    plan: { preserveLock: boolean; restoreAutomaticRotation: boolean },
+    signal?: AbortSignal,
   ): Promise<AlreadyAppliedOrientationDecision> {
+    throwIfAborted(signal);
+    const { preserveLock, restoreAutomaticRotation } = plan;
     if (currentOrientation !== orientation) {
       return { kind: "requires-rotation", reason: "orientation-differs" };
     }
@@ -532,16 +575,18 @@ export class Rotate extends BaseVisualChange {
     }
 
     if (preserveLock) {
-      return this.lockAlreadyAppliedOrientation(orientation, value, currentOrientation);
+      return this.lockAlreadyAppliedOrientation(orientation, value, currentOrientation, signal);
     }
 
     if (!restoreAutomaticRotation) {
       return { kind: "requires-rotation", reason: "orientation-differs" };
     }
 
-    const { achievedOrientation, warning } =
-      await this.restoreAutoRotateAndConfirmOrientation(orientation);
-    const orientationLockState = await this.getOrientationLockState();
+    const { achievedOrientation, warning } = await this.restoreAutoRotateAndConfirmOrientation(
+      orientation,
+      signal,
+    );
+    const orientationLockState = await this.getOrientationLockState(signal);
     if (orientationLockState !== "unlocked") {
       return {
         kind: "handled",
@@ -630,13 +675,19 @@ export class Rotate extends BaseVisualChange {
     preserveLock: boolean,
     restoreAutomaticRotation: boolean,
     wasAutoRotateEnabled: boolean,
+    signal?: AbortSignal,
   ): Promise<RotateResult> {
-    const orientationLockState = await this.getOrientationLockState();
+    throwIfAborted(signal);
+    const orientationLockState = await this.getOrientationLockState(signal);
     const rotationPerformed = currentOrientation !== orientation;
     if (preserveLock && orientationLockState !== "locked") {
       // Auto-rotate may already have restored the sensor-held orientation.
       // Reuse the bounded live read; stale user_rotation cannot confirm it.
-      const confirmation = await this.confirmOrientationAfterAutoRotateRestore(orientation, false);
+      const confirmation = await this.confirmOrientationAfterAutoRotateRestore(
+        orientation,
+        false,
+        signal,
+      );
       return {
         success: false,
         orientation,
@@ -688,39 +739,70 @@ export class Rotate extends BaseVisualChange {
    * Check if orientation is locked
    * @returns Promise with boolean indicating if auto-rotation is disabled
    */
-  async isOrientationLocked(): Promise<boolean> {
-    return (await this.getAutoRotateState()) === "locked";
+  async isOrientationLocked(signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
+    return (await this.getAutoRotateState(signal)) === "locked";
   }
 
-  private async writeSystemSetting(key: string, value: string): Promise<void> {
+  private async writeSystemSetting(
+    key: string,
+    value: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    throwIfAborted(signal);
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-      const a11yResult = await a11y.requestSettingsPut("system", key, value, "int");
+      const a11yResult = await awaitWhileRequestIsLive(
+        a11y.requestSettingsPut("system", key, value, "int"),
+        signal,
+      );
       if (a11yResult.success) {
         return;
       }
       logger.debug(`[Rotate] a11y settings put failed for ${key}: ${a11yResult.error}`);
     } catch (error) {
+      throwIfAborted(signal);
       logger.debug(`[Rotate] a11y settings put threw for ${key}: ${error}`);
     }
-    await this.adb.executeCommand(`shell settings put system ${key} ${value}`);
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.adb.executeCommand(`shell settings put system ${key} ${value}`),
+      signal,
+    );
   }
 
   async execute(
     orientation: "portrait" | "landscape",
     progress?: ProgressCallback,
     lockOrientation?: boolean,
+    signal?: AbortSignal,
   ): Promise<RotateResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("rotate");
 
-    switch (this.device.platform) {
-      case "ios":
-        return this.executeIosRotation(orientation, progress, perf);
-      case "android":
-        return this.executeAndroidRotation(orientation, progress, perf, lockOrientation);
-      default:
-        throw unsupportedPlatformError(this.device.platform, "rotate the device");
+    try {
+      switch (this.device.platform) {
+        case "ios":
+          return await this.executeIosRotation(orientation, progress, perf, signal);
+        case "android":
+          return await this.executeAndroidRotation(
+            orientation,
+            progress,
+            perf,
+            lockOrientation,
+            signal,
+          );
+        default:
+          throw unsupportedPlatformError(this.device.platform, "rotate the device");
+      }
+    } catch (error) {
+      throw toActionableError(
+        error,
+        signal?.aborted
+          ? "Rotation cancelled; device may still complete the change"
+          : "Failed to rotate device",
+      );
     }
   }
 
@@ -728,15 +810,18 @@ export class Rotate extends BaseVisualChange {
     orientation: "portrait" | "landscape",
     progress: ProgressCallback | undefined,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
+    signal?: AbortSignal,
   ): Promise<RotateResult> {
+    throwIfAborted(signal);
     let previousScreenSize: { width: number; height: number } | undefined;
     const result: RotateResult = await this.observedInteraction(
       async (previousObservation) => {
         previousScreenSize = previousObservation.screenSize;
         try {
+          throwIfAborted(signal);
           const client = IOSCtrlProxyClient.getInstance(this.device);
           const result = await perf.track("iOSRotation", () =>
-            client.requestRotate(orientation, 5000, perf),
+            awaitWhileRequestIsLive(client.requestRotate(orientation, 5000, perf), signal),
           );
 
           if (!result.success) {
@@ -761,7 +846,8 @@ export class Rotate extends BaseVisualChange {
               : `Device is already in ${orientation} orientation`,
           };
         } catch (error) {
-          throw new Error(`Failed to rotate iOS device: ${error}`);
+          throwIfAborted(signal);
+          throw toActionableError(error, "Failed to rotate iOS device");
         }
       },
       {
@@ -771,6 +857,7 @@ export class Rotate extends BaseVisualChange {
         timeoutMs: 5000,
         progress,
         perf,
+        signal,
         skipUiStability: true,
       },
     );
@@ -800,7 +887,9 @@ export class Rotate extends BaseVisualChange {
     progress: ProgressCallback | undefined,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     lockOrientation: boolean | undefined,
+    signal?: AbortSignal,
   ): Promise<RotateResult> {
+    throwIfAborted(signal);
     return this.observedInteraction(
       // The read-auto-rotate -> disable -> rotate -> restore-auto-rotate
       // sequence below must run atomically per device: interleaving it with
@@ -809,14 +898,18 @@ export class Rotate extends BaseVisualChange {
       // (#6199 review). Different devices use independent locks and never
       // wait on each other.
       () =>
-        this.getRotationLock().runExclusive(() =>
-          this.performAndroidRotation(orientation, perf, lockOrientation),
+        awaitWhileRequestIsLive(
+          this.getRotationLock().runExclusive(() =>
+            this.performAndroidRotation(orientation, perf, lockOrientation, signal),
+          ),
+          signal,
         ),
       {
         changeExpected: true,
         timeoutMs: 5000,
         progress,
         perf,
+        signal,
         // Skip gfxinfo-based UI stability tracking for rotation - it incorrectly
         // detects rotation animation as "unstable UI" and can cause 5+ second waits
         skipUiStability: true,
@@ -833,12 +926,14 @@ export class Rotate extends BaseVisualChange {
     orientation: "portrait" | "landscape",
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
     lockOrientation: boolean | undefined,
+    signal?: AbortSignal,
   ): Promise<RotateResult> {
+    throwIfAborted(signal);
     const value = orientation === "portrait" ? 0 : 1;
 
     // Run getCurrentOrientation and getAutoRotateState in parallel
     const [currentOrientation, autoRotateState] = await perf.track("getOrientationState", () =>
-      Promise.all([this.getCurrentOrientation(), this.getAutoRotateState()]),
+      Promise.all([this.getCurrentOrientation(signal), this.getAutoRotateState(signal)]),
     );
 
     const {
@@ -853,8 +948,8 @@ export class Rotate extends BaseVisualChange {
       value,
       currentOrientation,
       autoRotateState,
-      preserveLock,
-      restoreAutomaticRotation,
+      { preserveLock, restoreAutomaticRotation },
+      signal,
     );
     if (alreadyApplied.kind === "handled") {
       return alreadyApplied.result;
@@ -879,17 +974,19 @@ export class Rotate extends BaseVisualChange {
           // user_rotation is honored only after automatic rotation is disabled.
           // Keeping these writes ordered avoids a target write racing ahead of
           // the lock on devices where the settings provider completes slowly.
-          await this.writeSystemSetting("accelerometer_rotation", "0");
+          await this.writeSystemSetting("accelerometer_rotation", "0", signal);
         } else {
           logger.debug(
             "[Rotate] accelerometer_rotation is unconfirmed; writing user_rotation without changing the lock state",
           );
         }
-        await this.writeSystemSetting("user_rotation", String(value));
+        await this.writeSystemSetting("user_rotation", String(value), signal);
       });
 
       // Wait for rotation to complete (also serves as verification)
-      await perf.track("waitForRotation", () => this.awaitIdle.waitForRotation(value));
+      await perf.track("waitForRotation", () =>
+        this.awaitIdle.waitForRotation(value, undefined, signal),
+      );
 
       // Note: We skip explicit verification since waitForRotation already confirms
       // the rotation completed successfully by polling dumpsys window
@@ -903,7 +1000,7 @@ export class Rotate extends BaseVisualChange {
 
       if (shouldRestoreAutoRotate) {
         ({ achievedOrientation, warning, restoreConfirmed } =
-          await this.restoreAutoRotateAndConfirmOrientation(orientation));
+          await this.restoreAutoRotateAndConfirmOrientation(orientation, signal));
       }
 
       return this.finalizeAndroidRotation(
@@ -916,15 +1013,19 @@ export class Rotate extends BaseVisualChange {
         preserveLock,
         restoreAutomaticRotation,
         wasAutoRotateEnabled,
+        signal,
       );
     } catch (error) {
+      throwIfAborted(signal);
+      logger.warn("Failed to change device orientation", error);
       // Restore auto-rotate on a failed temporary/explicit-unlock operation.
       // A persistent request intentionally leaves its lock in place.
       if (shouldRestoreAutoRotate) {
         try {
-          await this.writeSystemSetting("accelerometer_rotation", "1");
+          await this.writeSystemSetting("accelerometer_rotation", "1", signal);
           logger.info("Restored auto-rotate after error");
         } catch (restoreError) {
+          throwIfAborted(signal);
           logger.warn(`Failed to restore auto-rotate: ${restoreError}`);
         }
       }
@@ -937,7 +1038,7 @@ export class Rotate extends BaseVisualChange {
         previousOrientation: currentOrientation,
         rotationPerformed: false,
         orientationLockHandled: wasAutoRotateEnabled,
-        orientationLockState: await this.getOrientationLockState(),
+        orientationLockState: await this.getOrientationLockState(signal),
         error: `Failed to change device orientation: ${error}`,
       };
     }

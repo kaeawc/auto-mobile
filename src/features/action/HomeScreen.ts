@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -130,25 +131,35 @@ export class HomeScreen extends BaseVisualChange {
     perf?: PerformanceTracker,
     frameContext?: string,
     timeoutMs?: number,
+    signal?: AbortSignal,
   ): Promise<void> {
+    throwIfAborted(signal);
     const simulator = isIosSimulatorUdid(this.device.deviceId);
     if (!simulator) {
       const client = IOSCtrlProxyClient.getInstance(this.device);
-      const pressError = await this.tryIosRunnerHome(client, 5000, perf, frameContext);
+      const pressError = await awaitWhileRequestIsLive(
+        this.tryIosRunnerHome(client, 5000, perf, frameContext),
+        signal,
+      );
       if (pressError) {
         throw new ActionableError(pressError);
       }
-      await this.verifyIosHomeForeground(client, perf);
+      await this.verifyIosHomeForeground(client, perf, undefined, undefined, undefined, { signal });
       return;
     }
 
     const deadline = this.timer.now() + (timeoutMs ?? 5000);
     try {
-      await this.simctl.executeCommandArgs(
-        ["launch", this.device.deviceId, "com.apple.springboard"],
-        Math.min(HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS, this.iosHomeRemainingMs(deadline)),
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(
+        this.simctl.executeCommandArgs(
+          ["launch", this.device.deviceId, "com.apple.springboard"],
+          Math.min(HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS, this.iosHomeRemainingMs(deadline)),
+        ),
+        signal,
       );
     } catch (error) {
+      throwIfAborted(signal);
       throw toActionableError(error, "Failed to launch SpringBoard with simctl");
     }
 
@@ -160,9 +171,10 @@ export class HomeScreen extends BaseVisualChange {
         HomeScreen.IOS_SIMULATOR_RETRY_DELAYS_MS,
         this.iosHomeRemainingMs(deadline),
         HomeScreen.IOS_SIMULATOR_READ_TIMEOUT_MS,
-        true,
+        { pollUntilDeadline: true, signal },
       );
     } catch (error) {
+      throwIfAborted(signal);
       throw new ActionableError(
         `simctl launched SpringBoard, but foreground verification failed: ${errorMessage(error)}`,
         { cause: error },
@@ -204,13 +216,17 @@ export class HomeScreen extends BaseVisualChange {
     retryDelaysMs: readonly number[] = HomeScreen.IOS_HOME_RETRY_DELAYS_MS,
     timeoutMs: number = HomeScreen.IOS_HOME_VERIFICATION_TIMEOUT_MS,
     readTimeoutMs: number = HomeScreen.IOS_HOME_HIERARCHY_READ_TIMEOUT_MS,
-    pollUntilDeadline = false,
+    options: { pollUntilDeadline?: boolean; signal?: AbortSignal } = {},
   ): Promise<void> {
+    const pollUntilDeadline = options.pollUntilDeadline === true;
+    const signal = options.signal;
+    throwIfAborted(signal);
     const deadline = this.timer.now() + timeoutMs;
     const backoff = sequenceBackoff(retryDelaysMs);
     let lastHierarchy: CtrlProxyHierarchy | undefined;
 
     for (let attempt = 0; ; attempt++) {
+      throwIfAborted(signal);
       const remainingMs = deadline - this.timer.now();
       if (remainingMs <= 0) {
         break;
@@ -219,6 +235,7 @@ export class HomeScreen extends BaseVisualChange {
         client,
         perf,
         Math.min(remainingMs, readTimeoutMs),
+        signal,
       );
       if (hierarchy) {
         lastHierarchy = hierarchy;
@@ -234,6 +251,7 @@ export class HomeScreen extends BaseVisualChange {
           backoff,
           deadline,
           pollUntilDeadline,
+          signal,
         ))
       ) {
         break;
@@ -249,7 +267,9 @@ export class HomeScreen extends BaseVisualChange {
     backoff: BackoffPolicy,
     deadline: number,
     pollUntilDeadline: boolean,
+    signal?: AbortSignal,
   ): Promise<boolean> {
+    throwIfAborted(signal);
     if (!pollUntilDeadline && attempt >= retryLimit) {
       return false;
     }
@@ -257,7 +277,11 @@ export class HomeScreen extends BaseVisualChange {
     if (!pollUntilDeadline && this.timer.now() + delayMs >= deadline) {
       return false;
     }
-    await this.timer.sleep(Math.min(delayMs, deadline - this.timer.now()));
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.timer.sleep(Math.min(delayMs, deadline - this.timer.now())),
+      signal,
+    );
     return true;
   }
 
@@ -265,13 +289,20 @@ export class HomeScreen extends BaseVisualChange {
     client: IOSCtrlProxyClient,
     perf: PerformanceTracker | undefined,
     remainingMs: number,
+    signal?: AbortSignal,
   ): Promise<CtrlProxyHierarchy | undefined> {
+    throwIfAborted(signal);
     try {
       // Request a fresh foreground hierarchy after Home navigation. A cached
       // earlier hierarchy cannot establish the Home postcondition.
-      const response = await client.requestHierarchySync(perf, true, undefined, remainingMs);
+      throwIfAborted(signal);
+      const response = await awaitWhileRequestIsLive(
+        client.requestHierarchySync(perf, true, undefined, remainingMs),
+        signal,
+      );
       return response?.hierarchy;
     } catch (error) {
+      throwIfAborted(signal);
       throw toActionableError(
         error,
         "Failed to verify the iOS foreground app after Home navigation",

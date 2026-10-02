@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -29,25 +30,31 @@ export class SelectAllText extends BaseVisualChange {
     this.ctrlProxyFactory = ctrlProxyFactory;
   }
 
-  async execute(progress?: ProgressCallback): Promise<SelectAllTextResult> {
+  async execute(progress?: ProgressCallback, signal?: AbortSignal): Promise<SelectAllTextResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("selectAllText");
 
     return this.observedInteraction(
       async () => {
+        throwIfAborted(signal);
         try {
           // Platform-specific select all execution
           switch (this.device.platform) {
             case "android":
-              return await perf.track("androidSelectAll", () => this.executeAndroidSelectAll());
+              return await perf.track("androidSelectAll", () =>
+                this.executeAndroidSelectAll(signal),
+              );
             case "ios":
-              return await perf.track("iOSSelectAll", () => this.executeiOSSelectAll());
+              return await perf.track("iOSSelectAll", () => this.executeiOSSelectAll(signal));
             default:
               perf.end();
               throw unsupportedPlatformError(this.device.platform, "select all text");
           }
         } catch (error) {
+          throwIfAborted(signal);
           perf.end();
+          logger.warn(`Failed to select all text: ${errorMessage(error)}`, error);
           return {
             success: false,
             error: `Failed to select all text: ${errorMessage(error)}`,
@@ -59,6 +66,7 @@ export class SelectAllText extends BaseVisualChange {
         tolerancePercent: 0,
         timeoutMs: 500,
         progress,
+        signal,
         perf,
         skipUiStability: true, // Skip UI stability wait - a11y service is fast
       },
@@ -68,12 +76,13 @@ export class SelectAllText extends BaseVisualChange {
   /**
    * Execute iOS-specific select all using CtrlProxy iOS.
    */
-  private async executeiOSSelectAll(): Promise<SelectAllTextResult> {
+  private async executeiOSSelectAll(signal?: AbortSignal): Promise<SelectAllTextResult> {
     try {
+      throwIfAborted(signal);
       const client =
         this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
         IOSCtrlProxyClient.getInstance(this.device);
-      const result = await client.requestSelectAll();
+      const result = await awaitWhileRequestIsLive(client.requestSelectAll(), signal);
 
       if (result.success) {
         logger.info(`[SelectAllText] Select all via CtrlProxy iOS`);
@@ -83,6 +92,7 @@ export class SelectAllText extends BaseVisualChange {
       logger.warn(`[SelectAllText] CtrlProxy iOS selectAll failed: ${result.error}`);
       return { success: false, error: result.error };
     } catch (error) {
+      throwIfAborted(signal);
       logger.error(`[SelectAllText] CtrlProxy iOS exception: ${error}`);
       return { success: false, error: String(error) };
     }
@@ -92,11 +102,12 @@ export class SelectAllText extends BaseVisualChange {
    * Execute Android-specific select all using accessibility service.
    * Uses ACTION_SET_SELECTION which is significantly faster than ADB double-tap.
    */
-  private async executeAndroidSelectAll(): Promise<SelectAllTextResult> {
+  private async executeAndroidSelectAll(signal?: AbortSignal): Promise<SelectAllTextResult> {
+    throwIfAborted(signal);
     const a11yClient =
       this.ctrlProxyFactory?.(this.device, this.adbFactory) ??
       AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const a11yResult = await a11yClient.requestSelectAll();
+    const a11yResult = await awaitWhileRequestIsLive(a11yClient.requestSelectAll(), signal);
 
     if (a11yResult.success) {
       logger.info(

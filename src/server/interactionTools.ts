@@ -2114,10 +2114,11 @@ export async function selectAllTextHandler(
   device: BootedDevice,
   _args: SelectAllTextArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   try {
     const selectAllText = selectAllTextFactory(device);
-    const result: SelectAllTextResult = await selectAllText.execute(progress);
+    const result: SelectAllTextResult = await selectAllText.execute(progress, signal);
 
     const message = result.success
       ? "Selected all text in focused input field"
@@ -2153,11 +2154,12 @@ export async function pressButtonHandler(
   device: BootedDevice,
   args: PressButtonArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   try {
     const pressButton = pressButtonFactory(device);
-    const result: PressButtonResult = await pressButton.execute(args.button, progress);
+    const result: PressButtonResult = await pressButton.execute(args.button, progress, signal);
 
     const message = result.success
       ? `Pressed button ${args.button}`
@@ -2203,11 +2205,14 @@ export function resetSetPostureFactory(): void {
 export async function setPostureHandler(
   device: BootedDevice,
   args: { posture: RequestedPosture; displayPreset?: "phone" | "unfolded" | "tablet" },
+  _progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   try {
     const result: SetPostureOutput = await setPostureFactory(device).execute(
       args.posture,
       args.displayPreset,
+      signal,
     );
     const message = "status" in result ? result.message : `Set device posture to ${result.posture}`;
     return createJSONToolResponse({ message, ...result });
@@ -2229,13 +2234,14 @@ export async function rotateHandler(
   device: BootedDevice,
   args: RotateArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   try {
     if (args.lockOrientation !== undefined && device.platform !== "android") {
       throw new ActionableError("lockOrientation is supported only on Android devices.");
     }
     const rotate = rotateFactory(device);
-    const result = await rotate.execute(args.orientation, progress, args.lockOrientation);
+    const result = await rotate.execute(args.orientation, progress, args.lockOrientation, signal);
     const response = createJSONToolResponse({
       observation: result.observation,
       ...result,

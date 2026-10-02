@@ -1347,9 +1347,34 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     });
   }
 
+  private selectDisplaySiblingOrMiss(
+    options: TapVerificationOptions,
+    select: () => ElementSelectionResult,
+  ): ElementSelectionResult {
+    if (options.verification === undefined) {
+      return select();
+    }
+    try {
+      return select();
+    } catch (error) {
+      if (!(error instanceof ActionableError) || error.message !== "Sibling row not found") {
+        throw error;
+      }
+      // A missing sibling is expected while polling a targeted display; let
+      // the shared search loop retry and format the final selector error.
+      logger.debug("[TapOnElement] Target display sibling not found yet", error);
+      return {
+        element: null,
+        totalMatches: 0,
+        indexInMatches: -1,
+        strategy: options.selectionStrategy ?? "first",
+      };
+    }
+  }
+
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   findElementInHierarchy(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     viewHierarchy: ViewHierarchyResult,
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
@@ -1362,27 +1387,26 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const lookupAction = options.action === "focus" ? "focus-input" : "inspect";
     const selectionIntent = TEXT_SELECTION_INTENT_BY_ACTION[options.action];
 
-    if (options.text) {
+    const text = options.text;
+    if (text) {
       if (options.sibling) {
         return {
-          selection: this.elementSelector.selectClickableSiblingOfText(
-            viewHierarchy,
-            options.text,
-            {
+          selection: this.selectDisplaySiblingOrMiss(options, () =>
+            this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
               container: options.container,
               fuzzyMatch: true,
               caseSensitive: false,
               strategy: options.selectionStrategy,
               intentAction,
               index: options.index,
-            },
+            }),
           ),
           containerFound,
         };
       }
 
       return {
-        selection: this.elementSelector.selectByText(viewHierarchy, options.text, {
+        selection: this.elementSelector.selectByText(viewHierarchy, text, {
           container: options.container,
           partialMatch: true,
           caseSensitive: false,
@@ -1401,14 +1425,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
       for (const text of options.textAny) {
         const selection = options.sibling
-          ? this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
-              container: options.container,
-              fuzzyMatch: true,
-              caseSensitive: false,
-              strategy: options.selectionStrategy,
-              intentAction,
-              index: options.index,
-            })
+          ? this.selectDisplaySiblingOrMiss(options, () =>
+              this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
+                container: options.container,
+                fuzzyMatch: true,
+                caseSensitive: false,
+                strategy: options.selectionStrategy,
+                intentAction,
+                index: options.index,
+              }),
+            )
           : this.elementSelector.selectByText(viewHierarchy, text, {
               container: options.container,
               partialMatch: true,
@@ -1440,26 +1466,25 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
     }
 
-    if (options.elementId) {
+    const elementId = options.elementId;
+    if (elementId) {
       if (options.sibling) {
         return {
-          selection: this.elementSelector.selectClickableSiblingOfResourceId(
-            viewHierarchy,
-            options.elementId,
-            {
+          selection: this.selectDisplaySiblingOrMiss(options, () =>
+            this.elementSelector.selectClickableSiblingOfResourceId(viewHierarchy, elementId, {
               container: options.container,
               partialMatch: false,
               strategy: options.selectionStrategy,
               intentAction,
               index: options.index,
-            },
+            }),
           ),
           containerFound,
         };
       }
 
       return {
-        selection: this.elementSelector.selectByResourceId(viewHierarchy, options.elementId, {
+        selection: this.elementSelector.selectByResourceId(viewHierarchy, elementId, {
           container: options.container,
           partialMatch: false,
           strategy: options.selectionStrategy,
@@ -2241,7 +2266,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private async searchForElement(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     observeResult: ObserveResult,
     signal?: AbortSignal,
   ): Promise<{
@@ -2316,11 +2341,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         }
         nextPollAt = this.timer.now() + TapOnElement.SEARCH_POLL_INTERVAL_MS;
         const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-        const refreshedHierarchy = await this.refreshViewHierarchy(
-          remainingTimeMs,
-          latestScreenSize,
+        const refreshedHierarchy = await this.tapVerificationRefresh({
+          refresh: options.verification?.refresh,
+          screenSize: latestScreenSize,
           signal,
-        );
+        })(remainingTimeMs);
         requestCount += 1;
 
         if (!refreshedHierarchy) {
@@ -2976,22 +3001,51 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         ? inspected
         : selection;
     }
-    const selectorOptions = {
-      container: options.container,
-      strategy: options.selectionStrategy,
-      index: options.index,
-      intentAction: options.action === "longPress" ? ("long-press" as const) : ("tap" as const),
-    };
-    const selected = options.elementId
-      ? this.elementSelector.selectByResourceId(hierarchy, options.elementId, selectorOptions)
-      : options.testTag
-        ? this.elementSelector.selectByTestTag(hierarchy, options.testTag, selectorOptions)
-        : this.elementSelector.selectByText(
-            hierarchy,
-            options.text ?? options.textAny?.[0] ?? "",
-            selectorOptions,
-          );
-    return selected;
+    return this.findElementInHierarchy(options, hierarchy).selection;
+  }
+
+  private async resolveAndroidDisplaySelection(
+    options: TapVerificationOptions,
+    observation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<
+    { selection: ElementSelectionResult; stats: SearchUntilStats } | { result: TapOnElementResult }
+  > {
+    if (!observation.viewHierarchy) {
+      throw new ActionableError("Selected display has no view hierarchy");
+    }
+    // Preserve focus's inspect fallback for the editable-input error.
+    if (options.action === "focus") {
+      const selection = this.selectElementOnDisplay(options, observation.viewHierarchy);
+      if (selection.element) {
+        return { selection, stats: { durationMs: 0, requestCount: 0, changeCount: 0 } };
+      }
+    }
+    const outcome = await this.searchForElement(options, observation, signal);
+    this.replaceObservationHierarchy(
+      observation,
+      outcome.viewHierarchy,
+      outcome.refreshedFromDevice,
+    );
+    if (!outcome.selection.element) {
+      try {
+        if (outcome.visibilityError) {
+          throw new ActionableError(outcome.visibilityError);
+        }
+        // Vision screenshots are not display-aware. Omit the observation to keep
+        // the shared base error without invoking default-display vision fallback.
+        await this.handleElementNotFound(options, undefined, outcome.containerFound, signal);
+      } catch (error) {
+        logger.warn(`tapOn display resolution failed: ${errorMessage(error)}`, error);
+        return {
+          result: {
+            ...this.createErrorResult(options.action, errorMessage(error)),
+            searchUntil: outcome.stats,
+          },
+        };
+      }
+    }
+    return outcome;
   }
 
   private async observedAndroidDisplayInteraction(
@@ -3002,10 +3056,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     },
   ): Promise<TapOnElementResult> {
     const { target, signal } = context;
-    const hierarchy = target.observation.viewHierarchy;
-    if (!hierarchy) {
-      throw new ActionableError("Selected display has no view hierarchy");
-    }
     const refresh: AndroidTapVerification["refresh"] = async (timeoutMs) => {
       throwIfAborted(signal);
       target.assertCurrent();
@@ -3039,7 +3089,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return captured;
     };
     const verificationOptions = { ...options, verification: { refresh } };
-    const selection = this.selectElementOnDisplay(options, hierarchy);
+    const resolved = await this.resolveAndroidDisplaySelection(
+      verificationOptions,
+      target.observation,
+      signal,
+    );
+    if ("result" in resolved) {
+      return resolved.result;
+    }
+    const { selection, stats } = resolved;
     let tapTimestamp: number | undefined;
     const result: Awaited<ReturnType<TapOnElement["executeOnAndroidDisplay"]>> =
       await this.observedInteraction(
@@ -3062,6 +3120,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             : {}),
         },
       );
+    result.searchUntil = stats;
     target.assertCurrent();
     if (result.success && result.skipped !== "already-checked") {
       await this.applyEnsureCheckedResult(result, verificationOptions, signal);
@@ -3093,31 +3152,26 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (display !== undefined) {
       try {
         const unsupported = (
-          [
-            "sibling",
-            "subtext",
-            "searchUntil",
-            "accessibilityLink",
-            "focusFirst",
-            "screenReaderNavigation",
-          ] as const
+          ["subtext", "accessibilityLink", "focusFirst", "screenReaderNavigation"] as const
         ).find((key) => options[key] !== undefined);
         if (unsupported) {
           throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
         }
-        if (options.textAny && options.textAny.length !== 1) {
-          throw new ActionableError(
-            "textAny with multiple values is not supported with `display` yet",
-          );
-        }
         if (options.ensureTap) {
           options = { ...options, preTapStability: true, retryIfNoChange: true };
         }
-        // Preserve unsupported-option precedence while sharing checked-selector validation.
-        const validationError =
-          options.ensureChecked !== undefined ? this.validateOptions(options) : null;
+        // Preserve unsupported-option precedence while sharing selector validation.
+        const needsValidation =
+          options.ensureChecked !== undefined ||
+          options.sibling !== undefined ||
+          options.textAny !== undefined ||
+          options.searchUntil !== undefined;
+        const validationError = needsValidation ? this.validateOptions(options) : null;
         if (validationError) {
           return this.createErrorResult(options.action, validationError);
+        }
+        if (options.searchUntil !== undefined) {
+          this.getSearchUntilDuration(options);
         }
         const target = await prepareTargetDisplayAction(
           this.device,

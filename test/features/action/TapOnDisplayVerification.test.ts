@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { StaleDisplayError } from "../../../src/models/StaleDisplayError";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -16,6 +17,7 @@ import {
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const device = {
@@ -55,7 +57,8 @@ function hierarchy(
 
 class PanelCapture implements HierarchyCapture {
   readonly requests: HierarchyCaptureRequest[] = [];
-  read: (index: number) => ViewHierarchyResult = () => hierarchy();
+  read: (index: number, request: HierarchyCaptureRequest) => ViewHierarchyResult = () =>
+    hierarchy();
   async capture(request: HierarchyCaptureRequest): Promise<HierarchySnapshot> {
     this.requests.push(request);
     return {
@@ -63,7 +66,7 @@ class PanelCapture implements HierarchyCapture {
       platform: "android",
       requestedFreshness: request.freshness,
       receivedAt: 0,
-      hierarchy: this.read(this.requests.length),
+      hierarchy: this.read(this.requests.length, request),
       nodes: [],
     };
   }
@@ -78,14 +81,22 @@ afterEach(() => {
 
 function harness(
   ctrlProxy: boolean,
-  options: { checked?: boolean; productionCapture?: boolean } = {},
+  options: {
+    checked?: boolean;
+    productionCapture?: boolean;
+    manualTimer?: boolean;
+    vision?: boolean;
+  } = {},
 ) {
   const transitions = new FakeDisplayTransitionReader();
   transitions.panel = { key: "external", role: "external" };
   const timer = new FakeTimer();
-  timer.enableAutoAdvance();
+  if (!options.manualTimer) {
+    timer.enableAutoAdvance();
+  }
   timer.setCurrentTime(100);
   const capture = new PanelCapture();
+  const screenshots = new FakeScreenshotCapturer();
   const executor = new FakeAdbExecutor();
   executor.setCommandResponse("cmd display get-displays", {
     stdout:
@@ -113,15 +124,31 @@ function harness(
     systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
     viewHierarchy: { ...current, updatedAt: timer.now() + 1 },
   });
-  capture.read = () => ({ ...current });
+  let decoy = hierarchy({ displayId: 0, left: 120 });
+  capture.read = (_index, request) => ({ ...(request.displayId === 2 ? current : decoy) });
   const observe = new FakeObserveScreen();
   observe.setObserveResult(observation);
   const action = new TapOnElement(device, executor, {
+    screenshotCapturer: screenshots,
+    visionConfig: {
+      enabled: options.vision ?? false,
+      provider: "claude",
+      confidenceThreshold: "high",
+      maxCostUsd: 1,
+      cacheResults: false,
+      cacheTtlMinutes: 60,
+    },
     timer,
     displayTransitions: transitions,
     lastRenderedObservation: () => observation(),
     ...(options.productionCapture ? {} : { hierarchyCapture: capture }),
   });
+  const observeExecute = observe.execute.bind(observe);
+  const observeSpy = spyOn(observe, "execute").mockImplementation(async (request) => {
+    const result = await observeExecute(request);
+    return request?.display === "external" ? result : { ...result, viewHierarchy: decoy };
+  });
+  restores.push(() => observeSpy.mockRestore());
   action.observeScreen = observe;
   const client = AndroidCtrlProxyClient.getExistingInstance(device.deviceId)!;
   const capability = spyOn(client, "supportsCommand").mockResolvedValue(ctrlProxy);
@@ -149,12 +176,17 @@ function harness(
   return {
     action,
     capture,
+    screenshots,
     timer,
     transitions,
     dispatches,
     observe,
     client,
+    capability,
     observation,
+    setDefault: (next: ViewHierarchyResult) => {
+      decoy = next;
+    },
     setCurrent: (next: ViewHierarchyResult) => {
       current = next;
     },
@@ -455,14 +487,11 @@ describe("tapOn display verification", () => {
   test("remaining display options reject before observation or dispatch in original order", async () => {
     const h = harness(false);
     const cases: Array<[Partial<TapOnElementOptions>, string]> = [
-      [{ sibling: true }, "sibling"],
       [{ subtext: { text: "Link" } }, "subtext"],
-      [{ searchUntil: { duration: 100 } }, "searchUntil"],
       [{ accessibilityLink: "Link" }, "accessibilityLink"],
       [{ focusFirst: true }, "focusFirst"],
       [{ screenReaderNavigation: true }, "screenReaderNavigation"],
-      [{ textAny: ["One", "Two"] }, "textAny with multiple values"],
-      [{ sibling: true, subtext: { text: "Link" }, ensureTap: true }, "sibling"],
+      [{ sibling: true, subtext: { text: "Link" }, ensureTap: true }, "subtext"],
       [{ screenReaderNavigation: true, textAny: ["One", "Two"] }, "screenReaderNavigation"],
     ];
     for (const [extra, name] of cases) {
@@ -495,6 +524,317 @@ describe("tapOn display verification", () => {
       (await h.action.execute({ text: "Wi-Fi", action: "tap", preTapStability: true })).success,
     ).toBe(true);
     expect(h.capture.requests.length).toBeGreaterThan(0);
+    expect(h.capture.requests.every((request) => request.displayId === undefined)).toBe(true);
+    expect(h.dispatches).toEqual([]);
+  });
+});
+
+function siblingHierarchy(
+  options: { left?: number; displayId?: number } = {},
+): ViewHierarchyResult {
+  const tree = hierarchy(options);
+  tree.hierarchy.node = {
+    bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+    node: [
+      {
+        text: "Wi-Fi",
+        "resource-id": "app:id/label",
+        class: "android.widget.TextView",
+        bounds: { left: 10, top: 30, right: 50, bottom: 90 },
+      },
+      {
+        clickable: true,
+        class: "android.widget.Button",
+        "resource-id": "app:id/button",
+        bounds: { left: options.left ?? 80, top: 30, right: (options.left ?? 80) + 40, bottom: 90 },
+      },
+    ],
+  };
+  return tree;
+}
+
+// Yield only microtasks; all polling deadlines and sleeps use the injected FakeTimer.
+async function drainMicrotasks() {
+  for (let turn = 0; turn < 100; turn++) {
+    await Promise.resolve();
+  }
+}
+
+const resolutionCases: Array<[string, Partial<TapOnElementOptions>, ViewHierarchyResult, number]> =
+  [
+    ["sibling text", { sibling: true }, siblingHierarchy(), 100],
+    [
+      "sibling resource id",
+      { text: undefined, elementId: "app:id/label", sibling: true },
+      siblingHierarchy(),
+      100,
+    ],
+    ["multi textAny", { text: undefined, textAny: ["Missing", "Wi-Fi"] }, hierarchy(), 50],
+    ["searchUntil", { searchUntil: { duration: 150 } }, hierarchy(), 50],
+  ];
+
+describe("tapOn targeted display resolution", () => {
+  for (const ctrlProxy of [true, false]) {
+    const route = ctrlProxy ? "CtrlProxy" : "adb input -d";
+    for (const [name, extra, tree, x] of resolutionCases) {
+      test(`${route} resolves ${name} on target despite default display decoy`, async () => {
+        const h = harness(ctrlProxy);
+        h.setCurrent(tree);
+        // A default-display read would resolve the same selectors at another point.
+        const decoy = name.startsWith("sibling")
+          ? siblingHierarchy({ displayId: 0, left: 140 })
+          : hierarchy({ displayId: 0, left: 120 });
+        h.setDefault(decoy);
+        h.capture.read = (_index, request) => (request.displayId === 2 ? tree : decoy);
+        const result = await h.execute(extra);
+        expect(result.success).toBe(true);
+        expect(h.dispatches).toEqual([{ displayId: 2, x, y: 60 }]);
+        expect(
+          h.observe.getExecuteOptions().every((request) => request.display === "external"),
+        ).toBe(true);
+        expect(result.searchUntil).toEqual({ durationMs: 0, requestCount: 0, changeCount: 0 });
+      });
+    }
+
+    test(`${route} multi textAny skips off-screen first candidate`, async () => {
+      const h = harness(ctrlProxy);
+      const tree = hierarchy();
+      tree.hierarchy.node = [
+        {
+          text: "Offscreen",
+          clickable: true,
+          class: "android.widget.Button",
+          bounds: { left: 220, top: 30, right: 280, bottom: 90 },
+        },
+        {
+          text: "Wi-Fi",
+          clickable: true,
+          class: "android.widget.Button",
+          bounds: { left: 80, top: 30, right: 140, bottom: 90 },
+        },
+      ];
+      h.setCurrent(tree);
+      const result = await h.execute({ text: undefined, textAny: ["Offscreen", "Wi-Fi"] });
+      expect(result.success).toBe(true);
+      expect(h.dispatches).toEqual([{ displayId: 2, x: 110, y: 60 }]);
+    });
+
+    test(`${route} search polls only target and stops at third poll using manual FakeTimer`, async () => {
+      const h = harness(ctrlProxy, { manualTimer: true });
+      h.setCurrent(hierarchy({ text: "Loading" }));
+      h.capture.read = (index, request) =>
+        request.displayId !== 2
+          ? hierarchy({ displayId: 0, left: 120 })
+          : hierarchy({ text: index < 3 ? "Loading" : "Wi-Fi", left: 80 });
+      const pending = h.execute({ searchUntil: { duration: 500 } });
+      await drainMicrotasks();
+      expect(h.capture.requests).toHaveLength(1);
+      expect(h.timer.getPendingSleeps()).toEqual([50]);
+      h.timer.advanceTime(50);
+      await drainMicrotasks();
+      expect(h.capture.requests).toHaveLength(2);
+      h.timer.advanceTime(50);
+      await drainMicrotasks();
+      h.timer.enableAutoAdvance();
+      h.timer.resolveAll();
+      const result = await pending;
+      expect(result.success).toBe(true);
+      expect(result.searchUntil).toEqual({ durationMs: 100, requestCount: 3, changeCount: 2 });
+      expect(h.capture.requests).toHaveLength(3);
+      expectTargeted(h.capture);
+      expect(h.dispatches).toEqual([{ displayId: 2, x: 110, y: 60 }]);
+    });
+
+    test(`${route} fence changing after search refuses dispatch`, async () => {
+      const h = harness(ctrlProxy);
+      h.setCurrent(hierarchy({ text: "Loading" }));
+      h.capture.read = () => hierarchy({ left: 80 });
+      h.capability.mockImplementation(async () => {
+        h.transitions.transition();
+        return ctrlProxy;
+      });
+      const result = await h.execute({ searchUntil: { duration: 100 } });
+      expect(result.staleDisplay?.retry).toBe("observe");
+      expect(h.capture.requests).toHaveLength(1);
+      expect(h.dispatches).toEqual([]);
+    });
+
+    for (const failure of [
+      "wrong display",
+      "missing display",
+      "fold during capture",
+      "fold between polls",
+      "stale capture error",
+    ] as const) {
+      test(`${route} search aborts on ${failure} without dispatch`, async () => {
+        const h = harness(ctrlProxy);
+        h.setCurrent(hierarchy({ text: "Loading" }));
+        h.capture.read = (index) => {
+          if (index === 2 && failure === "fold during capture") {
+            h.transitions.transition();
+          }
+          if (index === 2 && failure === "stale capture error") {
+            throw new StaleDisplayError({
+              retry: "observe",
+              observedGeneration: h.transitions.generation,
+              currentGeneration: h.transitions.generation + 1,
+            });
+          }
+          const tree = hierarchy({
+            text: index === 2 ? "Wi-Fi" : "Loading",
+            displayId: index === 2 && failure === "wrong display" ? 0 : 2,
+          });
+          return index === 2 && failure === "missing display"
+            ? { ...tree, displayId: undefined }
+            : tree;
+        };
+        if (failure === "fold between polls") {
+          const sleep = h.timer.sleep.bind(h.timer);
+          h.timer.sleep = async (ms) => {
+            await sleep(ms);
+            h.transitions.transition();
+          };
+        }
+        const result = await h.execute({ searchUntil: { duration: 500 } });
+        expect(result.success).toBe(false);
+        expect(result.staleDisplay?.retry).toBe("observe");
+        expect(h.dispatches).toEqual([]);
+        expect(h.capture.requests).toHaveLength(failure === "fold between polls" ? 1 : 2);
+        expectTargeted(h.capture);
+      });
+    }
+
+    for (const [extra, error] of [
+      [
+        { text: undefined, textAny: ["Missing", "Absent"] },
+        "Element not found with any provided text 'Missing', 'Absent'",
+      ],
+      [{ sibling: true }, "No clickable sibling found next to element with text 'Wi-Fi'"],
+      [
+        { container: { text: "Missing container" } },
+        "Container element not found with provided text 'Missing container'",
+      ],
+      [
+        { text: "Missing", container: { text: "Wi-Fi" } },
+        "Element not found with provided text 'Missing' within container text 'Wi-Fi'",
+      ],
+    ] satisfies Array<[Partial<TapOnElementOptions>, string]>) {
+      test(`${route} search timeout preserves base error without vision: ${error}`, async () => {
+        const h = harness(ctrlProxy, { vision: true });
+        const result = await h.execute({ searchUntil: { duration: 100 }, ...extra });
+        expect(result.error).toBe(error);
+        expect(result.searchUntil?.requestCount).toBe(2);
+        expect(h.dispatches).toEqual([]);
+        expect(h.capture.requests).toHaveLength(2);
+        expectTargeted(h.capture);
+        expect(h.screenshots.getCallCount()).toBe(0);
+      });
+    }
+
+    test(`${route} search + sibling + textAny + ensureTap shares display stability and retry`, async () => {
+      const h = harness(ctrlProxy);
+      h.setCurrent(hierarchy({ text: "Loading" }));
+      h.capture.read = (index) =>
+        index === 1 ? hierarchy({ text: "Loading" }) : siblingHierarchy();
+      h.action.hashViewHierarchy = () => "same";
+      const result = await h.execute({
+        text: undefined,
+        textAny: ["Missing", "Wi-Fi"],
+        sibling: true,
+        searchUntil: { duration: 500 },
+        ensureTap: true,
+      });
+      expect(result.success).toBe(true);
+      expect(result.searchUntil?.requestCount).toBe(2);
+      expect(h.dispatches).toEqual([
+        { displayId: 2, x: 100, y: 60 },
+        { displayId: 2, x: 100, y: 60 },
+      ]);
+      expectTargeted(h.capture);
+      expect(h.timer.getSleepHistory()).toContain(POST_TAP_SETTLE_MS);
+      expect(h.timer.getSleepHistory()).toContain(PRE_RETRY_DELAY_MS);
+    });
+  }
+
+  for (const [extra, error] of [
+    [{ searchUntil: { duration: 99 } }, "searchUntil.duration must be at least 100ms"],
+    [{ searchUntil: { duration: 12001 } }, "searchUntil.duration must be at most 12000ms"],
+    [{ searchUntil: { duration: NaN } }, "searchUntil.duration must be a number"],
+    [{ text: undefined, textAny: [] }, "tapOn textAny selector must be non-empty"],
+    [
+      { sibling: true, elementId: "duplicate" },
+      "tapOn requires exactly one of text, textAny, elementId, testTag, or accessibilityLink",
+    ],
+  ] satisfies Array<[Partial<TapOnElementOptions>, string]>) {
+    test(`resolution validation before observation: ${error}`, async () => {
+      const h = harness(false);
+      expect((await h.execute(extra)).error).toBe(error);
+      expect(h.observe.getExecuteCallCount()).toBe(0);
+      expect(h.capture.requests).toEqual([]);
+      expect(h.dispatches).toEqual([]);
+    });
+  }
+
+  test("default multi textAny + searchUntil polls without displayId", async () => {
+    const h = harness(false);
+    const before = { ...hierarchy({ text: "Loading" }), displayId: undefined };
+    h.capture.read = () => ({ ...hierarchy({ left: 120 }), displayId: undefined });
+    h.action.observedInteraction = async (run) => ({
+      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
+      observation: { viewHierarchy: before },
+    });
+    const points: Array<{ x: number; y: number }> = [];
+    h.action.executeAndroidTap = async (_action, x, y) => {
+      points.push({ x, y });
+    };
+    h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+      observation,
+    });
+    h.action.captureTerminalObservationScreenshot = async () => {};
+    h.action.recordDeferredPredictionOutcome = async () => {};
+    h.action.enforceFreshnessConsistencyWithEffect = () => {};
+    const result = await h.action.execute({
+      action: "tap",
+      textAny: ["Missing", "Wi-Fi"],
+      searchUntil: { duration: 100 },
+    });
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 150, y: 60 }]);
+    expect(result.searchUntil?.requestCount).toBe(1);
+    expect(h.capture.requests).toHaveLength(1);
+    expect(h.capture.requests[0].displayId).toBeUndefined();
+    expect(h.dispatches).toEqual([]);
+  });
+
+  test("default sibling + multi textAny + searchUntil keeps stability refresh without displayId", async () => {
+    const h = harness(false);
+    const before = { ...siblingHierarchy(), displayId: undefined };
+    h.capture.read = () => ({ ...siblingHierarchy({ left: 140 }), displayId: undefined });
+    h.action.observedInteraction = async (run) => ({
+      ...(await run({ screenSize: { width: 200, height: 200 }, viewHierarchy: before })),
+      observation: { viewHierarchy: before },
+    });
+    const points: Array<{ x: number; y: number }> = [];
+    h.action.executeAndroidTap = async (_action, x, y) => {
+      points.push({ x, y });
+    };
+    h.action.deriveTapEffectAfterPostTapObservation = async (_previous, observation) => ({
+      observation,
+    });
+    h.action.captureTerminalObservationScreenshot = async () => {};
+    h.action.recordDeferredPredictionOutcome = async () => {};
+    h.action.enforceFreshnessConsistencyWithEffect = () => {};
+    const result = await h.action.execute({
+      action: "tap",
+      textAny: ["Wi-Fi", "Other"],
+      sibling: true,
+      searchUntil: { duration: 100 },
+      preTapStability: true,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.success).toBe(true);
+    expect(points).toEqual([{ x: 160, y: 60 }]);
+    expect(h.capture.requests.length).toBeGreaterThan(1);
     expect(h.capture.requests.every((request) => request.displayId === undefined)).toBe(true);
     expect(h.dispatches).toEqual([]);
   });

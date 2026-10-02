@@ -236,8 +236,13 @@ deviceOrientation=... interfaceOrientation=... sampleErrors=...` line, including
 fast taps, under the same `dev.jasonpearson.automobile` / `GesturePerformer`
 subsystem/category. The daemon logs compact JSON with `[CTRLPROXY_TAP_DIAG]`;
 its existing 1,000-character line limit can truncate unusually long errors.
-Diagnostics stay out of tool/observe output. Debug off omits both wire fields
-and performs no extra XCUI/UIKit reads; current released runners ignore the flag.
+Diagnostics stay out of tool/observe output. Debug off omits both request fields;
+folded/single-panel taps perform no new platform reads. On a multi-panel mismatch,
+taps and single-finger swipes inventory displays and prefer an explicitly targeted
+event record; missing private synthesis symbols fall back to the prior coordinate path.
+The `soleNonMainScreen` fallback applies only to phone-idiom devices; other idioms
+require an application display ID that differs from the main display ID.
+Current released runners ignore the flag.
 A runner re-cut is required: the newer host alone has no diagnostics to log.
 
 The points are XCUITest's resolved coordinates immediately before the gesture,
@@ -246,7 +251,19 @@ come from the runner process, not the target app; fallback/unknown readings are
 explicit. Each failed sample is omitted and named in `sampleErrors`. Only the
 necessary app frame attribute is read: no additional window enumeration or
 candidate-element snapshot query, and no cheap public bundle identifier getter.
-Tap construction, coordinates, and phase recording are unchanged.
+Optional fields include `route`, `targetDisplayId`, `targetDisplayReason`, `deviceIdiom`
+(`phone` or `other`), `mainDisplayId`,
+`applicationDisplayId`, `screens` (`displayId`, `isMain`), `synthesizedPoint`,
+`synthesizedInterfaceOrientation`, `fallbackFrom`, and `deliveryWarning`. A coordinate
+route on a panel mismatch emits `eventDisplayMismatch`, also logged by the host at WARN.
+When no inventory is read, display fields are omitted and `targetDisplayReason` is
+`notSampled`, including folded/single-panel diagnostic taps without forced display targeting.
+Debug-only `AUTOMOBILE_IOS_TAP_STRATEGY` accepts `legacy`, `appRelative`,
+`appRelativeObserved`, `displayTargeted` (portrait app-frame points), and
+`displayTargetedObserved` (unchanged observed points and observation orientation).
+Double tap, the separate long-press method, drag, pinch, multi-finger swipe, and
+lock-screen swipe do not opt into display targeting. These are routing hypotheses,
+not measured touch delivery; display-record routes omit resolved XCUICoordinate points.
 
 On the unfolded Duo, run an isolated private daemon with `--debug`, call
 `setPosture opened`, and confirm `observe` reports screenSize 951x669. Run

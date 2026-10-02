@@ -27,7 +27,12 @@ interface SharedGestureConfig {
 
 export interface TapDiagnosticParameters {
   diagnostics?: true;
-  tapStrategy?: "legacy" | "appRelative" | "appRelativeObserved";
+  tapStrategy?:
+    | "legacy"
+    | "appRelative"
+    | "appRelativeObserved"
+    | "displayTargeted"
+    | "displayTargetedObserved";
 }
 
 export class SharedGestureDelegate {

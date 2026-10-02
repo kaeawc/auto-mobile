@@ -1,5 +1,6 @@
 #import "ObjCExceptionCatcher.h"
 #import <math.h>
+#import <stdbool.h>
 
 ObjCPinchPoints ObjCExceptionCatcher_computePinchPoints(
     CGFloat centerX,
@@ -253,6 +254,107 @@ BOOL ObjCExceptionCatcher_synthesizePinch(
     if (errorMessage != NULL) {
         *errorMessage = @"XCTest private pinch event synthesis is only available on iOS";
     }
+    return NO;
+#endif
+}
+
+NSNumber * _Nullable ObjCExceptionCatcher_displayID(NSObject *object) {
+    __block NSNumber *result = nil;
+    NSException *exception = ObjCExceptionCatcher_tryBlock(^{
+        SEL selector = NSSelectorFromString(@"displayID");
+        if ([object respondsToSelector:selector]) {
+            long long (*read)(id, SEL) = (long long (*)(id, SEL))[object methodForSelector:selector];
+            result = @(read(object, selector));
+        }
+    });
+    return exception == nil ? result : nil;
+}
+
+NSArray<NSDictionary<NSString *, NSNumber *> *> * _Nullable ObjCExceptionCatcher_displayInventory(void) {
+#if TARGET_OS_IOS
+    __block NSMutableArray<NSDictionary<NSString *, NSNumber *> *> *result = [NSMutableArray array];
+    NSException *exception = ObjCExceptionCatcher_tryBlock(^{
+        Class screenClass = NSClassFromString(@"XCUIScreen");
+        SEL screensSelector = NSSelectorFromString(@"screens");
+        if (screenClass == Nil || ![screenClass respondsToSelector:screensSelector]) { return; }
+        id (*readScreens)(id, SEL) = (id (*)(id, SEL))[screenClass methodForSelector:screensSelector];
+        id screens = readScreens(screenClass, screensSelector);
+        if (![screens isKindOfClass:[NSArray class]]) { return; }
+        for (NSObject *screen in screens) {
+            // Catch per-screen failures so later inventory entries can still be sampled.
+            ObjCExceptionCatcher_tryBlock(^{
+                NSNumber *displayID = ObjCExceptionCatcher_displayID(screen);
+                SEL mainSelector = NSSelectorFromString(@"isMainScreen");
+                if (displayID == nil || ![screen respondsToSelector:mainSelector]) { return; }
+                bool (*readMain)(id, SEL) = (bool (*)(id, SEL))[screen methodForSelector:mainSelector];
+                [result addObject:@{@"displayId": displayID, @"isMain": @(readMain(screen, mainSelector))}];
+            });
+        }
+    });
+    return exception == nil ? result : nil;
+#else
+    return nil;
+#endif
+}
+
+BOOL ObjCExceptionCatcher_synthesizeDisplayTouch(
+    CGFloat startX, CGFloat startY, CGFloat endX, CGFloat endY,
+    NSTimeInterval pressDuration, NSTimeInterval moveDuration,
+    unsigned long long displayID, NSInteger interfaceOrientation,
+    BOOL *_Nullable symbolsUnavailable, NSString *_Nullable *_Nullable errorMessage
+) {
+    if (symbolsUnavailable != NULL) { *symbolsUnavailable = NO; }
+#if TARGET_OS_IOS
+    __block BOOL success = NO;
+    __block BOOL unavailable = NO;
+    __block NSString *failure = nil;
+    NSException *exception = ObjCExceptionCatcher_tryBlock(^{
+        Class pathClass = NSClassFromString(@"XCPointerEventPath");
+        Class recordClass = NSClassFromString(@"XCSynthesizedEventRecord");
+        if (pathClass == Nil || recordClass == Nil ||
+            ![pathClass instancesRespondToSelector:@selector(initForTouchAtPoint:offset:)] ||
+            ![pathClass instancesRespondToSelector:@selector(moveToPoint:atOffset:)] ||
+            ![pathClass instancesRespondToSelector:@selector(liftUpAtOffset:)] ||
+            ![recordClass instancesRespondToSelector:@selector(initWithName:displayID:interfaceOrientation:)] ||
+            ![recordClass instancesRespondToSelector:@selector(addPointerEventPath:)] ||
+            ![recordClass instancesRespondToSelector:@selector(synthesizeWithError:)]) {
+            unavailable = YES;
+            failure = @"XCTest private display-targeted event synthesis symbols are unavailable";
+            return;
+        }
+        XCSynthesizedEventRecord *record = [[recordClass alloc]
+            initWithName:@"AutoMobile display-targeted touch"
+            displayID:displayID interfaceOrientation:(UIInterfaceOrientation)interfaceOrientation];
+        XCPointerEventPath *path = [[pathClass alloc]
+            initForTouchAtPoint:CGPointMake(startX, startY) offset:0];
+        NSTimeInterval press = pressDuration > 0 ? pressDuration : 0;
+        NSTimeInterval move = moveDuration > 0 ? moveDuration : 0;
+        if (move > 0 || startX != endX || startY != endY) {
+            if (press > 0) { [path moveToPoint:CGPointMake(startX, startY) atOffset:press]; }
+            [path moveToPoint:CGPointMake(endX, endY) atOffset:press + move];
+        }
+        NSTimeInterval liftOffset = press + move > 0.05 ? press + move : 0.05;
+        [path liftUpAtOffset:liftOffset];
+        [record addPointerEventPath:path];
+        NSError *synthesisError = nil;
+        success = [record synthesizeWithError:&synthesisError];
+        if (!success) {
+            NSString *description = synthesisError.localizedDescription != nil ? synthesisError.localizedDescription : @"unknown error";
+            failure = [NSString stringWithFormat:@"display-targeted touch synthesis failed: %@",
+                description];
+        }
+    });
+    if (exception != nil) {
+        NSString *reason = exception.reason != nil ? exception.reason : @"no reason";
+        failure = [NSString stringWithFormat:@"Objective-C exception during display-targeted touch synthesis: %@ - %@",
+            exception.name, reason];
+    }
+    if (symbolsUnavailable != NULL) { *symbolsUnavailable = unavailable; }
+    if (!success && errorMessage != NULL) { *errorMessage = failure != nil ? failure : @"display-targeted touch synthesis failed"; }
+    return success;
+#else
+    if (symbolsUnavailable != NULL) { *symbolsUnavailable = YES; }
+    if (errorMessage != NULL) { *errorMessage = @"XCTest private display-targeted synthesis is only available on iOS"; }
     return NO;
 #endif
 }

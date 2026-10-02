@@ -217,7 +217,23 @@ export interface CtrlProxyTapDiagnostics {
     interface?: TapDiagnosticOrientation;
   };
   sampleErrors?: string[];
-  strategy?: "legacy" | "appRelative" | "appRelativeObserved";
+  strategy?:
+    | "legacy"
+    | "appRelative"
+    | "appRelativeObserved"
+    | "displayTargeted"
+    | "displayTargetedObserved";
+  route?: "xcuiCoordinate" | "displayTargetedRecord";
+  targetDisplayId?: number;
+  targetDisplayReason?: string;
+  deviceIdiom?: string;
+  mainDisplayId?: number;
+  applicationDisplayId?: number;
+  screens?: { displayId: number; isMain: boolean }[];
+  synthesizedPoint?: { x: number; y: number };
+  synthesizedInterfaceOrientation?: number;
+  fallbackFrom?: string;
+  deliveryWarning?: "eventDisplayMismatch";
   strategyReason?: string;
   normalizedOffset?: { x?: number; y?: number };
 }

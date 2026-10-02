@@ -987,53 +987,63 @@ public final class GesturePerformer: GesturePerforming {
             return try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
                 let provider = XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
-                let factory = try GestureCoordinateFactory(provider: provider, forced: forced)
-                let resolved = try factory.resolve(x: x, y: y, forced: forced)
-                let coordinate = resolved.coordinate
-                let selection = resolved.selection
+                let factory = try DisplayGestureFactory(provider: provider, forced: forced)
                 var diagnostics: TapDiagnostics?
-                if let requested {
-                    let requested = TapDiagnostics.Requested(
-                        x: requested.x, y: requested.y, durationMs: requested.durationMs,
-                        coordinateConstruction: selection.strategy == .legacy
-                            ? "appFrameOriginPlusPointOffset" : "appNormalizedOffset"
-                    )
-                    diagnostics = tapDiagnosticsSampler.sample(requested: requested, reads: TapDiagnosticReads(
-                        baseScreenPoint: { try Self.diagnosticPoint(coordinate.base.screenPoint) },
-                        resolvedScreenPoint: { try Self.diagnosticPoint(coordinate.resolved.screenPoint) },
-                        // Only the necessary app frame attribute; no snapshot tree/window query.
-                        // XCUIApplication exposes no cheap public bundle identifier getter.
-                        application: { try .init(frame: Self.diagnosticFrame(coordinate.application.frame)) },
-                        screen: {
-                            let screen = UIScreen.main
-                            guard screen.scale.isFinite, screen.nativeScale.isFinite else {
-                                throw GestureError.gestureFailed("non-finite diagnostic scale")
-                            }
-                            return try .init(
-                                bounds: Self.diagnosticFrame(screen.bounds),
-                                nativeBounds: Self.diagnosticFrame(screen.nativeBounds),
-                                scale: Double(screen.scale), nativeScale: Double(screen.nativeScale),
-                                source: "runnerProcessUIScreenMain"
-                            )
-                        },
-                        deviceOrientation: { .device(rawValue: XCUIDevice.shared.orientation.rawValue) },
-                        interfaceOrientation: { DeviceRotation.tapDiagnosticInterfaceOrientation() }
-                    ))
-                    diagnostics?.strategy = selection.strategy.rawValue
-                    diagnostics?.strategyReason = selection.reason
-                    if selection.strategy != .legacy {
-                        diagnostics?.normalizedOffset = .init(x: selection.normalized.x, y: selection.normalized.y)
-                    }
-                    if let diagnostics { logger.warning("\(diagnostics.logLine(), privacy: .public)") }
-                } else if selection.strategy != .legacy || (forced != nil && forced != .legacy) ||
-                    factory.geometry.map({ hasMultiPanelMismatch(app: $0.app, screen: $0.screen) }) == true
-                {
-                    logger.warning("tap_diagnostics \(selection.logFields, privacy: .public)")
-                }
-
-                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
-                try provider.tap(coordinate, duration: duration)
+                let delivery = try factory.deliver(
+                    start: GesturePoint(x: x, y: y), press: duration, forced: forced
+                ) { candidate in
+                    if let requested {
+                        let coordinate = candidate.coordinate
+                        let selection = candidate.selection
+                        let construction = candidate.route == .displayTargetedRecord ? "displayTargetedPoint" :
+                            (selection.strategy == .legacy ? "appFrameOriginPlusPointOffset" : "appNormalizedOffset")
+                        let requested = TapDiagnostics.Requested(
+                            x: requested.x, y: requested.y, durationMs: requested.durationMs,
+                            coordinateConstruction: construction
+                        )
+                        diagnostics = tapDiagnosticsSampler.sample(requested: requested, reads: TapDiagnosticReads(
+                            baseScreenPoint: { try coordinate.map { try Self.diagnosticPoint($0.base.screenPoint) } },
+                            resolvedScreenPoint: {
+                                try coordinate.map { try Self.diagnosticPoint($0.resolved.screenPoint) }
+                            },
+                            // Record synthesis does not construct an XCUICoordinate; its points are omitted.
+                            application: {
+                                try .init(frame: Self.diagnosticFrame(
+                                    (coordinate?.application ?? provider.observedApplication).frame
+                                ))
+                            },
+                            screen: {
+                                let screen = UIScreen.main
+                                guard screen.scale.isFinite, screen.nativeScale.isFinite else {
+                                    throw GestureError.gestureFailed("non-finite diagnostic scale")
+                                }
+                                return try .init(
+                                    bounds: Self.diagnosticFrame(screen.bounds),
+                                    nativeBounds: Self.diagnosticFrame(screen.nativeBounds),
+                                    scale: Double(screen.scale), nativeScale: Double(screen.nativeScale),
+                                    source: "runnerProcessUIScreenMain"
+                                )
+                            },
+                            deviceOrientation: { .device(rawValue: XCUIDevice.shared.orientation.rawValue) },
+                            interfaceOrientation: { DeviceRotation.tapDiagnosticInterfaceOrientation() }
+                        ))
+                    }
+                    GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                }
+                if var sample = diagnostics {
+                    factory.annotate(&sample, delivery: delivery)
+                    diagnostics = sample
+                    logger.warning("\(sample.logLine(), privacy: .public)")
+                } else if delivery.selection.strategy != .legacy || (forced != nil && forced != .legacy) || factory
+                    .mismatch
+                {
+                    let durationMs = duration
+                        .isFinite && abs(duration * 1000) < Double(Int.max) ? Int(duration * 1000) : 0
+                    var sample = TapDiagnostics(requested: .init(x: x, y: y, durationMs: durationMs))
+                    factory.annotate(&sample, delivery: delivery)
+                    logger.warning("\(sample.logLine(), privacy: .public)")
+                }
                 return diagnostics
             }
         }
@@ -1104,25 +1114,24 @@ public final class GesturePerformer: GesturePerforming {
 
             try catchingObjCException {
                 GesturePhaseDiagnostics.current?.begin("coordinateResolution")
-                let factory = try GestureCoordinateFactory(
+                let factory = try DisplayGestureFactory(
                     provider: XCUIGestureCoordinateProvider(app: app, locator: elementLocator)
                 )
-                let start = try factory.resolve(x: startX, y: startY)
-                let end = try factory.resolve(x: endX, y: endY)
-                logRelativeCoordinate(start.selection, gesture: "swipe")
-                logRelativeCoordinate(end.selection, gesture: "swipeEnd")
                 let distance = hypot(endX - startX, endY - startY)
                 let velocity = Self.swipeVelocity(distance: distance, duration: duration)
 
-                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
                 defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
-                try factory.provider.drag(
-                    start.coordinate,
-                    to: end.coordinate,
-                    press: 0.05,
-                    velocity: velocity,
-                    hold: 0
-                )
+                let delivery = try factory.deliver(
+                    start: GesturePoint(x: startX, y: startY), end: GesturePoint(x: endX, y: endY),
+                    press: 0.05, move: duration, velocity: velocity
+                ) { _ in
+                    GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                }
+                if factory.mismatch {
+                    var sample = TapDiagnostics(requested: .init(x: startX, y: startY, durationMs: 0))
+                    factory.annotate(&sample, delivery: delivery)
+                    logger.warning("\(sample.logLine(gesture: "swipe"), privacy: .public)")
+                }
             }
         }
 

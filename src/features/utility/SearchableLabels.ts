@@ -18,13 +18,13 @@ export function foldSearchableLabels(
   if (parts.length === 0) {
     return row;
   }
-  if (row.label === undefined) {
+  if (row.label === undefined || row.label.trim() === "") {
     return {
       label: parts[0],
       sublabel: parts.length > 1 ? parts.slice(1).join(", ") : row.sublabel,
     };
   }
-  if (row.label !== row.label.trim()) {
+  if (row.label !== row.label.trimStart()) {
     return {
       label: `${parts[0]} ${row.label.trim()}`,
       sublabel: parts.length > 1 ? parts.slice(1).join(", ") : row.sublabel,

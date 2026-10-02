@@ -365,15 +365,17 @@ function groupTextByContainer(
   return byContainer;
 }
 
-/** Distinct descendant labels, excluding any equal to the container's own label. */
+/** Distinct descendant labels, comparing trimmed forms including the container's own label. */
 function distinctHoistParts(
   container: SkeletonAccumulator,
   texts: SkeletonAccumulator[],
 ): string[] {
   const parts: string[] = [];
+  const seen = new Set([container.label?.trim()]);
   for (const text of texts) {
     const label = text.label;
-    if (label !== undefined && label !== container.label && !parts.includes(label)) {
+    if (label !== undefined && !seen.has(label.trim())) {
+      seen.add(label.trim());
       parts.push(label);
     }
   }
@@ -381,28 +383,13 @@ function distinctHoistParts(
 }
 
 /**
- * Whether `label` is an incomplete/templated own-label rather than a genuine
- * one (issue #6221 item 3). A real Android row label built from a
- * `"$time $name"`-style template (e.g. an alarm row) leaves its leading
- * delimiter behind when the interpolated part comes back empty — the observed
- * repro was a row whose own text/content-desc read literally `" Alarm"`
- * (leading space, no time), while a sibling row of the same type read
- * `"6:45 AM Alarm"` (own text already complete, nothing to fold in). Stray
- * leading/trailing whitespace on the RAW (untrimmed) label is a narrow, strong
- * signal of exactly that dropped-placeholder shape — unlike an ordinary clean
- * single-word label ("Wi-Fi", "Alarm" with no stray space), which must NOT be
- * clobbered by a descendant's state text (that text belongs in `sublabel`,
- * per the AC2 #5869 behavior above).
- */
-/**
- * Fold `parts` onto the container: the first becomes `label` when it has none
- * — or when its existing own label is an incomplete template
- * (leading or trailing whitespace), in which case the first part is prepended to
- * the trimmed own label so the row keeps its generic noun ("Alarm") without
- * losing the identifying descendant text ("8:30 AM") that made the row unique
- * (issue #6221 item 3). The remainder always joins into `sublabel`. A
- * container with a genuine own label keeps it verbatim and takes every part
- * as `sublabel`.
+ * Fold ordered descendant labels using the shared display/resolution contract.
+ * An absent or whitespace-only own label takes the first part as its label.
+ * Leading whitespace on a nonblank raw own label signals a dropped template
+ * placeholder (" Alarm", issue #6221 item 3): prepend the first part to the
+ * trimmed own label and put the remaining parts in `sublabel`. Trailing-only
+ * whitespace is incidental (#6240); genuine own labels stay verbatim until
+ * display trimming and take every part as `sublabel` (AC2 #5869).
  */
 function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): void {
   Object.assign(container, foldSearchableLabels(container, parts));

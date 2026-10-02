@@ -2,6 +2,7 @@ import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { DefaultObserveElementCollector } from "../../../src/features/observe/ObserveElementCollector";
 import { describe, expect, test } from "bun:test";
 import { SearchableHierarchy, toSearchable } from "../../../src/features/utility/SearchableNode";
+import { foldSearchableLabels } from "../../../src/features/utility/SearchableLabels";
 
 const bounds = { left: 0, top: 0, right: 100, bottom: 50 };
 
@@ -46,6 +47,55 @@ describe("searchable node derivation", () => {
     expect(node.label).toBe("  Save  ");
     expect(node.displayedLabel).toBe("Save");
     expect(node.textFields).toEqual(["Save", "  Save  "]);
+  });
+
+  test("a trailing-space own label stays consistent with skeleton display (#6240)", () => {
+    const [row] = new SearchableHierarchy().project({
+      hierarchy: {
+        node: {
+          bounds,
+          "resource-id": "bt-row",
+          "content-desc": "Bluetooth ",
+          clickable: true,
+          node: {
+            bounds: { left: 1, top: 1, right: 90, bottom: 40 },
+            "resource-id": "bt-state",
+            text: "Off",
+          },
+        },
+      },
+    });
+
+    expect(row.label).toBe("Bluetooth");
+    expect(row.displayedLabel).toBe("Bluetooth");
+    expect(row.textFields).toContain("Off");
+    expect(row.textFields).not.toContain("Off Bluetooth");
+  });
+
+  test("whitespace-only own labels fold as absent without an extra delimiter (#6240)", () => {
+    expect(foldSearchableLabels({ label: " \t " }, ["Bluetooth", "Off"])).toEqual({
+      label: "Bluetooth",
+      sublabel: "Off",
+    });
+  });
+
+  test("template folding excludes descendant labels equal to the trimmed own label (#6240)", () => {
+    const [row] = new SearchableHierarchy().project({
+      hierarchy: {
+        node: {
+          bounds,
+          "content-desc": " Alarm",
+          clickable: true,
+          node: ["Alarm", "8:30 AM"].map((text, index) => ({
+            bounds: { left: 1, top: 1 + index * 20, right: 90, bottom: 20 + index * 20 },
+            text,
+          })),
+        },
+      },
+    });
+
+    expect(row.label).toBe("8:30 AM Alarm");
+    expect(row.displayedLabel).toBe("8:30 AM Alarm");
   });
 
   test("editable value and accessible label remain searchable", () => {

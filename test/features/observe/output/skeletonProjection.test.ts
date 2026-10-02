@@ -1408,6 +1408,67 @@ describe("toSkeleton — acceptance criteria", () => {
   });
 
   describe("#6221 item 3: identifying descendant text is not dropped from a generic own label", () => {
+    test("a trailing-space own label keeps descendant state in sublabel (#6240)", () => {
+      const state: Element = {
+        bounds: bounds(72, 140, 600, 200),
+        "resource-id": "bt-state",
+        text: "Off",
+      };
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "bt-row",
+        "content-desc": "Bluetooth ",
+        clickable: "true",
+        node: [state],
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [state] }));
+
+      const entry = findById(skeleton, "bt-row");
+      expect(entry?.label).toBe("Bluetooth");
+      expect(entry?.sublabel).toBe("Off");
+    });
+
+    test("hoisted labels are distinct modulo surrounding whitespace (#6240)", () => {
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "bt-row",
+        "content-desc": "Bluetooth ",
+        clickable: "true",
+      };
+      const texts: Element[] = ["Bluetooth", "Off", " Off "].map((text, index) => ({
+        bounds: bounds(72, 20 + index * 60, 600, 60 + index * 60),
+        text,
+      }));
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: texts }));
+
+      const entry = findById(skeleton, "bt-row");
+      expect(entry?.label).toBe("Bluetooth");
+      expect(entry?.sublabel).toBe("Off");
+    });
+
+    test("a whitespace-only own label acts as absent when hoisting descendants (#6240)", () => {
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "blank-row",
+        "content-desc": " \t ",
+        clickable: "true",
+      };
+      const texts: Element[] = ["Bluetooth", "Off"].map((text, index) => ({
+        bounds: bounds(72, 20 + index * 100, 600, 80 + index * 100),
+        text,
+      }));
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: texts }));
+
+      const entry = findById(skeleton, "blank-row");
+      expect(entry?.label).toBe("Bluetooth");
+      expect(entry?.sublabel).toBe("Off");
+      const lonely = findById(toSkeleton(makeElements({ clickable: [row] })), "blank-row");
+      expect(lonely?.label).toBeUndefined();
+    });
+
     test("a leading-space generic own label folds in the identifying descendant text, trimmed", () => {
       // Mirrors the dogfood repro: an alarm row whose own text/content-desc
       // template dropped the time (" Alarm", leading space) while a sibling

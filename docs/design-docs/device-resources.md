@@ -78,12 +78,24 @@ groups are optional in platform snapshots. Key presence does not promise support
 
 A group is `enabled` or `disabled` only when evidence covers the whole defined
 group. A single inactive process, absent observation, or requested setting is
-insufficient. A future producer must define its evidence coverage for each OS and
+insufficient. Each producer must define its evidence coverage for each OS and
 device type; it must report `unknown` when that coverage is incomplete.
 
 Desired provisioning configuration is separate from this snapshot. There is no
 overall mode or profile identity, and callers must not infer that a requested
 reduction succeeded.
+
+### Runtime producers
+
+`DeviceResourceObserver` is an internal read-only producer of complete Android
+emulator and iOS Simulator snapshots. It shares the controllers' native inventory
+and state readers without issuing writes or creating restoration receipts, and
+never derives observations from requested configuration. Every catalog target
+must be verified for an enabled/disabled group; mixed or partially absent evidence
+is unknown, wholly absent or unapproved read paths are unsupported, and native
+read failures are logged and reported as unknown. Physical devices currently
+return complete unsupported snapshots with reasons. Exposure to callers through
+tools, device listings, or MCP resources is not yet wired.
 
 ## Configuring resources
 

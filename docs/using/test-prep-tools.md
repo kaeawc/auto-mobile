@@ -27,6 +27,38 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
 }
 ```
 
+On Android, `putAppFile` accepts optional `userId` (a non-negative safe integer).
+An explicit ID selects that profile without discovery. Omission checks package
+installation for every user: use the sole installed user, or the current
+foreground user if installed among several candidates. Ambiguity lists the
+candidate IDs and asks for `userId`; no installation names the app/device, and
+failed discovery asks for an explicit ID. Batches resolve once. Private
+`documents`/`cache`/`tmp` containers use `run-as` and require a debuggable app.
+`externalFiles` uses `/sdcard/Android/data/<appId>/files` for user 0 and
+`/storage/emulated/<userId>/Android/data/<appId>/files` for nonzero users.
+Shared-storage domains keep their existing resolution.
+
+The list resource is
+`automobile:devices/{deviceId}/apps/{appId}/files/{container}{?userId}`;
+append `/{path}` before the query to read a file. For example:
+`automobile:devices/emulator-5554/apps/com.example.app/files/documents/settings.json?userId=10`.
+Both accept the same optional `?userId=N`; omission auto-resolves on Android.
+Returned put and list file URIs pin the resolved Android user. Explicit IDs
+always round-trip, including `?userId=0`, without extra discovery. Auto-resolved
+nonzero users always include `?userId=N`; auto-resolved user 0 includes
+`?userId=0` only when the app is installed for several users. A sole user-0
+installation keeps the existing query-free URI. The same rule applies to
+`externalFiles`; iOS URIs have no user query.
+
+**Unverified:** `run-as --user` API support has no captured fixture. Unsupported
+option/usage errors identify this uncertainty (unverified which API level),
+and advise omitting `userId` only for a primary-user installation or using a
+debuggable build via an adb-user-0 session. **Unverified, from Android
+scoped-storage documentation:** on API 30+, plain shell read/list access to other
+apps' `Android/data` directories is not guaranteed and push may be denied;
+the existing shell/push mechanism is retained. See
+[File containers](../tools.md) for semantics and the Android documentation source.
+
 ## Locale and device state
 
 - `changeLocalization` sets language, region, time zone, and formatting for a

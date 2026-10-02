@@ -1,14 +1,22 @@
 import { dirname, join, resolve } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   type AppFileFileSystem,
   type AppFileStats,
   createAppFileServiceForTesting,
+  executeAndroidAppFileCommand,
+  resolveAndroidTarget,
   type AppFileProvider,
   type AppFileWriteProvider,
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
-import type { BootedDevice } from "../../src/models";
+import { ActionableError, type BootedDevice } from "../../src/models";
+import {
+  APP_FILE_RESOURCE_TEMPLATES,
+  parseAppFileResourceParams,
+  type AppFileContainer,
+} from "../../src/server/appFileContract";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -108,6 +116,25 @@ describe("AppFileService", () => {
       }),
     ).rejects.toThrow("contentBase64 must be valid, non-empty base64.");
     expect(provider.putRequests).toEqual([]);
+  });
+
+  test("iOS put resource URI has no Android user query", async () => {
+    const provider = new RecordingAppFileProvider("ios");
+    const service = createAppFileServiceForTesting({
+      providers: [provider],
+      fileSystem: new TestAppFileFileSystem(),
+    });
+    const result = await service.putFile({
+      device: iosSimulatorDevice,
+      appId: "com.example.app",
+      container: "documents",
+      userId: 10,
+      contentText: "hello",
+      destinationPath: "welcome.txt",
+    });
+    expect(result.resourceUri).toBe(
+      `automobile:devices/${iosSimulatorDevice.deviceId}/apps/com.example.app/files/documents/welcome.txt`,
+    );
   });
 
   test("routes a normalized canonical batch by platform and logical domain", async () => {
@@ -603,6 +630,7 @@ describe("AppFileService", () => {
       device,
       appId: "com.example.app",
       container: "documents",
+      userId: 0,
       contentText: "hello",
       destinationPath: "fixtures/welcome file.txt",
     });
@@ -616,7 +644,7 @@ describe("AppFileService", () => {
       destinationPath: "fixtures/welcome file.txt",
       byteCount: 5,
       resourceUri:
-        "automobile:devices/emulator-5554/apps/com.example.app/files/documents/fixtures/welcome%20file.txt",
+        "automobile:devices/emulator-5554/apps/com.example.app/files/documents/fixtures/welcome%20file.txt?userId=0",
     });
 
     const commands = adbFactory.getFakeClient().getAllCommands();
@@ -631,8 +659,8 @@ describe("AppFileService", () => {
     expect(commands[2]).toContain("shell rm -f '/data/local/tmp/automobile-");
   });
 
-  test("putFile uses the exact run-as command for default, primary, and work-profile users", async () => {
-    for (const userId of [undefined, 0, 10]) {
+  test("putFile uses the exact run-as command for explicit primary and work-profile users", async () => {
+    for (const userId of [0, 10]) {
       const adbFactory = new FakeAdbClientFactory();
       const service = createAppFileServiceForTesting({
         adbFactory,
@@ -657,8 +685,8 @@ describe("AppFileService", () => {
     }
   });
 
-  test("listFiles uses the exact run-as command for default, primary, and work-profile users", async () => {
-    for (const userId of [undefined, 0, 10]) {
+  test("listFiles uses the exact run-as command for explicit primary and work-profile users", async () => {
+    for (const userId of [0, 10]) {
       const adbFactory = new FakeAdbClientFactory();
       const service = createAppFileServiceForTesting({
         adbFactory,
@@ -682,8 +710,8 @@ describe("AppFileService", () => {
     }
   });
 
-  test("readFile uses the exact run-as command for default, primary, and work-profile users", async () => {
-    for (const userId of [undefined, 0, 10]) {
+  test("readFile uses the exact run-as command for explicit primary and work-profile users", async () => {
+    for (const userId of [0, 10]) {
       const adbFactory = new FakeAdbClientFactory();
       const service = createAppFileServiceForTesting({
         adbFactory,
@@ -738,6 +766,7 @@ describe("AppFileService", () => {
       device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
       contentText: "hello",
       destinationPath: "fixtures/welcome.txt",
     });
@@ -766,6 +795,7 @@ describe("AppFileService", () => {
       device,
       appId: "com.example.app",
       container: "documents",
+      userId: 0,
       contentText: "hello",
       destinationPath: "fixtures/welcome.txt",
     });
@@ -794,6 +824,7 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "documents",
+      userId: 0,
     });
 
     expect(result.files).toEqual([]);
@@ -821,6 +852,7 @@ describe("AppFileService", () => {
         device,
         appId: "../other.app",
         container: "externalFiles",
+        userId: 0,
         contentText: "hello",
         destinationPath: "fixtures/welcome.txt",
       }),
@@ -1375,12 +1407,14 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "documents",
+      userId: 0,
       path: "screenshots/home.png",
     });
     await service.readFile({
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
       path: "screenshots/home.png",
     });
 
@@ -1413,11 +1447,13 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "documents",
+      userId: 0,
     });
     await service.listFiles({
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
     });
 
     const calls = adbFactory.getFakeClient().getCommandCalls();
@@ -1451,12 +1487,14 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "documents",
+      userId: 0,
       path: "screenshots/home.png",
     });
     await service.listFiles({
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
     });
 
     const calls = adbFactory.getFakeClient().getCommandCalls();
@@ -1483,6 +1521,7 @@ describe("AppFileService", () => {
       device,
       appId: "com.example.app",
       container: "documents",
+      userId: 0,
       contentText: "hello",
       destinationPath: "fixtures/welcome.txt",
       signal: controller.signal,
@@ -1523,6 +1562,7 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
     });
 
     expect(result.files).toEqual([
@@ -1532,7 +1572,7 @@ describe("AppFileService", () => {
         isDirectory: true,
         lastModified: "2024-03-09T16:01:00.000Z",
         resourceUri:
-          "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures",
+          "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures?userId=0",
       },
       {
         path: "fixtures/welcome file.txt",
@@ -1541,7 +1581,7 @@ describe("AppFileService", () => {
         isDirectory: false,
         lastModified: "2024-03-09T16:02:03.000Z",
         resourceUri:
-          "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures/welcome%20file.txt",
+          "automobile:devices/emulator-5554/apps/com.example.app/files/externalFiles/fixtures/welcome%20file.txt?userId=0",
       },
     ]);
   });
@@ -1568,6 +1608,7 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
       path: "config/settings.json",
     });
 
@@ -1602,6 +1643,7 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
       path: "config/bom.json",
     });
 
@@ -1637,6 +1679,7 @@ describe("AppFileService", () => {
       deviceId: "emulator-5554",
       appId: "com.example.app",
       container: "externalFiles",
+      userId: 0,
       path: "fixtures/pixel.bin",
     });
 
@@ -1671,11 +1714,469 @@ describe("AppFileService", () => {
         deviceId: "emulator-5554",
         appId: "com.example.app",
         container: "documents",
+        userId: 0,
         path: "fixtures/private.txt",
       }),
     ).rejects.toThrow(
       "Android documents app file read for com.example.app on emulator-5554 requires a debuggable app build because it uses run-as",
     );
+  });
+});
+
+// User/package/current-user state and all error strings in this suite are
+// constructed, not captured from a device. No captured fixtures exist for them.
+class AppFileUserAdb extends FakeAdbExecutor {
+  listUsersCalls = 0;
+  listUsersError?: Error;
+  override async listUsers() {
+    this.listUsersCalls += 1;
+    if (this.listUsersError) {
+      throw this.listUsersError;
+    }
+    return super.listUsers();
+  }
+}
+
+const appFileUserDevice: BootedDevice = {
+  deviceId: "fake-device",
+  name: "Fake",
+  platform: "android",
+};
+const appFileUserCases = [
+  { name: "explicit work profile", explicit: 10, users: [0, 10], installed: [], resolved: 10 },
+  { name: "explicit primary user", explicit: 0, users: [0, 10], installed: [], resolved: 0 },
+  { name: "sole primary installation", users: [0], installed: [0], resolved: 0 },
+  { name: "sole work-profile installation", users: [0, 10], installed: [10], resolved: 10 },
+  {
+    name: "several installations, foreground installed",
+    users: [0, 10],
+    installed: [0, 10],
+    current: 10,
+    resolved: 10,
+  },
+  {
+    name: "several installations, foreground absent",
+    users: [0, 10, 11],
+    installed: [0, 10],
+    current: 11,
+    error: "candidate users 0, 10",
+  },
+  {
+    name: "no installation",
+    users: [0, 10],
+    installed: [],
+    error: "com.example.app is not installed for any user on fake-device",
+  },
+  { name: "unknown user list", users: [], installed: [], error: "user resolution failed" },
+];
+
+function appFileUserService(adb: AppFileUserAdb) {
+  const fileSystem = new TestAppFileFileSystem();
+  return {
+    fileSystem,
+    service: createAppFileServiceForTesting({
+      adbFactory: new FakeAdbClientFactory(adb),
+      idGenerator: new CountingIdGenerator("tmp"),
+      deviceResolver: async () => appFileUserDevice,
+      fileSystem,
+    }),
+  };
+}
+
+function appFileOperationCommands(
+  operation: "put" | "list" | "read",
+  container: AppFileContainer,
+  userId: number,
+): string[] {
+  const root =
+    container === "externalFiles"
+      ? `${userId === 0 ? "/sdcard" : `/storage/emulated/${userId}`}/Android/data/com.example.app/files`
+      : container === "documents"
+        ? "files"
+        : container === "tmp"
+          ? "cache/tmp"
+          : "cache";
+  const path = `${root}/fixtures/welcome.txt`;
+  const prefix = `shell run-as 'com.example.app'${userId ? ` --user ${userId}` : ""}`;
+  if (operation === "put") {
+    if (container === "externalFiles") {
+      return [`shell mkdir -p '${root}/fixtures'`, `push '/fixtures/welcome.txt' '${path}'`];
+    }
+    const temp = "/data/local/tmp/automobile-tmp-1-welcome.txt";
+    const script = `mkdir -p '${root}/fixtures' && cp '${temp}' '${path}' && chmod 600 '${path}'`;
+    return [
+      `push '/fixtures/welcome.txt' '${temp}'`,
+      `${prefix} sh -c ${shellQuote(script)}`,
+      `shell rm -f '${temp}'`,
+    ];
+  }
+  if (operation === "read") {
+    return [`${container === "externalFiles" ? "shell" : prefix} base64 '${path}'`];
+  }
+  const script = `if [ -d '${root}' ]; then find '${root}' -exec stat -c '%F|%s|%Y|%n' {} \\; ; fi`;
+  return [
+    container === "externalFiles" ? `shell ${script}` : `${prefix} sh -c ${shellQuote(script)}`,
+  ];
+}
+
+for (const operation of ["put", "list", "read"] as const) {
+  describe(`Android app-file user targeting: ${operation}`, () => {
+    test.each(appFileUserCases)("$name (exact commands)", async (scenario) => {
+      for (const container of ["documents", "cache", "tmp", "externalFiles"] as const) {
+        const adb = new AppFileUserAdb();
+        adb.setUsers(
+          scenario.users.map((userId) => ({
+            userId,
+            name: `User ${userId}`,
+            running: true,
+            flags: 0,
+          })),
+        );
+        for (const userId of scenario.users) {
+          // Constructed, not captured from a device: exact package-list entry or empty listing.
+          adb.setCommandResponse(
+            `shell pm list packages --user ${userId}`,
+            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+          );
+        }
+        if (scenario.current !== undefined) {
+          // Constructed, not captured from a device: foreground-user number.
+          adb.setCommandResponse("shell am get-current-user", execResult(`${scenario.current}\n`));
+        }
+        const { service, fileSystem } = appFileUserService(adb);
+        await fileSystem.writeFileBuffer("/fixtures/welcome.txt", Buffer.from("hello"));
+        const common = {
+          deviceId: appFileUserDevice.deviceId,
+          appId: "com.example.app",
+          container,
+          userId: scenario.explicit,
+        };
+        const result =
+          operation === "put"
+            ? service.putFile({
+                ...common,
+                device: appFileUserDevice,
+                sourcePath: "/fixtures/welcome.txt",
+                destinationPath: "fixtures/welcome.txt",
+              })
+            : operation === "list"
+              ? service.listFiles(common)
+              : service.readFile({ ...common, path: "fixtures/welcome.txt" });
+        const resolution =
+          scenario.explicit !== undefined
+            ? []
+            : scenario.users.map((id) => `shell pm list packages --user ${id}`);
+        if (scenario.current !== undefined) {
+          resolution.push("shell am get-current-user");
+        }
+        if (scenario.error) {
+          await expect(result).rejects.toBeInstanceOf(ActionableError);
+          await expect(result).rejects.toThrow(scenario.error);
+          if (scenario.current !== undefined || scenario.users.length === 0) {
+            await expect(result).rejects.toThrow("Pass userId");
+          }
+          expect(adb.getExecutedCommands()).toEqual(resolution);
+          expect(adb.wasCommandExecuted("run-as")).toBe(false);
+        } else {
+          await result;
+          expect(adb.getExecutedCommands()).toEqual([
+            ...resolution,
+            ...appFileOperationCommands(operation, container, scenario.resolved!),
+          ]);
+        }
+        // Single-user omitted ID costs one listUsers + one pm list, no current-user read.
+        // Explicit IDs cost zero resolution reads; every other operation lists users once.
+        expect(adb.listUsersCalls).toBe(scenario.explicit === undefined ? 1 : 0);
+      }
+    });
+
+    test("failed user listing is actionable and issues no file commands", async () => {
+      const adb = new AppFileUserAdb();
+      // Constructed, not captured from a device: a user-enumeration failure.
+      adb.listUsersError = new Error("user enumeration unavailable");
+      const { service, fileSystem } = appFileUserService(adb);
+      await fileSystem.writeFileBuffer("/fixtures/welcome.txt", Buffer.from("hello"));
+      const common = {
+        deviceId: appFileUserDevice.deviceId,
+        appId: "com.example.app",
+        container: "documents" as const,
+      };
+      const result =
+        operation === "put"
+          ? service.putFile({
+              ...common,
+              device: appFileUserDevice,
+              sourcePath: "/fixtures/welcome.txt",
+              destinationPath: "welcome.txt",
+            })
+          : operation === "list"
+            ? service.listFiles(common)
+            : service.readFile({ ...common, path: "welcome.txt" });
+      await expect(result).rejects.toBeInstanceOf(ActionableError);
+      await expect(result).rejects.toThrow(
+        "Android user resolution failed for com.example.app on fake-device. Pass userId",
+      );
+      expect(adb.getExecutedCommands()).toEqual([]);
+    });
+  });
+}
+
+describe("Android app-file resource user round trips", () => {
+  afterEach(() => ResourceRegistry.clearResources());
+
+  const scenarios = [
+    {
+      name: "explicit primary",
+      explicit: 0,
+      installed: [0, 10],
+      current: 10,
+      user: 0,
+      query: "?userId=0",
+    },
+    {
+      name: "explicit work",
+      explicit: 10,
+      installed: [0, 10],
+      current: 0,
+      user: 10,
+      query: "?userId=10",
+    },
+    { name: "sole work installation", installed: [10], user: 10, query: "?userId=10" },
+    { name: "foreground work", installed: [0, 10], current: 10, user: 10, query: "?userId=10" },
+    { name: "foreground primary", installed: [0, 10], current: 0, user: 0, query: "?userId=0" },
+    { name: "single primary user", users: [0], installed: [0], user: 0, query: "" },
+    { name: "sole primary installation with other users", installed: [0], user: 0, query: "" },
+  ];
+
+  for (const operation of ["put", "list"] as const) {
+    for (const container of ["documents", "externalFiles"] as const) {
+      test.each(scenarios)(`${operation} ${container}: $name URI round trip`, async (scenario) => {
+        const adb = new AppFileUserAdb();
+        const users = scenario.users ?? [0, 10];
+        adb.setUsers(users.map((userId) => ({ userId, name: `User ${userId}` })));
+        for (const userId of users) {
+          adb.setCommandResponse(
+            `shell pm list packages --user ${userId}`,
+            execResult(scenario.installed.includes(userId) ? "package:com.example.app\n" : ""),
+          );
+        }
+        adb.setCommandResponse(
+          "shell am get-current-user",
+          execResult(`${scenario.current ?? 10}\n`),
+        );
+        const root =
+          container === "documents"
+            ? "files"
+            : `${scenario.user === 0 ? "/sdcard" : `/storage/emulated/${scenario.user}`}/Android/data/com.example.app/files`;
+        const commands = appFileOperationCommands(operation, container, scenario.user);
+        adb.setCommandResponse(
+          commands[operation === "put" ? 1 : 0]!,
+          execResult(`regular file|5|0|${root}/fixtures/welcome.txt\n`),
+        );
+        const readCommand = appFileOperationCommands("read", container, scenario.user)[0]!;
+        adb.setCommandResponse(readCommand, execResult(Buffer.from("hello").toString("base64")));
+        const { service, fileSystem } = appFileUserService(adb);
+        await fileSystem.writeFileBuffer("/fixtures/welcome.txt", Buffer.from("hello"));
+        const common = {
+          deviceId: appFileUserDevice.deviceId,
+          appId: "com.example.app",
+          container,
+          userId: scenario.explicit,
+        };
+        const uri =
+          operation === "put"
+            ? (
+                await service.putFile({
+                  ...common,
+                  device: appFileUserDevice,
+                  sourcePath: "/fixtures/welcome.txt",
+                  destinationPath: "fixtures/welcome.txt",
+                })
+              ).resourceUri
+            : (await service.listFiles(common)).files[0]!.resourceUri;
+        expect(uri).toBe(
+          `automobile:devices/fake-device/apps/com.example.app/files/${container}/fixtures/welcome.txt${scenario.query}`,
+        );
+        const resolution =
+          scenario.explicit === undefined
+            ? users.map((id) => `shell pm list packages --user ${id}`)
+            : [];
+        if (scenario.explicit === undefined && scenario.installed.length > 1) {
+          resolution.push("shell am get-current-user");
+        }
+        expect(adb.getExecutedCommands()).toEqual([...resolution, ...commands]);
+        expect(adb.listUsersCalls).toBe(scenario.explicit === undefined ? 1 : 0);
+
+        ResourceRegistry.registerTemplate(
+          APP_FILE_RESOURCE_TEMPLATES.FILE,
+          "File",
+          "File",
+          "text/plain",
+          async () => ({ uri }),
+        );
+        const match = ResourceRegistry.matchTemplate(uri);
+        expect(match).toBeDefined();
+        const parts = parseAppFileResourceParams(match!.params);
+        expect(parts.userId).toBe(scenario.query ? scenario.user : undefined);
+        const discoveryCalls = adb.listUsersCalls;
+        adb.clearHistory();
+        // Change foreground state after generating the URI: pinned reads must not drift.
+        adb.setCommandResponse(
+          "shell am get-current-user",
+          execResult(`${scenario.user === 0 ? 10 : 0}\n`),
+        );
+        const read = await service.readFile({ ...parts, path: parts.path! });
+        expect(read.text).toBe("hello");
+        expect(adb.getExecutedCommands()).toEqual([
+          ...(scenario.query ? [] : resolution),
+          readCommand,
+        ]);
+        expect(adb.listUsersCalls).toBe(discoveryCalls + (scenario.query ? 0 : 1));
+      });
+    }
+  }
+});
+
+describe("Android app-file profile details", () => {
+  test("resolveAndroidTarget keeps primary paths and substitutes secondary storage roots", () => {
+    expect(resolveAndroidTarget("com.example.app", "externalFiles", "a.txt")).toEqual({
+      kind: "external",
+      absolutePath: "/sdcard/Android/data/com.example.app/files/a.txt",
+    });
+    expect(resolveAndroidTarget("com.example.app", "externalFiles", "a.txt", 10)).toEqual({
+      kind: "external",
+      absolutePath: "/storage/emulated/10/Android/data/com.example.app/files/a.txt",
+    });
+    for (const userId of [0, 10]) {
+      expect(resolveAndroidTarget("com.example.app", "documents", "a.txt", userId)).toEqual({
+        kind: "runAs",
+        relativePath: "files/a.txt",
+      });
+    }
+  });
+
+  test("putFiles batch resolves once even when foreground state could change", async () => {
+    const adb = new AppFileUserAdb();
+    adb.setUsers([
+      { userId: 0, name: "Owner" },
+      { userId: 10, name: "Work" },
+    ]);
+    // Constructed, not captured from a device: both users have the package, current user changes.
+    adb.setCommandResponse("shell pm list packages", execResult("package:com.example.app\n"));
+    adb.setCommandResponseSequence("shell am get-current-user", [
+      execResult("10\n"),
+      execResult("0\n"),
+    ]);
+    const { service } = appFileUserService(adb);
+    const result = await service.putFile({
+      device: appFileUserDevice,
+      target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+      files: [
+        { contentText: "one", destinationPath: "one.txt" },
+        { contentText: "two", destinationPath: "two.txt" },
+      ],
+    });
+    expect(result.files.map((file) => file.resourceUri)).toEqual([
+      "automobile:devices/fake-device/apps/com.example.app/files/documents/one.txt?userId=10",
+      "automobile:devices/fake-device/apps/com.example.app/files/documents/two.txt?userId=10",
+    ]);
+    expect(adb.listUsersCalls).toBe(1);
+    expect(adb.getExecutedCommands().filter((c) => c.startsWith("shell pm list packages"))).toEqual(
+      ["shell pm list packages --user 0", "shell pm list packages --user 10"],
+    );
+    expect(adb.getExecutedCommands().filter((c) => c === "shell am get-current-user")).toHaveLength(
+      1,
+    );
+    const writes = adb.getExecutedCommands().filter((c) => c.startsWith("shell run-as"));
+    expect(writes).toHaveLength(2);
+    expect(
+      writes.every((c) => c.startsWith("shell run-as 'com.example.app' --user 10 sh -c")),
+    ).toBe(true);
+  });
+
+  test("listed file resource URI retains the resolved work profile", async () => {
+    const adb = new AppFileUserAdb();
+    // Constructed, not captured from a device: stat record for a work-profile file.
+    adb.setCommandResponse("shell run-as", execResult("regular file|5|0|files/welcome.txt\n"));
+    const { service } = appFileUserService(adb);
+    const result = await service.listFiles({
+      deviceId: appFileUserDevice.deviceId,
+      appId: "com.example.app",
+      container: "documents",
+      userId: 10,
+    });
+    expect(result.files[0]?.resourceUri).toBe(
+      "automobile:devices/fake-device/apps/com.example.app/files/documents/welcome.txt?userId=10",
+    );
+  });
+
+  // Every string here is constructed, not captured from a device; --user API support is unverified.
+  test.each([
+    ["run-as: unknown package: com.example.app", "not installed for user 10"],
+    ["run-as: package not debuggable: com.example.app", "com.example.app for user 10"],
+    ["run-as: unknown option --user", "run-as --user appears unsupported"],
+    ["command failed\n  run-as: Unknown option --user", "run-as --user appears unsupported"],
+    ["run-as: invalid option --user", "run-as --user appears unsupported"],
+    ["run-as: unrecognized option --user", "run-as --user appears unsupported"],
+    ["Usage: run-as <package> <command>", "run-as --user appears unsupported"],
+    ["Permission denied", "was denied by the device"],
+    [
+      "run-as: package not debuggable: com.example.app\nUsage: run-as <package> <command>",
+      "requires a debuggable app build",
+    ],
+    [
+      "run-as: unknown package: com.example.app\nUsage: run-as <package> <command>",
+      "not installed for user 10",
+    ],
+    ["Permission denied\nUsage: run-as <package> <command>", "was denied by the device"],
+    ["cp: 'files/unknown option.txt': does not exist", "not installed for user 10"],
+    [
+      "cp: 'files/unknown option.txt': No such file or directory",
+      "Failed to list Android documents app files",
+    ],
+    [
+      "cp: 'files/Usage: run-as.txt': No such file or directory",
+      "Failed to list Android documents app files",
+    ],
+    ["run-as: unknown user 99", "Failed to list Android documents app files"],
+  ])("maps %s", async (output, expected) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("run-as", new Error(output));
+    const result = executeAndroidAppFileCommand(
+      adb,
+      `shell run-as 'com.example.app' --user ${output.includes("unknown user 99") ? 99 : 10} ls`,
+      {
+        device: appFileUserDevice,
+        appId: "com.example.app",
+        container: "documents",
+        operation: "list",
+        access: "run-as",
+        userId: output.includes("unknown user 99") ? 99 : 10,
+      },
+    );
+    await expect(result).rejects.toBeInstanceOf(ActionableError);
+    await expect(result).rejects.toThrow(expected);
+    if (expected.includes("unsupported")) {
+      await expect(result).rejects.toThrow("unverified which API level");
+    } else {
+      await expect(result).rejects.not.toThrow("run-as --user appears unsupported");
+    }
+  });
+
+  test("usage without --user retains the ordinary error branch", async () => {
+    const adb = new FakeAdbExecutor();
+    // Constructed, not captured from a device: run-as usage text.
+    adb.setCommandError("run-as", new Error("Usage: run-as <package> <command>"));
+    await expect(
+      executeAndroidAppFileCommand(adb, "shell run-as 'com.example.app' ls", {
+        device: appFileUserDevice,
+        appId: "com.example.app",
+        container: "documents",
+        operation: "list",
+        access: "run-as",
+        userId: 0,
+      }),
+    ).rejects.toThrow("Failed to list Android documents app files");
   });
 });
 

@@ -22,6 +22,7 @@ function createListAppFilesResource(service: AppFileServiceResolver) {
       deviceId: request.deviceId,
       appId: request.appId,
       container: request.container,
+      userId: request.userId,
     });
     return {
       uri: buildAppFileResourceUri(request),
@@ -44,6 +45,7 @@ function createReadAppFileResource(service: AppFileServiceResolver) {
       deviceId: request.deviceId,
       appId: request.appId,
       container: request.container,
+      userId: request.userId,
       path: request.path,
     });
 
@@ -63,7 +65,7 @@ export function registerAppFileResources(appFileService?: AppFileService): void 
   ResourceRegistry.registerTemplate(
     APP_FILE_RESOURCE_TEMPLATES.CONTAINER,
     "App Container Files",
-    "List files in a logical app container for a specific device and app.",
+    "List files in a logical app container for a specific device and app. Android auto-resolves the installed user; optional ?userId=N selects a profile.",
     "application/json",
     createListAppFilesResource(service),
   );
@@ -71,7 +73,7 @@ export function registerAppFileResources(appFileService?: AppFileService): void 
   ResourceRegistry.registerTemplate(
     APP_FILE_RESOURCE_TEMPLATES.FILE,
     "App Container File",
-    "Read a file from a logical app container. UTF-8 content is returned as text; binary content is returned as a base64 MCP blob.",
+    "Read a file from a logical app container. Android auto-resolves the installed user; optional ?userId=N selects a profile. UTF-8 content is returned as text; binary content is returned as a base64 MCP blob.",
     "application/octet-stream",
     createReadAppFileResource(service),
   );

@@ -7,6 +7,7 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import type { Platform } from "../models";
+import { getRequestedResourceUri } from "./resourceRegistry";
 
 export const APP_FILE_CONTAINERS = [
   "documents",
@@ -19,11 +20,12 @@ export const APP_FILE_CONTAINERS = [
 export type AppFileContainer = (typeof APP_FILE_CONTAINERS)[number];
 
 export const APP_FILE_RESOURCE_TEMPLATES = {
-  CONTAINER: "automobile:devices/{deviceId}/apps/{appId}/files/{container}",
-  FILE: "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}",
+  CONTAINER: "automobile:devices/{deviceId}/apps/{appId}/files/{container}{?userId}",
+  FILE: "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}{?userId}",
 } as const;
 
 export interface AppFileResourceParts {
+  userId?: number;
   deviceId: string;
   appId: string;
   container: AppFileContainer;
@@ -453,16 +455,41 @@ export function buildAppFileResourceUri(parts: AppFileResourceParts): string {
     `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
     `/apps/${encodeURIComponent(parts.appId)}` +
     `/files/${encodeURIComponent(parts.container)}`;
-  return parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
+  const uri = parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
+  return parts.userId === undefined
+    ? uri
+    : `${uri}?${new URLSearchParams({ userId: String(parts.userId) })}`;
 }
 
 export function parseAppFileResourceParams(params: Record<string, string>): AppFileResourceParts {
+  const requestedUri = getRequestedResourceUri(params);
+  const queryKeys = requestedUri
+    ? new URL(requestedUri).searchParams.keys()
+    : Object.keys(params).filter(
+        (key) => !["deviceId", "appId", "container", "path"].includes(key),
+      );
+  for (const key of queryKeys) {
+    if (key !== "userId") {
+      throw new Error(
+        `App file resource does not accept query parameter "${key}"; the only supported query parameter is "userId".`,
+      );
+    }
+  }
+
   const container = decodeURIComponent(params.container);
   if (!APP_FILE_CONTAINERS.includes(container as AppFileContainer)) {
     throw new Error(`Unsupported app file container: ${container}`);
   }
 
+  const userId = params.userId === undefined ? undefined : Number(params.userId);
+  if (
+    params.userId !== undefined &&
+    (!/^\d+$/.test(params.userId) || !Number.isSafeInteger(userId) || userId! < 0)
+  ) {
+    throw new Error("App file resource userId must be a non-negative safe integer.");
+  }
   return {
+    ...(userId === undefined ? {} : { userId }),
     deviceId: decodeURIComponent(params.deviceId),
     appId: decodeURIComponent(params.appId),
     container: container as AppFileContainer,

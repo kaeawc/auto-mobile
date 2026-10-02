@@ -82,6 +82,18 @@ describe("FakeImageBackend", () => {
       expect(backend.lastPipeline).toBe(pipeline);
     });
 
+    test("records crop then rotation without changing the operation order", async () => {
+      const rotated: ImagePipeline = {
+        operations: [
+          { type: "crop", x: 3, y: 0, width: 1, height: 2 },
+          { type: "rotate", degrees: 270 },
+        ],
+        encoding: { mime: "image/png" },
+      };
+      await backend.execute(source, rotated);
+      expect(backend.lastPipeline).toEqual(rotated);
+    });
+
     test("records metadata and rawPixels calls", async () => {
       await backend.metadata(source);
       await backend.rawPixels(source);

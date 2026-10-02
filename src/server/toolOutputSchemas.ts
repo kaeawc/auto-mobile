@@ -733,7 +733,8 @@ export const observeCropResultSchema = z
     screenSize: z.object({ width: z.number().positive(), height: z.number().positive() }).strict(),
     imageSize: z
       .object({ width: z.number().int().positive(), height: z.number().int().positive() })
-      .strict(),
+      .strict()
+      .describe("Pixel dimensions of the upright output crop PNG."),
     pixelsPerNativeUnit: z.object({ x: z.number().positive(), y: z.number().positive() }).strict(),
     scaleProvenance: z.enum(["raster-dimensions", "native-scale-confirmed"]),
     rasterBounds: z
@@ -743,8 +744,15 @@ export const observeCropResultSchema = z
         right: z.number().int().positive(),
         bottom: z.number().int().positive(),
       })
-      .strict(),
-    screenshotOrientation: z.enum(["display", "native"]),
+      .strict()
+      .describe(
+        "Bounds read from the captured source raster before crop orientation normalization.",
+      ),
+    screenshotOrientation: z
+      .enum(["display", "native"])
+      .describe(
+        "Orientation of the output crop PNG; display after native iOS quarter/half-turn normalization. The full screenshot retains its own orientation metadata.",
+      ),
   })
   .strict();
 

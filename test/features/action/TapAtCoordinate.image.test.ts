@@ -13,6 +13,33 @@ const devices: BootedDevice[] = [
   { deviceId: "image-android", platform: "android", name: "Fake Android" },
   { deviceId: "image-ios", platform: "ios", name: "Fake iOS" },
 ];
+test.each([
+  [1, 75],
+  [3, 25],
+] as const)(
+  "native full screenshot rotation %s dispatches the corrected corner",
+  async (rotation, y) => {
+    const { tapAt, iosDispatches } = createTapAt(devices[1], 200, 100);
+    expect(
+      await tapAt.execute({
+        image: {
+          unit: "pixels",
+          x: 75,
+          y: 300,
+          source: {
+            screenshot: {
+              screenSize: { width: 200, height: 100 },
+              imageSize: { width: 300, height: 600 },
+              screenshotOrientation: "native",
+              rotation,
+            },
+          },
+        },
+      }),
+    ).toMatchObject({ success: true, x: 100, y });
+    expect(iosDispatches.map(({ x, y }) => ({ x, y }))).toEqual([{ x: 100, y }]);
+  },
+);
 afterEach(() => {
   for (const device of devices) {
     displayTransitions.reset(device.deviceId);

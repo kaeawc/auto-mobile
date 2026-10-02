@@ -1,7 +1,7 @@
 /**
  * Backend seam for image processing.
  *
- * `ImageTransformer` records the caller's resize/crop/encode requests into a
+ * Image callers record resize/crop/rotate/encode requests into a
  * declarative `ImagePipeline`, then hands the source buffer + pipeline to an
  * `ImageBackend` for execution. This decouples the fluent transform API from
  * the concrete decoder/encoder (sharp on macOS/Linux; jimp on Windows until
@@ -37,7 +37,9 @@ export type ImageOperation =
        */
       mode?: "nearest";
     }
-  | { type: "crop"; x: number; y: number; width: number; height: number };
+  | { type: "crop"; x: number; y: number; width: number; height: number }
+  /** Clockwise quarter/half turn without resampling; dimensions swap for 90 and 270. */
+  | { type: "rotate"; degrees: 90 | 180 | 270 };
 
 /**
  * The requested output encoding. `null` (on the pipeline) means "re-encode in

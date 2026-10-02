@@ -63,6 +63,93 @@ describe("JimpBackend", () => {
       expect(meta.height).toBe(2);
     });
 
+    test.each([
+      [
+        90,
+        2,
+        3,
+        [
+          [1, 2],
+          [1, 1],
+          [2, 2],
+          [2, 1],
+          [3, 2],
+          [3, 1],
+        ],
+      ],
+      [
+        180,
+        3,
+        2,
+        [
+          [3, 2],
+          [2, 2],
+          [1, 2],
+          [3, 1],
+          [2, 1],
+          [1, 1],
+        ],
+      ],
+      [
+        270,
+        2,
+        3,
+        [
+          [3, 1],
+          [3, 2],
+          [2, 1],
+          [2, 2],
+          [1, 1],
+          [1, 2],
+        ],
+      ],
+    ] as const)(
+      "crop then rotate %s degrees clockwise preserves exact pixels",
+      async (degrees, width, height, coordinates) => {
+        const backend = new JimpBackend();
+        const source = await makeSourcePng(5, 4);
+        const raw = await backend.rawPixels(
+          await backend.execute(source, {
+            operations: [
+              { type: "crop", x: 1, y: 1, width: 3, height: 2 },
+              { type: "rotate", degrees },
+            ],
+            encoding: { mime: "image/png" },
+          }),
+        );
+        expect({ width: raw.width, height: raw.height }).toEqual({ width, height });
+        expect([...raw.data]).toEqual(
+          coordinates.flatMap(([x, y]) => [x * 16, y * 16, x * y, 255]),
+        );
+      },
+    );
+
+    test("preserves rotation before crop and repeated rotation order", async () => {
+      const backend = new JimpBackend();
+      const source = await makeSourcePng(5, 4);
+      const cropped = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [
+            { type: "rotate", degrees: 90 },
+            { type: "crop", x: 1, y: 2, width: 2, height: 1 },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
+      expect({ width: cropped.width, height: cropped.height }).toEqual({ width: 2, height: 1 });
+      expect([...cropped.data]).toEqual([32, 32, 4, 255, 32, 16, 2, 255]);
+      const repeated = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [
+            { type: "rotate", degrees: 90 },
+            { type: "rotate", degrees: 270 },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
+      expect(repeated).toEqual(await backend.rawPixels(source));
+    });
+
     test("crop produces the requested region at the requested offset", async () => {
       const backend = new JimpBackend();
       const source = await makeSourcePng(8, 8);

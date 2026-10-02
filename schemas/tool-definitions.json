@@ -8555,6 +8555,7 @@
               "additionalProperties": false
             },
             "imageSize": {
+              "description": "Pixel dimensions of the upright output crop PNG.",
               "type": "object",
               "properties": {
                 "width": {
@@ -8591,6 +8592,7 @@
               "enum": ["raster-dimensions", "native-scale-confirmed"]
             },
             "rasterBounds": {
+              "description": "Bounds read from the captured source raster before crop orientation normalization.",
               "type": "object",
               "properties": {
                 "left": {
@@ -8618,6 +8620,7 @@
               "additionalProperties": false
             },
             "screenshotOrientation": {
+              "description": "Orientation of the output crop PNG; display after native iOS quarter/half-turn normalization. The full screenshot retains its own orientation metadata.",
               "type": "string",
               "enum": ["display", "native"]
             }

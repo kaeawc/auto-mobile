@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
+import { PLAN_AUTO_RELEASE_REASON } from "../../src/daemon/sessionManager";
 import { DeviceSessionRepository } from "../../src/db/deviceSessionRepository";
 import { createTestDatabase } from "../db/testDbHelper";
 import { releaseDeviceLabelSessions } from "../../src/server/deviceLabelMapping";
@@ -58,7 +59,7 @@ describe("releaseDeviceLabelSessions ordering", () => {
         const released = await releaseDeviceLabelSessions(base);
 
         expect(released).toEqual([derived]);
-        expect(releaseSpy).toHaveBeenCalledWith(derived);
+        expect(releaseSpy).toHaveBeenCalledWith(derived, PLAN_AUTO_RELEASE_REASON);
         // The device was freed only AFTER the session release fully settled.
         expect(releasedFirst).toBe(true);
       } finally {

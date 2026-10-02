@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { PLAN_AUTO_RELEASE_REASON, SessionManager } from "../../src/daemon/sessionManager";
 import { Rotate } from "../../src/features/action/Rotate";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -233,7 +233,7 @@ describe("session rotation restoration", () => {
           );
           const attempt = h.rotate.execute("landscape");
           await flush();
-          await h.manager.releaseSession("rotation-session");
+          await h.manager.releaseSession("rotation-session", PLAN_AUTO_RELEASE_REASON);
           await h.manager.createSession("rotation-session", device.deviceId, "android");
           gate.resolve();
           await queued;

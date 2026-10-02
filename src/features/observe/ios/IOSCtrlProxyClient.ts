@@ -36,6 +36,8 @@ import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOpt
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { raceWithDeadline } from "../../../utils/raceWithDeadline";
+import { exponentialBackoff } from "../../../utils/Backoff";
+import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../devices/requireBootedDevice";
@@ -45,7 +47,18 @@ import {
   type CtrlProxyIosSetupResult,
 } from "../../../ctrlProxy/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../../../utils/factories/PlatformDeviceManagerFactory";
-import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationBuildContext,
+} from "../../navigation/NavigationGraphManager";
+import { GetAppMetadata } from "../GetAppMetadata";
+import type { IosAppMetadataSource } from "../../../models/IosAppMetadataSource";
+import { createIosMetadataSource } from "../../../utils/iosAppMetadataSource";
+import {
+  createContentHashProvider,
+  type ContentHashProvider,
+} from "../../../utils/ContentHashProvider";
+import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
@@ -113,6 +126,46 @@ const defaultServiceManagerFactory: ServiceManagerFactory = (d) =>
  * Injected for testability — avoids coupling to PlatformDeviceManagerFactory in tests.
  */
 export type BootedDeviceLister = () => Promise<BootedDevice[]>;
+
+export interface IosCtrlProxyClientOptions {
+  transientObserver?: boolean;
+  iosSource?: IosAppMetadataSource;
+  contentHashProvider?: ContentHashProvider;
+}
+
+interface IosCtrlProxyClientDependencies extends IosCtrlProxyClientOptions {
+  wsFactory?: WebSocketFactory;
+  timer?: Timer;
+  serviceManagerFactory?: ServiceManagerFactory;
+  bootedDeviceLister?: BootedDeviceLister;
+  deviceConnectionLostNotifier?: DeviceConnectionLostNotifier;
+  sdkEventIngestor?: IosSdkEventIngestor;
+  retryExecutor?: RetryExecutor;
+}
+
+interface IosBuildContextAttempt {
+  generation: number;
+  controller: AbortController;
+  scheduledTimer?: ReturnType<Timer["setTimeout"]>;
+}
+
+type IosBuildContextResolution =
+  | { kind: "resolved"; context: NavigationBuildContext }
+  | { kind: "terminal"; reason: string }
+  | { kind: "failed" | "superseded" };
+
+const iosBuildContextBackoff = exponentialBackoff({
+  initialDelayMs: 5000,
+  multiplier: 2,
+  maxDelayMs: 300000,
+});
+const IOS_BUILD_CONTEXT_DEADLINE_MS = 30000;
+
+// Test-created clients must never fall through to simctl/devicectl for provenance.
+const noOpIosMetadataSource: IosAppMetadataSource = {
+  listApps: async () => [],
+  getPhysicalDeviceAppInfo: async () => null,
+};
 
 type IosSdkCapability =
   | "hierarchy"
@@ -704,6 +757,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private readonly sdkScreenIdentityTrackingGenerationsByApplicationId = new Map<string, number>();
   private readonly sdkScreenIdentityTrackingDisabledApplicationIds = new Set<string>();
   private sdkScreenIdentityClearGeneration = 0;
+  private iosSource?: IosAppMetadataSource;
+  private appMetadata?: GetAppMetadata;
+  private contentHashProvider?: ContentHashProvider;
+  private readonly resolvedBuildContexts = new Map<string, NavigationBuildContext>();
+  private readonly buildContextInFlight = new Map<string, IosBuildContextAttempt>();
+  private readonly buildContextFailures = new Map<string, { attempts: number; retryAt: number }>();
+  private readonly appliedBuildContextManagers = new Map<string, Set<NavigationGraphManager>>();
+  private readonly buildContextGeneration = new Map<string, number>();
   private sdkEventPollGeneration = 0;
   private sdkEventPollAbortController: AbortController | null = null;
   private sdkEventPollInFlight: {
@@ -726,36 +787,32 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private constructor(
     device: BootedDevice,
     port: number = IOSCtrlProxyClient.DEFAULT_PORT,
-    wsFactory: WebSocketFactory = defaultWebSocketFactory,
-    timer: Timer = defaultTimer,
-    serviceManagerFactory: ServiceManagerFactory = defaultServiceManagerFactory,
-    bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister,
-    deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier,
-    sdkEventIngestor?: IosSdkEventIngestor,
-    retryExecutor: RetryExecutor = defaultRetryExecutor,
-    transientObserver = false,
+    options: IosCtrlProxyClientDependencies = {},
   ) {
     super(
-      timer,
-      wsFactory,
+      options.timer ?? defaultTimer,
+      options.wsFactory ?? defaultWebSocketFactory,
       { connectionResetMs: IOSCtrlProxyClient.CONNECTION_RESET_MS },
-      retryExecutor,
+      options.retryExecutor ?? defaultRetryExecutor,
     );
     this.device = device;
-    this.transientObserver = transientObserver;
-    if (transientObserver) {
+    this.transientObserver = options.transientObserver ?? false;
+    this.iosSource = options.iosSource;
+    this.contentHashProvider = options.contentHashProvider;
+    if (this.transientObserver) {
       this.autoReconnectEnabled = false;
     }
     this.port = port;
-    this.serviceManagerFactory = serviceManagerFactory;
-    this.bootedDeviceLister = bootedDeviceLister;
-    this.deviceConnectionLostNotifier = deviceConnectionLostNotifier;
+    this.serviceManagerFactory = options.serviceManagerFactory ?? defaultServiceManagerFactory;
+    this.bootedDeviceLister = options.bootedDeviceLister ?? defaultBootedDeviceLister;
+    this.deviceConnectionLostNotifier =
+      options.deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
     // Constructed eagerly (unlike the lazy delegate getters): DefaultIosSdkEventIngestor's
     // constructor only stores these session-bound closures — it does no I/O and does not
     // resolve the telemetry/failure singletons (those resolve per-call), so eager
     // construction is free even for throwaway probe clients.
     this.sdkEventIngestor =
-      sdkEventIngestor ??
+      options.sdkEventIngestor ??
       new DefaultIosSdkEventIngestor({
         deviceId: this.device.deviceId,
         getNavigationGraphManager: () => this.getNavigationGraphManager(),
@@ -851,9 +908,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   public clearSdkScreenIdentity(applicationId?: string): void {
     this.invalidateSdkCapabilities();
     if (applicationId) {
+      this.invalidateBuildContext(applicationId);
       this.sdkScreenIdentityTrackingDisabledApplicationIds.delete(applicationId);
       this.invalidateSdkScreenIdentity(applicationId);
       return;
+    }
+    for (const appId of this.buildContextGeneration.keys()) {
+      this.invalidateBuildContext(appId);
     }
     this.sdkScreenIdentityClearGeneration++;
     this.sdkScreenIdentityGenerationsByApplicationId.clear();
@@ -983,18 +1044,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           return socket;
         }
       : defaultWebSocketFactory;
-    const client = new IOSCtrlProxyClient(
-      device,
-      port,
-      socketFactory,
-      dependencies.timer,
-      dependencies.serviceManagerFactory,
-      dependencies.bootedDeviceLister,
-      dependencies.deviceConnectionLostNotifier,
-      undefined,
-      dependencies.retryExecutor,
-      true,
-    );
+    const client = new IOSCtrlProxyClient(device, port, {
+      ...dependencies,
+      wsFactory: socketFactory,
+      transientObserver: true,
+      iosSource: resident?.iosSource,
+      contentHashProvider: resident?.contentHashProvider,
+    });
     if (ownsPortAllocation) {
       client.allocatedPort = port;
     }
@@ -1153,6 +1209,211 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       : NavigationGraphManager.getInstance();
   }
 
+  /** Resolve provenance out of band, re-applying it to the current session on every event. */
+  private ensureBuildContext(appId: string): void {
+    if (this.closed) {
+      return;
+    }
+    const resolved = this.resolvedBuildContexts.get(appId);
+    if (resolved) {
+      this.applyBuildContext(resolved);
+      return;
+    }
+    this.getNavigationGraphManager().clearBuildContext(appId);
+    if (
+      this.buildContextInFlight.has(appId) ||
+      this.timer.now() < (this.buildContextFailures.get(appId)?.retryAt ?? 0)
+    ) {
+      return;
+    }
+    const generation = this.buildContextGeneration.get(appId) ?? 0;
+    this.buildContextGeneration.set(appId, generation);
+    const attempt: IosBuildContextAttempt = { generation, controller: new AbortController() };
+    this.buildContextInFlight.set(appId, attempt);
+    // Match Android's macrotask deferral: register the navigation write first,
+    // before metadata lookup or hashing can do any I/O.
+    attempt.scheduledTimer = this.timer.setTimeout(() => {
+      attempt.scheduledTimer = undefined;
+      if (this.isBuildContextAttemptCurrent(appId, attempt)) {
+        void this.resolveBuildContext(appId, attempt);
+      }
+    }, 0);
+  }
+
+  private isBuildContextAttemptCurrent(appId: string, attempt: IosBuildContextAttempt): boolean {
+    return (
+      !this.closed &&
+      !attempt.controller.signal.aborted &&
+      this.buildContextInFlight.get(appId) === attempt &&
+      this.buildContextGeneration.get(appId) === attempt.generation
+    );
+  }
+
+  private async readBuildContext(
+    appId: string,
+    attempt: IosBuildContextAttempt,
+  ): Promise<IosBuildContextResolution> {
+    if (!this.isBuildContextAttemptCurrent(appId, attempt)) {
+      return { kind: "superseded" };
+    }
+    // Use metadata's existing transport predicate. Physical bundle paths belong
+    // to the device filesystem and cannot be hashed by the host bundle walker.
+    if (!isIosSimulatorUdid(this.device.deviceId)) {
+      return { kind: "terminal", reason: "physical-device bundle hashing is unavailable" };
+    }
+    this.iosSource ??= createIosMetadataSource(this.device);
+    this.appMetadata ??= new GetAppMetadata(this.device, defaultAdbClientFactory, this.iosSource);
+    const metadata = await this.appMetadata.execute(appId);
+    if (!this.isBuildContextAttemptCurrent(appId, attempt)) {
+      return { kind: "superseded" };
+    }
+    if (!metadata) {
+      return { kind: "failed" };
+    }
+    const buildNumber = metadata.buildNumber.trim();
+    const versionCode = Number(buildNumber);
+    if (!buildNumber || !/^\d+$/.test(buildNumber) || !Number.isSafeInteger(versionCode)) {
+      return {
+        kind: "terminal",
+        reason: `CFBundleVersion ${JSON.stringify(buildNumber)} is not a safe plain integer`,
+      };
+    }
+    this.contentHashProvider ??= createContentHashProvider(
+      this.device,
+      defaultAdbClientFactory.create(this.device),
+      this.iosSource,
+    );
+    const contentHash = await this.contentHashProvider.resolveContentHash(
+      this.device,
+      appId,
+      versionCode,
+    );
+    if (contentHash === null) {
+      return { kind: "failed" };
+    }
+    return {
+      kind: "resolved",
+      context: { appId, deviceId: this.device.deviceId, versionCode, contentHash },
+    };
+  }
+
+  private async resolveBuildContext(
+    appId: string,
+    attempt: IosBuildContextAttempt,
+  ): Promise<boolean> {
+    try {
+      const result = await raceWithDeadline(() => this.readBuildContext(appId, attempt), {
+        timer: this.timer,
+        timeoutMs: IOS_BUILD_CONTEXT_DEADLINE_MS,
+        signal: attempt.controller.signal,
+        label: `iOS build-context resolution for ${appId}`,
+      });
+      if (!this.isBuildContextAttemptCurrent(appId, attempt) || result.kind === "superseded") {
+        return false;
+      }
+      if (result.kind === "failed") {
+        this.recordBuildContextFailure(appId);
+        return false;
+      }
+      if (result.kind === "terminal") {
+        logger.info(
+          `[IOSCtrlProxyClient] ${appId}: ${result.reason}; using device attribution with the unknown build key until invalidation`,
+        );
+      }
+      // (0, "") is NavigationGraphManager's existing default/unknown build key.
+      // Keep its device dimension without inventing a version or content hash;
+      // observation rows remain separate by device/session under that same key.
+      const context: NavigationBuildContext =
+        result.kind === "resolved"
+          ? result.context
+          : {
+              appId,
+              deviceId: this.device.deviceId,
+              versionCode: 0,
+              contentHash: "",
+            };
+      this.applyBuildContext(context);
+      this.resolvedBuildContexts.set(appId, context);
+      this.buildContextFailures.delete(appId);
+      return true;
+    } catch (error) {
+      if (!this.isBuildContextAttemptCurrent(appId, attempt)) {
+        // Invalidation/close intentionally aborts optional provenance; no write is lost.
+        logger.debug(
+          `[IOSCtrlProxyClient] Build-context resolution cancelled for ${appId}: ${errorMessage(error)}`,
+        );
+        return false;
+      }
+      logger.warn(
+        `[IOSCtrlProxyClient] Build-context resolution failed for ${appId}: ${errorMessage(error)}`,
+        error,
+      );
+      this.recordBuildContextFailure(appId);
+      return false;
+    } finally {
+      // The deadline helper observes late rejections; abort also prevents a late
+      // metadata result from starting hashing after the race has already settled.
+      attempt.controller.abort();
+      if (this.buildContextInFlight.get(appId) === attempt) {
+        this.buildContextInFlight.delete(appId);
+      }
+    }
+  }
+
+  private recordBuildContextFailure(appId: string): void {
+    const attempts = (this.buildContextFailures.get(appId)?.attempts ?? 0) + 1;
+    this.buildContextFailures.set(appId, {
+      attempts,
+      retryAt: this.timer.now() + iosBuildContextBackoff.delayForAttempt(attempts),
+    });
+  }
+
+  private applyBuildContext(context: NavigationBuildContext): void {
+    const manager = this.getNavigationGraphManager();
+    manager.setBuildContext(context);
+    let managers = this.appliedBuildContextManagers.get(context.appId);
+    if (!managers) {
+      managers = new Set();
+      this.appliedBuildContextManagers.set(context.appId, managers);
+    }
+    managers.add(manager);
+  }
+
+  private clearClientBuildContext(appId: string): boolean {
+    // Clear earlier session bindings too: close must not leave a released device
+    // attributable on a manager to which this client previously applied context.
+    const managers =
+      this.appliedBuildContextManagers.get(appId) ?? new Set<NavigationGraphManager>();
+    for (const manager of managers) {
+      manager.clearBuildContext(appId);
+    }
+    this.appliedBuildContextManagers.delete(appId);
+    try {
+      this.getNavigationGraphManager().clearBuildContext(appId);
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[IOSCtrlProxyClient] Could not clear build context for ${appId}: ${errorMessage(error)}`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  private invalidateBuildContext(appId: string): void {
+    this.buildContextGeneration.set(appId, (this.buildContextGeneration.get(appId) ?? 0) + 1);
+    const attempt = this.buildContextInFlight.get(appId);
+    if (attempt?.scheduledTimer !== undefined) {
+      this.timer.clearTimeout(attempt.scheduledTimer);
+    }
+    attempt?.controller.abort();
+    this.buildContextInFlight.delete(appId);
+    this.buildContextFailures.delete(appId);
+    this.resolvedBuildContexts.delete(appId);
+    this.contentHashProvider?.invalidate(this.device.deviceId, appId);
+    this.clearClientBuildContext(appId);
+  }
+
   /**
    * Create instance for testing with injected dependencies
    */
@@ -1166,23 +1427,25 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     deviceConnectionLostNotifier?: DeviceConnectionLostNotifier,
     sdkEventIngestor?: IosSdkEventIngestor,
     retryExecutor?: RetryExecutor,
-    transientObserver = false,
+    options: boolean | IosCtrlProxyClientOptions = false,
   ): IOSCtrlProxyClient {
     // Default test lister always reports the device as booted so existing tests
     // are unaffected. Tests that verify boot-check behavior supply their own lister.
     const lister = bootedDeviceLister ?? (async () => [device]);
-    return new IOSCtrlProxyClient(
-      device,
-      port,
+    return new IOSCtrlProxyClient(device, port, {
+      ...(typeof options === "boolean" ? { transientObserver: options } : options),
+      iosSource:
+        typeof options === "boolean"
+          ? noOpIosMetadataSource
+          : (options.iosSource ?? noOpIosMetadataSource),
       wsFactory,
       timer,
       serviceManagerFactory,
-      lister,
+      bootedDeviceLister: lister,
       deviceConnectionLostNotifier,
       sdkEventIngestor,
       retryExecutor,
-      transientObserver,
-    );
+    });
   }
 
   /**
@@ -1378,6 +1641,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   public override async close(): Promise<void> {
     this.closed = true;
+    // Synchronous teardown before super.close() can await socket cleanup.
+    for (const appId of this.buildContextGeneration.keys()) {
+      this.invalidateBuildContext(appId);
+    }
+    this.buildContextGeneration.clear();
     if (this.restartRearmTimeout) {
       this.timer.clearTimeout(this.restartRearmTimeout);
       this.restartRearmTimeout = null;
@@ -2327,6 +2595,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return false;
     }
     if (currentSessionId && currentSessionId !== sessionId) {
+      this.invalidateBuildContext(applicationId);
       this.retireSdkScreenIdentitySession(applicationId, currentSessionId);
       this.sdkScreenIdentitiesByApplicationId.delete(applicationId);
       this.sdkScreenIdentityOrdersByApplicationId.delete(applicationId);
@@ -4141,6 +4410,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Track foreground bundle and start performance monitoring when app changes
     const bundleId = hierarchy.packageName;
+    if (bundleId) {
+      this.ensureBuildContext(bundleId);
+    }
     logger.debug(
       `[IOSCtrlProxyClient] Hierarchy update - bundleId: "${bundleId}", lastForeground: "${this.lastForegroundBundleId}"`,
     );

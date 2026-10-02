@@ -691,7 +691,11 @@ the structured result with `success: false` and set the MCP `isError` flag.
 
 `rotate` preserves its existing behavior when `lockOrientation` is omitted: it
 temporarily disables auto-rotate when necessary, then restores the prior
-setting. To keep portrait or landscape orientation in effect for subsequent
+setting. A confirmed reversion to the sensor-held orientation returns
+`success: false` with the achieved `currentOrientation`; `rotationPerformed` is
+false when the display ended in its previous orientation. An unreadable final
+orientation retains success with a warning because no mismatch was confirmed.
+To keep portrait or landscape orientation in effect for subsequent
 actions, pass `lockOrientation: true`:
 
 ```json

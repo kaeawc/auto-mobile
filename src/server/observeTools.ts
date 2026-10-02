@@ -19,7 +19,7 @@ import { ResourceRegistry } from "./resourceRegistry";
 import { RESOURCE_URIS } from "./observationResources";
 import { OBSERVE_APP_RESOURCE_URI } from "./observeAppResource";
 import { ActionableError } from "../models/ActionableError";
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import { hasUsableHierarchy, RealObserveScreen } from "../features/observe/ObserveScreen";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
 import type {
   ObserveScreen,
@@ -1355,14 +1355,14 @@ function recordDisplayWaitEvidence(
   }
   postureEvidence.knownValueObserved ||=
     observation.display !== undefined && observation.display.posture !== "unknown";
-  postureEvidence.hierarchyCaptured ||= observation.viewHierarchy !== undefined;
+  postureEvidence.hierarchyCaptured ||= hasUsableHierarchy(observation.viewHierarchy);
   activeDisplayEvidence.lastObservedReason = observation.display
     ? `last observed active display "${observation.display.key}" (${observation.display.role})`
     : 'last observed active display "unknown"';
   activeDisplayEvidence.knownValueObserved ||=
     observation.display !== undefined &&
     !(observation.display.key === "0" && observation.display.role === "unknown");
-  activeDisplayEvidence.hierarchyCaptured ||= observation.viewHierarchy !== undefined;
+  activeDisplayEvidence.hierarchyCaptured ||= hasUsableHierarchy(observation.viewHierarchy);
 }
 
 export const waitForObservation = async (

@@ -414,6 +414,92 @@ describe("display transitions", () => {
     expect(tracker.record(device.deviceId, cover)).toBe(false);
   });
 
+  test("an unchanged display callback completes a state push before a later resize", () => {
+    const tracker = new DisplayTransitionTracker(() => {});
+    tracker.record(device.deviceId, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 0 },
+      screenSize: { width: 200, height: 100 },
+    });
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "device_state",
+      displayId: 0,
+      deviceState: 2,
+    });
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:inner",
+      width: 200,
+      height: 100,
+    });
+    expect(tracker.identityRevision(device.deviceId)).toBe(1);
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:inner",
+      width: 300,
+      height: 100,
+    });
+    expect(tracker.identityRevision(device.deviceId)).toBe(2);
+  });
+
+  test("a duplicate state callback completes a display push before a later state change", () => {
+    const tracker = new DisplayTransitionTracker(() => {});
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "device_state",
+      displayId: 0,
+      deviceState: 1,
+    });
+    tracker.record(device.deviceId, {
+      display: { key: "cover", role: "cover", posture: "closed", generation: 1 },
+      screenSize: { width: 100, height: 100 },
+    });
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:inner",
+      width: 200,
+      height: 100,
+    });
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "device_state",
+      displayId: 0,
+      deviceState: 1,
+    });
+    expect(tracker.identityRevision(device.deviceId)).toBe(2);
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "device_state",
+      displayId: 0,
+      deviceState: 2,
+    });
+    expect(tracker.identityRevision(device.deviceId)).toBe(3);
+  });
+
+  test("zero geometry preserves a push fence until a usable panel is recorded", () => {
+    const tracker = new DisplayTransitionTracker(() => {});
+    tracker.record(device.deviceId, {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 0 },
+      screenSize: { width: 200, height: 100 },
+    });
+    tracker.notifyAndroidTransition(device.deviceId, {
+      change: "changed",
+      displayId: 0,
+      panelUniqueId: "local:cover",
+      width: 100,
+      height: 100,
+    });
+    const display = { key: "cover", role: "cover", posture: "closed", generation: 1 } as const;
+    expect(tracker.record(device.deviceId, { display, screenSize: { width: 0, height: 0 } })).toBe(
+      false,
+    );
+    expect(tracker.revision(device.deviceId)).toBe(1);
+    expect(
+      tracker.record(device.deviceId, { display, screenSize: { width: 100, height: 100 } }),
+    ).toBe(false);
+    expect(tracker.revision(device.deviceId)).toBe(1);
+    expect(tracker.identityRevision(device.deviceId)).toBe(1);
+  });
+
   test("an unchanged observation consumes a later device-state push", () => {
     const invalidations: string[] = [];
     const tracker = new DisplayTransitionTracker((_deviceId, reason) => invalidations.push(reason));

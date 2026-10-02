@@ -1763,6 +1763,36 @@ describe("waitForObservation activeWindow", () => {
     );
   });
 
+  test.each(["posture", "activeDisplay"] as const)(
+    "%s timeout treats error-shaped hierarchies as uncaptured",
+    async (waitKind) => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const screen = new FakeObserveScreen();
+      screen.setObserveResult({
+        ...activeDisplayStub(),
+        viewHierarchy: { hierarchy: { error: "connection lost", transportFailure: true } },
+      });
+      const outcome = await waitForObservation(
+        screen,
+        waitKind === "posture"
+          ? { posture: "closed", timeout: 200 }
+          : { activeDisplay: "cover", timeout: 200 },
+        undefined,
+        false,
+        timer,
+        "android",
+        undefined,
+        undefined,
+        "multi",
+        activePanels,
+      );
+      expect(outcome.timedOut).toBe(true);
+      expect(outcome.timeoutReason).toContain("no hierarchy was captured");
+      expect(screen.getExecuteCallCount()).toBe(3);
+    },
+  );
+
   test("activeDisplay timeout reports the last known display stamp", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

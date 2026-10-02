@@ -265,14 +265,14 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
     if (captureStart.revision !== this.revision(deviceId)) {
       return false;
     }
-    // The first fresh observation after a push consumes its fence, even if
-    // the stamp is unchanged or the observation has no usable geometry.
+    // The first fresh observation with usable geometry after a push consumes
+    // its fence, even if the stamp is unchanged.
     const pushedFence = this.hasPendingPush(deviceId);
-    this.pendingPushes.delete(deviceId);
     const { width, height } = result.screenSize;
     if (width <= 0 || height <= 0) {
       return false;
     }
+    this.pendingPushes.delete(deviceId);
     const current = {
       key: result.display.key,
       role: result.display.role,
@@ -352,15 +352,17 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
     }
     const previous = this.panelBeforePush(deviceId);
     if (event.change === "device_state") {
-      if (
-        event.deviceState === undefined ||
-        this.deviceStates.get(deviceId) === event.deviceState
-      ) {
+      if (event.deviceState === undefined) {
+        return;
+      }
+      if (this.deviceStates.get(deviceId) === event.deviceState) {
+        this.markPendingCallbackSeen(deviceId, "stateCallbackSeen");
         return;
       }
       this.deviceStates.set(deviceId, event.deviceState);
     } else if (event.change === "changed" && previous) {
       if (samePushedPanel(event, previous)) {
+        this.markPendingCallbackSeen(deviceId, "displayCallbackSeen");
         return;
       }
     }
@@ -376,6 +378,16 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
       stateCallbackSeen: event.change === "device_state",
       panel: this.panelFromPush(deviceId, event),
     });
+  }
+
+  private markPendingCallbackSeen(
+    deviceId: string,
+    callback: "displayCallbackSeen" | "stateCallbackSeen",
+  ): void {
+    const pending = this.pendingPushes.get(deviceId);
+    if (pending?.revision === this.revision(deviceId)) {
+      pending[callback] = true;
+    }
   }
 
   private panelBeforePush(

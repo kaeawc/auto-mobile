@@ -67,28 +67,6 @@ public final class StreamableHTTPMCPClient: AutoMobileMCPClient, Sendable {
         return try? JSONSerialization.data(withJSONObject: payload, options: [])
     }
 
-    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
-    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
-    /// The operation must not need the main actor; its own deadline bounds the blocking wait.
-    public func initialize(timeout: TimeInterval) throws {
-        try BlockingAsyncCall.run { try await self.initialize(timeout: timeout) }
-    }
-
-    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
-    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
-    /// The operation must not need the main actor; its own deadline bounds the blocking wait.
-    public func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
-        let params = try encodeParams(["name": name, "arguments": arguments])
-        return try BlockingAsyncCall.run { try await self.callTool(params: params, timeout: timeout) }
-    }
-
-    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
-    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
-    /// The operation must not need the main actor; its own deadline bounds the blocking wait.
-    public func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
-        try BlockingAsyncCall.run { try await self.readResource(uri: uri, timeout: timeout) }
-    }
-
     public func initialize(timeout: TimeInterval) async throws {
         PerfTimer.log("HTTPClient.initialize START")
         _ = try await sendRequest(method: "initialize", params: encodeParams(Self.initializeParams()), timeout: timeout)

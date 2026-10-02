@@ -6,16 +6,61 @@ import XCTestRunnerTestSupport
 
 @MainActor
 final class AsyncExecutorTests: XCTestCase {
-    func testAsyncDefaultUsesGeneratorWithoutChangingTestThreadSession() async throws {
-        let original = AutoMobileSession.currentSessionUuid()
-        AutoMobileSession.setCurrentSessionUuid("test-thread-session")
-        defer { AutoMobileSession.setCurrentSessionUuid(original) }
+    func testExecutePlanReturnsResultAndPassesOneSessionAndMetadataAcrossAwait() async throws {
+        let client = AsyncExecutorClient()
+        let generator = ExecutorSessionProbe()
+        let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery())
+        let testCase = HermeticPlanTestCase(selector: #selector(HermeticPlanTestCase.planBody))
+        testCase.executorFactory = { configuration in
+            XCTAssertEqual(configuration.planPath, "unused")
+            return executor
+        }
+        testCase.idGenerator = { generator.generate() }
+        try testCase.setUpWithError()
+        defer { try? testCase.tearDownWithError() }
+        let observer = AutoMobileTestObserver()
+        observer.testCaseWillStart(testCase)
+
+        let result = try await Task.detached { try await testCase.executePlan() }.value
+        observer.testCaseDidFinish(testCase)
+
+        XCTAssertTrue(result.success)
+        XCTAssertEqual(result.executedSteps, 2)
+        XCTAssertEqual(generator.calls, 1)
+        XCTAssertEqual(client.sessions, ["generated-session-1", "generated-session-1"])
+        XCTAssertEqual(client.testClasses, ["HermeticPlanTestCase"])
+        XCTAssertEqual(client.testMethods, ["planBody"])
+        XCTAssertEqual(observer.getTimingData().map(\.testName), [testCase.name])
+    }
+
+    func testCancellingAsyncTestBodyPropagatesThroughExecutePlanToClient() async throws {
+        let client = AsyncExecutorClient(pauseCall: true)
+        let generator = ExecutorSessionProbe()
+        let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery())
+        let testCase = HermeticPlanTestCase(selector: #selector(HermeticPlanTestCase.planBody))
+        testCase.executorFactory = { _ in executor }
+        testCase.idGenerator = { generator.generate() }
+        try testCase.setUpWithError()
+        defer { try? testCase.tearDownWithError() }
+
+        let body = Task.detached { try await testCase.executePlan() }
+        try await client.executions.wait(for: 1)
+        body.cancel()
+        await assertTransportCancellation(body)
+
+        XCTAssertEqual(client.cancellations.count, 1)
+        XCTAssertEqual(client.executions.count, 1)
+        XCTAssertEqual(generator.calls, 1)
+        XCTAssertEqual(client.sessions, ["generated-session-1", "generated-session-1"])
+        XCTAssertEqual(client.resetSessionCount, 0)
+    }
+
+    func testAsyncDefaultUsesGeneratorOncePerExecution() async throws {
         let generator = ExecutorSessionProbe()
         let client = AsyncExecutorClient()
         let executor = makeExecutor(
             client: client,
             handler: AsyncExecutorRecovery(),
-            sessionIdProvider: nil,
             idGenerator: { generator.generate() }
         )
 
@@ -26,13 +71,12 @@ final class AsyncExecutorTests: XCTestCase {
             "generated-session-1", "generated-session-1",
             "generated-session-2", "generated-session-2",
         ])
-        XCTAssertEqual(generator.calls, 2, "the generator, not the thread-local provider, supplies each ID")
-        XCTAssertEqual(AutoMobileSession.currentSessionUuid(), "test-thread-session")
+        XCTAssertEqual(generator.calls, 2, "each execution generates exactly one ID")
     }
 
     func testDefaultGeneratorProducesDistinctUUIDs() async throws {
         let client = AsyncExecutorClient()
-        let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery(), sessionIdProvider: nil)
+        let executor = makeExecutor(client: client, handler: AsyncExecutorRecovery())
         _ = try await executor.execute()
         _ = try await executor.execute()
         let first = try XCTUnwrap(client.sessions[0])
@@ -42,30 +86,17 @@ final class AsyncExecutorTests: XCTestCase {
         XCTAssertNotEqual(first, second)
     }
 
-    func testExplicitSessionCapturedOnSyncThreadOverridesProviderAndGenerator() async throws {
+    func testExplicitSessionOverridesGenerator() async throws {
         let client = AsyncExecutorClient()
-        let provider = ExecutorSessionProbe()
         let generator = ExecutorSessionProbe()
         let executor = makeExecutor(
             client: client,
             handler: AsyncExecutorRecovery(),
-            sessionIdProvider: { provider.capture() },
             idGenerator: { generator.generate() }
         )
-        // AutoMobileTestCase's executor is private and has no injection hook. Exercise its exact
-        // boundary with an injected executor/client instead of starting a daemon or simulator.
-        let result = try await runSyncTransportTest {
-            let original = AutoMobileSession.currentSessionUuid()
-            AutoMobileSession.setCurrentSessionUuid("sync-xctest-session")
-            defer { AutoMobileSession.setCurrentSessionUuid(original) }
-            let sessionUuid = AutoMobileSession.currentSessionUuid()
-            let result = try BlockingAsyncCall.run { try await executor.execute(sessionUuid: sessionUuid) }
-            XCTAssertEqual(AutoMobileSession.currentSessionUuid(), "sync-xctest-session")
-            return result
-        }
+        let result = try await executor.execute(sessionUuid: "explicit-xctest-session")
         XCTAssertTrue(result.success)
-        XCTAssertEqual(client.sessions, ["sync-xctest-session", "sync-xctest-session"])
-        XCTAssertEqual(provider.calls, 0)
+        XCTAssertEqual(client.sessions, ["explicit-xctest-session", "explicit-xctest-session"])
         XCTAssertEqual(generator.calls, 0)
     }
 
@@ -317,7 +348,7 @@ final class AsyncExecutorTests: XCTestCase {
         XCTAssertEqual(client.resetSessionCount, resetsBeforeCancellation, "cancellation must not add a reset")
     }
 
-    func testSessionProviderRunsOnceBeforeSuspensionAndSurvivesRetryRecoveryAndResume() async throws {
+    func testSessionGeneratorRunsOnceBeforeSuspensionAndSurvivesRetryRecoveryAndResume() async throws {
         let scheduler = VirtualDeadlineScheduler()
         let provider = ExecutorSessionProbe()
         let client = AsyncExecutorClient(failures: 1, planFailure: true, pauseInitialize: true)
@@ -326,12 +357,11 @@ final class AsyncExecutorTests: XCTestCase {
             client: client,
             handler: handler,
             scheduler: scheduler,
-            sessionIdProvider: { provider.capture() }
+            idGenerator: { provider.generate() }
         )
         let task = Task { try await executor.execute() }
         try await client.initializations.wait(for: 1)
         XCTAssertEqual(provider.calls, 1, "identity must be captured before initialize suspends")
-        XCTAssertNotNil(provider.thread)
         client.initializeGate.resume(returning: ())
         try await scheduler.registered.wait(for: 1)
         scheduler.advance(by: 10)
@@ -339,8 +369,8 @@ final class AsyncExecutorTests: XCTestCase {
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.aiRecoverySuccessful)
         XCTAssertEqual(provider.calls, 1)
-        XCTAssertEqual(client.sessions, Array(repeating: "executor-owned-session", count: 6))
-        XCTAssertEqual(handler.sessions, ["executor-owned-session"])
+        XCTAssertEqual(client.sessions, Array(repeating: "generated-session-1", count: 6))
+        XCTAssertEqual(handler.sessions, ["generated-session-1"])
         XCTAssertEqual(client.executions.count, 3, "initial error, retry failure, recovery resume")
         XCTAssertEqual(client.resetSessionCount, 1)
     }
@@ -351,7 +381,6 @@ final class AsyncExecutorTests: XCTestCase {
         retries: Int = 2,
         scheduler: any DeadlineScheduler = VirtualDeadlineScheduler(),
         transport: AutoMobilePlanExecutor.Transport = .daemonUnixSocket(path: "/unused/async-executor.sock"),
-        sessionIdProvider: (@Sendable () -> String)? = { "executor-owned-session" },
         daemonEnsurer: any AutoMobileDaemonEnsuring = AsyncExecutorDaemonEnsurer(),
         idGenerator: @escaping @Sendable () -> String = { UUID().uuidString }
     )
@@ -370,7 +399,6 @@ final class AsyncExecutorTests: XCTestCase {
             mcpClient: client,
             timer: FakeTimer(),
             logger: AsyncExecutorLogger(),
-            sessionIdProvider: sessionIdProvider,
             recoveryHandler: handler,
             recoveryConfigProvider: StaticRecoveryConfigProvider(),
             recoveryModelConfig: nil,
@@ -379,6 +407,15 @@ final class AsyncExecutorTests: XCTestCase {
             idGenerator: idGenerator
         )
     }
+}
+
+/// Configured before launch and touched again only after the detached body completes. XCTestCase
+/// itself is not Sendable; this hermetic fixture confines its mutable hooks to that lifecycle.
+private final class HermeticPlanTestCase: AutoMobileTestCase, @unchecked Sendable {
+    override var planPath: String { "unused" }
+
+    @objc
+    func planBody() {}
 }
 
 private struct AsyncExecutorPlanLoader: AutoMobilePlanLoading {
@@ -433,27 +470,13 @@ private final class BlockingExecutorDaemonEnsurer: AutoMobileDaemonEnsuring {
 }
 
 private final class ExecutorSessionProbe: Sendable {
-    private struct State: Sendable {
-        var calls = 0
-        var thread: ObjectIdentifier?
-    }
-
-    private let state = OSAllocatedUnfairLock(initialState: State())
-    var calls: Int { state.withLock { $0.calls } }
-    var thread: ObjectIdentifier? { state.withLock { $0.thread } }
-
-    func capture() -> String {
-        state.withLock {
-            $0.calls += 1
-            $0.thread = ObjectIdentifier(Thread.current)
-        }
-        return "executor-owned-session"
-    }
+    private let state = OSAllocatedUnfairLock(initialState: 0)
+    var calls: Int { state.withLock { $0 } }
 
     func generate() -> String {
         state.withLock {
-            $0.calls += 1
-            return "generated-session-\($0.calls)"
+            $0 += 1
+            return "generated-session-\($0)"
         }
     }
 }
@@ -486,6 +509,8 @@ private final class AsyncExecutorRecovery: PlanRecoveryHandler {
 
 private final class AsyncExecutorClient: AutoMobileMCPClient {
     private struct State: Sendable {
+        var testClasses: [String?] = []
+        var testMethods: [String?] = []
         var names: [String] = []
         var sessions: [String?] = []
         var resetSessionCount = 0
@@ -499,8 +524,11 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
     private let cancellationError: Bool
     let initializations = TransportEvents()
     let executions = TransportEvents()
+    let cancellations = TransportEvents()
     let initializeGate = SingleResumeCell<Void>()
     let callGate = SingleResumeCell<Void>()
+    var testClasses: [String?] { state.withLock { $0.testClasses } }
+    var testMethods: [String?] { state.withLock { $0.testMethods } }
     var names: [String] { state.withLock { $0.names } }
     var sessions: [String?] { state.withLock { $0.sessions } }
     var resetSessionCount: Int { state.withLock { $0.resetSessionCount } }
@@ -536,10 +564,15 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
     func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) async throws -> MCPToolResponse {
         // Record only Sendable routing values, never retain the dynamic wire dictionary.
         let sessionUuid = arguments["sessionUuid"] as? String
+        let metadata = arguments["testMetadata"] as? [String: Any]
+        let testClass = metadata?["testClass"] as? String
+        let testMethod = metadata?["testMethod"] as? String
         let response = state.withLock { current -> Result<MCPToolResponse, any Error> in
             current.names.append(name)
             current.sessions.append(sessionUuid)
             if name != "executePlan" { return .success(MCPToolResponse(text: "{}")) }
+            current.testClasses.append(testClass)
+            current.testMethods.append(testMethod)
             if cancellationError { return .failure(CancellationError()) }
             if current.failures > 0 {
                 current.failures -= 1
@@ -562,7 +595,13 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
                 return shouldPause
             }
             executions.signal()
-            if shouldPause { try await callGate.wait() }
+            if shouldPause {
+                try await withTaskCancellationHandler {
+                    try await callGate.wait()
+                } onCancel: {
+                    self.cancellations.signal()
+                }
+            }
         }
         try Task.checkCancellation()
         return try response.get()
@@ -571,18 +610,6 @@ private final class AsyncExecutorClient: AutoMobileMCPClient {
     func readResource(uri _: String, timeout _: TimeInterval) async throws -> MCPResourceResponse {
         XCTFail("Static config must not read daemon resources")
         return MCPResourceResponse(text: "{}")
-    }
-
-    // Required only until PR 3 removes the sync client requirements. Tests must exercise async calls.
-    func initialize(timeout _: TimeInterval) throws { XCTFail("Unexpected synchronous initialize") }
-    func callTool(name _: String, arguments _: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
-        XCTFail("Unexpected synchronous callTool")
-        throw MCPClientError.requestFailed("timeout")
-    }
-
-    func readResource(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
-        XCTFail("Unexpected synchronous readResource")
-        throw MCPClientError.requestFailed("timeout")
     }
 
     func resetSession() { state.withLock { $0.resetSessionCount += 1 } }

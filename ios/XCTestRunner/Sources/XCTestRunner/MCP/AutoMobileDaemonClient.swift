@@ -38,20 +38,6 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         )
     }
 
-    /// Legacy sync seam retained for existing tests; removed in PR 3. Its adapter owns the factory.
-    convenience init(
-        socketPath: String,
-        logger: AutoMobileLogger = StdoutLogger(),
-        clientVersion: String? = nil,
-        connectionFactory: DaemonLineConnectionFactory
-    ) {
-        self.init(
-            socketPath: socketPath,
-            connectionFactory: LegacyDaemonLineConnectionFactory(connectionFactory),
-            options: Options(logger: logger, clientVersion: clientVersion)
-        )
-    }
-
     init(
         socketPath: String,
         connectionFactory: any AsyncDaemonLineConnectionFactory,
@@ -90,28 +76,6 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
         }
         payload.append(0x0A)
         return payload
-    }
-
-    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
-    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
-    /// The operation must not need the main actor. Its own deadline bounds the wait, excluding gate queue time.
-    public func initialize(timeout: TimeInterval) throws {
-        try BlockingAsyncCall.run { try await self.initialize(timeout: timeout) }
-    }
-
-    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
-    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
-    /// The operation must not need the main actor. Its own deadline bounds the wait, excluding gate queue time.
-    public func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
-        let params = try encodeParams(["name": name, "arguments": arguments])
-        return try BlockingAsyncCall.run { try await self.callTool(name: name, params: params, timeout: timeout) }
-    }
-
-    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
-    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
-    /// The operation must not need the main actor. Its own deadline bounds the wait, excluding gate queue time.
-    public func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
-        try BlockingAsyncCall.run { try await self.readResource(uri: uri, timeout: timeout) }
     }
 
     public func initialize(timeout: TimeInterval) async throws {

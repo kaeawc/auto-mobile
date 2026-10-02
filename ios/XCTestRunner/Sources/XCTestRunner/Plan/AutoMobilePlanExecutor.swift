@@ -4,7 +4,7 @@ import Foundation
 /// it, and — on failure, when enabled — hands off to an AI recovery handler and resumes.
 ///
 /// Async execution owns an explicit session value: the caller's ID or a fresh ID for this run.
-/// An injected session provider runs on an arbitrary executor thread, not the caller's thread.
+/// The injected idGenerator supplies one fresh ID when the caller does not provide a sessionUuid.
 /// Immutable dependencies refine Sendable; execution state and wire arguments remain local to a run.
 /// Concurrent runs require distinct transport clients if their session lifetimes must be independent.
 public final class AutoMobilePlanExecutor: Sendable {
@@ -14,7 +14,6 @@ public final class AutoMobilePlanExecutor: Sendable {
     private let deadlineScheduler: any DeadlineScheduler
     private let logger: AutoMobileLogger
     private let daemonEnsurer: AutoMobileDaemonEnsuring
-    private let sessionIdProvider: (@Sendable () -> String)?
     private let idGenerator: @Sendable () -> String
     private static let daemonEnsureQueue = DispatchQueue(
         label: "com.automobile.xctestrunner.daemon-ensure",
@@ -32,7 +31,6 @@ public final class AutoMobilePlanExecutor: Sendable {
         mcpClient: AutoMobileMCPClient? = nil,
         timer: AutoMobileTimer = SystemTimer(),
         logger: AutoMobileLogger = StdoutLogger(),
-        sessionIdProvider: (@Sendable () -> String)? = nil,
         recoveryHandler: PlanRecoveryHandler? = nil,
         recoveryConfigProvider: RecoveryConfigProviding? = nil,
         recoveryModelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
@@ -45,7 +43,6 @@ public final class AutoMobilePlanExecutor: Sendable {
         self.planLoader = planLoader
         self.logger = logger
         self.daemonEnsurer = daemonEnsurer
-        self.sessionIdProvider = sessionIdProvider
         self.idGenerator = idGenerator
 
         if let mcpClient = mcpClient {
@@ -98,10 +95,8 @@ public final class AutoMobilePlanExecutor: Sendable {
     )
         async throws -> ExecutePlanResult
     {
-        // Async entry may already be on a cooperative-pool thread. Never consult thread-local
-        // identity here by default. A custom provider runs once on an arbitrary thread; the sync
-        // XCTest bridge captures its thread-local identity and passes that value explicitly.
-        let sessionUuid = sessionUuid ?? sessionIdProvider?() ?? idGenerator()
+        // Resolve identity once, before suspension, and reuse it across retries and recovery.
+        let sessionUuid = sessionUuid ?? idGenerator()
         return try await executeWithRetries(testMetadata: testMetadata, sessionUuid: sessionUuid)
     }
 

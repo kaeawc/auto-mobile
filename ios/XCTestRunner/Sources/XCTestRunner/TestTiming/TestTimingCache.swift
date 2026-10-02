@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Prefetches and caches per-test timing data from the daemon so `AutoMobileTestCase` can order a
 /// suite fastest/slowest-first. Best-effort: any fetch/parse failure logs and leaves the cache empty.
@@ -13,38 +14,46 @@ import Foundation
 final class TestTimingCache: @unchecked Sendable {
     static let shared = TestTimingCache()
 
+    typealias Fetcher = @Sendable (String, TimeInterval) async throws -> String
+
+    private let fetcher: Fetcher
+    private let enabled: @Sendable () -> Bool
     private let jsonDecoder = JSONDecoder()
     private let lock = NSLock()
     private var loaded = false
     private var timingMap: [TestTimingKey: TestTimingEntry] = [:]
     private var summary: TestTimingSummary?
 
-    private init() {}
+    private convenience init() {
+        self.init(fetcher: { uri, timeout in
+            let client = try AutoMobileTestTimingClient(environment: AutoMobileEnvironment())
+            return try await client.readResource(uri: uri, timeout: timeout)
+        }, enabled: { Self.isEnabled() })
+    }
 
-    func prefetchIfEnabled() {
-        lock.lock()
-        defer { lock.unlock() }
-        prefetchLocked()
+    /// The fake fetcher must not reenter this cache; suite prefetch holds its one-time load lock.
+    init(fetcher: @escaping Fetcher, enabled: @escaping @Sendable () -> Bool = { true }) {
+        self.fetcher = fetcher
+        self.enabled = enabled
     }
 
     func getTiming(testClass: String, testMethod: String) -> TestTimingEntry? {
         lock.lock()
         defer { lock.unlock() }
-        prefetchLocked()
         return timingMap[TestTimingKey(testClass: testClass, testMethod: testMethod)]
     }
 
-    func hasTimings() -> Bool {
+    /// Only suite construction may fetch; ordinary reads use the snapshot it populated.
+    func hasTimings(sessionUuid: String) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        prefetchLocked()
+        prefetchLocked(sessionUuid: sessionUuid)
         return !timingMap.isEmpty
     }
 
     func getSummary() -> TestTimingSummary? {
         lock.lock()
         defer { lock.unlock() }
-        prefetchLocked()
         return summary
     }
 
@@ -57,25 +66,25 @@ final class TestTimingCache: @unchecked Sendable {
     }
 
     /// Assumes `lock` is held. Fetches once; subsequent calls are no-ops.
-    private func prefetchLocked() {
-        guard isEnabled() else {
+    private func prefetchLocked(sessionUuid: String) {
+        guard enabled() else {
             return
         }
         if loaded {
             return
         }
-        loadFromDaemon()
+        loadFromDaemon(sessionUuid: sessionUuid)
         loaded = true
     }
 
-    private func isEnabled() -> Bool {
+    private static func isEnabled() -> Bool {
         if isCiMode() {
             return false
         }
         return config.boolValue(forKey: "automobile.junit.timing.enabled", defaultValue: true)
     }
 
-    private func isCiMode() -> Bool {
+    private static func isCiMode() -> Bool {
         if config.boolValue(forKey: "automobile.ci.mode", defaultValue: false) {
             return true
         }
@@ -85,12 +94,14 @@ final class TestTimingCache: @unchecked Sendable {
         return envValue.lowercased() == "true" || envValue == "1"
     }
 
-    private func loadFromDaemon() {
-        let uri = buildRequestUri()
+    private func loadFromDaemon(sessionUuid: String) {
+        let uri = buildRequestUri(sessionUuid: sessionUuid)
         let timeoutSeconds = Double(resolveTimeoutMs()) / 1000.0
         do {
-            let client = try AutoMobileTestTimingClient(environment: AutoMobileEnvironment())
-            let payload = try client.readResource(uri: uri, timeout: timeoutSeconds)
+            let fetcher = fetcher
+            let payload = try SynchronousTimingFetch.read {
+                try await fetcher(uri, timeoutSeconds)
+            }
             guard let data = payload.data(using: .utf8) else {
                 return
             }
@@ -99,6 +110,7 @@ final class TestTimingCache: @unchecked Sendable {
                let error = object["error"] as? String,
                !error.isEmpty
             {
+                print("[TestTimingCache] Daemon timing resource returned an error: \(error)")
                 return
             }
             let parsed = try jsonDecoder.decode(TestTimingSummary.self, from: data)
@@ -125,7 +137,7 @@ final class TestTimingCache: @unchecked Sendable {
         )
     }
 
-    private func buildRequestUri() -> String {
+    private func buildRequestUri(sessionUuid: String) -> String {
         var params: [String: String] = [:]
         params["lookbackDays"] = String(resolvePositiveIntProperty(
             "automobile.junit.timing.lookback.days",
@@ -135,10 +147,11 @@ final class TestTimingCache: @unchecked Sendable {
         params["minSamples"] = String(resolveMinSamples())
         params["devicePlatform"] = "ios"
 
-        let sessionUuid = AutoMobileSession.currentSessionUuid()
-        if !sessionUuid.isEmpty {
-            params["sessionUuid"] = sessionUuid
-        }
+        // The daemon uses sessionUuid as a ROW FILTER (testExecutionRepository.getTimingStats).
+        // Suite construction has no execution session yet. A fresh caller-supplied ID matches
+        // nothing by design today, preserving the existing wire behavior. Omitting this filter
+        // would activate timing ordering and requires an owner decision (D-needed), outside #6061.
+        params["sessionUuid"] = sessionUuid
 
         return Self.buildRequestUri(parameters: params)
     }
@@ -173,21 +186,46 @@ final class TestTimingCache: @unchecked Sendable {
     }
 
     private func resolveMinSamples() -> Int {
-        let value = config.intValue(forKey: "automobile.junit.timing.min.samples", defaultValue: 1)
+        let value = Self.config.intValue(forKey: "automobile.junit.timing.min.samples", defaultValue: 1)
         return max(0, value)
     }
 
     private func resolvePositiveIntProperty(_ key: String, fallback: Int) -> Int {
-        let value = config.intValue(forKey: key, defaultValue: fallback)
+        let value = Self.config.intValue(forKey: key, defaultValue: fallback)
         return value > 0 ? value : fallback
     }
 
     private func resolveTimeoutMs() -> Int {
-        let value = config.intValue(forKey: "automobile.junit.timing.fetch.timeout.ms", defaultValue: 5000)
+        let value = Self.config.intValue(forKey: "automobile.junit.timing.fetch.timeout.ms", defaultValue: 5000)
         return value > 0 ? value : 5000
     }
 
-    private var config: TimingConfig {
+    private static var config: TimingConfig {
         return TimingConfig()
+    }
+}
+
+/// Only for XCTestCase.defaultTestSuite; NEVER call from an async context or the cooperative pool.
+/// Safe only because nothing in the awaited path uses the main actor/main queue. XCTest constructs
+/// the suite before any async test body can warm the cache, so a lazy async fetch cannot order a
+/// cold-start suite. The async transport owns the unchanged five-second default fetch deadline.
+private enum SynchronousTimingFetch {
+    static func read(_ operation: @escaping @Sendable () async throws -> String) throws -> String {
+        let semaphore = DispatchSemaphore(value: 0)
+        let result = OSAllocatedUnfairLock<Result<String, any Error>?>(initialState: nil)
+        Task.detached {
+            do {
+                let payload = try await operation()
+                result.withLock { $0 = .success(payload) }
+            } catch {
+                result.withLock { $0 = .failure(error) }
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        guard let completion = result.withLock({ $0 }) else {
+            throw MCPClientError.requestFailed("Timing fetch completed without a result")
+        }
+        return try completion.get()
     }
 }

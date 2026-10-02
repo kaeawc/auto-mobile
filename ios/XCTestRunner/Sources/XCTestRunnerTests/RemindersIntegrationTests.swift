@@ -13,16 +13,16 @@ private final class LaunchPlanContractMCPClient: AutoMobileMCPClient, @unchecked
     private(set) var initializeTimeouts: [TimeInterval] = []
     private(set) var toolCalls: [ToolCall] = []
 
-    private func initializeResult(timeout: TimeInterval) throws {
+    func initialize(timeout: TimeInterval) async throws {
         initializeTimeouts.append(timeout)
     }
 
-    private func callToolResult(
+    func callTool(
         name: String,
         arguments: [String: Any],
         timeout: TimeInterval
     )
-        throws -> MCPToolResponse
+        async throws -> MCPToolResponse
     {
         toolCalls.append(ToolCall(name: name, arguments: arguments, timeout: timeout))
 
@@ -38,26 +38,8 @@ private final class LaunchPlanContractMCPClient: AutoMobileMCPClient, @unchecked
         }
     }
 
-    private func readResourceResult(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
+    func readResource(uri _: String, timeout _: TimeInterval) async throws -> MCPResourceResponse {
         throw MCPClientError.invalidResponse("Unexpected resource read")
-    }
-
-    func initialize(timeout: TimeInterval) throws { try initializeResult(timeout: timeout) }
-    func initialize(timeout: TimeInterval) async throws { try initializeResult(timeout: timeout) }
-    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
-        try callToolResult(name: name, arguments: arguments, timeout: timeout)
-    }
-
-    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> MCPToolResponse {
-        try callToolResult(name: name, arguments: arguments, timeout: timeout)
-    }
-
-    func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
-        try readResourceResult(uri: uri, timeout: timeout)
-    }
-
-    func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
-        try readResourceResult(uri: uri, timeout: timeout)
     }
 
     func resetSession() {}
@@ -122,10 +104,10 @@ final class RemindersLaunchPlanTests: XCTestCase {
             mcpClient: client,
             timer: FakeTimer(),
             logger: LaunchPlanContractLogger(),
-            sessionIdProvider: { "launch-plan-contract-session" },
             recoveryModelConfig: nil,
             daemonEnsurer: HermeticDaemonEnsurer(),
-            deadlineScheduler: VirtualDeadlineScheduler()
+            deadlineScheduler: VirtualDeadlineScheduler(),
+            idGenerator: { "launch-plan-contract-session" }
         )
         let result = try await executor.execute(
             testMetadata: AutoMobilePlanExecutor.TestMetadata(
@@ -175,9 +157,9 @@ final class RemindersAddPlanTests: RemindersIntegrationBase {
         ]
     }
 
-    func testAddReminderPlan() throws {
+    func testAddReminderPlan() async throws {
         PerfTimer.log("testAddReminderPlan START - planPath: \(planPath)")
-        let result = try executePlan()
+        let result = try await executePlan()
         PerfTimer.log("testAddReminderPlan END - result: \(result)")
     }
 }

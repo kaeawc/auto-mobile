@@ -38,8 +38,8 @@ final class MyAppTests: AutoMobileTestCase {
     override var retryCount: Int { 2 }
     override var timeoutSeconds: TimeInterval { 300 }
 
-    func testLoginFlow() throws {
-        try executePlan()
+    func testLoginFlow() async throws {
+        try await executePlan()
     }
 }
 ```
@@ -72,58 +72,51 @@ let timingData = observer.getTimingData()
 try observer.exportTimingData(to: "timing-history.json")
 ```
 
-### Async migration (step 2 of 3)
+### Async migration (step 3 of 3)
 
 This source-breaking migration ships in the next minor release (#6061, owner decision D29).
-`AutoMobileMCPClient` has async `initialize`, `callTool`, and `readResource` overloads. Its sync
-methods remain deprecated in documentation only because synchronous timing clients and transport
-compatibility tests still call them. Sync calls are only for synchronous XCTest threads; never use
-these wrappers from the cooperative pool or main-actor async code.
+The test body, executor, recovery handler, and MCP transports now use native async calls.
 
-Source changes in this step:
-- `AutoMobilePlanExecutor.execute` is now `async throws`; its private `executeAttempt` and
-  `handleFailure` are also `async throws`. Await executor calls and update async XCTest methods.
-- `PlanRecoveryHandler.attemptRecovery` is now `async` (nonthrowing). Cancellation produces a failed
-  recovery outcome; the executor checks its own cancellation immediately after awaiting recovery and
-  throws `CancellationError`, without retrying or resuming.
-- Both `RecoveryConfigProviding` methods (`isRecoveryEnabled`, `maxRecoveryToolCalls`) are now
-  `async` (nonthrowing). The daemon provider loads lazily on async use and serializes its cached read;
-  construction performs no MCP I/O and needs no blocking bridge.
-- The `asyncBridge` initializer parameter and the internal `AsyncCallBridging` and
-  `SemaphoreAsyncCallBridge` types are removed. Executor and handler initializers accept the shared
-  `DeadlineScheduler` seam; tests use virtual time for delays and deadlines.
-- The executor and its immutable `Configuration` now conform to checked `Sendable`.
-  An injected `sessionIdProvider` must be an `@Sendable` closure and runs on an arbitrary thread.
-  All execution state stays local to one run;
-  independent concurrent runs need distinct transport clients to isolate session lifetimes.
+Source breaks in this step and their replacements:
+- `AutoMobileTestCase.executePlan()` is now `async throws`. Use `try await executePlan()` from an
+  `async throws` XCTest method. Setup remains synchronous.
+- The synchronous (throwing, non-async) `initialize`, `callTool`, and `readResource` methods are
+  removed from `AutoMobileMCPClient`, `AutoMobileDaemonClient`, and `StreamableHTTPMCPClient`.
+  Await the async methods instead, and implement native async methods in transport doubles.
+  `resetSession()` remains synchronous.
+- `AutoMobilePlanExecutor.init` no longer accepts `sessionIdProvider`. Pass `sessionUuid:` to
+  `execute`, or inject the initializer's `idGenerator` for a fresh id per execution.
+- The public `AutoMobileSession` type (including `shared`, `currentSessionUuid`, `setSessionUuid`,
+  and `setCurrentSessionUuid`) is removed. Keep the id explicitly and pass it to the executor;
+  there is no thread-local or task-local session storage.
 
-The async executor uses an explicit `sessionUuid`, an injected session provider, or a fresh
-`UUID().uuidString` (in that order). The default generator never reads or writes thread-local session
-state; tests can inject `idGenerator`. A custom provider runs once on an arbitrary executor thread.
-That explicit value survives every retry, tool call, recovery context and resumed attempt.
-The synchronous XCTest bridge captures the XCTest thread's legacy identity and passes it explicitly
-before starting its detached task.
-As before, the executor resets the transport session only before a daemon-socket retry, before the
-retry delay; HTTP retries do not reset it. Success, final failure and cancellation never trigger a
-reset. Cancellation during the retry delay preserves the single reset that already happened before
-the delay. Plan app cleanup remains owned by the daemon through the existing cleanup arguments.
+Session identity is one explicit value owned by the executor. The test case generates it once per
+execution with its internal `idGenerator` and passes it to `execute(testMetadata:sessionUuid:)`.
+For direct executor calls, an explicit `sessionUuid` wins; otherwise its injectable `idGenerator`
+creates one id before suspension. That value survives all tool calls, retries, recovery, and resumed
+attempts. The observer tracks test objects and timestamps, without consuming session ids.
+Independent concurrent runs need distinct transport clients to isolate transport session lifetimes.
 
-Daemon preflight and retry ensures run on a dedicated dispatch queue because the synchronous ensurer
-can block. Cancellation releases the await immediately; the background ensure may finish later,
-but its result is ignored and cancellation during retry ensure prevents the subsequent session reset.
+`XCTestCase.defaultTestSuite` is the sole synchronous fetch boundary. XCTest constructs the suite
+before async test bodies run, so loading lazily on first async use cannot order a cold-start suite.
+The private `SynchronousTimingFetch` next to `TestTimingCache` waits for an async resource read on a
+synchronous XCTest thread, using the unchanged five-second default timeout and best-effort logging.
+Never call it from an async context or the cooperative pool. Its awaited path must stay free of
+main-actor/main-queue work; a source guard test enforces that invariant. Ordinary cache reads never
+block on a fetch. The internal cache fetch seam supports hermetic tests without a daemon.
 
-`AutoMobileTestCase.executePlan()` stays synchronous in this step and uses `BlockingAsyncCall` at its
-one execution boundary. Synchronous XCTest bodies normally run on the main thread. The awaited runner
-path must stay free of main-actor and main-queue hops: awaiting such work while blocking the main
-thread would deadlock. Never call the bridge from the cooperative pool or main-actor async code.
-Model timeouts use `withDeadline`: cancellation is requested
-on the losing operation, but an uncooperative provider can remain alive until it returns. The deadline
-returns without joining that operation, and its late response cannot resume the caller again or run
-device tools. The `RecoveryTimeoutError` message is unchanged.
+Timing prefetch preserves existing user-visible ordering: it passes an explicit fresh session id as
+a row filter. No execution session exists at suite construction, so that filter matches no recorded
+runs today. Omitting it would activate timing ordering and needs a separate owner decision (D-needed).
+The general execution blocking bridge and legacy synchronous daemon connection adapter are deleted.
 
-PR 3 makes the test case async, moves session identity ownership fully into the executor, migrates the
-remaining synchronous timing/resource clients and transport tests, and deletes `BlockingAsyncCall`
-and the sync client wrappers. No dates are promised.
+Earlier steps made `AutoMobilePlanExecutor.execute` async throwing, `PlanRecoveryHandler.attemptRecovery`
+and `RecoveryConfigProviding` async nonthrowing, and removed `asyncBridge` and the semaphore recovery
+bridge. Cancellation propagates as `CancellationError` without retry or recovery. Daemon preflight
+and retry ensures still run on a dedicated dispatch queue; cancellation releases the await and
+ignores a late ensure result. Only a daemon-socket retry resets the transport session, before its
+virtual-testable delay; success, final failure, cancellation, and HTTP retries do not reset it.
+Model deadlines return without joining uncooperative providers and discard late responses.
 
 ## Configuration
 
@@ -190,8 +183,8 @@ Example scheme argument values:
 # Build the package
 swift build
 
-# Run tests
-swift test
+# Run hermetic async/session/timing tests; CI disables shared suite timing I/O
+CI=1 swift test --filter 'AsyncExecutorTests|AsyncSourceInvariantTests|TestTimingCacheTests|AsyncDaemonTransportTests|AsyncHTTPTransportTests|AutoMobileDaemonClientTests|StreamableHTTPSSETests|AsyncProtocolWitnessTests|MCPConcurrencyTests'
 
 # Build for iOS
 xcodebuild -scheme XCTestRunner -destination 'platform=iOS Simulator,name=iPhone 15'
@@ -225,7 +218,7 @@ import XCTest
 import XCTestRunner
 
 final class RemindersLaunchPlanTests: XCTestCase {
-    func testLaunchRemindersPlan() throws {
+    func testLaunchRemindersPlan() async throws {
         // Constructs an AutoMobilePlanExecutor with the bundled plan and an MCP fake.
     }
 }

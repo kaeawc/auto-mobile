@@ -238,21 +238,20 @@ final class AsyncDaemonTransportTests: XCTestCase {
         XCTAssertEqual(connection.sends.count, 0)
     }
 
-    func testSyncWrapperSuccessOverNativeAsyncSeam() async throws {
+    func testNativeAsyncSuccess() async throws {
         let connection = AsyncFakeDaemonConnection(autoReply: true)
         let (client, _) = makeClient([connection])
-        // The synchronous closure runs on a GCD thread, never the async XCTest executor.
-        let result = try await runSyncTransportTest { try client.callTool(name: "observe", arguments: [:], timeout: 5) }
+        let result = try await client.callTool(name: "observe", arguments: [:], timeout: 5)
         XCTAssertEqual(result.text, "ok")
         XCTAssertEqual(connection.sends.count, 1)
     }
 
-    func testSyncWrapperDeadlineUsesOnlyVirtualTime() async throws {
+    func testNativeAsyncDeadlineUsesOnlyVirtualTime() async throws {
         let scheduler = VirtualDeadlineScheduler()
         let connection = AsyncFakeDaemonConnection()
         let (client, _) = makeClient([connection], scheduler: scheduler)
         let task = Task {
-            try await runSyncTransportTest { try client.callTool(name: "observe", arguments: [:], timeout: 5) }
+            try await client.callTool(name: "observe", arguments: [:], timeout: 5)
         }
         try await connection.receives.wait(for: 1)
         try await scheduler.registered.wait(for: 1)

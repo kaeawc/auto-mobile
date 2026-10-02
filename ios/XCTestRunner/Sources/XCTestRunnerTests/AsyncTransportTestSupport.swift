@@ -260,11 +260,19 @@ final class AsyncFakeHTTPPerformer: HTTPRequestPerforming, Sendable {
     func reply(_ index: Int, session: String = "s1", status: Int = 200, text: String = "ok") -> Bool {
         let exchange = captured[index]
         let id = Self.requestId(exchange.request)
+        return reply(
+            index, data: TransportFixtures.httpReply(id: id, text: text), status: status,
+            headers: ["Content-Type": "application/json", "mcp-session-id": session]
+        )
+    }
+
+    @discardableResult
+    func reply(_ index: Int, data: Data, status: Int = 200, headers: [String: String]) -> Bool {
+        let exchange = captured[index]
         return exchange.cell.resume(returning: HTTPExchange(
-            data: TransportFixtures.httpReply(id: id, text: text),
+            data: data,
             response: HTTPURLResponse(
-                url: exchange.request.url!, statusCode: status, httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "application/json", "mcp-session-id": session]
+                url: exchange.request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers
             )!
         ))
     }
@@ -310,19 +318,6 @@ enum TransportFixtures {
             "{\"jsonrpc\":\"2.0\",\"id\":\(id),\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"\(text)\"}]}}"
                 .utf8
         )
-    }
-}
-
-/// Exercises the temporary blocking wrappers on a GCD thread so the async test executor stays free.
-func runSyncTransportTest<Value: Sendable>(
-    _ operation: @escaping @Sendable () throws -> Value
-)
-    async throws -> Value
-{
-    try await withCheckedThrowingContinuation { continuation in
-        DispatchQueue.global().async {
-            continuation.resume(with: Result { try operation() })
-        }
     }
 }
 

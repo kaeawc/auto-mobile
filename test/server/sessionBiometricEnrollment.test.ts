@@ -53,6 +53,84 @@ describe("runSessionBiometricMutation", () => {
     }
   });
 
+  test("does not cache enrollment, mutate, or restore when tracked setup is refused", async () => {
+    const restored: string[] = [];
+    const manager = new SessionManager(
+      new FakeTimer(),
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+      () => ({ restore: async () => {} }),
+      () => ({ restore: async (enrollment) => restored.push(enrollment) }),
+    );
+    const finished = Promise.withResolvers<void>();
+    let mutationStarted = false;
+    try {
+      await manager.createSession("session-1", "sim-1", "ios");
+      const pendingMutation = runSessionBiometricMutation(
+        manager,
+        "session-1",
+        "sim-1",
+        undefined,
+        async () => {
+          await finished.promise;
+        },
+      );
+      const release = manager.releaseSession("session-1");
+
+      await expect(
+        runSessionBiometricMutation(manager, "session-1", "sim-1", "enrolled", async () => {
+          mutationStarted = true;
+        }),
+      ).rejects.toThrow("began releasing before the mutation started");
+
+      const enrollment = manager.getBiometricEnrollment("session-1");
+      finished.resolve();
+      await pendingMutation;
+      await release;
+
+      expect(enrollment).toBeUndefined();
+      expect(mutationStarted).toBe(false);
+      expect(restored).toEqual([]);
+    } finally {
+      finished.resolve();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("keeps enrollment and restores it when an admitted mutation throws", async () => {
+    const restored: string[] = [];
+    const manager = new SessionManager(
+      new FakeTimer(),
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+      () => ({ restore: async () => {} }),
+      () => ({ restore: async (enrollment) => restored.push(enrollment) }),
+    );
+    try {
+      await manager.createSession("session-1", "sim-1", "ios");
+
+      await expect(
+        runSessionBiometricMutation(manager, "session-1", "sim-1", "not_enrolled", async () => {
+          expect(manager.getBiometricEnrollment("session-1")).toEqual({
+            initialEnrollment: "not_enrolled",
+          });
+          throw new Error("mutation failed after modifying enrollment");
+        }),
+      ).rejects.toThrow("mutation failed after modifying enrollment");
+
+      expect(manager.getBiometricEnrollment("session-1")).toEqual({
+        initialEnrollment: "not_enrolled",
+      });
+      expect(restored).toEqual([]);
+
+      await manager.releaseSession("session-1");
+
+      expect(restored).toEqual(["not_enrolled"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("does not mutate an old simulator after the session rebinds", async () => {
     const manager = new SessionManager(
       new FakeTimer(),

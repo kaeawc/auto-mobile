@@ -1,3 +1,8 @@
+import type {
+  StreamSubscriptionEndReason,
+  StreamSubscriptionKind,
+} from "./streamSubscriptionPolicy";
+
 /**
  * Wire types for the local video-stream relay socket (`~/.auto-mobile/video-stream.sock`).
  *
@@ -10,6 +15,24 @@
  * This is the local live-mirroring path. It is deliberately separate from the WebRTC/WHIP path,
  * which publishes to a remote coordination server for browser viewers and cannot be consumed
  * locally.
+ *
+ * Admission still requires a live session and a device unowned or owned by that session.
+ * An owning subscriber is an owner; an unowned-device subscriber is a read-only viewer. Viewers
+ * survive ownership changes, and a live owner losing ownership downgrades to viewer. Either kind
+ * ends when its own session ends (session_ended), the device is removed (device_removed), its
+ * identity is quarantined (identity_quarantined), or the daemon closes (daemon_shutdown).
+ * Auth-off admits with owner semantics and skips ownership reconciliation and its notices.
+ * Subscribe-time quality/fps/bitrate hints work for both kinds and can start/retain shared capture.
+ * The relay has no post-subscribe controls: all extra lines are ignored without a reply (writing
+ * JSON into a continuing binary stream would corrupt framing); viewers cannot send controls.
+ *
+ * Additive subscription notices use a 12-byte packet header: big-endian int64 ptsAndFlags with
+ * bit 61 set, CONFIG (63), KEY (62), heartbeat (60) and dropped-frames (59) clear, code in bits
+ * 0-58, followed by big-endian int32 zero payload length. Codes: 1=downgraded_to_viewer,
+ * 2=device_removed, 3=identity_quarantined, 4=daemon_shutdown, 5=session_ended. Old clients ignore
+ * the empty non-CONFIG payload. Downgrade sends only this packet and keeps flowing. End sends
+ * this packet then a terminal JSON line and closes; pending/pre-ack sockets get only JSON.
+ * To resume after an end, subscribe again on a fresh socket and pass admission again.
  */
 
 export type VideoStreamAction = "subscribe" | "unsubscribe";
@@ -84,7 +107,11 @@ export interface VideoStreamSocketResponse {
    * to its prior per-platform stall policy.
    */
   heartbeatMs?: number;
-  /** Final JSON line after authorization is revoked; the socket then ends. */
+  /** Current owner/viewer kind, on the subscribe ack and terminal line. */
+  subscriptionKind?: StreamSubscriptionKind;
+  /** Typed lifecycle/authentication end reason; present on terminal lines. */
+  reason?: StreamSubscriptionEndReason;
+  /** Final JSON line after subscription ends; the socket then ends. */
   terminal?: boolean;
   error?: string;
 }

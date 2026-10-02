@@ -1,3 +1,4 @@
+import type { StreamSubscriptionIdentity } from "./streamSubscriptionPolicy";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { ActionableError } from "../models";
 import { DaemonState } from "./daemonState";
@@ -52,6 +53,8 @@ export interface StreamSocketAuthenticator {
    * device bound to a different session.
    */
   authorize(input: StreamAuthorizeInput): void;
+  /** Structured live identity/ownership query; does not alter admission authorization. */
+  resolveSubscriptionIdentity?(input: StreamAuthorizeInput): StreamSubscriptionIdentity;
   /** Canonical base identity for lease ownership, when available. */
   resolveSessionIdentity?(sessionUuid?: string): string | undefined;
   /** Whether caller identity is verified; absent implementations default to enforced. */
@@ -100,6 +103,44 @@ export class SessionScopedStreamAuthenticator implements StreamSocketAuthenticat
     return sessionManager
       ? (resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid)
       : uuid;
+  }
+
+  resolveSubscriptionIdentity({
+    sessionUuid,
+    deviceId,
+  }: StreamAuthorizeInput): StreamSubscriptionIdentity {
+    if (!authEnforced(this.env)) {
+      return { authEnabled: false, sessionExists: false, ownsDevice: false };
+    }
+    const uuid = typeof sessionUuid === "string" ? sessionUuid.trim() : "";
+    const manager = this.resolveSessionManager();
+    if (!uuid || !manager) {
+      return { authEnabled: true, sessionExists: false, ownsDevice: false };
+    }
+    const base = resolveToolSelectionBaseSessionUuid(uuid, manager) ?? uuid;
+    const session = manager.getSession(base);
+    const sessionExists = !!session && !isSessionReleasing(manager, base, session);
+    return {
+      authEnabled: true,
+      sessionExists,
+      ownsDevice: sessionExists && this.sessionOwnsDevice({ manager, base, deviceId }),
+    };
+  }
+
+  private sessionOwnsDevice({
+    manager,
+    base,
+    deviceId,
+  }: {
+    manager: StreamAuthSessionManager;
+    base: string;
+    deviceId?: string;
+  }): boolean {
+    const owner = deviceId ? manager.getSessionForDevice(deviceId) : null;
+    if (!owner) {
+      return false;
+    }
+    return (resolveToolSelectionBaseSessionUuid(owner, manager) ?? owner) === base;
   }
 
   authorize({ sessionUuid, deviceId, requireOwnership }: StreamAuthorizeInput): void {

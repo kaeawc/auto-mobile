@@ -1,3 +1,15 @@
+import { SessionReleaseBroadcaster } from "../server/sessionReleaseBroadcast";
+import {
+  decideLifecycleEvent,
+  decideOwnershipChange,
+  subscriptionKindForIdentity,
+  type StreamSubscriptionKind,
+  type StreamSubscriptionEndReason,
+} from "./streamSubscriptionPolicy";
+import {
+  getDaemonStreamDeviceLifecycleEmitter,
+  type StreamDeviceLifecycleEvents,
+} from "./streamDeviceLifecycleEvents";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
@@ -38,6 +50,7 @@ import {
   encodePacket,
   encodePtsAndFlags,
   encodeStreamHeader,
+  encodeSubscriptionNotice,
 } from "./videoStreamFraming";
 import type { VideoStreamSocketRequest, VideoStreamSocketResponse } from "./videoStreamSocketTypes";
 
@@ -82,6 +95,9 @@ export interface VideoStreamSocketServerDependencies {
   /** Monotonic microseconds, used for packet presentation timestamps. */
   nowUs: () => bigint;
   ownershipChanges?: () => DeviceOwnershipChanges | null;
+  deviceLifecycle?: () => StreamDeviceLifecycleEvents | null;
+  /** Also covers device-less viewer sessions, whose release changes no device owner. */
+  sessionReleases?: { subscribe(callback: (sessionId: string) => void): () => void };
   /** Maximum time a subscriber may wait for outbound drain. */
   outboundStallTimeoutMs?: number;
 }
@@ -295,14 +311,24 @@ function subscribeFailureResponse(
  * start a second encoder; the capture stops after its last subscriber has been idle briefly.
  */
 export class VideoStreamSocketServer extends BaseSocketServer {
+  private readonly connections = new Set<Socket>();
   private readonly captures = new Map<string, DeviceCapture>();
   private readonly pendingStops = new Map<string, Promise<void>>();
   private readonly socketDeviceIds = new Map<Socket, string>();
   private readonly socketSessionUuids = new Map<Socket, string | undefined>();
+  private readonly socketSubscriptionKinds = new Map<Socket, StreamSubscriptionKind>();
+  private readonly acknowledgedSubscribers = new Set<Socket>();
+  private removeDeviceRemovedListener: (() => void) | null = null;
+  private removeIdentityChangedListener: (() => void) | null = null;
+  private removeSessionReleaseListener: (() => void) | null = null;
   private removeOwnershipListener: (() => void) | null = null;
   private readonly outboundStalls = new Map<
     Socket,
     { timeout: NodeJS.Timeout; onDrain: () => void }
+  >();
+  private readonly endingSockets = new Map<
+    Socket,
+    { timeout: NodeJS.Timeout; onClose: () => void }
   >();
   private readonly subscribing = new Set<Socket>();
   private closed = false;
@@ -343,18 +369,67 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.deps.ownershipChanges?.()?.onDeviceOwnershipChange((deviceId) => {
         this.reauthorizeSubscribers(deviceId);
       }) ?? null;
+    this.removeSessionReleaseListener =
+      this.deps.sessionReleases?.subscribe(() => {
+        // A viewer may watch a device other than its session's bound device, or have no binding.
+        for (const deviceId of this.captures.keys()) {
+          this.reauthorizeSubscribers(deviceId);
+        }
+      }) ?? null;
+    const lifecycle = this.deps.deviceLifecycle?.();
+    this.removeDeviceRemovedListener =
+      lifecycle?.onDeviceRemoved((deviceId) => {
+        this.endDeviceSubscribers(deviceId, "device_removed");
+      }) ?? null;
+    this.removeIdentityChangedListener =
+      lifecycle?.onDeviceIdentityChanged((deviceId) => {
+        if (!this.captures.has(deviceId)) {
+          return;
+        }
+        try {
+          this.admissionGate.assertDeviceActionable(deviceId, VIDEO_STREAM_PURPOSE);
+        } catch (error) {
+          // The admission gate is the authoritative quarantine check; lift/invalidation is a no-op.
+          logger.warn(
+            `[VideoStream] identity no longer actionable for ${deviceId}: ${errorMessage(error)}`,
+          );
+          this.endDeviceSubscribers(deviceId, "identity_quarantined");
+        }
+      }) ?? null;
   }
 
   override async close(): Promise<void> {
     this.closed = true;
     this.removeOwnershipListener?.();
     this.removeOwnershipListener = null;
+    this.removeSessionReleaseListener?.();
+    this.removeSessionReleaseListener = null;
+    this.removeDeviceRemovedListener?.();
+    this.removeIdentityChangedListener?.();
+    this.removeDeviceRemovedListener = null;
+    this.removeIdentityChangedListener = null;
+    for (const deviceId of this.captures.keys()) {
+      this.endDeviceSubscribers(deviceId, "daemon_shutdown");
+    }
     await Promise.all([...this.captures.keys()].map((deviceId) => this.stopCapture(deviceId)));
     await Promise.all(this.pendingStops.values());
     this.socketDeviceIds.clear();
     this.socketSessionUuids.clear();
+    this.socketSubscriptionKinds.clear();
+    this.acknowledgedSubscribers.clear();
     this.subscribing.clear();
-    await super.close();
+    // Subscription state can be detached before the transport finishes closing. Flush live
+    // peers, then destroy even half-open connections, including unresolved/idle subscribers.
+    for (const socket of this.connections) {
+      this.endSocketBounded(socket);
+    }
+    try {
+      await super.close();
+    } finally {
+      for (const { onClose } of this.endingSockets.values()) {
+        onClose();
+      }
+    }
   }
 
   private isStreamingOrSubscribing(socket: Socket): boolean {
@@ -362,9 +437,14 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   }
 
   protected async processLine(socket: Socket, line: string): Promise<void> {
+    if (socket.destroyed) {
+      return;
+    }
     if (this.isStreamingOrSubscribing(socket)) {
-      // Already streaming; clients send nothing else, so ignore stray input rather than
-      // interrupting the stream.
+      // Policy classifies ALL post-handshake lines (even a second subscribe) as mutating for a
+      // viewer. The relay has no control protocol: ignore them for both kinds without a reply.
+      // assertMayControl provides a typed guard to transports with controls; a JSON error here
+      // would corrupt the continuing binary framing. Subscribe-time hints remain admission data.
       return;
     }
 
@@ -429,39 +509,80 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.admissionGate.assertDeviceActionable(device.deviceId, VIDEO_STREAM_PURPOSE);
       authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
       const capture = await this.attach(socket, device, request);
-      // Ownership can change while the source starts. A revoked pending subscriber
-      // must not receive a success acknowledgement or any binary stream data.
-      if (!this.socketDeviceIds.has(socket)) {
-        return;
+      if (capture) {
+        this.acknowledgeSubscriber(socket, capture, request);
       }
-      authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
-
-      this.sendJson(socket, {
-        id: request.id,
-        type: "video_stream_response",
-        success: true,
-        action: "subscribe",
-        deviceId: device.deviceId,
-        framing: "h264",
-        heartbeatMs: HEARTBEAT_INTERVAL_MS,
-      } satisfies VideoStreamSocketResponse);
-
-      socket.write(encodeStreamHeader(capture.size?.width ?? 0, capture.size?.height ?? 0));
-
-      // The cache belongs to capture.generation. A joiner held for a future configuration must
-      // not receive its old parameter sets or GOP, even though existing viewers still can.
-      this.primeAcknowledgedSubscriber(capture, socket);
     } catch (error) {
       logger.warn(`[VideoStream] subscribe failed: ${error}`);
       this.detach(socket);
-      this.sendJson(socket, subscribeFailureResponse(request.id, error));
-      socket.end();
+      if (!socket.destroyed) {
+        this.sendJson(socket, subscribeFailureResponse(request.id, error));
+        this.endSocketBounded(socket);
+      }
     } finally {
       this.subscribing.delete(socket);
     }
   }
 
+  /** Reconcile startup races before committing the JSON-to-binary transition. */
+  private acknowledgeSubscriber(
+    socket: Socket,
+    capture: DeviceCapture,
+    request: VideoStreamSocketRequest,
+  ): void {
+    // Ownership can change while the source starts. A revoked pending subscriber
+    // must not receive a success acknowledgement or any binary stream data.
+    if (!this.socketDeviceIds.has(socket)) {
+      return;
+    }
+    if (!this.checkSubscriberActionable(socket, capture.device.deviceId)) {
+      return;
+    }
+    if (this.authenticator.resolveSubscriptionIdentity) {
+      this.reconcileSubscriber(socket, capture.device.deviceId);
+    } else {
+      authorizeResolvedDevice(this.authenticator, request.sessionUuid, capture.device.deviceId);
+    }
+    if (!this.socketDeviceIds.has(socket) || socket.destroyed) {
+      return;
+    }
+
+    this.sendJson(socket, {
+      id: request.id,
+      type: "video_stream_response",
+      success: true,
+      action: "subscribe",
+      deviceId: capture.device.deviceId,
+      framing: "h264",
+      heartbeatMs: HEARTBEAT_INTERVAL_MS,
+      subscriptionKind: this.socketSubscriptionKinds.get(socket),
+    } satisfies VideoStreamSocketResponse);
+
+    if (socket.destroyed) {
+      this.detach(socket);
+      return;
+    }
+    socket.write(encodeStreamHeader(capture.size?.width ?? 0, capture.size?.height ?? 0));
+    this.acknowledgedSubscribers.add(socket);
+
+    // The cache belongs to capture.generation. A joiner held for a future configuration must
+    // not receive its old parameter sets or GOP, even though existing viewers still can.
+    this.primeAcknowledgedSubscriber(capture, socket);
+  }
+
+  protected override onConnectionEstablished(socket: Socket): void {
+    if (this.closed) {
+      socket.destroy();
+      return;
+    }
+    this.connections.add(socket);
+    // Bun may never emit finish/close for end() with queued notices after a peer disconnects.
+    // A peer FIN cannot drain those writes; do not leave shutdown waiting on that socket.
+    socket.once("end", () => socket.destroy());
+  }
+
   protected override onConnectionClose(socket: Socket): void {
+    this.connections.delete(socket);
     this.subscribing.delete(socket);
     this.detach(socket);
   }
@@ -477,28 +598,135 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       return;
     }
     for (const socket of [...capture.pendingSubscribers, ...capture.subscribers]) {
-      if (!this.socketDeviceIds.has(socket)) {
-        continue;
+      this.reconcileSubscriber(socket, deviceId);
+    }
+  }
+
+  private reconcileSubscriber(socket: Socket, deviceId: string): void {
+    if (!this.socketDeviceIds.has(socket)) {
+      return;
+    }
+    const kind = this.socketSubscriptionKinds.get(socket) ?? "owner";
+    const input = { sessionUuid: this.socketSessionUuids.get(socket), deviceId };
+    try {
+      const identity = this.authenticator.resolveSubscriptionIdentity?.(input);
+      if (!identity) {
+        // Older injected authenticators retain strict revocation, without parsing error text.
+        this.authenticator.authorize({ ...input, requireOwnership: true });
+        return;
       }
-      try {
-        this.authenticator.authorize({
-          sessionUuid: this.socketSessionUuids.get(socket),
-          deviceId,
-          requireOwnership: true,
-        });
-      } catch (error) {
-        logger.warn(`[VideoStream] revoking subscriber for ${deviceId}: ${error}`);
+      const decision = decideOwnershipChange({ ...identity, kind });
+      if (decision.action === "end") {
+        this.endSubscriber(socket, deviceId, decision.reason);
+      } else if (decision.action === "downgrade") {
+        this.socketSubscriptionKinds.set(socket, "viewer");
+        logger.info(
+          `[VideoStream] downgraded subscriber: deviceId=${deviceId} kind=viewer reason=downgrade`,
+        );
+        if (this.acknowledgedSubscribers.has(socket) && !socket.destroyed) {
+          socket.write(encodeSubscriptionNotice("downgraded_to_viewer"));
+        }
+      }
+    } catch (error) {
+      // Fail closed; endSubscriber emits the warning without exposing the session identity.
+      this.endSubscriber(socket, deviceId, "session_ended", { authorizationError: error });
+    }
+  }
+
+  private endDeviceSubscribers(
+    deviceId: string,
+    event: Exclude<StreamSubscriptionEndReason, "session_ended">,
+  ): void {
+    const capture = this.captures.get(deviceId);
+    if (!capture) {
+      return;
+    }
+    for (const socket of [...capture.pendingSubscribers, ...capture.subscribers]) {
+      const kind = this.socketSubscriptionKinds.get(socket) ?? "owner";
+      this.endSubscriber(socket, deviceId, decideLifecycleEvent({ kind, event }).reason);
+    }
+  }
+
+  private endSubscriber(
+    socket: Socket,
+    deviceId: string,
+    reason: StreamSubscriptionEndReason,
+    options: { authorizationError?: unknown } = {},
+  ): void {
+    if (!this.socketDeviceIds.has(socket) && !this.subscribing.has(socket)) {
+      return;
+    }
+    const kind = this.socketSubscriptionKinds.get(socket);
+    const message = `[VideoStream] ending subscriber: deviceId=${deviceId} kind=${kind} reason=${reason}`;
+    if (
+      "authorizationError" in options ||
+      reason === "device_removed" ||
+      reason === "identity_quarantined"
+    ) {
+      logger.warn(message);
+    } else {
+      logger.info(message);
+    }
+    try {
+      if (!socket.destroyed) {
+        if (this.acknowledgedSubscribers.has(socket)) {
+          socket.write(encodeSubscriptionNotice(reason));
+        }
         this.sendJson(socket, {
           type: "video_stream_response",
           success: false,
           action: "unsubscribe",
           deviceId,
           terminal: true,
-          error: `Video stream ended: authorization changed for ${deviceId}: ${errorMessage(error)}`,
+          reason,
+          subscriptionKind: this.socketSubscriptionKinds.get(socket),
+          error: `Video stream ended: ${reason} for ${deviceId}`,
         } satisfies VideoStreamSocketResponse);
-        socket.end();
-        this.detach(socket);
+        this.endSocketBounded(socket);
       }
+    } catch (error) {
+      logger.warn(`[VideoStream] failed to end subscriber for ${deviceId}: ${errorMessage(error)}`);
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    } finally {
+      this.subscribing.delete(socket);
+      this.detach(socket);
+    }
+  }
+
+  /** Ending must retain its own drain bound after detach clears the media stall timer. */
+  private endSocketBounded(socket: Socket): void {
+    if (socket.destroyed || this.endingSockets.has(socket)) {
+      return;
+    }
+    const onClose = (): void => {
+      const ending = this.endingSockets.get(socket);
+      if (ending) {
+        this.timer.clearTimeout(ending.timeout);
+        this.endingSockets.delete(socket);
+      }
+      socket.off("close", onClose);
+    };
+    const timeout = this.timer.setTimeout(() => {
+      socket.destroy();
+    }, this.deps.outboundStallTimeoutMs ?? OUTBOUND_STALL_TIMEOUT_MS);
+    this.endingSockets.set(socket, { timeout, onClose });
+    socket.once("close", onClose);
+    socket.end();
+    socket.destroySoon();
+  }
+
+  private checkSubscriberActionable(socket: Socket, deviceId: string): boolean {
+    try {
+      this.admissionGate.assertDeviceActionable(deviceId, VIDEO_STREAM_PURPOSE);
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[VideoStream] identity no longer actionable for ${deviceId}: ${errorMessage(error)}`,
+      );
+      this.endSubscriber(socket, deviceId, "identity_quarantined");
+      return false;
     }
   }
 
@@ -506,7 +734,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     socket: Socket,
     device: BootedDevice,
     request: VideoStreamSocketRequest,
-  ): Promise<DeviceCapture> {
+  ): Promise<DeviceCapture | null> {
     if (this.closed) {
       throw new ActionableError("Video stream server is closed");
     }
@@ -523,6 +751,20 @@ export class VideoStreamSocketServer extends BaseSocketServer {
         );
       }
     }
+    // This socket is not registered yet: a pending stop grants no live viewer rights.
+    authorizeResolvedDevice(this.authenticator, request.sessionUuid, deviceId);
+    const subscriptionKind = this.authenticator.resolveSubscriptionIdentity
+      ? subscriptionKindForIdentity(
+          this.authenticator.resolveSubscriptionIdentity({
+            sessionUuid: request.sessionUuid,
+            deviceId,
+          }),
+        )
+      : "owner";
+    this.socketSubscriptionKinds.set(socket, subscriptionKind);
+    if (!this.checkSubscriberActionable(socket, deviceId)) {
+      return null;
+    }
     const existing = this.captures.get(deviceId);
     if (existing) {
       this.clearIdleTimer(existing);
@@ -533,6 +775,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       }
       this.socketDeviceIds.set(socket, deviceId);
       this.socketSessionUuids.set(socket, request.sessionUuid);
+      this.socketSubscriptionKinds.set(socket, subscriptionKind);
       await existing.startup;
       this.promoteSubscriber(existing, socket, true);
       this.scheduleReconfigure(deviceId, existing);
@@ -587,6 +830,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.captures.set(deviceId, capture);
     this.socketDeviceIds.set(socket, deviceId);
     this.socketSessionUuids.set(socket, request.sessionUuid);
+    this.socketSubscriptionKinds.set(socket, subscriptionKind);
 
     capture.startup = (async () => {
       try {
@@ -1198,11 +1442,13 @@ export class VideoStreamSocketServer extends BaseSocketServer {
       this.outboundStalls.delete(socket);
     }
     const deviceId = this.socketDeviceIds.get(socket);
+    this.socketDeviceIds.delete(socket);
+    this.socketSessionUuids.delete(socket);
+    this.socketSubscriptionKinds.delete(socket);
+    this.acknowledgedSubscribers.delete(socket);
     if (!deviceId) {
       return;
     }
-    this.socketDeviceIds.delete(socket);
-    this.socketSessionUuids.delete(socket);
 
     const capture = this.captures.get(deviceId);
     if (!capture) {
@@ -1382,7 +1628,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
     for (const subscriber of [...capture.pendingSubscribers, ...capture.subscribers]) {
       this.detach(subscriber);
-      subscriber.end();
+      this.endSocketBounded(subscriber);
     }
     capture.pendingSubscribers.clear();
     capture.subscribers.clear();
@@ -1488,6 +1734,8 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
       const state = DaemonState.getInstance();
       return state.isInitialized() ? state.getSessionManager() : null;
     },
+    deviceLifecycle: getDaemonStreamDeviceLifecycleEmitter,
+    sessionReleases: SessionReleaseBroadcaster,
     resolveDevice: defaultResolveDevice,
     createCaptureSource: async (options) => {
       // Resolved once per stream, off the frame path. A null jar means the Android source falls

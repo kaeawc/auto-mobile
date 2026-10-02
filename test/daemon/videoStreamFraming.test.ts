@@ -1,3 +1,8 @@
+import {
+  encodeSubscriptionNotice,
+  PACKET_FLAG_SUBSCRIPTION_NOTICE,
+  SUBSCRIPTION_NOTICE_CODES,
+} from "../../src/daemon/videoStreamFraming";
 import { describe, expect, test } from "bun:test";
 import {
   CODEC_ID_H264,
@@ -228,4 +233,16 @@ describe("videoStreamFraming", () => {
       expect(isParameterSetChunk(padded)).toBe(true);
     });
   });
+});
+
+test("subscription notice codes occupy empty non-CONFIG, non-KEY packets safe for old Kotlin decoders", () => {
+  for (const [notice, code] of Object.entries(SUBSCRIPTION_NOTICE_CODES)) {
+    const packet = encodeSubscriptionNotice(notice as keyof typeof SUBSCRIPTION_NOTICE_CODES);
+    expect(packet.length).toBe(12);
+    expect(packet.readInt32BE(8)).toBe(0);
+    expect(packet.readBigUInt64BE(0)).toBe(PACKET_FLAG_SUBSCRIPTION_NOTICE | BigInt(code));
+    expect(
+      packet.readBigUInt64BE(0) & ((1n << 63n) | (1n << 62n) | (1n << 60n) | (1n << 59n)),
+    ).toBe(0n);
+  }
 });

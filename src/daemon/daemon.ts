@@ -1,3 +1,4 @@
+import { getDaemonStreamDeviceLifecycleEmitter } from "./streamDeviceLifecycleEvents";
 import { isSessionReleasing } from "./sessionReleaseState";
 import { ObserverSessionRegistry } from "./observerSessionRegistry";
 import { DefaultObservationInitialFrameCoordinator } from "./observationInitialFrameCoordinator";
@@ -593,10 +594,13 @@ export class Daemon {
         this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit),
       onDeviceReady: (deviceId) => this.onDeviceReadyForSessionRegistry(deviceId),
       recoveryPolicy: recoveryConfiguration.policy,
-      onDeviceFramesInvalidated: (deviceId) =>
+      onDeviceFramesInvalidated: (deviceId) => {
         // Full: pool callbacks signal new incarnations or untrusted runtime identity.
-        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId),
+        this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
+        getDaemonStreamDeviceLifecycleEmitter().deviceIdentityChanged(deviceId);
+      },
       onDeviceRemoved: (deviceId, platform) => {
+        getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
         defaultDisplayInventoryProvider.invalidate(deviceId);
         DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);

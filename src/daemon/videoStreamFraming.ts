@@ -1,3 +1,5 @@
+import type { StreamSubscriptionEndReason } from "./streamSubscriptionPolicy";
+
 /**
  * Encoders for the `VideoStreamProtocol` framing, mirroring
  * `android/video-server/src/main/kotlin/dev/jasonpearson/automobile/video/VideoStreamProtocol.kt`.
@@ -158,4 +160,26 @@ function firstNalUnitType(chunk: Buffer): number | null {
     }
   }
   return null;
+}
+
+/**
+ * Bit 61 on a non-CONFIG, non-KEY, zero-payload packet is a subscription notice. Bits 0-58
+ * contain the code, not a PTS; bits 60/59 stay clear. VideoStreamParser.kt reads rotation only
+ * on CONFIG, and H264Decoder.kt skips empty payloads, so old Kotlin clients safely ignore it.
+ */
+export const PACKET_FLAG_SUBSCRIPTION_NOTICE = 1n << 61n;
+export const SUBSCRIPTION_NOTICE_CODES = {
+  downgraded_to_viewer: 1,
+  device_removed: 2,
+  identity_quarantined: 3,
+  daemon_shutdown: 4,
+  session_ended: 5,
+} as const;
+export function encodeSubscriptionNotice(
+  notice: StreamSubscriptionEndReason | "downgraded_to_viewer",
+): Buffer {
+  return encodePacketHeader(
+    PACKET_FLAG_SUBSCRIPTION_NOTICE | BigInt(SUBSCRIPTION_NOTICE_CODES[notice]),
+    0,
+  );
 }

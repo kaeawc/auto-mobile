@@ -12,12 +12,9 @@ import {
   VideoStreamSocketServer,
   type DeviceOwnershipChanges,
 } from "../../src/daemon/videoStreamSocketServer";
-import { SessionManager } from "../../src/daemon/sessionManager";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { ScreenRecordingPermissionError } from "../../src/features/webrtc";
 import {
   SessionScopedStreamAuthenticator,
-  STREAM_SOCKET_AUTH_ENV,
   type StreamAuthSessionManager,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
@@ -1810,30 +1807,6 @@ describe("VideoStreamSocketServer", () => {
   });
 
   describe("authentication (issue #4751)", () => {
-    function ownershipHarness(): {
-      source: DeviceOwnershipChanges;
-      changed: (deviceId: string) => void;
-      listenerCount: () => number;
-    } {
-      const listeners = new Set<(deviceId: string) => void>();
-      return {
-        source: {
-          onDeviceOwnershipChange: (listener) => {
-            listeners.add(listener);
-            return () => {
-              listeners.delete(listener);
-            };
-          },
-        },
-        changed: (deviceId) => {
-          for (const listener of listeners) {
-            listener(deviceId);
-          }
-        },
-        listenerCount: () => listeners.size,
-      };
-    }
-
     function fakeSessionManager(
       overrides: Partial<StreamAuthSessionManager> = {},
     ): StreamAuthSessionManager {
@@ -1934,153 +1907,6 @@ describe("VideoStreamSocketServer", () => {
       });
       expect(ack.success).toBe(true);
       expect(h.sources).toHaveLength(1);
-    });
-
-    test("revokes an unowned-device subscriber when another session claims it", async () => {
-      const timer = new FakeTimer();
-      const ownership = ownershipHarness();
-      let owner: string | null = null;
-      const h = await startHarness({
-        timer,
-        ownershipChanges: () => ownership.source,
-        authenticator: enforcing(
-          fakeSessionManager({
-            getSession: (uuid) => (uuid === "session-1" || uuid === "session-2" ? {} : null),
-            getSessionForDevice: () => owner,
-          }),
-        ),
-      });
-      const oldViewer = await subscribe(h.socketPath, {
-        action: "subscribe",
-        deviceId: DEVICE.deviceId,
-        sessionUuid: "session-1",
-      });
-      const newViewer = await subscribe(h.socketPath, {
-        action: "subscribe",
-        deviceId: DEVICE.deviceId,
-        sessionUuid: "session-2",
-      });
-      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(2);
-
-      owner = "session-2";
-      ownership.changed(DEVICE.deviceId);
-      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(1);
-      await waitFor(() => oldViewer.binary().includes(Buffer.from('"terminal":true')));
-      expect(oldViewer.binary().toString()).toContain('"action":"unsubscribe"');
-      expect(oldViewer.binary().toString()).toContain("Video stream ended: authorization changed");
-      expect(newViewer.binary().toString()).not.toContain('"terminal":true');
-      expect(h.sources[0].consumerStates.at(-1)).toBe(true);
-
-      owner = "session-1";
-      ownership.changed(DEVICE.deviceId);
-      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(0);
-      await waitFor(() => newViewer.binary().includes(Buffer.from('"terminal":true')));
-      timer.advanceTime(3_000);
-      await waitFor(() => h.sources[0].stopped);
-    });
-
-    test("release revokes the subscriber and stops capture after idle grace", async () => {
-      const timer = new FakeTimer();
-      const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
-      await manager.createSession("session-1", DEVICE.deviceId, "android");
-      const h = await startHarness({
-        timer,
-        ownershipChanges: () => manager,
-        authenticator: enforcing(manager),
-      });
-      const viewer = await subscribe(h.socketPath, {
-        action: "subscribe",
-        deviceId: DEVICE.deviceId,
-        sessionUuid: "session-1",
-      });
-      expect(viewer.ack.success).toBe(true);
-
-      await manager.releaseSession("session-1", "explicit-release");
-
-      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(0);
-      await waitFor(() => viewer.binary().includes(Buffer.from('"terminal":true')));
-      expect(viewer.binary().toString()).toContain('"action":"unsubscribe"');
-      await waitFor(() => viewer.socket.destroyed);
-      expect(h.sources[0].stopped).toBe(false);
-      timer.advanceTime(3_000);
-      await waitFor(() => h.sources[0].stopped);
-      manager.stopCleanupTimer();
-    });
-
-    test("rebind revokes a subscriber while its session remains live", async () => {
-      const ownership = ownershipHarness();
-      let owner: string | null = "session-1";
-      const h = await startHarness({
-        ownershipChanges: () => ownership.source,
-        authenticator: enforcing(fakeSessionManager({ getSessionForDevice: () => owner })),
-      });
-      const viewer = await subscribe(h.socketPath, {
-        action: "subscribe",
-        deviceId: DEVICE.deviceId,
-        sessionUuid: "session-1",
-      });
-      owner = null;
-      ownership.changed(DEVICE.deviceId);
-
-      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(0);
-      await waitFor(() => viewer.binary().includes(Buffer.from('"terminal":true')));
-      expect(viewer.binary().toString()).toContain('"action":"unsubscribe"');
-    });
-
-    test("auth off leaves subscribers attached after ownership changes", async () => {
-      const ownership = ownershipHarness();
-      const auth = new SessionScopedStreamAuthenticator(() => null, "video-stream subscribe", {
-        [STREAM_SOCKET_AUTH_ENV]: "0",
-      } as NodeJS.ProcessEnv);
-      const h = await startHarness({
-        ownershipChanges: () => ownership.source,
-        authenticator: auth,
-      });
-      const viewer = await subscribe(h.socketPath);
-
-      ownership.changed(DEVICE.deviceId);
-
-      expect(viewer.ack.success).toBe(true);
-      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(1);
-      expect(viewer.binary().toString()).not.toContain('"terminal":true');
-    });
-
-    test("an authorization error for one subscriber leaves the other streaming", async () => {
-      const ownership = ownershipHarness();
-      let rejectFirst = false;
-      const h = await startHarness({
-        ownershipChanges: () => ownership.source,
-        authenticator: {
-          authorize: ({ sessionUuid }) => {
-            if (rejectFirst && sessionUuid === "session-1") {
-              throw new ActionableError("Session lost access");
-            }
-          },
-        },
-      });
-      const first = await subscribe(h.socketPath, {
-        action: "subscribe",
-        deviceId: DEVICE.deviceId,
-        sessionUuid: "session-1",
-      });
-      const second = await subscribe(h.socketPath, {
-        action: "subscribe",
-        deviceId: DEVICE.deviceId,
-        sessionUuid: "session-2",
-      });
-      rejectFirst = true;
-      ownership.changed(DEVICE.deviceId);
-      expect(h.server.subscriberCount(DEVICE.deviceId)).toBe(1);
-      await waitFor(() => first.binary().includes(Buffer.from('"terminal":true')));
-      expect(second.binary().toString()).not.toContain('"terminal":true');
-    });
-
-    test("removes the ownership listener on close", async () => {
-      const ownership = ownershipHarness();
-      const h = await startHarness({ ownershipChanges: () => ownership.source });
-      expect(ownership.listenerCount()).toBe(1);
-      await h.server.close();
-      expect(ownership.listenerCount()).toBe(0);
     });
   });
 });

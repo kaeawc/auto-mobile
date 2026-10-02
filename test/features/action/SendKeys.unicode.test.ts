@@ -291,14 +291,46 @@ describe("sendKeys Unicode delivery", () => {
     expect(h.adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("Android eventAll coalesces 2,000 mixed grapheme clusters into one insert run", async () => {
+  test("Android eventAll coalesces 2,000 non-ASCII clusters into runs between ASCII key events", async () => {
     const h = createSendKeysHarness(android);
-    const text = "👨‍👩‍👧👍🏽1️⃣🇺🇸e\u0301".repeat(400);
-    expect(segmentGraphemes(text)).toHaveLength(2000);
+    const run = "👨‍👩‍👧👍🏽1️⃣🇺🇸e\u0301".repeat(100);
+    const separators = ["a", "b", "c", "d"];
+    const text = separators.map((separator) => separator + run).join("");
+    expect(segmentGraphemes(text)).toHaveLength(2004);
     expect(await h.executor.type({ action: "type", text, mode: "eventAll" })).toMatchObject({
       success: true,
     });
-    // None has a key-event plan, so eventAllInsertRunEnd coalesces every cluster.
+    // ASCII key-event characters split the input into runs; eventAllInsertRunEnd
+    // coalesces each run of non-key-event clusters into one insert.
+    expect(h.inserted).toHaveLength(4);
+    expect(h.inserted).toEqual(separators.map(() => run));
+    expectWellFormedInserts(h.inserted);
+    expect(h.adb.getExecutedCommands()).toHaveLength(4);
+    expect(h.adb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+      "shell input keyevent KEYCODE_C",
+      "shell input keyevent KEYCODE_D",
+    ]);
+    expect(h.deliveries.filter((delivery) => delivery.kind === "keyevent")).toHaveLength(4);
+    expect(h.deliveries).toEqual(
+      separators.flatMap((separator) => [
+        { kind: "keyevent", text: separator },
+        { kind: "insert", text: run },
+      ]),
+    );
+    expect(h.deliveries.map((delivery) => delivery.text).join("")).toBe(text);
+  });
+
+  test("Android eventAll inserts non-ASCII clusters together via the all-a11y fast path", async () => {
+    const h = createSendKeysHarness(android);
+    const text = "👨‍👩‍👧👍🏽1️⃣🇺🇸e\u0301".repeat(4);
+    expect(segmentGraphemes(text)).toHaveLength(20);
+    // No cluster has a key-event plan, so the all-a11y fast path calls insertGraphemeRun.
+    expect(await h.executor.type({ action: "type", text, mode: "eventAll" })).toMatchObject({
+      success: true,
+      resolvedMode: "a11y",
+    });
     expect(h.inserted).toHaveLength(1);
     expect(h.inserted).toEqual([text]);
     expectWellFormedInserts(h.inserted);

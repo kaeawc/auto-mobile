@@ -1,7 +1,7 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import type { BootedDevice } from "../../models";
-import type { TalkBackResult } from "../../models/AccessibilityResult";
+import type { TalkBackResult, TalkBackBlockingPrompt } from "../../models/AccessibilityResult";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
@@ -14,6 +14,19 @@ const TALKBACK_SERVICE_FALLBACK = `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.TalkB
 const DIALOG_DISMISS_RETRIES = 4; // 1 immediate + 3 × 500ms = 1500ms max wait
 const DIALOG_DISMISS_DELAY_MS = 500;
 const UIAUTOMATOR_DUMP_TIMEOUT_MS = 30_000;
+
+/** Foreground activity identifies a runtime prompt, not the requested permission. */
+export function isTalkBackRuntimePermissionPrompt(app: {
+  packageName: string;
+  activityName?: string;
+}): boolean {
+  // Accept the AOSP package too: it hosts the same GrantPermissionsActivity.
+  return (
+    (app.packageName === "com.google.android.permissioncontroller" ||
+      app.packageName === "com.android.permissioncontroller") &&
+    app.activityName?.split(".").at(-1) === "GrantPermissionsActivity"
+  );
+}
 
 export class TalkBackToggle {
   private readonly adb: AdbExecutor;
@@ -63,6 +76,8 @@ export class TalkBackToggle {
     // path AND the ADB fallback both fail) is wrapped into a typed result rather
     // than propagating raw out of toggle(), matching the graceful contract of the
     // other paths (#3921).
+    let blockingPrompt: TalkBackBlockingPrompt | undefined;
+    let warning: string | undefined;
     try {
       if (enabled) {
         await this.enableTalkBack(serviceComponent!);
@@ -77,6 +92,22 @@ export class TalkBackToggle {
             currentState: talkBackCurrentlyEnabled,
             reason,
           };
+        }
+        blockingPrompt = await this.readBlockingPrompt();
+        if (blockingPrompt) {
+          // #6499 device check, 2026-09-25: API 36 google_apis arm64,
+          // HEAD 21791e9da, GrantPermissionsActivity showed "Allow Android
+          // Accessibility Suite to send you notifications?" with
+          // permission_allow_button / permission_deny_button. Back did not
+          // dismiss it; the caller used tapOn on permission_deny_button.
+          warning =
+            "A system runtime permission prompt is covering the screen after enabling TalkBack. " +
+            "On API 36 this was observed as the Android Accessibility Suite (TalkBack) notifications permission. " +
+            "The foreground activity does not identify the requested permission. Nothing was tapped. " +
+            "You must answer it: use observe to inspect the prompt, then tapOn its permission_allow_button or permission_deny_button.";
+          logger.warn(`[TalkBackToggle] ${warning}`, blockingPrompt);
+        } else if (dialogResult === "not-found") {
+          logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");
         }
       } else {
         await this.disableTalkBack();
@@ -104,7 +135,29 @@ export class TalkBackToggle {
       supported: true,
       applied: confirmedEnabled === enabled,
       currentState: confirmedEnabled,
+      ...(blockingPrompt ? { blockingPrompt, warning } : {}),
     };
+  }
+
+  private async readBlockingPrompt(): Promise<TalkBackBlockingPrompt | undefined> {
+    try {
+      const app = await this.adb.getForegroundApp();
+      if (!app) {
+        logger.debug("[TalkBackToggle] Foreground app unavailable; no prompt reported");
+        return undefined;
+      }
+      if (app.activityName && isTalkBackRuntimePermissionPrompt(app)) {
+        return {
+          kind: "runtime-permission",
+          package: app.packageName,
+          activity: app.activityName,
+        };
+      }
+    } catch (error) {
+      // Prompt detection is advisory; enabled-state read-back remains the source of truth.
+      logger.debug("[TalkBackToggle] Foreground prompt read failed:", errorMessage(error));
+    }
+    return undefined;
   }
 
   /**
@@ -306,7 +359,6 @@ export class TalkBackToggle {
     if (dialogSeen || !dumpSucceeded) {
       return "could-not-confirm";
     }
-    logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");
     return "not-found";
   }
 

@@ -58,7 +58,14 @@ export function registerAccessibilityTools() {
           }
           const enabled = talkback.currentState ?? false;
           const service = enabled ? ("talkback" as const) : ("unknown" as const);
-          return createStructuredToolResponse({ enabled, service });
+          return createStructuredToolResponse({
+            enabled,
+            service,
+            ...(talkback.warning !== undefined ? { warning: talkback.warning } : {}),
+            ...(talkback.blockingPrompt !== undefined
+              ? { blockingPrompt: talkback.blockingPrompt }
+              : {}),
+          });
         } catch (error) {
           throw error instanceof ActionableError
             ? error
@@ -123,7 +130,7 @@ export function registerAccessibilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "accessibility",
-    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). Always returns fresh state from the device.",
+    "Check or control accessibility services. On Android: omit talkback to check TalkBack state, or pass talkback: true/false to enable/disable it. On iOS: omit voiceover to check VoiceOver state, or pass voiceover: true/false to enable/disable it (Simulator via simctl, physical devices via the Settings app). After enabling TalkBack, reports a blocking system runtime permission prompt in warning and blockingPrompt when detected; AutoMobile does not dismiss it. Use observe, then tapOn to answer the prompt. Always returns fresh state from the device.",
     accessibilitySchema,
     accessibilityHandler,
     { defaultEnabled: false, outputSchema: accessibilityStateSchema },

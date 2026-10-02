@@ -169,7 +169,7 @@ export class FakeAdbExecutor implements AdbExecutor {
    * @param app - Foreground app info or null
    */
   setForegroundApp(
-    app: { packageName: string; userId: number } | null,
+    app: { packageName: string; userId: number; activityName?: string } | null,
     options: { displayId?: number } = {},
   ): void {
     const displayId = options.displayId ?? 0;
@@ -467,7 +467,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   async getForegroundApp(
     _signal?: AbortSignal,
     options?: number | { timeoutMs?: number; displayId?: number },
-  ): Promise<{ packageName: string; userId: number } | null> {
+  ): Promise<{ packageName: string; userId: number; activityName?: string } | null> {
     const displayId = typeof options === "object" ? (options.displayId ?? 0) : 0;
     return displayId === 0
       ? this.foregroundApp

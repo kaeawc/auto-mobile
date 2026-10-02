@@ -243,7 +243,11 @@ enable the default-off `accessibility` tool for the current MCP connection:
 ```
 
 Call `accessibility` with `talkback: true` on Android or `voiceover: true` on
-iOS, run the flow, and disable it afterward. Android also supports the
+iOS, run the flow, and disable it afterward. Enabling TalkBack may leave a system
+runtime permission prompt covering the screen. The result reports it through
+`warning` and `blockingPrompt` (`kind`, `package`, `activity`) when detected;
+AutoMobile does not dismiss it. Use `observe` to inspect it, then `tapOn` to
+answer the allow or deny button. Android also supports the
 default-off debug tool `accessibilityFocus` for setting or clearing TalkBack
 focus. Check text alternatives, content descriptions or accessibility labels,
 focus order, contrast, and tap-target size as part of the assertions; support

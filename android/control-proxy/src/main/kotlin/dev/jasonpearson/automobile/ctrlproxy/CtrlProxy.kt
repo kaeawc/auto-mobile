@@ -1880,7 +1880,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     x2: Double,
     y2: Double,
     duration: Long,
-  ) = performSwipe(requestId, x1, y1, x2, y2, duration)
+  ) = requestSwipe(requestId, x1, y1, x2, y2, duration, null, null)
 
   override fun requestSwipe(
     requestId: String?,
@@ -1890,10 +1890,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y2: Double,
     duration: Long,
     frameContext: String?,
-  ) {
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.SWIPE)) return
-    performSwipe(requestId, x1, y1, x2, y2, duration, frameContext)
-  }
+  ) = requestSwipe(requestId, x1, y1, x2, y2, duration, frameContext, null)
 
   /**
    * The Android half of streaming gesture input: builds real `StrokeDescription`s and dispatches
@@ -1988,7 +1985,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   override fun requestTapCoordinates(requestId: String?, x: Double, y: Double, duration: Long) =
-    performTapCoordinates(requestId, x, y, duration)
+    requestTapCoordinates(requestId, x, y, duration, null, null)
 
   override fun requestTapCoordinates(
     requestId: String?,
@@ -1996,10 +1993,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     y: Double,
     duration: Long,
     frameContext: String?,
-  ) {
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.TAP)) return
-    performTapCoordinates(requestId, x, y, duration, frameContext)
-  }
+  ) = requestTapCoordinates(requestId, x, y, duration, frameContext, null)
 
   override fun requestTwoFingerSwipe(
     requestId: String?,
@@ -2020,7 +2014,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     pressDurationMs: Long,
     dragDurationMs: Long,
     holdDurationMs: Long,
-  ) = performDrag(requestId, x1, y1, x2, y2, pressDurationMs, dragDurationMs, holdDurationMs)
+  ) =
+    requestDrag(
+      requestId,
+      x1,
+      y1,
+      x2,
+      y2,
+      pressDurationMs,
+      dragDurationMs,
+      holdDurationMs,
+      null,
+      null,
+    )
 
   override fun requestDrag(
     requestId: String?,
@@ -2032,9 +2038,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     dragDurationMs: Long,
     holdDurationMs: Long,
     frameContext: String?,
-  ) {
-    if (rejectStaleFrameContext(requestId, frameContext, StaleFrameContextAction.DRAG)) return
-    performDrag(
+  ) =
+    requestDrag(
       requestId,
       x1,
       y1,
@@ -2044,8 +2049,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       dragDurationMs,
       holdDurationMs,
       frameContext,
+      null,
     )
-  }
 
   private enum class StaleFrameContextAction(val wireName: String) {
     TAP("tap"),

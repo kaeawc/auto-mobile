@@ -117,6 +117,8 @@ import { daemonProcessEnvironment, daemonProcessOptions } from "./daemonOptionSc
 import {
   createDefaultDaemonProcessFinder,
   isShellCommandWrapper,
+  DAEMON_SOCKET_PATH_FLAG,
+  parseDaemonSocketPath,
   type DaemonProcessFinder,
   type DaemonProcessLivenessChecker,
   type DaemonProcessRecord,
@@ -263,9 +265,6 @@ function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivene
 
 const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
-/** An occupied port found by degraded process discovery has no known process-table PID. */
-const DAEMON_UNKNOWN_OWNER_PID = -1;
-
 /** Host a daemon binds when `--host` is not given; mirrors the CLI default. */
 const DEFAULT_DAEMON_HOST = "127.0.0.1";
 
@@ -326,20 +325,11 @@ const PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS = 1000;
 const PEER_DAEMON_JOIN_DELIVERY_HEADROOM_MS = 2000;
 
 /**
- * Upper bound on how long the post-exit peer rejoin (issue #6103) may run when
- * this manager uses an isolated socket namespace (a non-default PID/socket path,
- * e.g. a test harness or a manually isolated daemon). {@link findLiveDaemonProcesses}
- * scans the WHOLE process table and cannot tell a daemon bound to THIS namespace's
- * socket apart from an unrelated daemon — e.g. one from another worktree or test
- * run — using the DEFAULT namespace or a different isolated one entirely (issue
- * #6140, folded from PR #6109 review). Trusting that unscoped "a live daemon
- * process exists somewhere" signal for the full rejoin budget lets a failed
- * isolated-socket launch poll an unrelated, permanently-unreachable socket for the
- * whole budget. Capping the isolated-namespace rejoin to this short grace bounds
- * the cost of that false signal without touching the default-namespace path, where
- * a process-table match is far more likely to be the actual peer.
+ * Short readiness grace for an isolated namespace after our child exits. Only
+ * positively attributed namespace peers qualify; keep the existing bounded
+ * isolated-launch handoff budget rather than extending failed-start latency.
  */
-const PEER_DAEMON_UNCORRELATED_NAMESPACE_GRACE_MS = 2000;
+const PEER_DAEMON_ISOLATED_NAMESPACE_GRACE_MS = 2000;
 
 /**
  * Cadence at which the liveness watchdog re-samples the "keep waiting" predicate
@@ -572,9 +562,18 @@ export class DaemonManager implements DaemonManagerLike {
       // Windows named pipes cannot use this POSIX socket identity probe. This accepted
       // platform gap means a live Windows daemon with missing PID metadata will not
       // self-heal here; retain the pre-identity-recovery behavior on Windows.
+      // On win32, namespace attribution uses only the argv socket marker or our PID
+      // record; the default IO never probes a socket owner.
       socketExists: () => this.platform !== "win32" && existsSync(this.socketPath),
       readRecord: () => readPidFileDataSync(this.pidFilePath),
-      probe: () => new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
+      probe: () =>
+        this.platform === "win32"
+          ? Promise.reject(
+              new Error(
+                "Failed to connect to daemon: socket-owner probing is unsupported on win32",
+              ),
+            )
+          : new DaemonClient(this.socketPath, 1000, this.timer).getDaemonStatus(1000),
     };
     this.platform = platformOverride;
     this.portAvailabilityChecker = portAvailabilityChecker;
@@ -699,7 +698,10 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   findOtherDaemonProcesses(activeDaemonPid: number | undefined): number[] {
-    return this.findLiveDaemonProcesses().filter((pid) => pid !== activeDaemonPid);
+    return this.findLiveDaemonProcessRecords()
+      .filter((candidate) => this.hasNamespaceRecordOrMarker(candidate))
+      .map((candidate) => candidate.pid)
+      .filter((pid) => pid !== activeDaemonPid);
   }
 
   /**
@@ -714,12 +716,86 @@ export class DaemonManager implements DaemonManagerLike {
     try {
       const records = this.processFinder.findDaemonProcesses(timeoutMs);
       const daemonPids = new Set(this.normalizeDaemonProcessRecords(records));
-      return records.filter(
-        (record) => daemonPids.has(record.pid) && this.isProcessRunning(record.pid),
-      );
+      return records
+        .filter((record) => daemonPids.has(record.pid) && this.isProcessRunning(record.pid))
+        .map((record) => ({ ...record, socketPath: parseDaemonSocketPath(record.command) }));
     } catch (error) {
       throw new ActionableError(`Failed to inspect daemon process table: ${errorMessage(error)}`);
     }
+  }
+
+  private hasNamespaceRecordOrMarker(candidate: DaemonProcessRecord): boolean {
+    if (candidate.socketPath !== undefined) {
+      return candidate.socketPath === this.socketPath;
+    }
+    // An invalid marker is not an unmarked legacy launch.
+    if (candidate.command.includes(DAEMON_SOCKET_PATH_FLAG)) {
+      return false;
+    }
+    const record = this.recordedStatus();
+    return (
+      record.running &&
+      record.pid === candidate.pid &&
+      this.matchesRecordedDaemonGeneration(record, candidate)
+    );
+  }
+
+  private async probeNamespaceOwner(): Promise<DaemonStatus | undefined> {
+    try {
+      const owner = await this.identityRecoveryIO.probe();
+      return owner.running &&
+        owner.pid !== undefined &&
+        this.isProcessRunning(owner.pid) &&
+        (owner.reportedSocketPath === undefined || owner.reportedSocketPath === this.socketPath) &&
+        (owner.reportedPidFilePath === undefined || owner.reportedPidFilePath === this.pidFilePath)
+        ? owner
+        : undefined;
+    } catch (error) {
+      if (
+        /ECONNREFUSED|ENOENT|Daemon socket not found|Failed to connect to daemon|timed out/i.test(
+          errorMessage(error),
+        )
+      ) {
+        // An absent or busy namespace socket grants no orphan ownership evidence.
+        logger.debug("No namespace socket owner available for daemon discovery", error);
+      } else {
+        logger.warn("Failed to probe namespace socket ownership", error);
+      }
+      return undefined;
+    }
+  }
+
+  private async findNamespaceDaemonProcessRecords(
+    timeoutMs?: number,
+  ): Promise<DaemonProcessRecord[]> {
+    const candidates = this.findLiveDaemonProcessRecords(timeoutMs);
+    const owner =
+      !this.recordedStatus().running ||
+      candidates.some(
+        (candidate) =>
+          !this.hasNamespaceRecordOrMarker(candidate) &&
+          !candidate.command.includes(DAEMON_SOCKET_PATH_FLAG),
+      )
+        ? await this.probeNamespaceOwner()
+        : undefined;
+    if (owner?.pid !== undefined && !candidates.some((candidate) => candidate.pid === owner.pid)) {
+      candidates.push({
+        pid: owner.pid,
+        ppid: 0,
+        command: "",
+        startedAt: owner.processStartedAt ?? owner.startedAt,
+        processGenerationToken: owner.processGenerationToken,
+      });
+    }
+    return candidates.filter((candidate) => {
+      const ours =
+        this.hasNamespaceRecordOrMarker(candidate) ||
+        (!candidate.command.includes(DAEMON_SOCKET_PATH_FLAG) && owner?.pid === candidate.pid);
+      if (!ours) {
+        logger.debug(`Ignoring daemon PID ${candidate.pid}: no evidence for this socket namespace`);
+      }
+      return ours;
+    });
   }
 
   /**
@@ -750,9 +826,11 @@ export class DaemonManager implements DaemonManagerLike {
         if (remaining <= 0) {
           throw new Error("Process-table inspection ETIMEDOUT before daemon startup deadline");
         }
-        return this.findLiveDaemonProcesses(
-          Math.min(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS, remaining),
-        );
+        return (
+          await this.findNamespaceDaemonProcessRecords(
+            Math.min(DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS, remaining),
+          )
+        ).map((candidate) => candidate.pid);
       },
       {
         maxAttempts: DAEMON_START_PROCESS_TABLE_SCAN_MAX_ATTEMPTS,
@@ -778,36 +856,22 @@ export class DaemonManager implements DaemonManagerLike {
       throw error;
     }
 
-    // A process-table scan can miss a daemon in another PID/socket namespace.
-    // The probe's socket closes before it resolves, so it cannot atomically reserve
-    // a port for the child. Check every host:port this install could plausibly own
-    // before allowing strict child binding to arbitrate a free candidate. The same
-    // port binds independently on 127.0.0.1 and ::1, so a start on `--host ::1`
-    // must still look for an incumbent on the default 127.0.0.1 (issue #7001).
-    const probeBudget = this.remainingTime(startDeadline);
-    if (probeBudget <= 0) {
-      throw new ActionableError(
-        "Daemon startup deadline elapsed before the degraded port probe could run; refusing to launch a daemon after the client deadline.",
-      );
+    // Port occupancy alone cannot attribute a process to this socket namespace.
+    const owner = await this.probeNamespaceOwner();
+    if (owner?.pid !== undefined) {
+      return [owner.pid];
     }
     const occupied = await this.findOccupiedDaemonStartPort(
       this.degradedStartProbeTargets(options),
-      probeBudget,
+      this.remainingTime(startDeadline),
     );
-    if (occupied !== undefined) {
-      logger.warn(
-        `[DaemonManager] process-table inspection timed out during daemon start and port ${occupied.port} on ${occupied.host} is occupied; waiting for its daemon reachability before refusing a second start: ${errorMessage(error)}`,
-        error,
-      );
-      return [DAEMON_UNKNOWN_OWNER_PID];
+    if (occupied === undefined) {
+      options.strictPort = true;
     }
-
-    options.strictPort = true;
-    // Every candidate port was free at probe time; strict child binding, socket
-    // readiness, and the ownership record protect startup while this best-effort
-    // host scan remains unavailable.
+    // A foreign listener can occupy the default port; allow the normal fallback
+    // while the namespace lock/socket bind guard protects against duplicate owners.
     logger.warn(
-      `[DaemonManager] process-table inspection timed out during daemon start; proceeding with socket ownership checks: ${errorMessage(error)}`,
+      `[DaemonManager] process-table inspection timed out during daemon start; proceeding with namespace ownership checks: ${errorMessage(error)}`,
       error,
     );
     return [];
@@ -1157,9 +1221,33 @@ export class DaemonManager implements DaemonManagerLike {
     // prevent. Bounding the rejoin by the time REMAINING under this deadline keeps
     // the error deliverable.
     const startDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
-    const status = await this.lifecycleStatus();
+    let status = await this.lifecycleStatus();
     this.throwIfRecoveryCancelled(recoverySignal);
+    if (
+      status.running &&
+      !(await this.verifyDaemonGenerationBeforeSignal(
+        this.daemonProcessRecordFromStatus(status),
+        undefined,
+        "Daemon start",
+      ))
+    ) {
+      status = { running: false };
+    }
     if (!status.running && status.recovery) {
+      const owner =
+        status.recovery.state === "unauthenticated" ? await this.probeNamespaceOwner() : undefined;
+      // Older socket owners lack identity-republication fields. Reuse their
+      // answering namespace socket without granting permission to signal them.
+      if (
+        owner?.reportedSocketPath === undefined &&
+        owner?.reportedPidFilePath === undefined &&
+        owner?.pid !== undefined &&
+        (await this.waitForExistingDaemon(
+          Math.min(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS, this.remainingTime(startDeadline)),
+        ))
+      ) {
+        return "joined";
+      }
       return this.startIdentityRecovery(status);
     }
     if (status.running) {
@@ -1430,7 +1518,10 @@ export class DaemonManager implements DaemonManagerLike {
     launch: DaemonLaunchCommand,
     options: DaemonOptions,
   ): DaemonLaunchCommand {
-    const args = [...launch.args];
+    const args = [
+      ...launch.args,
+      `${DAEMON_SOCKET_PATH_FLAG}=${encodeURIComponent(this.socketPath)}`,
+    ];
     if (options.port) {
       args.push("--port", options.port.toString());
     }
@@ -1917,9 +2008,9 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Stop the daemon gracefully
    */
-  async stop(timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS): Promise<void> {
+  async stop(timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS, expected?: DaemonStatus): Promise<void> {
     // Explicit stop must not repair or replace a missing generation before stopping it.
-    let status = await this.status(false);
+    let status = expected ?? (await this.status(false));
     if (!status.running && this.identityRecoveryIO.socketExists()) {
       status = await this.authenticateSocketOwner();
     }
@@ -2004,7 +2095,7 @@ export class DaemonManager implements DaemonManagerLike {
     this.throwIfRecoveryCancelled(signal);
     const status = await this.lifecycleStatus();
     this.throwIfRecoveryCancelled(signal);
-    const candidates = this.findLiveDaemonProcessRecords(
+    const candidates = await this.findNamespaceDaemonProcessRecords(
       this.remainingRecoveryTime(recoveryDeadline),
     );
     const recordedCandidate = this.findRecoveryCandidate(status, candidates);
@@ -2115,7 +2206,7 @@ export class DaemonManager implements DaemonManagerLike {
       throw new ActionableError(
         "Daemon recovery could not correlate the failed control socket with exactly one live " +
           "AutoMobile daemon process. Refusing to stop an uncorrelated daemon; inspect " +
-          "`--daemon status` and retry after other daemon instances have stopped.",
+          "the namespace PID record and socket before retrying.",
       );
     }
     if (status.running && recordedCandidate === undefined) {
@@ -2214,23 +2305,16 @@ export class DaemonManager implements DaemonManagerLike {
     timeout: number = DAEMON_SHUTDOWN_TIMEOUT_MS,
     signalFirst: boolean = true,
   ): Promise<void> {
+    this.assertDaemonStatusNamespace(status);
     stderrLog(`Stopping daemon (PID ${status.pid})...`);
 
     const pid = status.pid!;
-    const expected: DaemonProcessRecord = {
-      pid,
-      ppid: 0,
-      command: status.entryScript ?? "",
-      startedAt: status.processStartedAt ?? status.startedAt,
-      ...(status.processGenerationToken === undefined
-        ? {}
-        : { processGenerationToken: status.processGenerationToken }),
-    };
+    const expected = this.daemonProcessRecordFromStatus(status);
 
     try {
       if (signalFirst) {
         // Send SIGTERM for graceful shutdown.
-        this.signalVerifiedDaemonGeneration(
+        await this.signalVerifiedDaemonGeneration(
           expected,
           "SIGTERM",
           `Daemon generation ${pid} exited before stop could signal it.`,
@@ -2243,7 +2327,7 @@ export class DaemonManager implements DaemonManagerLike {
 
       if (!waitResult.stopped) {
         stderrLog(`Daemon did not stop gracefully, sending SIGKILL...`);
-        this.signalVerifiedDaemonGeneration(
+        await this.signalVerifiedDaemonGeneration(
           expected,
           "SIGKILL",
           `Daemon generation ${pid} exited before stop could force-stop it.`,
@@ -2252,7 +2336,7 @@ export class DaemonManager implements DaemonManagerLike {
         waitResult = await this.waitForStop(pid, DAEMON_FORCED_STOP_TIMEOUT_MS, expected);
         replacedByOtherGeneration ||= waitResult.replacedByOtherGeneration;
         if (!waitResult.stopped) {
-          throw new Error(`Daemon process ${pid} did not exit after SIGKILL`);
+          throw new ActionableError(`Daemon process ${pid} did not exit after SIGKILL`);
         }
       }
 
@@ -2270,12 +2354,30 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private signalVerifiedDaemonGeneration(
+  private daemonProcessRecordFromStatus(status: DaemonStatus): DaemonProcessRecord {
+    return {
+      pid: status.pid!,
+      ppid: 0,
+      command: status.entryScript ?? "",
+      startedAt: status.processStartedAt ?? status.startedAt,
+      processGenerationToken: status.processGenerationToken,
+    };
+  }
+
+  private assertDaemonStatusNamespace(status: DaemonStatus): void {
+    if (status.socketPath !== this.socketPath) {
+      throw new ActionableError(
+        "Daemon stop could not attribute the recorded daemon to this socket namespace.",
+      );
+    }
+  }
+
+  private async signalVerifiedDaemonGeneration(
     expected: DaemonProcessRecord,
     signal: NodeJS.Signals,
     exitedMessage: string,
-  ): void {
-    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Daemon stop")) {
+  ): Promise<void> {
+    if (!(await this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Daemon stop"))) {
       throw new DaemonGenerationExitedBeforeSignalError(exitedMessage);
     }
     this.processSignaler.signal(expected.pid, signal);
@@ -2287,6 +2389,8 @@ export class DaemonManager implements DaemonManagerLike {
     pid: number,
   ): Promise<void> {
     if (error instanceof DaemonGenerationExitedBeforeSignalError) {
+      // Liveness confirmed death; no signal or socket cleanup is needed.
+      logger.debug("Recorded daemon generation died before signalling", error);
       await this.removeConfirmedDeadPidFile();
       stderrLog(error.message);
       return;
@@ -2435,7 +2539,7 @@ export class DaemonManager implements DaemonManagerLike {
 
   private recordedStatus(): DaemonStatus {
     const record = this.identityRecoveryIO.readRecord();
-    return record && this.isProcessRunning(record.pid)
+    return record && record.socketPath === this.socketPath && this.isProcessRunning(record.pid)
       ? { ...record, running: true }
       : { running: false };
   }
@@ -2645,7 +2749,10 @@ export class DaemonManager implements DaemonManagerLike {
     if (recovering && this.hasPublishedRecoveryIdentity(status)) {
       return "joined";
     }
-    const runningOptions = daemonProcessOptions(status.options);
+    const runningOptions = daemonProcessOptions({
+      ...status.options,
+      ...(status.port === undefined ? {} : { port: status.port }),
+    });
     const requestedOptions = daemonProcessOptions(
       Object.fromEntries(
         Object.entries(options).filter(([, value]) => value !== undefined),
@@ -2668,12 +2775,18 @@ export class DaemonManager implements DaemonManagerLike {
       return this.restartExpectedGeneration(status, expectedDaemon, restartOptions, recovering);
     }
 
-    // All restart cleanup follows the same 10s graceful + 1s forced-stop
-    // budget. Run the PID-recorded daemon and every cross-namespace candidate
-    // concurrently so the launcher timeout remains bounded by one cleanup window.
+    return this.restartNamespace(status, restartOptions);
+  }
+
+  private async restartNamespace(
+    status: DaemonStatus,
+    options: DaemonOptions,
+  ): Promise<DaemonRestartResult> {
+    // Stop only this namespace's observed generation and attributable orphans.
+    // Keep the bounded graceful + forced-stop cleanup window.
     await this.awaitRestartCleanup([
-      () => (status.running ? this.stop() : undefined),
-      () => this.stopUnrecordedDaemonsForExplicitRestart(status.pid),
+      () => (status.running ? this.stop(DAEMON_SHUTDOWN_TIMEOUT_MS, status) : undefined),
+      () => this.stopNamespaceOrphansForExplicitRestart(status.pid),
     ]);
     // Confirm the previous daemon(s) are actually gone before starting a
     // replacement (issue #6260). `awaitRestartCleanup` above only rejects when a
@@ -2683,10 +2796,28 @@ export class DaemonManager implements DaemonManagerLike {
     // then silently started a second daemon on a fallback port and reported
     // unqualified success while the old one kept CtrlProxy forwarding ownership.
     // Failing loudly here, naming the orphan, is strictly better than that.
-    await this.assertNoSurvivingDaemonBeforeRestart(restartOptions);
+    if (status.pid !== undefined && this.isProcessRunning(status.pid)) {
+      throw new ActionableError(
+        "Restart could not confirm the namespace's previous daemon exited; refusing to start a replacement.",
+      );
+    }
+    await this.assertNoSurvivingDaemonBeforeRestart(options);
     // Wait a bit before starting
     await this.timer.sleep(DAEMON_RESTART_HANDOFF_DELAY_MS);
-    const startResult = await this.start(restartOptions);
+    const startResult = await this.start(options);
+    const successor = this.recordedStatus();
+    if (
+      status.running &&
+      successor.pid === status.pid &&
+      !this.isConfirmedDifferentDaemonGeneration(
+        this.daemonProcessRecordFromStatus(status),
+        this.daemonProcessRecordFromStatus(successor),
+      )
+    ) {
+      throw new ActionableError(
+        "Restart did not replace the namespace's previous daemon generation.",
+      );
+    }
     return restartResultFromStart(startResult);
   }
 
@@ -2859,7 +2990,7 @@ export class DaemonManager implements DaemonManagerLike {
         startupSecret,
       );
       await this.commitAcceptanceRestartAdmission(client, status, restartToken);
-      if (this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
+      if (await this.verifyAcceptanceGenerationBeforeSignal(status, generation)) {
         this.processSignaler.signal(status.pid!, "SIGKILL");
         signalSent = true;
         const expected: DaemonProcessRecord = {
@@ -3000,10 +3131,10 @@ export class DaemonManager implements DaemonManagerLike {
    * SIGKILL. Admission authenticates the daemon that handled the RPC, but that
    * generation may exit before this manager signals its formerly owned PID.
    */
-  private verifyAcceptanceGenerationBeforeSignal(
+  private async verifyAcceptanceGenerationBeforeSignal(
     status: DaemonStatus,
     generation: DaemonGenerationIdentity,
-  ): boolean {
+  ): Promise<boolean> {
     return this.verifyDaemonGenerationBeforeSignal(
       {
         pid: generation.pid,
@@ -3153,9 +3284,9 @@ export class DaemonManager implements DaemonManagerLike {
    * (issue #6260). Two independent confirmations, either of which fails loudly
    * rather than letting `start()` silently fall back to a different port:
    *
-   * 1. Re-scan the process table: if any AutoMobile daemon process is still
-   *    alive, name it rather than starting a second one beside it.
-   * 2. Probe the canonical port directly: process-table detection can miss a
+   * 1. Re-scan attributable processes: if this namespace's daemon survives,
+   *    refuse to start a second owner. Foreign namespace processes are ignored.
+   * 2. Probe the replacement's configured/recorded port directly: detection can miss a
    *    live daemon (a stale/mismatched PID record, a process-table scan that
    *    raced the kill) even when the port it holds is unmistakably still bound.
    *    A definitive "the port is still taken" is worth failing on even without a
@@ -3165,17 +3296,14 @@ export class DaemonManager implements DaemonManagerLike {
     options: DaemonOptions,
     recoveryDeadline?: number,
   ): Promise<void> {
-    const survivors = this.findLiveDaemonProcesses(this.remainingRecoveryTime(recoveryDeadline));
+    const survivors = (
+      await this.findNamespaceDaemonProcessRecords(this.remainingRecoveryTime(recoveryDeadline))
+    ).map((candidate) => candidate.pid);
     if (survivors.length > 0) {
       throw new ActionableError(
-        `Restart could not confirm the previous AutoMobile daemon process(es) stopped (the PID was reused or another daemon survived): ` +
-          `PID(s) ${survivors.join(", ")} still running an AutoMobile daemon (matched by ` +
-          `\`--daemon-mode\` on its command line). Refusing to start a second daemon on a ` +
-          `fallback port and split ownership of the device pool. A PID can be recycled to an ` +
-          `unrelated process between this scan and when you act on it, so re-verify identity ` +
-          `before stopping anything — e.g. \`ps -p ${survivors.join(",")} -o pid=,command= | ` +
-          `grep -- --daemon-mode\` — and kill only the PID(s) that still match, then run ` +
-          `\`--daemon restart\` again.`,
+        `Restart could not confirm this namespace's previous daemon stopped: ` +
+          `PID(s) ${survivors.join(", ")} still running in this socket namespace. ` +
+          "Verify the `--daemon-mode` socket marker, namespace PID record, socket owner and process generation before retrying `--daemon restart`.",
       );
     }
 
@@ -3191,7 +3319,7 @@ export class DaemonManager implements DaemonManagerLike {
       return;
     }
     throw new ActionableError(
-      `Restart stopped every AutoMobile daemon process it could find, but port ${port} on ${host} ` +
+      `Restart stopped this namespace's verified daemon candidates, but replacement port ${port} on ${host} ` +
         `is still in use. Refusing to silently start the replacement daemon on a fallback port — ` +
         `that is how an orphaned process ends up owning device forwarding while a second daemon ` +
         `reports success. Find and stop whatever still holds port ${port} (it may not be an ` +
@@ -3200,14 +3328,11 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * An explicit restart force-cleans live daemon-mode processes discovered from
-   * other PID-file namespaces. This intentionally does not require this
-   * manager's socket to be reachable: an orphaned daemon is precisely the
-   * failure mode that `--daemon restart` must recover from. Ordinary `start`
-   * remains non-destructive.
+   * Explicit restart may stop an orphan only when its marker or this socket's
+   * response attributes it to this namespace. Ordinary start remains non-destructive.
    */
-  private async stopUnrecordedDaemonsForExplicitRestart(recordedPid?: number): Promise<void> {
-    const candidates = this.findLiveDaemonProcessRecords().filter(
+  private async stopNamespaceOrphansForExplicitRestart(recordedPid?: number): Promise<void> {
+    const candidates = (await this.findNamespaceDaemonProcessRecords()).filter(
       (candidate) => candidate.pid !== recordedPid,
     );
     if (candidates.length === 0) {
@@ -3246,7 +3371,7 @@ export class DaemonManager implements DaemonManagerLike {
     recoveryDeadline: number | undefined,
     signal: AbortSignal | undefined,
   ): Promise<void> {
-    if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
+    if (!(await this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline))) {
       stderrLog(`Daemon candidate ${expected.pid} exited before repair could stop it.`);
       return;
     }
@@ -3279,7 +3404,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
-    if (!this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline)) {
+    if (!(await this.verifyDaemonGenerationBeforeSignal(expected, recoveryDeadline))) {
       stderrLog(`Daemon candidate ${expected.pid} exited before repair could force-stop it.`);
       return;
     }
@@ -3311,7 +3436,7 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private async stopExplicitRestartDaemonProcess(expected: DaemonProcessRecord): Promise<void> {
-    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart")) {
+    if (!(await this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart"))) {
       stderrLog(`Daemon candidate ${expected.pid} exited before explicit restart could stop it.`);
       return;
     }
@@ -3333,7 +3458,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     stderrLog(`Verified daemon ${expected.pid} did not stop gracefully, sending SIGKILL...`);
-    if (!this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart")) {
+    if (!(await this.verifyDaemonGenerationBeforeSignal(expected, undefined, "Explicit restart"))) {
       stderrLog(
         `Daemon candidate ${expected.pid} exited before explicit restart could force-stop it.`,
       );
@@ -3363,34 +3488,87 @@ export class DaemonManager implements DaemonManagerLike {
    * consume the final budget; signaling after that would violate fail-closed
    * daemon recovery semantics.
    */
-  private verifyDaemonGenerationBeforeSignal(
+  private async verifyDaemonGenerationBeforeSignal(
     expected: DaemonProcessRecord,
     recoveryDeadline: number | undefined,
     context: string = "Daemon recovery",
-  ): boolean {
-    if (expected.startedAt === undefined) {
+  ): Promise<boolean> {
+    if (!this.isProcessRunning(expected.pid)) {
+      return false;
+    }
+    if (expected.startedAt === undefined && expected.processGenerationToken === undefined) {
       throw new ActionableError(
         `${context} could not verify the recorded daemon process generation before signalling it.`,
       );
     }
-    const currentCandidates = this.findLiveDaemonProcessRecords(
+    const candidates = this.findLiveDaemonProcessRecords(
       this.remainingRecoveryTime(recoveryDeadline),
     );
     this.remainingRecoveryTime(recoveryDeadline);
-
-    if (
-      currentCandidates.some((candidate) =>
-        this.matchesObservedDaemonGeneration(expected, candidate),
-      )
-    ) {
-      return true;
+    const current = candidates.find((candidate) => candidate.pid === expected.pid);
+    this.assertObservedDaemonGeneration(expected, current, context);
+    if (current && this.hasNamespaceRecordOrMarker(current)) {
+      return this.isProcessRunning(expected.pid);
     }
-    if (currentCandidates.some((candidate) => candidate.pid === expected.pid)) {
+    // An alive PID missing from ps is inconclusive, never proof of exit. A
+    // self-identified namespace socket owner can supply the matching generation.
+    const owner = await this.probeNamespaceOwner();
+    this.remainingRecoveryTime(recoveryDeadline);
+    if (!this.isProcessRunning(expected.pid)) {
+      return false;
+    }
+    const refreshed = this.findLiveDaemonProcessRecords(
+      this.remainingRecoveryTime(recoveryDeadline),
+    ).find((candidate) => candidate.pid === expected.pid);
+    this.remainingRecoveryTime(recoveryDeadline);
+    this.assertObservedDaemonGeneration(expected, refreshed, context);
+    if (this.matchesSocketOwnerBeforeSignal(owner, expected, refreshed)) {
+      return this.isProcessRunning(expected.pid);
+    }
+    throw new ActionableError(
+      `${context} could not verify the live PID's generation and ownership of this socket namespace; refusing to signal it.`,
+    );
+  }
+
+  private assertObservedDaemonGeneration(
+    expected: DaemonProcessRecord,
+    current: DaemonProcessRecord | undefined,
+    context: string,
+  ): void {
+    if (current && !this.matchesObservedDaemonGeneration(expected, current)) {
       throw new ActionableError(
         `${context} found that the verified daemon PID was reused before signalling it.`,
       );
     }
-    return false;
+  }
+
+  private matchesSocketOwnerBeforeSignal(
+    owner: DaemonStatus | undefined,
+    expected: DaemonProcessRecord,
+    current: DaemonProcessRecord | undefined,
+  ): boolean {
+    if (!owner || owner.pid !== expected.pid) {
+      return false;
+    }
+    // A matching ps generation permits legacy socket responses. An unlisted
+    // live PID requires both modern self-reported namespace paths as well.
+    if (
+      !current &&
+      (owner.reportedSocketPath !== this.socketPath ||
+        owner.reportedPidFilePath !== this.pidFilePath)
+    ) {
+      return false;
+    }
+    if (current?.command.includes(DAEMON_SOCKET_PATH_FLAG)) {
+      return false;
+    }
+    return this.matchesObservedDaemonGeneration(expected, {
+      pid: owner.pid,
+      ppid: 0,
+      command: "",
+      startedAt: owner.processStartedAt ?? owner.startedAt,
+      processGenerationToken: owner.processGenerationToken,
+    });
   }
 
   private stopWaitTimeout(timeoutMs: number, recoveryDeadline: number | undefined): number {
@@ -3640,7 +3818,7 @@ export class DaemonManager implements DaemonManagerLike {
     // See {@link isIsolatedSocketNamespace} for why the comparison uses the
     // built-in DEFAULT_* constants rather than PID_FILE_PATH/SOCKET_PATH.
     const effectiveBudgetMs = this.isIsolatedSocketNamespace()
-      ? Math.min(budgetMs, PEER_DAEMON_UNCORRELATED_NAMESPACE_GRACE_MS)
+      ? Math.min(budgetMs, PEER_DAEMON_ISOLATED_NAMESPACE_GRACE_MS)
       : budgetMs;
     const deadline = this.timer.now() + effectiveBudgetMs;
 
@@ -3691,7 +3869,7 @@ export class DaemonManager implements DaemonManagerLike {
         // catch a small-but-nonzero remainder — the scan could still run to its full
         // ceiling and blow past both the grace and the outer delivery headroom before
         // the actionable launch error is ever delivered.
-        peerProcessComingUp = this.hasComingUpPeerDaemon(remainingForScan);
+        peerProcessComingUp = await this.hasComingUpPeerDaemon(remainingForScan);
         nextProcessScanAt = this.timer.now() + PEER_DAEMON_PROCESS_SCAN_INTERVAL_MS;
       }
       if (!peerProcessComingUp) {
@@ -3738,9 +3916,9 @@ export class DaemonManager implements DaemonManagerLike {
    * joined regardless of this gate, and a socket that does not is not waited on unless a
    * live daemon process backs it.
    */
-  private hasComingUpPeerDaemon(timeoutMs?: number): boolean {
+  private async hasComingUpPeerDaemon(timeoutMs?: number): Promise<boolean> {
     try {
-      return this.findLiveDaemonProcesses(timeoutMs).length > 0;
+      return (await this.findNamespaceDaemonProcessRecords(timeoutMs)).length > 0;
     } catch (error) {
       // Best-effort recovery probe: a transient process-table inspection failure must
       // not REPLACE the caller's original spawn/exit diagnostic (which carries the
@@ -3813,27 +3991,7 @@ export class DaemonManager implements DaemonManagerLike {
     return this.platform === "win32" || existsSync(this.socketPath);
   }
 
-  /**
-   * Whether this manager's effective socket/PID namespace is isolated from the
-   * built-in default — i.e. a non-default PID file path, socket path, or both
-   * (issue #6140). {@link findLiveDaemonProcesses} scans the WHOLE process table
-   * and has no socket-namespace identity, so it cannot tell a daemon bound to
-   * THIS namespace's socket apart from an unrelated daemon (another worktree, a
-   * different isolated instance, or the default namespace). Trusting that
-   * unscoped signal for the full rejoin budget is only safe in the default
-   * namespace, where a process-table match is far more likely to be the actual
-   * peer ({@link tryJoinPeerDaemonAfterSpawnExit}).
-   *
-   * Compares against the built-in {@link DEFAULT_PID_FILE_PATH}/
-   * {@link DEFAULT_SOCKET_PATH} constants, NOT `PID_FILE_PATH`/`SOCKET_PATH`:
-   * when production isolation is configured via `AUTOMOBILE_DAEMON_PID_FILE_PATH`
-   * (or the socket equivalent), that env override is what INITIALIZES
-   * `PID_FILE_PATH`/`SOCKET_PATH` in the first place, so an unoverridden manager's
-   * `pidFilePath` constructor default equals the very same overridden constant —
-   * comparing against it would always read as "not isolated" and let an unrelated
-   * daemon from the global process scan poll the unreachable custom socket for
-   * the full rejoin budget instead of the intended short grace.
-   */
+  /** Compare built-in defaults so environment-overridden namespaces keep their short rejoin grace. */
   private isIsolatedSocketNamespace(): boolean {
     return this.pidFilePath !== DEFAULT_PID_FILE_PATH || this.socketPath !== DEFAULT_SOCKET_PATH;
   }
@@ -3936,7 +4094,7 @@ export class DaemonManager implements DaemonManagerLike {
       // The global process scan can find a different checkout's daemon after OS PID
       // reuse. Only this namespace's PID record naming that candidate proves it took
       // over our namespace rather than being an unrelated daemon elsewhere.
-      const pidData = readPidFileDataSync(this.pidFilePath);
+      const pidData = this.identityRecoveryIO.readRecord();
       if (pidData === null) {
         return false;
       }
@@ -3971,11 +4129,7 @@ export class DaemonManager implements DaemonManagerLike {
       }
       try {
         const candidates = this.findLiveDaemonProcessRecords(scanBudget);
-        // No daemon record at this live OS PID means the tracked generation is gone.
-        // A different daemon at this PID still needs the namespace PID-file check.
-        if (!candidates.some((candidate) => candidate.pid === pid)) {
-          return { stopped: true, replacedByOtherGeneration: false };
-        }
+        // Absence from ps does not prove that a still-live recorded PID exited.
         if (replacementWasObserved(candidates)) {
           return { stopped: true, replacedByOtherGeneration: true };
         }

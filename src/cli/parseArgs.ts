@@ -53,6 +53,8 @@ const booleanOptions = Object.fromEntries(
 
 const cliOptions = {
   ...booleanOptions,
+  // Process-discovery marker only; namespace paths still come from launch ENV.
+  "daemon-socket-path": { type: "string" as const },
   "enable-tool": { type: "string" as const, multiple: true },
   "disable-tool": { type: "string" as const, multiple: true },
 };

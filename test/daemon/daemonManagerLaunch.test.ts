@@ -1,14 +1,11 @@
+import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { PassThrough } from "node:stream";
-import {
-  DaemonManager,
-  relayDaemonStderr,
-  type DaemonProcessSpawner,
-} from "../../src/daemon/manager";
+import { relayDaemonStderr, type DaemonProcessSpawner } from "../../src/daemon/manager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { TOOL_OUTPUTS_DIR_ENV, TOOL_OUTPUTS_DIR_FLAG } from "../../src/utils/toolOutputArtifacts";

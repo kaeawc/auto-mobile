@@ -1,3 +1,4 @@
+import { posix, win32 } from "node:path";
 import { execSync } from "node:child_process";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -11,10 +12,60 @@ export interface DaemonProcessRecord {
   pid: number;
   ppid: number;
   command: string;
+  /** Namespace marker decoded by lifecycle consumers; ps parsing stays unchanged. */
+  socketPath?: string;
   /** Approximate process creation time from the OS process table, when available. */
   startedAt?: number;
   /** Stable OS-derived identity for this process generation, when available. */
   processGenerationToken?: string;
+}
+
+export const DAEMON_SOCKET_PATH_FLAG = "--daemon-socket-path";
+
+/**
+ * ps flattens argv without preserving spaces. Manager launches percent-encode the
+ * path in one token; quoted raw values are accepted for manually marked launches.
+ * Full-token parsing prevents /a.sock from matching /a.sock2. Ambiguous or duplicate
+ * markers fail closed rather than granting ownership from a partial path.
+ */
+export function parseDaemonSocketPath(command: string): string | undefined {
+  const matches = [...command.matchAll(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)];
+  const tokens: string[] = [];
+  let end = 0;
+  for (const match of matches) {
+    if (command.slice(end, match.index).trim()) {
+      return undefined; // Unbalanced quotes make the flattened argv ambiguous.
+    }
+    tokens.push(
+      match[0].replace(
+        /"([^"]*)"|'([^']*)'/g,
+        (_quoted, double: string | undefined, single: string | undefined) => double ?? single ?? "",
+      ),
+    );
+    end = match.index + match[0].length;
+  }
+  if (command.slice(end).trim()) {
+    return undefined;
+  }
+  const markers = tokens.flatMap((token, index) => {
+    if (token === DAEMON_SOCKET_PATH_FLAG) {
+      return [tokens[index + 1]];
+    }
+    return token.startsWith(`${DAEMON_SOCKET_PATH_FLAG}=`)
+      ? [token.slice(DAEMON_SOCKET_PATH_FLAG.length + 1)]
+      : [];
+  });
+  const value = markers[0];
+  if (markers.length !== 1 || !value || value.startsWith("--")) {
+    return undefined;
+  }
+  try {
+    return posix.isAbsolute(value) || win32.isAbsolute(value) ? value : decodeURIComponent(value);
+  } catch (error) {
+    // Malformed marker text supplies no ownership evidence; never guess a path.
+    logger.debug("Ignoring malformed daemon socket marker", error);
+    return undefined;
+  }
 }
 
 export interface DaemonProcessFinder {

@@ -1,17 +1,34 @@
+import { SafeDaemonManager } from "../fakes/SafeDaemonManager";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
+import type { DaemonProcessSpawner } from "../../src/daemon/manager";
 import type {
   DaemonProcessFinder,
   DaemonProcessLivenessChecker,
   DaemonProcessRecord,
   DaemonProcessSignaler,
 } from "../../src/daemon/processTable";
+import { readPidFileDataSync } from "../../src/daemon/daemonFiles";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+// Keep ownership probes fake: these tests exercise PID records in isolated temp
+// paths, never connect to a live socket or invoke the default OS signaler/spawner.
+class DaemonManager extends SafeDaemonManager {
+  constructor(...args: ConstructorParameters<typeof SafeDaemonManager>) {
+    args[11] ??= { next: () => "recovery-unit-owner" };
+    args[12] ??= { isReachable: async () => false };
+    args[17] ??= {
+      socketExists: () => false,
+      readRecord: () => (args[4] ? readPidFileDataSync(args[4]) : null),
+      probe: async () => ({ running: false }),
+    };
+    super(...args);
+  }
+}
 
 class MutableDaemonProcesses implements DaemonProcessFinder, DaemonProcessLivenessChecker {
   constructor(
@@ -180,7 +197,11 @@ describe("DaemonManager control-state recovery", () => {
     expect(spawner.calls).toHaveLength(1);
     expect(spawner.calls[0]).toMatchObject({
       command: "auto-mobile",
-      args: ["--daemon-mode", "--strict-port"],
+      args: [
+        "--daemon-mode",
+        `--daemon-socket-path=${encodeURIComponent(socket)}`,
+        "--strict-port",
+      ],
     });
   });
 
@@ -244,6 +265,7 @@ describe("DaemonManager control-state recovery", () => {
       expect(spawner.calls).toHaveLength(1);
       expect(spawner.calls[0]?.args).toEqual([
         "--daemon-mode",
+        `--daemon-socket-path=${encodeURIComponent(socket)}`,
         "--port",
         "4321",
         "--host",
@@ -291,7 +313,11 @@ describe("DaemonManager control-state recovery", () => {
 
       expect(signals).toEqual([]);
       expect(spawner.calls).toHaveLength(1);
-      expect(spawner.calls[0]?.args).toEqual(["--daemon-mode", "--strict-port"]);
+      expect(spawner.calls[0]?.args).toEqual([
+        "--daemon-mode",
+        `--daemon-socket-path=${encodeURIComponent(socket)}`,
+        "--strict-port",
+      ]);
     },
   );
 
@@ -350,6 +376,7 @@ describe("DaemonManager control-state recovery", () => {
       expect(spawner.calls).toHaveLength(1);
       expect(spawner.calls[0]?.args).toEqual([
         "--daemon-mode",
+        `--daemon-socket-path=${encodeURIComponent(socket)}`,
         "--port",
         "4321",
         "--host",
@@ -360,9 +387,10 @@ describe("DaemonManager control-state recovery", () => {
     },
   );
 
-  test("refuses multiple uncorrelated live daemon candidates without signalling either", async () => {
+  test("ignores multiple foreign daemon candidates during namespace recovery", async () => {
     const { lock, pid, socket } = paths();
     const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const livePids = new Set([1234, 5678]);
     const processes = new MutableDaemonProcesses(
       [
@@ -395,10 +423,11 @@ describe("DaemonManager control-state recovery", () => {
       async () => false,
     );
 
-    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+    await expect(manager.recoverControlState()).resolves.toBe("restarted");
 
     expect(signals).toEqual([]);
-    expect(spawner.calls).toEqual([]);
+    expect(livePids).toEqual(new Set([1234, 5678]));
+    expect(spawner.calls).toHaveLength(1);
   });
 
   test("joins a healthy successor found after acquiring the lifecycle lock", async () => {
@@ -446,7 +475,7 @@ describe("DaemonManager control-state recovery", () => {
     expect(signals).toBe(0);
   });
 
-  test("fails closed rather than signalling an uncorrelated daemon-mode process", async () => {
+  test("ignores an uncorrelated process but retains the replacement port guard", async () => {
     const { lock, pid, socket } = paths();
     const timer = new FakeTimer();
     const livePids = new Set([1234]);
@@ -481,7 +510,7 @@ describe("DaemonManager control-state recovery", () => {
       async () => false,
     );
 
-    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+    await expect(manager.recoverControlState()).rejects.toThrow("still in use");
     expect(signals).toEqual([]);
   });
 
@@ -585,7 +614,7 @@ describe("DaemonManager control-state recovery", () => {
       async () => false,
     );
 
-    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+    await expect(manager.recoverControlState()).rejects.toThrow("potentially reused PID");
     expect(signals).toEqual([]);
   });
 
@@ -627,7 +656,7 @@ describe("DaemonManager control-state recovery", () => {
       async () => false,
     );
 
-    await expect(manager.recoverControlState()).rejects.toThrow("could not correlate");
+    await expect(manager.recoverControlState()).rejects.toThrow("potentially reused PID");
     expect(signals).toEqual([]);
   });
 

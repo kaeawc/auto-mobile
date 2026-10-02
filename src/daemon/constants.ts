@@ -207,7 +207,8 @@ export const DAEMON_STARTUP_TIMEOUT_MS =
 /**
  * Reachability budget for an already-live daemon during start (milliseconds).
  *
- * When a start request finds a live daemon process without a usable PID record,
+ * When a start request attributes a live daemon to its socket namespace without
+ * a usable PID record (socket response or explicit argv marker),
  * it waits for that daemon to become reachable before deciding what to do. This
  * wait is nested INSIDE a client's `tools/list` request, and clients time that
  * request out at ~30s (`DAEMON_STARTUP_TIMEOUT_MS`). If the wait itself consumed

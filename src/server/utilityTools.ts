@@ -1,6 +1,7 @@
 import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
 import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
 import { runSessionClockMutation } from "./sessionClock";
+import { createSessionLocationWriteAdmission, runSessionLocationMutation } from "./sessionLocation";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -847,6 +848,11 @@ export function registerUtilityTools() {
     const deviceState = new DeviceState(device, {
       clockMutation: (mutation) =>
         runSessionClockMutation(sessionManager, args.sessionUuid, device.deviceId, mutation),
+      canWriteLocation: createSessionLocationWriteAdmission({
+        sessionManager,
+        sessionUuid: args.sessionUuid,
+        deviceId: device.deviceId,
+      }),
     });
     // Single decision for whether an applied networkCondition needs a session
     // restore slot: a degrading request on an Android emulator (issue #6012).
@@ -891,6 +897,15 @@ export function registerUtilityTools() {
         : deviceState.setState(input);
 
     const capture = await captureBiometricEnrollment(device, args, deviceState);
+    const applyLocationTracked = (input: SetDeviceStateInput): Promise<DeviceStateResult> =>
+      input.location && !capture.sessionManager
+        ? runSessionLocationMutation({
+            sessionManager,
+            sessionUuid: args.sessionUuid,
+            deviceId: device.deviceId,
+            mutation: () => applyStateTracked(input),
+          })
+        : applyStateTracked(input);
     if (capture.failure) {
       const result = await applyStateAfterBiometricCaptureFailure(
         { setState: applyStateTracked },
@@ -911,7 +926,7 @@ export function registerUtilityTools() {
     }
 
     const mutation = () =>
-      applyStateTracked({
+      applyLocationTracked({
         doNotDisturb: args.doNotDisturb,
         biometrics: args.biometrics,
         connectivity: args.connectivity,

@@ -306,13 +306,20 @@ export function stopLocationRouteForRemovedDevice(
 
 /** Attach route cleanup to the daemon's existing session lifecycle seam. */
 export function registerLocationRouteSessionCleanup(
-  manager: Pick<SessionManager, "onSessionRelease" | "onSessionDeviceUnbound">,
+  manager: Pick<
+    SessionManager,
+    "onSessionRelease" | "onSessionDeviceUnbound" | "registerPendingDeviceCleanup"
+  >,
   registry: LocationRouteRegistry = defaultLocationRouteRegistry,
 ): void {
-  manager.onSessionRelease((_sessionId, deviceId) => {
+  const cleanup = (_sessionId: string, deviceId: string): void => {
+    if (registry.isActive(deviceId)) {
+      // stopAndSettle cancels synchronously; publish quarantine before the hook returns.
+      const settlement = registry.stopAndSettle(deviceId);
+      manager.registerPendingDeviceCleanup(deviceId, settlement);
+    }
     registry.forget(deviceId);
-  });
-  manager.onSessionDeviceUnbound((_sessionId, deviceId) => {
-    registry.forget(deviceId);
-  });
+  };
+  manager.onSessionRelease(cleanup);
+  manager.onSessionDeviceUnbound(cleanup);
 }

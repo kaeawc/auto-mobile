@@ -45,6 +45,9 @@ import {
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
 
+export const PINCH_DURATION_MIN_MS = 1;
+export const PINCH_DURATION_MAX_MS = 10000;
+
 export const PINCH_DISTANCE_EXCLUSIVE_MIN = 0;
 export const PINCH_SCALE_EXCLUSIVE_MIN = 0;
 
@@ -136,6 +139,16 @@ export class PinchOn extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<PinchOnResult> {
     throwIfAborted(signal);
+    if (
+      options.duration !== undefined &&
+      (!Number.isInteger(options.duration) ||
+        options.duration < PINCH_DURATION_MIN_MS ||
+        options.duration > PINCH_DURATION_MAX_MS)
+    ) {
+      throw new ActionableError(
+        `pinchOn duration must be an integer from ${PINCH_DURATION_MIN_MS} to ${PINCH_DURATION_MAX_MS} ms`,
+      );
+    }
     let displayTarget: Awaited<ReturnType<typeof prepareTargetDisplayAction>> | undefined;
     if (options.display !== undefined) {
       try {

@@ -84,7 +84,15 @@ multiplier. Their defaults remain 100 ms and 1 respectively. There is no
 schema upper bound; long gestures remain subject to request/runner deadlines.
 
 `pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
-supplied; nonpositive values are rejected before gesture dispatch.
+supplied; nonpositive values are rejected before gesture dispatch. Its optional
+`duration` must be a positive integer from 1 to 10000 ms; the default remains
+300 ms. This is a deliberate input tightening: zero, negative, fractional, and
+over-10000 ms durations are rejected by both the schema and action.
+
+For `tapAny` with `action: "longPress"`, the effective maximum duration is
+2147323897 ms after rounding. The action derives this limit from the timer
+ceiling minus non-press overhead and the maximum search window; the schema
+advertises it without an upper-bound constraint.
 
 ### Screen-coordinate contract
 
@@ -467,7 +475,10 @@ Enabled-set drift is reported with bounded component IDs; the session never
 overwrites external enable/disable changes.
 
 `sendKeys` accepts one optional field selector and an ordered sequence of up to
-100 commands:
+100 commands. Each `key` command accepts at most 4 raw modifier entries
+(`shift`, `ctrl`, `alt`, `meta`), including duplicates. Both limits are enforced
+by the schema and preflighted by the action before any key is sent, including
+modifiers on semantic keys:
 
 ```json
 {

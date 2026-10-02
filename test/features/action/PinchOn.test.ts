@@ -1,3 +1,4 @@
+import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type {
@@ -112,6 +113,22 @@ describe("PinchOn", () => {
     getInstanceSpy?.mockRestore();
     iosGetInstanceSpy?.mockRestore();
     managerSpy?.mockRestore();
+  });
+
+  test.each([0, -1, 1.5, 10001])(
+    "rejects invalid duration %s before dispatch",
+    async (duration) => {
+      await expect(pinchOn.execute({ direction: "in", duration })).rejects.toThrow(ActionableError);
+      expect(fakeA11yService.getPinchHistory()).toEqual([]);
+      expect(fakeIosService.getPinchHistory()).toEqual([]);
+    },
+  );
+
+  test.each([1, 10000, undefined])("preserves accepted/default duration %s", async (duration) => {
+    const result = await pinchOn.execute({ direction: "in", autoTarget: false, duration });
+    expect(result.success).toBe(true);
+    expect(result.duration).toBe(duration ?? 300);
+    expect(fakeA11yService.getPinchHistory()[0]?.duration).toBe(duration ?? 300);
   });
 
   test("already aborted pinch dispatches no device command", async () => {

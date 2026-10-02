@@ -13,7 +13,10 @@ import {
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
-import { TapAnyElement } from "../features/action/TapAnyElement";
+import {
+  TapAnyElement,
+  TAP_ANY_LONG_PRESS_MAX_DURATION_MS,
+} from "../features/action/TapAnyElement";
 import { WakeAndUnlock } from "../features/action/WakeAndUnlock";
 import { DeviceLockStore } from "../features/action/DeviceLockStore";
 import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
@@ -37,6 +40,8 @@ import {
   PinchOn,
   PINCH_DISTANCE_EXCLUSIVE_MIN,
   PINCH_SCALE_EXCLUSIVE_MIN,
+  PINCH_DURATION_MIN_MS,
+  PINCH_DURATION_MAX_MS,
 } from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
 import { RecentApps } from "../features/action/RecentApps";
@@ -64,6 +69,8 @@ import { AndroidImeCatalog } from "../features/action/AndroidImeCatalog";
 import { createInstalledImeKeySession } from "../features/action/InstalledImeKeySession";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import {
+  SEND_KEYS_MAX_COMMANDS,
+  SEND_KEYS_MAX_MODIFIERS,
   SEND_KEYS_OPERATIONS,
   SEND_KEYS_SEMANTIC_KEYS,
   SEND_KEYS_TYPING_MODES,
@@ -653,7 +660,13 @@ export const tapAnySchema = withJsonSchemaOverride(
           .describe("Action type (default: tap)"),
         // Bounded like tapOn.duration so a negative longPress cannot silently
         // become a plain tap (#5769).
-        duration: z.number().min(0, "must be >= 0").optional().describe("Long press duration (ms)"),
+        duration: z
+          .number()
+          .min(0, "must be >= 0")
+          .optional()
+          .describe(
+            `Long press duration (ms; maximum for action 'longPress': ${TAP_ANY_LONG_PRESS_MAX_DURATION_MS} ms after rounding)`,
+          ),
         searchUntil: z
           .object({
             duration: z
@@ -809,7 +822,15 @@ export const pinchOnSchema = withJsonSchemaOverride(
           .gt(PINCH_SCALE_EXCLUSIVE_MIN)
           .optional()
           .describe(`Scale factor (> ${PINCH_SCALE_EXCLUSIVE_MIN}; overrides distances)`),
-        duration: z.number().optional().describe("Gesture duration (ms)"),
+        duration: z
+          .number()
+          .int()
+          .min(PINCH_DURATION_MIN_MS)
+          .max(PINCH_DURATION_MAX_MS)
+          .optional()
+          .describe(
+            `Gesture duration (integer ${PINCH_DURATION_MIN_MS}-${PINCH_DURATION_MAX_MS} ms, default: 300)`,
+          ),
         rotationDegrees: z
           .number()
           .optional()
@@ -1038,9 +1059,11 @@ const sendKeysCommandSchema = withCanonicalDiscriminatedUnionJsonSchema(
           ),
         modifiers: z
           .array(z.enum(INPUT_KEY_MODIFIERS))
-          .max(INPUT_KEY_MODIFIERS.length)
+          .max(SEND_KEYS_MAX_MODIFIERS)
           .optional()
-          .describe("Raw-key modifier chord: shift, ctrl, alt, or meta"),
+          .describe(
+            `Raw-key modifier chord: shift, ctrl, alt, or meta (maximum ${SEND_KEYS_MAX_MODIFIERS} entries, including duplicates)`,
+          ),
       })
       .strict(),
     z.object({ action: z.literal("clear") }).strict(),
@@ -1057,8 +1080,10 @@ export const sendKeysSchema = addDeviceTargetingToSchema(
       commands: z
         .array(sendKeysCommandSchema)
         .min(1)
-        .max(100)
-        .describe("One to 100 commands executed serially; execution stops on the first failure"),
+        .max(SEND_KEYS_MAX_COMMANDS)
+        .describe(
+          `One to ${SEND_KEYS_MAX_COMMANDS} commands executed serially; execution stops on the first failure`,
+        ),
       // #5870: Device or session targeting resolves the platform.
       platform: platformSchema.optional(),
       ...responseShapeControlFields,

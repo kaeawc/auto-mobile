@@ -1,3 +1,8 @@
+import { TAP_ANY_LONG_PRESS_MAX_DURATION_MS } from "../../src/features/action/TapAnyElement";
+import {
+  SEND_KEYS_MAX_COMMANDS,
+  SEND_KEYS_MAX_MODIFIERS,
+} from "../../src/features/action/SendKeys";
 import { afterEach, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import {
@@ -7,6 +12,8 @@ import {
   resetDragAndDropFactory,
   swipeOnSchema,
   pinchOnSchema,
+  sendKeysSchema,
+  tapAnySchema,
   swipeOnHandler,
   setSwipeOnFactory,
   resetSwipeOnFactory,
@@ -29,10 +36,20 @@ import {
 import {
   PINCH_DISTANCE_EXCLUSIVE_MIN,
   PINCH_SCALE_EXCLUSIVE_MIN,
+  PINCH_DURATION_MIN_MS,
+  PINCH_DURATION_MAX_MS,
 } from "../../src/features/action/PinchOn";
 
 test("schema bounds follow the implementation constants", () => {
   const bounds = [
+    {
+      field: "duration",
+      schema: pinchOnSchema.shape.duration,
+      min: PINCH_DURATION_MIN_MS,
+      max: PINCH_DURATION_MAX_MS,
+      exclusive: false,
+      integer: true,
+    },
     {
       field: "pressDurationMs",
       schema: dragAndDropSchema.shape.pressDurationMs,
@@ -90,13 +107,16 @@ test("schema bounds follow the implementation constants", () => {
       exclusive: true,
     },
   ];
-  for (const { field, schema, min, max, exclusive } of bounds) {
+  for (const { field, schema, min, max, exclusive, integer } of bounds) {
     const json = z.toJSONSchema(schema);
     expect(json[exclusive ? "exclusiveMinimum" : "minimum"]).toBe(min);
     expect(json.maximum).toBe(max);
     expect(schema.safeParse(min - 1).success).toBe(false);
     expect(schema.safeParse(min).success).toBe(!exclusive);
-    expect(schema.safeParse(min + 0.01).success).toBe(true);
+    expect(schema.safeParse(min + 0.01).success).toBe(!integer);
+    if (integer) {
+      expect(json.type).toBe("integer");
+    }
     expect(schema.description).toContain(`${min}`);
     if (max !== undefined) {
       expect(schema.safeParse(max).success).toBe(true);
@@ -209,3 +229,45 @@ test.each([{ apexPause: 3001 }, { returnSpeed: 0.05 }, { returnSpeed: 4 }])(
     expect((await swipeOnHandler(device, parsedSwipe)).isError).toBeUndefined();
   },
 );
+
+test.each([1, 10000, 0, -1, 1.5, 10001])("pinch duration schema boundary %s", (duration) => {
+  const parsed = pinchOnSchema.safeParse({ direction: "in", duration });
+  expect(parsed.success).toBe(duration === 1 || duration === 10000);
+  if (!parsed.success) {
+    expect(parsed.error.issues[0].path).toEqual(["duration"]);
+  }
+});
+
+test("sendKeys schema caps raw arrays", () => {
+  const key = { action: "key", key: "tab", modifiers: ["shift", "ctrl", "alt", "meta"] };
+  expect(
+    sendKeysSchema.safeParse({
+      commands: Array.from({ length: SEND_KEYS_MAX_COMMANDS }, () => key),
+    }).success,
+  ).toBe(true);
+  expect(
+    sendKeysSchema.safeParse({
+      commands: Array.from({ length: SEND_KEYS_MAX_COMMANDS + 1 }, () => key),
+    }).success,
+  ).toBe(false);
+  const commandsJson = z.toJSONSchema(sendKeysSchema.shape.commands);
+  expect(commandsJson.maxItems).toBe(SEND_KEYS_MAX_COMMANDS);
+  const command = sendKeysSchema.shape.commands.element;
+  const keySchema = command.options.find((option) => option.shape.action.value === "key");
+  if (!keySchema || !("modifiers" in keySchema.shape)) {
+    throw new Error("Missing key modifiers schema");
+  }
+  expect(z.toJSONSchema(keySchema.shape.modifiers).maxItems).toBe(SEND_KEYS_MAX_MODIFIERS);
+  for (const fifth of ["shift", "super"]) {
+    expect(
+      sendKeysSchema.safeParse({ commands: [{ ...key, modifiers: [...key.modifiers, fifth] }] })
+        .success,
+    ).toBe(false);
+  }
+});
+
+test("tapAny describes the action longPress maximum", () => {
+  expect(tapAnySchema.shape.duration.description).toContain(
+    `${TAP_ANY_LONG_PRESS_MAX_DURATION_MS}`,
+  );
+});

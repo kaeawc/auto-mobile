@@ -1,7 +1,10 @@
 import { describe, expect, mock, test } from "bun:test";
 import { android, createSendKeysHarness, observer as harnessObserver } from "./SendKeysTestHarness";
+import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import {
+  SEND_KEYS_MAX_COMMANDS,
+  SEND_KEYS_MAX_MODIFIERS,
   DefaultSendKeysCommandExecutor,
   SendKeys,
   type SendKeysCommandExecutor,
@@ -2454,4 +2457,61 @@ test("sendKeys retains warnings from the failed command and preceding successful
       { success: false, warning: "failed command warning" },
     ],
   });
+});
+
+test("sendKeys preflights every raw modifier array and the command count before keys", async () => {
+  const h = createSendKeysHarness(android);
+  const press = mock(async () => ({ success: true }));
+  const executor = new DefaultSendKeysCommandExecutor(
+    android,
+    createAdbFactory(h.adb),
+    harnessObserver,
+    { textClient: h.client, inputKey: { press } },
+  );
+  const action = new SendKeys(android, undefined, {
+    executor,
+    observer: harnessObserver,
+    timestampProvider: { now: async () => 0 },
+    timer: new FakeTimer(),
+  });
+  const key = { action: "key", key: "tab" } as const;
+  await expect(
+    action.execute(Array.from({ length: SEND_KEYS_MAX_COMMANDS + 1 }, () => key)),
+  ).rejects.toThrow(ActionableError);
+  expect(press).toHaveBeenCalledTimes(0);
+  for (const semanticKey of ["tab", "done"] as const) {
+    await expect(
+      action.execute([
+        key,
+        { action: "key", key: semanticKey, modifiers: ["shift", "ctrl", "alt", "meta", "shift"] },
+      ]),
+    ).rejects.toThrow(`${SEND_KEYS_MAX_MODIFIERS}`);
+    expect(press).toHaveBeenCalledTimes(0);
+  }
+  await expect(
+    action.execute([
+      key,
+      {
+        action: "key",
+        key: "tab",
+        modifiers: [
+          "shift",
+          "ctrl",
+          "alt",
+          "meta",
+          // @ts-expect-error Exercise a direct runtime caller with five distinct modifiers.
+          "super",
+        ],
+      },
+    ]),
+  ).rejects.toThrow(ActionableError);
+  expect(press).toHaveBeenCalledTimes(0);
+  const result = await action.execute(
+    Array.from({ length: SEND_KEYS_MAX_COMMANDS }, () => ({
+      ...key,
+      modifiers: ["shift", "ctrl", "alt", "meta"],
+    })),
+  );
+  expect(result.success).toBe(true);
+  expect(press).toHaveBeenCalledTimes(SEND_KEYS_MAX_COMMANDS);
 });

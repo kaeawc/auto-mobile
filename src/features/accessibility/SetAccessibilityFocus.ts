@@ -27,6 +27,7 @@ import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
+import { BaseVisualChange } from "../action/BaseVisualChange";
 
 /**
  * Minimal accessibility-focus capability surface, so this feature can be unit-tested
@@ -197,10 +198,29 @@ export class SetAccessibilityFocus {
 
   private async getViewHierarchy(): Promise<ViewHierarchyResult> {
     let observeResult = await this.observeScreen.getMostRecentCachedObserveResult();
-    if (!observeResult.viewHierarchy || observeResult.viewHierarchy.hierarchy?.error) {
+    const hasUsableCache = Boolean(
+      observeResult.viewHierarchy && !observeResult.viewHierarchy.hierarchy.error,
+    );
+    const staleCachedRefetch =
+      hasUsableCache && BaseVisualChange.shouldRefetchCachedObservation(observeResult);
+    if (staleCachedRefetch) {
+      try {
+        observeResult = await this.observeScreen.execute({ freshness: "fresh" });
+      } catch (error) {
+        throw new ActionableError(
+          "Unable to observe screen to resolve accessibility focus target.",
+          {
+            cause: error,
+          },
+        );
+      }
+    } else if (!hasUsableCache) {
       observeResult = await this.observeScreen.execute();
     }
-    if (!observeResult.viewHierarchy) {
+    if (
+      !observeResult.viewHierarchy ||
+      (staleCachedRefetch && observeResult.viewHierarchy.hierarchy?.error)
+    ) {
       throw new ActionableError("Unable to observe screen to resolve accessibility focus target.");
     }
     return observeResult.viewHierarchy;

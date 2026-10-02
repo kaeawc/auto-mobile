@@ -513,15 +513,28 @@ describe("display stamp waitFor conditions", () => {
     expect(outcome.matched).toBe(true);
   });
 
-  test("activeDisplay fails immediately when display inventory is unavailable", async () => {
+  test("activeDisplay with unavailable inventory polls and explains its timeout", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const screen = new FakeObserveScreen();
     screen.setObserveResult({
       ...makeObservation([]),
       display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
     });
-    await expect(waitForObservation(screen, { activeDisplay: "unknown" })).rejects.toThrow(
-      "Cannot wait for activeDisplay: this device has no display inventory",
+    const outcome = await waitForObservation(
+      screen,
+      { activeDisplay: "cover", timeout: 200 },
+      undefined,
+      false,
+      timer,
     );
+    expect(outcome).toMatchObject({
+      timedOut: true,
+      awaitTimeout: true,
+      timeoutReason:
+        'Timed out after 200 ms waiting for activeDisplay "cover"; display inventory was unavailable so the active display was never confirmed',
+    });
+    expect(screen.getExecuteCallCount()).toBeGreaterThan(1);
   });
 });
 

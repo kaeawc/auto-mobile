@@ -25,6 +25,20 @@ import {
   stopVideoRecording,
   type VideoRetentionPolicy,
 } from "../../src/server/videoRecordingManager";
+import { createVideoRecordingDeviceIncarnationListener } from "../../src/server/videoRecordingIncarnationListener";
+import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
+import {
+  restoreDeviceSnapshot,
+  setDeviceSnapshotManagerDependencies,
+  resetDeviceSnapshotManagerDependencies,
+} from "../../src/server/deviceSnapshotManager";
+import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
+import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
+import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
+import { FakeAvdSnapshotService } from "../fakes/FakeAvdSnapshotService";
+import type { DeviceSnapshotRepository } from "../../src/db/deviceSnapshotRepository";
+import type { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
+import type { DeviceSnapshotManifest } from "../../src/models";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -85,6 +99,7 @@ describe("videoRecordingManager", () => {
 
   const cleanup = () => {
     resetVideoRecordingManagerDependencies();
+    resetDeviceSnapshotManagerDependencies();
     displayTransitions.reset("recording-foldable");
   };
 
@@ -113,6 +128,132 @@ describe("videoRecordingManager", () => {
     }
     throw new Error(`Timed out waiting for ${expected} recordings`);
   };
+
+  function restoreListener(options: { expiryMs?: number; failListing?: boolean } = {}) {
+    return createVideoRecordingDeviceIncarnationListener(
+      {
+        listActiveVideoRecordings: async () => {
+          if (options.failListing) {
+            throw new Error("listing failed");
+          }
+          return [];
+        },
+        forceStopVideoRecording: async () => {},
+        interruptVideoRecording: async () => {},
+      },
+      { timer: fakeTimer, expiryMs: options.expiryMs },
+    );
+  }
+
+  test.each([true, false])(
+    "VM restore fences starts until settlement (ready=%s)",
+    async (ready) => {
+      const listener = restoreListener();
+      await listener.prepareForIncarnationChange?.(testDevice.deviceId);
+      await expect(startVideoRecording({ device: testDevice })).rejects.toBeInstanceOf(
+        ActionableError,
+      );
+      await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+        `VM snapshot restore is in progress on device ${testDevice.deviceId}`,
+      );
+      expect(fakeBackend.startCalls).toHaveLength(0);
+      // A refused start leaves neither a reservation nor a drain count behind.
+      const other = { ...testDevice, deviceId: "other-device" };
+      await expect(startVideoRecording({ device: other })).resolves.toBeDefined();
+      await listener.onDeviceIncarnationChanged(testDevice.deviceId);
+      await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+        "VM snapshot restore",
+      );
+      await listener.onIncarnationChangeSettled?.(testDevice.deviceId, { ready });
+      await expect(startVideoRecording({ device: testDevice })).resolves.toBeDefined();
+      await stopAcceptingVideoRecordingStarts();
+    },
+  );
+
+  test("failed restore provider releases the recording fence through the restore manager", async () => {
+    const device = { ...testDevice, deviceId: "emulator-5554" };
+    const repository = new FakeDeviceSnapshotRepository();
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "failed-restore",
+      timestamp: new Date(0).toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+    };
+    await repository.insertSnapshot({
+      ...manifest,
+      createdAt: manifest.timestamp,
+      lastAccessedAt: manifest.timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    const listener = restoreListener();
+    await setDeviceSnapshotManagerDependencies({
+      snapshotRepository: repository as DeviceSnapshotRepository,
+      configRepository: new FakeDeviceSnapshotConfigRepository(),
+      snapshotStore: new FakeDeviceSnapshotStore() as DeviceSnapshotStore,
+      avdSnapshots: new FakeAvdSnapshotService(),
+      timer: fakeTimer,
+      deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
+      createRestoreProvider: () => ({
+        restore: async (args) => {
+          await args.onBeforeVmSnapshotLoad?.();
+          await expect(startVideoRecording({ device })).rejects.toThrow("VM snapshot restore");
+          throw new Error("load failed");
+        },
+      }),
+    });
+    await expect(
+      restoreDeviceSnapshot(device, { snapshotName: manifest.snapshotName }),
+    ).rejects.toThrow("load failed");
+    await expect(startVideoRecording({ device })).resolves.toBeDefined();
+  });
+
+  test("VM restore fences first even when preparation listing fails", async () => {
+    const listener = restoreListener({ failListing: true });
+    await expect(listener.prepareForIncarnationChange?.(testDevice.deviceId)).rejects.toThrow(
+      "listing failed",
+    );
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+      "VM snapshot restore",
+    );
+    await listener.onIncarnationChangeSettled?.(testDevice.deviceId, { ready: false });
+    await expect(startVideoRecording({ device: testDevice })).resolves.toBeDefined();
+  });
+
+  test("VM restore safety expiry releases a stuck fence", async () => {
+    const listener = restoreListener({ expiryMs: 100 });
+    await listener.prepareForIncarnationChange?.(testDevice.deviceId);
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+      "VM snapshot restore",
+    );
+    fakeTimer.advanceTime(100);
+    await expect(startVideoRecording({ device: testDevice })).resolves.toBeDefined();
+  });
+
+  test.each([true, false])(
+    "VM restore replaces expiry without clearing a later fence (clear=%s)",
+    async (clear) => {
+      const listener = restoreListener({ expiryMs: 100 });
+      await listener.prepareForIncarnationChange?.(testDevice.deviceId);
+      fakeTimer.advanceTime(50);
+      if (clear) {
+        await listener.onIncarnationChangeSettled?.(testDevice.deviceId, { ready: false });
+        expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+      }
+      await listener.prepareForIncarnationChange?.(testDevice.deviceId);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+      fakeTimer.advanceTime(50);
+      await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+        "VM snapshot restore",
+      );
+      fakeTimer.advanceTime(50);
+      await expect(startVideoRecording({ device: testDevice })).resolves.toBeDefined();
+    },
+  );
 
   test("auto-stops recordings using FakeTimer", async () => {
     const stopCall = fakeBackend.waitForStopCall();

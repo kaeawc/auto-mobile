@@ -24,6 +24,15 @@ import {
   noOpSnapshotFileSync,
 } from "../helpers/deviceSnapshotStoreSync";
 
+import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
+import { createInstalledAppsDeviceIncarnationListener } from "../../src/server/appResources";
+import { PerDeviceInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { RestoreSnapshot } from "../../src/features/action/RestoreSnapshot";
+import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+
 const TEST_DEVICE: BootedDevice = {
   deviceId: "test-device",
   name: "Test Device",
@@ -808,6 +817,155 @@ describe("deviceSnapshotManager", () => {
     expect(restoreCalls[0]?.manifest).toEqual(manifest);
   });
 
+  async function seedVmRestore() {
+    const device = { ...TEST_DEVICE, deviceId: "emulator-5554", name: "Pixel_9_Pro" };
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "settlement-vm",
+      timestamp: new Date(0).toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "android",
+      snapshotType: "vm",
+      includeAppData: true,
+      includeSettings: false,
+    };
+    await repository.insertSnapshot({
+      ...manifest,
+      createdAt: manifest.timestamp,
+      lastAccessedAt: manifest.timestamp,
+      sizeBytes: 0,
+      manifest,
+    });
+    return { device, manifest };
+  }
+
+  test.each(["success", "pre-load", "load", "readiness", "prepare"])(
+    "settles exactly once after preparation on %s exit",
+    async (exit) => {
+      const { device, manifest } = await seedVmRestore();
+      const outcomes: { ready: boolean }[] = [];
+      await setDeviceSnapshotManagerDependencies({
+        deviceIncarnationInvalidator: {
+          prepareForIncarnationChange: async () => {
+            if (exit === "prepare") {
+              throw new Error("prepare failed");
+            }
+          },
+          invalidate: async () => {},
+          settleIncarnationChange: async (settledDevice, outcome) => {
+            expect(settledDevice).toBe(device);
+            outcomes.push(outcome);
+          },
+        },
+        createRestoreProvider: () => ({
+          restore: async (args) => {
+            await args.onBeforeVmSnapshotLoad?.();
+            await args.onBeforeVmSnapshotLoad?.();
+            if (exit === "pre-load") {
+              throw Object.assign(new Error("pre-load failed"), {
+                isDefinitiveVmSnapshotLoadFailure: true,
+              });
+            }
+            if (exit === "load") {
+              throw new Error("load failed");
+            }
+            await args.onVmSnapshotLoaded?.();
+            if (exit === "readiness") {
+              throw new Error("readiness failed");
+            }
+            return { snapshotType: manifest.snapshotType, restoredAt: manifest.timestamp };
+          },
+        }),
+      });
+      const restore = restoreDeviceSnapshot(device, { snapshotName: manifest.snapshotName });
+      if (exit === "success") {
+        await restore;
+      } else {
+        await expect(restore).rejects.toThrow(`${exit} failed`);
+      }
+      expect(outcomes).toEqual([{ ready: exit === "success" }]);
+    },
+  );
+
+  test.each([true, false])(
+    "installed-app notifications wait for real restore readiness (ready=%s)",
+    async (ready) => {
+      const { device, manifest } = await seedVmRestore();
+      const apps = new FakeInstalledAppsRepository();
+      await apps.upsertInstalledApp(device.deviceId, 0, "com.example.app", false, 123);
+      const barrier = new FakeDbWriteBarrier();
+      let invalidations = 0;
+      let notifications = 0;
+      const listener = createInstalledAppsDeviceIncarnationListener(
+        apps,
+        new PerDeviceInstalledAppsCacheWriteCoordinator(() => barrier),
+        barrier,
+        () => {
+          invalidations++;
+        },
+        async () => {
+          notifications++;
+        },
+      );
+      let release!: (device: BootedDevice) => void;
+      let reject!: (error: Error) => void;
+      const readiness = new Promise<BootedDevice>((resolve, fail) => {
+        release = resolve;
+        reject = fail;
+      });
+      let entered!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      class DeferredEmulator extends AndroidEmulatorClient {
+        override async waitForEmulatorReady(): Promise<BootedDevice> {
+          entered();
+          return readiness;
+        }
+      }
+      const adb = new FakeAdbClient();
+      adb.setCommandResult(`emu avd snapshot load ${manifest.snapshotName}`, "OK");
+      const emulator = new DeferredEmulator(null, null, fakeTimer, { create: () => adb });
+      await setDeviceSnapshotManagerDependencies({
+        deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([listener]),
+        createRestoreProvider: () =>
+          new RestoreSnapshot(
+            device,
+            { create: () => adb },
+            emulator,
+            fakeTimer,
+            new DeviceSnapshotStore(path.join(os.tmpdir(), "settlement-test-unused")),
+          ),
+      });
+      const restore = restoreDeviceSnapshot(device, { snapshotName: manifest.snapshotName });
+      // Attach rejection handling before rejecting the deferred readiness promise.
+      const completion = restore.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      await waiting;
+      try {
+        expect(invalidations).toBe(1);
+        expect(await apps.getCacheVerifiedAt(device.deviceId)).toBe(0);
+        expect(notifications).toBe(0);
+      } finally {
+        // Always settle the deferred guest, even when the pending-state assertion fails.
+        if (ready) {
+          release(device);
+        } else {
+          reject(new Error("readiness failed"));
+        }
+        const failure = await completion;
+        if (ready) {
+          expect(failure).toBeUndefined();
+        } else {
+          expect(failure).toBeInstanceOf(ActionableError);
+        }
+      }
+      expect(notifications).toBe(ready ? 1 : 0);
+    },
+  );
+
   test("restoreDeviceSnapshot invalidates an Android VM device incarnation after restore", async () => {
     const vmDevice: BootedDevice = {
       ...TEST_DEVICE,
@@ -848,6 +1006,7 @@ describe("deviceSnapshotManager", () => {
         },
       }),
       deviceIncarnationInvalidator: {
+        settleIncarnationChange: async () => {},
         prepareForIncarnationChange: async () => {
           calls.push("prepare");
         },
@@ -903,6 +1062,7 @@ describe("deviceSnapshotManager", () => {
         },
       }),
       deviceIncarnationInvalidator: {
+        settleIncarnationChange: async () => {},
         prepareForIncarnationChange: async () => {},
         invalidate: async (invalidatedDevice) => {
           expect(invalidatedDevice).toBe(vmDevice);
@@ -959,6 +1119,7 @@ describe("deviceSnapshotManager", () => {
         },
       }),
       deviceIncarnationInvalidator: {
+        settleIncarnationChange: async () => {},
         prepareForIncarnationChange: async () => {},
         invalidate: async () => {
           invalidations++;
@@ -1001,6 +1162,7 @@ describe("deviceSnapshotManager", () => {
     });
     await setDeviceSnapshotManagerDependencies({
       deviceIncarnationInvalidator: {
+        settleIncarnationChange: async () => {},
         prepareForIncarnationChange: async () => {},
         invalidate: async () => {
           invalidated = true;

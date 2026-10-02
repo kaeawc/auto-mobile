@@ -28,6 +28,8 @@ export interface DeviceIncarnationListener {
    */
   prepareForIncarnationChange?(deviceId: string): Promise<void> | void;
   onDeviceIncarnationChanged(deviceId: string): Promise<void> | void;
+  /** Release preparation state on every exit; ready means guest readiness resolved. */
+  onIncarnationChangeSettled?(deviceId: string, outcome: { ready: boolean }): Promise<void> | void;
 }
 
 let resolver: DeviceIncarnationResolver | undefined;

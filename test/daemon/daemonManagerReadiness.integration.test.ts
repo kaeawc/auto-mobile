@@ -1,3 +1,9 @@
+import {
+  FakeDaemonProcessTable,
+  namespaceDaemonProcess,
+  unmarkedDaemonProcess,
+} from "../fakes/FakeDaemonProcessTable";
+import type { IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { createServer, type Server } from "node:net";
@@ -72,10 +78,13 @@ class FakePeerSocketReachability implements DaemonSocketReachabilityLike {
   }
 }
 
-/**
- * Constructs a DaemonManager with the injected peer-reachability probe at its
- * constructor position, keeping the rejoin tests readable despite the long signature.
- */
+const noNamespaceOwner: IdentityRecoveryIO = {
+  socketExists: () => false,
+  readRecord: () => null,
+  probe: async () => ({ running: false }),
+};
+
+/** Keeps process discovery, namespace ownership and peer probes on injected I/O. */
 function createRejoinManager(args: {
   timer: FakeTimer;
   lockPath: string;
@@ -83,6 +92,7 @@ function createRejoinManager(args: {
   socketPath: string;
   spawner: FakeDaemonSpawner;
   reachability: DaemonSocketReachabilityLike;
+  processTable: FakeDaemonProcessTable;
 }): DaemonManager {
   return new DaemonManager(
     undefined,
@@ -91,13 +101,18 @@ function createRejoinManager(args: {
     args.lockPath,
     args.pidPath,
     args.socketPath,
+    args.processTable,
     args.spawner,
     undefined,
     undefined,
     undefined,
     undefined,
-    undefined,
     args.reachability,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    noNamespaceOwner,
   );
 }
 
@@ -716,6 +731,7 @@ describe("DaemonManager readiness", () => {
     const spawner = new FakeDaemonSpawner(true);
     spawner.logText = `OLD_LOG_START\n${"a".repeat(5000)}\nSQLiteError: database is locked\nstack line\n`;
 
+    const processTable = new FakeDaemonProcessTable();
     const manager = new DaemonManager(
       undefined,
       undefined,
@@ -723,9 +739,19 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
+      processTable,
       spawner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      noNamespaceOwner,
     );
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(async () => false);
 
     try {
@@ -740,7 +766,6 @@ describe("DaemonManager readiness", () => {
       expect(spawner.process.signals).toEqual(["SIGTERM"]);
     } finally {
       readySpy.mockRestore();
-      findSpy.mockRestore();
     }
   });
 
@@ -749,6 +774,7 @@ describe("DaemonManager readiness", () => {
     const fakeTimer = new FakeTimer();
     const spawner = new FakeDaemonSpawner(true);
     const clients: ProbeClient[] = [];
+    const processTable = new FakeDaemonProcessTable();
     const manager = new DaemonManager(
       () => {
         const client = new ProbeClient(true);
@@ -760,7 +786,18 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
+      processTable,
       spawner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      noNamespaceOwner,
     );
     let statusCalls = 0;
     const statusSpy = spyOn(manager, "status").mockImplementation(async () => {
@@ -775,7 +812,6 @@ describe("DaemonManager readiness", () => {
         socketPath,
       };
     });
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockResolvedValue(false);
 
     try {
@@ -785,7 +821,6 @@ describe("DaemonManager readiness", () => {
       expect(spawner.process.signals).toEqual([]);
     } finally {
       statusSpy.mockRestore();
-      findSpy.mockRestore();
       readySpy.mockRestore();
     }
   });
@@ -798,6 +833,7 @@ describe("DaemonManager readiness", () => {
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
+    const processTable = new FakeDaemonProcessTable();
     const manager = new DaemonManager(
       undefined,
       undefined,
@@ -805,9 +841,19 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
+      processTable,
       spawner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      noNamespaceOwner,
     );
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -818,7 +864,6 @@ describe("DaemonManager readiness", () => {
       );
     } finally {
       readySpy.mockRestore();
-      findSpy.mockRestore();
     }
   });
 
@@ -829,6 +874,7 @@ describe("DaemonManager readiness", () => {
     spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
     spawner.onSpawn = (process) => process.emit("exit", 7, null);
 
+    const processTable = new FakeDaemonProcessTable();
     const manager = new DaemonManager(
       undefined,
       undefined,
@@ -836,18 +882,24 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
+      processTable,
       spawner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      noNamespaceOwner,
     );
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
 
-    try {
-      await expect(manager.start()).rejects.toThrow(
-        /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/,
-      );
-      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
-    } finally {
-      findSpy.mockRestore();
-    }
+    await expect(manager.start()).rejects.toThrow(
+      /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/,
+    );
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("joins a peer daemon that becomes reachable just after our subprocess exits (#6103)", async () => {
@@ -862,6 +914,9 @@ describe("DaemonManager readiness", () => {
     // socket probe is refused the first time and reachable on the second.
     const reachability = new FakePeerSocketReachability();
     reachability.reachable = () => reachability.calls >= 2;
+    const processTable = new FakeDaemonProcessTable((call) =>
+      call === 1 ? [] : [namespaceDaemonProcess(999999, socketPath)],
+    );
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -869,15 +924,11 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
       reachability,
+      processTable,
     });
 
     // No live daemon before we spawn (so start() spawns our own child), but a peer
     // daemon process is present afterwards while it finishes coming up.
-    let liveCalls = 0;
-    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
-      liveCalls++;
-      return liveCalls <= 1 ? [] : [999999];
-    });
     // Our own launch never reports ready — our child dies first.
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
@@ -891,10 +942,9 @@ describe("DaemonManager readiness", () => {
       // The synchronous process scan runs once pre-spawn and once in the rejoin (after
       // the first probe miss) — NOT on every poll iteration (issue #6103). The join
       // completes within the coarse re-scan interval, so exactly two scans occur.
-      expect(liveCalls).toBe(2);
+      expect(processTable.scanCalls).toBe(2);
     } finally {
       readySpy.mockRestore();
-      liveSpy.mockRestore();
     }
   });
 
@@ -906,6 +956,7 @@ describe("DaemonManager readiness", () => {
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
     const reachability = new FakePeerSocketReachability(); // socket never reachable
+    const processTable = new FakeDaemonProcessTable();
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -913,9 +964,9 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
       reachability,
+      processTable,
     });
     // No live daemon exists, so nothing is coming up.
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -930,7 +981,6 @@ describe("DaemonManager readiness", () => {
       expect(fakeTimer.getPendingSleepCount()).toBe(0);
     } finally {
       readySpy.mockRestore();
-      findSpy.mockRestore();
     }
   });
 
@@ -944,6 +994,7 @@ describe("DaemonManager readiness", () => {
     // The peer is already accepting on the socket.
     const reachability = new FakePeerSocketReachability();
     reachability.reachable = () => true;
+    const processTable = new FakeDaemonProcessTable();
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -951,15 +1002,11 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
       reachability,
+      processTable,
     });
     // The (synchronous, possibly-stalling) process scan must never run before the
     // authoritative socket probe. Count every scan; with a reachable socket the rejoin
     // must join on the probe and never scan, so only the single pre-spawn scan occurs.
-    let scanCalls = 0;
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockImplementation(() => {
-      scanCalls++;
-      return [];
-    });
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -969,11 +1016,10 @@ describe("DaemonManager readiness", () => {
       expect(reachability.calls).toBeGreaterThanOrEqual(1);
       // Exactly one scan (the pre-spawn reuse check); the rejoin joined via the probe
       // without ever consulting the scan — proving socket-first ordering.
-      expect(scanCalls).toBe(1);
+      expect(processTable.scanCalls).toBe(1);
       expect(spawner.process.signals).toEqual([]);
     } finally {
       readySpy.mockRestore();
-      findSpy.mockRestore();
     }
   });
 
@@ -988,6 +1034,7 @@ describe("DaemonManager readiness", () => {
     // SECOND probe, which is the final probe taken after the (missing) scan.
     const reachability = new FakePeerSocketReachability();
     reachability.reachable = () => reachability.calls >= 2;
+    const processTable = new FakeDaemonProcessTable();
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -995,11 +1042,11 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
       reachability,
+      processTable,
     });
     // The best-effort process scan misses the peer entirely (returns empty). Without a
     // final probe, the rejoin would abandon on this snapshot even though the winner is
     // now accepting.
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -1011,7 +1058,6 @@ describe("DaemonManager readiness", () => {
       expect(spawner.process.signals).toEqual([]);
     } finally {
       readySpy.mockRestore();
-      findSpy.mockRestore();
     }
   });
 
@@ -1026,6 +1072,9 @@ describe("DaemonManager readiness", () => {
     // must be the exhausted deadline.
     const reachability = new FakePeerSocketReachability();
     reachability.reachable = () => true;
+    const processTable = new FakeDaemonProcessTable((call) =>
+      call === 1 ? [] : [namespaceDaemonProcess(999999, socketPath)],
+    );
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -1033,11 +1082,7 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
       reachability,
-    });
-    let liveCalls = 0;
-    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
-      liveCalls++;
-      return liveCalls <= 1 ? [] : [999999];
+      processTable,
     });
     // Our own launch burns the entire client-facing startup budget, then times out.
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(async () => {
@@ -1053,7 +1098,6 @@ describe("DaemonManager readiness", () => {
       expect(spawner.process.signals).toEqual(["SIGTERM"]);
     } finally {
       readySpy.mockRestore();
-      liveSpy.mockRestore();
     }
   });
 
@@ -1077,6 +1121,9 @@ describe("DaemonManager readiness", () => {
     // The socket never becomes reachable, and a live peer process is present — so a
     // rejoin that ran would poll out its remaining budget and rethrow AT the deadline.
     const reachability = new FakePeerSocketReachability();
+    const processTable = new FakeDaemonProcessTable((call) =>
+      call === 1 ? [] : [namespaceDaemonProcess(999999, socketPath)],
+    );
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -1084,11 +1131,7 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
       reachability,
-    });
-    let liveCalls = 0;
-    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
-      liveCalls++;
-      return liveCalls <= 1 ? [] : [999999];
+      processTable,
     });
     // Our launch never reports ready on its own — the delayed child exit is what ends it.
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
@@ -1105,7 +1148,6 @@ describe("DaemonManager readiness", () => {
       expect(reachability.calls).toBe(0);
     } finally {
       readySpy.mockRestore();
-      liveSpy.mockRestore();
     }
   });
 
@@ -1117,6 +1159,12 @@ describe("DaemonManager readiness", () => {
     spawner.onSpawn = (daemonProcess) => daemonProcess.emit("exit", 1, null);
 
     const reachability = new FakePeerSocketReachability(); // socket not reachable
+    const processTable = new FakeDaemonProcessTable((call) => {
+      if (call === 1) {
+        return [];
+      }
+      throw new Error("Failed to inspect daemon process table: ps exploded");
+    });
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -1124,17 +1172,10 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner,
       reachability,
+      processTable,
     });
     // Pre-spawn inspection succeeds (empty, so we spawn), but the recovery-path
     // inspection throws transiently.
-    let findCalls = 0;
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockImplementation(() => {
-      findCalls++;
-      if (findCalls <= 1) {
-        return [];
-      }
-      throw new Error("Failed to inspect daemon process table: ps exploded");
-    });
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -1155,7 +1196,6 @@ describe("DaemonManager readiness", () => {
       expect(fakeTimer.getPendingSleepCount()).toBe(0);
     } finally {
       readySpy.mockRestore();
-      findSpy.mockRestore();
     }
   });
 
@@ -1170,6 +1210,7 @@ describe("DaemonManager readiness", () => {
       process.emit("error", error);
     };
 
+    const processTable = new FakeDaemonProcessTable();
     const manager = new DaemonManager(
       undefined,
       undefined,
@@ -1177,9 +1218,19 @@ describe("DaemonManager readiness", () => {
       lockPath,
       pidPath,
       socketPath,
+      processTable,
       spawner,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      noNamespaceOwner,
     );
-    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
     const readySpy = spyOn(manager, "waitForReady").mockImplementation(
       () => new Promise<boolean>(() => {}),
     );
@@ -1190,7 +1241,6 @@ describe("DaemonManager readiness", () => {
       );
     } finally {
       readySpy.mockRestore();
-      findSpy.mockRestore();
     }
   });
 
@@ -1286,6 +1336,7 @@ describe("DaemonManager readiness", () => {
       }
     }
     const reachability = new BudgetExhaustingReachability(fakeTimer);
+    const processTable = new FakeDaemonProcessTable();
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -1293,41 +1344,32 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner: new FakeDaemonSpawner(true),
       reachability,
+      processTable,
     });
 
-    let scanCalls = 0;
-    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockImplementation(() => {
-      scanCalls++;
-      return [];
-    });
-
-    try {
-      const internals = manager as unknown as {
-        tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-      };
-      // Budget equals the single-probe cap, so the first probe alone exhausts it.
-      await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
-      expect(reachability.calls).toBe(1);
-      // The scan must never run: the deadline was already exhausted by the probe.
-      expect(scanCalls).toBe(0);
-    } finally {
-      liveSpy.mockRestore();
-    }
+    const internals = manager as unknown as {
+      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
+    };
+    // Budget equals the single-probe cap, so the first probe alone exhausts it.
+    await expect(internals.tryJoinPeerDaemonAfterSpawnExit(1000)).resolves.toBe(false);
+    expect(reachability.calls).toBe(1);
+    // The scan must never run: the deadline was already exhausted by the probe.
+    expect(processTable.scanCalls).toBe(0);
   });
 
-  // #6109-folded fix (b): findLiveDaemonProcesses() scans the WHOLE process table
-  // and cannot tell a daemon bound to THIS namespace's socket apart from an
-  // unrelated one (another worktree, another isolated test socket). For a manager
-  // using an isolated (non-default) PID/socket path, the rejoin must not trust
-  // that unscoped "a live daemon process exists somewhere" signal for the full
-  // budget — an unrelated daemon being alive must not poll an unreachable socket
-  // for the whole rejoin window.
+  // #6109-folded fix (b): discovery scans the whole process table, but namespace
+  // attribution must ignore unmarked and explicitly foreign daemons rather than
+  // wait for an unrelated process to publish this namespace's socket.
   test("bounds the rejoin to a short grace for an isolated socket namespace, ignoring an unrelated daemon (#6140, folded from PR #6109)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
     const reachability = new FakePeerSocketReachability(); // never reachable
+    const processTable = new FakeDaemonProcessTable(() => [
+      unmarkedDaemonProcess(424242),
+      namespaceDaemonProcess(424243, join(socketPath, "other.sock")),
+    ]);
     const manager = createRejoinManager({
       timer: fakeTimer,
       lockPath,
@@ -1335,24 +1377,24 @@ describe("DaemonManager readiness", () => {
       socketPath,
       spawner: new FakeDaemonSpawner(true),
       reachability,
+      processTable,
     });
     // An unrelated auto-mobile daemon (a different worktree/namespace) is always
     // "live" per the unscoped process-table scan.
-    const liveSpy = spyOn(manager, "findLiveDaemonProcesses").mockReturnValue([424242]);
 
-    try {
-      const internals = manager as unknown as {
-        tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
-      };
-      const start = fakeTimer.getCurrentTime();
-      // A generous budget that would, on the default namespace, poll for a long
-      // time on the strength of the (unrelated) live-process signal alone.
-      await expect(internals.tryJoinPeerDaemonAfterSpawnExit(30_000)).resolves.toBe(false);
-      // Bounded to the short isolated-namespace grace, not the full 30s budget.
-      expect(fakeTimer.getCurrentTime() - start).toBeLessThan(5_000);
-    } finally {
-      liveSpy.mockRestore();
-    }
+    const internals = manager as unknown as {
+      tryJoinPeerDaemonAfterSpawnExit(budgetMs: number): Promise<boolean>;
+    };
+    const start = fakeTimer.getCurrentTime();
+    // A generous budget that would, on the default namespace, poll for a long
+    // time on the strength of the (unrelated) live-process signal alone.
+    await expect(internals.tryJoinPeerDaemonAfterSpawnExit(30_000)).resolves.toBe(false);
+    // Bounded to the short isolated-namespace grace, not the full 30s budget.
+    expect(fakeTimer.getCurrentTime() - start).toBeLessThan(5_000);
+    expect(processTable.scanCalls).toBe(1);
+    expect(fakeTimer.getCurrentTime() - start).toBe(0);
+    expect(fakeTimer.getPendingSleepCount()).toBe(0);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
   });
 
   // #6140 P2 review finding: comparing against `PID_FILE_PATH`/`SOCKET_PATH` is a

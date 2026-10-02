@@ -128,3 +128,5 @@ enforcement nor desktop composition.
 ## Daemon namespace ownership
 
 Lifecycle ownership requires positive evidence for the configured namespace: a live PID with matching generation in its PID record, an argv socket marker, or the daemon answering on that socket. Unmarked processes from the machine-wide process table are never presumed to belong to this namespace. Revalidate both ownership and generation before every signal, including SIGKILL; a live PID missing from the scan is inconclusive, and must be authenticated through the namespace socket or rejected without signalling. Never signal a PID not verified as this namespace's.
+
+Tests must stub process discovery through the `DaemonProcessFinder` constructor seam, never by spying on `findAllDaemonProcesses`/`findLiveDaemonProcesses`; lifecycle discovery does not route through those methods.

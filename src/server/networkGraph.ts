@@ -1,3 +1,4 @@
+import { isFailedNetworkRequest } from "../utils/networkRequestOutcome";
 import type { NetworkEventWithId } from "../db/networkEventRepository";
 import { computePercentile } from "../utils/percentile";
 
@@ -104,7 +105,7 @@ export function buildNetworkGraph(
     }
 
     group.durations.push(event.durationMs);
-    if (event.statusCode >= 400) {
+    if (isFailedNetworkRequest(event)) {
       group.errors++;
     } else {
       group.success++;

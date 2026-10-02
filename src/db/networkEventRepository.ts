@@ -1,4 +1,4 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import type { Database } from "./types";
 import { getDb, createEventRetentionState, cleanupEventTable } from "./eventRepositoryBase";
 import { truncateBodyText } from "../utils/truncateBodyText";
@@ -85,6 +85,7 @@ export interface NetworkEventQuery {
   method?: string;
   statusCode?: string;
   minStatusCode?: number;
+  errorsOnly?: boolean;
 }
 
 function mapRow(r: any): NetworkEventWithId {
@@ -175,6 +176,21 @@ export async function getNetworkEvents(
   }
   if (query.minStatusCode !== undefined) {
     q = q.where("status_code", ">=", query.minStatusCode);
+  }
+
+  if (query.errorsOnly) {
+    // Mirror isFailedNetworkRequest: the schema stores integer statuses (missing = 0).
+    // SQLite trim defaults to spaces only; include all ECMAScript trim whitespace.
+    const whitespace =
+      "\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+    q = q.where((eb) =>
+      eb.or([
+        eb("status_code", ">=", 400),
+        eb("status_code", "<=", 0),
+        eb("status_code", "is", null),
+        eb(sql<string>`trim(error, ${whitespace})`, "!=", ""),
+      ]),
+    );
   }
 
   q = q.orderBy("timestamp", "desc").limit(query.limit ?? 100);

@@ -267,6 +267,23 @@ describe("NetworkState", () => {
   });
 
   describe("notification dispatch", () => {
+    it.each([
+      { statusCode: 0, error: "The request timed out" },
+      { statusCode: 0, error: null },
+      { statusCode: 200, error: "cancelled" },
+    ])(
+      "admits transport failures through the errors filter and notifies the errors resource: %j",
+      (failure) => {
+        state.setCapture(true);
+        state.setNotifFilter("errors");
+        state.onNetworkEvent(makeNotification(failure));
+        expect(state.pendingNotificationCount).toBe(1);
+        timer.advanceTime(200);
+        expect(notifier.notifications).toContain("automobile:network/traffic/errors");
+        expect(state.pendingNotificationCount).toBe(0);
+      },
+    );
+
     it("does not notify when capture is off", () => {
       state.onNetworkEvent(makeNotification());
       timer.advanceTime(200);

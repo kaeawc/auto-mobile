@@ -1,3 +1,4 @@
+import { isFailedNetworkRequest } from "../utils/networkRequestOutcome";
 import { ResourceRegistry, type ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
 import {
@@ -167,7 +168,7 @@ export function bucketEvents(
       bucketStart: start,
       bucketEnd: start + bucketMs,
       requests: bucketEvents.length,
-      errors: bucketEvents.filter((e) => e.statusCode >= 400).length,
+      errors: bucketEvents.filter(isFailedNetworkRequest).length,
       avgDurationMs:
         durations.length > 0
           ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
@@ -206,7 +207,7 @@ export function aggregateStatsByHost(events: NetworkEventWithId[]): Record<strin
       durationsByHost[host] = [];
     }
     byHost[host].requests++;
-    if (event.statusCode >= 400) {
+    if (isFailedNetworkRequest(event)) {
       byHost[host].errors++;
     }
     if (event.durationMs > 0) {
@@ -355,10 +356,10 @@ export function registerNetworkResources(
   ResourceRegistry.register(
     NETWORK_RESOURCE_URIS.ERRORS,
     "Network Errors",
-    "Recent network errors (4xx/5xx responses). Subscribe to receive notifications on new errors.",
+    "Recent network errors (recorded transport error, missing/zero status, or status >= 400). Subscribe to receive notifications on new errors.",
     "application/json",
     async () => {
-      const errors = await repository.getNetworkEvents({ minStatusCode: 400, limit: 20 });
+      const errors = await repository.getNetworkEvents({ errorsOnly: true, limit: 20 });
       return {
         uri: NETWORK_RESOURCE_URIS.ERRORS,
         mimeType: "application/json",
@@ -375,7 +376,7 @@ export function registerNetworkResources(
     async () => {
       const events = await repository.getNetworkEvents({ limit: 200 });
       const totalRequests = events.length;
-      const errorCount = events.filter((e) => e.statusCode >= 400).length;
+      const errorCount = events.filter(isFailedNetworkRequest).length;
       const errorRate = totalRequests > 0 ? errorCount / totalRequests : 0;
       const durations = events
         .map((e) => e.durationMs)

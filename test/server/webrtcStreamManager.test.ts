@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import * as manager from "../../src/server/webrtcStreamManager";
 import { logger } from "../../src/utils/logger";
 import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
 import {
@@ -8,7 +9,7 @@ import {
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
-  stopWebRtcStreamsForDevice,
+  endWebRtcStreamsForDevice,
   reconcileWebRtcStreamsForDeviceOwnership,
   stopAllWebRtcStreams,
   WEBRTC_STREAM_STOP_TIMEOUT_MS,
@@ -172,6 +173,10 @@ async function flushPublisherStart(): Promise<void> {
   await Promise.resolve();
 }
 
+beforeEach(() => {
+  setWebRtcStreamManagerDependencies({ timer: new FakeTimer() });
+});
+
 afterEach(() => {
   resetWebRtcStreamManager();
 });
@@ -195,12 +200,16 @@ describe("webrtcStreamManager", () => {
       const listener = createWebRtcStreamDeviceIncarnationListener();
       const cleanup =
         boundary === "ownership"
-          ? reconcileWebRtcStreamsForDeviceOwnership(ANDROID.deviceId, () => false)
+          ? reconcileWebRtcStreamsForDeviceOwnership(ANDROID.deviceId, () => ({
+              authEnabled: true,
+              sessionExists: false,
+              ownsDevice: false,
+            }))
           : boundary === "incarnation"
             ? Promise.resolve(listener.prepareForIncarnationChange?.(ANDROID.deviceId))
             : boundary === "device"
-              ? stopWebRtcStreamsForDevice(ANDROID.deviceId, "disconnect")
-              : stopAllWebRtcStreams("shutdown");
+              ? endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason: "device_removed" })
+              : stopAllWebRtcStreams("daemon_shutdown");
       expect(sources[0].stopCalls).toBe(1);
       await expect(stopWebRtcStream(stream.streamId)).rejects.toThrow(ActionableError);
       await cleanup;
@@ -233,16 +242,21 @@ describe("webrtcStreamManager", () => {
       sessionUuid: "released",
       overrides: { whipEndpoint: ENDPOINT },
     });
-    await reconcileWebRtcStreamsForDeviceOwnership(
-      ANDROID.deviceId,
-      (session) => session === "owner",
-    );
+    await reconcileWebRtcStreamsForDeviceOwnership(ANDROID.deviceId, (session) => ({
+      authEnabled: true,
+      sessionExists: session === "owner",
+      ownsDevice: session === "owner",
+    }));
     expect(getWebRtcStreamDescriptor(stream.streamId)?.consumerCount).toBe(2);
     expect(() => getWebRtcStreamDescriptor(stream.streamId, stream.lease?.id, "released")).toThrow(
       ActionableError,
     );
     expect(sources.map((source) => source.stopCalls)).toEqual([0, 0]);
-    await reconcileWebRtcStreamsForDeviceOwnership(ANDROID.deviceId, () => false);
+    await reconcileWebRtcStreamsForDeviceOwnership(ANDROID.deviceId, () => ({
+      authEnabled: true,
+      sessionExists: false,
+      ownsDevice: false,
+    }));
     expect(getWebRtcStreamDescriptor(stream.streamId)?.consumerCount).toBe(1);
     expect(timer.getPendingTimeouts()).toEqual([
       WEBRTC_STREAM_LEASE_TTL_MS,
@@ -259,7 +273,7 @@ describe("webrtcStreamManager", () => {
       overrides: { whipEndpoint: ENDPOINT },
     });
     const stop = stopWebRtcStream(stream.streamId);
-    await stopWebRtcStreamsForDevice(ANDROID.deviceId, "rebind");
+    await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason: "device_removed" });
     await stop;
     timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS);
     expect(sources[0].stopCalls).toBe(1);
@@ -278,7 +292,7 @@ describe("webrtcStreamManager", () => {
     setWebRtcStreamManagerDependencies({ timer });
     await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
     const expiry = timer.callbacks[0];
-    await stopWebRtcStreamsForDevice(ANDROID.deviceId, "restore");
+    await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason: "device_removed" });
     expiry();
     expect(sources[0].stopCalls).toBe(1);
   });
@@ -291,7 +305,7 @@ describe("webrtcStreamManager", () => {
         const source = new FakeSource();
         source.start = async () => {
           source.started = true;
-          await stopWebRtcStreamsForDevice(ANDROID.deviceId, "restore during start");
+          await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason: "device_removed" });
         };
         sources.push(source);
         return source as unknown as AndroidH264Source;
@@ -319,7 +333,7 @@ describe("webrtcStreamManager", () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
       let settled = false;
-      const cleanup = stopAllWebRtcStreams("shutdown").then(() => {
+      const cleanup = stopAllWebRtcStreams("daemon_shutdown").then(() => {
         settled = true;
       });
       await flushPublisherStart();
@@ -1833,5 +1847,231 @@ describe("webrtcStreamManager", () => {
     expect(degraded.lifecycleState).toBe("degraded");
     expect(degraded.failure?.code).toBe("capture_runtime_failed");
     expect(degraded.fallback).toEqual({ mode: "screenshots", reason: "capture_runtime_failed" });
+  });
+});
+
+describe("WebRTC ended lease tombstones", () => {
+  test.each(["device_restored", "device_removed"] as const)(
+    "%s retains the reason and kind and logs each lease once",
+    async (reason) => {
+      installFakes();
+      const info = spyOn(logger, "info").mockImplementation(() => {});
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const stream = await startWebRtcStream({
+          device: ANDROID,
+          subscriptionKind: "viewer",
+          overrides: { whipEndpoint: ENDPOINT },
+        });
+        const listener = createWebRtcStreamDeviceIncarnationListener();
+        if (reason === "device_restored") {
+          await listener.prepareForIncarnationChange?.(ANDROID.deviceId);
+          await listener.onDeviceIncarnationChanged(ANDROID.deviceId);
+        } else {
+          await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason });
+          await endWebRtcStreamsForDevice({ deviceId: ANDROID.deviceId, reason });
+        }
+        expect(() => getWebRtcStreamDescriptor(stream.streamId, stream.lease?.id)).toThrow(reason);
+        try {
+          getWebRtcStreamDescriptor(stream.streamId, stream.lease?.id);
+        } catch (error) {
+          expect(error).toMatchObject({ reason, subscriptionKind: "viewer" });
+        }
+        const expected = reason === "device_restored" ? info : warn;
+        const other = expected === info ? warn : info;
+        expect(
+          expected.mock.calls.filter(([message]) => String(message).includes(`reason=${reason}`)),
+        ).toHaveLength(1);
+        expect(
+          other.mock.calls.filter(([message]) => String(message).includes(`reason=${reason}`)),
+        ).toHaveLength(0);
+      } finally {
+        info.mockRestore();
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("retains 256 newest ends, expires lazily at the lease TTL, and reset clears ends", async () => {
+    installFakes();
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({ timer });
+    const leases: string[] = [];
+    let streamId = "";
+    for (let i = 0; i < 257; i++) {
+      const stream = await startWebRtcStream({
+        device: ANDROID,
+        overrides: { whipEndpoint: ENDPOINT },
+      });
+      streamId = stream.streamId;
+      leases.push(stream.lease!.id);
+    }
+    await stopAllWebRtcStreams("daemon_shutdown");
+    expect(() => getWebRtcStreamDescriptor(streamId, leases[0])).not.toThrow();
+    expect(() => getWebRtcStreamDescriptor(streamId, leases[1])).toThrow("daemon_shutdown");
+    expect(() => getWebRtcStreamDescriptor(streamId, leases[256])).toThrow("daemon_shutdown");
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS);
+    expect(() => getWebRtcStreamDescriptor(streamId, leases[256])).not.toThrow();
+    const next = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await stopAllWebRtcStreams("daemon_shutdown");
+    expect(() => getWebRtcStreamDescriptor(next.streamId, next.lease?.id)).toThrow(
+      "daemon_shutdown",
+    );
+    resetWebRtcStreamManager();
+    expect(() => getWebRtcStreamDescriptor(next.streamId, next.lease?.id)).not.toThrow();
+  });
+});
+
+describe("WebRTC own-lease and owner control regressions", () => {
+  test("non-owner leaseless release preserves anonymous and even dead foreign leases", async () => {
+    const { publishers } = installFakes();
+    setWebRtcStreamManagerDependencies({ timer: new FakeTimer(), isSessionLive: () => false });
+    const first = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "a",
+      subscriptionKind: "viewer",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "b",
+      subscriptionKind: "viewer",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(typeof manager.releaseWebRtcStreamOwnLeases).toBe("function");
+    const result = await manager.releaseWebRtcStreamOwnLeases({
+      streamId: first.streamId,
+      sessionUuid: "a",
+    });
+    expect(result.consumerCount).toBe(2);
+    expect(listWebRtcStreams()).toHaveLength(1);
+    expect(publishers[0].stopped).toBe(false);
+  });
+  test("owner stop wakes a pending viewer waiter and releases every caller lease", async () => {
+    const { publishers, sources } = installFakes();
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({
+      timer,
+      isSessionLive: () => true,
+      createPublisher: (config, deps) => {
+        const publisher = new FakePublisher(config, deps);
+        publisher.start = async () => {};
+        publishers.push(publisher);
+        return publisher as unknown as WebRtcPublisher;
+      },
+    });
+    const first = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "a",
+      subscriptionKind: "viewer",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "b",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "b",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(typeof manager.stopWebRtcStreamAsOwner).toBe("function");
+    const waiting = waitForWebRtcStreamReadiness(
+      first.streamId,
+      "publishing",
+      1000,
+      first.lease?.id,
+      "a",
+    );
+    const ended = waiting.catch((error: unknown) => error);
+    const stopped = await manager.stopWebRtcStreamAsOwner({
+      streamId: first.streamId,
+      sessionUuid: "b",
+    });
+    expect(await ended).toMatchObject({ reason: "stopped_by_owner", subscriptionKind: "viewer" });
+    expect(stopped).toMatchObject({ state: "stopped", consumerCount: 0 });
+    expect(sources[0].stopped).toBe(true);
+    expect(publishers[0].stopped).toBe(true);
+    expect(listWebRtcStreams()).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+  test("owner stop retains the five-second cleanup bound", async () => {
+    const { sources, publishers } = installFakes();
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({ timer });
+    const first = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "a",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    sources[0].stop = () => new Promise<void>(() => {});
+    expect(typeof manager.stopWebRtcStreamAsOwner).toBe("function");
+    let settled = false;
+    const stopping = manager
+      .stopWebRtcStreamAsOwner({ streamId: first.streamId, sessionUuid: "b" })
+      .then(() => {
+        settled = true;
+      });
+    await flushPublisherStart();
+    expect(listWebRtcStreams()).toEqual([]);
+    expect(publishers[0].stopped).toBe(true);
+    timer.advanceTime(WEBRTC_STREAM_STOP_TIMEOUT_MS - 1);
+    await flushPublisherStart();
+    expect(settled).toBe(false);
+    timer.advanceTime(1);
+    await stopping;
+    expect(settled).toBe(true);
+  });
+  test.each([
+    { whipEndpoint: "https://elsewhere.example/private" },
+    { bearerToken: "secret" },
+    { iceServers: [{ urls: "turn:private", credential: "secret" }] },
+    { bitrateKbps: 777 },
+    { size: { width: 640, height: 480 } },
+    { androidFps: 24 },
+    { iosSimulatorFps: 24 },
+    { audioEnabled: true },
+    { trickleIce: true },
+  ])("all resolved config fields guard new owner attach: %j", async (overrides) => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ timer: new FakeTimer() });
+    await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "a",
+      subscriptionKind: "viewer",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await expect(
+      startWebRtcStream({
+        device: ANDROID,
+        sessionUuid: "b",
+        ownsDevice: true,
+        overrides: { whipEndpoint: ENDPOINT, ...overrides },
+      }),
+    ).rejects.toMatchObject({ code: "viewer_stream_active" });
+    expect(listWebRtcStreams()[0].consumerCount).toBe(1);
+  });
+  test("existing owner lease retains attach behavior with differing parameters", async () => {
+    installFakes();
+    setWebRtcStreamManagerDependencies({ timer: new FakeTimer() });
+    const first = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "a",
+      subscriptionKind: "viewer",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const second = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "a",
+      ownsDevice: true,
+      overrides: { whipEndpoint: ENDPOINT, bitrateKbps: 777 },
+    });
+    expect(second.streamId).toBe(first.streamId);
+    expect(second.consumerCount).toBe(2);
   });
 });

@@ -318,6 +318,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private readonly socketSessionUuids = new Map<Socket, string | undefined>();
   private readonly socketSubscriptionKinds = new Map<Socket, StreamSubscriptionKind>();
   private readonly acknowledgedSubscribers = new Set<Socket>();
+  private removeDeviceRestoredListener: (() => void) | null = null;
   private removeDeviceRemovedListener: (() => void) | null = null;
   private removeIdentityChangedListener: (() => void) | null = null;
   private removeSessionReleaseListener: (() => void) | null = null;
@@ -376,7 +377,15 @@ export class VideoStreamSocketServer extends BaseSocketServer {
           this.reauthorizeSubscribers(deviceId);
         }
       }) ?? null;
+    this.subscribeDeviceLifecycle();
+  }
+
+  private subscribeDeviceLifecycle(): void {
     const lifecycle = this.deps.deviceLifecycle?.();
+    this.removeDeviceRestoredListener =
+      lifecycle?.onDeviceRestored((deviceId) => {
+        this.endDeviceSubscribers(deviceId, "device_restored");
+      }) ?? null;
     this.removeDeviceRemovedListener =
       lifecycle?.onDeviceRemoved((deviceId) => {
         this.endDeviceSubscribers(deviceId, "device_removed");
@@ -404,6 +413,8 @@ export class VideoStreamSocketServer extends BaseSocketServer {
     this.removeOwnershipListener = null;
     this.removeSessionReleaseListener?.();
     this.removeSessionReleaseListener = null;
+    this.removeDeviceRestoredListener?.();
+    this.removeDeviceRestoredListener = null;
     this.removeDeviceRemovedListener?.();
     this.removeIdentityChangedListener?.();
     this.removeDeviceRemovedListener = null;
@@ -635,7 +646,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
 
   private endDeviceSubscribers(
     deviceId: string,
-    event: Exclude<StreamSubscriptionEndReason, "session_ended">,
+    event: Exclude<StreamSubscriptionEndReason, "session_ended" | "stopped_by_owner">,
   ): void {
     const capture = this.captures.get(deviceId);
     if (!capture) {
@@ -650,7 +661,7 @@ export class VideoStreamSocketServer extends BaseSocketServer {
   private endSubscriber(
     socket: Socket,
     deviceId: string,
-    reason: StreamSubscriptionEndReason,
+    reason: Exclude<StreamSubscriptionEndReason, "stopped_by_owner">,
     options: { authorizationError?: unknown } = {},
   ): void {
     if (!this.socketDeviceIds.has(socket) && !this.subscribing.has(socket)) {

@@ -7,6 +7,7 @@ import {
   subscriptionKindForIdentity,
   ViewerReadOnlyError,
   type StreamSubscriptionKind,
+  type StreamSubscriptionEndReason,
 } from "../../src/daemon/streamSubscriptionPolicy";
 import { ActionableError } from "../../src/models/ActionableError";
 
@@ -39,7 +40,12 @@ describe("transport-independent subscription policy", () => {
   });
   test("all lifecycle events end both kinds with typed reasons", () => {
     for (const kind of ["owner", "viewer"] as const) {
-      for (const event of ["device_removed", "identity_quarantined", "daemon_shutdown"] as const) {
+      for (const event of [
+        "device_removed",
+        "device_restored",
+        "identity_quarantined",
+        "daemon_shutdown",
+      ] as const) {
         expect(decideLifecycleEvent({ kind, event })).toEqual({ action: "end", reason: event });
       }
     }
@@ -73,4 +79,44 @@ describe("transport-independent subscription policy", () => {
     expect(error).toBeInstanceOf(ActionableError);
     expect(error.code).toBe("viewer_read_only");
   });
+});
+
+test("own-lease release/renew is distinct from stream control; unknown actions fail closed", () => {
+  for (const action of ["start", "stop"]) {
+    expect(classifyStreamMessage({ transport: "webrtc", action, target: "own_lease" })).toBe(
+      "own_lease",
+    );
+    expect(() =>
+      assertMayControl("viewer", { transport: "webrtc", action, target: "own_lease" }),
+    ).not.toThrow();
+    expect(classifyStreamMessage({ transport: "webrtc", action, target: "stream" })).toBe(
+      "mutating",
+    );
+  }
+  for (const action of ["status", "list", "await"]) {
+    expect(classifyStreamMessage({ transport: "webrtc", action, target: "own_lease" })).toBe(
+      "read",
+    );
+  }
+  for (const action of ["garbage", "constructor", "toString"]) {
+    expect(classifyStreamMessage({ transport: "webrtc", action, target: "own_lease" })).toBe(
+      "mutating",
+    );
+    expect(() =>
+      assertMayControl("viewer", { transport: "webrtc", action, target: "own_lease" }),
+    ).toThrow(ViewerReadOnlyError);
+  }
+});
+
+test("owner stop is an end reason but never a lifecycle or ownership outcome", () => {
+  const reason: StreamSubscriptionEndReason = "stopped_by_owner";
+  expect(reason).toBe("stopped_by_owner");
+  // Compile-only contract assertions; owner stops do not enter the lifecycle dispatcher.
+  if (false) {
+    // @ts-expect-error Owner stop is not a device lifecycle event.
+    decideLifecycleEvent({ kind: "viewer", event: reason });
+    // @ts-expect-error Ownership reconciliation can only end a missing session.
+    const decision: ReturnType<typeof decideOwnershipChange> = { action: "end", reason };
+    void decision;
+  }
 });

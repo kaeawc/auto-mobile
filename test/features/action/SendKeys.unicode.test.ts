@@ -13,6 +13,12 @@ import {
   smallCorpus as corpus,
 } from "./SendKeysTestHarness";
 
+function expectWellFormedInserts(inserted: string[]): void {
+  for (const text of inserted) {
+    expect(text.isWellFormed()).toBe(true);
+  }
+}
+
 describe("sendKeys unsafe caret across commands", () => {
   function harness(caretPlaced: false | undefined) {
     const h = createSendKeysHarness(android);
@@ -35,6 +41,7 @@ describe("sendKeys unsafe caret across commands", () => {
   test("carries unsafe caret to the next eventAll type command", async () => {
     const h = harness(false);
     expect(await h.sendKeys.execute([unsafe, ascii])).toMatchObject({ success: true });
+    expectWellFormedInserts(h.inserted);
     expect(h.deliveries).toEqual([
       { kind: "insert", text: "é" },
       { kind: "insert", text: "abc" },
@@ -51,6 +58,7 @@ describe("sendKeys unsafe caret across commands", () => {
       const h = harness(false);
       expect(await h.sendKeys.execute([unsafe, reset, ascii])).toMatchObject({ success: true });
       expect(h.inserted).toEqual(["é"]);
+      expectWellFormedInserts(h.inserted);
       expect(h.deliveries.slice(-3)).toEqual([
         { kind: "keyevent", text: "a" },
         { kind: "keyevent", text: "b" },
@@ -65,6 +73,7 @@ describe("sendKeys unsafe caret across commands", () => {
       success: true,
     });
     expect(h.clientCalls).toEqual(["insert:é", "clear"]);
+    expectWellFormedInserts(h.inserted);
     expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
       "keyevent",
       "keyevent",
@@ -77,6 +86,7 @@ describe("sendKeys unsafe caret across commands", () => {
     expect(await h.sendKeys.execute([unsafe])).toMatchObject({ success: true });
     expect(await h.sendKeys.execute([ascii])).toMatchObject({ success: true });
     expect(h.inserted).toEqual(["é"]);
+    expectWellFormedInserts(h.inserted);
     expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
       "keyevent",
       "keyevent",
@@ -88,6 +98,7 @@ describe("sendKeys unsafe caret across commands", () => {
     const h = harness(undefined);
     expect(await h.sendKeys.execute([unsafe, ascii])).toMatchObject({ success: true });
     expect(h.inserted).toEqual(["é"]);
+    expectWellFormedInserts(h.inserted);
     expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
       "keyevent",
       "keyevent",
@@ -104,6 +115,7 @@ describe("sendKeys unsafe caret across commands", () => {
         success: true,
       });
       expect(h.inserted).toEqual(["é", "abc"]);
+      expectWellFormedInserts(h.inserted);
       expect(h.deliveries.at(-1)).toEqual({ kind: "insert", text: "abc" });
     });
   }
@@ -118,6 +130,7 @@ describe("sendKeys unsafe caret across commands", () => {
         error: expect.stringContaining("caret"),
       });
       expect(h.deliveries).toEqual([{ kind: "insert", text: "é" }]);
+      expectWellFormedInserts(h.inserted);
     });
   }
 });
@@ -184,6 +197,7 @@ describe("sendKeys Unicode delivery", () => {
         success: true,
       });
       expect(h.inserted).toEqual(inserts);
+      expectWellFormedInserts(h.inserted);
       expect(h.adb.getExecutedCommands()).toEqual([]);
     }
   });
@@ -202,12 +216,126 @@ describe("sendKeys Unicode delivery", () => {
         "shell input keyevent KEYCODE_Y",
       ]);
       expect(h.inserted).toEqual([inserted]);
+      expectWellFormedInserts(h.inserted);
       expect(h.deliveries).toEqual([
         { kind: "keyevent", text: "x" },
         { kind: "insert", text: inserted },
         { kind: "keyevent", text: "y" },
       ]);
     }
+  });
+
+  for (const [name, cluster] of [
+    ["conjoining Hangul jamo", "한"],
+    ["surrogate-pair CJK ideograph U+20BB7", "\u{20BB7}"],
+  ] as const) {
+    test(`Android eventAll inserts ${name} whole alone`, async () => {
+      const h = createSendKeysHarness(android);
+      expect(
+        await h.executor.type({ action: "type", text: cluster, mode: "eventAll" }),
+      ).toMatchObject({ success: true });
+      expect(h.inserted).toEqual([cluster]);
+      expectWellFormedInserts(h.inserted);
+      expect(h.deliveries).toEqual([{ kind: "insert", text: cluster }]);
+      expect(h.adb.getExecutedCommands()).toEqual([]);
+    });
+
+    test(`Android eventAll keeps ${name} whole between ASCII events`, async () => {
+      const h = createSendKeysHarness(android);
+      expect(
+        await h.executor.type({ action: "type", text: `a${cluster}b`, mode: "eventAll" }),
+      ).toMatchObject({ success: true });
+      expect(h.inserted).toEqual([cluster]);
+      expectWellFormedInserts(h.inserted);
+      expect(h.deliveries).toEqual([
+        { kind: "keyevent", text: "a" },
+        { kind: "insert", text: cluster },
+        { kind: "keyevent", text: "b" },
+      ]);
+      expect(h.adb.getExecutedCommands()).toEqual([
+        "shell input keyevent KEYCODE_A",
+        "shell input keyevent KEYCODE_B",
+      ]);
+    });
+  }
+
+  test("Android eventAll keeps a regional-indicator flag whole between ASCII events", async () => {
+    const h = createSendKeysHarness(android);
+    const flag = "\u{1F1FA}\u{1F1F8}";
+    expect(
+      await h.executor.type({ action: "type", text: `a${flag}b`, mode: "eventAll" }),
+    ).toMatchObject({ success: true });
+    expect(h.inserted).toEqual([flag]);
+    expectWellFormedInserts(h.inserted);
+    expect(h.deliveries).toEqual([
+      { kind: "keyevent", text: "a" },
+      { kind: "insert", text: flag },
+      { kind: "keyevent", text: "b" },
+    ]);
+    expect(h.adb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+    ]);
+  });
+
+  test("Android eventAll coalesces two adjacent flags without shifting their pairing", async () => {
+    const h = createSendKeysHarness(android);
+    const flags = "\u{1F1FA}\u{1F1F8}\u{1F1EF}\u{1F1F5}";
+    expect(segmentGraphemes(flags)).toEqual(["\u{1F1FA}\u{1F1F8}", "\u{1F1EF}\u{1F1F5}"]);
+    expect(await h.executor.type({ action: "type", text: flags, mode: "eventAll" })).toMatchObject({
+      success: true,
+    });
+    expect(h.inserted).toEqual([flags]);
+    expectWellFormedInserts(h.inserted);
+    expect(h.deliveries).toEqual([{ kind: "insert", text: flags }]);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("Android eventAll coalesces 2,000 non-ASCII clusters into runs between ASCII key events", async () => {
+    const h = createSendKeysHarness(android);
+    const run = "👨‍👩‍👧👍🏽1️⃣🇺🇸e\u0301".repeat(100);
+    const separators = ["a", "b", "c", "d"];
+    const text = separators.map((separator) => separator + run).join("");
+    expect(segmentGraphemes(text)).toHaveLength(2004);
+    expect(await h.executor.type({ action: "type", text, mode: "eventAll" })).toMatchObject({
+      success: true,
+    });
+    // ASCII key-event characters split the input into runs; eventAllInsertRunEnd
+    // coalesces each run of non-key-event clusters into one insert.
+    expect(h.inserted).toHaveLength(4);
+    expect(h.inserted).toEqual(separators.map(() => run));
+    expectWellFormedInserts(h.inserted);
+    expect(h.adb.getExecutedCommands()).toHaveLength(4);
+    expect(h.adb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_B",
+      "shell input keyevent KEYCODE_C",
+      "shell input keyevent KEYCODE_D",
+    ]);
+    expect(h.deliveries.filter((delivery) => delivery.kind === "keyevent")).toHaveLength(4);
+    expect(h.deliveries).toEqual(
+      separators.flatMap((separator) => [
+        { kind: "keyevent", text: separator },
+        { kind: "insert", text: run },
+      ]),
+    );
+    expect(h.deliveries.map((delivery) => delivery.text).join("")).toBe(text);
+  });
+
+  test("Android eventAll inserts non-ASCII clusters together via the all-a11y fast path", async () => {
+    const h = createSendKeysHarness(android);
+    const text = "👨‍👩‍👧👍🏽1️⃣🇺🇸e\u0301".repeat(4);
+    expect(segmentGraphemes(text)).toHaveLength(20);
+    // No cluster has a key-event plan, so the all-a11y fast path calls insertGraphemeRun.
+    expect(await h.executor.type({ action: "type", text, mode: "eventAll" })).toMatchObject({
+      success: true,
+      resolvedMode: "a11y",
+    });
+    expect(h.inserted).toHaveLength(1);
+    expect(h.inserted).toEqual([text]);
+    expectWellFormedInserts(h.inserted);
+    expect(h.deliveries.map((delivery) => delivery.text).join("")).toBe(text);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
   });
 
   test("Android eventAll preserves ASCII-only device commands", async () => {
@@ -232,6 +360,7 @@ describe("sendKeys Unicode delivery", () => {
       "shell input keyevent KEYCODE_2",
     ]);
     expect(h.inserted).toEqual(["H", "W", "!"]);
+    expectWellFormedInserts(h.inserted);
   });
 
   test("Android eventAll failure reports the whole failed cluster and committed boundary", async () => {
@@ -254,6 +383,7 @@ describe("sendKeys Unicode delivery", () => {
       "shell input keyevent KEYCODE_B",
     ]);
     expect(h.inserted).toEqual(["😀"]);
+    expectWellFormedInserts(h.inserted);
     expect(h.deliveries).toEqual([
       { kind: "keyevent", text: "a" },
       { kind: "insert", text: "😀" },
@@ -273,6 +403,7 @@ describe("sendKeys Unicode delivery", () => {
     });
     expect(h.adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
     expect(h.inserted).toEqual([]);
+    expectWellFormedInserts(h.inserted);
   });
 
   test("Android auto fallback inserts complete ASCII-base graphemes", async () => {
@@ -287,6 +418,7 @@ describe("sendKeys Unicode delivery", () => {
       "shell input keyevent KEYCODE_Y",
     ]);
     expect(h.inserted).toEqual(["e\u0301"]);
+    expectWellFormedInserts(h.inserted);
   });
 
   test("Android eventAll sends exact keyevent arguments and never shell-encodes Unicode", async () => {
@@ -301,6 +433,7 @@ describe("sendKeys Unicode delivery", () => {
       "shell input keyevent KEYCODE_B",
     ]);
     expect(h.inserted).toEqual(["😀", "日本"]);
+    expectWellFormedInserts(h.inserted);
     expect(commands.some((command) => command.startsWith("shell input text "))).toBe(false);
   });
 
@@ -369,6 +502,7 @@ describe("Android eventAll caret and preceding input", () => {
       { kind: "insert", text: "b c" },
     ]);
     expect(h.adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
+    expectWellFormedInserts(h.inserted);
   });
 
   test("eventAll sends remaining text by key events when the caret was placed", async () => {
@@ -377,6 +511,7 @@ describe("Android eventAll caret and preceding input", () => {
       await h.executor.type({ action: "type", text: "a👍🏽b c", mode: "eventAll" }),
     ).toMatchObject({ success: true });
     expect(h.inserted).toEqual(["👍🏽"]);
+    expectWellFormedInserts(h.inserted);
     expect(h.adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_A",
       "shell input keyevent KEYCODE_B",
@@ -402,6 +537,7 @@ describe("Android eventAll caret and preceding input", () => {
         success: true,
       });
       expect(optionsSeen).toEqual([...expected]);
+      expectWellFormedInserts(h.inserted);
     }
   });
 
@@ -419,6 +555,7 @@ describe("Android eventAll caret and preceding input", () => {
     await h.executor.type({ action: "type", text: "c", mode: "eventAll" });
     expect(seen).toEqual([{ expectedSuffix: "a" }, undefined, undefined]);
     expect(h.inserted).toEqual(["👍🏽", "b", "c"]);
+    expectWellFormedInserts(h.inserted);
     expect(h.adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
   });
 

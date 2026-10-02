@@ -4,9 +4,9 @@ import { createHash } from "node:crypto";
  * Canonical mapping between the screenshot formats AutoMobile captures and the
  * file extensions it writes into the screenshot cache directory.
  *
- * Writers (TakeScreenshot) and readers (ScreenshotCache.getScreenshotFiles, and
- * through it the accessibility auditor's latest-screenshot fallback and
- * ScreenshotMatcher) must agree on this set. They previously drifted: the
+ * Writers (TakeScreenshot) and readers (ScreenshotCache.getScreenshotFiles and
+ * through it the accessibility auditor's latest-screenshot fallback) must agree
+ * on this set. They previously drifted: the
  * Android CtrlProxy path writes `.jpg` by default, which the lookup filter did
  * not recognise, so the cache never hit on the default Android path (#6599).
  */

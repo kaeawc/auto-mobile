@@ -1,11 +1,9 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { ScreenshotUtils } from "../../src/utils/screenshot/ScreenshotUtils";
-import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../src/utils/constants";
 import { promises as fsPromises } from "node:fs";
 import path from "path";
 import os from "os";
 import { Jimp, rgbaToInt } from "jimp";
-import { FakeTimer } from "../fakes/FakeTimer";
 
 async function createTestImage(
   width: number,
@@ -19,11 +17,9 @@ async function createTestImage(
 
 describe("ScreenshotUtils", function () {
   let testDir: string;
-  let fakeTimer: FakeTimer;
 
   beforeEach(async function () {
     testDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "test-screenshots-"));
-    fakeTimer = new FakeTimer();
   });
 
   afterEach(async function () {
@@ -174,87 +170,6 @@ describe("ScreenshotUtils", function () {
       expect(typeof hash).toBe("string");
       expect(hash).toHaveLength(32); // MD5 hash length
       expect(hash).toMatch(/^[a-f0-9]+$/); // Hex string
-    });
-  });
-
-  describe("Fuzzy Matching", function () {
-    test("should find similar screenshots within tolerance", async function () {
-      // Create test images
-      const baseImage = await createTestImage(50, 50, { r: 100, g: 150, b: 200 });
-
-      const timestamp = fakeTimer.now();
-      const testFilename = `screenshot_${timestamp}.png`;
-      await fsPromises.writeFile(path.join(testDir, testFilename), baseImage);
-
-      const result = await ScreenshotUtils.findSimilarScreenshots(
-        baseImage,
-        testDir,
-        DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        5,
-      );
-
-      expect(result.matchFound).toBe(true);
-      expect(result.similarity).toBe(100);
-      expect(result.filePath).toContain(testFilename);
-    });
-
-    test("should not find matches when no similar screenshots exist", async function () {
-      const targetImage = await createTestImage(50, 50, { r: 255, g: 0, b: 0 });
-
-      const differentImage = await createTestImage(50, 50, { r: 0, g: 255, b: 0 });
-
-      // Save a very different image
-      const timestamp = fakeTimer.now();
-      await fsPromises.writeFile(path.join(testDir, `screenshot_${timestamp}.png`), differentImage);
-
-      const result = await ScreenshotUtils.findSimilarScreenshots(
-        targetImage,
-        testDir,
-        DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        5,
-      );
-
-      expect(result.matchFound).toBe(false);
-      expect(result.similarity).toBeLessThan(100 - DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT);
-      expect(result.filePath).toBe("");
-    });
-
-    test("should handle empty cache directory", async function () {
-      const testImage = await createTestImage(50, 50, { r: 128, g: 128, b: 128 });
-
-      const result = await ScreenshotUtils.findSimilarScreenshots(
-        testImage,
-        testDir,
-        DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        5,
-      );
-
-      expect(result.matchFound).toBe(false);
-      expect(result.similarity).toBe(0);
-      expect(result.filePath).toBe("");
-    });
-
-    test("should limit the number of comparisons", async function () {
-      const testImage = await createTestImage(30, 30, { r: 64, g: 64, b: 64 });
-
-      // Create 10 different screenshot files
-      for (let i = 0; i < 10; i++) {
-        fakeTimer.advanceTime(1);
-        const timestamp = fakeTimer.now();
-        const filename = `screenshot_${timestamp}.png`;
-        await fsPromises.writeFile(path.join(testDir, filename), testImage);
-      }
-
-      const result = await ScreenshotUtils.findSimilarScreenshots(
-        testImage,
-        testDir,
-        DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        3, // Limit to 3 comparisons
-      );
-
-      // Should find a match (since we're comparing identical images)
-      expect(result.matchFound).toBe(true);
-      expect(result.similarity).toBe(100);
     });
   });
 

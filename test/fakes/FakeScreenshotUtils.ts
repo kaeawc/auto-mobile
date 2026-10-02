@@ -24,22 +24,6 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     totalPixels: 2592000, // 1080 * 2400
   };
   private screenshotFiles: string[] = [];
-  private batchCompareResult: Array<{ filePath: string; similarity: number; matchFound: boolean }> =
-    [];
-  private optimizedBatchCompareResult: Array<{
-    filePath: string;
-    similarity: number;
-    matchFound: boolean;
-  }> = [];
-  private findSimilarScreenshotsResult: {
-    filePath: string;
-    similarity: number;
-    matchFound: boolean;
-  } = {
-    filePath: "",
-    similarity: 0,
-    matchFound: false,
-  };
   private extractTimestampResult: string = "1234567890";
   private generateImageHashResult: string = "abcdef0123456789abcdef0123456789";
 
@@ -104,35 +88,6 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
    */
   setScreenshotFiles(files: string[]): void {
     this.screenshotFiles = files;
-  }
-
-  /**
-   * Configure batch compare result
-   */
-  setBatchCompareResult(
-    result: Array<{ filePath: string; similarity: number; matchFound: boolean }>,
-  ): void {
-    this.batchCompareResult = result;
-  }
-
-  /**
-   * Configure optimized batch compare result
-   */
-  setOptimizedBatchCompareResult(
-    result: Array<{ filePath: string; similarity: number; matchFound: boolean }>,
-  ): void {
-    this.optimizedBatchCompareResult = result;
-  }
-
-  /**
-   * Configure find similar screenshots result
-   */
-  setFindSimilarScreenshotsResult(result: {
-    filePath: string;
-    similarity: number;
-    matchFound: boolean;
-  }): void {
-    this.findSimilarScreenshotsResult = result;
   }
 
   /**
@@ -298,51 +253,6 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   async getScreenshotFiles(cacheDir: string): Promise<string[]> {
     this.recordCall("getScreenshotFiles", { cacheDir });
     return this.screenshotFiles;
-  }
-
-  async batchCompareScreenshots(
-    targetBuffer: Buffer,
-    screenshotPaths: string[],
-    tolerancePercent: number = 0.2,
-    fastMode: boolean = true,
-  ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    this.recordCall("batchCompareScreenshots", {
-      targetBufferLength: targetBuffer.length,
-      screenshotPathsCount: screenshotPaths.length,
-      tolerancePercent,
-      fastMode,
-    });
-    return this.batchCompareResult;
-  }
-
-  async optimizedBatchCompareScreenshots(
-    targetBuffer: Buffer,
-    screenshotPaths: string[],
-    tolerancePercent: number = 0.2,
-    fastMode: boolean = true,
-  ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    this.recordCall("optimizedBatchCompareScreenshots", {
-      targetBufferLength: targetBuffer.length,
-      screenshotPathsCount: screenshotPaths.length,
-      tolerancePercent,
-      fastMode,
-    });
-    return this.optimizedBatchCompareResult;
-  }
-
-  async findSimilarScreenshots(
-    targetBuffer: Buffer,
-    cacheDir: string,
-    tolerancePercent: number = 0.2,
-    maxComparisons: number = 10,
-  ): Promise<{ filePath: string; similarity: number; matchFound: boolean }> {
-    this.recordCall("findSimilarScreenshots", {
-      targetBufferLength: targetBuffer.length,
-      cacheDir,
-      tolerancePercent,
-      maxComparisons,
-    });
-    return this.findSimilarScreenshotsResult;
   }
 
   extractTimestampFromFilename(filePath: string): string {

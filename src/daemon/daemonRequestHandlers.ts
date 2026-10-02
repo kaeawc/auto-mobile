@@ -37,6 +37,8 @@ export interface DaemonStateAccess {
   getObserverSessionRegistry?(): ObserverSessionStore | undefined;
   getSessionManager(): {
     getSession(sessionId: string): Session | null;
+    isAdmittedForAutomation?(session: Session): boolean;
+    getReleasingSession?(sessionId: string): Session | null;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
@@ -212,7 +214,7 @@ export async function handleDaemonRequest(
       }
       const manager = state.getSessionManager();
       const session = manager.getSession(sessionId);
-      if (!session) {
+      if (!session || manager.isAdmittedForAutomation?.(session) === false) {
         if (
           typeof sessionId === "string" &&
           state.getObserverSessionRegistry?.()?.heartbeat(sessionId)
@@ -377,7 +379,7 @@ export async function handleDaemonRequest(
         };
       }
       const manager = state.getSessionManager();
-      const session = manager.getSession(sessionId);
+      const session = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
       if (!session) {
         if (
           typeof sessionId === "string" &&

@@ -2140,20 +2140,24 @@ export class DevicePool {
       // recovery or another start claims after selection, acquisition waits for
       // its lease; revalidate under that lease to join the winner's boot instead
       // of launching the same AVD again (#8381).
+      // Every Android start, including uncontended starts, re-runs the existing
+      // candidate path: one listDeviceImages and (when images exist) one
+      // getBootedDevices. Android images with unknown running state are excluded.
+      // Keep the funnelled post-skip refresh outside the lifecycle lease.
       if (device.platform === "android" && operation === "start") {
-        const booted = await this.deviceManager.getBootedDevices("android");
+        const candidates = await this.getStartableDeviceImageCandidates("android");
         const pooled = this.getDevicesByPlatform("android");
-        const bootedIds = new Set([
-          ...booted.map((entry) => entry.deviceId),
-          ...pooled.map((entry) => entry.id),
-        ]);
-        const bootedNames = new Set([
-          ...booted.map((entry) => entry.name),
-          ...pooled.map((entry) => entry.avdName ?? entry.name),
-        ]);
         if (
+          !candidates.some(
+            (candidate) =>
+              this.criteriaMatcher.getDeviceImageKey(candidate) ===
+              this.criteriaMatcher.getDeviceImageKey(device),
+          ) ||
           this.isAutoStartSuppressed(device) ||
-          (await this.isDeviceImageRunningForCandidate(device, bootedIds, bootedNames))
+          pooled.some(
+            (entry) =>
+              entry.id === device.deviceId || (entry.avdName ?? entry.name) === device.name,
+          )
         ) {
           return undefined;
         }

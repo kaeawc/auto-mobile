@@ -10,6 +10,7 @@ import type { CtrlProxyScreenshotResult } from "../../../../src/features/observe
 import type { ViewHierarchyResult } from "../../../../src/models";
 import type { NavigationEvent } from "../../../../src/utils/interfaces/NavigationGraph";
 import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
+import { FakeTimer } from "../../../fakes/FakeTimer";
 import { NavigationScreenshotManager } from "../../../../src/features/navigation/NavigationScreenshotManager";
 import {
   DefaultAndroidSdkEventIngestor,
@@ -95,10 +96,11 @@ describe("DefaultIosSdkEventIngestor", () => {
   let ingestor: DefaultIosSdkEventIngestor;
 
   const buildIngestor = (
-    overrides: { navigationScreenshotsEnabled?: () => boolean } = {},
+    overrides: { navigationScreenshotsEnabled?: () => boolean; deviceId?: string } = {},
   ): DefaultIosSdkEventIngestor =>
     new DefaultIosSdkEventIngestor({
-      deviceId: DEVICE_ID,
+      deviceId: overrides.deviceId ?? DEVICE_ID,
+      timer: new FakeTimer(),
       getNavigationGraphManager: () => navSink,
       captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({ success: false }),
       telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
@@ -248,6 +250,47 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(recorder.network[0].contextAtCall).toEqual({ deviceId: DEVICE_ID, sessionId: null });
     // Context restored to the previous values after ingestion.
     expect(recorder.getContext()).toEqual({ deviceId: "prev-device", sessionId: "prev-session" });
+  });
+
+  test("concurrent network events retain each device context on a shared recorder", async () => {
+    const otherDeviceId = "other-ios-device";
+    const otherIngestor = buildIngestor({ deviceId: otherDeviceId });
+    const a = ingestor.recordSdkEvent(
+      event("network_request", { schemaVersion: 1, url: "https://a.test" }),
+      "com.a",
+    );
+    const b = otherIngestor.recordSdkEvent(
+      event("network_request", { schemaVersion: 1, url: "https://b.test" }),
+      "com.b",
+    );
+    await Promise.all([a, b]);
+    expect(
+      recorder.network.map(({ event, contextAtCall }) => ({
+        url: event.url,
+        deviceId: contextAtCall.deviceId,
+      })),
+    ).toEqual([
+      { url: "https://a.test", deviceId: DEVICE_ID },
+      { url: "https://b.test", deviceId: otherDeviceId },
+    ]);
+  });
+
+  test("concurrent rejected network diagnostics retain each device context on a shared recorder", async () => {
+    const otherDeviceId = "other-ios-device";
+    const otherIngestor = buildIngestor({ deviceId: otherDeviceId });
+    const a = ingestor.recordSdkEvent(event("network_request", { schemaVersion: 2 }), "com.a");
+    const b = otherIngestor.recordSdkEvent(event("network_request", { schemaVersion: 2 }), "com.b");
+    await Promise.all([a, b]);
+    expect(recorder.network).toHaveLength(0);
+    expect(
+      recorder.logs.map(({ event, contextAtCall }) => ({
+        applicationId: event.applicationId,
+        deviceId: contextAtCall.deviceId,
+      })),
+    ).toEqual([
+      { applicationId: "com.a", deviceId: DEVICE_ID },
+      { applicationId: "com.b", deviceId: otherDeviceId },
+    ]);
   });
 
   test("log routes to recordLogEvent", async () => {

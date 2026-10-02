@@ -30,7 +30,7 @@ last_significant_line="$(
 [[ "$last_significant_line" == "#endif" ]] ||
   fail "NetworkMockRuleStore.swift must close its file-level #if DEBUG guard"
 
-start_loading_line="$(line_number 'public override func startLoading\(\)' "$NETWORK_FILE")"
+start_loading_line="$(line_number '(public override|override public) func startLoading\(\)' "$NETWORK_FILE")"
 mock_lookup_line="$(line_number 'NetworkMockRuleStore\.shared\.findMatchingRule' "$NETWORK_FILE")"
 forwarding_line="$(line_number 'guard let mutableRequest' "$NETWORK_FILE")"
 

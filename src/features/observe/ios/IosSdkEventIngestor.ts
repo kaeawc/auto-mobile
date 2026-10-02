@@ -143,10 +143,13 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
       const p = event.payload;
 
       try {
-        if (
-          event.type === "network_request" &&
-          !(await this.acceptNetworkVersion(event, applicationId, recorder))
-        ) {
+        // Reach the recorder's context snapshot without yielding on accepted versions.
+        const version =
+          event.type === "network_request" ? this.acceptNetworkVersion(event, applicationId) : null;
+        if (version?.accepted === false && version.diagnosticLog) {
+          await recorder.recordLogEvent(version.diagnosticLog);
+        }
+        if (version?.accepted === false) {
           return;
         }
         switch (event.type) {
@@ -415,14 +418,18 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     }
   }
 
-  private async acceptNetworkVersion(
+  private acceptNetworkVersion(
     event: SdkEvent,
     applicationId: string | null,
-    recorder: IosTelemetryRecorder,
-  ): Promise<boolean> {
+  ):
+    | { accepted: true }
+    | {
+        accepted: false;
+        diagnosticLog?: Parameters<IosTelemetryRecorder["recordLogEvent"]>[0];
+      } {
     const version = decodeSdkNetworkVersion(event.payload, applicationId);
     if (version.success) {
-      return true;
+      return { accepted: true };
     }
     const diagnostic = version.diagnostic;
     diagnostic.receivedVersion = this.boundedReceivedVersion(diagnostic.receivedVersion);
@@ -438,22 +445,24 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     const previous = this.networkDiagnostics.get(key);
     if (previous && now - previous.emittedAt < IOS_SDK_NETWORK_DIAGNOSTIC_WINDOW_MS) {
       previous.suppressedCount += 1;
-      return false;
+      return { accepted: false };
     }
     if (previous) {
       diagnostic.suppressedCount = previous.suppressedCount;
     }
     this.networkDiagnostics.set(key, { emittedAt: now, suppressedCount: 0 });
     logger.warn("[IosSdkEventIngestor] Unsupported network schema", diagnostic);
-    await recorder.recordLogEvent({
-      timestamp: event.timestamp,
-      applicationId,
-      level: 5,
-      tag: IOS_SDK_NETWORK_DIAGNOSTIC_TAG,
-      message: JSON.stringify(diagnostic),
-      filterName: "sdk_network_schema_unsupported",
-    });
-    return false;
+    return {
+      accepted: false,
+      diagnosticLog: {
+        timestamp: event.timestamp,
+        applicationId,
+        level: 5,
+        tag: IOS_SDK_NETWORK_DIAGNOSTIC_TAG,
+        message: JSON.stringify(diagnostic),
+        filterName: "sdk_network_schema_unsupported",
+      },
+    };
   }
 
   private boundedReceivedVersion(received: unknown): unknown {

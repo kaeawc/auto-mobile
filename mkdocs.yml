@@ -127,6 +127,7 @@ nav:
       - "Device resources": design-docs/device-resources.md
       - "Host toolchain resource": design-docs/host-toolchain-resource.md
       - "iOS simctl and devicectl boundary": design-docs/plat/ios/simctl-devicectl-boundary.md
+      - "iOS network capture wire contract": design-docs/plat/ios/network-capture-wire-contract.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md

@@ -495,6 +495,51 @@ test("Android setPosture returns the tracker generation after its fresh observat
   );
 });
 
+for (const platform of ["android", "ios"] as const) {
+  test(`${platform} stale-twice setPosture generation fences coordinates before dispatch`, async () => {
+    const h = harness(platform);
+    if (platform === "ios") {
+      h.device.deviceId = "34C35F33-224C-4E74-B8C0-668FF03E49F5";
+      h.device.deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo";
+      devices.add(h.device.deviceId);
+      displayTransitions.reset(h.device.deviceId);
+    }
+    h.panel("cover");
+    const old = await h.screen.execute(options);
+    displayTransitions.notifyTransition(h.device.deviceId, "transition after cached capture");
+    const execute = spyOn(h.screen, "execute").mockResolvedValue(old);
+    restores.push(() => execute.mockRestore());
+    const feature = new SetPosture(h.device, {
+      adbFactory: h.adbFactory,
+      iosClientProvider: () => h.client,
+      timer: h.timer,
+      transitionSink: displayTransitions,
+      observeFactory: () => h.screen,
+    });
+    const result = await feature.execute("closed");
+    expect(result).toMatchObject({
+      display: { generation: old.display.generation },
+      warning: expect.any(String),
+    });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1]?.[0]?.freshness).toBe("fresh");
+    if (!("display" in result)) {
+      throw new Error("Expected a supported posture result");
+    }
+    const action = new BaseVisualChange(h.device, h.adb, h.timer, () => result.display.generation);
+    let dispatched = false;
+    await expect(
+      action.observedInteraction(
+        async () => {
+          dispatched = true;
+        },
+        { changeExpected: false, predictionContext: { toolName: "dragAndDrop", toolArgs: {} } },
+      ),
+    ).rejects.toThrow("Re-observe");
+    expect(dispatched).toBe(false);
+  });
+}
+
 test("iOS setPosture returns generation after hinge, observed identity, and settled fences", async () => {
   const h = harness("ios");
   h.device.deviceId = "34C35F33-224C-4E74-B8C0-668FF03E49F5";

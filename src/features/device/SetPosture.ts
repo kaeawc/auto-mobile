@@ -29,6 +29,7 @@ export interface SetPostureResult {
   posture: RequestedPosture;
   display: DisplayRef;
   locked?: boolean;
+  warning?: string;
 }
 
 export interface SetPostureUnsupportedResult {
@@ -427,18 +428,11 @@ export class SetPosture {
       throwIfAborted(signal);
       // A posture-only change need not produce a display push or new geometry.
       ObservedAndroidDisplayCache.clear(this.device.deviceId);
-      const observation = await awaitWhileRequestIsLive(
-        this.observeFactory(this.device).execute({ signal }),
+      return await this.observeFinalPosture(
+        requested,
+        () => this.observeFactory(this.device).execute({ signal }),
         signal,
       );
-      return {
-        posture: requested,
-        display: {
-          ...observation.display,
-          generation: this.transitionSink.identityRevision(this.device.deviceId),
-        },
-        ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
-      };
     } catch (error) {
       if (signal?.aborted) {
         throw toActionableError(
@@ -448,6 +442,52 @@ export class SetPosture {
       }
       throw toActionableError(error, "Failed to set device posture");
     }
+  }
+
+  private async observeFinalPosture(
+    requested: RequestedPosture,
+    observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
+    signal?: AbortSignal,
+  ): Promise<SetPostureResult> {
+    let observation = await awaitWhileRequestIsLive(observe(), signal);
+    // Missing provenance cannot certify freshness. Compare the full revision,
+    // including iOS geometry changes, before the legitimate settle notification.
+    let stale = observation.displayRevision !== this.transitionSink.revision(this.device.deviceId);
+    if (stale) {
+      if (this.device.platform === "android") {
+        ObservedAndroidDisplayCache.clear(this.device.deviceId);
+      }
+      throwIfAborted(signal);
+      observation = await awaitWhileRequestIsLive(
+        this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
+        signal,
+      );
+      stale = observation.displayRevision !== this.transitionSink.revision(this.device.deviceId);
+    }
+    throwIfAborted(signal);
+    if (this.device.platform === "ios") {
+      this.transitionSink.notifyTransition(
+        this.device.deviceId,
+        "setPosture settled on the iPhone Duo display",
+      );
+    }
+    return {
+      posture: requested,
+      display: {
+        ...observation.display,
+        // Never certify old coordinates with a newer transition's generation.
+        generation: stale
+          ? observation.display.generation
+          : this.transitionSink.identityRevision(this.device.deviceId),
+      },
+      ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
+      ...(stale
+        ? {
+            warning:
+              "The posture changed, but the returned observation predates it. Re-observe before acting.",
+          }
+        : {}),
+    };
   }
 
   private async executeIos(
@@ -494,24 +534,17 @@ export class SetPosture {
       "setPosture changed the iPhone Duo hinge angle",
     );
     const expectedRole = requested === "closed" ? "cover" : "inner";
-    const observation = await observeIosPosture(
-      () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
-      this.device.displays?.panels,
-      expectedRole,
-      this.timer,
+    return await this.observeFinalPosture(
+      requested,
+      () =>
+        observeIosPosture(
+          () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
+          this.device.displays?.panels,
+          expectedRole,
+          this.timer,
+          signal,
+        ),
       signal,
     );
-    this.transitionSink.notifyTransition(
-      this.device.deviceId,
-      "setPosture settled on the iPhone Duo display",
-    );
-    return {
-      posture: requested,
-      display: {
-        ...observation.display,
-        generation: this.transitionSink.identityRevision(this.device.deviceId),
-      },
-      ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
-    };
   }
 }

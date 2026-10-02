@@ -13,6 +13,7 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
@@ -72,7 +73,7 @@ function makeFeature(
       execute: async () => {
         observeCount += 1;
         tracker.notifyTransition(device.deviceId, "fake observed identity change");
-        return observed;
+        return { ...observed, displayRevision: tracker.revision(device.deviceId) };
       },
     }) as ObserveScreen;
   return {
@@ -233,7 +234,7 @@ describe("SetPosture", () => {
       };
       tracker.checkIdentity(device.deviceId, result.display);
       tracker.record(device.deviceId, result);
-      return result;
+      return { ...result, displayRevision: tracker.revision(device.deviceId) };
     };
     try {
       expect((await observe()).display.posture).toBe("opened");
@@ -541,6 +542,7 @@ describe("SetPosture", () => {
     const sequence: string[] = [];
     const tracker = new DisplayTransitionTracker(() => {});
     const transitionSink: DisplayTransitionSink = {
+      revision: (deviceId) => tracker.revision(deviceId),
       identityRevision: (deviceId) => tracker.identityRevision(deviceId),
       notifyAndroidTransition: () => {},
       notifyTransition: (deviceId, reason) => {
@@ -556,7 +558,10 @@ describe("SetPosture", () => {
           execute: async () => {
             observeCount += 1;
             sequence.push("observe");
-            return observations[Math.min(observeCount - 1, observations.length - 1)]!;
+            return {
+              ...observations[Math.min(observeCount - 1, observations.length - 1)]!,
+              displayRevision: tracker.revision(device.deviceId),
+            };
           },
         }) as ObserveScreen,
       timer,
@@ -817,6 +822,7 @@ describe("SetPosture", () => {
     const adbFactory: AdbClientFactory = { create: () => adb };
     const unlockedObservation = {
       display,
+      displayRevision: 0,
       screenSize: { width: 200, height: 300 },
     } as ObserveResult;
     const observeFactory = () => ({ execute: async () => unlockedObservation }) as ObserveScreen;
@@ -831,3 +837,154 @@ describe("SetPosture", () => {
     });
   });
 });
+
+for (const platform of ["android", "ios"] as const) {
+  describe(`${platform} final posture observation provenance`, () => {
+    function harness() {
+      const device = makeDevice();
+      device.platform = platform;
+      if (platform === "ios") {
+        device.deviceId = "34C35F33-224C-4E74-B8C0-668FF03E49F5";
+        device.deviceType = "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo";
+        device.displays!.panels = [
+          { key: "panel-cover", role: "cover", sizePx: { width: 200, height: 300 } },
+          { key: "panel-inner", role: "inner", sizePx: { width: 400, height: 600 } },
+        ];
+      }
+      const adb = new FakeAdbExecutor();
+      adb.setCommandResponse(
+        "shell cmd device_state print-states",
+        createExecResult(foldStates, ""),
+      );
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+      const observe = new FakeObserveScreen();
+      const timer = new FakeTimer();
+      const client = new FakeIOSCtrlProxy(timer);
+      const events: string[] = [];
+      // Full revision can differ from identity generation (iOS geometry corrections).
+      let revision = 7;
+      let generation = 3;
+      const sink = {
+        revision: () => revision,
+        identityRevision: () => generation,
+        notifyAndroidTransition: () => {},
+        notifyTransition: (_deviceId: string, reason: string) => {
+          revision += 1;
+          generation += 1;
+          events.push(reason);
+        },
+      };
+      const stamped = (stamp: number | undefined = revision, ownGeneration = 1): ObserveResult => ({
+        ...observation,
+        display: { ...display, key: "panel-cover", role: "cover", generation: ownGeneration },
+        displayRevision: stamp,
+      });
+      const feature = new SetPosture(device, {
+        adbFactory: { create: () => adb },
+        observeFactory: () => observe,
+        iosClientProvider: () => client,
+        timer,
+        transitionSink: sink,
+      });
+      return { feature, observe, sink, stamped, events, device };
+    }
+
+    test("re-observes a stale final stamp once and adopts the fresh panel", async () => {
+      const h = harness();
+      h.observe.setObserveResult((index) => {
+        h.events.push("observe");
+        return index === 0
+          ? { ...h.stamped(h.sink.revision() - 1), display: { ...display, role: "cover" } }
+          : h.stamped();
+      });
+      const clear = spyOn(ObservedAndroidDisplayCache, "clear");
+      try {
+        expect(await h.feature.execute("closed")).toEqual({
+          posture: "closed",
+          display: { ...h.stamped().display, generation: h.sink.identityRevision() },
+          locked: true,
+        });
+        expect(h.observe.getExecuteOptions()).toEqual([
+          platform === "ios" ? { freshness: "fresh", signal: undefined } : { signal: undefined },
+          { freshness: "fresh", signal: undefined },
+        ]);
+        if (platform === "android") {
+          expect(clear.mock.calls.filter(([id]) => id === h.device.deviceId)).toHaveLength(2);
+        } else {
+          expect(h.events).toEqual([
+            "setPosture changed the iPhone Duo hinge angle",
+            "observe",
+            "observe",
+            "setPosture settled on the iPhone Duo display",
+          ]);
+        }
+      } finally {
+        clear.mockRestore();
+      }
+    });
+
+    test("keeps the second stale observation's own generation and warns without a third capture", async () => {
+      const h = harness();
+      h.observe.setObserveResult((index) => {
+        h.events.push("observe");
+        return h.stamped(h.sink.revision() - 1, index + 1);
+      });
+      expect(await h.feature.execute("closed")).toEqual({
+        posture: "closed",
+        display: h.stamped(0, 2).display,
+        locked: true,
+        warning:
+          "The posture changed, but the returned observation predates it. Re-observe before acting.",
+      });
+      expect(h.observe.getExecuteOptions()).toHaveLength(2);
+      if (platform === "ios") {
+        expect(h.events.at(-1)).toBe("setPosture settled on the iPhone Duo display");
+        expect(h.sink.identityRevision()).toBe(5);
+      }
+    });
+
+    test("returns a fresh first observation unchanged with only one capture", async () => {
+      const h = harness();
+      h.observe.setObserveResult(() => h.stamped());
+      expect(await h.feature.execute("closed")).toEqual({
+        posture: "closed",
+        display: { ...h.stamped().display, generation: h.sink.identityRevision() },
+        locked: true,
+      });
+      expect(h.observe.getExecuteOptions()).toHaveLength(1);
+    });
+
+    test("treats missing displayRevision as stale instead of certifying unknown provenance", async () => {
+      const h = harness();
+      h.observe.setObserveResult(() => ({ ...h.stamped(), displayRevision: undefined }));
+      expect(await h.feature.execute("closed")).toMatchObject({
+        display: { generation: 1 },
+        warning:
+          "The posture changed, but the returned observation predates it. Re-observe before acting.",
+      });
+      expect(h.observe.getExecuteOptions()).toHaveLength(2);
+    });
+
+    test("cancellation between final captures rejects through the existing actionable error", async () => {
+      const h = harness();
+      const controller = new AbortController();
+      h.observe.setObserveResult(() => h.stamped(0));
+      // Abort when SetPosture checks provenance, after the first observation returned.
+      const readRevision = spyOn(h.sink, "revision").mockImplementation(() => {
+        controller.abort();
+        return 7;
+      });
+      try {
+        const attempt = h.feature.execute("closed", undefined, controller.signal);
+        await expect(attempt).rejects.toBeInstanceOf(ActionableError);
+        await expect(attempt).rejects.toThrow(
+          "Posture request cancelled; device may still complete the change",
+        );
+        expect(h.observe.getExecuteOptions()).toHaveLength(1);
+        expect(h.events).not.toContain("setPosture settled on the iPhone Duo display");
+      } finally {
+        readRevision.mockRestore();
+      }
+    });
+  });
+}

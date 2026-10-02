@@ -206,6 +206,8 @@ export interface ObserveResult {
   screenshotOrientation?: "native" | "display";
   /** Local path to this observation's validated settled screenshot. */
   screenshotPath?: string;
+  /** PNG crop from this settled capture; filesystem path and scalar geometry only. */
+  crop?: import("../features/observe/screenshot/observeCrop").ObserveCropResult;
   /** Provenance of the screenshot returned with this observation. */
   screenshotSource?: "fresh" | "cached";
   screenshotCaptureSource?: "device" | "observation-cache";

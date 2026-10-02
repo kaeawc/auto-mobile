@@ -125,3 +125,32 @@ export const resolverSelectorSchema: z.ZodType<ResolverSelector> = z.lazy(() =>
       "Provide at most one of elementId, text, testTag, contentDescription, or className",
     ),
 );
+
+export const tapOnSelectorSchema = z
+  .union([
+    z
+      .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") })
+      .strict(),
+    z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
+    z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict(),
+    z
+      .object({
+        accessibilityLink: z
+          .string()
+          .trim()
+          .min(1)
+          .describe("Exact visible text of a semantic accessibility link"),
+      })
+      .strict(),
+    z
+      .object({
+        textAny: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe("Ordered text variants; first visible match wins"),
+      })
+      .strict(),
+  ])
+  .describe(
+    "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
+  );

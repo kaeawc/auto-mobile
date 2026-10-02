@@ -711,6 +711,35 @@ const snapshotReferenceUnavailableSchema = z
     "Missing snapshot capture preconditions (display, screenSize, rotation, nativeScale, frameContext); only present when a session observe could not produce a reference.",
   );
 
+const cropNativeBoundsSchema = boundsObjectSchema
+  .pick({ left: true, top: true, right: true, bottom: true })
+  .strict();
+
+export const observeCropResultSchema = z
+  .object({
+    cropPath: z.string(),
+    unit: z.enum(["pixels", "points"]),
+    requestedBounds: cropNativeBoundsSchema,
+    clippedBounds: cropNativeBoundsSchema,
+    clipped: z.boolean(),
+    screenSize: z.object({ width: z.number().positive(), height: z.number().positive() }).strict(),
+    imageSize: z
+      .object({ width: z.number().int().positive(), height: z.number().int().positive() })
+      .strict(),
+    pixelsPerNativeUnit: z.object({ x: z.number().positive(), y: z.number().positive() }).strict(),
+    scaleProvenance: z.enum(["raster-dimensions", "native-scale-confirmed"]),
+    rasterBounds: z
+      .object({
+        left: z.number().int().nonnegative(),
+        top: z.number().int().nonnegative(),
+        right: z.number().int().positive(),
+        bottom: z.number().int().positive(),
+      })
+      .strict(),
+    screenshotOrientation: z.enum(["display", "native"]),
+  })
+  .strict();
+
 const observationScreenshotOutputFields = {
   screenshotSettled: z.boolean().optional(),
   screenshotSettledError: z.string().optional(),
@@ -1357,6 +1386,7 @@ export const observeResultSchema = z
     snapshotReferenceUnavailable: snapshotReferenceUnavailableSchema,
     rotation: observationRotationSchema,
     ...observationScreenshotOutputFields,
+    crop: observeCropResultSchema.optional(),
     screenSize: screenSizeSchema.optional(),
     systemInsets: systemInsetsSchema.optional(),
     insets: observationInsetsSchema.optional(),

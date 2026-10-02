@@ -4553,6 +4553,115 @@
           "type": "string",
           "enum": ["settled", "async", "none"]
         },
+        "crop": {
+          "description": "Exactly one of element (tapOn selector) or rect {x,y,width,height} in native screen units. Implies settled capture; explicit async or none is rejected. Returns a PNG path and scalar metadata only.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "element": {
+                  "description": "Element to tap: elementId, Android testTag, text, semantic accessibility link, or ordered text variants",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "description": "Resource ID, e.g. com.app:id/btn_login",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["elementId"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "testTag": {
+                          "description": "Android accessibility test tag",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["testTag"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "description": "Text, content-desc, or placeholder",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["text"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "accessibilityLink": {
+                          "description": "Exact visible text of a semantic accessibility link",
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["accessibilityLink"],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "textAny": {
+                          "description": "Ordered text variants; first visible match wins",
+                          "minItems": 1,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        }
+                      },
+                      "required": ["textAny"],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "required": ["element"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "rect": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "width": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "height": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "required": ["x", "y", "width", "height"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["rect"],
+              "additionalProperties": false
+            }
+          ]
+        },
         "screenshotOptions": {
           "description": "Encoding for a settled screenshot; omitted uses PNG",
           "anyOf": [
@@ -5012,6 +5121,155 @@
               "additionalProperties": false
             }
           ]
+        },
+        "crop": {
+          "type": "object",
+          "properties": {
+            "cropPath": {
+              "type": "string"
+            },
+            "unit": {
+              "type": "string",
+              "enum": ["pixels", "points"]
+            },
+            "requestedBounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "number"
+                },
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                }
+              },
+              "required": ["left", "top", "right", "bottom"],
+              "additionalProperties": false
+            },
+            "clippedBounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "number"
+                },
+                "top": {
+                  "type": "number"
+                },
+                "right": {
+                  "type": "number"
+                },
+                "bottom": {
+                  "type": "number"
+                }
+              },
+              "required": ["left", "top", "right", "bottom"],
+              "additionalProperties": false
+            },
+            "clipped": {
+              "type": "boolean"
+            },
+            "screenSize": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "height": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": ["width", "height"],
+              "additionalProperties": false
+            },
+            "imageSize": {
+              "type": "object",
+              "properties": {
+                "width": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "height": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["width", "height"],
+              "additionalProperties": false
+            },
+            "pixelsPerNativeUnit": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "y": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "required": ["x", "y"],
+              "additionalProperties": false
+            },
+            "scaleProvenance": {
+              "type": "string",
+              "enum": ["raster-dimensions", "native-scale-confirmed"]
+            },
+            "rasterBounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "top": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "right": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "bottom": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["left", "top", "right", "bottom"],
+              "additionalProperties": false
+            },
+            "screenshotOrientation": {
+              "type": "string",
+              "enum": ["display", "native"]
+            }
+          },
+          "required": [
+            "cropPath",
+            "unit",
+            "requestedBounds",
+            "clippedBounds",
+            "clipped",
+            "screenSize",
+            "imageSize",
+            "pixelsPerNativeUnit",
+            "scaleProvenance",
+            "rasterBounds",
+            "screenshotOrientation"
+          ],
+          "additionalProperties": false
         },
         "screenSize": {
           "description": "Current-orientation native screen size for observe bounds and absolute tapAt input: Android physical pixels or iOS XCTest logical points. Valid points satisfy 0 <= x < width and 0 <= y < height. No density, inset, Retina, canonical-pixel, or rotation transform applies to an already-native point.",

@@ -800,6 +800,7 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
     screenshot: ScreenshotMode = "settled",
     screenshotOptions?: ScreenshotEncodingOptions,
+    requireFreshScreenshot: boolean = false,
   ): Promise<ObserveResult> {
     const result = await this.execute({
       observerMode: true,
@@ -814,7 +815,12 @@ export class RealObserveScreen implements ObserveScreen {
       result.screenshotCaptureAttempted = false;
       return result;
     }
-    await this.captureDeviceReadScreenshot(result, signal, screenshotOptions);
+    await this.captureDeviceReadScreenshot(
+      result,
+      signal,
+      screenshotOptions,
+      requireFreshScreenshot,
+    );
     return result;
   }
 
@@ -847,6 +853,7 @@ export class RealObserveScreen implements ObserveScreen {
     result: ObserveResult,
     signal?: AbortSignal,
     screenshotOptions?: ScreenshotEncodingOptions,
+    requireFreshScreenshot: boolean = false,
   ): Promise<void> {
     result.screenshotCaptureAttempted = true;
     result.screenshotOrientation = this.device.platform === "ios" ? "native" : "display";
@@ -871,7 +878,25 @@ export class RealObserveScreen implements ObserveScreen {
       result.screenshotSettled = true;
       return;
     }
-    const failure = capture.error ?? "Screenshot capture failed";
+    await this.handleDeviceReadScreenshotFailure(
+      result,
+      capture.error ?? "Screenshot capture failed",
+      displayId,
+      requireFreshScreenshot,
+    );
+  }
+
+  private async handleDeviceReadScreenshotFailure(
+    result: ObserveResult,
+    failure: string,
+    displayId: number | undefined,
+    requireFreshScreenshot: boolean,
+  ): Promise<void> {
+    if (requireFreshScreenshot) {
+      throw new ActionableError(
+        `observe crop screenshot capture failed for device ${this.device.deviceId}: ${failure}. Retry with a fresh settled capture.`,
+      );
+    }
     const cachedPath = this.eligibleCachedScreenshotPath(displayId);
     if (cachedPath) {
       try {

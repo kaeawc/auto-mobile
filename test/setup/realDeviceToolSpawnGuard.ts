@@ -87,13 +87,15 @@ function blockedEnv(argv: readonly string[]): string | undefined {
         blockedToolForArgv([...words, ...rest])
       );
     }
-    if (["-u", "--unset", "-C", "--chdir"].includes(option)) {
-      index += 2;
-    } else if (
-      /^(-u.|-C.|--unset=|--chdir=)/.test(option) ||
-      ["-i", "--ignore-environment", "-", "-0", "-v"].includes(option)
-    ) {
-      index++;
+    if (option.startsWith("--")) {
+      // Signal operands are optional and only accepted with '='. Other long
+      // options without an operand still precede the command.
+      index += ["--unset", "--chdir", "--argv0"].includes(option) ? 2 : 1;
+    } else if (option.startsWith("-")) {
+      // The first value-taking letter consumes the cluster remainder, or the
+      // following token when it is the final letter in the cluster.
+      const operandIndex = option.search(/[uCa]/);
+      index += operandIndex === option.length - 1 && operandIndex > 0 ? 2 : 1;
     } else {
       break;
     }
@@ -202,8 +204,15 @@ export function blockedToolForArgv(argv: readonly string[]): string | undefined 
     return blockedShellArgv(argv);
   }
   if (name === "cmd") {
-    const flag = argv.findIndex((arg) => arg.toLowerCase() === "/c");
-    return flag < 0 ? undefined : blockedShellCommand(argv.slice(flag + 1).join(" "));
+    const flag = argv.findIndex((arg) => ["/c", "/k"].includes(arg.toLowerCase()));
+    if (flag < 0) {
+      return undefined;
+    }
+    const command = argv.slice(flag + 1).join(" ");
+    // cmd /s removes exactly the outer quote pair around its command string.
+    return blockedShellCommand(
+      command.startsWith('"') && command.endsWith('"') ? command.slice(1, -1) : command,
+    );
   }
   if (name === "which") {
     return blockedLookup(argv.slice(1).filter((arg) => !arg.startsWith("-")));
@@ -245,7 +254,7 @@ export function blockedToolForArgv(argv: readonly string[]): string | undefined 
 }
 
 function blockedShellCommand(command: string): string | undefined {
-  for (const segment of command.split(/;|&&|\|\||\|/)) {
+  for (const segment of command.split(/;|&|\||\r?\n/)) {
     const tool = blockedToolForArgv(shellWords(segment.trim()));
     if (tool) {
       return tool;

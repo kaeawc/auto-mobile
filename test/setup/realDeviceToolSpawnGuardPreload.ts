@@ -24,7 +24,7 @@ if (process.platform !== "win32" && isUnitTestPath(testFile)) {
           new URL("../../scripts/unit-test-device-spawn-allowlist.txt", import.meta.url),
           "utf8",
         )
-          .split("\n")
+          .split(/\r?\n/)
           .filter((line) => line && !line.startsWith("#")),
       ),
     mode: censusFile ? "census" : "enforce",

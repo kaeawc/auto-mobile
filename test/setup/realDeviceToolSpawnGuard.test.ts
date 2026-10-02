@@ -68,7 +68,7 @@ test("lookups and shell command segments detect blocked tools", () => {
     [["zsh", "-c", "exec command env BAR=2 xcrun --version"], "xcrun"],
     [["cmd", "/d", "/s", "/C", "adb", "devices"], "adb"],
   ];
-  for (const operator of [";", "&&", "||", "|"]) {
+  for (const operator of [";", "&&", "||", "|", "&", "\n", "\r\n"]) {
     cases.push([["sh", "-c", `echo hi ${operator} adb devices`], "adb"]);
   }
   for (const [argv, tool] of cases) {
@@ -76,6 +76,65 @@ test("lookups and shell command segments detect blocked tools", () => {
   }
   expect(blockedToolForArgv(["which", "git"])).toBeUndefined();
   expect(blockedToolForArgv(["sh", "-c", "git status"])).toBeUndefined();
+});
+
+test("cmd command strings unwrap one outer quote pair across platforms", () => {
+  for (const shell of ["cmd", "cmd.exe", "C:\\Windows\\system32\\cmd.exe"]) {
+    for (const flag of ["/c", "/C", "/k", "/K"]) {
+      for (const command of ["adb devices", '"adb devices"', '"adb devices && echo ok"']) {
+        const argv = [shell, "/d", "/s", flag, command];
+        expect(blockedToolForArgv(argv), JSON.stringify(argv)).toBe("adb");
+      }
+      expect(blockedToolForArgv([shell, "/d", "/s", flag, '"echo hello"'])).toBeUndefined();
+    }
+  }
+  expect(blockedToolForArgv(["cmd.exe", "/d", "/s", '"adb devices"'])).toBeUndefined();
+});
+
+test("env long options and short clusters preserve command and operand boundaries", () => {
+  const options = [
+    ["--block-signal"],
+    ["--block-signal=INT"],
+    ["--default-signal"],
+    ["--default-signal=TERM"],
+    ["--ignore-signal"],
+    ["--ignore-signal=PIPE"],
+    ["--list-signal-handling"],
+    ["--argv0", "label"],
+    ["--argv0=label"],
+    ["-a", "label"],
+    ["-alabel"],
+    ["-iv"],
+    ["-0i"],
+    ["-iu", "FOO"],
+    ["-iuFOO"],
+    ["-iC", "/tmp"],
+    ["-iC/tmp"],
+    ["-ia", "label"],
+    ["-ialabel"],
+  ];
+  for (const flags of options) {
+    expect(blockedToolForArgv(["env", ...flags, "adb", "devices"]), JSON.stringify(flags)).toBe(
+      "adb",
+    );
+    expect(
+      blockedToolForArgv(["env", ...flags, "echo", "hello"]),
+      JSON.stringify(flags),
+    ).toBeUndefined();
+  }
+  for (const flags of [
+    ["--argv0", "adb"],
+    ["--argv0=adb"],
+    ["-ia", "adb"],
+    ["-iu", "adb"],
+    ["-iuadb"],
+    ["-iC", "adb"],
+  ]) {
+    expect(
+      blockedToolForArgv(["env", ...flags, "echo", "hello"]),
+      JSON.stringify(flags),
+    ).toBeUndefined();
+  }
 });
 
 test("wrapper option operands are skipped before recursively checking commands", () => {

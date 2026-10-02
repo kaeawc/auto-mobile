@@ -168,3 +168,23 @@ describe("cleanupDaemonChildProcesses", () => {
     expect(calls).toEqual(["stop:in-memory-recording"]);
   });
 });
+
+test("shutdown aborts inventory background work before draining capture owners", async () => {
+  const calls: string[] = [];
+  const dependencies = {
+    shutdownInventoryReads: () => {
+      calls.push("inventory");
+    },
+    stopAcceptingVideoRecordingStarts: async () => {
+      calls.push("captures");
+    },
+    listActiveVideoRecordings: async () => [],
+    listOwnedActiveVideoRecordingIds: () => [],
+    stopVideoRecording: async () => {},
+    forceStopVideoRecording: async () => {},
+    interruptVideoRecording: async () => {},
+    shutdownIOSCtrlProxies: async () => {},
+  };
+  await cleanupDaemonChildProcesses(dependencies);
+  expect(calls).toEqual(["inventory", "captures"]);
+});

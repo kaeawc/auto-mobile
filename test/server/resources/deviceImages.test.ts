@@ -8,6 +8,7 @@ import {
   DeviceImagesResourceContent,
   notifyDeviceImageResourcesUpdated,
   resetAndroidDeviceImageResourceCache,
+  invalidateAndroidInventoryProvenanceAndCatalog,
 } from "../../../src/server/deviceImageResources";
 import { DeviceInfo } from "../../../src/models";
 import { AvdInfo } from "../../../src/utils/android-cmdline-tools/avdmanager";
@@ -610,10 +611,10 @@ describe("Device Image Resources with Fakes", () => {
         systemImages: [],
         profiles: [],
       });
-      // The hung enumeration must have been cancelled, not left running.
+      // Caller expiry leaves the shared catalog running; reset owns cancellation.
       const calls = fakeAvdManager.getListInstalledSystemImagesCalls();
       expect(calls).toHaveLength(1);
-      expect(calls[0].signal?.aborted).toBe(true);
+      expect(calls[0].signal?.aborted).toBe(false);
     });
 
     test("bounds the preceding device-image listing under the same deadline", async () => {
@@ -646,18 +647,17 @@ describe("Device Image Resources with Fakes", () => {
           message: expect.stringContaining("5000"),
         },
       });
-      // The hung listing child must have been aborted, not left running to its
-      // own independent 60s avdmanager timeout.
+      // The shared provenance child survives the caller's shorter wait.
       const calls = fakeAvdManager.getListDeviceImagesCalls();
       expect(calls).toHaveLength(1);
-      expect(calls[0].signal?.aborted).toBe(true);
+      expect(calls[0].signal?.aborted).toBe(false);
     });
 
-    test("bounds and cancels the primary Android discovery under the same deadline", async () => {
+    test("bounds the primary Android read while its shared discovery continues", async () => {
       const timer = new FakeTimer();
       // The primary discovery path (deviceManager.listDeviceImages("android") ->
-      // emulator -list-avds) hangs. It must be bounded by the single deadline and
-      // its child cancelled, not left running to accumulate across reads.
+      // emulator -list-avds) hangs. The read deadline is bounded while one shared
+      // background fetch continues until reset or its independent hard cap.
       fakeDeviceUtils.setDeviceImages("android", [
         { name: "Pixel_9", platform: "android", deviceId: "avd-late", source: "local" },
       ]);
@@ -694,6 +694,9 @@ describe("Device Image Resources with Fakes", () => {
             error: {
               code: "timeout",
               message: expect.stringContaining("5000"),
+              retryable: true,
+              retryAfterMs: 1000,
+              missing: ["configuredInventory"],
             },
           },
         },
@@ -702,12 +705,11 @@ describe("Device Image Resources with Fakes", () => {
       // after the timeout, even though a device was configured for the listing.
       expect(result.androidCount).toBe(0);
       expect(result.images).toHaveLength(0);
-      // The hung primary discovery child must have been passed the deadline's
-      // signal and cancelled, not left running.
+      // The background fetch owns the discovery signal until reset or its hard cap.
       const calls = fakeDeviceUtils.getListDeviceImagesCalls();
       const androidCall = calls.find((call) => call.platform === "android");
       expect(androidCall).toBeDefined();
-      expect(androidCall?.signal?.aborted).toBe(true);
+      expect(androidCall?.signal?.aborted).toBe(false);
     });
 
     test("does not publish a configured device that resolves after the deadline", async () => {
@@ -792,7 +794,7 @@ describe("Device Image Resources with Fakes", () => {
       const result = await pending;
       const returnedSnapshot = JSON.stringify(result);
 
-      expect(metadataSignal?.aborted).toBe(true);
+      expect(metadataSignal?.aborted).toBe(false);
       expect(result.totalCount).toBe(result.androidCount);
       expect(result.androidCount).toBe(result.images.length);
       expect(result.configuredInventory.observations.android).toMatchObject({
@@ -816,12 +818,12 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.images).toEqual([]);
     });
 
-    test("aborts profile enumeration too when the deadline wins", async () => {
+    test("keeps profile enumeration running after the read deadline and aborts it on full invalidation", async () => {
       const timer = new FakeTimer();
       fakeDeviceUtils.setDeviceImages("android", []);
       // listInstalledSystemImages would resolve, but the concurrently-raced
-      // profile enumeration hangs. The timeout must abort BOTH, so a stalled
-      // `avdmanager list device` child cannot run on to its own 60s timeout.
+      // profile enumeration hangs. The caller deadline leaves the shared child
+      // running; only full invalidation aborts the obsolete catalog fetch.
       fakeAvdManager.setListInstalledSystemImagesResponse([]);
       fakeAvdManager.setListDevicesHangs(true);
 
@@ -846,6 +848,8 @@ describe("Device Image Resources with Fakes", () => {
       });
       const profileCalls = fakeAvdManager.getListDevicesCalls();
       expect(profileCalls).toHaveLength(1);
+      expect(profileCalls[0].signal?.aborted).toBe(false);
+      invalidateAndroidInventoryProvenanceAndCatalog();
       expect(profileCalls[0].signal?.aborted).toBe(true);
     });
 
@@ -942,7 +946,7 @@ describe("Device Image Resources with Fakes", () => {
       expect(fakeDeviceUtils.getGetDeviceImagesDetailedCalls()).toEqual([
         {
           platform: "android",
-          options: { signal: expect.any(AbortSignal) },
+          options: { signal: expect.any(AbortSignal), coalesceInventoryEnrichment: true },
         },
         {
           platform: "ios",

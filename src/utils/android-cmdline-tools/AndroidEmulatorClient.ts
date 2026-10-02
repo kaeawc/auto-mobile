@@ -13,13 +13,18 @@ import {
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
 import { AdbClientFactory, unadmittedAdbClientFactory } from "./AdbClientFactory";
 import { AdbClient } from "./AdbClient";
-import { readAndroidDeviceDisplays } from "./AndroidDisplayInventory";
+import {
+  readAndroidDeviceDisplays,
+  readAndroidDeviceDisplaysChecked,
+} from "./AndroidDisplayInventory";
+import { TTLCache } from "../cache/Cache";
+import { SingleFlight } from "../cache/SingleFlight";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { resolveAndroidSdkRoot } from "./androidSdkRoot";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { raceWithDeadline } from "../raceWithDeadline";
-import { combineAbortSignals } from "../AbortContext";
+import { combineAbortSignals, getAbortSignal, runWithAbortSignal } from "../AbortContext";
 import { runDetachedFromPerf, trackAmbient } from "../PerfContext";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import {
@@ -59,6 +64,59 @@ const MIN_EMULATOR_POLLING_INTERVAL_MS = 100;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_POLLING_SLEEP_CHUNK_MS = 500;
 const READINESS_NAME_TIMEOUT_MS = 2_000;
+const ANDROID_INVENTORY_AVD_LIST_CAP_MS = 30_000;
+export const ANDROID_INVENTORY_ENRICHMENT_TTL_MS = 2_500;
+export const ANDROID_INVENTORY_DEVICE_LIST_BUDGET_MS = 2_000;
+type InventoryNameResult = {
+  name: string;
+  diagnostic?: ReadinessDiagnostic;
+  consoleBusyDuringProbe?: boolean;
+};
+type InventoryDisplayResult = Awaited<ReturnType<typeof readAndroidDeviceDisplaysChecked>>;
+interface InventoryEnrichmentState {
+  generation: number;
+  names: TTLCache<string, InventoryNameResult>;
+  nameFlight: SingleFlight<string, InventoryNameResult>;
+  displays: TTLCache<string, InventoryDisplayResult>;
+  displayFlight: SingleFlight<string, InventoryDisplayResult>;
+  avds: TTLCache<string, DeviceInfo[]>;
+  avdFlight: SingleFlight<string, DeviceInfo[]>;
+}
+const inventoryEnrichmentStates = new WeakMap<Timer, InventoryEnrichmentState>();
+const inventoryEnrichmentReferences = new Set<WeakRef<InventoryEnrichmentState>>();
+function inventoryEnrichmentState(timer: Timer): InventoryEnrichmentState {
+  let state = inventoryEnrichmentStates.get(timer);
+  if (!state) {
+    const options = { ttlMs: ANDROID_INVENTORY_ENRICHMENT_TTL_MS, maxEntries: 256 };
+    state = {
+      generation: 0,
+      names: new TTLCache(timer, options),
+      nameFlight: new SingleFlight(),
+      displays: new TTLCache(timer, options),
+      displayFlight: new SingleFlight(),
+      avds: new TTLCache(timer, options),
+      avdFlight: new SingleFlight(),
+    };
+    inventoryEnrichmentStates.set(timer, state);
+    inventoryEnrichmentReferences.add(new WeakRef(state));
+  }
+  return state;
+}
+export function resetAndroidInventoryEnrichmentCache(): void {
+  for (const ref of inventoryEnrichmentReferences) {
+    const state = ref.deref();
+    if (!state) {
+      inventoryEnrichmentReferences.delete(ref);
+      continue;
+    }
+    state.generation++;
+    state.names.clear();
+    state.displays.clear();
+    state.avds.clear();
+    // Retain active flights: lifecycle invalidation must never multiply subprocesses.
+  }
+}
+
 const READINESS_PROBE_TIMEOUT_MS = 10_000;
 const READINESS_NAME_CANDIDATES_PER_ITERATION = 4;
 // A freshly-provisioned AVD's first cold boot can land its serial in ADB
@@ -103,6 +161,7 @@ interface BootedDeviceScan {
 }
 
 interface BootedDeviceScanOptions {
+  coalesceInventoryEnrichment?: boolean;
   bypassDeviceListCache?: boolean;
   devices?: BootedDevice[];
   timeoutMs?: number;
@@ -262,7 +321,11 @@ export interface AndroidEmulator {
    * @param options - Optional deadline/abort for the `-list-avds` child (#7008)
    * @returns Promise with array of AVD names
    */
-  listAvds(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<DeviceInfo[]>;
+  listAvds(options?: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    coalesceInventoryEnrichment?: boolean;
+  }): Promise<DeviceInfo[]>;
 
   /**
    * Check if a specific AVD is running
@@ -1651,7 +1714,48 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * List all available AVDs
    * @returns Promise with array of AVD names
    */
-  async listAvds(options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<DeviceInfo[]> {
+  async listAvds(options?: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    coalesceInventoryEnrichment?: boolean;
+  }): Promise<DeviceInfo[]> {
+    if (!options?.coalesceInventoryEnrichment) {
+      return this.listAvdsUncached(options);
+    }
+    const state = inventoryEnrichmentState(this.timer);
+    const signal = options.signal ?? getAbortSignal();
+    signal?.throwIfAborted();
+    const cached = state.avds.get("avds");
+    if (cached) {
+      return cached;
+    }
+    const generation = state.generation;
+    const shared = state.avdFlight.run(
+      "avds",
+      () =>
+        runWithAbortSignal(undefined, async () => {
+          const result = await this.listAvdsUncached({
+            timeoutMs: ANDROID_INVENTORY_AVD_LIST_CAP_MS,
+          });
+          if (generation === state.generation) {
+            state.avds.set("avds", result);
+          }
+          return result;
+        }),
+      signal,
+    );
+    return raceWithDeadline(shared, {
+      timer: this.timer,
+      timeoutMs: options.timeoutMs,
+      signal,
+      label: "Android AVD-list caller wait",
+    });
+  }
+
+  private async listAvdsUncached(options?: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  }): Promise<DeviceInfo[]> {
     try {
       const result = await this.executeCommand(["-list-avds"], options?.timeoutMs, options?.signal);
       const devices = result.stdout
@@ -1893,10 +1997,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         (await adb.getBootedAndroidDevices({
           bypassCache: options.bypassDeviceListCache,
           throwOnMissingAdb: true,
-          timeoutMs: options.deviceListTimeoutMs ?? options.timeoutMs,
+          timeoutMs: this.deviceListScanTimeout(options),
           signal,
         }));
       perf.endOperation("adbDeviceScan");
+      this.invalidateInventorySerials(devices, options);
       const runningDevices: BootedDevice[] = [];
 
       // Add local emulator devices
@@ -1928,10 +2033,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           const avdName =
             options.skipNameEnrichment || nameTimeoutMs <= 0
               ? { name: "", diagnostic: undefined }
-              : await this.getRunningAVDName(device, nameTimeoutMs, signal);
+              : await this.inventoryRunningAvdName(device, {
+                  options,
+                  timeoutMs: nameTimeoutMs,
+                  signal,
+                });
           const modelRemainingMs = Math.min(deadlineMs - this.timer.now(), remainingScanMs());
           const model =
-            modelRemainingMs > 0
+            modelRemainingMs > 0 && !(options.readinessOnly && options.coalesceInventoryEnrichment)
               ? await this.modelForBootedEmulator(
                   device,
                   avdName,
@@ -1969,7 +2078,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       }
 
       for (const device of physicalDevices) {
-        const physicalTimeoutMs = remainingScanMs();
+        const physicalTimeoutMs = this.physicalScanTimeout(options, remainingScanMs());
         if (physicalTimeoutMs <= 0) {
           runningDevices.push(this.discoveredPhysicalDevice(device, undefined, undefined));
           continue;
@@ -1993,8 +2102,12 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       if (!options.readinessOnly) {
         await Promise.all(
           runningDevices.map(async (device) => {
-            const displays = await readAndroidDeviceDisplays(
-              this.adbFactory.create(device),
+            const snapshotDevice = devices.find(
+              (snapshot) => snapshot.deviceId === device.deviceId,
+            );
+            const displays = await this.inventoryDisplays(
+              { ...device, observedAt: snapshotDevice?.observedAt },
+              options,
               signal,
             );
             if (displays) {
@@ -2007,6 +2120,130 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
       return { devices: runningDevices, diagnostics };
     }
+  }
+
+  private physicalScanTimeout(options: BootedDeviceScanOptions, timeoutMs: number): number {
+    // Inventory overlays consume only emulator names; handset metadata cannot contribute.
+    return options.readinessOnly && options.coalesceInventoryEnrichment ? 0 : timeoutMs;
+  }
+
+  private deviceListScanTimeout(options: BootedDeviceScanOptions): number | undefined {
+    const explicit = options.deviceListTimeoutMs ?? options.timeoutMs;
+    if (
+      explicit !== undefined ||
+      options.bypassDeviceListCache ||
+      options.targetDeviceId ||
+      options.skipNameEnrichment
+    ) {
+      return explicit;
+    }
+    return options.coalesceInventoryEnrichment
+      ? ANDROID_INVENTORY_DEVICE_LIST_BUDGET_MS
+      : undefined;
+  }
+
+  private inventoryCacheKey(
+    device: BootedDevice,
+    options: BootedDeviceScanOptions,
+  ): string | undefined {
+    if (
+      !options.coalesceInventoryEnrichment ||
+      options.bypassDeviceListCache ||
+      options.targetDeviceId ||
+      options.skipNameEnrichment ||
+      device.observedAt === undefined
+    ) {
+      return undefined;
+    }
+    return `${device.deviceId}\0${device.observedAt}`;
+  }
+
+  private invalidateInventorySerials(
+    devices: BootedDevice[],
+    options: BootedDeviceScanOptions,
+  ): void {
+    if (!options.bypassDeviceListCache) {
+      return;
+    }
+    const state = inventoryEnrichmentState(this.timer);
+    state.generation++;
+    const prefixes = devices.map((device) => `${device.deviceId}\0`);
+    for (const key of state.names.keys()) {
+      if (prefixes.some((prefix) => key.startsWith(prefix))) {
+        state.names.delete(key);
+      }
+    }
+    for (const key of state.displays.keys()) {
+      if (prefixes.some((prefix) => key.startsWith(prefix))) {
+        state.displays.delete(key);
+      }
+    }
+  }
+
+  private async inventoryRunningAvdName(
+    device: BootedDevice,
+    {
+      options,
+      timeoutMs,
+      signal,
+    }: { options: BootedDeviceScanOptions; timeoutMs: number; signal?: AbortSignal },
+  ): Promise<InventoryNameResult> {
+    const key = this.inventoryCacheKey(device, options);
+    if (!key) {
+      return this.getRunningAVDName(device, timeoutMs, signal);
+    }
+    const state = inventoryEnrichmentState(this.timer);
+    const cached = state.names.get(key);
+    if (cached) {
+      return cached;
+    }
+    const generation = state.generation;
+    return state.nameFlight.run(
+      key,
+      () =>
+        runWithAbortSignal(undefined, async () => {
+          const result = await this.getRunningAVDName(device, READINESS_NAME_TIMEOUT_MS);
+          if (result.name && generation === state.generation) {
+            state.names.set(key, result);
+          }
+          return result;
+        }),
+      signal ?? getAbortSignal(),
+    );
+  }
+
+  private async inventoryDisplays(
+    device: BootedDevice,
+    options: BootedDeviceScanOptions,
+    signal?: AbortSignal,
+  ) {
+    const key = this.inventoryCacheKey(device, options);
+    if (!key) {
+      return readAndroidDeviceDisplays(this.adbFactory.create(device), signal);
+    }
+    const state = inventoryEnrichmentState(this.timer);
+    const cached = state.displays.get(key);
+    if (cached) {
+      return cached.displays;
+    }
+    const generation = state.generation;
+    const result = await state.displayFlight.run(
+      key,
+      () =>
+        runWithAbortSignal(undefined, async () => {
+          const result = await readAndroidDeviceDisplaysChecked(this.adbFactory.create(device));
+          if (
+            generation === state.generation &&
+            !result.degraded &&
+            result.outcome.kind !== "unreadable"
+          ) {
+            state.displays.set(key, result);
+          }
+          return result;
+        }),
+      signal ?? getAbortSignal(),
+    );
+    return result.displays;
   }
 
   /**

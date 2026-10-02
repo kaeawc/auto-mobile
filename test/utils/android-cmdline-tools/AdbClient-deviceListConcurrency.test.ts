@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { getAbortSignal, runWithAbortSignal } from "../../../src/utils/AbortContext";
 import type { ExecResult } from "../../../src/models";
 import {
   AdbClient,
@@ -69,6 +70,37 @@ describe("AdbClient concurrent device-list snapshots", () => {
       { deviceId: "emulator-5556" },
     ]);
     expect(adbDeviceListCalls).toBe(2);
+  });
+
+  test("ambient leader abort cancels only its wait, not the shared adb subprocess", async () => {
+    const timer = new FakeTimer();
+    let calls = 0;
+    const client = new AdbClient(
+      null,
+      async () => {
+        calls++;
+        const childSignal = getAbortSignal();
+        await timer.sleep(25);
+        childSignal?.throwIfAborted();
+        return resultFor("emulator-5554");
+      },
+      null,
+      undefined,
+      timer,
+    );
+    const leader = new AbortController();
+    const first = runWithAbortSignal(leader.signal, () => client.getBootedAndroidDevices());
+    const second = client.getBootedAndroidDevices();
+    const firstOutcome = first.then(
+      () => "resolved",
+      () => "cancelled",
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    leader.abort(new Error("Daemon MCP client disconnected"));
+    await timer.advanceTimeAsync(25);
+    await expect(second).resolves.toMatchObject([{ deviceId: "emulator-5554" }]);
+    expect(await firstOutcome).toBe("cancelled");
+    expect(calls).toBe(1);
   });
 
   test("bypass reads execute separately from an in-flight coalesced read", async () => {
@@ -154,5 +186,41 @@ describe("AdbClient concurrent device-list snapshots", () => {
       { deviceId: "emulator-5556" },
     ]);
     expect(adbDeviceListCalls).toBe(2);
+  });
+  test("mixed patience shares a 10s read, times out only the 2s waiter and caches 5s success", async () => {
+    const timer = new FakeTimer();
+    let calls = 0;
+    const client = new AdbClient(
+      null,
+      async () => {
+        calls++;
+        await timer.sleep(5_000);
+        return resultFor("emulator-5554");
+      },
+      null,
+      undefined,
+      timer,
+    );
+    const inventory = client.getBootedAndroidDevices({ timeoutMs: 2_000 }).then(
+      () => "resolved",
+      (error: unknown) => error,
+    );
+    const pool = client.getBootedAndroidDevices({ timeoutMs: 10_000 });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const initialCalls = calls;
+    await timer.advanceTimeAsync(2_000);
+    let inventorySettled = false;
+    void inventory.then(() => {
+      inventorySettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const settledAtBudget = inventorySettled;
+    await timer.advanceTimeAsync(3_000);
+    expect(await pool).toMatchObject([{ deviceId: "emulator-5554" }]);
+    await inventory;
+    expect(initialCalls).toBe(1);
+    expect(settledAtBudget).toBe(true);
+    expect(await client.getBootedAndroidDevices({ timeoutMs: 2_000 })).toHaveLength(1);
+    expect(calls).toBe(1);
   });
 });

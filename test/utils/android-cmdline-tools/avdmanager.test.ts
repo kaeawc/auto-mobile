@@ -3,7 +3,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
 import { AvdManagerClient } from "../../../src/utils/android-cmdline-tools/AvdManagerClient";
+import { createDeviceImageResourcesHandler } from "../../../src/server/deviceImageResources";
+import { FakeAvdManager } from "../../fakes/FakeAvdManager";
+import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
+
+async function pendingCatalog() {
+  const timer = new FakeTimer();
+  const avds = new FakeAvdManager();
+  avds.setListDevicesHangs(true);
+  const handler = createDeviceImageResourcesHandler({
+    timer,
+    avdManager: avds,
+    deviceManager: new FakeDeviceUtils(),
+  });
+  const read = handler.getDeviceImagesForPlatforms(["android"]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  return { read, signal: avds.getListDevicesCalls()[0].signal };
+}
 
 // Normalize paths for cross-platform comparison:
 // 1. Convert backslashes to forward slashes
@@ -469,9 +486,12 @@ Available Packages:
         force: true,
       };
 
+      const catalog = await pendingCatalog();
       const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
 
       expect(result.success).toBe(true);
+      expect(catalog.signal?.aborted).toBe(true);
+      expect((await catalog.read).catalogObservations.android?.error?.code).toBe("superseded");
       expect(result.avdName).toBe("test_avd");
     });
 
@@ -608,12 +628,15 @@ Available Packages:
         return child;
       };
 
+      const catalog = await pendingCatalog();
       const result = await resolveWithFakeTimer(
         fakeTimer,
         avdmanager.deleteAvd("test_avd", mockDeps),
       );
 
       expect(result.success).toBe(true);
+      expect(catalog.signal?.aborted).toBe(true);
+      expect((await catalog.read).catalogObservations.android?.error?.code).toBe("superseded");
       expect(result.message).toContain("deleted successfully");
     });
 
@@ -878,12 +901,15 @@ id: 52 or "pixel_9"
       };
 
       const packageName = "system-images;android-33;google_apis;arm64-v8a";
+      const catalog = await pendingCatalog();
       const result = await resolveWithFakeTimer(
         fakeTimer,
         avdmanager.installSystemImage(packageName, true, mockDeps),
       );
 
       expect(result.success).toBe(true);
+      expect(catalog.signal?.aborted).toBe(true);
+      expect((await catalog.read).catalogObservations.android?.error?.code).toBe("superseded");
       expect(result.message).toContain("installed successfully");
     });
 

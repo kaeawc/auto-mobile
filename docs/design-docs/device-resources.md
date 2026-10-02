@@ -14,6 +14,44 @@ virtual devices started outside AutoMobile keep unavailable image-only facts as 
 `null`. `runtime.orientation` comes from a bounded live orientation probe (Android) and remains
 `null` where no safe read signal exists (currently iOS).
 
+Read-only Android inventory shares successful AVD-name and display probes, plus configured
+AVD listings, for `ANDROID_INVENTORY_ENRICHMENT_TTL_MS` (2,500 ms). Device enrichment keys
+include the serial and the ADB list observation; a fresh list or bypass cannot reuse a prior
+emulator incarnation. Unknown names and failed display reads are not cached. Readiness and
+destructive identity checks retain fresh probes. The running-state overlay reads names only.
+
+Inventory reads have separate response budgets: `BOOTED_DEVICES_RESOURCE_BUDGET_MS`
+(8,000 ms), `ANDROID_PROVISIONING_CATALOG_BUDGET_MS` (9,000 ms), and
+`CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS` (2,000 ms) for `listDevices` image enrichment.
+Android inventory device-list reads use `ANDROID_INVENTORY_DEVICE_LIST_BUDGET_MS`
+(2,000 ms); existing per-device name/model and display probes remain bounded at 2,000 ms.
+The five-emulator mixed-capture fixture verifies a sequential `listDevices` → booted resource
+→ images resource bound of 25,000 ms, with every individual response before a 15,000 ms
+client deadline. The review-fix run completes in 23,200 FakeTimer ms (6,200 ms for
+`listDevices`, 8,000 ms for the booted resource, 9,000 ms for images). This is a
+deterministic workload bound, not a host performance guarantee.
+
+On budget expiry, known devices/images remain in the response. The booted resource adds
+`enrichment: { complete: false, pending: string[], retryable: true, retryAfterMs: 1000, reason }`,
+omits unfinished enrichment, aborts its private pending probes, and does not cache this
+incomplete result. `listDevices` adds
+`enrichment: { complete: false, missing: ["configuredImages"], retryable: true, retryAfterMs: 1000 }`
+when its configured-image fallback times out or fails. Images report `catalogComplete: false`
+and `catalogObservations.android.error: { code: "timeout", message, retryable: true,
+retryAfterMs: 1000, missing: ["catalog"] }`; `missing` also includes `"configuredInventory"`
+if that stage has not finished, and its configured-inventory observation carries equivalent
+retry hints. `retryAfterMs` suggests how long to wait before retrying, not when completion is
+guaranteed.
+
+A single images background fetch continues after the read deadline, bounded by
+`ANDROID_INVENTORY_BACKGROUND_CAP_MS` (30,000 ms). Its completed stage is retained for
+`ANDROID_INVENTORY_STAGE_TTL_MS` (2,500 ms), so a retry shortly after completion normally
+returns the full catalog without starting new children. Provenance callers wait at most
+2,000 ms while one shared fetch continues for at most `ANDROID_AVD_PROVENANCE_FETCH_CAP_MS`
+(30,000 ms); success is retained until AVD lifecycle invalidation and failure cools down for
+`ANDROID_AVD_PROVENANCE_FAILURE_COOLDOWN_MS` (5,000 ms). Invalidation and daemon shutdown
+abort these shared children. A caller cancellation abandons only that caller's wait.
+
 `runtime.serviceStatus`, when observed, carries the complete service diagnostic: installation,
 enablement, running and compatibility flags; nullable installed and expected checksums; structured
 runner `version`; and nullable `supportedCommandsComplete` / `supportedFeaturesComplete` flags.
@@ -322,3 +360,22 @@ budgets) to recover from abandoned restore flows. Custom restores longer than
 that bound may outlive the fence. A start already reserved before preparation
 can still finish after the active-recording inventory was taken; the fence
 rejects new reservations and does not drain starts already in flight.
+
+Persistent Android provenance failure (including a missing cmdline-tools installation) returns
+`enrichment: { complete: false, missing: ["provenance"], retryable: false, reason }` from
+`listDevices`. The booted list remains usable without provenance; clients should address the
+reported cause instead of polling. Successful provenance omits `enrichment`.
+
+Hot presence, disconnect and lifecycle-notification resets clear the 2,500 ms resource,
+stage and enrichment caches without aborting shared catalog/provenance fetches. Successful
+AVD create/delete/provision, system-image install and daemon shutdown use full invalidation:
+obsolete catalog reads report `code: "superseded"` with retry hints, rather than a timeout.
+Only an actual 30,000 ms hard-cap expiry reports that background timeout; genuine catalog
+failures retain `code: "failed"` with the underlying cause.
+
+All ordinary ADB device-list readers share a 10,000 ms subprocess bound. Inventory callers
+wait at most 2,000 ms and return incomplete discovery with `code: "timeout"`, `retryable: true`
+and `retryAfterMs: 1000`; their timeout leaves the shared read running and able to publish
+into the 5,000 ms cache. Bypass readers run a fresh subprocess. Coalesced AVD listings use a
+30,000 ms shared cap and independent caller deadlines/signals, so a 2,000 ms waiter cannot
+cancel a longer reader's listing.

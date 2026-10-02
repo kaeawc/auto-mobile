@@ -55,6 +55,7 @@ import {
 } from "./bootedDeviceResources";
 import {
   DEVICE_IMAGE_RESOURCE_URIS,
+  ANDROID_INVENTORY_RETRY_AFTER_MS,
   notifyDeviceImageResourcesUpdated,
 } from "./deviceImageResources";
 import {
@@ -247,6 +248,15 @@ const listDevicesOutputSchema = z.object({
   devices: z.array(listDevicesEntrySchema),
   count: z.number(),
   discovery: z.unknown(),
+  enrichment: z
+    .object({
+      complete: z.literal(false),
+      missing: z.array(z.enum(["configuredImages", "provenance"])),
+      retryable: z.boolean(),
+      retryAfterMs: z.number().optional(),
+      reason: z.string().optional(),
+    })
+    .optional(),
   note: z.unknown(),
 });
 
@@ -1120,27 +1130,45 @@ export async function configuredImagesForBootedDevices(
   avdManager: Pick<AvdManager, "listDeviceImages">,
   booted: readonly BootedDevice[],
   timer: Timer,
-): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
+): Promise<{
+  images: ReadonlyMap<string, StableConfiguredDeviceImage>;
+  enrichment?: {
+    complete: false;
+    missing: Array<"configuredImages" | "provenance">;
+    retryable: boolean;
+    retryAfterMs?: number;
+    reason?: string;
+  };
+}> {
   const images = new Map<string, StableConfiguredDeviceImage>();
+  let incomplete = false;
   const platforms = [...new Set(booted.map((device) => device.platform))];
   await Promise.all(
     platforms.map(async (platform) => {
       const controller = new AbortController();
-      let timeoutHandle: NodeJS.Timeout | undefined;
       try {
-        timeoutHandle = timer.setTimeout(() => {
-          controller.abort(
-            new Error(
-              `Configured ${platform} image inventory timed out after ${CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS}ms`,
-            ),
-          );
-        }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
-        const [discovery, androidProvenance] = await Promise.all([
-          deviceManager.getDeviceImagesDetailed(platform, { signal: controller.signal }),
-          platform === "android"
-            ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
-            : Promise.resolve(new Map()),
-        ]);
+        const [discovery, androidProvenance] = await raceWithDeadline(
+          Promise.all([
+            deviceManager.getDeviceImagesDetailed(platform, {
+              signal: controller.signal,
+              coalesceInventoryEnrichment: true,
+            }),
+            platform === "android"
+              ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
+              : Promise.resolve(new Map()),
+          ]),
+          {
+            timer,
+            signal: controller.signal,
+            label: "Configured image inventory",
+            timeoutMs: CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
+            onTimeout: () =>
+              controller.abort(new Error("Configured image inventory caller budget elapsed")),
+          },
+        );
+        if (!discovery.succeededPlatforms.has(platform)) {
+          incomplete = true;
+        }
         for (const [key, image] of configuredImagesByStableId(platform, discovery)) {
           const provenance = androidProvenance.get(image.name);
           images.set(
@@ -1158,18 +1186,40 @@ export async function configuredImagesForBootedDevices(
           );
         }
       } catch (error) {
+        incomplete = true;
         logger.warn(
           `listDevices configured ${platform} image inventory failed: ${errorMessage(error)}`,
           error,
         );
-      } finally {
-        if (timeoutHandle) {
-          timer.clearTimeout(timeoutHandle);
-        }
       }
     }),
   );
-  return images;
+  const provenance = platforms.includes("android")
+    ? AndroidAvdProvenanceCache.getInstance().getStatus()
+    : { state: "cached" as const };
+  if (provenance.state === "failed") {
+    return {
+      images,
+      enrichment: {
+        complete: false,
+        missing: ["provenance"],
+        retryable: false,
+        reason: `avdmanager unavailable: ${provenance.cause}`,
+      },
+    };
+  }
+  if (incomplete || provenance.state !== "cached") {
+    return {
+      images,
+      enrichment: {
+        complete: false,
+        missing: ["configuredImages"],
+        retryable: true,
+        retryAfterMs: ANDROID_INVENTORY_RETRY_AFTER_MS,
+      },
+    };
+  }
+  return { images };
 }
 
 export interface ListDeviceImagesArgs {
@@ -4645,7 +4695,7 @@ export function registerDeviceTools() {
 
   ToolRegistry.register(
     "listDevices",
-    "List booted devices; resource pointers for images and detail in the note",
+    "List booted devices; pending configured-image enrichment includes retry hints and failed provenance includes a non-retryable reason; resource pointers for images and detail in the note",
     listDevicesSchema,
     listDevicesHandler,
     { defaultEnabled: true, outputSchema: listDevicesOutputSchema },

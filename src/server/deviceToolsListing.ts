@@ -78,6 +78,7 @@ export function createListingHandlers() {
       const deviceUtils = deps.deviceManagerFactory();
       const discovery = await deviceUtils.getDeviceImagesDetailed(args.platform, {
         bypassIosDeviceListCache: args.platform === "ios",
+        ...(args.platform === "android" ? { coalesceInventoryEnrichment: true } : {}),
       });
       const projection = projectConfiguredDeviceInventory(args.platform, discovery);
       const configuredInventory = createConfiguredInventoryContract([args.platform], {
@@ -134,10 +135,10 @@ export function createListingHandlers() {
     let sourceErrors: BootedDeviceDiscovery["sourceErrors"];
     let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
-      const discovery = await deviceManager.getBootedDevicesDetailed(
-        platform,
-        detailedDiscoveryOptions(presentationOrder),
-      );
+      const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+        ...detailedDiscoveryOptions(presentationOrder),
+        coalesceInventoryEnrichment: true,
+      });
       // FUNNEL 1: listDevices publishes each entry's pool-derived label/epoch
       // through the same join the booted-devices resource uses (#6863 review).
       await reconcileDiscoveryObservation(discovery.devices, "listDevices");
@@ -169,13 +170,13 @@ export function createListingHandlers() {
       deps.displayInventory,
     );
     const matchingBooted = selectBootedDevices(resolvedBooted, args, discovery.complete);
-    const configuredImages = await configuredImagesForBootedDevices(
+    const configured = await configuredImagesForBootedDevices(
       deviceManager,
       deps.avdManagerFactory(),
       matchingBooted,
       deps.timer,
     );
-    const devices = listDevicePayloads(matchingBooted, initializedDevicePool(), configuredImages);
+    const devices = listDevicePayloads(matchingBooted, initializedDevicePool(), configured.images);
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createStructuredToolResponse({
@@ -183,6 +184,7 @@ export function createListingHandlers() {
       devices,
       count: devices.length,
       discovery,
+      ...(configured.enrichment ? { enrichment: configured.enrichment } : {}),
       note: availableDeviceResourceNote(),
     });
   };

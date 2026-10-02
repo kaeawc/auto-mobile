@@ -1,5 +1,6 @@
 import type { DeviceHealthMarker } from "../daemon/deviceHealthMarkers";
 import { errorMessage } from "../utils/describeUnknownError";
+import { combineWithAmbientAbort, getAbortSignal, runWithAbortSignal } from "../utils/AbortContext";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import {
@@ -83,6 +84,8 @@ export const BOOTED_DEVICE_RESOURCE_URIS = {
 // enumerates booted devices and runs ONLY the keyguard probe.
 export const DEVICE_LOCK_STATES_RESOURCE_URI = "automobile:devices/lockStates";
 
+export const BOOTED_DEVICES_RESOURCE_BUDGET_MS = 8_000;
+export const BOOTED_DEVICES_RETRY_AFTER_MS = 1_000;
 const BOOTED_DEVICES_RESOURCE_CACHE_TTL_MS = 2_500; // Stay below adb's ~5s device-list cache.
 let bootedDevicesResourceCache: TTLCache<string, BootedDevicesResourceContent> | null = null;
 let bootedDevicesResourceSingleFlight = new SingleFlight<string, BootedDevicesResourceContent>();
@@ -229,6 +232,13 @@ function probeTarget(device: BootedDeviceInfo): BootedDeviceProbeTarget {
 
 // Resource content schema
 export interface BootedDevicesResourceContent {
+  enrichment?: {
+    complete: false;
+    pending: string[];
+    retryable: true;
+    retryAfterMs: number;
+    reason: string;
+  };
   totalCount: number;
   androidCount: number;
   iosCount: number;
@@ -362,12 +372,14 @@ function activeOrientationReaderFactory(): OrientationReaderFactory | null {
  */
 async function probeDeviceLock(
   device: BootedDevice,
-  lockProbe: DeviceLockProbe,
+  options: { lockProbe: DeviceLockProbe; timer?: Timer },
 ): Promise<boolean | undefined> {
+  const { lockProbe, timer = defaultTimer } = options;
   const deadline = new Error("Lock-state probe timed out");
   try {
     return await raceWithDeadline(lockProbe(device), {
-      timer: defaultTimer,
+      timer,
+      signal: getAbortSignal(),
       timeoutMs: LOCK_STATE_TIMEOUT_MS,
       label: "Lock-state probe",
       timeoutError: () => deadline,
@@ -442,7 +454,7 @@ async function computeDeviceLockStates(): Promise<DeviceLockStatesResourceConten
   const lockProbe = activeLockProbe();
   if (lockProbe) {
     const results = await Promise.allSettled(
-      devices.map((device) => probeDeviceLock(device, lockProbe)),
+      devices.map((device) => probeDeviceLock(device, { lockProbe })),
     );
     for (let i = 0; i < devices.length; i++) {
       const result = results[i];
@@ -549,21 +561,26 @@ export async function configuredImagesForBootedPlatform(
     : undefined,
 ): Promise<ReadonlyMap<string, StableConfiguredDeviceImage>> {
   const controller = new AbortController();
-  let timeoutHandle: NodeJS.Timeout | undefined;
   try {
-    timeoutHandle = timer.setTimeout(() => {
-      controller.abort(
-        new Error(
-          `Configured ${platform} image inventory timed out after ${CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS}ms`,
-        ),
-      );
-    }, CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS);
-    const [discovery, androidProvenance] = await Promise.all([
-      deviceManager.getDeviceImagesDetailed(platform, { signal: controller.signal }),
-      avdManager
-        ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
-        : Promise.resolve(new Map()),
-    ]);
+    const [discovery, androidProvenance] = await raceWithDeadline(
+      Promise.all([
+        deviceManager.getDeviceImagesDetailed(platform, {
+          signal: combineWithAmbientAbort(controller.signal),
+          coalesceInventoryEnrichment: true,
+        }),
+        avdManager
+          ? AndroidAvdProvenanceCache.getInstance().getByName(avdManager, timer)
+          : Promise.resolve(new Map()),
+      ]),
+      {
+        timer,
+        timeoutMs: CONFIGURED_IMAGE_FALLBACK_TIMEOUT_MS,
+        signal: combineWithAmbientAbort(controller.signal),
+        label: "Configured image inventory",
+        onTimeout: () =>
+          controller.abort(new Error("Configured image inventory caller budget elapsed")),
+      },
+    );
     return new Map(
       [...configuredImagesByStableId(platform, discovery)].map(([key, image]) => {
         const provenance = androidProvenance.get(image.name);
@@ -588,10 +605,6 @@ export async function configuredImagesForBootedPlatform(
       error,
     );
     return new Map();
-  } finally {
-    if (timeoutHandle) {
-      timer.clearTimeout(timeoutHandle);
-    }
   }
 }
 
@@ -761,11 +774,20 @@ async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
   sessionInfoByDeviceId: Map<string, Session> | null,
-  resolveDeviceSessionUuid: (deviceId: string) => string | null,
+  options: {
+    resolveDeviceSessionUuid: (deviceId: string) => string | null;
+    timer: Timer;
+    onDiscovery: (devices: BootedDeviceInfo[], discovery: BootedDeviceDiscovery) => void;
+  },
 ): Promise<PlatformDiscoveryResult> {
+  const { resolveDeviceSessionUuid, timer } = options;
   try {
     const deviceManager = PlatformDeviceManagerFactory.getInstance();
-    const discovery = await deviceManager.getBootedDevicesDetailed(platform);
+    const discovery = await deviceManager.getBootedDevicesDetailed(platform, {
+      coalesceInventoryEnrichment: true,
+      signal: getAbortSignal(),
+    });
+    getAbortSignal()?.throwIfAborted();
     // FUNNEL 1: fold this observation into the pool BEFORE any of it is joined to
     // pooled identity below. This read can be the first discovery to see the
     // `Unknown (<serial>)` placeholder, and withholding only its own output would
@@ -773,7 +795,29 @@ async function discoverBootedDevicesForPlatform(
     // resolver -- still trusting the stale label
     // ([#6863](https://github.com/kaeawc/auto-mobile/pull/6863) review).
     await devicePool?.reconcileDiscoveryObservation(discovery.devices, "booted-devices-resource");
-    const configuredImages = await configuredImagesForBootedPlatform(platform);
+    options.onDiscovery(
+      discovery.devices.map((device) =>
+        withIdentityQuarantineMarker(
+          toBootedDeviceInfo(
+            device,
+            resolvePoolDeviceContext(
+              devicePool,
+              device,
+              sessionInfoByDeviceId,
+              resolveDeviceSessionUuid,
+            ),
+          ),
+          devicePool,
+        ),
+      ),
+      discovery,
+    );
+    const configuredImages = await configuredImagesForBootedPlatform(
+      platform,
+      deviceManager,
+      timer,
+    );
+    getAbortSignal()?.throwIfAborted();
     const complete = discovery.succeededSources
       ? sourcesForPlatform(platform).every((source) => discovery.succeededSources!.has(source))
       : discovery.succeededPlatforms.has(platform);
@@ -948,7 +992,7 @@ async function probeBootCompletionWithBudget(
               remainingMs,
               undefined,
               true,
-              controller.signal,
+              combineWithAmbientAbort(controller.signal),
             )
             .then((result) => result.stdout.trim()),
           {
@@ -1174,7 +1218,11 @@ export function readinessFromServiceStatus(
   return { state: serviceStatus.running ? "ready" : "unknown" };
 }
 
-async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void> {
+async function enrichDeviceLockStates(
+  devices: BootedDeviceInfo[],
+  options: { timer?: Timer } = {},
+): Promise<void> {
+  const timer = options.timer ?? defaultTimer;
   const lockProbe = activeLockProbe();
   if (!lockProbe) {
     return;
@@ -1182,7 +1230,9 @@ async function enrichDeviceLockStates(devices: BootedDeviceInfo[]): Promise<void
 
   const lockResults = await Promise.allSettled(
     devices.map(async (device) =>
-      isProbeableDevice(device) ? await probeDeviceLock(probeTarget(device), lockProbe) : undefined,
+      isProbeableDevice(device)
+        ? await probeDeviceLock(probeTarget(device), { lockProbe, timer })
+        : undefined,
     ),
   );
 
@@ -1212,16 +1262,19 @@ export async function probeDeviceOrientation(
   try {
     return await withRemainingBudget(deadlineMs, timer, undefined, async (_signal, remainingMs) => {
       const controller = new AbortController();
-      return await raceWithDeadline(reader.readOrientation(device, controller.signal), {
-        timer,
-        timeoutMs: remainingMs,
-        label: "Orientation probe",
-        timeoutError: () => timeout,
-        onTimeout: () => {
-          controller.abort(timeout);
-          logger.warn(timeout.message);
+      return await raceWithDeadline(
+        reader.readOrientation(device, combineWithAmbientAbort(controller.signal)),
+        {
+          timer,
+          timeoutMs: remainingMs,
+          label: "Orientation probe",
+          timeoutError: () => timeout,
+          onTimeout: () => {
+            controller.abort(timeout);
+            logger.warn(timeout.message);
+          },
         },
-      });
+      );
     });
   } catch (error) {
     if (error === timeout) {
@@ -1277,27 +1330,83 @@ async function computeBootedDevicesForPlatforms(
   const platformObservations: Partial<Record<Platform, PlatformObservation>> = {};
   const sourceObservations: Partial<Record<DiscoverySource, PlatformObservation>> = {};
 
-  for (const platform of platforms) {
-    const discovery = await discoverBootedDevicesForPlatform(
-      platform,
-      daemonContext.devicePool,
-      daemonContext.sessionInfoByDeviceId,
-      daemonContext.resolveDeviceSessionUuid,
-    );
-    devices.push(...discovery.devices);
-    platformObservations[platform] = discovery.observation;
-    Object.assign(sourceObservations, discovery.sourceObservations);
-    for (const discoveredPlatform of discovery.succeededPlatforms) {
-      succeededPlatforms.add(discoveredPlatform);
+  const controller = new AbortController();
+  const pending = new Set<string>(["discovery", "configuredImages"]);
+  let enrichment: BootedDevicesResourceContent["enrichment"];
+  const work = runWithAbortSignal(controller.signal, async () => {
+    for (const platform of platforms) {
+      const discovery = await discoverBootedDevicesForPlatform(
+        platform,
+        daemonContext.devicePool,
+        daemonContext.sessionInfoByDeviceId,
+        {
+          resolveDeviceSessionUuid: daemonContext.resolveDeviceSessionUuid,
+          timer,
+          onDiscovery: (known, snapshot) => {
+            devices.push(...known);
+            pending.delete("discovery");
+            const complete = sourcesForPlatform(platform).every(
+              (source) =>
+                snapshot.succeededSources?.has(source) ?? snapshot.succeededPlatforms.has(platform),
+            );
+            platformObservations[platform] = { observationComplete: complete };
+            if (complete) {
+              succeededPlatforms.add(platform);
+            }
+            for (const source of sourcesForPlatform(platform)) {
+              sourceObservations[source] = {
+                observationComplete: snapshot.succeededSources?.has(source) ?? complete,
+              };
+            }
+          },
+        },
+      );
+      controller.signal.throwIfAborted();
+      const otherPlatforms = devices.filter((device) => device.platform !== platform);
+      devices.splice(0, devices.length, ...otherPlatforms, ...discovery.devices);
+      platformObservations[platform] = discovery.observation;
+      Object.assign(sourceObservations, discovery.sourceObservations);
+      for (const discoveredPlatform of discovery.succeededPlatforms) {
+        succeededPlatforms.add(discoveredPlatform);
+      }
     }
+    pending.clear();
+    const probes = [
+      ["bootCompletion", () => enrichDeviceBootCompletion(devices, timer)],
+      ["serviceStatus", () => enrichDeviceServiceStatuses(devices, timer)],
+      ["lock", () => enrichDeviceLockStates(devices, { timer })],
+      ["orientation", () => enrichDeviceOrientations(devices, timer)],
+    ] as const;
+    for (const [name] of probes) {
+      pending.add(name);
+    }
+    await Promise.all(
+      probes.map(async ([name, probe]) => {
+        await probe();
+        pending.delete(name);
+      }),
+    );
+  });
+  try {
+    await raceWithDeadline(work, {
+      timer,
+      timeoutMs: BOOTED_DEVICES_RESOURCE_BUDGET_MS,
+      label: "Booted inventory enrichment",
+      onTimeout: () => controller.abort(new Error("Booted inventory enrichment budget elapsed")),
+    });
+  } catch (error) {
+    logger.warn(
+      `[BootedDeviceResources] Returning bounded incomplete enrichment: ${errorMessage(error)}`,
+      error,
+    );
+    enrichment = {
+      complete: false,
+      pending: [...pending],
+      retryable: true,
+      retryAfterMs: BOOTED_DEVICES_RETRY_AFTER_MS,
+      reason: errorMessage(error),
+    };
   }
-
-  await Promise.all([
-    enrichDeviceBootCompletion(devices, timer),
-    enrichDeviceServiceStatuses(devices),
-    enrichDeviceLockStates(devices),
-    enrichDeviceOrientations(devices),
-  ]);
 
   const virtualCount = devices.filter((device) => device.isVirtual).length;
   const physicalCount = devices.length - virtualCount;
@@ -1319,7 +1428,9 @@ async function computeBootedDevicesForPlatforms(
     platformObservations,
     sourceObservations,
     poolStatus,
-    devices,
+    ...(enrichment ? { enrichment } : {}),
+    // Pending probes replace entries on their private working array; freeze the returned snapshot.
+    devices: [...devices],
   };
 }
 
@@ -1334,15 +1445,20 @@ export async function getBootedDevicesForPlatforms(
     return cached;
   }
 
-  return await bootedDevicesResourceSingleFlight.run(cacheKey, async () => {
-    const generation = ++bootedDevicesResourceGeneration;
-    const result = await computeBootedDevicesForPlatforms(canonicalPlatforms, timer);
-    if (generation >= bootedDevicesResourcePublishedGeneration) {
-      bootedDevicesResourcePublishedGeneration = generation;
-      getBootedDevicesResourceCache(timer).set(cacheKey, result);
-    }
-    return result;
-  });
+  return await bootedDevicesResourceSingleFlight.run(
+    cacheKey,
+    () =>
+      runWithAbortSignal(undefined, async () => {
+        const generation = ++bootedDevicesResourceGeneration;
+        const result = await computeBootedDevicesForPlatforms(canonicalPlatforms, timer);
+        if (generation >= bootedDevicesResourcePublishedGeneration && !result.enrichment) {
+          bootedDevicesResourcePublishedGeneration = generation;
+          getBootedDevicesResourceCache(timer).set(cacheKey, result);
+        }
+        return result;
+      }),
+    getAbortSignal(),
+  );
 }
 
 export interface AndroidServiceStatusLookup {

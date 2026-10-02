@@ -1,3 +1,4 @@
+import { AdbCommandTimeoutError } from "../utils/android-cmdline-tools/AdbClient";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 export type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
@@ -56,6 +57,8 @@ export type DeviceDiscoveryErrorCode = "unavailable" | "failed" | "timeout";
 export interface DeviceDiscoveryError {
   code: DeviceDiscoveryErrorCode;
   message: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
 }
 
 /**
@@ -102,6 +105,7 @@ function iosSucceededSources(outcome: {
 }
 
 export interface BootedDeviceDiscoveryOptions {
+  coalesceInventoryEnrichment?: boolean;
   /** Bypass Android's short device-list cache to verify ADB transport identity. */
   bypassAndroidDeviceListCache?: boolean;
   /** Bypass iOS's short simulator-list cache to verify simulator identity. */
@@ -140,6 +144,7 @@ function presentBootedDevices(
 }
 
 export interface DeviceImageDiscoveryOptions {
+  coalesceInventoryEnrichment?: boolean;
   /** Bypass simulator inventory caching when durable absence must be proven. */
   bypassIosDeviceListCache?: boolean;
   /** Cancels short-lived platform image discovery work. */
@@ -451,11 +456,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async listDeviceImages(platform: SomePlatform, signal?: AbortSignal): Promise<DeviceInfo[]> {
     switch (platform) {
       case "android":
-        return this.listAndroidDeviceImages(signal);
+        return this.listAndroidDeviceImages({ signal });
       case "ios":
         return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false, signal });
       case "either":
-        const emulators = await this.listAndroidDeviceImages(signal);
+        const emulators = await this.listAndroidDeviceImages({ signal });
         const simulators = await this.listIosDeviceImagesIfAvailable({
           swallowDiscoveryErrors: true,
           signal,
@@ -477,11 +482,16 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * a handset modelled like an AVD would otherwise mark that AVD running and
    * let bootMatchedImage() hand back the handset instead of booting the AVD.
    */
-  private async listAndroidDeviceImages(signal?: AbortSignal): Promise<DeviceInfo[]> {
-    const bootedDeviceSignal = combineWithAmbientAbort(signal);
+  private async listAndroidDeviceImages(
+    options: DeviceImageDiscoveryOptions = {},
+  ): Promise<DeviceInfo[]> {
+    const bootedDeviceSignal = combineWithAmbientAbort(options.signal);
     const [images, overlay] = await Promise.all([
-      this.emulator.listAvds({ signal: bootedDeviceSignal }),
-      this.getAndroidRunningStateOverlay(bootedDeviceSignal),
+      this.emulator.listAvds({
+        signal: bootedDeviceSignal,
+        coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
+      }),
+      this.getAndroidRunningStateOverlay({ ...options, signal: bootedDeviceSignal }),
     ]);
     return images.map((image) => ({
       ...image,
@@ -499,13 +509,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * still return its complete inventory (issue #7169).
    */
   private async getAndroidRunningStateOverlay(
-    bootedDeviceSignal?: AbortSignal,
+    options: DeviceImageDiscoveryOptions = {},
   ): Promise<{ runningAvdNames: Set<string>; hasUnresolvedEmulatorIdentity: boolean } | undefined> {
     try {
       const bootedDevices = await this.emulator.getBootedDevicesChecked(
         false,
-        {},
-        bootedDeviceSignal,
+        { readinessOnly: true, coalesceInventoryEnrichment: options.coalesceInventoryEnrichment },
+        options.signal,
       );
       const emulatorDevices = bootedDevices.filter((device) =>
         isAndroidEmulatorSerial(device.deviceId),
@@ -515,7 +525,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         hasUnresolvedEmulatorIdentity: emulatorDevices.some(isUnresolvedAndroidEmulatorName),
       };
     } catch (error) {
-      bootedDeviceSignal?.throwIfAborted();
+      options.signal?.throwIfAborted();
       logger.warn(`[DeviceManager] Android running-state overlay failed: ${errorMessage(error)}`);
       return undefined;
     }
@@ -701,7 +711,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
 
     const [android, ios] = await Promise.all([
       platform === "android" || platform === "either"
-        ? this.discoverAndroidDeviceImages(options.signal)
+        ? this.discoverAndroidDeviceImages(options)
         : undefined,
       platform === "ios" || platform === "either"
         ? this.discoverIosDeviceImages(options)
@@ -731,13 +741,13 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return { devices, succeededPlatforms, discoveryErrors };
   }
 
-  private async discoverAndroidDeviceImages(signal?: AbortSignal): Promise<{
+  private async discoverAndroidDeviceImages(options: DeviceImageDiscoveryOptions): Promise<{
     devices: DeviceInfo[];
     succeeded: boolean;
     error?: DeviceDiscoveryError;
   }> {
     try {
-      return { devices: await this.listAndroidDeviceImages(signal), succeeded: true };
+      return { devices: await this.listAndroidDeviceImages(options), succeeded: true };
     } catch (error) {
       logger.warn(`[DeviceManager] Android device inventory failed: ${error}`);
       return {
@@ -793,6 +803,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         devices: await this.emulator.getBootedDevicesChecked(
           false,
           {
+            coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
             skipNameEnrichment: options.skipAndroidNameEnrichment,
           },
@@ -807,8 +818,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       return {
         devices: [],
         error: {
-          code: "failed",
+          code: error instanceof AdbCommandTimeoutError ? "timeout" : "failed",
           message: `Android booted-device discovery failed: ${errorMessage(error)}`,
+          ...(error instanceof AdbCommandTimeoutError
+            ? { retryable: true, retryAfterMs: 1_000 }
+            : {}),
         },
       };
     }

@@ -14,6 +14,9 @@ export type ConfiguredDeviceInventoryErrorCode = "unavailable" | "failed" | "tim
 export interface ConfiguredDeviceInventoryError {
   code: ConfiguredDeviceInventoryErrorCode;
   message: string;
+  retryable?: boolean;
+  retryAfterMs?: number;
+  missing?: string[];
 }
 
 export type ConfiguredDeviceInventoryObservation =

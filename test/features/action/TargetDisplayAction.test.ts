@@ -1046,17 +1046,13 @@ describe("explicit action display", () => {
 
   test("tapOn rejects display options it cannot honor before dispatch", async () => {
     const unsupported: Array<Partial<TapOnElementOptions>> = [
-      { ensureChecked: true },
       { sibling: true },
       { subtext: { text: "Link" } },
       { searchUntil: { duration: 100 } },
-      { retryIfNoChange: true },
-      { ensureTap: true },
       { textAny: ["One", "Two"] },
       { accessibilityLink: "Link" },
       { focusFirst: true },
       { screenReaderNavigation: true },
-      { preTapStability: true },
     ];
     const executor = adb();
     const observe = new FakeObserveScreen();

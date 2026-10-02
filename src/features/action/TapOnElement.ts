@@ -117,6 +117,7 @@ import { sequenceBackoff } from "../../utils/Backoff";
 import { dispatchAndroidCoordinateTap, dispatchIosCoordinateTap } from "./coordinateTapDispatch";
 import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
+import { createDeviceHierarchyCapture } from "../observe/DeviceHierarchyCapture";
 import {
   checkAndroidTapHierarchyChange,
   POST_TAP_REFRESH_TIMEOUT_MS,
@@ -156,6 +157,14 @@ const IOS_STATUS_BAR_CLASSES = new Set([
   "UIStatusBar",
   "UIStatusBarWindow",
 ]);
+
+/** Internal I/O seam: decisions and timing remain shared with the default tap path. */
+interface AndroidTapVerification {
+  refresh: (timeoutMs: number) => Promise<ViewHierarchyResult | null>;
+  dispatch?: (point: { x: number; y: number }) => Promise<void>;
+}
+
+type TapVerificationOptions = TapOnElementOptions & { verification?: AndroidTapVerification };
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
@@ -387,6 +396,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               request.timeoutMs,
             ),
           readFresh: async (request) => {
+            if (request.displayId !== undefined) {
+              return (
+                await createDeviceHierarchyCapture(device, {
+                  adbFactory: this.adbFactory,
+                  timer: this.timer,
+                }).capture(request)
+              ).hierarchy;
+            }
             const result = await this.readFreshHierarchy(
               request.timeoutMs ?? TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
               undefined,
@@ -1861,6 +1878,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return captured;
   }
 
+  private tapVerificationRefresh(context: {
+    refresh?: AndroidTapVerification["refresh"];
+    screenSize?: ObserveResult["screenSize"];
+    signal?: AbortSignal;
+  }): AndroidTapVerification["refresh"] {
+    return (
+      context.refresh ??
+      ((timeoutMs) => this.refreshViewHierarchy(timeoutMs, context.screenSize, context.signal))
+    );
+  }
+
   private async checkRefreshedDisplay(
     captured: ViewHierarchyResult,
     screenSize: ObserveResult["screenSize"],
@@ -1969,7 +1997,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    */
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   async resolveAndroidStableTapTargetAfterRefreshes(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     observeResult: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
     action: TapOnElementOptions["action"],
     requireResourceId: boolean,
@@ -2053,11 +2081,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       firstIteration = false;
 
       const refreshStart = this.timer.now();
-      const freshHierarchy = await this.refreshViewHierarchy(
-        TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
-        observeResult.screenSize,
+      const freshHierarchy = await this.tapVerificationRefresh({
+        refresh: options.verification?.refresh,
+        screenSize: observeResult.screenSize,
         signal,
-      );
+      })(TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS);
       if (!freshHierarchy) {
         // The failed refresh itself burned wall-clock (up to the timeout); exclude
         // that from the deadline too, not just the recovery sleep, otherwise a slow
@@ -2592,7 +2620,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private async refreshEnsureCheckedSelection(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     observation: ObserveResult,
     selection: ElementSelectionResult,
     signal?: AbortSignal,
@@ -2600,11 +2628,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (options.ensureChecked === undefined) {
       return { selection, viewHierarchy: observation.viewHierarchy as ViewHierarchyResult };
     }
-    const freshHierarchy = await this.refreshViewHierarchy(
-      POST_TAP_REFRESH_TIMEOUT_MS,
-      observation.screenSize,
+    const freshHierarchy = await this.tapVerificationRefresh({
+      refresh: options.verification?.refresh,
+      screenSize: observation.screenSize,
       signal,
-    );
+    })(POST_TAP_REFRESH_TIMEOUT_MS);
     if (!freshHierarchy) {
       throw new ActionableError("tapOn ensureChecked: unable to refresh toggle before tapping");
     }
@@ -2617,7 +2645,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private async ensureCheckedAfterTap(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     observation: ObserveResult,
     signal?: AbortSignal,
   ): Promise<string | undefined> {
@@ -2636,7 +2664,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         readChecked,
         options.ensureChecked,
         observation,
-        signal,
+        { signal, refresh: options.verification?.refresh },
       );
     }
     return observed === options.ensureChecked
@@ -2646,7 +2674,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private async applyEnsureCheckedResult(
     result: TapOnElementResult,
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     signal?: AbortSignal,
   ): Promise<void> {
     if (options.ensureChecked === undefined) {
@@ -2667,8 +2695,9 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     readChecked: () => boolean | "not found",
     expected: boolean,
     observation: ObserveResult,
-    signal?: AbortSignal,
+    context: { signal?: AbortSignal; refresh?: AndroidTapVerification["refresh"] } = {},
   ): Promise<boolean | "not found"> {
+    const { signal } = context;
     const deadline = this.timer.now() + ENSURE_CHECKED_POLL_TIMEOUT_MS;
     let observed = readChecked();
     for (let attempt = 1; this.timer.now() < deadline; attempt++) {
@@ -2682,11 +2711,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       if (remainingMs <= 0) {
         break;
       }
-      const freshHierarchy = await this.refreshViewHierarchy(
-        Math.min(POST_TAP_REFRESH_TIMEOUT_MS, remainingMs),
-        observation.screenSize,
+      const freshHierarchy = await this.tapVerificationRefresh({
+        refresh: context.refresh,
+        screenSize: observation.screenSize,
         signal,
-      );
+      })(Math.min(POST_TAP_REFRESH_TIMEOUT_MS, remainingMs));
       if (!freshHierarchy) {
         continue;
       }
@@ -2726,19 +2755,85 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return { element, usedParent: false };
   }
 
-  private async executeOnAndroidDisplay(
-    options: TapOnElementOptions,
+  private async prepareAndroidDisplaySelection(
+    options: TapVerificationOptions,
     context: {
       target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
       selection: ElementSelectionResult;
       signal?: AbortSignal;
     },
-  ): Promise<TapOnElementResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
-    const { target, selection, signal } = context;
-    const hierarchy = target.observation.viewHierarchy;
+  ): Promise<
+    | { selection: ElementSelectionResult; hierarchy: ViewHierarchyResult }
+    | { result: TapOnElementResult }
+  > {
+    const { target, signal } = context;
+    let selection = context.selection;
+    let hierarchy = target.observation.viewHierarchy;
     if (!hierarchy) {
       throw new ActionableError("Selected display has no view hierarchy");
     }
+    const liveSelection = await this.refreshEnsureCheckedSelection(
+      options,
+      target.observation,
+      selection,
+      signal,
+    );
+    selection = liveSelection.selection;
+    hierarchy = liveSelection.viewHierarchy;
+    const searchUntil = { durationMs: 0, requestCount: 0, changeCount: 0 };
+    const checkedResult =
+      selection.element &&
+      this.ensureCheckedBeforeTap(
+        options,
+        selection.element,
+        this.buildSelectedElementMetadata(selection),
+        searchUntil,
+      );
+    if (checkedResult) {
+      return { result: checkedResult };
+    }
+    if (this.strategy.shouldRunPreTapStability(options)) {
+      const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
+        options,
+        target.observation,
+        options.action,
+        false,
+        signal,
+      );
+      if (!stable.ok) {
+        return { result: { success: false, error: stable.error } as TapOnElementResult };
+      }
+      this.replaceObservationHierarchy(target.observation, stable.viewHierarchy, true);
+      hierarchy = stable.viewHierarchy;
+      selection = { ...stable.selection, element: stable.tapElement };
+      const stableCheckedResult = this.ensureCheckedBeforeTap(
+        options,
+        stable.selection.element ?? stable.tapElement,
+        this.buildSelectedElementMetadata(selection),
+        searchUntil,
+      );
+      if (stableCheckedResult) {
+        return { result: stableCheckedResult };
+      }
+    }
+    return { selection, hierarchy };
+  }
+
+  private async executeOnAndroidDisplay(
+    options: TapVerificationOptions & { verification: AndroidTapVerification },
+    context: {
+      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+      selection: ElementSelectionResult;
+      signal?: AbortSignal;
+      onDispatched: () => void;
+    },
+  ): Promise<TapOnElementResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
+    const { target, signal } = context;
+    const prepared = await this.prepareAndroidDisplaySelection(options, context);
+    if ("result" in prepared) {
+      return prepared.result;
+    }
+    const { selection, hierarchy } = prepared;
     const element = selection.element;
     if (!element?.bounds) {
       throw new ActionableError("Element not found on selected display");
@@ -2778,12 +2873,48 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!point) {
       throw new ActionableError("Matched element has no visible tap area on selected display");
     }
-    const { x, y } = point;
+    const preTapHash = options.retryIfNoChange ? this.hashViewHierarchy(hierarchy) : null;
+    const dispatchAction = await this.androidDisplayDispatch(options, context);
+    await dispatchAction(point);
+    if (preTapHash && this.strategy.retryTapIfNoChange) {
+      await this.retryTapIfNoChange(
+        preTapHash,
+        point,
+        options.action,
+        this.strategy.longPressDurationMs,
+        element,
+        {
+          ...options,
+          verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
+        },
+        false,
+        target.observation.screenSize,
+        signal,
+        selection,
+      );
+    }
+    return {
+      success: true,
+      action: options.action,
+      element,
+      selectedElement,
+    };
+  }
+
+  private async androidDisplayDispatch(
+    options: TapOnElementOptions,
+    context: {
+      target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+      signal?: AbortSignal;
+      onDispatched: () => void;
+    },
+  ): Promise<(point: { x: number; y: number }) => Promise<void>> {
+    const { target, signal } = context;
     const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
       this.accessibilityService,
       target.displayId,
     );
-    const dispatch = async () => {
+    const dispatch = async ({ x, y }: { x: number; y: number }) => {
       throwIfAborted(signal);
       target.assertCurrent();
       const duration = options.action === "longPress" ? (options.duration ?? 800) : 10;
@@ -2815,17 +2946,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           target.assertCurrent,
         );
       }
+      context.onDispatched();
     };
-    await dispatch();
-    if (options.action === "doubleTap") {
-      await dispatch();
-    }
-    return {
-      success: true,
-      action: options.action,
-      element,
-      selectedElement,
+    const dispatchAction = async (point: { x: number; y: number }) => {
+      await dispatch(point);
+      if (options.action === "doubleTap") {
+        await dispatch(point);
+      }
     };
+    return dispatchAction;
   }
 
   private selectElementOnDisplay(
@@ -2877,17 +3006,66 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!hierarchy) {
       throw new ActionableError("Selected display has no view hierarchy");
     }
+    const refresh: AndroidTapVerification["refresh"] = async (timeoutMs) => {
+      throwIfAborted(signal);
+      target.assertCurrent();
+      let captured: ViewHierarchyResult;
+      try {
+        captured = (
+          await this.hierarchyCapture.capture({
+            freshness: "fresh",
+            searchRaw: serverConfig.isRawElementSearchEnabled(),
+            timeoutMs,
+            signal,
+            displayId: target.displayId ?? 0,
+          })
+        ).hierarchy;
+      } catch (error) {
+        target.assertCurrent();
+        if (error instanceof StaleDisplayError) {
+          throw error;
+        }
+        throwIfAborted(signal);
+        logger.warn(`[TapOnElement] Fresh display capture failed: ${errorMessage(error)}`, error);
+        return null;
+      }
+      target.assertCurrent();
+      if (captured.displayId !== (target.displayId ?? 0)) {
+        throw this.staleDisplay(
+          target.observation.display.generation ??
+            this.displayTransitionReader.identityRevision(this.device.deviceId),
+        );
+      }
+      return captured;
+    };
+    const verificationOptions = { ...options, verification: { refresh } };
     const selection = this.selectElementOnDisplay(options, hierarchy);
+    let tapTimestamp: number | undefined;
     const result: Awaited<ReturnType<TapOnElement["executeOnAndroidDisplay"]>> =
       await this.observedInteraction(
-        () => this.executeOnAndroidDisplay(options, { target, selection, signal }),
+        () =>
+          this.executeOnAndroidDisplay(verificationOptions, {
+            target,
+            selection,
+            signal,
+            onDispatched: () => {
+              tapTimestamp = this.timer.now();
+            },
+          }),
         {
           changeExpected: false,
           display: target.observation.display.key,
           previousObservation: target.observation,
           signal,
+          ...(options.ensureChecked !== undefined
+            ? { observationTimestampProvider: () => tapTimestamp }
+            : {}),
         },
       );
+    target.assertCurrent();
+    if (result.success && result.skipped !== "already-checked") {
+      await this.applyEnsureCheckedResult(result, verificationOptions, signal);
+    }
     if (options.action !== "focus" || !result.success || result.wasAlreadyFocused) {
       return result;
     }
@@ -2911,20 +3089,17 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     options: TapOnElementOptions,
     signal?: AbortSignal,
   ): Promise<TapOnElementResult | undefined> {
-    if (options.display !== undefined) {
+    const display = options.display;
+    if (display !== undefined) {
       try {
         const unsupported = (
           [
-            "ensureChecked",
             "sibling",
             "subtext",
             "searchUntil",
-            "retryIfNoChange",
-            "ensureTap",
             "accessibilityLink",
             "focusFirst",
             "screenReaderNavigation",
-            "preTapStability",
           ] as const
         ).find((key) => options[key] !== undefined);
         if (unsupported) {
@@ -2935,9 +3110,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             "textAny with multiple values is not supported with `display` yet",
           );
         }
+        if (options.ensureTap) {
+          options = { ...options, preTapStability: true, retryIfNoChange: true };
+        }
+        // Preserve unsupported-option precedence while sharing checked-selector validation.
+        const validationError =
+          options.ensureChecked !== undefined ? this.validateOptions(options) : null;
+        if (validationError) {
+          return this.createErrorResult(options.action, validationError);
+        }
         const target = await prepareTargetDisplayAction(
           this.device,
-          options.display,
+          display,
           this.observeScreen,
           this.adb,
           this.lastRenderedObservation,
@@ -3676,7 +3860,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     action: string,
     longPressDuration: number,
     tapElement: Element,
-    options: TapOnElementOptions & DisplayFenceOption,
+    options: TapVerificationOptions & DisplayFenceOption,
     isTalkBackEnabled: boolean,
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
@@ -3684,7 +3868,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   ): Promise<void> {
     const probe = await checkAndroidTapHierarchyChange(
       this.timer,
-      (timeoutMs) => this.refreshViewHierarchy(timeoutMs, screenSize, signal),
+      this.tapVerificationRefresh({ refresh: options.verification?.refresh, screenSize, signal }),
       (hierarchy) => this.hashViewHierarchy(hierarchy),
       preTapHash,
     );
@@ -3754,6 +3938,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
     await this.timer.sleep(PRE_RETRY_DELAY_MS);
 
+    if (options.verification?.dispatch) {
+      await options.verification.dispatch(retryPoint);
+      return;
+    }
     await this.executeAndroidTap(
       action,
       retryPoint.x,

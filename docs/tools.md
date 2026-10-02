@@ -48,6 +48,20 @@ For Android `sendKeys`, text, clear, and IME actions require a selector when
 `display` is set so the input field can be focused on that panel. Discrete key
 events use `input -d` directly.
 
+### Gesture timing bounds
+
+`dragAndDrop` accepts `pressDurationMs` from 600 to 3000 ms,
+`dragDurationMs` from 300 to 2000 ms, and `holdDurationMs` from 100 to 3000 ms.
+The schema and action share these bounds.
+
+With `swipeOn({ boomerang: true })`, `apexPause` accepts any nonnegative
+finite duration in milliseconds, and `returnSpeed` accepts any positive finite
+multiplier. Their defaults remain 100 ms and 1 respectively. There is no
+schema upper bound; long gestures remain subject to request/runner deadlines.
+
+`pinchOn` requires positive `scale`, `distanceStart`, and `distanceEnd` when
+supplied; nonpositive values are rejected before gesture dispatch.
+
 ### Screen-coordinate contract
 
 `snapshotOf` is an opt-in tool. Enable it with `setToolEnabled`, then pass

@@ -38,12 +38,12 @@ import {
   type ScreenshotCapturer,
 } from "../navigation/SelectionStateTracker";
 
-const PRESS_DURATION_MIN_MS = 600;
-const PRESS_DURATION_MAX_MS = 3000;
-const DRAG_DURATION_MIN_MS = 300;
-const DRAG_DURATION_MAX_MS = 2000;
-const HOLD_DURATION_MIN_MS = 100;
-const HOLD_DURATION_MAX_MS = 3000;
+export const PRESS_DURATION_MIN_MS = 600;
+export const PRESS_DURATION_MAX_MS = 3000;
+export const DRAG_DURATION_MIN_MS = 300;
+export const DRAG_DURATION_MAX_MS = 2000;
+export const HOLD_DURATION_MIN_MS = 100;
+export const HOLD_DURATION_MAX_MS = 3000;
 const DROP_DURATION_MS = 100;
 const DRAG_TIMEOUT_BUFFER_MS = 500;
 const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;

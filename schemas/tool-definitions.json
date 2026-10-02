@@ -1130,10 +1130,10 @@
           "maximum": 3000
         },
         "dragDurationMs": {
-          "description": "Drag duration ms (min: 300, max: 1000, default: 300)",
+          "description": "Drag duration ms (min: 300, max: 2000, default: 300)",
           "type": "number",
           "minimum": 300,
-          "maximum": 1000
+          "maximum": 2000
         },
         "holdDurationMs": {
           "description": "Hold duration ms (min: 100, max: 3000, default: 100)",
@@ -12369,16 +12369,19 @@
           "enum": ["in", "out"]
         },
         "distanceStart": {
-          "description": "Initial finger distance defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
-          "type": "number"
+          "description": "Initial finger distance (> 0) defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
+          "type": "number",
+          "exclusiveMinimum": 0
         },
         "distanceEnd": {
-          "description": "Final finger distance defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
-          "type": "number"
+          "description": "Final finger distance (> 0) defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
+          "type": "number",
+          "exclusiveMinimum": 0
         },
         "scale": {
-          "description": "Scale factor (overrides distances)",
-          "type": "number"
+          "description": "Scale factor (> 0; overrides distances)",
+          "type": "number",
+          "exclusiveMinimum": 0
         },
         "duration": {
           "description": "Gesture duration (ms)",
@@ -22958,16 +22961,14 @@
           "type": "boolean"
         },
         "apexPause": {
-          "description": "Pause duration at swipe apex in ms (0-3000)",
+          "description": "Pause duration at swipe apex in ms (>= 0)",
           "type": "number",
-          "minimum": 0,
-          "maximum": 3000
+          "minimum": 0
         },
         "returnSpeed": {
-          "description": "Speed multiplier for return swipe (0.1-3.0)",
+          "description": "Speed multiplier for return swipe (> 0)",
           "type": "number",
-          "minimum": 0.1,
-          "maximum": 3
+          "exclusiveMinimum": 0
         },
         "speed": {
           "description": "Swipe speed preset",

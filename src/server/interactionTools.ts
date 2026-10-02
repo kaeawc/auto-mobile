@@ -19,9 +19,25 @@ import { DeviceLockStore } from "../features/action/DeviceLockStore";
 import { IosLockScreenUnlocker } from "../features/action/IosLockScreenUnlocker";
 import { SelectAllText } from "../features/action/SelectAllText";
 import { PressButton } from "../features/action/PressButton";
-import { DragAndDrop } from "../features/action/DragAndDrop";
+import {
+  DragAndDrop,
+  PRESS_DURATION_MIN_MS,
+  PRESS_DURATION_MAX_MS,
+  DRAG_DURATION_MIN_MS,
+  DRAG_DURATION_MAX_MS,
+  HOLD_DURATION_MIN_MS,
+  HOLD_DURATION_MAX_MS,
+} from "../features/action/DragAndDrop";
+import {
+  SWIPE_APEX_PAUSE_MIN_MS,
+  SWIPE_RETURN_SPEED_EXCLUSIVE_MIN,
+} from "../features/action/swipeon/swipeTiming";
 import { SwipeOn } from "../features/action/swipeon";
-import { PinchOn } from "../features/action/PinchOn";
+import {
+  PinchOn,
+  PINCH_DISTANCE_EXCLUSIVE_MIN,
+  PINCH_SCALE_EXCLUSIVE_MIN,
+} from "../features/action/PinchOn";
 import { Shake } from "../features/action/Shake";
 import { RecentApps } from "../features/action/RecentApps";
 import { HomeScreen } from "../features/action/HomeScreen";
@@ -682,22 +698,28 @@ export const dragAndDropSchema = withJsonSchemaOverride(
         target: dragAndDropSelectorSchema("Target"),
         pressDurationMs: z
           .number()
-          .min(600)
-          .max(3000)
+          .min(PRESS_DURATION_MIN_MS)
+          .max(PRESS_DURATION_MAX_MS)
           .optional()
-          .describe("Press duration ms (min: 600, max: 3000, default: 600)"),
+          .describe(
+            `Press duration ms (min: ${PRESS_DURATION_MIN_MS}, max: ${PRESS_DURATION_MAX_MS}, default: 600)`,
+          ),
         dragDurationMs: z
           .number()
-          .min(300)
-          .max(1000)
+          .min(DRAG_DURATION_MIN_MS)
+          .max(DRAG_DURATION_MAX_MS)
           .optional()
-          .describe("Drag duration ms (min: 300, max: 1000, default: 300)"),
+          .describe(
+            `Drag duration ms (min: ${DRAG_DURATION_MIN_MS}, max: ${DRAG_DURATION_MAX_MS}, default: 300)`,
+          ),
         holdDurationMs: z
           .number()
-          .min(100)
-          .max(3000)
+          .min(HOLD_DURATION_MIN_MS)
+          .max(HOLD_DURATION_MAX_MS)
           .optional()
-          .describe("Hold duration ms (min: 100, max: 3000, default: 100)"),
+          .describe(
+            `Hold duration ms (min: ${HOLD_DURATION_MIN_MS}, max: ${HOLD_DURATION_MAX_MS}, default: 100)`,
+          ),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
         // its own.
@@ -740,16 +762,14 @@ export const swipeOnSchema = withJsonSchemaOverride(
         boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
         apexPause: z
           .number()
-          .min(0)
-          .max(3000)
+          .min(SWIPE_APEX_PAUSE_MIN_MS)
           .optional()
-          .describe("Pause duration at swipe apex in ms (0-3000)"),
+          .describe(`Pause duration at swipe apex in ms (>= ${SWIPE_APEX_PAUSE_MIN_MS})`),
         returnSpeed: z
           .number()
-          .min(0.1)
-          .max(3.0)
+          .gt(SWIPE_RETURN_SPEED_EXCLUSIVE_MIN)
           .optional()
-          .describe("Speed multiplier for return swipe (0.1-3.0)"),
+          .describe(`Speed multiplier for return swipe (> ${SWIPE_RETURN_SPEED_EXCLUSIVE_MIN})`),
         speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
         // #5870: a `sessionUuid`/`deviceId` resolves the platform, so `platform` is
         // not required — a device handle from getAndroid/getApple is sufficient on
@@ -770,17 +790,23 @@ export const pinchOnSchema = withJsonSchemaOverride(
         direction: z.enum(["in", "out"]).describe("Pinch direction"),
         distanceStart: z
           .number()
+          .gt(PINCH_DISTANCE_EXCLUSIVE_MIN)
           .optional()
           .describe(
-            "Initial finger distance defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
+            `Initial finger distance (> ${PINCH_DISTANCE_EXCLUSIVE_MIN}) defaults to 60% of the target's smaller dimension for direction 'in' and 20% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).`,
           ),
         distanceEnd: z
           .number()
+          .gt(PINCH_DISTANCE_EXCLUSIVE_MIN)
           .optional()
           .describe(
-            "Final finger distance defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).",
+            `Final finger distance (> ${PINCH_DISTANCE_EXCLUSIVE_MIN}) defaults to 20% of the target's smaller dimension for direction 'in' and 60% for 'out'; clamped to 10%-90% with a 10 px floor capped by the 90% ceiling (below 10 px for targets under 11.1 px).`,
           ),
-        scale: z.number().optional().describe("Scale factor (overrides distances)"),
+        scale: z
+          .number()
+          .gt(PINCH_SCALE_EXCLUSIVE_MIN)
+          .optional()
+          .describe(`Scale factor (> ${PINCH_SCALE_EXCLUSIVE_MIN}; overrides distances)`),
         duration: z.number().optional().describe("Gesture duration (ms)"),
         rotationDegrees: z
           .number()

@@ -717,8 +717,10 @@ export type CtrlProxyRequest =
 export type CtrlProxyRequestType = CtrlProxyRequest["type"];
 
 /**
- * Optional Android capabilities advertised by
- * android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt:431-439.
+ * Legacy optional Android capabilities advertised by WebSocketServer.supportedCommands() in
+ * android/control-proxy/src/main/kotlin/dev/jasonpearson/automobile/ctrlproxy/WebSocketServer.kt.
+ * Services advertising full_command_set_v1 derive all request types from WebSocketRequest's
+ * sealed serializer; this subset is used only for older APKs without that marker.
  * Before #8408, AndroidCtrlProxyClient.supportsNodeActionSelectors,
  * supportsAccessibilityLinkActivation, and refreshObservationStreamHierarchyCadence
  * gated node_selector_actions, request_activate_accessibility_link, and
@@ -743,6 +745,9 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "ime_key_events_v1",
   "gesture_display_id_v1",
 ] as const;
+
+/** The supportedCommands list is authoritative for every request when this marker is present. */
+export const ANDROID_FULL_COMMAND_SET_CAPABILITY = "full_command_set_v1";
 
 export const ANDROID_CAPABILITY_GATED_COMMANDS: ReadonlySet<string> = new Set([
   ...ANDROID_CAPABILITY_REQUEST_TYPES,

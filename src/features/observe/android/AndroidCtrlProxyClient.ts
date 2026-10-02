@@ -117,6 +117,7 @@ import { NetworkState } from "../../../server/NetworkState";
 import { buildNetworkMockRules } from "../../../server/networkMockRules";
 import {
   ANDROID_CAPABILITY_GATED_COMMANDS,
+  ANDROID_FULL_COMMAND_SET_CAPABILITY,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
 } from "./ctrlProxyProtocol";
@@ -6276,14 +6277,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.rejectedCommands.has(messageType)) {
       return false;
     }
+    if (this.supportedCommands?.has(ANDROID_FULL_COMMAND_SET_CAPABILITY)) {
+      return this.supportedCommands.has(messageType);
+    }
+    // Legacy behavior for services that predate full_command_set_v1 (older APKs).
     if (messageType === "gesture_display_id_v1") {
       return this.supportedCommands?.has(messageType) === true;
     }
     if (this.supportedCommands === null) {
       return true;
     }
-    // #8585: Android advertises optional capabilities, while iOS advertises its
-    // complete command set (#8408). Core Android requests remain available.
     if (ANDROID_CAPABILITY_GATED_COMMANDS.has(messageType)) {
       return this.supportedCommands.has(messageType);
     }

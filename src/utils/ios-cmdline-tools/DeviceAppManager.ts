@@ -14,6 +14,28 @@ import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostComm
 import { throwIfAborted } from "../toolUtils";
 import type { Logger } from "../logger";
 import type { DevicectlVersionSource } from "./CoreDeviceCapabilityProbe";
+import { classifyDevicectlInvocationError } from "./DevicectlDeviceLister";
+import { raceWithDeadline } from "../raceWithDeadline";
+import { defaultTimer, type Timer } from "../SystemTimer";
+
+/** Short reads share the 15-second device-list budget used by the lister and SimCtlClient. */
+const DEVICECTL_INFO_TIMEOUT_MS = 15_000;
+/** Process changes and uninstall match SimCtlClient's 60-second command budget. */
+const DEVICECTL_PROCESS_TIMEOUT_MS = 60_000;
+/** Large bundle installs and copies over USB need longer than simctl, but must remain bounded. */
+const DEVICECTL_TRANSFER_TIMEOUT_MS = 180_000;
+/** Let the executor's timeout and SIGKILL settle first before abandoning a wedged executor. */
+const DEVICECTL_KILL_GRACE_MS = 5_000;
+
+const DEVICECTL_TIMEOUTS: ReadonlyMap<string, number> = new Map([
+  ["--version", DEVICECTL_INFO_TIMEOUT_MS],
+  ["list", DEVICECTL_INFO_TIMEOUT_MS],
+  ["device info", DEVICECTL_INFO_TIMEOUT_MS],
+  ["device process", DEVICECTL_PROCESS_TIMEOUT_MS],
+  ["device uninstall", DEVICECTL_PROCESS_TIMEOUT_MS],
+  ["device install", DEVICECTL_TRANSFER_TIMEOUT_MS],
+  ["device copy", DEVICECTL_TRANSFER_TIMEOUT_MS],
+]);
 
 interface DeviceAppManagerDependencies {
   platform: () => NodeJS.Platform;
@@ -25,6 +47,7 @@ interface DeviceAppManagerDependencies {
   stat: (path: string) => Promise<{ isDirectory: () => boolean }>;
   tmpdir: () => string;
   logger: Pick<Logger, "debug" | "warn">;
+  timer?: Pick<Timer, "setTimeout" | "clearTimeout">;
 }
 
 type LaunchPreconditionResult = { ok: true } | { ok: false; reason: "non-darwin" };
@@ -40,6 +63,7 @@ const defaultDependencies: DeviceAppManagerDependencies = {
   stat: async (path) => fs.stat(path),
   tmpdir,
   logger,
+  timer: defaultTimer,
 };
 
 function redactedLaunchError(error: unknown, launchArguments: string[] | undefined): string {
@@ -444,9 +468,45 @@ export class DeviceAppManager implements DeviceUrlLauncher, DevicectlVersionSour
     // One span per command, named by stable subcommand tokens so app
     // identifiers, UDIDs, and artifact paths do not fragment timing aggregation.
     const spanArgs = args[0] === "simctl" ? args.slice(0, 2) : args.slice(0, 4);
-    return trackAmbient(`${file} ${spanArgs.join(" ")}`.trimEnd(), () =>
-      this.deps.execute(file, args, options),
-    );
+    const command = `${file} ${spanArgs.join(" ")}`.trimEnd();
+    const timer = this.deps.timer ?? defaultTimer;
+    return trackAmbient(command, async () => {
+      if (
+        file !== "xcrun" ||
+        args[0] !== "devicectl" ||
+        options?.timeoutMs !== undefined ||
+        options?.signal
+      ) {
+        return this.deps.execute(file, args, options);
+      }
+
+      const operation = args[1] === "device" ? args.slice(1, 3).join(" ") : args[1];
+      const timeoutMs = DEVICECTL_TIMEOUTS.get(operation) ?? DEVICECTL_PROCESS_TIMEOUT_MS;
+      let deadlineExpired = false;
+      try {
+        return await raceWithDeadline(
+          () => this.deps.execute(file, args, { ...options, timeoutMs, killSignal: "SIGKILL" }),
+          {
+            timer,
+            timeoutMs: timeoutMs + DEVICECTL_KILL_GRACE_MS,
+            unref: true,
+            label: command,
+            onTimeout: () => {
+              deadlineExpired = true;
+            },
+          },
+        );
+      } catch (error) {
+        if (!deadlineExpired && classifyDevicectlInvocationError(error) !== "timeout") {
+          throw error;
+        }
+        const message =
+          `${command} timed out after ${timeoutMs} ms; the device may be locked or unpaired. ` +
+          "Unlock the device, re-pair it and trust this computer, then reconnect the cable and retry.";
+        this.deps.logger.warn(message);
+        throw new ActionableError(message, { cause: error });
+      }
+    });
   }
 
   private getLaunchPrecondition(): LaunchPreconditionResult {

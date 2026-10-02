@@ -5,17 +5,16 @@ export interface ScreenshotCacheFile {
 }
 
 /**
- * Minimum age before a screenshot is eligible for size-based eviction.
- *
- * The screenshots cache dir is shared by every process that writes there. In
- * production each agent runs its own (non-proxy) MCP client process, so unless
- * operators isolate TMPDIR per agent, multiple processes write here. Screenshot
- * filenames are timestamp-only (not keyed by process/device), so size-based
- * eviction could otherwise delete a frame another process just captured and is
- * still reading. Protecting recent files closes that window; a captured frame is
- * consumed within milliseconds, so 30s is comfortably safe.
+ * Returned paths receive 30 seconds from publication in this process: the
+ * shortest existing retention floor (formerly measured only from file mtime).
+ * This is not a measured client-consumption duration. Other processes still
+ * honor the same 30-second mtime floor, but cannot see process-local protection.
  */
-export const SCREENSHOT_MIN_EVICT_AGE_MS = 30_000;
+export const SCREENSHOT_MIN_LIFETIME_MS = 30_000;
+export const SCREENSHOT_CACHE_MAX_SIZE_BYTES = 128 * 1024 * 1024;
+/** Same 24-hour stale-age policy as automatic tool-output artifacts; far beyond
+ * the 30-second return window and other processes' five-minute cache TTL. */
+export const SCREENSHOT_STALE_AGE_MS = 24 * 60 * 60 * 1000;
 
 export interface ScreenshotEvictionPlan {
   /** Oldest-first paths to delete. */
@@ -37,6 +36,7 @@ export function selectScreenshotsToEvict(
   minAgeMs: number,
   nowMs: number,
   isReferenced: (path: string) => boolean = () => false,
+  isProtected: (path: string) => boolean = () => false,
 ): ScreenshotEvictionPlan {
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total <= maxSizeBytes) {
@@ -54,6 +54,9 @@ export function selectScreenshotsToEvict(
     }
     if (nowMs - file.mtimeMs < minAgeMs) {
       // Too recent to evict — may be another process's in-flight frame.
+      continue;
+    }
+    if (isProtected(file.path)) {
       continue;
     }
     if (isReferenced(file.path)) {

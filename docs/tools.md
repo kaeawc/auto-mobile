@@ -98,6 +98,22 @@ native absolute-input coordinates.
 native coordinate space described above. For a fresh screenshot matching an
 observation, call `observe({ screenshot: "settled" })` and read its
 `screenshotPath`.
+
+Returned full-screen fresh (settled or device-read), cached fallback, per-panel/per-display,
+and crop (`crop-*` from `observe({ crop })` and `snapshot-of-*`) paths are protected
+in the returning process for **30 seconds
+from return**, including when a cached path is returned again. Other processes sharing
+this directory honor a 30-second file-mtime floor, but cannot see these process-local
+protections. Protection bookkeeping is bounded to 4096 paths across devices and sessions;
+on overload the oldest protection is dropped with a warning, so that path may lose its
+return-time guarantee. Release or device removal drops the cache references; it does not
+delete the file early. Eligible unreferenced, unprotected files may be removed by size
+cleanup after the minimum lifetime (128 MiB target). Recent or referenced files can
+temporarily keep the directory over budget. Stale unreferenced, unprotected screenshot
+files are swept after **24 hours** by mtime on capture construction, including the first
+cleanup after restart; idle processes do not sweep. Callers needing a path longer
+**must copy the file**. Return-time protection ends on process exit or crash.
+
 For encoded captures, pass `screenshotOptions` with `screenshot: "settled"`,
 `includeScreenshotImage: true`, or `crop`,
 for example `observe({ screenshot: "settled", screenshotOptions: { format: "webp", quality: 80 } })`.

@@ -25,7 +25,17 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
-import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screenshotCacheEviction";
+import {
+  selectScreenshotsToEvict,
+  SCREENSHOT_MIN_LIFETIME_MS,
+  SCREENSHOT_CACHE_MAX_SIZE_BYTES,
+  SCREENSHOT_STALE_AGE_MS,
+  type ScreenshotCacheFile,
+} from "./screenshotCacheEviction";
+import {
+  screenshotPathProtection,
+  type ScreenshotPathProtection,
+} from "./ScreenshotPathProtection";
 import { IOSCtrlProxyClient } from "./ios";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
@@ -257,7 +267,6 @@ export class TakeScreenshot implements ScreenshotService {
   private cacheDirResolver: () => string;
   private readonly physicalDisplayIdResolver: AndroidPhysicalDisplayIdResolver;
   private static cacheDir: string | null = null;
-  private static readonly MAX_CACHE_SIZE_BYTES = 128 * 1024 * 1024; // 128MB
 
   /**
    * Get the cache directory, creating it with secure permissions if needed.
@@ -287,6 +296,7 @@ export class TakeScreenshot implements ScreenshotService {
       timer,
     ),
     cleanupOnCreate = true,
+    private readonly pathProtection: ScreenshotPathProtection = screenshotPathProtection,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -305,52 +315,100 @@ export class TakeScreenshot implements ScreenshotService {
     }
   }
 
-  /**
-   * Clean up the cache directory if it exceeds the maximum size
-   */
+  /** Sweep stale files on the first construction and every subsequent cleanup pass. */
   private async cleanupCache(): Promise<void> {
     try {
       const cacheDir = this.cacheDirResolver();
-
-      // Get all files in cache with their stats
-      const files = await this.fileSystem.readdir(cacheDir);
-      const fileStats = await Promise.all(
-        files.map(async (file) => {
-          const filePath = path.join(cacheDir, file);
-          const stats = await this.fileSystem.stat(filePath);
-          return { path: filePath, stats, mtime: stats.mtimeMs };
-        }),
+      const names = await this.fileSystem.readdir(cacheDir);
+      const candidates = names.filter((name) =>
+        /^(?:screenshot_.+\.(?:png|jpe?g|webp)(?:\.temp)?|snapshot-of-.+\.png|crop-[A-Za-z0-9_-]+\.png)$/.test(
+          name,
+        ),
       );
-
+      let files = (
+        await Promise.all(
+          candidates.map((name) => this.readCachedScreenshot(path.join(cacheDir, name))),
+        )
+      ).filter((file): file is ScreenshotCacheFile => file !== undefined);
       const referencedPaths = new Set([
         ...getScreenshotStateStore().getReferencedScreenshotPaths(),
         ...(await getObserveCacheStore().getReferencedScreenshotPaths()),
       ]);
       const isReferenced = (filePath: string): boolean => referencedPaths.has(filePath);
-
-      // Evict oldest-first until under the limit, but never a file young enough
-      // to be an in-flight capture from another process sharing this dir (in
-      // production each agent runs its own client process writing here) or
-      // referenced by a live observe result or screenshot state.
-      const nowMs = Date.now();
-      const evictionPlan = selectScreenshotsToEvict(
-        fileStats.map((f) => ({ path: f.path, size: f.stats.size, mtimeMs: f.mtime })),
-        TakeScreenshot.MAX_CACHE_SIZE_BYTES,
-        SCREENSHOT_MIN_EVICT_AGE_MS,
-        nowMs,
+      const isProtected = (filePath: string): boolean => this.pathProtection.isProtected(filePath);
+      const nowMs = this.timer.now();
+      const stale = files.filter((file) => nowMs - file.mtimeMs > SCREENSHOT_STALE_AGE_MS);
+      files = await this.evictCandidates(
+        stale.map((file) => file.path),
+        files,
         isReferenced,
       );
-      if (evictionPlan.overBudgetAfterEviction) {
+      const evictionPlan = selectScreenshotsToEvict(
+        files,
+        SCREENSHOT_CACHE_MAX_SIZE_BYTES,
+        SCREENSHOT_MIN_LIFETIME_MS,
+        nowMs,
+        isReferenced,
+        isProtected,
+      );
+      files = await this.evictCandidates(evictionPlan.toEvict, files, isReferenced);
+      if (files.reduce((total, file) => total + file.size, 0) > SCREENSHOT_CACHE_MAX_SIZE_BYTES) {
         logger.warn(
-          `Screenshot cache remains over budget after eviction; skipped ${evictionPlan.skippedReferenced} referenced screenshots`,
+          `Screenshot cache remains over budget after eviction; skipped ${evictionPlan.skippedReferenced} referenced screenshots; ${files.filter((file) => isProtected(file.path)).length} protected screenshots`,
         );
       }
-      for (const filePath of evictionPlan.toEvict) {
-        await this.fileSystem.unlink(filePath);
-        logger.debug(`Removed cached screenshot: ${filePath}`);
+    } catch (error) {
+      logger.warn("Failed to cleanup screenshot cache:", error);
+    }
+  }
+
+  private async readCachedScreenshot(filePath: string): Promise<ScreenshotCacheFile | undefined> {
+    try {
+      // lstat excludes symlinks; legacy injected filesystems without it must
+      // explicitly identify plain files through stat.isFile instead.
+      const stats = await (this.fileSystem.lstat?.(filePath) ?? this.fileSystem.stat(filePath));
+      return stats.isFile?.() === true
+        ? { path: filePath, size: stats.size, mtimeMs: stats.mtimeMs }
+        : undefined;
+    } catch (error) {
+      logger.warn(`Failed to stat screenshot during cleanup: ${filePath}`, error);
+      return undefined;
+    }
+  }
+
+  private async evictCandidates(
+    candidates: string[],
+    files: ScreenshotCacheFile[],
+    isReferenced: (path: string) => boolean,
+  ): Promise<ScreenshotCacheFile[]> {
+    const removed = new Set<string>();
+    for (const filePath of candidates) {
+      // Recheck after every await: a path may have been returned since selection.
+      if (isReferenced(filePath)) {
+        continue;
       }
-    } catch (err) {
-      logger.warn("Failed to cleanup screenshot cache:", err);
+      const deleted = await this.pathProtection.removeIfUnprotected(filePath, () => {
+        // Screenshot completion can add a cache reference after plan selection.
+        if (getScreenshotStateStore().getReferencedScreenshotPaths().includes(filePath)) {
+          return Promise.resolve(false);
+        }
+        return this.removeCachedScreenshot(filePath);
+      });
+      if (deleted) {
+        removed.add(filePath);
+      }
+    }
+    return files.filter((file) => !removed.has(file.path));
+  }
+
+  private async removeCachedScreenshot(filePath: string): Promise<boolean> {
+    try {
+      await this.fileSystem.unlink(filePath);
+      logger.debug(`Removed cached screenshot: ${filePath}`);
+      return true;
+    } catch (error) {
+      logger.warn(`Failed to remove cached screenshot: ${filePath}`, error);
+      return false;
     }
   }
 

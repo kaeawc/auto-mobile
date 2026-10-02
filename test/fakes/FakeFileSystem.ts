@@ -172,7 +172,7 @@ export class FakeFileSystem implements FileSystem {
     return this.existsSync(filePath);
   }
 
-  async stat(filePath: string): Promise<{ size: number; mtimeMs: number }> {
+  async stat(filePath: string): Promise<{ size: number; mtimeMs: number; isFile(): boolean }> {
     const normalizedPath = this.normalizePath(filePath);
     const content = this.files.get(normalizedPath);
     if (content !== undefined) {
@@ -181,12 +181,17 @@ export class FakeFileSystem implements FileSystem {
       // mis-report. Measure bytes.
       return {
         size: Buffer.byteLength(content, "utf8"),
+        isFile: () => true,
         mtimeMs: this.fileMtimes.get(normalizedPath) ?? 0,
       };
     }
     const binaryContent = this.binaryFiles.get(normalizedPath);
     if (binaryContent !== undefined) {
-      return { size: binaryContent.length, mtimeMs: this.fileMtimes.get(normalizedPath) ?? 0 };
+      return {
+        isFile: () => true,
+        size: binaryContent.length,
+        mtimeMs: this.fileMtimes.get(normalizedPath) ?? 0,
+      };
     }
     throw new Error(`File not found: ${normalizedPath}`);
   }

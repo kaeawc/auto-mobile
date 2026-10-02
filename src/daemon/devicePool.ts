@@ -1504,6 +1504,7 @@ export class DevicePool {
     this.devices.delete(deviceId);
     // Full: removal retires this runtime; onDeviceRemoved prunes stream state after registry retirement.
     this.notifyDeviceFramesInvalidated(deviceId);
+    this.sessionManager.retireClockRestoration(deviceId);
     displayTransitions.reset(deviceId);
     getObserveCacheStore().clear(deviceId);
     this.refreshCoordinator.recordDeviceRemoval(deviceId);

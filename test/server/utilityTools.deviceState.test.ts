@@ -4,6 +4,7 @@ import Ajv from "ajv";
 import fs from "node:fs";
 import path from "node:path";
 import { registerUtilityTools } from "../../src/server/utilityTools";
+import { ActionableError } from "../../src/models/ActionableError";
 import { DeviceState } from "../../src/features/utility/DeviceState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -195,6 +196,66 @@ describe("device state tools", () => {
       capability: "unsupported",
       requestedProfile: "3g",
     });
+  });
+
+  test("rejects invalid clock input before the handler can capture or mutate state", async () => {
+    const getSpy = spyOn(DeviceState.prototype, "getBiometricEnrollmentState");
+    const setSpy = spyOn(DeviceState.prototype, "setState");
+    try {
+      await expect(
+        ToolRegistry.getTool("setDeviceState")!.deviceAwareHandler!(
+          createBootedDevice("emulator-5554"),
+          {
+            clock: { mode: "set", instant: "2026-10-01T00:00:00" },
+            biometrics: { enrollment: "enrolled" },
+          },
+        ),
+      ).rejects.toBeInstanceOf(ActionableError);
+      expect(getSpy).not.toHaveBeenCalled();
+      expect(setSpy).not.toHaveBeenCalled();
+    } finally {
+      getSpy.mockRestore();
+      setSpy.mockRestore();
+    }
+  });
+
+  test("threads clock through the setter and advertises its strict input union", async () => {
+    const setTool = ToolRegistry.getTool("setDeviceState");
+    const response = await setTool!.deviceAwareHandler!(createBootedDevice("physical-android"), {
+      clock: { mode: "reset" },
+    });
+    const payload = JSON.parse((response as { content: Array<{ text: string }> }).content[0].text);
+    expect(payload.clock).toMatchObject({ supported: false, capability: "unsupported" });
+    const definitions = JSON.parse(
+      fs.readFileSync("schemas/tool-definitions.json", "utf8"),
+    ) as Array<{
+      name: string;
+      description: string;
+      inputSchema: { properties: Record<string, unknown> };
+    }>;
+    const definition = definitions.find((value) => value.name === "setDeviceState")!;
+    const validate = new Ajv({ strict: false, validateFormats: false }).compile(
+      definition.inputSchema.properties.clock as object,
+    );
+    expect(validate({ mode: "set", instant: "2026-10-01T00:00:00Z" })).toBe(true);
+    expect(validate({ mode: "set", instant: "2026-10-01T00:00:00" })).toBe(false);
+    expect(validate({ mode: "advance", byMs: 315360000000 })).toBe(true);
+    expect(validate({ mode: "advance", byMs: 315360000001 })).toBe(false);
+    expect(validate({ mode: "advance", byMs: 1.5 })).toBe(false);
+    expect(validate({ mode: "reset", instant: "2026-10-01T00:00:00Z" })).toBe(false);
+    for (const warning of [
+      "TLS/certificate validation",
+      "token expiry",
+      "freshness checks",
+      "rootable Android emulators",
+      "Play Store images",
+      "session release",
+    ]) {
+      expect(definition.description).toContain(warning);
+    }
+    expect(() =>
+      ToolRegistry.getTool("getDeviceState")!.schema.parse({ include: ["clock"] }),
+    ).not.toThrow();
   });
 
   test("threads location through the setDeviceState handler", async () => {

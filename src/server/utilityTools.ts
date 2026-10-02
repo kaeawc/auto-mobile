@@ -1,3 +1,11 @@
+import { defaultTimer } from "../utils/SystemTimer";
+import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
+import {
+  deviceClockInputSchema,
+  writeDeviceClock,
+  validateDeviceClockInput,
+} from "../features/utility/DeviceClock";
+import { runSessionClockMutation } from "./sessionClock";
 import { toActionableError } from "../models/ActionableError";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
@@ -399,6 +407,11 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
         networkCondition: networkConditionInputSchema
           .optional()
           .describe("Device-wide network condition to apply (Android emulator only)."),
+        clock: deviceClockInputSchema
+          .optional()
+          .describe(
+            "Set the real clock within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z, advance by integer byMs >= 1000 with second-level precision, or reset to host time and original auto_time (1 without a recorded slot). Rootable Android emulators only.",
+          ),
         location: locationInputSchema
           .optional()
           .describe(
@@ -412,7 +425,8 @@ export const setDeviceStateSchema = withJsonSchemaOverride(
       values.biometrics !== undefined ||
       values.connectivity !== undefined ||
       values.networkCondition !== undefined ||
-      values.location !== undefined,
+      values.location !== undefined ||
+      values.clock !== undefined,
     {
       message: "At least one device state field must be provided",
     },
@@ -828,11 +842,29 @@ export function registerUtilityTools() {
   };
 
   const setDeviceStateHandler = async (device: BootedDevice, args: SetDeviceStateArgs) => {
-    const deviceState = new DeviceState(device);
+    if (args.clock !== undefined) {
+      validateDeviceClockInput(args.clock);
+    }
     const sessionManager =
       args.sessionUuid && DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
+    const deviceState = new DeviceState(device, {
+      clockMutation: (input, adapter, prepared) =>
+        runSessionClockMutation(sessionManager, args.sessionUuid, device.deviceId, (slot) =>
+          writeDeviceClock(
+            device,
+            adapter,
+            input,
+            slot,
+            {
+              hostClock: defaultTimer,
+              invalidate: (deviceId) => invalidateDisplayCaches(deviceId, "Device clock changed"),
+            },
+            prepared,
+          ),
+        ),
+    });
     // Single decision for whether an applied networkCondition needs a session
     // restore slot: a degrading request on an Android emulator (issue #6012).
     const registerNetworkRestore = shouldRegisterNetworkRestore(device, args);
@@ -885,6 +917,7 @@ export function registerUtilityTools() {
           connectivity: args.connectivity,
           networkCondition: args.networkCondition,
           location: args.location,
+          clock: args.clock,
         },
         capture.failure,
       );
@@ -895,37 +928,22 @@ export function registerUtilityTools() {
     }
 
     const mutation = () =>
-      deviceState.setState({
+      applyStateTracked({
         doNotDisturb: args.doNotDisturb,
         biometrics: args.biometrics,
         connectivity: args.connectivity,
         networkCondition: args.networkCondition,
         location: args.location,
+        clock: args.clock,
       });
 
-    // Route network-bearing requests through runSessionNetworkMutation (slot
-    // registered first, mutation tracked). The biometric-wrapper path is used
-    // only when biometrics succeeded (iOS) — where networkCondition is always
-    // unsupported and registers no slot — so it needs no network tracking.
-    let result: DeviceStateResult;
-    if (!args.biometrics && args.networkCondition) {
-      result = await runSessionNetworkMutation(
-        sessionManager,
-        args.sessionUuid,
-        device.deviceId,
-        registerNetworkRestore,
-        mutation,
-        args.networkCondition.expiresInSeconds,
-      );
-    } else {
-      result = await runSessionBiometricMutation(
-        capture.sessionManager,
-        args.sessionUuid,
-        device.deviceId,
-        capture.initialEnrollment,
-        mutation,
-      );
-    }
+    const result = await runSessionBiometricMutation(
+      capture.sessionManager,
+      args.sessionUuid,
+      device.deviceId,
+      capture.initialEnrollment,
+      mutation,
+    );
 
     return createJSONToolResponse({
       message: result.success
@@ -962,7 +980,8 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state: Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack.",
+    "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, and device-wide network condition. Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack." +
+      " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
     getDeviceStateHandler,
     { defaultEnabled: false },
@@ -970,7 +989,8 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind.",
+    "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator or iOS Simulator, iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind." +
+      " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

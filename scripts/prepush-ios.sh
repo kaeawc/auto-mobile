@@ -5,7 +5,7 @@
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
+  cat << 'EOF'
 Usage: scripts/prepush-ios.sh
 
 Runs the pinned SwiftFormat lint, SwiftLint, XCTestRunner build, and its
@@ -27,7 +27,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/.." && pwd)"
 
 repo_root_status=0
-repo_root="$(git -C "${project_root}" rev-parse --show-toplevel 2>/dev/null)" || repo_root_status=$?
+repo_root="$(git -C "${project_root}" rev-parse --show-toplevel 2> /dev/null)" || repo_root_status=$?
 if [[ ${repo_root_status} -ne 0 ]]; then
   echo "prepush-ios.sh: '${project_root}' is not inside a git checkout" >&2
   exit 1
@@ -40,6 +40,14 @@ source "${project_root}/scripts/swiftlint/swiftlint_version.sh"
 # shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
 source "${project_root}/scripts/ios/swift_test_counts.sh"
 
+if [[ ! -f "${project_root}/scripts/ios/xctestrunner_test_filter.sh" ]]; then
+  echo "prepush-ios.sh: missing helper scripts/ios/xctestrunner_test_filter.sh (copy it alongside prepush-ios.sh in fixtures)" >&2
+  exit 1
+fi
+# shellcheck source=scripts/ios/xctestrunner_test_filter.sh
+# shellcheck disable=SC1091
+source "${project_root}/scripts/ios/xctestrunner_test_filter.sh"
+
 require_pinned_swiftformat_version
 
 # Pre-push runs after a commit, so compare the branch to its merge-base with
@@ -47,7 +55,7 @@ require_pinned_swiftformat_version
 # the command useful for a repository whose default remote uses another name.
 base_ref="${PREPUSH_IOS_BASE_REF:-origin/main}"
 base_ref_status=0
-git -C "${repo_root}" rev-parse --verify "${base_ref}^{commit}" >/dev/null 2>&1 || base_ref_status=$?
+git -C "${repo_root}" rev-parse --verify "${base_ref}^{commit}" > /dev/null 2>&1 || base_ref_status=$?
 if [[ ${base_ref_status} -ne 0 ]]; then
   echo "prepush-ios.sh: base ref '${base_ref}' not found; set PREPUSH_IOS_BASE_REF to a valid ref" >&2
   exit 1
@@ -66,7 +74,7 @@ done < <(
 
 git_diff_status=0
 if [[ -s "${git_diff_status_file}" ]]; then
-  git_diff_status="$(<"${git_diff_status_file}")"
+  git_diff_status="$(< "${git_diff_status_file}")"
 fi
 if [[ ${git_diff_status} -ne 0 ]]; then
   echo "prepush-ios.sh: git diff against '${base_ref}' failed" >&2
@@ -99,12 +107,6 @@ bash "${project_root}/scripts/ios/api-dump.sh" --check
 
 cd "${project_root}/ios/XCTestRunner"
 swift build
-# RemindersAddPlanTests extends RemindersIntegrationBase, which requires a
-# booted Simulator and a live daemon, so it remains excluded from this run.
-SIMULATOR_DEPENDENT_TEST_CLASSES=(
-  RemindersAddPlanTests
-)
-
 swift_test_list_status=0
 if swift_test_list_output="$(swift test list 2>&1)"; then
   :
@@ -117,40 +119,8 @@ if [[ ${swift_test_list_status} -ne 0 ]]; then
   exit 1
 fi
 
-test_classes=()
-while IFS= read -r test_class; do
-  [[ -z "${test_class}" ]] && continue
-  simulator_dependent=false
-  for excluded_class in "${SIMULATOR_DEPENDENT_TEST_CLASSES[@]}"; do
-    if [[ "${test_class}" == "${excluded_class}" ]]; then
-      simulator_dependent=true
-      break
-    fi
-  done
-  if [[ "${simulator_dependent}" == false ]]; then
-    already_included=false
-    for included_class in ${test_classes[@]+"${test_classes[@]}"}; do
-      if [[ "${test_class}" == "${included_class}" ]]; then
-        already_included=true
-        break
-      fi
-    done
-    if [[ "${already_included}" == false ]]; then
-      test_classes+=("${test_class}")
-    fi
-  fi
-done < <(
-  printf '%s\n' "${swift_test_list_output}" | sed -n \
-    -e 's/^XCTestRunnerTests\.\([^/]*\)\/.*/\1/p' \
-    -e 's/^XCTestRunnerTests\.\([^/(]*\)(.*)$/\1/p'
-)
-
-if [[ ${#test_classes[@]} -eq 0 ]]; then
-  echo "prepush-ios.sh: swift test list produced no simulator-free XCTestRunnerTests classes after excluding the denylist; check swift test list output and SIMULATOR_DEPENDENT_TEST_CLASSES" >&2
-  exit 1
-fi
-
-test_filter="XCTestRunnerTests\\.($(IFS='|'; printf '%s' "${test_classes[*]}"))"
+xctestrunner_build_test_filter "${swift_test_list_output}"
+test_filter="${XCTESTRUNNER_TEST_FILTER}"
 if test_output="$(swift test -Xswiftc -warnings-as-errors \
   --filter "${test_filter}" \
   2>&1)"; then

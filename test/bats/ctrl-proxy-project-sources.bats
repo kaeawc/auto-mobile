@@ -65,6 +65,7 @@ PBX
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${fixture}/scripts/swiftformat/"
   cp "${repo_root}/scripts/swiftlint/swiftlint_version.sh" "${fixture}/scripts/swiftlint/"
   cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${fixture}/scripts/ios/"
+  cp "${repo_root}/scripts/ios/xctestrunner_test_filter.sh" "${fixture}/scripts/ios/"
   printf '%s\n' '#!/usr/bin/env bash' 'exit 0' > "${fixture}/scripts/ios/api-dump.sh"
   chmod +x "${fixture}/scripts/ios/api-dump.sh"
   cat > "${fixture}/scripts/ios/ctrl-proxy-build-for-testing.sh" <<'RUNNER'

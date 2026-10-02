@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers/workflowSteps";
+import {
+  indexOfNamed,
+  indexOfWaitOn,
+  loadJobSteps,
+  loadWorkflow,
+  stepNamed,
+} from "../helpers/workflowSteps";
 
 // Guards issue #4128: three independent wins in nightly.yml.
 //
@@ -57,5 +63,48 @@ describe("#4128 nightly — XcodeGen overlap in ios-xcode-build-sweep", () => {
     expect(waitIndex).toBeGreaterThanOrEqual(0);
     expect(waitIndex).toBeLessThan(generateIndex);
     expect(generateIndex).toBeLessThan(buildIndex);
+  });
+});
+
+describe("nightly XCTestRunner Thread Sanitizer lane", () => {
+  const jobId = "xctestrunner-tsan";
+  const workflow = loadWorkflow(WORKFLOW);
+  const job = workflow.jobs?.[jobId];
+  const steps = loadJobSteps(WORKFLOW, jobId);
+
+  test("is an independent advisory macOS job with a bounded budget", () => {
+    expect(job).toHaveProperty("continue-on-error", true);
+    expect(job?.["runs-on"]).toBe("macos-26");
+    expect(job?.["timeout-minutes"]).toBe(45);
+    expect(job?.needs).toBeUndefined();
+    for (const other of Object.values(workflow.jobs ?? {})) {
+      const needs = other?.needs;
+      expect(Array.isArray(needs) ? needs : needs ? [needs] : []).not.toContain(jobId);
+    }
+    for (const file of ["pull_request.yml", "merge.yml"]) {
+      expect(loadWorkflow(`.github/workflows/${file}`).jobs?.[jobId]).toBeUndefined();
+    }
+  });
+
+  test("selects Xcode 26.5 and runs the diagnostic before the job deadline", () => {
+    const xcode = stepNamed(steps, "Select Xcode 26.5");
+    expect(xcode?.uses).toBe("maxim-lobanov/setup-xcode@v1");
+    expect(xcode?.with?.["xcode-version"]).toBe("26.5");
+    const run = stepNamed(steps, "Run XCTestRunner Thread Sanitizer");
+    expect(run?.run).toBe("bash scripts/ci/xctestrunner-tsan.sh");
+    const timeout = Number(run?.env?.XCTESTRUNNER_TSAN_TIMEOUT_SECONDS);
+    expect(timeout).toBeGreaterThan(0);
+    expect(timeout).toBeLessThan((job?.["timeout-minutes"] ?? 0) * 60);
+  });
+
+  test("always uploads logs and contains no simulator or daemon steps", () => {
+    const upload = stepNamed(steps, "Upload XCTestRunner Thread Sanitizer logs");
+    expect(upload?.uses).toBe("actions/upload-artifact@v6");
+    expect(upload?.if).toBe("always()");
+    expect(upload?.with?.path).toBe("scratch/xctestrunner-tsan/");
+    for (const step of steps) {
+      expect(step.run ?? "").not.toMatch(/simctl|boot-device|ensure-ios-simulator-runtime|daemon/i);
+      expect(step.uses ?? "").not.toContain("ensure-ios-simulator-runtime");
+    }
   });
 });

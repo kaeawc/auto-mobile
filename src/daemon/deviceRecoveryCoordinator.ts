@@ -41,6 +41,7 @@ export interface DeviceRecoveryPoolPort {
   ): Promise<void>;
   getPooledDevice(id: string): PooledDevice | undefined;
   getSessionForDevice(id: string): string | null | undefined;
+  waitForReleasingSession(sessionId: string): Promise<void> | undefined;
   getAndroidSessionPreservingRecoveryTarget(
     id: string,
     expected: PooledDevice | undefined,
@@ -163,6 +164,7 @@ export class DeviceRecoveryCoordinator {
     }
     const target = this.pool.getAndroidSessionPreservingRecoveryTarget(deviceId, expectedDevice);
     if (!target) {
+      await this.finishIncidentAfterSessionRelease(candidateSessionId, incidentId);
       return "not-attempted";
     }
     const { device, session } = target;
@@ -207,6 +209,7 @@ export class DeviceRecoveryCoordinator {
     }
     const target = this.pool.getSessionPreservingRecoveryTarget(deviceId, expectedDevice);
     if (!target || !this.pool.isIOSSimulatorContinuityDevice(target.device)) {
+      await this.finishIncidentAfterSessionRelease(candidateSessionId, incidentId);
       return "not-attempted";
     }
     const { device, session } = target;
@@ -218,6 +221,22 @@ export class DeviceRecoveryCoordinator {
     } finally {
       this.clearSessionPreservingRecoveryIfCurrent(session.sessionId, entry);
     }
+  }
+
+  private async finishIncidentAfterSessionRelease(
+    sessionId: string | null | undefined,
+    incidentId: string | undefined,
+  ): Promise<void> {
+    if (!sessionId) {
+      return;
+    }
+    // An inadmissible releasing session needs teardown settlement, not device recovery.
+    const release = this.pool.waitForReleasingSession(sessionId);
+    if (!release) {
+      return;
+    }
+    await release;
+    await this.pool.finishEmulatorLossIncident(incidentId, "not-attempted");
   }
 
   async retryDueDeferredSessionRecoveries(): Promise<void> {

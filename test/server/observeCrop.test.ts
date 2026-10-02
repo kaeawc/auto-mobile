@@ -27,6 +27,7 @@ import { loadAndroidHomeObserve } from "../fixtures/observe/observeFixture";
 import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
 
 import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
 import {
@@ -80,8 +81,8 @@ function register(extra: Parameters<typeof registerObserveTools>[0] = {}) {
           }
           return fake.execute(options);
         },
-        executeDeviceRead: async (_signal, mode, _options, fresh) => {
-          expect(fresh).toBe(true);
+        executeDeviceRead: async (_signal, mode, _encoding, options) => {
+          expect(options).toEqual({ requireFreshScreenshot: true, timeoutMs: undefined });
           modes.push(mode);
           captures++;
           return current;
@@ -144,6 +145,49 @@ afterEach(() => {
 });
 
 describe("observe crop validation", () => {
+  test.each([false, true])(
+    "all with crop rejects before any capture (device read: %s)",
+    async (deviceRead) => {
+      const calls = { createScreen: 0, execute: 0, executeDeviceRead: 0, capture: 0 };
+      register({
+        createScreen: () => {
+          calls.createScreen++;
+          return {
+            execute: async () => {
+              calls.execute++;
+              return current;
+            },
+            executeDeviceRead: async () => {
+              calls.executeDeviceRead++;
+              return current;
+            },
+            captureScreenshot: async () => {
+              calls.capture++;
+            },
+            appendRawViewHierarchy: fake.appendRawViewHierarchy.bind(fake),
+            getMostRecentCachedObserveResult: fake.getMostRecentCachedObserveResult.bind(fake),
+          };
+        },
+      });
+      const args = {
+        deviceId: device.deviceId,
+        sessionUuid: deviceRead ? undefined : "crop-session",
+        display: "all",
+        crop: { rect },
+      };
+      expect(observeSchema.safeParse(args).success).toBe(false);
+      // Bypass schema parsing to exercise the handler's independent pre-capture validation.
+      await expect(
+        runWithToolSelectionContext({ explicitObserveDeviceRead: deviceRead }, () =>
+          ToolRegistry.getTool("observe")!.deviceAwareHandler!(device, args),
+        ),
+      ).rejects.toThrow("observe crop requires one display");
+      expect(calls).toEqual({ createScreen: 0, execute: 0, executeDeviceRead: 0, capture: 0 });
+      expect(captures).toBe(0);
+      expect(writes).toEqual([]);
+    },
+  );
+
   test.each([
     { crop: {} },
     { crop: { element: { text: "Gmail" }, rect } },
@@ -440,6 +484,21 @@ describe("observe crop capture and output", () => {
     expect(restoreNotify).not.toHaveBeenCalled();
   });
 
+  test("crop deviceId read keeps strict freshness and leaves aggregate timeout undefined", async () => {
+    const args = {
+      deviceId: device.deviceId,
+      crop: { rect },
+      [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: timer.now() + 500,
+    };
+    const response = await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
+      ToolRegistry.getTool("observe")!.deviceAwareHandler!(device, args),
+    );
+    // The shared fake asserts both fields of the fourth argument, including timeoutMs: undefined.
+    expect(getStructuredField(response, "crop")).toBeDefined();
+    expect(captures).toBe(1);
+    expect(modes).toEqual(["settled"]);
+  });
+
   test.each(["full", "skeleton"] as const)(
     "hierarchy/elements remain byte-identical under %s projection",
     async (project) => {
@@ -644,9 +703,46 @@ describe("observe crop failures", () => {
       },
       timer,
     );
-    await expect(screen.executeDeviceRead(undefined, "settled", undefined, true)).rejects.toThrow(
-      "observe crop screenshot capture failed",
+    await expect(
+      screen.executeDeviceRead(undefined, "settled", undefined, { requireFreshScreenshot: true }),
+    ).rejects.toThrow("observe crop screenshot capture failed");
+  });
+
+  test("device-read options retain strict fresh failure alongside an aggregate timeout budget", async () => {
+    let captureCalls = 0;
+    const screen = new RealObserveScreen(
+      device,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+      {
+        deviceReadOnly: true,
+        hierarchyCapture: {
+          capture: async () => ({
+            captureId: "fixture",
+            platform: "android",
+            requestedFreshness: "fresh",
+            receivedAt: timer.now(),
+            hierarchy: fixture.viewHierarchy!,
+            nodes: [],
+          }),
+        },
+        screenshot: {
+          execute: async () => {
+            captureCalls++;
+            return { success: false, error: "capture unavailable" };
+          },
+          generateScreenshotPath: () => "/fake/new.png",
+          getActivityHash: async () => "",
+        },
+      },
+      timer,
     );
+    await expect(
+      screen.executeDeviceRead(undefined, "settled", undefined, {
+        requireFreshScreenshot: true,
+        timeoutMs: 500,
+      }),
+    ).rejects.toThrow("observe crop screenshot capture failed");
+    expect(captureCalls).toBe(1);
   });
 
   test("secure default writer saves crop PNG with owner-only permissions", async () => {

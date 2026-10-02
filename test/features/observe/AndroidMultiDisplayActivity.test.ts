@@ -80,6 +80,17 @@ describe("display-scoped resumed activity", () => {
     ).toBeUndefined();
   });
 
+  test("legacy foreground output cannot identify a non-default display", () => {
+    const output = filteredForegroundOutput(fixture("single-display-phone.log")).replace(
+      /^Display #.*\n/gm,
+      "",
+    );
+    expect(parseResumedActivityForDisplay(output).activity?.packageName).toBe(
+      "com.android.contacts",
+    );
+    expect(parseResumedActivityForDisplay(output, 2).activity).toBeUndefined();
+  });
+
   test("foreground identity uses the same display-scoped activity", async () => {
     const output = filteredForegroundOutput(fixture("multi-display-foldable.log"));
     const client = new (class extends AdbClient {
@@ -103,6 +114,13 @@ describe("display-scoped resumed activity", () => {
       activityName: "com.google.android.gms.auth.uiflows.minutemaid.MinuteMaidActivity",
       displayCount: 2,
     });
+    expect(await client.getForegroundApp(undefined, { displayId: 2 })).toEqual({
+      packageName: "com.android.settings",
+      userId: 0,
+      activityName: "com.android.settings.Settings",
+      displayCount: 2,
+    });
+    expect(await client.getForegroundApp(undefined, { displayId: 3 })).toBeNull();
   });
 
   test("observe pairs the default-display hierarchy with its resumed activity", async () => {

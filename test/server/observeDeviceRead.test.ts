@@ -44,6 +44,9 @@ import {
 } from "../../src/server/directSessionDeviceRegistry";
 import { getStructuredField } from "../../src/utils/toolUtils";
 import { snapshotReferences } from "../../src/features/observe/SnapshotReferenceStore";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../../src/daemon/constants";
+import { defaultTimer } from "../../src/utils/SystemTimer";
+import type { DeviceReadOptions } from "../../src/features/observe/interfaces/ObserveScreen";
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const originalManager = Reflect.get(ToolRegistry, "deviceSessionManager");
@@ -71,6 +74,63 @@ afterEach(() => {
 });
 
 describe("session-free observe device read", () => {
+  test("all deviceId read forwards the remaining deadline minus the serialization margin", async () => {
+    const timer = new FakeTimer();
+    timer.advanceTime(1_000);
+    const now = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
+    const received: Array<DeviceReadOptions | undefined> = [];
+    registerObserveTools({
+      timer,
+      createScreen: (_device, display) => {
+        expect(display).toBe("all");
+        return {
+          executeDeviceRead: async (_signal, screenshot, encoding, options) => {
+            expect(screenshot).toBe("settled");
+            expect(encoding).toBeUndefined();
+            received.push(options);
+            return loadAndroidHomeObserve().observe;
+          },
+          execute: async () => {
+            throw new Error("Session capture must not start");
+          },
+          appendRawViewHierarchy: async () => {},
+          getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
+        };
+      },
+    });
+    try {
+      await runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
+        ToolRegistry.getTool("observe")!.deviceAwareHandler!(device, {
+          deviceId: device.deviceId,
+          display: "all",
+          [INTERNAL_MCP_REQUEST_DEADLINE_PARAM]: timer.now() + 750,
+        }),
+      );
+      expect(received).toEqual([{ requireFreshScreenshot: false, timeoutMs: 650 }]);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  test.each([
+    [{ waitFor: { text: "Home" } }, "waitFor"],
+    [{ includeScreenshotImage: true }, "includeScreenshotImage"],
+    [{ raw: true }, "raw"],
+  ] as const)("all rejects %j with an actionable error before capture", async (options, option) => {
+    let captures = 0;
+    registerObserveTools({
+      deviceReadAccess: { listBooted: async () => [device], isAuthorized: () => true },
+      createScreen: () => {
+        captures++;
+        throw new Error("Capture must not start");
+      },
+    });
+    const pending = callDeviceRead({ deviceId: device.deviceId, display: "all", ...options });
+    await expect(pending).rejects.toBeInstanceOf(ActionableError);
+    await expect(pending).rejects.toThrow(`cannot be combined with ${option}`);
+    expect(captures).toBe(0);
+  });
+
   test.each([
     [
       { waitFor: { text: "Home" } },
@@ -331,6 +391,55 @@ describe("session-free observe device read", () => {
         .filter((entry) => entry.name !== "observe")
         .every((entry) => !Object.hasOwn(entry.inputSchema.properties ?? {}, "deviceId")),
     ).toBe(true);
+  });
+
+  test("session all omits snapshot references and resource notifications", async () => {
+    const sessionUuid = "aggregate-owner";
+    const manager = new FakeDeviceSessionManager();
+    manager.setConnectedDevices([device]);
+    Reflect.set(ToolRegistry, "deviceSessionManager", manager);
+    registerDirectSessionDevice(sessionUuid, device);
+    const capture = spyOn(snapshotReferences, "capture");
+    const notify = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue();
+    const recorder = Reflect.get(ToolRegistry, "navigationToolCallRecorder");
+    const record = spyOn(recorder, "record").mockImplementation(() => {});
+    const restore = ToolRegistry.setPipelineOverridesForTesting({
+      auditRunner: {
+        run: async (input) => input.handler(input.device, input.args, input.progress, input.signal),
+      },
+    });
+    const observation = { ...loadAndroidHomeObserve().observe, backStack: undefined };
+    try {
+      registerObserveTools({
+        createScreen: (_device, display) => {
+          expect(display).toBe("all");
+          return {
+            execute: async () => observation,
+            executeDeviceRead: async () => {
+              throw new Error("Must retain session routing");
+            },
+            appendRawViewHierarchy: async () => {},
+            getMostRecentCachedObserveResult: async () => observation,
+          };
+        },
+      });
+      const result = await callDeviceRead({
+        deviceId: device.deviceId,
+        sessionUuid,
+        display: "all",
+        raw: false,
+        includeScreenshotImage: false,
+        screenshot: "none",
+      });
+      expect(getStructuredField(result, "snapshotReference")).toBeUndefined();
+      expect(capture).not.toHaveBeenCalled();
+      expect(notify).not.toHaveBeenCalled();
+    } finally {
+      restore();
+      record.mockRestore();
+      capture.mockRestore();
+      notify.mockRestore();
+    }
   });
 
   test("matching deviceId and sessionUuid use the session observe pipeline", async () => {

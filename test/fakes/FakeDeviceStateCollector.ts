@@ -19,12 +19,23 @@ export class FakeDeviceStateCollector implements ObservedState {
 
   constructor(private readonly populateState = true) {}
 
-  async collectForegroundIdentity(): Promise<string | undefined> {
-    return undefined;
+  readonly foregroundSnapshots = new Map<
+    number,
+    Awaited<ReturnType<DeviceStateCollector["collectForegroundSnapshot"]>>
+  >();
+
+  async collectForegroundIdentity(
+    signal?: AbortSignal,
+    options: { displayId?: number } = {},
+  ): Promise<string | undefined> {
+    return (await this.collectForegroundSnapshot(signal, options))?.packageName;
   }
 
-  async collectForegroundSnapshot(): Promise<null> {
-    return null;
+  async collectForegroundSnapshot(
+    _signal?: AbortSignal,
+    options: { displayId?: number } = {},
+  ): ReturnType<DeviceStateCollector["collectForegroundSnapshot"]> {
+    return this.foregroundSnapshots.get(options.displayId ?? 0) ?? null;
   }
 
   async collectBackStack(result: ObserveResult): Promise<void> {
@@ -47,7 +58,7 @@ export class FakeDeviceStateCollector implements ObservedState {
     }
   }
 
-  async collectActiveWindow(result: ObserveResult): Promise<void> {
+  async collectActiveWindow(result: ObserveResult, _readOnly = false): Promise<void> {
     this.activeWindowCalls++;
     if (this.populateState) {
       result.activeWindow = {

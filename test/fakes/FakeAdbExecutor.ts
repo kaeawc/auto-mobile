@@ -38,7 +38,11 @@ export class FakeAdbExecutor implements AdbExecutor {
   private deviceStates: AdbDeviceState[] = [];
   private users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
   private usersSequence: AndroidUser[][] | null = null;
-  private foregroundApp: { packageName: string; userId: number } | null = null;
+  private foregroundApp: Awaited<ReturnType<AdbExecutor["getForegroundApp"]>> = null;
+  private readonly displayForegroundApps = new Map<
+    number,
+    Awaited<ReturnType<AdbExecutor["getForegroundApp"]>>
+  >();
   private deviceTimestampMs: number | null = null;
   private deviceTimestampMsSequence: number[] | null = null;
   private deviceTimestampSource: DeviceTimestampSource | null = null;
@@ -164,7 +168,15 @@ export class FakeAdbExecutor implements AdbExecutor {
    * Configure foreground app
    * @param app - Foreground app info or null
    */
-  setForegroundApp(app: { packageName: string; userId: number } | null): void {
+  setForegroundApp(
+    app: { packageName: string; userId: number } | null,
+    options: { displayId?: number } = {},
+  ): void {
+    const displayId = options.displayId ?? 0;
+    if (displayId !== 0) {
+      this.displayForegroundApps.set(displayId, app);
+      return;
+    }
     this.foregroundApp = app;
   }
 
@@ -452,8 +464,14 @@ export class FakeAdbExecutor implements AdbExecutor {
     return this.users;
   }
 
-  async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
-    return this.foregroundApp;
+  async getForegroundApp(
+    _signal?: AbortSignal,
+    options?: number | { timeoutMs?: number; displayId?: number },
+  ): Promise<{ packageName: string; userId: number } | null> {
+    const displayId = typeof options === "object" ? (options.displayId ?? 0) : 0;
+    return displayId === 0
+      ? this.foregroundApp
+      : (this.displayForegroundApps.get(displayId) ?? null);
   }
 
   async getDeviceTimestampMs(): Promise<number> {

@@ -174,6 +174,12 @@ export interface AccessibilityHierarchy {
  */
 export type AndroidPerfTiming = PerfTiming;
 
+/** Per-call display routing and owner-state preservation for observer hierarchy reads. */
+export interface ObserverHierarchyRequestOptions {
+  displayId?: number;
+  preserveDisplayState?: boolean;
+}
+
 /**
  * Per-call diagnostics out-parameter for `CtrlProxyHierarchy.requestHierarchySync` (issue #3062).
  *
@@ -360,7 +366,7 @@ export interface A11yLaunchIntentResult extends BaseResult {
  * Extended context for hierarchy delegate with additional state access.
  */
 export interface HierarchyDelegateContext extends DelegateContext {
-  markObserverHierarchyRequest?(requestId: string): void;
+  markObserverHierarchyRequest?(requestId: string, options?: { isolateResponse?: boolean }): void;
   unmarkObserverHierarchyRequest?(requestId: string): void;
   /** The device this client is connected to */
   device: BootedDevice;

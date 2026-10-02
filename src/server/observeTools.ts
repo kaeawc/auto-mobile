@@ -15,6 +15,8 @@ import { z } from "zod/v4";
 import { screenshotOptionsSchema } from "../features/observe/screenshot/screenshotOptions";
 import { ToolRegistry } from "./toolRegistry";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
+import { INTERNAL_MCP_REQUEST_DEADLINE_PARAM } from "../daemon/constants";
+import { assertAllDisplayObserveSupported } from "../features/observe/DisplaySelection";
 import {
   assertObservationReadAccess,
   resolveDeviceForObservationRead,
@@ -615,7 +617,7 @@ const observeBaseSchema = withJsonSchemaOverride(
           .string()
           .optional()
           .describe(
-            "Panel key, role (inner, cover, rear, external), or active; all is not supported yet",
+            "Panel key, role (inner, cover, rear, external), active, or opt-in Android all. All adds per-panel displays while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
           ),
         project: z
           .enum(["full", "skeleton"])
@@ -1856,11 +1858,11 @@ function attachSnapshotReference(deviceId: string, result: ObserveResult): void 
   }
 }
 
-function assertObserveOptionsSupported(
-  platform: BootedDevice["platform"],
-  args: ObserveArgs,
-  deviceRead: boolean,
-): void {
+function prepareObserveOptions(platform: BootedDevice["platform"], args: ObserveArgs) {
+  const deviceRead = getToolSelectionContext()?.explicitObserveDeviceRead === true;
+  if (args.display === "all") {
+    assertAllDisplayObserveSupported(platform, args);
+  }
   if (deviceRead) {
     if (args.waitFor !== undefined) {
       throw new ActionableError(
@@ -1881,6 +1883,25 @@ function assertObserveOptionsSupported(
     }
   }
   assertActiveWindowWaitForSupportedOnPlatform(platform, args.waitFor);
+  const screenshot = requestedScreenshotMode(args);
+  return {
+    deviceRead,
+    aggregate: args.display === "all",
+    timeoutMs: aggregateObserveTimeoutMs(args),
+    screenshotMode: deviceRead ? (screenshot ?? "settled") : screenshot,
+    encoding: args.screenshotOptions,
+  };
+}
+
+/** Leave a short serialization window before the enclosing observe request expires. */
+function aggregateObserveTimeoutMs(args: ObserveArgs): number | undefined {
+  if (args.display !== "all") {
+    return undefined;
+  }
+  const deadline = (args as Record<string, unknown>)[INTERNAL_MCP_REQUEST_DEADLINE_PARAM];
+  return typeof deadline === "number" && Number.isFinite(deadline)
+    ? Math.max(0, deadline - defaultTimer.now() - 100)
+    : undefined;
 }
 
 function createObserveWaitResponse(
@@ -1943,16 +1964,15 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     _progress?: unknown,
     signal?: AbortSignal,
   ): Promise<ObserveResponse> => {
-    const deviceRead = getToolSelectionContext()?.explicitObserveDeviceRead === true;
     // #6154 follow-up: `platform` is optional on the wire, so the schema's
     // iOS-rejects-activityName check (which runs against the raw request
     // platform) can be skipped entirely when the caller omitted it. Re-validate
     // against the resolved `device.platform`, before the try/catch below so the
     // actionable message isn't re-wrapped as a generic execution failure.
-    assertObserveOptionsSupported(device.platform, args, deviceRead);
-    const screenshotMode = deviceRead
-      ? (requestedScreenshotMode(args) ?? "settled")
-      : requestedScreenshotMode(args);
+    const { deviceRead, aggregate, timeoutMs, screenshotMode, encoding } = prepareObserveOptions(
+      device.platform,
+      args,
+    );
     try {
       const observeScreen = screenForObserve(device, args, dependencies);
       // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
@@ -1973,12 +1993,10 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
             )
           : null;
       const result = deviceRead
-        ? await observeScreen.executeDeviceRead(
-            signal,
-            screenshotMode,
-            args.screenshotOptions,
-            args.crop !== undefined,
-          )
+        ? await observeScreen.executeDeviceRead(signal, screenshotMode, encoding, {
+            requireFreshScreenshot: args.crop !== undefined,
+            timeoutMs,
+          })
         : waitOutcome
           ? waitOutcome.observation
           : await observeScreen.execute({
@@ -1987,11 +2005,14 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
               signal,
               screenshot: screenshotMode,
               screenshotOptions: args.screenshotOptions,
+              timeoutMs,
             });
 
-      await attachObserveCrop(args, result, device.platform, dependencies.crop);
+      if (!aggregate) {
+        await attachObserveCrop(args, result, device.platform, dependencies.crop);
+      }
 
-      if (!deviceRead) {
+      if (!deviceRead && !aggregate) {
         attachSnapshotReference(device.deviceId, result);
       }
 
@@ -2000,7 +2021,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
       }
 
       // The settled capture has resolved before either resource is announced.
-      if (!deviceRead) {
+      if (!deviceRead && !aggregate) {
         await ResourceRegistry.notifyResourcesUpdated([
           RESOURCE_URIS.LATEST_OBSERVATION,
           RESOURCE_URIS.LATEST_SCREENSHOT,
@@ -2092,7 +2113,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    `Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for ${SCREENSHOT_MIN_LIFETIME_MS / 1000} seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after ${SCREENSHOT_STALE_AGE_MS / (60 * 60 * 1000)} hours on capture construction. Copy files needed longer.`,
+    `Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for ${SCREENSHOT_MIN_LIFETIME_MS / 1000} seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after ${SCREENSHOT_STALE_AGE_MS / (60 * 60 * 1000)} hours on capture construction. Copy files needed longer.`,
     observeSchema,
     observeHandler,
     {

@@ -1833,13 +1833,15 @@ export class AdbClient implements AdbExecutor {
    */
   async getForegroundApp(
     signal?: AbortSignal,
-    timeoutMs?: number,
+    timeout?: number | { timeoutMs?: number; displayId?: number },
   ): Promise<{
     packageName: string;
     userId: number;
     activityName?: string;
     displayCount?: number;
   } | null> {
+    const { timeoutMs, displayId = 0 } =
+      typeof timeout === "number" ? { timeoutMs: timeout } : (timeout ?? {});
     try {
       const result = await this.executeCommand(
         "shell dumpsys activity activities | grep -E '^[^[:space:]]|^[[:space:]]*(topResumedActivity|mResumedActivity|ResumedActivity|Resumed|mFocusedActivity)[[:space:]]*[:=]'",
@@ -1849,7 +1851,7 @@ export class AdbClient implements AdbExecutor {
         signal,
       );
 
-      const parsed = parseResumedActivityForDisplay(result.stdout);
+      const parsed = parseResumedActivityForDisplay(result.stdout, displayId);
       const foreground = parsed.activity;
       if (foreground) {
         const { userId, packageName } = foreground;

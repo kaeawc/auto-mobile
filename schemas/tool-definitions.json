@@ -7716,7 +7716,7 @@
   },
   {
     "name": "observe",
-    "description": "Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for 30 seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after 24 hours on capture construction. Copy files needed longer.",
+    "description": "Get screen view hierarchy and screenshot, with optional PNG crop from a fresh settled capture of one display. Opt-in Android display:'all' adds per-panel displays to the unchanged active-panel result, without updating observation baselines or transition fences; rejects waitFor, raw:true and includeScreenshotImage:true. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for 30 seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after 24 hours on capture construction. Copy files needed longer.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -8127,7 +8127,7 @@
           "type": "boolean"
         },
         "display": {
-          "description": "Panel key, role (inner, cover, rear, external), or active; all is not supported yet",
+          "description": "Panel key, role (inner, cover, rear, external), active, or opt-in Android all. All adds per-panel displays while retaining the active result; rejects waitFor, raw:true and includeScreenshotImage:true.",
           "type": "string"
         },
         "project": {
@@ -8390,6 +8390,927 @@
               }
             },
             "required": ["key", "role", "size"],
+            "additionalProperties": false
+          }
+        },
+        "displays": {
+          "description": "Opt-in Android display:all observations, including the active panel. Proposed additive shape; absent on default reads or without inventory. Each panel uses the requested projection; unavailable panels retain freshness reasons.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "display": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["inner", "cover", "rear", "external", "unknown"]
+                  },
+                  "posture": {
+                    "type": "string",
+                    "enum": [
+                      "closed",
+                      "half_opened",
+                      "opened",
+                      "rear_display",
+                      "flipped",
+                      "tent",
+                      "unknown"
+                    ]
+                  },
+                  "generation": {
+                    "description": "Generation advances on notifyTransition calls for panel key, role, or posture changes, Android non-swap size changes and accepted pushed display_transition events (changed with a different panel key or non-swap size, added, removed, or device_state changes), iOS multi-panel rotation, and iOS setPosture hinge, observed identity, and settled notifications (potentially several increments per request), but not on captures, Android pure width/height swaps, or iOS same-observation geometry corrections. Generation is comparable only within one session: it restarts at 0 when the device is released or the session ends, and on daemon restart.",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["key", "role", "posture", "generation"],
+                "additionalProperties": false
+              },
+              "screenSize": {
+                "description": "Current-orientation native screen size for observe bounds and absolute tapAt input: Android physical pixels or iOS XCTest logical points. Valid points satisfy 0 <= x < width and 0 <= y < height. No density, inset, Retina, canonical-pixel, or rotation transform applies to an already-native point.",
+                "type": "object",
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "units": {
+                    "type": "string",
+                    "enum": ["physical-pixels", "points", "unknown"]
+                  }
+                },
+                "required": ["width", "height"],
+                "additionalProperties": false
+              },
+              "viewHierarchy": {
+                "type": "object",
+                "properties": {
+                  "hierarchy": {
+                    "type": "object",
+                    "properties": {
+                      "error": {
+                        "type": "string"
+                      },
+                      "node": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/__schema0"
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": {}
+                  },
+                  "windows": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "bounds": {
+                              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "left": {
+                                      "type": "number"
+                                    },
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "centerX": {
+                                      "type": "number"
+                                    },
+                                    "centerY": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["left", "top", "right", "bottom"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                  "type": "array",
+                                  "prefixItems": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            "hierarchy": {
+                              "$ref": "#/$defs/__schema0"
+                            }
+                          },
+                          "additionalProperties": {}
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "contentHiddenRegions": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "bounds": {
+                              "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "left": {
+                                      "type": "number"
+                                    },
+                                    "top": {
+                                      "type": "number"
+                                    },
+                                    "right": {
+                                      "type": "number"
+                                    },
+                                    "bottom": {
+                                      "type": "number"
+                                    },
+                                    "centerX": {
+                                      "type": "number"
+                                    },
+                                    "centerY": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "required": ["left", "top", "right", "bottom"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                  "type": "array",
+                                  "prefixItems": [
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "number"
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            "reason": {
+                              "type": "string"
+                            },
+                            "areaPercent": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["bounds", "reason", "areaPercent"],
+                          "additionalProperties": {}
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "accessibility-focused-element": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "systemInsets": {
+                    "type": "object",
+                    "properties": {
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      },
+                      "left": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["top", "right", "bottom", "left"],
+                    "additionalProperties": false
+                  },
+                  "insets": {
+                    "type": "object",
+                    "properties": {
+                      "available": {
+                        "type": "boolean"
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "android-window-metrics",
+                          "android-resource-fallback",
+                          "ios-sdk-safe-area",
+                          "unavailable"
+                        ]
+                      },
+                      "units": {
+                        "type": "string",
+                        "enum": ["physical-pixels", "points", "unknown"]
+                      },
+                      "systemBars": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "visible": {
+                                "type": "object",
+                                "properties": {
+                                  "top": {
+                                    "type": "number"
+                                  },
+                                  "right": {
+                                    "type": "number"
+                                  },
+                                  "bottom": {
+                                    "type": "number"
+                                  },
+                                  "left": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["top", "right", "bottom", "left"],
+                                "additionalProperties": false
+                              },
+                              "stable": {
+                                "type": "object",
+                                "properties": {
+                                  "top": {
+                                    "type": "number"
+                                  },
+                                  "right": {
+                                    "type": "number"
+                                  },
+                                  "bottom": {
+                                    "type": "number"
+                                  },
+                                  "left": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": ["top", "right", "bottom", "left"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["visible", "stable"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "displayCutout": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "left": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["top", "right", "bottom", "left"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "displayCutoutInfo": {
+                        "type": "object",
+                        "properties": {
+                          "classification": {
+                            "type": "string",
+                            "enum": ["none", "notch", "dynamic_island", "hole_punch", "unknown"]
+                          },
+                          "bounds": {
+                            "anyOf": [
+                              {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "left": {
+                                          "type": "number"
+                                        },
+                                        "top": {
+                                          "type": "number"
+                                        },
+                                        "right": {
+                                          "type": "number"
+                                        },
+                                        "bottom": {
+                                          "type": "number"
+                                        },
+                                        "centerX": {
+                                          "type": "number"
+                                        },
+                                        "centerY": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": ["left", "top", "right", "bottom"],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "description": "Compact bounds tuple [left, top, right, bottom].",
+                                      "minItems": 4,
+                                      "maxItems": 4,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "number"
+                                      }
+                                    }
+                                  ]
+                                }
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": ["classification"],
+                        "additionalProperties": false
+                      },
+                      "systemGestures": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "left": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["top", "right", "bottom", "left"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "mandatorySystemGestures": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "left": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["top", "right", "bottom", "left"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "tappableElement": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "left": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["top", "right", "bottom", "left"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "safeArea": {
+                        "type": "object",
+                        "properties": {
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          },
+                          "left": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["top", "right", "bottom", "left"],
+                        "additionalProperties": false
+                      },
+                      "systemChrome": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "visibility": {
+                                "type": "string",
+                                "enum": ["visible", "hidden", "partial", "unknown"]
+                              },
+                              "statusBar": {
+                                "type": "string",
+                                "enum": ["visible", "hidden", "unknown"]
+                              },
+                              "navigationBar": {
+                                "type": "string",
+                                "enum": ["visible", "hidden", "unknown"]
+                              },
+                              "homeIndicatorAutoHideRequested": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "source": {
+                                "type": "string",
+                                "enum": ["android-window-insets", "ios-status-bar-manager"]
+                              }
+                            },
+                            "required": ["visibility", "statusBar", "source"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["available", "source", "units"],
+                    "additionalProperties": false
+                  },
+                  "truncationReasons": {
+                    "description": "Why the captured hierarchy is incomplete (issue #6601). Present only when rows were dropped — a device-side stop (max_nodes, max_depth) or the per-node child cap (max_children[<node> kept N of M]). This is the nested location `sanitizeObserveResult` leaves raw hierarchy reasons under `project:\"full\"` or `raw:true`; capture-fidelity reasons may also be lifted to the top-level `truncationReasons` field for skeleton/diff output, while a host-output max_children cap is not lifted to a non-diff skeleton.",
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "additionalProperties": {}
+              },
+              "skeleton": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "sublabel": {
+                      "type": "string"
+                    },
+                    "testTag": {
+                      "type": "string"
+                    },
+                    "semanticLinks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "occurrence": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "start": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "end": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": ["text", "occurrence"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "bounds": {
+                      "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    },
+                    "affordances": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["tap", "long-press", "input", "scroll", "toggle"]
+                      }
+                    },
+                    "occluded": {
+                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "index": {
+                      "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["bounds", "affordances"],
+                  "additionalProperties": {}
+                }
+              },
+              "context": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "elementId": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "sublabel": {
+                      "type": "string"
+                    },
+                    "testTag": {
+                      "type": "string"
+                    },
+                    "semanticLinks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "occurrence": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "start": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "end": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": ["text", "occurrence"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "bounds": {
+                      "description": "Bounds as the compact [left, top, right, bottom] tuple — always this shape for skeleton entries, in the same current-orientation native space as screenSize and tapAt.",
+                      "type": "array",
+                      "prefixItems": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ]
+                    },
+                    "affordances": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["tap", "long-press", "input", "scroll", "toggle"]
+                      }
+                    },
+                    "occluded": {
+                      "description": "Fully covered by the Android IME window; this row has no actionable affordance.",
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "checked": {
+                      "type": "boolean"
+                    },
+                    "index": {
+                      "description": "Disambiguator present when a replay-eligible row's elementId, or id-less label, repeats among other replay-eligible rows (issue #6221). Eligibility requires valid bounds and an affordance; a known viewport excludes off-screen rows unless raw element search is enabled. Pass verbatim as tapOn({ selector, index }) to hit this exact entry.",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["bounds", "affordances"],
+                  "additionalProperties": {}
+                }
+              },
+              "keyboard": {
+                "type": "object",
+                "properties": {
+                  "visible": {
+                    "type": "boolean",
+                    "const": true
+                  },
+                  "package": {
+                    "type": "string"
+                  }
+                },
+                "required": ["visible", "package"],
+                "additionalProperties": false
+              },
+              "truncationReasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "screenshotPath": {
+                "type": "string"
+              },
+              "observeScope": {
+                "type": "object",
+                "properties": {
+                  "applied": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["focus", "region", "overview"]
+                    }
+                  },
+                  "gatedOff": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": ["focus", "region", "overview"]
+                    }
+                  },
+                  "nodesBefore": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "nodesAfter": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "regionPx": {
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid. Coordinates share screenSize's current-orientation native space and can be passed to tapAt without density, inset, Retina, canonical-pixel, or rotation conversion.",
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "number"
+                          },
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          },
+                          "centerX": {
+                            "type": "number"
+                          },
+                          "centerY": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["left", "top", "right", "bottom"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "focus": {
+                    "type": "object",
+                    "properties": {
+                      "by": {
+                        "type": "string",
+                        "enum": ["anchor", "foreground-app"]
+                      },
+                      "matched": {
+                        "type": "boolean"
+                      },
+                      "packageName": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["by", "matched"],
+                    "additionalProperties": {}
+                  }
+                },
+                "required": ["applied", "nodesBefore", "nodesAfter"],
+                "additionalProperties": {}
+              },
+              "freshness": {
+                "type": "object",
+                "properties": {
+                  "requestedAfter": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "actualTimestamp": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "ageMs": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "verified": {
+                    "type": "boolean"
+                  },
+                  "isFresh": {
+                    "type": "boolean"
+                  },
+                  "staleDurationMs": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "warning": {
+                    "type": "string"
+                  },
+                  "unavailableReason": {
+                    "type": "string",
+                    "enum": [
+                      "runner_not_running",
+                      "connection_lost",
+                      "simulator_not_booted",
+                      "request_timed_out",
+                      "auto_setup_failed",
+                      "unknown",
+                      "service_recovering",
+                      "device_locked",
+                      "incomplete_capture"
+                    ]
+                  },
+                  "unavailableDetail": {
+                    "type": "string",
+                    "maxLength": 500
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "cache_age",
+                      "window_identity",
+                      "requested_min",
+                      "no_timestamp",
+                      "unavailable",
+                      "effect_inconsistent"
+                    ]
+                  }
+                },
+                "required": ["isFresh"],
+                "additionalProperties": {}
+              }
+            },
+            "required": ["display", "screenSize", "freshness"],
             "additionalProperties": false
           }
         },

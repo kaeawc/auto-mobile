@@ -153,6 +153,8 @@ export interface ScreenIdentity {
 export interface ObserveResult {
   /** Physical panel represented by this capture; always present on emitted observations. */
   display: DisplayRef;
+  /** Opt-in Android display:"all" aggregate; the proposed additive shape (#8256). */
+  displays?: DisplayObservation[];
   /** Other known physical panels, only present when inventory has multiple panels. */
   otherDisplays?: Array<Pick<DisplayPanel, "key" | "role"> & { size: DisplayPanel["sizePx"] }>;
   /** INTERNAL-ONLY: display transition revision when this capture completed. */
@@ -563,6 +565,27 @@ export interface ObserveResult {
    */
   observeScope?: ObserveScopeMetadata;
 }
+
+/** Same capture/projection and freshness types as a single-panel observation. */
+export type DisplayObservation = Pick<ObserveResult, "display" | "screenSize"> &
+  Pick<
+    ObserveResult,
+    | "viewHierarchy"
+    | "skeleton"
+    | "context"
+    | "keyboard"
+    | "truncationReasons"
+    | "screenshotPath"
+    | "observeScope"
+  > & {
+    freshness: NonNullable<ObserveResult["freshness"]>;
+    /** INTERNAL-ONLY: original elements retain ancestry for the output projection. */
+    elements?: ObserveResult["elements"];
+    /** INTERNAL-ONLY: single-panel metadata used by the existing scope transforms. */
+    systemInsets?: ObserveResult["systemInsets"];
+    insets?: ObserveResult["insets"];
+    activeWindow?: ObserveResult["activeWindow"];
+  };
 
 /**
  * The payload the `observe` tool packs into its MCP `structuredContent` envelope.

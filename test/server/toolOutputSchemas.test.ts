@@ -35,6 +35,31 @@ test("freshness schema accepts bounded machine-readable unavailability", () => {
   expect(() => freshnessSchema.parse({ ...fields, unavailableDetail: "x".repeat(501) })).toThrow();
 });
 
+test("observe advertises optional typed per-panel observations", () => {
+  const stamp = { key: "cover", role: "cover", posture: "unknown", generation: 0 };
+  const entry = {
+    display: stamp,
+    screenSize: { width: 100, height: 100 },
+    skeleton: [],
+    freshness: { isFresh: false, unavailableReason: "request_timed_out" },
+  };
+  const result = { observationId: "capture", deviceId: "android", displays: [entry] };
+  expect(observeResultSchema.parse(result).displays).toEqual([entry]);
+  expect(
+    observeResultSchema.safeParse({ ...result, displays: [{ ...entry, display: undefined }] })
+      .success,
+  ).toBe(false);
+  expect(
+    observeResultSchema.safeParse({
+      ...result,
+      displays: [{ ...entry, freshness: { isFresh: false, unavailableReason: "bad_reason" } }],
+    }).success,
+  ).toBe(false);
+  const schema = toJSONSchema(observeResultSchema);
+  expect(schema.required ?? []).not.toContain("displays");
+  expect(schema.properties?.displays).toBeDefined();
+});
+
 test("full action observation advertises the optional freshness reason fields", () => {
   const full = toJSONSchema(observationSummarySchema);
   const freshness = full.properties?.freshness;

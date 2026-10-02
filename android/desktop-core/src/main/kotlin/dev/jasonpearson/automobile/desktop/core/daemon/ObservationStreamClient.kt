@@ -711,6 +711,26 @@ class ObservationStreamClient(
           storageReconciliationRequestChannel.send(StorageSubscriptionKey(packageName, fileName))
         }
       }
+      "device_session_ended" -> {
+        val deviceId = response.deviceId
+        val retiredUuid = response.deviceSessionUuid
+        val successorUuid = response.successorSessionUuid
+        if (
+          !deviceId.isNullOrBlank() &&
+            !retiredUuid.isNullOrBlank() &&
+            !successorUuid.isNullOrBlank()
+        ) {
+          _deviceEvents.emit(
+            DeviceStreamEvent.DeviceSessionSuperseded(
+              deviceId = deviceId,
+              retiredUuid = retiredUuid,
+              successorUuid = successorUuid,
+              timestamp = response.timestamp ?: System.currentTimeMillis(),
+            )
+          )
+        }
+      }
+      "device_session_started" -> Unit
       "ping" -> {
         log.info("Received ping, sending pong")
         sendPong()
@@ -1056,6 +1076,8 @@ data class StreamResponse(
   val error: String? = null,
   val subscriptionId: String? = null,
   val deviceId: String? = null,
+  val deviceSessionUuid: String? = null,
+  val successorSessionUuid: String? = null,
   val timestamp: Long? = null,
   val data: JsonElement? = null,
   val screenshotBase64: String? = null,
@@ -1263,6 +1285,13 @@ data class PerformanceStreamUpdate(
 )
 
 sealed class DeviceStreamEvent {
+  data class DeviceSessionSuperseded(
+    val deviceId: String,
+    val retiredUuid: String,
+    val successorUuid: String,
+    val timestamp: Long,
+  ) : DeviceStreamEvent()
+
   data class DeviceConnectionLost(
     val deviceId: String,
     val timestamp: Long,

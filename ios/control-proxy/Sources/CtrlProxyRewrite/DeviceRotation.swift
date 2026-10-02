@@ -40,6 +40,7 @@ enum DeviceRotation {
                 queue.maxConcurrentOperationCount = 1
                 return queue
             }()
+
             private var observer: NSObjectProtocol?
 
             // `UIDevice` is `@MainActor`. `RotationChangeSignaling` is a nonisolated
@@ -148,11 +149,44 @@ enum DeviceRotation {
             )
         }
 
+        /// Labels the existing helper's RUNNER scene/fallback reading; never target-app orientation.
+        /// Its legacy unknown-device fallback is portrait. Preserve that helper's behavior but
+        /// report unknown explicitly, with the fallback named, in this diagnostic-only path.
+        @MainActor
+        static func tapDiagnosticInterfaceOrientation() -> TapDiagnostics.OrientationReading {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let active = scenes.first(where: {
+                $0.activationState == .foregroundActive && isCardinalInterfaceOrientation($0.interfaceOrientation)
+            })?.interfaceOrientation
+            let scene = scenes.first(where: { isCardinalInterfaceOrientation($0.interfaceOrientation) })?
+                .interfaceOrientation
+            let device = UIDevice.current.orientation
+            let value = gestureInterfaceOrientation(
+                activeSceneOrientation: active, sceneOrientation: scene, deviceOrientation: device
+            )
+            let hasScene = active != nil || scene != nil
+            let knownDevice = [UIDeviceOrientation.portrait, .portraitUpsideDown, .landscapeLeft, .landscapeRight]
+                .contains(device)
+            let name = [
+                1: "portrait",
+                2: "portraitUpsideDown",
+                3: "landscapeRight",
+                4: "landscapeLeft",
+            ][value.rawValue] ?? "unknown"
+            return .init(
+                rawValue: value.rawValue, value: !hasScene && !knownDevice ? "unknown" : name,
+                source: "runnerProcessScenes",
+                fallback: hasScene ? nil : (knownDevice ? "runnerProcessUIDevice" : "defaultPortraitForUnknownDevice")
+            )
+        }
+
         static func gestureInterfaceOrientation(
             activeSceneOrientation: UIInterfaceOrientation?,
             sceneOrientation: UIInterfaceOrientation?,
             deviceOrientation: UIDeviceOrientation
-        ) -> UIInterfaceOrientation {
+        )
+            -> UIInterfaceOrientation
+        {
             if let activeSceneOrientation, isCardinalInterfaceOrientation(activeSceneOrientation) {
                 return activeSceneOrientation
             }

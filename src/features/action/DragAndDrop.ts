@@ -79,7 +79,11 @@ export class DragAndDrop extends BaseVisualChange {
   ) {
     super(device, adb, timer, deps.renderedDisplayRevision, deps);
     this.lastRenderedObservation = deps.lastRenderedObservation;
-    this.selector = deps.selector ?? new ResolverElementSelector();
+    this.selector =
+      deps.selector ??
+      new ResolverElementSelector(undefined, undefined, {
+        iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
+      });
     this.hierarchyCapture =
       deps.hierarchyCapture ??
       createDeviceHierarchyCapture(device, { timer, adbFactory: this.adbFactory });

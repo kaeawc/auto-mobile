@@ -1,9 +1,10 @@
 import {
   cancellationHandlers,
+  cancellationTests,
   pausedSleep,
   cleanupDeadline,
 } from "../helpers/interactionCancellation";
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { SelectAllText } from "../../src/features/action/SelectAllText";
@@ -57,7 +58,8 @@ const bypassObservation = () =>
   );
 
 describe("registered interaction handlers honor cancellation", () => {
-  afterEach(() => {
+  const test = cancellationTests(() => {
+    observation.clearHistory();
     resetSelectAllTextFactory();
     resetPressButtonFactory();
     resetRotateFactory();

@@ -1,3 +1,4 @@
+import { isSessionReleasing } from "./sessionReleaseState";
 import type { ChildProcess } from "child_process";
 export type DeviceAutolockChildProcess = ChildProcess;
 import { logger } from "../utils/logger";
@@ -981,6 +982,10 @@ export class DevicePool {
       completeJoinedEmulatorLossRecovery: (id, outcome, state) =>
         this.completeEmulatorLossRecovery(id, outcome, state),
       getSessionForDevice: (id) => this.sessionManager.getSessionForDevice(id),
+      waitForReleasingSession: (sessionId) =>
+        this.sessionManager.getReleasingSession(sessionId)
+          ? this.sessionManager.waitForSessionRelease(sessionId)
+          : undefined,
       getAndroidSessionPreservingRecoveryTarget: (id, expected) =>
         this.getAndroidSessionPreservingRecoveryTarget(id, expected),
       getSessionPreservingRecoveryTarget: (id, expected) =>
@@ -1725,6 +1730,9 @@ export class DevicePool {
       if (started > 0) {
         await this.refreshDevices();
         stats = this.getStatsForPlatform(platform);
+      } else if (platform === "android") {
+        // A queued start may have joined a boot without launching a device.
+        stats = this.getStatsForPlatform(platform);
       }
     }
 
@@ -2077,6 +2085,9 @@ export class DevicePool {
             await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
           });
           started++;
+        } else if (startResult === undefined && device.platform === "android") {
+          // Rediscover the winner after releasing the lifecycle lease.
+          await this.refreshDevices();
         }
       }
 
@@ -2100,7 +2111,7 @@ export class DevicePool {
       signal: AbortSignal,
       retainLeaseUntil: (settlement: Promise<unknown>) => void,
     ) => Promise<T>,
-  ): Promise<T> {
+  ): Promise<T | undefined> {
     const timeoutMs = this.remainingStartDeadline(deadlineMs);
     const controller = new AbortController();
     const timeoutError = new ActionableError(
@@ -2130,6 +2141,32 @@ export class DevicePool {
         : settlement;
     };
     try {
+      // Recovery claimed before candidate selection is suppressed there. When
+      // recovery or another start claims after selection, acquisition waits for
+      // its lease; revalidate under that lease to join the winner's boot instead
+      // of launching the same AVD again (#8381).
+      // Every Android start, including uncontended starts, re-runs the existing
+      // candidate path: one listDeviceImages and (when images exist) one
+      // getBootedDevices. Android images with unknown running state are excluded.
+      // Keep the funnelled post-skip refresh outside the lifecycle lease.
+      if (device.platform === "android" && operation === "start") {
+        const candidates = await this.getStartableDeviceImageCandidates("android");
+        const pooled = this.getDevicesByPlatform("android");
+        if (
+          !candidates.some(
+            (candidate) =>
+              this.criteriaMatcher.getDeviceImageKey(candidate) ===
+              this.criteriaMatcher.getDeviceImageKey(device),
+          ) ||
+          this.isAutoStartSuppressed(device) ||
+          pooled.some(
+            (entry) =>
+              entry.id === device.deviceId || (entry.avdName ?? entry.name) === device.name,
+          )
+        ) {
+          return undefined;
+        }
+      }
       const childProcess = await runWithAbortSignal(signal, () =>
         this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
       );
@@ -2248,6 +2285,10 @@ export class DevicePool {
         },
       );
       if (!startResult) {
+        if (startResult === undefined && criteria.platform === "android") {
+          // Rediscover the winner after releasing the lifecycle lease.
+          await this.refreshDevices();
+        }
         return null;
       }
       // Start readiness and the lifecycle lease settle before assignmentMutex;
@@ -2316,6 +2357,13 @@ export class DevicePool {
     bootedIds: Set<string>,
     bootedNames: Set<string>,
   ): Promise<boolean> {
+    if (
+      image.platform === "android" &&
+      ((image.deviceId !== undefined && bootedIds.has(image.deviceId)) ||
+        bootedNames.has(image.name))
+    ) {
+      return true;
+    }
     if (image.isRunning === true) {
       return true;
     }
@@ -2494,7 +2542,9 @@ export class DevicePool {
     const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
     if (
       !attemptDeviceLossRecovery ||
+      !sessionId ||
       !session ||
+      isSessionReleasing(this.sessionManager, sessionId, session) ||
       !this.isSessionPreservingBinding(device, session)
     ) {
       return false;
@@ -2788,7 +2838,11 @@ export class DevicePool {
       return undefined;
     }
     const session = this.sessionManager.getSession(sessionId);
-    if (!session || !this.isEligibleSessionPreservingRecoveryTarget(device, session)) {
+    if (
+      !session ||
+      isSessionReleasing(this.sessionManager, sessionId, session) ||
+      !this.isEligibleSessionPreservingRecoveryTarget(device, session)
+    ) {
       return undefined;
     }
     return { device, session };

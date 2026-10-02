@@ -182,8 +182,8 @@ setup() {
   [[ "$output" == *'+  var value: Int { get }'* ]]
   [[ "$output" == *'-  subscript(index: Int) -> Int { get set }'* ]]
   [[ "$output" == *'+  subscript(index: Int) -> Int { get }'* ]]
-  [[ "$output" == *'-  var commented: Int { get set } // requirement'* ]]
-  [[ "$output" == *'+  var commented: Int { get } // requirement'* ]]
+  printf '%s\n' "$output" | grep -Fx -- '-  var commented: Int { get set }'
+  printf '%s\n' "$output" | grep -Fx -- '+  var commented: Int { get }'
 }
 
 @test "changing standalone declaration attributes fails the API check" {
@@ -407,4 +407,84 @@ setup() {
     bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
     grep -Fx '  var attributed: Int { @available(*, deprecated, message: "see http://x and /* text */") get set }' "$AUTOMOBILE_IOS_API_FILE"
   done
+}
+
+@test "typed throws trivia preserves exact output and error type changes fail check" {
+  cp "$FIXTURES/trivia/ThrowsPlain.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$BATS_TEST_TMPDIR/plain.api"
+  local fixture
+  for fixture in "$FIXTURES"/trivia/Throws*.swift; do
+    cp "$fixture" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+    bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+    grep -Fx '  var x: Int { get throws(E1) }' "$AUTOMOBILE_IOS_API_FILE"
+    cmp "$BATS_TEST_TMPDIR/plain.api" "$AUTOMOBILE_IOS_API_FILE"
+    # Only the accessor type changes; both error declarations stay identical.
+    sed 's/(E1)/(E2)/g' "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"
+    mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+    run bash "$SCRIPT" --check
+    [ "$status" -eq 1 ]
+    printf '%s\n' "$output" | grep -Fx -- '-  var x: Int { get throws(E1) }'
+    printf '%s\n' "$output" | grep -Fx -- '+  var x: Int { get throws(E2) }'
+  done
+}
+
+@test "comment braces nested comments and trailing comments never change accessors" {
+  cp "$FIXTURES/trivia/Comments.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  local member
+  for member in close open nested nestedLines nestedText lastLine firstLine trailing; do
+    grep -Fx "  var $member: Int { get set }" "$AUTOMOBILE_IOS_API_FILE"
+  done
+  grep -Fx '  func next() -> Int' "$AUTOMOBILE_IOS_API_FILE"
+  # Replace only comment contents, including each level of nested comments.
+  sed -e 's@/\* } \*/@/* x */@g' -e 's@/\* { \*/@/* x */@g' \
+    -e 's@} \*/@x */@g' -e 's@// }@// x@g' \
+    -e 's@// trailing }@// trailing x@g' \
+    "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"
+  mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$BATS_TEST_TMPDIR/changed.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/changed.api"
+}
+
+@test "attribute strings retain braces in inline multiline and closing-line accessors" {
+  cp "$FIXTURES/trivia/Strings.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var inline: Int { @available(*, deprecated, message: "close } here") get set }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var multiline: Int { @available(*, deprecated, message: "close } here") get set }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var closing: Int { get @available(*, deprecated, message: "a } b") set }' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  var nextLine: Int { @available(*, deprecated, message: "open { and close } here") get set }' "$AUTOMOBILE_IOS_API_FILE"
+}
+
+@test "protocol trailing line comment changes leave the dump byte-identical" {
+  cp "$FIXTURES/trivia/TrailingComments.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  local suffix member
+  for suffix in Plain Block; do
+    for member in inline multiline nextLine; do
+      grep -Fx "  var $member$suffix: Int { get set }" "$AUTOMOBILE_IOS_API_FILE"
+    done
+    for member in inlineWhere where; do
+      grep -Fx "  func $member$suffix<T>(_ value: T) -> Int where T: Equatable" "$AUTOMOBILE_IOS_API_FILE"
+    done
+    grep -Fx "  func laterParen$suffix( _ value: Int ) -> Int" "$AUTOMOBILE_IOS_API_FILE"
+  done
+  grep -Fx '  func plain() -> Int' "$AUTOMOBILE_IOS_API_FILE"
+  grep -Fx '  func block() -> Int' "$AUTOMOBILE_IOS_API_FILE"
+  ! grep '^  .*//' "$AUTOMOBILE_IOS_API_FILE"
+  sed 's@// x@// y@g' "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift" > "$BATS_TEST_TMPDIR/changed.swift"
+  mv "$BATS_TEST_TMPDIR/changed.swift" "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  bash "$SCRIPT" > "$BATS_TEST_TMPDIR/changed.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/changed.api"
+}
+
+@test "trivia fixtures are deterministic across runs system bash and C and UTF-8 locales" {
+  rm "$AUTOMOBILE_IOS_API_SOURCES/Surface.swift"
+  cp "$FIXTURES"/trivia/*.swift "$AUTOMOBILE_IOS_API_SOURCES/"
+  LC_ALL=C bash "$SCRIPT" > "$AUTOMOBILE_IOS_API_FILE"
+  LC_ALL=C bash "$SCRIPT" > "$BATS_TEST_TMPDIR/repeat.api"
+  LC_ALL=en_US.UTF-8 bash "$SCRIPT" > "$BATS_TEST_TMPDIR/utf8.api"
+  /bin/bash "$SCRIPT" > "$BATS_TEST_TMPDIR/system.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/repeat.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/utf8.api"
+  cmp "$AUTOMOBILE_IOS_API_FILE" "$BATS_TEST_TMPDIR/system.api"
 }

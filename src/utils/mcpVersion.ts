@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { testOverrides } from "./testOverrides";
 import {
   defaultGitMetadataClient,
   type GitMetadataClient,
@@ -154,7 +155,7 @@ export const getMcpServerVersion = (): string => {
       npm_package_version: process.env.npm_package_version,
     },
     readPackageVersion: readPackageVersionFromDisk,
-    readGitVersion: () => readGitVersion(),
+    readGitVersion: () => readGitVersion(moduleDir(), testOverrides.gitMetadataClient),
   });
   return cachedVersion;
 };

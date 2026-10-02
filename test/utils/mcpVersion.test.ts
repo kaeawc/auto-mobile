@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   formatMcpServerVersion,
   getMcpServerVersion,
@@ -8,8 +8,61 @@ import {
   type GitVersionInfo,
   type McpVersionDeps,
 } from "../../src/utils/mcpVersion";
-import { DefaultGitMetadataClient } from "../../src/utils/GitMetadataClient";
+import {
+  DefaultGitMetadataClient,
+  defaultGitMetadataClient,
+} from "../../src/utils/GitMetadataClient";
 import { compareVersions } from "../../src/server/deviceMatcher";
+import { testOverrides } from "../../src/utils/testOverrides";
+import { fileURLToPath } from "node:url";
+
+const versionModulePath = "../../src/utils/mcpVersion.ts";
+
+describe("getMcpServerVersion laziness", () => {
+  test("import is lazy and the first getter call probes one command group then caches", async () => {
+    const original = testOverrides.gitMetadataClient;
+    const commands: string[][] = [];
+    testOverrides.gitMetadataClient = new DefaultGitMetadataClient((_command, args) => {
+      commands.push([...args]);
+      if (args[1] === "--show-toplevel") {
+        return fileURLToPath(new URL("../../", import.meta.url));
+      }
+      return args[1] === "--short=12" ? "abcdef123456" : "";
+    });
+    try {
+      const version: typeof import("../../src/utils/mcpVersion") = await import(
+        `${versionModulePath}?lazy-cache`
+      );
+      expect(commands).toEqual([]);
+      const first = version.getMcpServerVersion();
+      expect(first).toMatch(/^\d+\.\d+\.\d+\+gabcdef123456$/);
+      expect(commands).toEqual([
+        ["rev-parse", "--show-toplevel"],
+        ["rev-parse", "--short=12", "HEAD"],
+        ["status", "--porcelain", "--untracked-files=no"],
+      ]);
+      expect(version.getMcpServerVersion()).toBe(first);
+      expect(commands).toHaveLength(3);
+    } finally {
+      testOverrides.gitMetadataClient = original;
+    }
+  });
+
+  test("the preload override returns the unstamped manifest version without a git runner", async () => {
+    const probe = spyOn(defaultGitMetadataClient, "readVersion").mockReturnValue(null);
+    try {
+      expect(testOverrides.gitMetadataClient).toBeDefined();
+      const version: typeof import("../../src/utils/mcpVersion") = await import(
+        `${versionModulePath}?preload-override`
+      );
+      expect(version.getMcpServerVersion()).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(version.getMcpServerVersion()).toBe(getMcpServerVersion());
+      expect(probe).not.toHaveBeenCalled();
+    } finally {
+      probe.mockRestore();
+    }
+  });
+});
 
 const git = (shortSha: string, dirty = false, dirtyHash: string | null = null): GitVersionInfo => ({
   shortSha,

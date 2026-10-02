@@ -1,6 +1,59 @@
 import { testOverrides } from "../../src/utils/testOverrides";
 import { rmSync } from "node:fs";
+import childProcess from "node:child_process";
 import { ensureAuxSocketDir } from "./auxSocketDir";
+import { spawnArgv } from "./realDeviceToolSpawnGuard";
+
+// Install before portAvailabilityPreload imports AndroidCtrlProxyClient ->
+// deviceDataStreamSocketServer -> daemonFiles -> constants (DAEMON_VERSION).
+// An env override would leak to child server/daemon processes in integration tests.
+testOverrides.gitMetadataClient = { readVersion: () => null };
+
+/**
+ * Match GitMetadataClient's three initial version probes, ignoring other test
+ * files' git commands. Keep this local so importing production code cannot bind
+ * spawnSync before the recording hooks are installed.
+ */
+export function isGitVersionProbe(argv: readonly string[]): boolean {
+  if (argv[0] !== "git") {
+    return false;
+  }
+  return (
+    (argv.length === 3 && argv[1] === "rev-parse" && argv[2] === "--show-toplevel") ||
+    (argv.length === 4 &&
+      argv[1] === "rev-parse" &&
+      argv[2] === "--short=12" &&
+      argv[3] === "HEAD") ||
+    (argv.length === 4 &&
+      argv[1] === "status" &&
+      argv[2] === "--porcelain" &&
+      argv[3] === "--untracked-files=no")
+  );
+}
+
+/** Record version probes, including ones swallowed by version fallback. */
+export const gitVersionPreloadSpawns: string[][] = [];
+childProcess.spawnSync = new Proxy(childProcess.spawnSync, {
+  apply(target, thisArg, args: unknown[]) {
+    const argv =
+      args[0] === "git" && Array.isArray(args[1]) && args[1].every((arg) => typeof arg === "string")
+        ? ["git", ...args[1]]
+        : [];
+    if (isGitVersionProbe(argv)) {
+      gitVersionPreloadSpawns.push([...argv]);
+    }
+    return Reflect.apply(target, thisArg, args);
+  },
+});
+Bun.spawnSync = new Proxy(Bun.spawnSync, {
+  apply(target, thisArg, args: unknown[]) {
+    const argv = spawnArgv(args);
+    if (isGitVersionProbe(argv)) {
+      gitVersionPreloadSpawns.push([...argv]);
+    }
+    return Reflect.apply(target, thisArg, args);
+  },
+});
 
 /** Isolate auxiliary sockets from live daemons and parallel tests (issue #7616, PR #7612). */
 const auxSocketDir = ensureAuxSocketDir();

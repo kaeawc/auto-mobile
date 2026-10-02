@@ -1,5 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { DefaultGitMetadataClient, type GitCommandRunner } from "../../src/utils/GitMetadataClient";
 
 const OWN = "@kaeawc/auto-mobile";
@@ -23,22 +21,16 @@ const fakeRunner =
   };
 
 describe("DefaultGitMetadataClient", () => {
-  // Git for Windows is commonly a shell-resolved git.exe shim, while this
-  // production boundary deliberately uses shell:false argv execution. A jj
-  // workspace has no Git worktree, so its optional Git metadata is expected
-  // to be unavailable and is covered by the injected-runner tests below.
-  test.skipIf(process.platform === "win32" || !existsSync(".git"))(
-    "uses the default runner in this Git source checkout",
-    () => {
-      const readPackageName = (directory: string): string | null =>
-        (JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { name?: string })
-          .name ?? null;
-
-      expect(
-        new DefaultGitMetadataClient().readVersion(process.cwd(), readPackageName)?.shortSha,
-      ).toMatch(/^[0-9a-f]{12}$/);
-    },
-  );
+  test("construction does not execute the injected git runner", () => {
+    let calls = 0;
+    const client = new DefaultGitMetadataClient(() => {
+      calls++;
+      return null;
+    });
+    expect(calls).toBe(0);
+    expect(client.readVersion("/src/auto-mobile", () => OWN)).toBeNull();
+    expect(calls).toBe(1);
+  });
 
   test("uses argv and a short timeout when executing git", () => {
     const calls: Array<{

@@ -235,6 +235,8 @@ type HttpBodyResult = { ok: true; body: string } | { ok: false; status: number; 
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = MISSING_DEVICE_MISS_THRESHOLD;
+// Retain plan-time evidence while requiring two inactive observations before cleanup.
+const PLAN_DEVICE_DISCONNECT_MISS_CAP = DEVICE_DISCONNECT_MISS_THRESHOLD - 2;
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 // Upper bound on how long graceful shutdown waits for in-flight best-effort DB
 // writes to quiesce before closing the connection (issue #2792). Best-effort
@@ -2273,12 +2275,24 @@ export class Daemon {
       return;
     }
 
-    const discoverAndReconcile = async (bypassAndroidDeviceListCache = false) => {
+    const discoverAndReconcile = async ({
+      planActive,
+      bypassAndroidDeviceListCache = false,
+    }: {
+      planActive: boolean;
+      bypassAndroidDeviceListCache?: boolean;
+    }) => {
       const discovery = await deviceManager.getBootedDevicesDetailed("either", {
         bypassAndroidDeviceListCache,
       });
-      // Every monitor observation reaches the pool before any identity is read.
-      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor");
+      // Reconciliation can quarantine identity and cancel in-flight work. During
+      // allocation, discovery supplies only presence evidence for miss counting.
+      if (!planActive) {
+        await this.devicePool.reconcileDiscoveryObservation(
+          discovery.devices,
+          "disconnect-monitor",
+        );
+      }
       return discovery;
     };
 
@@ -2286,27 +2300,25 @@ export class Daemon {
       this.timer,
       DEVICE_DISCONNECT_POLL_INTERVAL_MS,
       async () => {
+        const planActive = serverConfig.isPlanExecutionActive();
         let adbServerResetCohort: readonly PooledDevice[] = [];
         try {
-          if (serverConfig.isPlanExecutionActive()) {
-            logger.debug("[DisconnectMonitor] Skipping — plan execution active");
-            return;
+          if (!planActive) {
+            this.trackDeferredSessionRecoverySweep(
+              this.devicePool.retryDueDeferredSessionRecoveries().catch((error) => {
+                logger.warn(
+                  `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
+                  error,
+                );
+              }),
+            );
           }
 
-          this.trackDeferredSessionRecoverySweep(
-            this.devicePool.retryDueDeferredSessionRecoveries().catch((error) => {
-              logger.warn(
-                `[DisconnectMonitor] Deferred session recovery sweep failed: ${error}`,
-                error,
-              );
-            }),
-          );
-
-          let discovery = await discoverAndReconcile();
+          let discovery = await discoverAndReconcile({ planActive });
           const bootedDevices = discovery.devices;
           let succeededPlatforms = discovery.succeededPlatforms;
-          const bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
-          const activeRecordings = await listRecordings();
+          let bootedDeviceIds = new Set(bootedDevices.map((device) => device.deviceId));
+          const activeRecordings = planActive ? [] : await listRecordings();
 
           const missingByDevice = new Map<string, string[]>();
           const candidateDeviceIds = new Set<string>();
@@ -2334,18 +2346,21 @@ export class Daemon {
           // -state serials. Ask only about candidates already missing from
           // that list, so a fully-healthy sweep never pays for this extra
           // `devices -l` probe (#7536).
-          const missingAndroidCandidateIds = new Set(
-            [...candidateDeviceIds].filter(
-              (deviceId) =>
-                !bootedDeviceIds.has(deviceId) && candidatePlatforms.get(deviceId) === "android",
-            ),
-          );
           let offlineDeviceIds: Set<string> | undefined;
           try {
-            offlineDeviceIds =
-              missingAndroidCandidateIds.size > 0
-                ? await deviceManager.getAndroidOfflineDeviceIds(missingAndroidCandidateIds)
-                : new Set<string>();
+            if (!planActive) {
+              const missingAndroidCandidateIds = new Set(
+                [...candidateDeviceIds].filter(
+                  (deviceId) =>
+                    !bootedDeviceIds.has(deviceId) &&
+                    candidatePlatforms.get(deviceId) === "android",
+                ),
+              );
+              offlineDeviceIds =
+                missingAndroidCandidateIds.size > 0
+                  ? await deviceManager.getAndroidOfflineDeviceIds(missingAndroidCandidateIds)
+                  : new Set<string>();
+            }
           } catch (error) {
             if (!(error instanceof AndroidOfflineProbeError)) {
               throw error;
@@ -2355,59 +2370,61 @@ export class Daemon {
               `[DisconnectMonitor] Retaining offline recovery attempts: ${errorMessage(error)}`,
             );
           }
-          this.offlineRecoveryAttemptedDeviceIds = pruneStaleOfflineRecoveryAttempts(
-            this.offlineRecoveryAttemptedDeviceIds,
-            candidateDeviceIds,
-            offlineDeviceIds,
-            this.offlineRecoveryAttemptedIncarnations,
-            candidateIncarnations,
-          );
-          // A serial that is mid-provisionDevice/startDevice already has its
-          // own bounded offline recovery: AndroidEmulatorClient's
-          // fresh-provision readiness wait (maybeRecoverFreshOffline, #7054/
-          // #7078) owns that serial's `adb reconnect offline` on its own 15s
-          // threshold. Deferring to it here mirrors how the ADB-reset cohort
-          // path (below) defers on the same in-flight-startup lease, so the
-          // monitor never races a second reconnect against the readiness
-          // wait's own dispatch.
-          const inFlightStartupOfflineDeviceIds = new Set(
-            [...(offlineDeviceIds ?? [])].filter((deviceId) =>
-              this.devicePool.isDeviceLeasedForAndroidStartup(deviceId),
-            ),
-          );
-          const offlineRecoveryTargets = selectOfflineRecoveryCandidates(
-            offlineDeviceIds ?? new Set(),
-            candidateDeviceIds,
-            this.offlineRecoveryAttemptedDeviceIds,
-            inFlightStartupOfflineDeviceIds,
-          );
-          const dispatchTargets =
-            inFlightStartupOfflineDeviceIds.size > 0 ? [] : offlineRecoveryTargets;
-          this.offlineRecoveryAttemptedDeviceIds = new Set([
-            ...this.offlineRecoveryAttemptedDeviceIds,
-            ...dispatchTargets,
-          ]);
-          this.offlineRecoveryAttemptedIncarnations = new Map(
-            [...candidateIncarnations].filter(([deviceId]) =>
-              this.offlineRecoveryAttemptedDeviceIds.has(deviceId),
-            ),
-          );
-          if (dispatchTargets.length > 0) {
-            logger.warn(
-              `[DisconnectMonitor] In-session device(s) ADB-offline (${offlineRecoveryTargets.join(", ")}); attempting bounded 'adb reconnect offline' recovery before miss-counting`,
+          if (!planActive) {
+            this.offlineRecoveryAttemptedDeviceIds = pruneStaleOfflineRecoveryAttempts(
+              this.offlineRecoveryAttemptedDeviceIds,
+              candidateDeviceIds,
+              offlineDeviceIds,
+              this.offlineRecoveryAttemptedIncarnations,
+              candidateIncarnations,
             );
-            // Global re-detect (adb has no per-serial reconnect target), one
-            // shot per offline episode; failures are logged and swallowed
-            // inside recoverAndroidOfflineDevices so a probe or recovery
-            // hiccup here never blocks the miss-count/disconnect path below.
-            await deviceManager.recoverAndroidOfflineDevices();
-            // Reconnect may restore the transport during this await. Never use
-            // the pre-recovery absence for miss counting or ADB-reset detection.
-            discovery = await discoverAndReconcile(true);
-            succeededPlatforms = discovery.succeededPlatforms;
-            bootedDeviceIds.clear();
-            for (const device of discovery.devices) {
-              bootedDeviceIds.add(device.deviceId);
+            // A serial that is mid-provisionDevice/startDevice already has its
+            // own bounded offline recovery: AndroidEmulatorClient's
+            // fresh-provision readiness wait (maybeRecoverFreshOffline, #7054/
+            // #7078) owns that serial's `adb reconnect offline` on its own 15s
+            // threshold. Deferring to it here mirrors how the ADB-reset cohort
+            // path (below) defers on the same in-flight-startup lease, so the
+            // monitor never races a second reconnect against the readiness
+            // wait's own dispatch.
+            const inFlightStartupOfflineDeviceIds = new Set(
+              [...(offlineDeviceIds ?? [])].filter((deviceId) =>
+                this.devicePool.isDeviceLeasedForAndroidStartup(deviceId),
+              ),
+            );
+            const offlineRecoveryTargets = selectOfflineRecoveryCandidates(
+              offlineDeviceIds ?? new Set(),
+              candidateDeviceIds,
+              this.offlineRecoveryAttemptedDeviceIds,
+              inFlightStartupOfflineDeviceIds,
+            );
+            const dispatchTargets =
+              inFlightStartupOfflineDeviceIds.size > 0 ? [] : offlineRecoveryTargets;
+            this.offlineRecoveryAttemptedDeviceIds = new Set([
+              ...this.offlineRecoveryAttemptedDeviceIds,
+              ...dispatchTargets,
+            ]);
+            this.offlineRecoveryAttemptedIncarnations = new Map(
+              [...candidateIncarnations].filter(([deviceId]) =>
+                this.offlineRecoveryAttemptedDeviceIds.has(deviceId),
+              ),
+            );
+            if (dispatchTargets.length > 0) {
+              logger.warn(
+                `[DisconnectMonitor] In-session device(s) ADB-offline (${offlineRecoveryTargets.join(", ")}); attempting bounded 'adb reconnect offline' recovery before miss-counting`,
+              );
+              // Global re-detect (adb has no per-serial reconnect target), one
+              // shot per offline episode; failures are logged and swallowed
+              // inside recoverAndroidOfflineDevices so a probe or recovery
+              // hiccup here never blocks the miss-count/disconnect path below.
+              await deviceManager.recoverAndroidOfflineDevices();
+              // Reconnect may restore the transport during this await. Never use
+              // the pre-recovery absence for miss counting or ADB-reset detection.
+              discovery = await discoverAndReconcile({
+                planActive,
+                bypassAndroidDeviceListCache: true,
+              });
+              succeededPlatforms = discovery.succeededPlatforms;
+              bootedDeviceIds = new Set(discovery.devices.map((device) => device.deviceId));
             }
           }
 
@@ -2431,11 +2448,29 @@ export class Daemon {
             return;
           }
 
-          for (const { deviceId, misses } of disconnectResult.missed) {
+          for (const { deviceId, misses: evaluatedMisses } of disconnectResult.missed) {
+            const misses = planActive
+              ? Math.min(evaluatedMisses, PLAN_DEVICE_DISCONNECT_MISS_CAP)
+              : evaluatedMisses;
+            if (planActive) {
+              // Also lower pre-plan misses so a plan-driven restart gets the same grace.
+              this.deviceDisconnectMisses.set(deviceId, misses);
+            }
             const missState = offlineDeviceIds?.has(deviceId) ? "offline" : "absent";
-            logger.info(
-              `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`,
-            );
+            const message = `[DisconnectMonitor] Device ${deviceId} not in booted list (${missState}, miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`;
+            if (planActive && evaluatedMisses > PLAN_DEVICE_DISCONNECT_MISS_CAP) {
+              logger.debug(message);
+            } else {
+              logger.info(message);
+            }
+          }
+
+          // Keep absence evidence current, but leave allocation's pool/session
+          // state untouched. Two inactive ticks can confirm continued absence;
+          // a booted device clears the evidence during evaluation.
+          if (planActive) {
+            logger.debug("[DisconnectMonitor] Deferring actions — plan execution active");
+            return;
           }
 
           for (const deviceId of disconnectResult.disconnected) {
@@ -2620,7 +2655,9 @@ export class Daemon {
         } catch (error) {
           logger.warn(`[Daemon] Device disconnect monitor failed: ${error}`);
         } finally {
-          await this.devicePool.releaseAdbServerResetCohortReservations(adbServerResetCohort);
+          if (adbServerResetCohort.length > 0) {
+            await this.devicePool.releaseAdbServerResetCohortReservations(adbServerResetCohort);
+          }
         }
       },
     );

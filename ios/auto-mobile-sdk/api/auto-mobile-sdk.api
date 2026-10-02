@@ -40,6 +40,10 @@ public final class AutoMobileSDK: @unchecked Sendable
 
 // Biometrics/AutoMobileBiometrics.swift
 public enum BiometricResult: Sendable, Equatable
+  case success
+  case failure
+  case cancel
+  case error(code: Int, message: String)
 public final class AutoMobileBiometrics: @unchecked Sendable
   public static let shared = AutoMobileBiometrics()
   public static let overrideNotification = Notification.Name( "dev.jasonpearson.automobile.sdk.BIOMETRIC_OVERRIDE" )
@@ -50,6 +54,7 @@ public final class AutoMobileBiometrics: @unchecked Sendable
 
 // Breadcrumbs/BreadcrumbTrail.swift
 public enum BreadcrumbCategory: String, Codable, Sendable
+  case navigation, tap, lifecycle, network, log, custom
 public struct Breadcrumb: Codable, Sendable
   public let timestamp: TimeInterval
   public let category: BreadcrumbCategory
@@ -57,6 +62,9 @@ public struct Breadcrumb: Codable, Sendable
   public let metadata: [String: String]
   public init( timestamp: TimeInterval = Date().timeIntervalSince1970, category: BreadcrumbCategory, message: String, metadata: [String: String] = [:] )
 public protocol BreadcrumbTracking: AnyObject, Sendable
+  func add(_ breadcrumb: Breadcrumb)
+  func snapshot() -> [Breadcrumb]
+  func clear()
 public final class BreadcrumbTrail: BreadcrumbTracking, @unchecked Sendable
   public init(maxSize: Int = 100)
   public func add(_ breadcrumb: Breadcrumb)
@@ -82,13 +90,37 @@ public final class AutoMobileCrashes: @unchecked Sendable
 
 // Events/DropCounter.swift
 public enum DropReason: String, Codable, Sendable, CaseIterable
+  case disabled
+  case shutdown
+  case flushError
+  case bufferOverflow
+  case filtered
+  case deliveryFailed
 
 // Events/EventProcessor.swift
 public protocol EventProcessing: Sendable
+  func process(_ event: any SdkEvent) -> (any SdkEvent)?
 
 // Events/SdkEvent.swift
 public protocol SdkEvent: Codable, Sendable
+  var eventType: SdkEventType
+  var timestamp: Int64
 public enum SdkEventType: String, Codable, Sendable
+  case navigation
+  case handledException = "handled_exception"
+  case crash
+  case hang
+  case networkRequest = "network_request"
+  case webSocketFrame = "websocket_frame"
+  case log
+  case lifecycle
+  case notificationAction = "notification_action"
+  case viewBodySnapshot = "view_body_snapshot"
+  case broadcast
+  case interaction
+  case storageChanged = "storage_changed"
+  case viewHierarchy = "view_hierarchy"
+  case webView = "webview"
 public struct SdkNavigationEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .navigation
   public let timestamp: Int64
@@ -169,7 +201,14 @@ public struct SdkWebSocketFrameEvent: SdkEvent
   public let payloadSize: Int?
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), url: String, direction: WebSocketFrameDirection, frameType: WebSocketFrameType, payloadSize: Int? = nil )
 public enum WebSocketFrameDirection: String, Codable, Sendable
+  case sent
+  case received
 public enum WebSocketFrameType: String, Codable, Sendable
+  case text
+  case binary
+  case ping
+  case pong
+  case close
 public struct SdkLogEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .log
   public let timestamp: Int64
@@ -178,6 +217,12 @@ public struct SdkLogEvent: SdkEvent
   public let message: String
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), level: LogLevel, tag: String?, message: String )
 public enum LogLevel: Int, Codable, Sendable, Comparable
+  case verbose = 0
+  case debug = 1
+  case info = 2
+  case warning = 3
+  case error = 4
+  case fault = 5
   public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool
 public struct SdkLifecycleEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .lifecycle
@@ -213,6 +258,10 @@ public struct ViewBodySnapshot: Codable, Sendable
   public let averageDurationMs: Double?
   public init( id: String, viewName: String?, totalCount: Int, rollingAverage: Double, averageDurationMs: Double? )
 public enum NavigationSourceType: String, Codable, Sendable
+  case swiftUINavigation = "swiftui_navigation"
+  case uiKitNavigation = "uikit_navigation"
+  case deepLink = "deep_link"
+  case custom
 public struct SdkDeviceInfo: Codable, Sendable
   public let model: String
   public let manufacturer: String
@@ -344,6 +393,9 @@ public final class UIKitNavigationAdapter: NavigationFrameworkAdapter, @unchecke
 
 // Navigation/Adapters/NavigationFrameworkAdapter.swift
 public protocol NavigationFrameworkAdapter: AnyObject, Sendable
+  func start()
+  func stop()
+  var isActive: Bool
 
 // Navigation/Adapters/SwiftUINavigationAdapter.swift
 public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable
@@ -358,6 +410,7 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchec
 public struct TrackNavigationModifier: ViewModifier
   public func body(content: Content) -> some View
 public extension View
+  func trackNavigation( destination: String, arguments: [String: String] = [:], metadata: [String: String] = [:] ) -> some View
 
 // Navigation/NavigationEvent.swift
 public struct NavigationEvent: Sendable
@@ -375,6 +428,7 @@ public struct NavigationEvent: Sendable
 
 // Navigation/NavigationIdentity.swift
 public protocol NavigationDataRedacting: Sendable
+  func redact(_ value: String) -> String
 public struct NoOpNavigationRedactor: NavigationDataRedacting
   public init()
   public func redact(_ value: String) -> String
@@ -390,12 +444,17 @@ public struct NavigationEventFactory: Sendable
 
 // Navigation/NavigationListener.swift
 public protocol NavigationListener: AnyObject, Sendable
+  func onNavigationEvent(_ event: NavigationEvent)
 public final class BlockNavigationListener: NavigationListener, @unchecked Sendable
   public init(_ block: @escaping @Sendable (NavigationEvent) -> Void)
   public func onNavigationEvent(_ event: NavigationEvent)
 
 // Navigation/NavigationSource.swift
 public enum NavigationSource: String, Sendable, CaseIterable
+  case swiftUINavigation = "swiftui_navigation"
+  case uiKitNavigation = "uikit_navigation"
+  case deepLink = "deep_link"
+  case custom = "custom"
 
 // Network/AutoMobileNetwork.swift
 public struct NetworkRequestRecord: Sendable
@@ -443,6 +502,10 @@ public class AutoMobileURLProtocol: URLProtocol
 
 // Network/NetworkCaptureRecorder.swift
 public enum NetworkCaptureDirection: String, Codable, Sendable
+  case request
+  case response
+  case sent
+  case received
 public final class NetworkCaptureRecorder: @unchecked Sendable
   public typealias Emit = @Sendable (NetworkRequestRecord) -> Void
   public typealias IDGenerator = @Sendable () -> String
@@ -487,7 +550,19 @@ public final class NWConnectionNetworkCaptureAdapter: @unchecked Sendable
 
 // Network/NetworkMockRuleStore.swift
 public enum NetworkFaultTransport: String, Codable, Equatable
+  case urlSession
+  case webSocket
+  case nwConnection
+  case webView
 public enum NetworkFaultAction: String, Codable, Equatable
+  case response
+  case status
+  case error
+  case latency
+  case bandwidth
+  case dropBytes
+  case closeConnection
+  case rejectFrame
 public struct NetworkFaultRuleDTO: Codable, Equatable
   public let faultId: String
   public let transport: NetworkFaultTransport?
@@ -555,6 +630,9 @@ public struct RetryPolicy: Sendable
 
 // Notifications/AutoMobileNotifications.swift
 public enum NotificationStyle: String, Sendable
+  case `default`
+  case bigText
+  case bigPicture
 public struct NotificationAction: Sendable
   public let label: String
   public let actionId: String
@@ -568,7 +646,15 @@ public final class AutoMobileNotifications: @unchecked Sendable
 
 // Observation/AutoMobileObservationBridge.swift
 public enum AutoMobileCoordinateSpace: String, Codable, Sendable
+  case screen
+  case window
+  case view
 public enum AutoMobileDeviceOrientation: String, Codable, Sendable
+  case portrait
+  case portraitUpsideDown
+  case landscapeLeft
+  case landscapeRight
+  case unknown
 public struct AutoMobileObservationNode: Codable, Sendable, Equatable
   public let id: String
   public let role: String
@@ -593,7 +679,17 @@ public struct AutoMobileObservationSnapshot: Codable, Sendable, Equatable
   public init( captureIdentity: UInt64, orientation: AutoMobileDeviceOrientation = .unknown, coordinateSpace: AutoMobileCoordinateSpace, bounds: SdkBounds, root: AutoMobileObservationNode?, focusedElementId: String? = nil, capabilities: Set<String> = [] )
   public func containsElement(id: String) -> Bool
 public protocol AutoMobileObservationProvider: AnyObject, Sendable
+  func captureObservation() async -> AutoMobileObservationSnapshot
 public enum AutoMobileAction: Codable, Sendable, Equatable
+  case tap(observationIdentity: UInt64, elementId: String)
+  case longPress(observationIdentity: UInt64, elementId: String, durationMs: Int)
+  case swipe(observationIdentity: UInt64, start: SdkPoint, end: SdkPoint, durationMs: Int)
+  case drag(observationIdentity: UInt64, elementId: String, end: SdkPoint, durationMs: Int)
+  case pinch(observationIdentity: UInt64, elementId: String, scale: Double, durationMs: Int)
+  case insertText(observationIdentity: UInt64, elementId: String, text: String)
+  case clearText(observationIdentity: UInt64, elementId: String)
+  case back(observationIdentity: UInt64)
+  case scroll(observationIdentity: UInt64, elementId: String?, delta: SdkPoint)
   public var observationIdentity: UInt64
   public var targetElementId: String?
 public struct SdkPoint: Codable, Sendable, Equatable
@@ -602,12 +698,16 @@ public struct SdkPoint: Codable, Sendable, Equatable
   public init(x: Double, y: Double)
 public struct AutoMobileActionResult: Codable, Sendable, Equatable
 public enum Status: String, Codable, Sendable
+  case accepted
+  case rejected
+  case cancelled
   public let status: Status
   public let reason: String?
   public let durationMs: Double
   public let nextObservationIdentity: UInt64?
   public init(status: Status, reason: String? = nil, durationMs: Double = 0, nextObservationIdentity: UInt64? = nil)
 public protocol AutoMobileActionExecutor: AnyObject, Sendable
+  func execute(_ action: AutoMobileAction) async -> AutoMobileActionResult
   public actor AutoMobileSerialActionQueue: AutoMobileActionExecutor
   public typealias Performer = @Sendable (AutoMobileAction) async -> AutoMobileActionResult
   public init(capacity: Int = 32, performer: @escaping Performer)
@@ -631,9 +731,31 @@ public final class AutoMobileOsEvents: @unchecked Sendable
 
 // Public/AutoMobileAPI.swift
 public protocol AutoMobileAPI: AnyObject, Sendable
+  func initialize()
+  func initialize(configuration: AutoMobileConfiguration)
+  func shutdown()
+  var isEnabled: Bool
+  func setEnabled(_ enabled: Bool)
+  var isInitialized: Bool
+  func addNavigationListener(_ listener: NavigationListener)
+  func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
+  func removeNavigationListener(_ listener: NavigationListener)
+  func clearNavigationListeners()
+  func notifyNavigationEvent(_ event: NavigationEvent)
+  var listenerCount: Int
+  func currentSessionId() -> String?
+  func addBreadcrumb(message: String, category: BreadcrumbCategory, metadata: [String: String])
+  func setUserId(_ userId: String?)
+  func setTag(_ key: String, value: String)
+  func removeTag(_ key: String)
+  var configuration: AutoMobileConfiguration?
+  var bundleId: String?
+  var dropReport: [DropReason: Int]
 
 // Public/AutoMobileCrashesAPI.swift
 public protocol AutoMobileCrashesAPI: AnyObject, Sendable
+  func enableSignalHandlers()
+  func setCurrentScreenProvider(_ provider: (@Sendable () -> String?)?)
 public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, @unchecked Sendable
   public init()
   public func enableSignalHandlers()
@@ -641,6 +763,10 @@ public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, @unchecked
 
 // Public/AutoMobileNetworkAPI.swift
 public protocol AutoMobileNetworkAPI: AnyObject, Sendable
+  func recordRequest(_ record: NetworkRequestRecord)
+  func captureRecorder() -> NetworkCaptureRecorder
+  func setCaptureHeaders(_ enabled: Bool)
+  func setCaptureBodies(_ enabled: Bool)
 public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked Sendable
   public init()
   public func recordRequest(_ record: NetworkRequestRecord)
@@ -682,8 +808,14 @@ public final class DatabaseInspector: @unchecked Sendable
   public func registerCoreDataStore(_ store: CoreDataStoreRegistration)
   public func authorizeHostMutations(_ authorized: Bool)
   public func authorizeSessionMutations(sessionId: String?)
+  public func authorizeMutationToken(_ token: String)
   public func getDriver() -> DatabaseDriver?
 public protocol DatabaseDriver: Sendable
+  func getDatabases() -> [DatabaseDescriptor]
+  func getTables(databasePath: String) -> [String]
+  func getTableData(databasePath: String, table: String, limit: Int, offset: Int) -> TableDataResult
+  func getTableStructure(databasePath: String, table: String) -> TableStructureResult
+  func executeSQL(databasePath: String, query: String) -> SQLExecutionResult
 public struct DatabaseDescriptor: Sendable
   public let name: String
   public let path: String
@@ -756,7 +888,14 @@ public final class UserDefaultsInspector: @unchecked Sendable
   public func startListening(suiteName: String? = nil)
   public func stopListening()
 public protocol UserDefaultsChangeListener: AnyObject
+  func onPreferenceChanged(suiteName: String?, key: String?)
 public protocol UserDefaultsDriver: Sendable
+  func getSuites() -> [UserDefaultsSuiteDescriptor]
+  func getValues(suiteName: String?) -> [KeyValuePair]
+  func getValue(suiteName: String?, key: String) -> KeyValuePair?
+  func setValue(suiteName: String?, key: String, value: Any?, type: KeyValueType)
+  func removeValue(suiteName: String?, key: String)
+  func clear(suiteName: String?)
 public struct UserDefaultsSuiteDescriptor: Sendable
   public let name: String?
   public let displayName: String
@@ -768,6 +907,15 @@ public struct KeyValuePair: Sendable
   public let type: KeyValueType
   public init(key: String, value: String?, type: KeyValueType)
 public enum KeyValueType: String, Sendable
+  case string
+  case int
+  case double
+  case bool
+  case data
+  case date
+  case array
+  case dictionary
+  case unknown
 
 // ViewBody/ViewBodyTracker.swift
 public final class ViewBodyTracker: @unchecked Sendable
@@ -780,6 +928,7 @@ public final class ViewBodyTracker: @unchecked Sendable
 public struct TrackViewBodyModifier: ViewModifier
   public func body(content: Content) -> some View
 public extension View
+  func trackViewBody(id: String, viewName: String? = nil) -> some View
 public struct MeasureViewBody<Content: View>: View
   public init( id: String, viewName: String? = nil, @ViewBuilder content: @escaping () -> Content )
   public var body: some View
@@ -906,6 +1055,12 @@ public struct AutoMobileWebViewConfiguration: Sendable
   public let redactText: Bool
   public init( allowedOrigins: Set<String> = [], allowedFrames: Set<String> = [], maxElements: Int = 500, maxMessageBytes: Int = 256 * 1024, contentWorldName: String = "AutoMobile", redactText: Bool = true )
 public enum AutoMobileWebAction: Codable, Sendable, Equatable
+  case click(snapshotId: String, elementId: String)
+  case focus(snapshotId: String, elementId: String)
+  case insertText(snapshotId: String, elementId: String, text: String)
+  case select(snapshotId: String, elementId: String, value: String)
+  case scroll(snapshotId: String, elementId: String?, x: Double, y: Double)
+  case evaluateJavaScript(String)
 public struct SdkWebViewEvent: SdkEvent
   public private(set) var eventType: SdkEventType = .webView
   public let timestamp: Int64

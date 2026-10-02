@@ -46,6 +46,7 @@ class InstallApp extends ProductionInstallApp {
       repository,
       physicalAppLister,
       timer,
+      iosInstallBackendResolver,
     ] = args;
     super(
       device,
@@ -59,6 +60,7 @@ class InstallApp extends ProductionInstallApp {
       repository ?? new FakeInstalledAppsRepository(),
       physicalAppLister,
       timer,
+      iosInstallBackendResolver,
     );
   }
 }
@@ -544,6 +546,47 @@ describe("InstallApp", () => {
     expect(fakeHost.wasCommandExecuted("plutil")).toBe(false);
     expect(await repo.getCacheVerifiedAt(iosSimulatorDevice.deviceId)).toBe(0);
   });
+
+  test.each(["simulator", "physical"])(
+    "routes %s install and verification through an injected backend",
+    async (transport) => {
+      const device = transport === "simulator" ? iosSimulatorDevice : iosPhysicalDevice;
+      const artifactPath = transport === "simulator" ? "/tmp/MyApp.app" : ipaWithBundleId();
+      const calls: string[] = [];
+      const installApp = new InstallApp(
+        device,
+        fakeAdbFactory,
+        null,
+        null,
+        () => createPerformanceTracker(false, fakeTimer),
+        new FakeSimctl(),
+        new FakeDeviceAppInstaller(),
+        fakePlist("com.example.app"),
+        new FakeInstalledAppsRepository(),
+        undefined,
+        fakeTimer,
+        (deviceId) => {
+          calls.push(`resolve:${deviceId}`);
+          return {
+            installApp: async (path) => {
+              calls.push(`install:${path}`);
+            },
+            listApps: async () => {
+              calls.push("list");
+              return [{ bundleId: "com.example.app", bundlePath: artifactPath }];
+            },
+          };
+        },
+      );
+
+      await installApp.execute(artifactPath);
+      expect(calls).toEqual(
+        transport === "simulator"
+          ? [`resolve:${device.deviceId}`, "list", `install:${artifactPath}`, "list"]
+          : [`resolve:${device.deviceId}`, `install:${artifactPath}`, "list"],
+      );
+    },
+  );
 
   test("installs iOS .ipa on physical device via devicectl", async () => {
     const ipaPath = "/tmp/MyApp.ipa";

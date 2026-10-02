@@ -41,6 +41,10 @@ import type { IosPhysicalAppLister } from "../observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import {
+  resolveIosInstallBackend,
+  type IosInstallBackend,
+} from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 
 const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
 const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
@@ -75,6 +79,7 @@ export class InstallApp {
     installedAppsRepository?: InstalledAppsStore,
     physicalAppLister?: IosPhysicalAppLister,
     timer?: Timer,
+    private readonly iosInstallBackendResolver?: typeof resolveIosInstallBackend,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -91,6 +96,17 @@ export class InstallApp {
 
   private isSimulator(): boolean {
     return isIosSimulatorUdid(this.device.deviceId);
+  }
+
+  private getIosInstallBackend(): IosInstallBackend {
+    return (this.iosInstallBackendResolver ?? resolveIosInstallBackend)(this.device.deviceId, {
+      simctl: this.simctl,
+      deviceAppInstaller: this.deviceAppInstaller,
+      physicalAppLister: {
+        listInstalledApps: (deviceId) =>
+          (this.physicalAppLister ?? new DeviceAppManager()).listInstalledApps(deviceId),
+      },
+    });
   }
 
   async execute(
@@ -128,9 +144,10 @@ export class InstallApp {
 
     if (this.device.platform === "ios") {
       this.validateiOSArtifact(ext);
+      const backend = this.getIosInstallBackend();
       if (ext === ".ipa") {
         const result = await perf.track("iOSPhysicalInstall", () =>
-          this.executeiOSPhysical(artifactPath, perf, signal),
+          this.executeiOSPhysical(artifactPath, perf, backend, signal),
         );
         if (result.success) {
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity();
@@ -139,7 +156,7 @@ export class InstallApp {
         return { ...result, userId: 0 };
       }
       const result = await perf.track("iOSInstall", () =>
-        this.executeiOSSimulator(artifactPath, perf, signal),
+        this.executeiOSSimulator(artifactPath, perf, backend, signal),
       );
       if (result.success) {
         IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
@@ -465,6 +482,7 @@ export class InstallApp {
   private async executeiOSSimulator(
     appPath: string,
     perf: PerformanceTracker,
+    backend: IosInstallBackend,
     signal?: AbortSignal,
   ): Promise<{ success: boolean; upgrade: boolean; packageName?: string; warning?: string }> {
     if (signal?.aborted) {
@@ -475,9 +493,7 @@ export class InstallApp {
     let beforeError: unknown;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       try {
-        beforeApps = await perf.track("listAppsBefore", () =>
-          this.simctl.listAppsOrThrow(this.device.deviceId),
-        );
+        beforeApps = await perf.track("listAppsBefore", () => backend.listApps());
         break;
       } catch (error) {
         beforeError = error;
@@ -490,7 +506,7 @@ export class InstallApp {
     const beforeBundleIds = this.extractBundleIds(beforeApps);
 
     const downgraded = await perf.track("simctlInstall", () =>
-      this.installiOSSimulatorWithDowngradeRecovery(appPath, signal),
+      this.installiOSSimulatorWithDowngradeRecovery(appPath, backend, signal),
     );
 
     await this.markInstalledAppsCacheStale(true);
@@ -502,9 +518,7 @@ export class InstallApp {
     let afterApps: any[] = [];
     let postListingWarning: string | undefined;
     try {
-      afterApps = await perf.track("listAppsAfter", () =>
-        this.simctl.listAppsOrThrow(this.device.deviceId),
-      );
+      afterApps = await perf.track("listAppsAfter", () => backend.listApps());
     } catch (error) {
       postListingWarning = `Could not verify installed bundle: ${errorMessage(error)}`;
       logger.warn(`[InstallApp] ${postListingWarning}`, error);
@@ -573,10 +587,11 @@ export class InstallApp {
    */
   private async installiOSSimulatorWithDowngradeRecovery(
     appPath: string,
+    backend: IosInstallBackend,
     signal?: AbortSignal,
   ): Promise<boolean> {
     try {
-      await this.simctl.installApp(appPath, this.device.deviceId);
+      await backend.installApp(appPath);
       return false;
     } catch (error) {
       const text = this.extractErrorText(error);
@@ -603,7 +618,7 @@ export class InstallApp {
       if (signal?.aborted) {
         throw new Error(OPERATION_CANCELLED_MESSAGE);
       }
-      await this.simctl.installApp(appPath, this.device.deviceId);
+      await backend.installApp(appPath);
       return true;
     }
   }
@@ -611,6 +626,7 @@ export class InstallApp {
   private async executeiOSPhysical(
     ipaPath: string,
     perf: PerformanceTracker,
+    backend: IosInstallBackend,
     signal?: AbortSignal,
   ): Promise<{ success: boolean; upgrade: boolean; packageName?: string; warning?: string }> {
     if (signal?.aborted) {
@@ -618,9 +634,7 @@ export class InstallApp {
     }
 
     try {
-      await perf.track("devicectlInstall", () =>
-        this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath),
-      );
+      await perf.track("devicectlInstall", () => backend.installApp(ipaPath));
       await this.markInstalledAppsCacheStale(true);
     } catch (error) {
       const text = this.extractErrorText(error);
@@ -653,9 +667,7 @@ export class InstallApp {
               if (signal?.aborted) {
                 throw new Error(OPERATION_CANCELLED_MESSAGE);
               }
-              const apps = await (
-                this.physicalAppLister ?? new DeviceAppManager()
-              ).listInstalledApps(this.device.deviceId);
+              const apps = await backend.listApps();
               if (apps.some((app) => getIosInstalledAppBundleId(app) === bundleId)) {
                 return true;
               }

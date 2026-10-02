@@ -1964,6 +1964,14 @@ jobs:
             (cd "${package}" && swift package resolve)
           done
 
+      - name: "Check iOS SDK public API baseline"
+        shell: bash
+        run: |
+          if ! bash scripts/ios/api-dump.sh --check; then
+            echo "::error::Update the iOS SDK API baseline: scripts/ios/api-dump.sh > ios/auto-mobile-sdk/api/auto-mobile-sdk.api"
+            exit 1
+          fi
+
       - name: "Build Swift Packages"
         env:
           MACOS_SIGNING_ENABLED: ${{ env.MACOS_SIGNING_ENABLED }}
@@ -2920,9 +2928,11 @@ jobs:
       # Publish both SDK variants to the local Maven repo. The storage-inspection
       # ContentProviders ship in the debug variant only (#5714); this proves a
       # Maven consumer -- not an in-repo project() dependency -- can obtain them.
+      # Check the public API here because publishing already compiles SDK release classes.
+      # Update the baseline with: cd android && ./gradlew :auto-mobile-sdk:apiDump
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal"
+          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal :auto-mobile-sdk:apiCheck"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

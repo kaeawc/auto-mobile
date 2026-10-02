@@ -83,8 +83,12 @@ fi
 
 root_gradle_changed=false
 detekt_config_changed=false
+sdk_api_baseline_changed=false
 for changed_file in "${android_changes[@]}"; do
   case "${changed_file}" in
+    android/auto-mobile-sdk/api/auto-mobile-sdk.api)
+      sdk_api_baseline_changed=true
+      ;;
     android/config/detekt/*)
       detekt_config_changed=true
       ;;
@@ -110,21 +114,40 @@ run_full_scope_detekt() {
   (cd android && ./gradlew detektMain detektTest)
 }
 
+run_sdk_api_check() {
+  echo "==> SDK API baseline validation"
+  (cd android && ./gradlew :auto-mobile-sdk:apiCheck)
+}
+
 kotlin_changes=()
 while IFS= read -r changed_file; do
   [[ -n "${changed_file}" ]] && kotlin_changes+=("${changed_file}")
 done < <(printf '%s\n' "${android_changes[@]+"${android_changes[@]}"}" | grep -E '^android/.*\.(kt|kts)$' || true)
 if [[ "${#kotlin_changes[@]}" -eq 0 ]]; then
+  if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+    run_sdk_api_check
+  fi
   if [[ "${detekt_config_changed}" == "true" ]]; then
     run_full_scope_detekt
     if [[ "${root_gradle_changed}" == "true" ]]; then
       validate_root_gradle_configuration
     fi
-    echo "No changed Kotlin files; full-scope Detekt ran; ktfmt, compile, and tests are no-ops."
+    if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+      echo "No changed Kotlin files; SDK API baseline validation and full-scope Detekt ran; ktfmt, compile, and tests are no-ops."
+    else
+      echo "No changed Kotlin files; full-scope Detekt ran; ktfmt, compile, and tests are no-ops."
+    fi
     exit 0
   fi
   if [[ "${root_gradle_changed}" == "true" ]]; then
     validate_root_gradle_configuration
+    if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+      echo "No changed Kotlin files; SDK API baseline validation ran; ktfmt, scoped Detekt, compile, and tests are no-ops."
+    fi
+    exit 0
+  fi
+  if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+    echo "No changed Kotlin files; SDK API baseline validation ran; ktfmt, scoped Detekt, compile, and tests are no-ops."
     exit 0
   fi
   echo "No changed Kotlin files; ktfmt, scoped Detekt, compile, and tests are no-ops."
@@ -159,16 +182,30 @@ done < <(printf '%s\n' "${modules[@]+"${modules[@]}"}" | sort -u)
 modules=("${unique_modules[@]+"${unique_modules[@]}"}")
 
 if [[ "${#modules[@]}" -eq 0 ]]; then
+  if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+    run_sdk_api_check
+  fi
   if [[ "${detekt_config_changed}" == "true" ]]; then
     run_full_scope_detekt
     if [[ "${root_gradle_changed}" == "true" ]]; then
       validate_root_gradle_configuration
     fi
-    echo "No changed Kotlin modules; full-scope Detekt ran; compile and tests are no-ops."
+    if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+      echo "No changed Kotlin modules; SDK API baseline validation and full-scope Detekt ran; compile and tests are no-ops."
+    else
+      echo "No changed Kotlin modules; full-scope Detekt ran; compile and tests are no-ops."
+    fi
     exit 0
   fi
   if [[ "${root_gradle_changed}" == "true" ]]; then
     validate_root_gradle_configuration
+    if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+      echo "No changed Kotlin modules; SDK API baseline validation ran; scoped Detekt, compile, and tests are no-ops."
+    fi
+    exit 0
+  fi
+  if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+    echo "No changed Kotlin modules; SDK API baseline validation ran; scoped Detekt, compile, and tests are no-ops."
     exit 0
   fi
   echo "No changed Kotlin modules; scoped Detekt, compile, and tests are no-ops."
@@ -201,10 +238,26 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
       compile_tasks+=("${module_path}:compileKotlin")
     fi
   fi
+  if [[ "${module_path}" == ":auto-mobile-sdk" ]]; then
+    compile_tasks+=("${module_path}:apiCheck")
+  fi
   if [[ -d "${module_dir}/src/test" ]]; then
     test_tasks+=("${module_path}:test")
   fi
 done
+
+if [[ "${sdk_api_baseline_changed}" == "true" ]]; then
+  sdk_module_inferred=false
+  for module_path in "${modules[@]+"${modules[@]}"}"; do
+    if [[ "${module_path}" == ":auto-mobile-sdk" ]]; then
+      sdk_module_inferred=true
+      break
+    fi
+  done
+  if [[ "${sdk_module_inferred}" == "false" ]]; then
+    compile_tasks+=(":auto-mobile-sdk:apiCheck")
+  fi
+fi
 
 if [[ "${detekt_config_changed}" == "true" ]]; then
   echo "==> full-scope Detekt (Detekt config changed)"

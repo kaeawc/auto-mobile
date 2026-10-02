@@ -103,81 +103,103 @@ tasks.withType<KotlinCompile>().configureEach {
 // These custom tasks use javap to produce a public API signature file from compiled release
 // classes. apiDump generates the baseline and apiCheck verifies it hasn't changed.
 
-fun generateApiSignature(classesDir: FileCollection): String {
-  val classpath = classesDir.files.joinToString(":") { it.path }
-  val classNames =
-    classesDir.asFileTree
-      .matching { include("**/*.class") }
-      .files
-      .sortedBy { it.path }
-      .mapNotNull { classFile ->
-        val relativePath =
-          classesDir.files.firstNotNullOfOrNull { root ->
-            if (classFile.startsWith(root)) classFile.relativeTo(root).path else null
-          } ?: return@mapNotNull null
-        if ("\$\$" in relativePath || "BuildConfig" in relativePath) return@mapNotNull null
-        relativePath.removeSuffix(".class").replace('/', '.')
-      }
-  if (classNames.isEmpty()) return ""
-  // Run javap once with all class names for efficiency
-  val proc =
-    ProcessBuilder(listOf("javap", "-public", "-classpath", classpath) + classNames)
-      .redirectErrorStream(true)
-      .start()
-  val output = proc.inputStream.bufferedReader().readText()
-  val exited = proc.waitFor(60, TimeUnit.SECONDS)
-  if (!exited) {
-    proc.destroyForcibly()
-    throw GradleException("javap timed out after 60 seconds")
+abstract class SdkApiSignatureTask : DefaultTask() {
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val releaseClasses: ConfigurableFileCollection
+
+  protected fun generateApiSignature(): String {
+    val classesDir = releaseClasses
+    val classpath = classesDir.files.joinToString(":") { it.path }
+    val classNames =
+      classesDir.asFileTree
+        .matching { include("**/*.class") }
+        .files
+        .sortedBy { it.path }
+        .mapNotNull { classFile ->
+          val relativePath =
+            classesDir.files.firstNotNullOfOrNull { root ->
+              if (classFile.startsWith(root)) classFile.relativeTo(root).path else null
+            } ?: return@mapNotNull null
+          if ("\$\$" in relativePath || "BuildConfig" in relativePath) return@mapNotNull null
+          relativePath.removeSuffix(".class").replace('/', '.')
+        }
+    if (classNames.isEmpty()) return ""
+    // Run javap once with all class names for efficiency
+    val proc =
+      ProcessBuilder(listOf("javap", "-public", "-classpath", classpath) + classNames)
+        .redirectErrorStream(true)
+        .start()
+    val output = proc.inputStream.bufferedReader().readText()
+    val exited = proc.waitFor(60, TimeUnit.SECONDS)
+    if (!exited) {
+      proc.destroyForcibly()
+      throw GradleException("javap timed out after 60 seconds")
+    }
+    if (proc.exitValue() != 0) {
+      throw GradleException("javap failed with exit code ${proc.exitValue()}: $output")
+    }
+    return output.trim() + "\n"
   }
-  if (proc.exitValue() != 0) {
-    throw GradleException("javap failed with exit code ${proc.exitValue()}: $output")
-  }
-  return output.trim() + "\n"
 }
 
-val apiFile = layout.projectDirectory.file("api/auto-mobile-sdk.api")
+abstract class SdkApiDumpTask : SdkApiSignatureTask() {
+  @get:OutputFile abstract val apiFile: RegularFileProperty
+
+  @TaskAction
+  fun dump() {
+    val signature = generateApiSignature()
+    val output = apiFile.get().asFile
+    output.parentFile.mkdirs()
+    output.writeText(signature)
+    logger.lifecycle("API dump written to ${output.name}")
+  }
+}
+
+abstract class SdkApiCheckTask : SdkApiSignatureTask() {
+  // InputFiles permits a missing baseline so the action can print the repair command.
+  @get:InputFiles
+  @get:PathSensitive(PathSensitivity.RELATIVE)
+  abstract val baselineFiles: ConfigurableFileCollection
+
+  @TaskAction
+  fun check() {
+    val expected = baselineFiles.singleFile
+    if (!expected.exists()) {
+      throw GradleException(
+        "API file ${expected.name} does not exist. " +
+          "Run cd android && ./gradlew :auto-mobile-sdk:apiDump first."
+      )
+    }
+    val current = generateApiSignature()
+    if (current != expected.readText()) {
+      throw GradleException(
+        "Public API has changed! Run cd android && ./gradlew :auto-mobile-sdk:apiDump " +
+          "to update the API file.\nExpected file: ${expected.name}"
+      )
+    }
+    logger.lifecycle("API check passed: public API matches ${expected.name}")
+  }
+}
+
+val sdkApiFile = layout.projectDirectory.file("api/auto-mobile-sdk.api")
 val kotlinReleaseClassesDir =
   layout.buildDirectory.dir("intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes")
 
-tasks.register("apiDump") {
+tasks.register<SdkApiDumpTask>("apiDump") {
   description = "Generate public API signature file from release classes"
   group = "verification"
   dependsOn("compileReleaseKotlin")
-  inputs.dir(kotlinReleaseClassesDir)
-  outputs.file(apiFile)
-  doLast {
-    val signature = generateApiSignature(files(kotlinReleaseClassesDir))
-    val output = apiFile.asFile
-    output.parentFile.mkdirs()
-    output.writeText(signature)
-    logger.lifecycle("API dump written to ${output.relativeTo(projectDir)}")
-  }
+  releaseClasses.from(kotlinReleaseClassesDir)
+  apiFile.set(sdkApiFile)
 }
 
-tasks.register("apiCheck") {
+tasks.register<SdkApiCheckTask>("apiCheck") {
   description = "Check that public API matches the checked-in signature file"
   group = "verification"
   dependsOn("compileReleaseKotlin")
-  inputs.dir(kotlinReleaseClassesDir)
-  inputs.file(apiFile)
-  doLast {
-    val expected = apiFile.asFile
-    if (!expected.exists()) {
-      throw GradleException(
-        "API file ${expected.relativeTo(projectDir)} does not exist. " +
-          "Run :auto-mobile-sdk:apiDump first."
-      )
-    }
-    val current = generateApiSignature(files(kotlinReleaseClassesDir))
-    if (current != expected.readText()) {
-      throw GradleException(
-        "Public API has changed! Run :auto-mobile-sdk:apiDump to update the API file.\n" +
-          "Expected file: ${expected.relativeTo(projectDir)}"
-      )
-    }
-    logger.lifecycle("API check passed: public API matches ${expected.relativeTo(projectDir)}")
-  }
+  releaseClasses.from(kotlinReleaseClassesDir)
+  baselineFiles.from(sdkApiFile)
 }
 
 mavenPublishing {

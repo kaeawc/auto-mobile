@@ -94,6 +94,9 @@ else
   done
 fi
 
+echo "Checking iOS SDK public API baseline"
+bash "${project_root}/scripts/ios/api-dump.sh" --check
+
 cd "${project_root}/ios/XCTestRunner"
 swift build
 # RemindersAddPlanTests extends RemindersIntegrationBase, which requires a

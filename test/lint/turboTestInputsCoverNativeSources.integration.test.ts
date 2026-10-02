@@ -41,6 +41,9 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
    * non-goal).
    */
   const REQUIRED_NATIVE_GLOBS = [
+    // sdkApiBaselineWorkflow.test.ts reads the SDK API baseline and Gradle wiring.
+    "android/auto-mobile-sdk/build.gradle.kts",
+    "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
     // registrationTeardownGuard.test.ts walks these four for listener leaks.
     "android/auto-mobile-sdk/src/main/kotlin/**",
     "android/control-proxy/src/main/kotlin/**",

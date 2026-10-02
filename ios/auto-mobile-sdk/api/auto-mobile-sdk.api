@@ -682,6 +682,7 @@ public final class DatabaseInspector: @unchecked Sendable
   public func registerCoreDataStore(_ store: CoreDataStoreRegistration)
   public func authorizeHostMutations(_ authorized: Bool)
   public func authorizeSessionMutations(sessionId: String?)
+  public func authorizeMutationToken(_ token: String)
   public func getDriver() -> DatabaseDriver?
 public protocol DatabaseDriver: Sendable
 public struct DatabaseDescriptor: Sendable

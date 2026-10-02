@@ -37,7 +37,7 @@
       "env": ["GITHUB_BASE_REF"]
     },
     "test": {
-      "description": "Run the hermetic Bun unit suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
+      "description": "Run the hermetic Bun unit suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity, sdkApiBaselineWorkflow); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
@@ -47,6 +47,7 @@
         "bunfig.toml",
         ".github/workflows/**",
         "turbo.json",
+        "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
@@ -54,6 +55,7 @@
         "android/protocol/src/main/kotlin/**",
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
+        "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**"
       ],
@@ -78,6 +80,7 @@
         "bunfig.toml",
         ".github/workflows/**",
         "turbo.json",
+        "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
@@ -85,6 +88,7 @@
         "android/protocol/src/main/kotlin/**",
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
+        "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**"
       ],
@@ -125,6 +129,7 @@
         "oxlint-plugins/**",
         ".github/workflows/**",
         "turbo.json",
+        "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
@@ -133,6 +138,7 @@
         "android/protocol/src/main/kotlin/**",
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
+        "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**"
       ],
@@ -220,6 +226,7 @@
         "package.json",
         "bunfig.toml",
         "turbo.json",
+        "android/auto-mobile-sdk/build.gradle.kts",
         "android/auto-mobile-sdk/src/main/kotlin/**",
         "android/control-proxy/src/main/kotlin/**",
         "android/control-proxy/src/test/kotlin/**",
@@ -227,6 +234,7 @@
         "android/protocol/src/main/kotlin/**",
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
+        "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**"
       ],

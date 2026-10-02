@@ -14,8 +14,8 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeDiscoveryObservationSequence } from "../../fakes/FakeDiscoveryObservationSequence";
 
-function parseFixture(name: string) {
-  const parsed = parseDevicectlDeviceList(JSON.parse(loadDevicectlListFixture(name)) as unknown);
+function parseListing(payload: unknown) {
+  const parsed = parseDevicectlDeviceList(payload);
   expect(parsed.ok).toBe(true);
   if (!parsed.ok) {
     throw new Error(parsed.reason);
@@ -23,12 +23,44 @@ function parseFixture(name: string) {
   return parsed;
 }
 
+function parseFixture(name: string) {
+  return parseListing(JSON.parse(loadDevicectlListFixture(name)) as unknown);
+}
+
 const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 
-function capturedLister(readFile: () => Promise<string>, timer = new FakeTimer()) {
+type DerivedListing = ReturnType<typeof loadDerivedDevicectlListing>;
+type PayloadGeneration = "both" | "propertiesOnly" | "deprecatedOnly";
+
+function deriveGeneration({
+  listing,
+  generation,
+}: {
+  listing: DerivedListing;
+  generation: PayloadGeneration;
+}): DerivedListing {
+  // DERIVED in-memory copies: preserve both groups or delete only captured field groups.
+  const derived = structuredClone(listing);
+  for (const record of derived.result.devices) {
+    if (generation === "propertiesOnly") {
+      delete record.hardwareProperties;
+      delete record.deviceProperties;
+      delete record.connectionProperties;
+      Reflect.deleteProperty(record, "_deprecationNotice");
+    } else if (generation === "deprecatedOnly") {
+      Reflect.deleteProperty(record, "properties");
+    }
+  }
+  return derived;
+}
+
+function capturedLister(
+  readFile: () => Promise<string>,
+  options: Pick<ConstructorParameters<typeof DevicectlDeviceLister>[0], "timer" | "logger"> = {},
+) {
   return new DevicectlDeviceLister({
     platform: () => "darwin",
-    timer,
+    timer: new FakeTimer(),
     observationSequence: new FakeDiscoveryObservationSequence(),
     execute: async () => createExecResult("", ""),
     readFile,
@@ -36,41 +68,11 @@ function capturedLister(readFile: () => Promise<string>, timer = new FakeTimer()
     rm: async () => {},
     tmpdir: () => "/fake",
     logger: { warn: () => {}, debug: () => {} },
+    ...options,
   });
 }
 
 describe("devicectl list devices host captures", () => {
-  test("captures classify equally per record; DERIVED availability exposes every device field", () => {
-    const withDeprecated = loadDerivedDevicectlListing("list-devices-simulators-only.json");
-    const withoutDeprecated = loadDerivedDevicectlListing();
-    expect(withDeprecated.result.devices.map((record) => record.identifier).toSorted()).toEqual(
-      withoutDeprecated.result.devices.map((record) => record.identifier).toSorted(),
-    );
-    for (const record of withDeprecated.result.devices) {
-      const paired = withoutDeprecated.result.devices.find(
-        (other) => other.identifier === record.identifier,
-      );
-      expect(paired).toBeDefined();
-      expect(parseDevicectlDeviceList([record])).toEqual(parseDevicectlDeviceList([paired]));
-      // DERIVED availability only: expose names, IDs, versions and form factors of shutdown records too.
-      const available = (entry: typeof record) => ({
-        ...entry,
-        properties: {
-          ...entry.properties,
-          state: { ...entry.properties.state, bootState: "booted" },
-          connection: { ...entry.properties.connection, state: "connected" },
-        },
-      });
-      if (paired) {
-        const parsed = parseDevicectlDeviceList([available(record)]);
-        expect(parsed).toEqual(parseDevicectlDeviceList([available(paired)]));
-        expect(parsed).toMatchObject({
-          simulators: [{ deviceId: record.properties.hardware.udid }],
-        });
-      }
-    }
-  });
-
   for (const [bootState, reason] of [
     ["SHUTDOWN", "shutdown"],
     ["Booting", "booting"],
@@ -208,7 +210,7 @@ describe("devicectl list devices host captures", () => {
     const good = loadDerivedDevicectlListing();
     good.result.devices.push(derivePhysicalDevicectlRecord(good.result.devices[0], retainedId));
     let raw = JSON.stringify(good);
-    const lister = capturedLister(async () => raw, timer);
+    const lister = capturedLister(async () => raw, { timer });
     const initial = await lister.listConnectedDevices();
     // DERIVED recognized phone plus an unidentified captured record.
     const partial = loadDerivedDevicectlListing();
@@ -247,27 +249,6 @@ describe("devicectl list devices host captures", () => {
     expect(failed.devices).toEqual(initial.devices);
   });
 
-  test("DERIVED deprecated-only fields retain positive simulator evidence", async () => {
-    const listing = loadDerivedDevicectlListing("list-devices-simulators-only.json");
-    // DERIVED older payload: remove the modern field group, retaining captured deprecated fields.
-    for (const record of listing.result.devices) {
-      Reflect.deleteProperty(record, "properties");
-    }
-    const parsed = parseDevicectlDeviceList(listing);
-    expect(parsed.ok).toBe(true);
-    if (parsed.ok) {
-      expect(parsed.simulators).toHaveLength(2);
-      expect(parsed.notAvailable).toHaveLength(6);
-      expect(parsed.unidentified).toEqual([]);
-    }
-    expect(
-      await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
-    ).toEqual({
-      complete: true,
-      devices: [],
-    });
-  });
-
   test("manifest pairing rejects zero captures, missing rows, and orphaned rows", () => {
     const names = DEVICECTL_FIXTURE_MANIFEST.map((row) => row.file);
     expect(() => loadDevicectlFixtureManifest([], [])).toThrow("No devicectl");
@@ -280,6 +261,181 @@ describe("devicectl list devices host captures", () => {
   });
 
   for (const row of DEVICECTL_FIXTURE_MANIFEST) {
+    const capture = loadDerivedDevicectlListing(row.file);
+    // DERIVED generations come only from deletion; the omit-deprecated capture has no legacy evidence.
+    const generations: PayloadGeneration[] = capture.result.devices.every(
+      (record) =>
+        record.hardwareProperties && record.deviceProperties && record.connectionProperties,
+    )
+      ? ["both", "propertiesOnly", "deprecatedOnly"]
+      : ["propertiesOnly"];
+
+    test.each(generations)(
+      `${row.file}: DERIVED %s preserves the entire captured parse`,
+      async (generation) => {
+        const listing = deriveGeneration({ listing: capture, generation });
+        expect(parseListing(listing)).toEqual(parseFixture(row.sameStateAs ?? row.file));
+        expect(
+          await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
+        ).toEqual({ complete: true, devices: [] });
+      },
+    );
+
+    test.each(generations)(
+      `${row.file}: DERIVED available %s exposes identical captured device fields`,
+      (generation) => {
+        // DERIVED availability: update every present generation before deleting field groups.
+        const available = structuredClone(capture);
+        for (const record of available.result.devices) {
+          record.properties.state.bootState = "booted";
+          record.properties.connection.state = "connected";
+          if (record.deviceProperties) {
+            record.deviceProperties.bootState = "booted";
+          }
+          if (record.connectionProperties) {
+            record.connectionProperties.tunnelState = "connected";
+          }
+        }
+        const parsed = parseListing(deriveGeneration({ listing: available, generation }));
+        expect(parsed).toEqual(parseListing(available));
+        expect(parsed).toMatchObject({
+          ok: true,
+          physical: [],
+          notAvailable: [],
+          unidentified: [],
+        });
+        expect(parsed.simulators).toHaveLength(8);
+        expect(parsed.simulators).toEqual(
+          capture.result.devices
+            .map((record) => ({
+              deviceId: record.properties.hardware.udid,
+              name: record.properties.state.name,
+              platform: "ios",
+              iosVersion: record.properties.software.osVersionNumber.stringValue,
+              osVersion: record.properties.software.osVersionNumber.stringValue,
+              // All captured product types are iPhone models, including Duo.
+              formFactor: "phone",
+            }))
+            .toSorted((a, b) => String(a.deviceId).localeCompare(String(b.deviceId))),
+        );
+        for (const device of parsed.simulators) {
+          expect(device.name).not.toBe("");
+          expect(device.iosVersion).toMatch(/^\d+\.\d+$/);
+        }
+      },
+    );
+
+    test.each(generations)(
+      `${row.file}: DERIVED mixed %s has the same physical-only inventory`,
+      async (generation) => {
+        // DERIVED physical record, not hardware evidence; derive before removing properties.
+        const mixed = structuredClone(capture);
+        mixed.result.devices.push(
+          derivePhysicalDevicectlRecord(capture.result.devices[0], PHYSICAL_UDID),
+        );
+        const listing = deriveGeneration({ listing: mixed, generation });
+        const parsed = parseListing(listing);
+        const baseline = parseListing(mixed);
+        expect(parsed).toEqual(baseline);
+        expect(parsed.unidentified).toEqual([]);
+        const source = capture.result.devices[0];
+        expect(parsed.physical).toEqual([
+          {
+            deviceId: PHYSICAL_UDID,
+            name: source.properties.state.name,
+            platform: "ios",
+            iosVersion: source.properties.software.osVersionNumber.stringValue,
+            osVersion: source.properties.software.osVersionNumber.stringValue,
+            formFactor: "phone",
+          },
+        ]);
+        expect(
+          await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
+        ).toEqual({
+          complete: true,
+          devices: baseline.physical.map((device) => ({ ...device, observedAt: 1 })),
+        });
+      },
+    );
+
+    test.each(generations)(
+      `${row.file}: DERIVED unknown fields in %s leave parsing unchanged`,
+      (generation) => {
+        const listing = deriveGeneration({ listing: capture, generation });
+        const baseline = parseListing(listing);
+        // DERIVED arbitrary extras in every present group, without inventing a missing generation.
+        for (const record of listing.result.devices) {
+          Object.assign(record, { futureTopLevel: [null, "extra", 42] });
+          if (record.properties) {
+            Object.assign(record.properties, { futureProperties: { enabled: true } });
+            Object.assign(record.properties.hardware, { futureHardware: "extra" });
+          }
+          for (const group of [
+            record.hardwareProperties,
+            record.deviceProperties,
+            record.connectionProperties,
+          ]) {
+            if (group) {
+              Object.assign(group, { futureDeprecated: { values: [false, 123] } });
+            }
+          }
+        }
+        expect(parseListing(listing)).toEqual(baseline);
+      },
+    );
+
+    for (const field of ["platform", "udid"] as const) {
+      test.each(generations)(
+        `${row.file}: DERIVED missing ${field} in %s warns safely and retains the recognized phone`,
+        async (generation) => {
+          // DERIVED mixed inventory with one required simulator field absent from every present generation.
+          const mixed = structuredClone(capture);
+          mixed.result.devices.push(
+            derivePhysicalDevicectlRecord(capture.result.devices[0], PHYSICAL_UDID),
+          );
+          const listing = deriveGeneration({ listing: mixed, generation });
+          const record = listing.result.devices[0];
+          for (const hardware of [record.properties?.hardware, record.hardwareProperties]) {
+            if (hardware) {
+              delete hardware[field];
+            }
+          }
+          const parsed = parseListing(listing);
+          expect(parsed.unidentified).toHaveLength(1);
+          expect(parsed.physical.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+          expect(parsed.simulators.map((device) => device.deviceId)).toEqual(
+            parseFixture(row.file)
+              .simulators.map((device) => device.deviceId)
+              .filter((udid) => udid !== capture.result.devices[0].properties.hardware.udid),
+          );
+          const warnings: string[] = [];
+          const discovery = await capturedLister(async () => JSON.stringify(listing), {
+            logger: {
+              warn: (message) => {
+                warnings.push(message);
+              },
+              debug: () => {},
+            },
+          }).listConnectedDevices();
+          expect(discovery).toMatchObject({ complete: false, error: { code: "failed" } });
+          expect(discovery.devices).toEqual(
+            parsed.physical.map((device) => ({ ...device, observedAt: 1 })),
+          );
+          expect(
+            warnings.filter((message) => message.includes("could not be identified")),
+          ).toHaveLength(1);
+          for (const message of warnings) {
+            for (const captured of capture.result.devices) {
+              expect(message).not.toContain(captured.identifier);
+              expect(message).not.toContain(String(captured.properties.hardware.udid));
+              expect(message).not.toContain(captured.properties.state.name);
+            }
+            expect(message).not.toContain(PHYSICAL_UDID);
+          }
+        },
+      );
+    }
+
     test(`${row.file}: DERIVED missing reality and unknown UDID cannot be an unavailable simulator`, async () => {
       const listing = loadDerivedDevicectlListing(row.file);
       const record = listing.result.devices[1];
@@ -335,7 +491,7 @@ describe("devicectl list devices host captures", () => {
       let listing = loadDerivedDevicectlListing(row.file);
       const phone = derivePhysicalDevicectlRecord(listing.result.devices[0], PHYSICAL_UDID);
       listing.result.devices.push(phone);
-      const lister = capturedLister(async () => JSON.stringify(listing), timer);
+      const lister = capturedLister(async () => JSON.stringify(listing), { timer });
       const initial = await lister.listConnectedDevices();
       expect(initial.complete).toBe(true);
       // DERIVED schema drift: only the physical record's reality changes.

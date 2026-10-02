@@ -187,3 +187,76 @@ describe("stream release evidence", () => {
     }
   });
 });
+
+describe("structured subscription identity (additive to authorize)", () => {
+  test("reports unowned, owned, differently owned and absent session without interpreting errors", () => {
+    let owner: string | null = null;
+    const auth = authenticator(sessionManager({ getSessionForDevice: () => owner }));
+    const input = { sessionUuid: "live", deviceId: "emu" };
+    expect(auth.resolveSubscriptionIdentity(input)).toEqual({
+      authEnabled: true,
+      sessionExists: true,
+      ownsDevice: false,
+    });
+    owner = "live";
+    expect(auth.resolveSubscriptionIdentity(input).ownsDevice).toBe(true);
+    owner = "other";
+    expect(auth.resolveSubscriptionIdentity(input)).toEqual({
+      authEnabled: true,
+      sessionExists: true,
+      ownsDevice: false,
+    });
+    expect(() => auth.authorize(input)).toThrow(/different daemon session/);
+    expect(
+      auth.resolveSubscriptionIdentity({ sessionUuid: "missing", deviceId: "emu" }).sessionExists,
+    ).toBe(false);
+    expect(authenticator(null).resolveSubscriptionIdentity(input).sessionExists).toBe(false);
+    expect(auth.resolveSubscriptionIdentity({ sessionUuid: " " }).sessionExists).toBe(false);
+  });
+  test("derived subscriber and derived owner use the same base identity", () => {
+    const auth = authenticator(
+      sessionManager({
+        getSessionForDevice: () => "live:phone",
+        getDeviceLabels: (id) => (id === "live" ? { phone: "live:phone" } : undefined),
+      }),
+    );
+    expect(
+      auth.resolveSubscriptionIdentity({ sessionUuid: " live:phone ", deviceId: "emu" }),
+    ).toEqual({ authEnabled: true, sessionExists: true, ownsDevice: true });
+  });
+  test("releasing identity is not live but a stale releasing object does not fence it", () => {
+    const session = {};
+    let releasing: unknown = session;
+    const auth = authenticator(
+      sessionManager({
+        getSession: () => session,
+        getReleasingSession: () => releasing,
+        getSessionForDevice: () => "live",
+      }),
+    );
+    expect(auth.resolveSubscriptionIdentity({ sessionUuid: "live", deviceId: "emu" })).toEqual({
+      authEnabled: true,
+      sessionExists: false,
+      ownsDevice: false,
+    });
+    releasing = {};
+    expect(
+      auth.resolveSubscriptionIdentity({ sessionUuid: "live", deviceId: "emu" }).sessionExists,
+    ).toBe(true);
+  });
+  test("auth off does not resolve the registry and reports disabled enforcement", () => {
+    const auth = new SessionScopedStreamAuthenticator(
+      () => {
+        throw new Error("must not resolve");
+      },
+      "test op",
+      { [STREAM_SOCKET_AUTH_ENV]: "0" },
+    );
+    expect(auth.resolveSubscriptionIdentity({})).toEqual({
+      authEnabled: false,
+      sessionExists: false,
+      ownsDevice: false,
+    });
+    expect(() => auth.authorize({})).not.toThrow();
+  });
+});

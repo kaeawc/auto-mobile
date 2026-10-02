@@ -61,7 +61,7 @@ import { buildContainerFromElement } from "../../../utils/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "../TargetDisplayAction";
-import { executeTouchscreenInput } from "../touchscreenInput";
+import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "../touchscreenInput";
 import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 import { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
@@ -267,14 +267,38 @@ export class SwipeOn extends BaseVisualChange {
     }
     const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, bounds);
     const duration = options.duration ?? 300;
+    const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
+      this.accessibilityService,
+      target.displayId,
+    );
     target.assertCurrent();
     throwIfAborted(signal);
-    await executeTouchscreenInput(
-      this.adb,
-      `swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
-      target.displayId,
-      signal,
-    );
+    if (useCtrlProxy) {
+      const result = await this.accessibilityService.requestSwipe(
+        x1,
+        y1,
+        x2,
+        y2,
+        duration,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+        target.displayId === 0 ? undefined : target.displayId,
+      );
+      throwIfAborted(signal);
+      if (!result.success) {
+        throw new ActionableError(result.error ?? "Android swipe failed");
+      }
+    } else {
+      await executeTouchscreenInput(
+        this.adb,
+        `swipe ${x1} ${y1} ${x2} ${y2} ${duration}`,
+        target.displayId,
+        signal,
+      );
+    }
     return {
       success: true,
       targetType: bounds ? "element" : "screen",

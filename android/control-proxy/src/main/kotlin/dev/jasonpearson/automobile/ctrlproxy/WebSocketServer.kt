@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.os.Build
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.protocol.*
@@ -53,6 +54,7 @@ class WebSocketServer(
     { connection, message ->
       connection.send(Frame.Text(message))
     },
+  private val sdkInt: () -> Int = { Build.VERSION.SDK_INT },
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -214,6 +216,21 @@ class WebSocketServer(
       }
       return "Malformed request: $cause"
     }
+  }
+
+  internal fun supportedCommands(): List<String> = buildList {
+    add("discover_keystore")
+    add("set_hierarchy_interval")
+    add("node_selector_actions")
+    add("request_activate_accessibility_link")
+    add("request_insert_text")
+    add("request_insert_text_state")
+    add("request_commit_text")
+    add("ime_key_events_v1")
+    if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("gesture_display_id_v1")
+    add("request_cancel_ime_commit")
+    add("request_set_keyboard_profile")
+    add("request_list_keyboard_profiles")
   }
 
   @Volatile private var server: EmbeddedServer<*, *>? = null
@@ -427,20 +444,7 @@ class WebSocketServer(
                         WebSocketResponse.serializer(),
                         ConnectedResponse(
                           id = connectionId,
-                          supportedCommands =
-                            listOf(
-                              "discover_keystore",
-                              "set_hierarchy_interval",
-                              "node_selector_actions",
-                              "request_activate_accessibility_link",
-                              "request_insert_text",
-                              "request_insert_text_state",
-                              "request_commit_text",
-                              "ime_key_events_v1",
-                              "request_cancel_ime_commit",
-                              "request_set_keyboard_profile",
-                              "request_list_keyboard_profiles",
-                            ),
+                          supportedCommands = supportedCommands(),
                         ),
                       )
                     )

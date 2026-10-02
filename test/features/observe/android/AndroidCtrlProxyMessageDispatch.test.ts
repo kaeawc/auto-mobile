@@ -257,3 +257,35 @@ describe("Android CtrlProxy WebSocket dispatch", () => {
     ]);
   });
 });
+
+test("connected greeting records gesture display capability without gating core gestures", async () => {
+  const timer = new FakeTimer();
+  const proxy = AndroidCtrlProxyClient.createForTesting(
+    { deviceId: "gesture-greeting", platform: "android", name: "Fake" },
+    new FakeAdbExecutor(),
+    undefined,
+    timer,
+  );
+  await proxy["handleWebSocketMessage"](
+    JSON.stringify({ type: "connected", supportedCommands: ["gesture_display_id_v1"] }),
+  );
+  expect(await proxy.supportsCommand("gesture_display_id_v1")).toBe(true);
+  const context = proxy["createDelegateContext"]();
+  for (const command of [
+    "request_tap_coordinates",
+    "request_swipe",
+    "request_two_finger_swipe",
+    "request_drag",
+    "request_pinch",
+    "request_gesture_start",
+  ]) {
+    expect(context.isCommandSupported?.(command)).toBe(true);
+  }
+  await proxy["handleWebSocketMessage"](
+    JSON.stringify({ type: "connected", supportedCommands: [] }),
+  );
+  expect(await proxy.supportsCommand("gesture_display_id_v1")).toBe(false);
+  expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
+  proxy["supportedCommands"] = null;
+  expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
+});

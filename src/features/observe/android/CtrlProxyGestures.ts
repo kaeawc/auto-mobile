@@ -22,6 +22,11 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     super(context, { logTag: "ACCESSIBILITY_SERVICE", roundCoordinates: true });
   }
 
+  protected override gestureDisplayParams(displayId?: number): { displayId?: number } {
+    // Preserve the requested target; sendCommand validates the current connection's capability.
+    return displayId === undefined || displayId === 0 ? {} : { displayId };
+  }
+
   /**
    * Request a two-finger swipe gesture for TalkBack mode. Android-only.
    *
@@ -39,6 +44,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     offset: number = 100,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
     // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
     // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
@@ -55,10 +61,13 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
         y2: this.coord(y2),
         duration,
         offset,
+        ...this.gestureDisplayParams(displayId),
       },
       timeoutMs,
       perf,
       errorLabel: "Two-finger swipe",
+      requiredCapability:
+        displayId === undefined || displayId === 0 ? undefined : "gesture_display_id_v1",
     });
   }
 
@@ -75,15 +84,23 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     y: number,
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    displayId?: number,
   ): Promise<A11ySwipeResult> {
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_start",
       responseType: "swipe",
       messageType: "request_gesture_start",
-      params: { gestureId, x: this.coord(x), y: this.coord(y) },
+      params: {
+        gestureId,
+        x: this.coord(x),
+        y: this.coord(y),
+        ...this.gestureDisplayParams(displayId),
+      },
       timeoutMs,
       perf,
       errorLabel: "Gesture start",
+      requiredCapability:
+        displayId === undefined || displayId === 0 ? undefined : "gesture_display_id_v1",
     });
   }
 

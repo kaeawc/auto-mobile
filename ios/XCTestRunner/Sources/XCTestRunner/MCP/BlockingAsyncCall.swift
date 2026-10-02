@@ -1,9 +1,10 @@
 import Foundation
 import os
 
-/// Temporary bridge for synchronous XCTest bodies on threads that are not Swift-concurrency
-/// executors. NEVER call from the cooperative pool or @MainActor-isolated async code: blocking may
-/// starve the executor needed by the task and deadlock. The operation must not require the main actor.
+/// Temporary bridge for synchronous XCTest bodies, which normally run on the main thread. The
+/// awaited runner path must stay free of main-actor and main-queue hops: blocking the main thread
+/// while awaiting that work would deadlock. NEVER call from the cooperative pool or @MainActor-
+/// isolated async code: blocking may starve the executor needed by the task and deadlock.
 /// There is intentionally no separate semaphore timer: the async transport owns its deadline, and
 /// time queued at the daemon gate must not count against a per-call backstop. Removed after PR 3.
 enum BlockingAsyncCall {

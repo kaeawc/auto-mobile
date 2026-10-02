@@ -49,11 +49,14 @@ final class VirtualDeadlineScheduler: DeadlineScheduler, Sendable {
     private struct State: Sendable {
         var now: TimeInterval = 0
         var sleepers: [Sleeper] = []
+        var requestedDelays: [TimeInterval] = []
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
     let registered = TransportEvents()
     var pendingCount: Int { state.withLock { $0.sleepers.count } }
+    var requestedDelays: [TimeInterval] { state.withLock { $0.requestedDelays } }
+    var currentTime: TimeInterval { state.withLock { $0.now } }
 
     func sleep(seconds: TimeInterval) async throws {
         try Task.checkCancellation()
@@ -63,6 +66,7 @@ final class VirtualDeadlineScheduler: DeadlineScheduler, Sendable {
                 // Cancellation removes under this lock, then resolves the cell after unlocking.
                 // Reject registration even in the interval between those two steps.
                 guard !Task.isCancelled, !cell.isResolved else { return false }
+                current.requestedDelays.append(seconds)
                 if seconds <= 0 { return true }
                 current.sleepers.append(Sleeper(due: current.now + seconds, cell: cell))
                 return false
@@ -348,3 +352,29 @@ func assertTransportFailure<Value: Sendable>(
 }
 
 // swiftlint:enable force_unwrapping
+
+/// Async equivalent of XCTAssertThrowsError, preserving existing error-specific assertions.
+@MainActor
+func assertAsyncThrowsError<Value: Sendable>(
+    _ expression: @MainActor () async throws -> Value,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    verify: (any Error) -> Void = { _ in }
+)
+    async
+{
+    do {
+        _ = try await expression()
+        XCTFail("Expected an error", file: file, line: line)
+    } catch {
+        verify(error)
+    }
+}
+
+/// Injected even when a custom socket prevents preflight, so tests cannot start a live daemon.
+struct HermeticDaemonEnsurer: AutoMobileDaemonEnsuring {
+    func ensureDaemonRunning(repoRoot _: String?) -> Bool {
+        XCTFail("Unit tests must never ensure a live daemon")
+        return false
+    }
+}

@@ -9,11 +9,8 @@ import Tachikoma
 // repeat up to the `maxToolCalls` budget. After the agent finishes we observe the device ourselves
 // (outside the budget) to verify it is in a queryable state — the same success signal Android uses.
 //
-// Concurrency: every stored dependency is an immutable `let` over a `Sendable` seam (the model call is
-// abstracted by `ModelResponding`; the sync↔async bound by `AsyncCallBridging`), so the handler is
-// cleanly `Sendable` and the recovery loop mutates only locals. The single async model call crosses to
-// a `Task` through `AsyncCallBridging.run`, whose operation is `@Sendable` and returns the `Sendable`
-// `ModelResponse`.
+// All dependencies are immutable Sendable seams. Model deadlines do not join abandoned operations;
+// late responses lose the single-resume arbitration and can never trigger recovery tools.
 public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
     private let mcpClient: AutoMobileMCPClient
     private let configProvider: RecoveryConfigProviding
@@ -22,9 +19,9 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
     private let timer: AutoMobileTimer
     private let logger: AutoMobileLogger
     private let responderFactory: @Sendable (RecoveryModelConfig) -> ModelResponding
-    private let asyncBridge: AsyncCallBridging
+    private let deadlineScheduler: any DeadlineScheduler
 
-    public convenience init(
+    public init(
         mcpClient: AutoMobileMCPClient,
         configProvider: RecoveryConfigProviding,
         modelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
@@ -33,31 +30,8 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         logger: AutoMobileLogger = StdoutLogger(),
         responderFactory: @escaping @Sendable (RecoveryModelConfig) -> ModelResponding = { config in
             TachikomaModelResponder(modelName: config.modelName)
-        }
-    ) {
-        self.init(
-            mcpClient: mcpClient,
-            configProvider: configProvider,
-            modelConfig: modelConfig,
-            timeoutSeconds: timeoutSeconds,
-            timer: timer,
-            logger: logger,
-            responderFactory: responderFactory,
-            asyncBridge: SemaphoreAsyncCallBridge()
-        )
-    }
-
-    /// Designated initializer. Internal so tests can inject a fake `AsyncCallBridging` (the seam is
-    /// not part of the public API surface).
-    init(
-        mcpClient: AutoMobileMCPClient,
-        configProvider: RecoveryConfigProviding,
-        modelConfig: RecoveryModelConfig?,
-        timeoutSeconds: TimeInterval,
-        timer: AutoMobileTimer,
-        logger: AutoMobileLogger,
-        responderFactory: @escaping @Sendable (RecoveryModelConfig) -> ModelResponding,
-        asyncBridge: AsyncCallBridging
+        },
+        deadlineScheduler: any DeadlineScheduler = SystemDeadlineScheduler()
     ) {
         self.mcpClient = mcpClient
         self.configProvider = configProvider
@@ -66,11 +40,15 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         self.timer = timer
         self.logger = logger
         self.responderFactory = responderFactory
-        self.asyncBridge = asyncBridge
+        self.deadlineScheduler = deadlineScheduler
     }
 
-    public func attemptRecovery(_ context: FailedStepContext) -> RecoveryOutcome {
+    public func attemptRecovery(_ context: FailedStepContext) async -> RecoveryOutcome {
         let start = timer.now()
+        guard !Task.isCancelled else {
+            logger.warn("AI recovery cancelled before starting")
+            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+        }
 
         guard let modelConfig = modelConfig else {
             // No API key for the configured provider — recovery is unavailable. Return failure so the
@@ -79,7 +57,7 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
             return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
         }
 
-        let maxToolCalls = configProvider.maxRecoveryToolCalls()
+        let maxToolCalls = await configProvider.maxRecoveryToolCalls()
         let responder = responderFactory(modelConfig)
         logger.info(
             "Starting AI recovery for step \(context.failedStepIndex + 1) (\(context.failedTool)) "
@@ -95,13 +73,16 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         let secretValues = SecretRedaction.secretValues(context.secretValues)
 
         do {
-            try runAgentLoop(
+            try await runAgentLoop(
                 context: context,
                 responder: responder,
                 settings: modelSettings(for: modelConfig),
                 maxToolCalls: maxToolCalls,
                 secretValues: secretValues
             )
+        } catch is CancellationError {
+            logger.warn("AI recovery cancelled")
+            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
         } catch {
             logger.warn("AI recovery execution failed: \(error)")
             return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
@@ -111,7 +92,14 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         // Android: success == a post-recovery observe returned something. The resumed step is the real
         // check of whether recovery actually worked.
         logger.info("AI recovery agent finished, verifying device state...")
-        let observeResult = observeDeviceState(context: context, secretValues: secretValues)
+        let observeResult: String?
+        do {
+            try Task.checkCancellation()
+            observeResult = try await observeDeviceState(context: context, secretValues: secretValues)
+        } catch {
+            logger.warn("AI recovery verification cancelled: \(error)")
+            return RecoveryOutcome(success: false, recoveryTimeMs: elapsedMs(since: start))
+        }
         return RecoveryOutcome(
             success: observeResult != nil,
             recoveryTimeMs: elapsedMs(since: start),
@@ -128,9 +116,10 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         maxToolCalls: Int,
         secretValues: [String]
     )
-        throws
+        async throws
     {
         let tools = Self.buildToolDefinitions()
+        let timeoutSeconds = self.timeoutSeconds
         // Redact the STATIC context fields that go into the initial prompt too (#6094). The executor
         // already redacts these on the FailedStepContext (#6092), so this is a no-op for that path; it
         // makes the public entry point self-contained, so a direct caller who supplies raw context
@@ -150,7 +139,13 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
                 systemInstructions: Self.systemInstructions
             )
 
-            let response = try asyncBridge.run(timeout: timeoutSeconds) { try await responder.respond(request) }
+            try Task.checkCancellation()
+            let response = try await withDeadline(
+                seconds: timeoutSeconds,
+                scheduler: deadlineScheduler,
+                timeoutError: RecoveryTimeoutError(timeoutSeconds: timeoutSeconds)
+            ) { try await responder.respond(request) }
+            try Task.checkCancellation()
             messages.append(.assistant(content: response.content))
 
             let toolCalls = response.content.compactMap { content -> ToolCallItem? in
@@ -178,7 +173,7 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
                     continue
                 }
                 toolCallsUsed += 1
-                let resultText = executeTool(
+                let resultText = try await executeTool(
                     name: call.function.name,
                     argumentsJSON: call.function.arguments,
                     context: context,
@@ -201,8 +196,9 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         context: FailedStepContext,
         secretValues: [String]
     )
-        -> String
+        async throws -> String
     {
+        try Task.checkCancellation()
         var arguments = Self.parseArguments(argumentsJSON)
         // Required routing fields are injected by us, not trusted from the model, so every recovery
         // call is valid and targets the same platform/session/device as the plan.
@@ -239,12 +235,16 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         }
 
         do {
-            let response = try mcpClient.callTool(name: name, arguments: arguments, timeout: timeoutSeconds)
+            let response = try await mcpClient.callTool(name: name, arguments: arguments, timeout: timeoutSeconds)
+            try Task.checkCancellation()
             // The tool EXECUTED against the device with real values above; only the RESULT TEXT that
             // re-enters the next ModelRequest is scrubbed, so a secret still visible on-screen at
             // recovery time cannot reach the LLM provider through the agent loop (issue #6094).
             return SecretRedaction.redact(response.text, secretValues: secretValues)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            try Task.checkCancellation()
             logger.warn("Recovery tool \(name) failed: \(error)")
             // The error can echo on-screen/tool content, so scrub it too before it enters the
             // transcript (issue #6094).
@@ -253,7 +253,8 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         }
     }
 
-    private func observeDeviceState(context: FailedStepContext, secretValues: [String]) -> String? {
+    private func observeDeviceState(context: FailedStepContext, secretValues: [String]) async throws -> String? {
+        try Task.checkCancellation()
         var arguments: [String: Any] = ["platform": context.platform]
         if let session = context.sessionUuid {
             arguments["sessionUuid"] = session
@@ -262,11 +263,15 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
             arguments["device"] = device
         }
         do {
-            let response = try mcpClient.callTool(name: "observe", arguments: arguments, timeout: timeoutSeconds)
+            let response = try await mcpClient.callTool(name: "observe", arguments: arguments, timeout: timeoutSeconds)
+            try Task.checkCancellation()
             // Post-recovery liveness observe. Its text can carry an on-screen secret, so scrub it
             // before it is surfaced as the recovery result (issue #6094).
             return SecretRedaction.redact(response.text, secretValues: secretValues)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            try Task.checkCancellation()
             logger.warn("Post-recovery observe failed: \(error)")
             return nil
         }

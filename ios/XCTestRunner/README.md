@@ -46,17 +46,17 @@ final class MyAppTests: AutoMobileTestCase {
 
 ### AutoMobilePlanExecutor
 
-Executes automation plans with retry and cleanup logic:
+Executes automation plans with retry logic:
 
 ```swift
 let config = AutoMobilePlanExecutor.Configuration(
-    transport: .daemonSocket,
+    transport: .daemonUnixSocket(path: DaemonManager.socketPath),
     planPath: "Plans/checkout.yaml",
     retryCount: 3
 )
 
 let executor = AutoMobilePlanExecutor(configuration: config)
-try executor.execute()
+try await executor.execute()
 ```
 
 ### AutoMobileTestObserver
@@ -72,12 +72,58 @@ let timingData = observer.getTimingData()
 try observer.exportTimingData(to: "timing-history.json")
 ```
 
-### Async transport migration
+### Async migration (step 2 of 3)
 
-`AutoMobileMCPClient` now provides async `initialize`, `callTool`, and `readResource` overloads.
-The sync methods are deprecated and will be removed in the next minor release (#6061).
-They are only for synchronous XCTest threads; never call them from the cooperative pool or
-`@MainActor` async code. The executor and test case migrate in later PRs; no dates are promised.
+This source-breaking migration ships in the next minor release (#6061, owner decision D29).
+`AutoMobileMCPClient` has async `initialize`, `callTool`, and `readResource` overloads. Its sync
+methods remain deprecated in documentation only because synchronous timing clients and transport
+compatibility tests still call them. Sync calls are only for synchronous XCTest threads; never use
+these wrappers from the cooperative pool or main-actor async code.
+
+Source changes in this step:
+- `AutoMobilePlanExecutor.execute` is now `async throws`; its private `executeAttempt` and
+  `handleFailure` are also `async throws`. Await executor calls and update async XCTest methods.
+- `PlanRecoveryHandler.attemptRecovery` is now `async` (nonthrowing). Cancellation produces a failed
+  recovery outcome; the executor checks its own cancellation immediately after awaiting recovery and
+  throws `CancellationError`, without retrying or resuming.
+- Both `RecoveryConfigProviding` methods (`isRecoveryEnabled`, `maxRecoveryToolCalls`) are now
+  `async` (nonthrowing). The daemon provider loads lazily on async use and serializes its cached read;
+  construction performs no MCP I/O and needs no blocking bridge.
+- The `asyncBridge` initializer parameter and the internal `AsyncCallBridging` and
+  `SemaphoreAsyncCallBridge` types are removed. Executor and handler initializers accept the shared
+  `DeadlineScheduler` seam; tests use virtual time for delays and deadlines.
+- The executor and its immutable `Configuration` now conform to checked `Sendable`.
+  An injected `sessionIdProvider` must be an `@Sendable` closure and runs on an arbitrary thread.
+  All execution state stays local to one run;
+  independent concurrent runs need distinct transport clients to isolate session lifetimes.
+
+The async executor uses an explicit `sessionUuid`, an injected session provider, or a fresh
+`UUID().uuidString` (in that order). The default generator never reads or writes thread-local session
+state; tests can inject `idGenerator`. A custom provider runs once on an arbitrary executor thread.
+That explicit value survives every retry, tool call, recovery context and resumed attempt.
+The synchronous XCTest bridge captures the XCTest thread's legacy identity and passes it explicitly
+before starting its detached task.
+As before, the executor resets the transport session only before a daemon-socket retry, before the
+retry delay; HTTP retries do not reset it. Success, final failure and cancellation never trigger a
+reset. Cancellation during the retry delay preserves the single reset that already happened before
+the delay. Plan app cleanup remains owned by the daemon through the existing cleanup arguments.
+
+Daemon preflight and retry ensures run on a dedicated dispatch queue because the synchronous ensurer
+can block. Cancellation releases the await immediately; the background ensure may finish later,
+but its result is ignored and cancellation during retry ensure prevents the subsequent session reset.
+
+`AutoMobileTestCase.executePlan()` stays synchronous in this step and uses `BlockingAsyncCall` at its
+one execution boundary. Synchronous XCTest bodies normally run on the main thread. The awaited runner
+path must stay free of main-actor and main-queue hops: awaiting such work while blocking the main
+thread would deadlock. Never call the bridge from the cooperative pool or main-actor async code.
+Model timeouts use `withDeadline`: cancellation is requested
+on the losing operation, but an uncooperative provider can remain alive until it returns. The deadline
+returns without joining that operation, and its late response cannot resume the caller again or run
+device tools. The `RecoveryTimeoutError` message is unchanged.
+
+PR 3 makes the test case async, moves session identity ownership fully into the executor, migrates the
+remaining synchronous timing/resource clients and transport tests, and deletes `BlockingAsyncCall`
+and the sync client wrappers. No dates are promised.
 
 ## Configuration
 

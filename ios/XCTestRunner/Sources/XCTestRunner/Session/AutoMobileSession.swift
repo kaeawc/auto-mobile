@@ -1,12 +1,12 @@
 import Foundation
 
 /// Per-thread AutoMobile session identity. The session UUID is stored in the current thread's
-/// dictionary so each XCTest worker thread gets its own session. `Sendable`: the type holds no
+/// dictionary so each synchronous XCTest thread gets its own session. `Sendable`: the type holds no
 /// mutable instance state (identity lives in `Thread.current.threadDictionary`, not in a property).
 ///
-/// NOTE: the thread-local model is correct for the synchronous per-worker executor and is NOT a live
-/// race. It would only break if the executor moved to async (a `Task` can resume on any pool thread);
-/// that rework is deferred (Phase 8), and the executor deliberately stays synchronous.
+/// AutoMobileTestCase captures this legacy identity on the synchronous XCTest thread before the
+/// temporary sync bridge and passes it explicitly. Async execution generates its own identity by
+/// default and never reads or writes this dictionary; async callers should pass an explicit ID.
 public final class AutoMobileSession: Sendable {
     public static let shared = AutoMobileSession()
     private static let sessionKey = "AutoMobileSession.sessionUuid"

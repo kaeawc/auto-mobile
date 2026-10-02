@@ -3,6 +3,15 @@ import { isIosPhysicalUdid, isIosSimulatorUdid } from "./iosDeviceType";
 import type { SimCtlClient } from "./SimCtlClient";
 import type { IosInstalledAppRecord } from "./iosInstalledApp";
 import type { IosAppMetadataSource } from "../../models/IosAppMetadataSource";
+import { promises as fs } from "fs";
+import * as path from "path";
+import type { ClearAppDataResult } from "../../models";
+import { errorMessage } from "../describeUnknownError";
+import {
+  getAppDataContainerPath,
+  IOS_APP_DATA_FOLDERS,
+  terminateAppIfRunning,
+} from "./iosAppContainer";
 
 /** The iOS operation currently shared by simulator and physical-device actions. */
 export interface IosDeviceBackend {
@@ -267,4 +276,113 @@ export function resolveIosAppInfoBackend(
   return isIosSimulatorUdid(deviceId)
     ? new SimulatorIosAppInfoBackend(deviceId, deps)
     : new PhysicalIosAppInfoBackend(deviceId, deps.iosSource);
+}
+
+export interface IosClearDataBackend {
+  clearAppData(bundleId: string): Promise<ClearAppDataResult>;
+}
+
+export interface IosClearDataReinstaller {
+  clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void>;
+}
+
+export interface IosClearDataBackendDeps {
+  simctl: Pick<SimCtlClient, "terminateApp" | "executeCommandArgs">;
+  createReinstaller: () => IosClearDataReinstaller;
+  rm?: typeof fs.rm;
+}
+
+export class SimulatorIosClearDataBackend implements IosClearDataBackend {
+  constructor(
+    private readonly deviceId: string,
+    private readonly deps: Pick<IosClearDataBackendDeps, "simctl" | "rm">,
+  ) {}
+
+  async clearAppData(bundleId: string): Promise<ClearAppDataResult> {
+    logger.info(`[iOS] Clearing app data for ${bundleId} on simulator ${this.deviceId}`);
+
+    // The container can't be safely wiped while the app holds open file handles.
+    await terminateAppIfRunning(this.deps.simctl, this.deviceId, bundleId);
+
+    const containerPath = await getAppDataContainerPath(this.deps.simctl, this.deviceId, bundleId);
+    if (!containerPath) {
+      return {
+        success: false,
+        packageName: bundleId,
+        error: `Could not resolve data container for ${bundleId} (is it installed?)`,
+      };
+    }
+
+    try {
+      // Folders are independent — wipe them concurrently. force:true so a missing
+      // folder (e.g. an app that never wrote Documents) is a no-op, not an error.
+      await Promise.all(
+        IOS_APP_DATA_FOLDERS.map((folder) =>
+          (this.deps.rm ?? fs.rm)(path.join(containerPath, folder), {
+            recursive: true,
+            force: true,
+          }),
+        ),
+      );
+      logger.info(`[iOS] Cleared app data for ${bundleId}`);
+      return { success: true, packageName: bundleId };
+    } catch (error) {
+      logger.warn(`[iOS] Failed to clear app data for ${bundleId}: ${errorMessage(error)}`);
+      return { success: false, packageName: bundleId, error: errorMessage(error) };
+    }
+  }
+}
+
+export class PhysicalIosClearDataBackend implements IosClearDataBackend {
+  constructor(
+    private readonly deviceId: string,
+    private readonly createReinstaller: () => IosClearDataReinstaller,
+  ) {}
+
+  async clearAppData(bundleId: string): Promise<ClearAppDataResult> {
+    logger.info(
+      `[iOS] Clearing app data for ${bundleId} via devicectl uninstall+reinstall on ${this.deviceId}`,
+    );
+    const reinstaller = this.createReinstaller();
+    try {
+      await reinstaller.clearAppDataViaReinstall(this.deviceId, bundleId);
+      logger.info(`[iOS] Cleared app data for ${bundleId} (reinstalled)`);
+      return { success: true, packageName: bundleId };
+    } catch (error) {
+      logger.warn(
+        `[iOS] Failed to clear app data for ${bundleId} via reinstall: ${errorMessage(error)}`,
+      );
+      return { success: false, packageName: bundleId, error: errorMessage(error) };
+    }
+  }
+}
+
+export function resolveIosClearDataBackend(
+  deviceId: string,
+  deps: IosClearDataBackendDeps,
+  isSimulatorFn: () => boolean = () => isIosSimulatorUdid(deviceId),
+): IosClearDataBackend {
+  return isSimulatorFn()
+    ? new SimulatorIosClearDataBackend(deviceId, deps)
+    : new PhysicalIosClearDataBackend(deviceId, deps.createReinstaller);
+}
+
+// Collapse this narrow contract onto the terminate backend once its PR merges.
+export interface IosColdStartTerminator {
+  terminate(bundleId: string): Promise<void>;
+}
+
+export class SimulatorIosColdStartTerminator implements IosColdStartTerminator {
+  constructor(private readonly simctl: Pick<SimCtlClient, "terminateApp">) {}
+
+  terminate(bundleId: string): Promise<void> {
+    return this.simctl.terminateApp(bundleId);
+  }
+}
+
+export function resolveIosColdStartTerminator(
+  deviceId: string,
+  deps: { simctl: Pick<SimCtlClient, "terminateApp"> },
+): IosColdStartTerminator | null {
+  return isIosSimulatorUdid(deviceId) ? new SimulatorIosColdStartTerminator(deps.simctl) : null;
 }

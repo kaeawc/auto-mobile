@@ -266,8 +266,8 @@ describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
     ).toBe("unsupported");
   });
 
-  it("secure_state read is unavailable pending the #5161 host policy, not unsupported", () => {
-    const report = computeStorageCapabilities(ctx());
+  it("iOS secure_state read is unavailable pending the #5161 host policy, not unsupported", () => {
+    const report = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
     const read = findOperationCapability(report, "secure_state", "read")!;
     expect(read.state).toBe("unavailable");
     expect(read.prerequisites?.some((p) => p.includes("5161"))).toBe(true);
@@ -279,5 +279,36 @@ describe("determinism", () => {
     const a = computeStorageCapabilities(ctx({ appId: "com.x" }));
     const b = computeStorageCapabilities(ctx({ appId: "com.x" }));
     expect(a).toEqual(b);
+  });
+});
+
+describe("Android app-owned Keystore capability", () => {
+  it("reports discovered metadata support and keeps host read and mutation unavailable", () => {
+    const keystore = {
+      schemaVersion: 1,
+      capability: "storage.keystore",
+      outcome: "ok",
+      bridgeAvailable: true,
+      metadata: "supported",
+      mutation: "declared_unsupported",
+      deviceLocked: "locked",
+      scopes: ["fixture"],
+    } as const;
+    const report = computeStorageCapabilities(
+      ctx({ keystore: { ...keystore, scopes: [...keystore.scopes] } }),
+    );
+    const secure = report.domains.find((d) => d.domain === "secure_state")!;
+    expect(secure.capabilities).toEqual([keystore]);
+    expect(findOperationCapability(report, "secure_state", "read")?.state).toBe("unavailable");
+    expect(findOperationCapability(report, "secure_state", "write")?.state).toBe("unsupported");
+    expect(findOperationCapability(report, "secure_state", "namespace_reset")?.state).toBe(
+      "unsupported",
+    );
+  });
+  it("does not infer Keystore bridge availability from embedded SDK", () => {
+    expect(
+      computeStorageCapabilities(ctx()).domains.find((d) => d.domain === "secure_state")
+        ?.capabilities,
+    ).toEqual([]);
   });
 });

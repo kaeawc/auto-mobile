@@ -239,6 +239,10 @@ class WebSocketServerIntegrationTest {
               ?.map { it.jsonPrimitive.content }
               .orEmpty()
           assertTrue(
+            "Should advertise optional discover_keystore",
+            supportedCommands.contains("discover_keystore"),
+          )
+          assertTrue(
             "Should advertise request_insert_text",
             supportedCommands.contains("request_insert_text"),
           )

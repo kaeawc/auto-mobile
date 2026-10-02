@@ -445,6 +445,13 @@ export interface GetPreferencesMessage {
   fileName: string;
 }
 
+/** Discovers the app-owned read-only Keystore metadata bridge. */
+export interface DiscoverKeystoreMessage {
+  type: "discover_keystore";
+  requestId: string;
+  packageName: string;
+}
+
 /**
  * `@SerialName("list_data_stores")` → `ListDataStores`.
  *
@@ -679,6 +686,7 @@ export type CtrlProxyRequest =
   | AddHighlightMessage
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
+  | DiscoverKeystoreMessage
   | ListDataStoresMessage
   | GetDataStoreMessage
   | SubscribeStorageMessage
@@ -712,6 +720,7 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
  * the raw advertised list for the remaining optional text/keyboard capabilities.
  */
 export const ANDROID_CAPABILITY_REQUEST_TYPES = [
+  "discover_keystore",
   "set_hierarchy_interval",
   "request_activate_accessibility_link",
   "request_insert_text_state",
@@ -783,6 +792,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   add_highlight: true,
   list_preference_files: true,
   get_preferences: true,
+  discover_keystore: true,
   list_data_stores: true,
   get_data_store: true,
   subscribe_storage: true,
@@ -1043,6 +1053,10 @@ export const ctrlProxyRequests = {
       packageName: args.packageName,
       fileName: args.fileName,
     };
+  },
+
+  discoverKeystore(args: { requestId: string; packageName: string }): DiscoverKeystoreMessage {
+    return { type: "discover_keystore", ...args };
   },
 
   listDataStores(args: {

@@ -155,6 +155,7 @@ class WebSocketServer(
         is CurrentFocusResult -> response.requestId
         is TraversalOrderResult -> response.requestId
         is HighlightResponse -> response.requestId
+        is dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult -> response.requestId
         is PreferenceFilesResult -> response.requestId
         is PreferencesResult -> response.requestId
         is SubscribeStorageResult -> response.requestId
@@ -428,6 +429,7 @@ class WebSocketServer(
                           id = connectionId,
                           supportedCommands =
                             listOf(
+                              "discover_keystore",
                               "set_hierarchy_interval",
                               "node_selector_actions",
                               "request_activate_accessibility_link",

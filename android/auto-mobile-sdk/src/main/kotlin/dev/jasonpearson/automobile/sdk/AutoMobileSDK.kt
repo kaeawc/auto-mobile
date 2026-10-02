@@ -32,6 +32,7 @@ import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker
+import dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState
 import dev.jasonpearson.automobile.sdk.logging.AutoMobileLog
 import dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger
 import dev.jasonpearson.automobile.sdk.logging.SdkLogger
@@ -629,6 +630,7 @@ object AutoMobileSDK {
 
       // Clear application-provided DataStore adapters so shutdown does not retain host references
       // (issue #5192).
+      KeystoreTestState.reset()
       DataStoreInspector.reset()
       DatabaseInspector.reset()
       SharedPreferencesInspector.reset()

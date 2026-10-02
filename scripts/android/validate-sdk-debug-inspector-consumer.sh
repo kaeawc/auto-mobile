@@ -15,10 +15,10 @@
 # path: it publishes the SDK to the local Maven repository and asserts against
 # the resolved artifacts and their Gradle Module Metadata that
 #
-#   AC1  the published debug AAR declares both exported inspection providers,
-#   AC2  the published debug AAR carries both provider classes (so inspection
+#   AC1  the published debug AAR declares all exported inspection providers,
+#   AC2  the published debug AAR carries all provider classes (so inspection
 #        can actually run against a debug consumer),
-#   AC3  the published release AAR declares and packages neither provider, and
+#   AC3  the published release AAR declares and packages no inspection providers, and
 #   AC4  the module metadata routes a debug consumer to the provider-bearing
 #        debug AAR and a release consumer to the provider-free release AAR.
 #
@@ -41,8 +41,8 @@ aar_entry() {
   unzip -p "$aar" "$entry"
 }
 
-# Count `<provider>` elements in an Android manifest whose android:name matches a
-# fully-qualified class name. With a third argument "exported", only providers
+# Count `<provider>` elements matching a class name (empty means any class).
+# An optional fourth argument restricts the exact authority. With a third argument "exported", only providers
 # with android:exported="true" are counted. Echoes an integer.
 #
 # Parsed with python3's ElementTree (a real, namespace-aware structured parser)
@@ -50,17 +50,19 @@ aar_entry() {
 # runners, while python3 is guaranteed there and on macOS -- and it beats
 # regex-matching XML by hand.
 manifest_provider_match_count() {
-  local manifest="$1" fqcn="$2" exported_only="${3:-}"
-  python3 - "$manifest" "$fqcn" "$exported_only" <<'PY'
+  local manifest="$1" fqcn="$2" exported_only="${3:-}" authority="${4:-}"
+  python3 - "$manifest" "$fqcn" "$exported_only" "$authority" <<'PY'
 import sys, xml.etree.ElementTree as ET
 A = "{http://schemas.android.com/apk/res/android}"
-manifest, fqcn, exported_only = sys.argv[1], sys.argv[2], sys.argv[3]
+manifest, fqcn, exported_only, authority = sys.argv[1:]
 root = ET.parse(manifest).getroot()
 n = 0
 for p in root.iter("provider"):
-    if p.get(A + "name") != fqcn:
+    if fqcn and p.get(A + "name") != fqcn:
         continue
     if exported_only == "exported" and p.get(A + "exported") != "true":
+        continue
+    if authority and p.get(A + "authorities") != authority:
         continue
     n += 1
 print(n)
@@ -69,12 +71,12 @@ PY
 
 # Count exported `<provider>` elements matching a fully-qualified class name.
 manifest_provider_count() {
-  manifest_provider_match_count "$1" "$2" exported
+  manifest_provider_match_count "$1" "$2" exported "${3:-}"
 }
 
 # Count `<provider>` elements matching a fully-qualified class name regardless of
 # their exported value. Used to assert an inspection provider is wholly absent
-# from the release manifest (scoped to the two inspection providers by name, so
+# from the release manifest (scoped to the inspection providers by name, so
 # an unrelated release-safe provider added later under src/main does not trip it).
 manifest_named_provider_count() {
   manifest_provider_match_count "$1" "$2"
@@ -135,6 +137,8 @@ DB_PROVIDER="dev.jasonpearson.automobile.sdk.database.DatabaseInspectorProvider"
 SP_PROVIDER="dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspectorProvider"
 DB_PROVIDER_CLASS="dev/jasonpearson/automobile/sdk/database/DatabaseInspectorProvider.class"
 SP_PROVIDER_CLASS="dev/jasonpearson/automobile/sdk/storage/SharedPreferencesInspectorProvider.class"
+KS_PROVIDER="dev.jasonpearson.automobile.sdk.keystore.KeystoreStateProvider"
+KS_PROVIDER_CLASS="dev/jasonpearson/automobile/sdk/keystore/KeystoreStateProvider.class"
 
 fail() {
   echo "error: $*" >&2
@@ -209,22 +213,27 @@ run_validation() {
   # suppressed, which the SC2310 ratchet (scripts/shellcheck/sete-baseline.txt)
   # gates. `[ ... ]` is a builtin, so testing the captured value is fine.
   local db_debug sp_debug db_class_debug sp_class_debug
-  local db_release sp_release db_class_release sp_class_release
+  local db_release sp_release db_class_release sp_class_release ks_debug ks_release ks_class_debug ks_class_release ks_authority_release
 
-  # AC1 -- published debug AAR declares both exported inspection providers.
+  # AC1 -- published debug AAR declares all exported inspection providers.
   db_debug="$(manifest_provider_count "${tmp}/debug-manifest.xml" "$DB_PROVIDER")"
   [ "$db_debug" = "1" ] || fail "AC1: debug AAR manifest does not declare exported ${DB_PROVIDER}"
   sp_debug="$(manifest_provider_count "${tmp}/debug-manifest.xml" "$SP_PROVIDER")"
   [ "$sp_debug" = "1" ] || fail "AC1: debug AAR manifest does not declare exported ${SP_PROVIDER}"
 
-  # AC2 -- published debug AAR carries both provider classes.
+  ks_debug="$(manifest_provider_count "${tmp}/debug-manifest.xml" "$KS_PROVIDER" "\${applicationId}.automobile.keystore")"
+  [ "$ks_debug" = "1" ] || fail "AC1: debug AAR must declare exported ${KS_PROVIDER} with its Keystore authority"
+
+  # AC2 -- published debug AAR carries all provider classes.
   db_class_debug="$(aar_class_present "$debug_aar" "$DB_PROVIDER_CLASS")"
   [ "$db_class_debug" = "1" ] || fail "AC2: debug AAR classes.jar is missing ${DB_PROVIDER_CLASS}"
   sp_class_debug="$(aar_class_present "$debug_aar" "$SP_PROVIDER_CLASS")"
   [ "$sp_class_debug" = "1" ] || fail "AC2: debug AAR classes.jar is missing ${SP_PROVIDER_CLASS}"
 
-  # AC3 -- published release AAR declares and packages neither inspection
-  # provider. Scoped to the two providers by name (not "any provider present"),
+  ks_class_debug="$(aar_class_present "$debug_aar" "$KS_PROVIDER_CLASS")"
+  [ "$ks_class_debug" = "1" ] || fail "AC2: debug AAR classes.jar is missing ${KS_PROVIDER_CLASS}"
+
+  # AC3 -- published release AAR declares and packages no inspection providers. Scoped to the inspection providers by name (not "any provider present"),
   # so a legitimate release-safe provider added later under src/main does not
   # make this required job fail spuriously.
   db_release="$(manifest_named_provider_count "${tmp}/release-manifest.xml" "$DB_PROVIDER")"
@@ -233,7 +242,12 @@ run_validation() {
   [ "$sp_release" = "0" ] || fail "AC3: release AAR manifest declares ${SP_PROVIDER}; it must package neither inspection provider"
   db_class_release="$(aar_class_present "$release_aar" "$DB_PROVIDER_CLASS")"
   sp_class_release="$(aar_class_present "$release_aar" "$SP_PROVIDER_CLASS")"
-  if [ "$db_class_release" != "0" ] || [ "$sp_class_release" != "0" ]; then
+  ks_release="$(manifest_named_provider_count "${tmp}/release-manifest.xml" "$KS_PROVIDER")"
+  [ "$ks_release" = "0" ] || fail "AC3: release AAR manifest declares ${KS_PROVIDER}"
+  ks_authority_release="$(manifest_provider_match_count "${tmp}/release-manifest.xml" "" "" "\${applicationId}.automobile.keystore")"
+  [ "$ks_authority_release" = "0" ] || fail "AC3: release AAR manifest declares the Keystore authority"
+  ks_class_release="$(aar_class_present "$release_aar" "$KS_PROVIDER_CLASS")"
+  if [ "$ks_class_release" != "0" ] || [ "$db_class_release" != "0" ] || [ "$sp_class_release" != "0" ]; then
     fail "AC3: release AAR classes.jar contains an inspection provider class; it must package none"
   fi
 

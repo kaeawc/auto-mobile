@@ -1134,6 +1134,17 @@ public final class dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTr
   public static final long access$getLastTapProcessedAt$p();
   public static final void access$setLastTapProcessedAt$p(long);
 }
+Compiled from "KeystoreTestState.kt"
+public final class dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState {
+  public static final dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState INSTANCE;
+  public static final int $stable;
+  public final void setEnabled(boolean);
+  public final boolean isEnabled();
+  public final dev.jasonpearson.automobile.sdk.InspectorRegistration declareScope(java.lang.String, java.util.Set<java.lang.String>);
+  public final java.util.Set<java.lang.String> declaredScopes$auto_mobile_sdk();
+  public final java.util.Set<java.lang.String> aliasesForScope$auto_mobile_sdk(java.lang.String);
+  public final void reset$auto_mobile_sdk();
+}
 Compiled from "AutoMobileLog.kt"
 public final class dev.jasonpearson.automobile.sdk.logging.AutoMobileLog {
   public static final dev.jasonpearson.automobile.sdk.logging.AutoMobileLog INSTANCE;

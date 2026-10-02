@@ -6,6 +6,11 @@
  */
 
 import WebSocket from "ws";
+import { toActionableError } from "../../../models/ActionableError";
+import {
+  keystoreDiscoverySchema,
+  type KeystoreDiscoveryState,
+} from "../../storage/keystoreDiscovery";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { ProviderUnavailableError } from "../../storage/ProviderUnavailableError";
@@ -186,6 +191,59 @@ export class CtrlProxyStorage {
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] getPreferenceEntries failed after ${duration}ms: ${error}`);
       throw error;
+    }
+  }
+
+  /** Discovers the app-owned read-only Keystore metadata bridge. */
+  async discoverKeystore(packageName: string, timeoutMs = 5000): Promise<KeystoreDiscoveryState> {
+    try {
+      if (!(await this.context.ensureConnected())) {
+        throw new Error("Failed to connect to accessibility service");
+      }
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      // Optional commands require an advertised capability, including on the first read.
+      const commands = await this.context.getSupportedCommands?.();
+      if (commands?.includes("discover_keystore") !== true) {
+        return {
+          schemaVersion: 1,
+          capability: "storage.keystore",
+          outcome: "unsupported",
+          reason: "DECLARED_UNSUPPORTED",
+          bridgeAvailable: false,
+          metadata: "supported",
+          mutation: "declared_unsupported",
+          deviceLocked: "unknown",
+          scopes: [],
+        };
+      }
+      const requestId = this.context.requestManager.generateId("discover_keystore");
+      const pending = this.context.requestManager.register<{ state: unknown }>(
+        requestId,
+        "discover_keystore",
+        timeoutMs,
+        () => ({
+          state: {
+            schemaVersion: 1,
+            capability: "storage.keystore",
+            outcome: "unavailable",
+            reason: "BRIDGE_UNAVAILABLE",
+            bridgeAvailable: false,
+            metadata: "supported",
+            mutation: "declared_unsupported",
+            deviceLocked: "unknown",
+            scopes: [],
+          },
+        }),
+      );
+      ws.send(
+        serializeCtrlProxyRequest(ctrlProxyRequests.discoverKeystore({ requestId, packageName })),
+      );
+      return keystoreDiscoverySchema.parse((await pending).state);
+    } catch (error) {
+      throw toActionableError(error, "Failed to discover Android Keystore capabilities");
     }
   }
 

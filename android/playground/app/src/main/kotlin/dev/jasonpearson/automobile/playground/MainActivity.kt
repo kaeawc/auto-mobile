@@ -18,6 +18,7 @@ import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
+import dev.jasonpearson.automobile.sdk.keystore.KeystoreTestState
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import dev.jasonpearson.automobile.storage.AnalyticsTracker
 import dev.jasonpearson.automobile.storage.session.SessionRepository
@@ -48,6 +49,10 @@ class MainActivity : ComponentActivity() {
       AutoMobileSDK.updateCapturePolicy(SdkCapturePolicy(allowMutations = true))
     }
     // Enable storage and database inspection in debug builds
+    if (BuildConfig.DEBUG) {
+      KeystoreTestState.declareScope("fixture", setOf("automobile.fixture"))
+      KeystoreTestState.setEnabled(true)
+    }
     SharedPreferencesInspector.setEnabled(true)
     DatabaseInspector.setEnabled(true)
     Log.d(TAG, "AutoMobileSDK initialized")

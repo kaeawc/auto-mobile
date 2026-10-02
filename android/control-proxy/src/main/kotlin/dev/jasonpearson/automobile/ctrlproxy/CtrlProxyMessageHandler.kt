@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
+import dev.jasonpearson.automobile.protocol.DiscoverKeystore
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.GetCurrentFocus
 import dev.jasonpearson.automobile.protocol.GetDataStore
@@ -456,6 +457,7 @@ class CtrlProxyMessageHandler(
       is ListPreferenceFiles -> actions.listPreferenceFiles(request.requestId, request.packageName)
       is GetPreferences ->
         actions.getPreferences(request.requestId, request.packageName, request.fileName)
+      is DiscoverKeystore -> actions.discoverKeystore(request.requestId, request.packageName)
       is ListDataStores ->
         actions.listDataStores(request.requestId, request.packageName, request.adapterName)
       is GetDataStore ->

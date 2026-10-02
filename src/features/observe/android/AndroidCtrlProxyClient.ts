@@ -565,6 +565,12 @@ interface WsDeviceInfoResultMessage extends WsMessageBase {
   totalTimeMs?: number;
 }
 
+interface WsKeystoreDiscoveryMessage extends WsMessageBase {
+  type: "keystore_discovery";
+  requestId: string;
+  state: unknown;
+}
+
 interface WsPreferenceFilesMessage extends WsMessageBase {
   type: "preference_files";
   requestId: string;
@@ -941,6 +947,7 @@ type WebSocketMessage =
   | WsHighlightResponseMessage
   | WsGlobalActionResultMessage
   | WsDeviceInfoResultMessage
+  | WsKeystoreDiscoveryMessage
   | WsPreferenceFilesMessage
   | WsPreferencesMessage
   | WsSubscribeStorageResultMessage
@@ -2125,7 +2132,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
-    return { isCommandSupported: (messageType) => this.isCommandSupported(messageType) };
+    return {
+      isCommandSupported: (messageType) => this.isCommandSupported(messageType),
+      getSupportedCommands: () => this.getSupportedCommands(),
+    };
   }
 
   private createCertificatesDelegateContext(): CertificatesDelegateContext {
@@ -3208,6 +3218,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs?: number,
   ): Promise<KeyValueEntry[]> {
     return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
+  }
+
+  async discoverKeystore(packageName: string) {
+    return this.storage.discoverKeystore(packageName);
   }
 
   async listDataStores(
@@ -5201,6 +5215,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         totalTimeMs: message.totalTimeMs ?? 0,
         error: message.error,
       })),
+
+    keystore_discovery: (message) =>
+      this.resolvePendingResponse(message, (message) => ({ state: message.state })),
 
     preference_files: (message) =>
       this.resolvePendingResponse(message, (message) => ({

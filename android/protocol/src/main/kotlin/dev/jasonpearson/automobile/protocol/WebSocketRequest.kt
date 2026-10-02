@@ -445,6 +445,14 @@ data class GetPreferences(
   val fileName: String,
 ) : WebSocketRequest()
 
+/** Discovers the app-owned read-only Keystore metadata bridge. */
+@Serializable
+@SerialName("discover_keystore")
+data class DiscoverKeystore(
+  override val requestId: String? = null,
+  val packageName: String,
+) : WebSocketRequest()
+
 /**
  * Lists the Jetpack DataStore instances exposed by a host-registered adapter (issue #5192/#5573).
  * DataStore descriptors reuse the SharedPreferences result shapes (StorageResponse.FileList, empty

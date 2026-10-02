@@ -2503,6 +2503,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   override fun getPreferences(requestId: String?, packageName: String, fileName: String) =
     handleGetPreferences(requestId, packageName, fileName)
 
+  override fun discoverKeystore(requestId: String?, packageName: String) {
+    asyncActionRunner.launch(requestId, "discover_keystore") {
+      val state =
+        dev.jasonpearson.automobile.ctrlproxy.storage.discoverKeystore(this@CtrlProxy, packageName)
+      resultBroadcaster.guard(requestId, "keystore_discovery") {
+        webSocketServer.broadcast(
+          dev.jasonpearson.automobile.protocol.KeystoreDiscoveryResult(
+            timestamp = timeProvider.currentTimeMillis(),
+            requestId = requestId,
+            state = state,
+          )
+        )
+      }
+    }
+  }
+
   override fun listDataStores(requestId: String?, packageName: String, adapterName: String) =
     handleListDataStores(requestId, packageName, adapterName)
 

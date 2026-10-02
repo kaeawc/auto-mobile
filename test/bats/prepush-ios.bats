@@ -288,6 +288,7 @@ commit_changed_swift_file() {
   cp "${repo_root}/scripts/prepush-ios.sh" "${outside_root}/scripts/prepush-ios.sh"
   cp "${repo_root}/scripts/swiftformat/swiftformat_version.sh" "${outside_root}/scripts/swiftformat/swiftformat_version.sh"
   cp "${repo_root}/scripts/ios/swift_test_counts.sh" "${outside_root}/scripts/ios/swift_test_counts.sh"
+  cp "${repo_root}/scripts/ios/xctestrunner_test_filter.sh" "${outside_root}/scripts/ios/xctestrunner_test_filter.sh"
   for tool in swiftformat swiftlint swift; do
     cp "${mock_bin}/${tool}" "${outside_bin}/${tool}"
   done
@@ -297,4 +298,20 @@ commit_changed_swift_file() {
 
   [ "$status" -ne 0 ]
   [[ "$output" == *"not inside a git checkout"* ]]
+}
+
+@test "exits with a clear message when the test filter helper is missing" {
+  create_real_git_fixture
+  rm "${fixture_root}/scripts/ios/xctestrunner_test_filter.sh"
+
+  run env PATH="${mock_bin}:${PATH}" PREPUSH_IOS_MOCK_REPO_ROOT="${fixture_root}" \
+    PREPUSH_IOS_COMMAND_LOG="${command_log}" bash "${fixture_root}/scripts/prepush-ios.sh"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == "prepush-ios.sh: missing helper scripts/ios/xctestrunner_test_filter.sh (copy it alongside prepush-ios.sh in fixtures)" ]]
+  run cat "${command_log}"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"swiftformat"* ]]
+  [[ "$output" != *"swiftlint"* ]]
+  [[ "$output" != *"swift "* ]]
 }

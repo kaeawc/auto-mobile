@@ -40,7 +40,12 @@ source "${project_root}/scripts/swiftlint/swiftlint_version.sh"
 # shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
 source "${project_root}/scripts/ios/swift_test_counts.sh"
 
-# shellcheck source=scripts/ios/xctestrunner_test_filter.sh disable=SC1091
+if [[ ! -f "${project_root}/scripts/ios/xctestrunner_test_filter.sh" ]]; then
+  echo "prepush-ios.sh: missing helper scripts/ios/xctestrunner_test_filter.sh (copy it alongside prepush-ios.sh in fixtures)" >&2
+  exit 1
+fi
+# shellcheck source=scripts/ios/xctestrunner_test_filter.sh
+# shellcheck disable=SC1091
 source "${project_root}/scripts/ios/xctestrunner_test_filter.sh"
 
 require_pinned_swiftformat_version

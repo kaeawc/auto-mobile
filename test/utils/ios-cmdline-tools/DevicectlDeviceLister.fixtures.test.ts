@@ -188,7 +188,17 @@ describe("devicectl list devices host captures", () => {
     });
   });
 
-  test("DERIVED cold incomplete sweep includes its recognized phone", async () => {
+  test("DERIVED only unidentified records yield a complete empty listing", async () => {
+    const listing = loadDerivedDevicectlListing();
+    listing.result.devices = [listing.result.devices[0]];
+    listing.result.devices[0].properties.hardware.platform = "futureOS";
+    expect(parseListing(listing).unidentified).toHaveLength(1);
+    expect(
+      await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
+    ).toEqual({ complete: true, devices: [] });
+  });
+
+  test("DERIVED cold sweep skips an unidentified record and includes its recognized phone", async () => {
     // DERIVED connected physical phone plus schema drift in a captured simulator record.
     const listing = loadDerivedDevicectlListing();
     listing.result.devices.push(
@@ -198,12 +208,12 @@ describe("devicectl list devices host captures", () => {
     const discovery = await capturedLister(async () =>
       JSON.stringify(listing),
     ).listConnectedDevices();
-    expect(discovery).toMatchObject({ complete: false, error: { code: "failed" } });
+    expect(discovery.complete).toBe(true);
     expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
     expect(discovery.devices[0]?.observedAt).toBe(1);
   });
 
-  test("DERIVED incomplete sweep unions recognized and retained devices without refreshing last-good", async () => {
+  test("DERIVED sweep with an unidentified record replaces last-good with recognized devices", async () => {
     const timer = new FakeTimer();
     const retainedId = "00008120-001C2D3E1234567B";
     // DERIVED previous-good phone D, using the captured connected simulator's record shape.
@@ -211,7 +221,7 @@ describe("devicectl list devices host captures", () => {
     good.result.devices.push(derivePhysicalDevicectlRecord(good.result.devices[0], retainedId));
     let raw = JSON.stringify(good);
     const lister = capturedLister(async () => raw, { timer });
-    const initial = await lister.listConnectedDevices();
+    await lister.listConnectedDevices();
     // DERIVED recognized phone plus an unidentified captured record.
     const partial = loadDerivedDevicectlListing();
     partial.result.devices.push(
@@ -220,18 +230,14 @@ describe("devicectl list devices host captures", () => {
     partial.result.devices[0].properties.hardware.reality = "future";
     raw = JSON.stringify(partial);
     timer.advanceTime(3_000);
-    const incomplete = await lister.listConnectedDevices();
-    expect(incomplete).toMatchObject({ complete: false, error: { code: "failed" } });
-    expect(incomplete.devices.map((device) => device.deviceId).toSorted()).toEqual(
-      [PHYSICAL_UDID, retainedId].toSorted(),
-    );
-    expect(incomplete.devices.find((device) => device.deviceId === PHYSICAL_UDID)?.observedAt).toBe(
+    const complete = await lister.listConnectedDevices();
+    expect(complete.complete).toBe(true);
+    expect(complete.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(complete.devices.find((device) => device.deviceId === PHYSICAL_UDID)?.observedAt).toBe(
       2,
     );
-    expect(incomplete.devices.find((device) => device.deviceId === retainedId)).toEqual(
-      initial.devices[0],
-    );
-    // DERIVED same device ID as retained D: the freshly recognized record wins.
+    expect(complete.devices.find((device) => device.deviceId === retainedId)).toBeUndefined();
+    // DERIVED previously seen device ID: the freshly recognized record replaces last-good.
     partial.result.devices[partial.result.devices.length - 1] = derivePhysicalDevicectlRecord(
       partial.result.devices[0],
       retainedId,
@@ -241,12 +247,12 @@ describe("devicectl list devices host captures", () => {
     const deduplicated = await lister.listConnectedDevices();
     expect(deduplicated.devices).toHaveLength(1);
     expect(deduplicated.devices[0]).toMatchObject({ deviceId: retainedId, observedAt: 3 });
-    // DERIVED unsuccessful envelope; original last-good D must remain the only retained device.
+    // DERIVED unsuccessful envelope; replay the latest complete sweep, including its fresh observation.
     raw = JSON.stringify({ ...partial, info: { outcome: "failed" } });
     timer.advanceTime(3_000);
     const failed = await lister.listConnectedDevices();
     expect(failed).toMatchObject({ complete: false, error: { code: "failed" } });
-    expect(failed.devices).toEqual(initial.devices);
+    expect(failed.devices).toEqual(deduplicated.devices);
   });
 
   test("manifest pairing rejects zero captures, missing rows, and orphaned rows", () => {
@@ -386,7 +392,7 @@ describe("devicectl list devices host captures", () => {
 
     for (const field of ["platform", "udid"] as const) {
       test.each(generations)(
-        `${row.file}: DERIVED missing ${field} in %s warns safely and retains the recognized phone`,
+        `${row.file}: DERIVED missing ${field} in %s skips safely and lists the recognized phone`,
         async (generation) => {
           // DERIVED mixed inventory with one required simulator field absent from every present generation.
           const mixed = structuredClone(capture);
@@ -409,22 +415,26 @@ describe("devicectl list devices host captures", () => {
               .filter((udid) => udid !== capture.result.devices[0].properties.hardware.udid),
           );
           const warnings: string[] = [];
+          const debug: string[] = [];
           const discovery = await capturedLister(async () => JSON.stringify(listing), {
             logger: {
               warn: (message) => {
                 warnings.push(message);
               },
-              debug: () => {},
+              debug: (message) => {
+                debug.push(message);
+              },
             },
           }).listConnectedDevices();
-          expect(discovery).toMatchObject({ complete: false, error: { code: "failed" } });
+          expect(discovery.complete).toBe(true);
           expect(discovery.devices).toEqual(
             parsed.physical.map((device) => ({ ...device, observedAt: 1 })),
           );
+          expect(warnings).toEqual([]);
           expect(
-            warnings.filter((message) => message.includes("could not be identified")),
+            debug.filter((message) => message.includes("could not be identified")),
           ).toHaveLength(1);
-          for (const message of warnings) {
+          for (const message of debug) {
             for (const captured of capture.result.devices) {
               expect(message).not.toContain(captured.identifier);
               expect(message).not.toContain(String(captured.properties.hardware.udid));
@@ -449,9 +459,8 @@ describe("devicectl list devices host captures", () => {
       expect(
         await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
       ).toMatchObject({
-        complete: false,
+        complete: true,
         devices: [],
-        error: { code: "failed" },
       });
     });
 
@@ -486,7 +495,7 @@ describe("devicectl list devices host captures", () => {
       expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
     });
 
-    test(`${row.file}: DERIVED unidentified phone retains last-good inventory`, async () => {
+    test(`${row.file}: DERIVED unidentified phone is skipped and clears last-good inventory`, async () => {
       const timer = new FakeTimer();
       let listing = loadDerivedDevicectlListing(row.file);
       const phone = derivePhysicalDevicectlRecord(listing.result.devices[0], PHYSICAL_UDID);
@@ -501,9 +510,7 @@ describe("devicectl list devices host captures", () => {
       }
       timer.advanceTime(3_000);
       const partial = await lister.listConnectedDevices();
-      expect(partial).toMatchObject({ complete: false, error: { code: "failed" } });
-      expect(partial.devices).toEqual(initial.devices);
-      expect(partial.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+      expect(partial).toEqual({ complete: true, devices: [] });
       // A subsequent authoritative simulator-only listing clears retention.
       listing = loadDerivedDevicectlListing(row.file);
       timer.advanceTime(3_000);
@@ -520,7 +527,7 @@ describe("devicectl list devices host captures", () => {
       ["udid", "unknown-shape"],
     ] as const) {
       for (const index of [0, 1]) {
-        test(`${row.file}: DERIVED ${index === 0 ? "booted" : "shutdown"} simulator with ${field}=${value} is incomplete`, async () => {
+        test(`${row.file}: DERIVED ${index === 0 ? "booted" : "shutdown"} simulator with ${field}=${value} is skipped in a complete listing`, async () => {
           const listing = loadDerivedDevicectlListing(row.file);
           const record = listing.result.devices[index];
           // DERIVED field deletion/change in both copies; all other capture fields remain verbatim.
@@ -542,9 +549,8 @@ describe("devicectl list devices host captures", () => {
           expect(
             await capturedLister(async () => JSON.stringify(listing)).listConnectedDevices(),
           ).toMatchObject({
-            complete: false,
+            complete: true,
             devices: [],
-            error: { code: "failed" },
           });
         });
       }

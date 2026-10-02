@@ -207,6 +207,73 @@ describe("parseSettingsFromNestedXml", () => {
     });
   });
 
+  test.each([
+    {
+      name: "authorizationStatus-only candidates with different values",
+      dicts: [
+        `<dict><key>authorizationStatus</key><integer>0</integer></dict>`,
+        `<dict><key>authorizationStatus</key><integer>2</integer></dict>`,
+        `<dict><key>authorizationStatus</key><integer>3</integer></dict>`,
+      ],
+      expected: { authorizationStatus: 3 },
+    },
+    {
+      name: "tied candidates with different known keys",
+      dicts: [
+        `<dict><key>authorizationStatus</key><integer>2</integer><key>alertType</key><integer>1</integer></dict>`,
+        `<dict><key>authorizationStatus</key><integer>2</integer><key>pushSettings</key><integer>63</integer></dict>`,
+      ],
+      expected: { authorizationStatus: 2, pushSettings: 63, alertType: undefined },
+    },
+    {
+      name: "tied candidates with different total key counts",
+      dicts: [
+        `<dict><key>authorizationStatus</key><integer>3</integer></dict>`,
+        `<dict><key>authorizationStatus</key><integer>2</integer><key>metadata</key><string>settings</string></dict>`,
+      ],
+      expected: { authorizationStatus: 2 },
+    },
+    {
+      name: "nested content with reordered dictionary keys",
+      dicts: [
+        `<dict><key>aMetadata</key><dict><key>z</key><integer>1</integer><key>a</key><array><true/><real>1</real><data>QUJD</data><date>2026-01-01T00:00:00Z</date></array></dict><key>authorizationStatus</key><integer>3</integer></dict>`,
+        `<dict><key>aMetadata</key><dict><key>z</key><integer>2</integer><key>a</key><array><true/><real>1</real><data>QUJD</data><date>2026-01-01T00:00:00Z</date></array></dict><key>authorizationStatus</key><integer>2</integer></dict>`,
+        `<dict><key>authorizationStatus</key><integer>2</integer><key>aMetadata</key><dict><key>a</key><array><true/><real>1</real><data>QUJD</data><date>2026-01-01T00:00:00Z</date></array><key>z</key><integer>2</integer></dict></dict>`,
+      ],
+      expected: { authorizationStatus: 2 },
+    },
+    {
+      name: "higher-score candidates regardless of total key count",
+      dicts: [
+        `<dict><key>authorizationStatus</key><integer>0</integer><key>metadata</key><string>decoy</string><key>other</key><true/></dict>`,
+        `<dict><key>authorizationStatus</key><integer>2</integer><key>alertType</key><integer>1</integer></dict>`,
+      ],
+      expected: { authorizationStatus: 2, alertType: 1 },
+    },
+  ])("selects consistently across orderings: $name", async ({ dicts, expected }) => {
+    const orderings = [dicts, [...dicts].reverse(), [...dicts.slice(1), dicts[0]]];
+    const results = [];
+    for (const ordering of orderings) {
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+\t<key>$archiver</key>
+\t<string>NSKeyedArchiver</string>
+\t<key>$objects</key>
+\t<array>
+\t\t<string>$null</string>
+${ordering.join("\n")}
+\t</array>
+</dict>
+</plist>`;
+      results.push(await parseSettingsFromNestedXml(xml));
+    }
+    for (const result of results) {
+      expect(result).toEqual(results[0]);
+    }
+    expect(results[0]).toMatchObject(expected);
+  });
+
   // Issue #6583 follow-up (codex review): the previous ad-hoc regex tokenizer
   // did not match no-space self-closing tags (`<true/>`, `<dict/>`) which is
   // exactly what plutil emits, so a self-closing sibling anywhere in the

@@ -307,7 +307,7 @@ export interface SimCtl {
 
   /**
    * List all installed apps on the simulator
-   * @param deviceId - Optional device ID (defaults to "booted" for current booted simulator)
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with array of app objects
    */
   listApps(deviceId?: string): Promise<any[]>;
@@ -316,7 +316,7 @@ export interface SimCtl {
    * Launch an app on the simulator
    * @param bundleId - The bundle identifier of the app to launch
    * @param options - Launch options
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with launch result containing success status and optional PID
    */
   launchApp(
@@ -332,7 +332,7 @@ export interface SimCtl {
   /**
    * Terminate an app on the simulator
    * @param bundleId - The bundle identifier of the app to terminate
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise that resolves when termination is complete
    */
   terminateApp(bundleId: string, deviceId?: string): Promise<void>;
@@ -340,20 +340,20 @@ export interface SimCtl {
   /**
    * Install an app on the simulator
    * @param appPath - Path to the .app bundle
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    */
   installApp(appPath: string, deviceId?: string): Promise<void>;
 
   /**
    * Uninstall an app from the simulator
    * @param bundleId - The bundle identifier of the app to uninstall
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    */
   uninstallApp(bundleId: string, deviceId?: string): Promise<void>;
 
   /**
    * Get the screen size of the simulator
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @param timeoutMs - Optional command timeout in milliseconds
    * @returns Promise with screen dimensions
    */
@@ -368,7 +368,7 @@ export interface SimCtl {
   /**
    * Set the simulator appearance
    * @param mode - Appearance mode ("light" or "dark")
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    */
   setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void>;
 
@@ -2566,9 +2566,20 @@ export class SimCtlClient implements SimCtl {
     }
   }
 
+  private requireSimulatorDeviceId(deviceId?: string): string {
+    const targetDevice = deviceId || this.device?.deviceId;
+    if (!targetDevice || targetDevice === "booted") {
+      throw new ActionableError(
+        "No simulator is selected. Bind a device when constructing SimCtlClient or pass a deviceId. " +
+          "Use a simulator UDID from xcrun simctl list devices or the listDevices tool.",
+      );
+    }
+    return targetDevice;
+  }
+
   /**
    * List all installed apps on the simulator
-   * @param deviceId - Optional device ID (defaults to "booted" for current booted simulator)
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with array of app objects containing bundle identifiers and other metadata
    */
   async listApps(deviceId?: string): Promise<any[]> {
@@ -2589,11 +2600,11 @@ export class SimCtlClient implements SimCtl {
    * callers; consumers that must tell "the listing failed" apart from "the
    * device has no such app" — the install pre-checks in `UninstallApp` and
    * `TerminateApp` — call this variant (issue #5621).
-   * @param deviceId - Optional device ID (defaults to "booted" for current booted simulator)
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with array of app objects containing bundle identifiers and other metadata
    */
   async listAppsOrThrow(deviceId?: string): Promise<any[]> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
+    const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Listing installed apps on iOS simulator ${targetDevice}`);
 
     const parseApps = (payload: string): any[] => {
@@ -2641,7 +2652,7 @@ export class SimCtlClient implements SimCtl {
    * Launch an app on the simulator
    * @param bundleId - The bundle identifier of the app to launch
    * @param options - Launch options
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with launch result containing success status and optional PID
    */
   async launchApp(
@@ -2653,10 +2664,9 @@ export class SimCtlClient implements SimCtl {
     pid?: number;
     error?: string;
   }> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
-    logger.debug(`Launching app ${bundleId} on iOS simulator ${targetDevice}`);
-
     try {
+      const targetDevice = this.requireSimulatorDeviceId(deviceId);
+      logger.debug(`Launching app ${bundleId} on iOS simulator ${targetDevice}`);
       const launchArgs = ["launch", targetDevice, bundleId, ...(options?.launchArguments ?? [])];
       const result = await this.executeCommandArgv(
         launchArgs,
@@ -2685,11 +2695,11 @@ export class SimCtlClient implements SimCtl {
   /**
    * Terminate an app on the simulator
    * @param bundleId - The bundle identifier of the app to terminate
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise that resolves when termination is complete
    */
   async terminateApp(bundleId: string, deviceId?: string): Promise<void> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
+    const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Terminating app ${bundleId} on iOS simulator ${targetDevice}`);
 
     try {
@@ -2701,24 +2711,24 @@ export class SimCtlClient implements SimCtl {
   }
 
   async installApp(appPath: string, deviceId?: string): Promise<void> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
+    const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Installing app ${appPath} on iOS simulator ${targetDevice}`);
     await this.executeCommandArgs(["install", targetDevice, appPath]);
   }
 
   async uninstallApp(bundleId: string, deviceId?: string): Promise<void> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
+    const targetDevice = this.requireSimulatorDeviceId(deviceId);
     logger.debug(`Uninstalling app ${bundleId} from iOS simulator ${targetDevice}`);
     await this.executeCommandArgs(["uninstall", targetDevice, bundleId]);
   }
 
   /**
    * Get the screen size of the simulator
-   * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param deviceId - Optional simulator UDID (defaults to the bound device; required when unbound)
    * @returns Promise with screen dimensions
    */
   async getScreenSize(deviceId?: string, timeoutMs?: number): Promise<ScreenSize> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
+    const targetDevice = this.requireSimulatorDeviceId(deviceId);
 
     logger.info(`[iOS] Getting screen size for simulator ${targetDevice}`);
 
@@ -2964,7 +2974,7 @@ export class SimCtlClient implements SimCtl {
   }
 
   async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {
-    const targetDevice = deviceId || this.device?.deviceId || "booted";
+    const targetDevice = this.requireSimulatorDeviceId(deviceId);
     await this.executeCommandArgs(["ui", targetDevice, "appearance", mode]);
   }
 

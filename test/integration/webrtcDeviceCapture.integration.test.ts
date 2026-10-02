@@ -813,7 +813,14 @@ async function captureProfile(): Promise<CaptureProfile> {
     // Not a hand-rolled `simctl io enumerate` regex: the first "Pixel Size:" in
     // that output belongs to the CarPlay screen, so a naive match reports
     // 720x480 for every simulator. SimCtlClient gates on the integrated display.
-    const screen = await (await createSimCtlClient()).getScreenSize("booted", REAL_IO_TIMEOUT_MS);
+    const simctl = await createSimCtlClient();
+    const udid =
+      configuredIosSimulatorUdid(process.env) ??
+      (await waitForBootedSimulatorUdid(simctl, { timeoutMs: REAL_IO_TIMEOUT_MS }));
+    if (!udid) {
+      throw new Error("No simulator is selected for capture source resolution");
+    }
+    const screen = await simctl.getScreenSize(udid, REAL_IO_TIMEOUT_MS);
     return { sourceSize: { width: screen.width, height: screen.height }, configuredFps };
   } catch (error) {
     // Diagnostic metadata only — a failed size query must not fail the lane.

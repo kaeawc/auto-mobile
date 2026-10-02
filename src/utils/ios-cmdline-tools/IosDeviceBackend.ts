@@ -92,10 +92,13 @@ export interface IosLaunchBackendDeps {
 export class SimulatorIosLaunchBackend implements IosLaunchBackend {
   readonly kind = "simulator";
 
-  constructor(private readonly simctl: Pick<SimCtlClient, "launchApp">) {}
+  constructor(
+    private readonly deviceId: string,
+    private readonly simctl: Pick<SimCtlClient, "launchApp">,
+  ) {}
 
   launchApp(bundleId: string, options?: LaunchOptions): Promise<LaunchResult> {
-    return this.simctl.launchApp(bundleId, options);
+    return this.simctl.launchApp(bundleId, options, this.deviceId);
   }
 }
 
@@ -122,7 +125,7 @@ export function resolveIosLaunchBackend(
   deps: IosLaunchBackendDeps,
 ): IosLaunchBackend {
   return isIosSimulatorUdid(deviceId)
-    ? new SimulatorIosLaunchBackend(deps.simctl)
+    ? new SimulatorIosLaunchBackend(deviceId, deps.simctl)
     : new PhysicalIosLaunchBackend(deviceId, deps.deviceAppLauncher);
 }
 
@@ -402,9 +405,7 @@ export function resolveIosColdStartTerminateBackend(
   deps: { simctl: Pick<SimCtlClient, "terminateApp"> },
 ): IosTerminateBackend | null {
   const backend = resolveIosTerminateBackend(deviceId, {
-    // Cold-start termination historically omits the device argument; keep that
-    // contract while routing through the shared terminate backend.
-    simctl: { terminateApp: (bundleId) => deps.simctl.terminateApp(bundleId) },
+    simctl: deps.simctl,
     // The resolver requires both transports, but this helper deliberately
     // exposes only the simulator backend, so physical termination is unreachable.
     deviceAppTerminator: {

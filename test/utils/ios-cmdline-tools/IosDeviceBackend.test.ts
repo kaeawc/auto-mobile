@@ -146,19 +146,16 @@ describe("resolveIosLaunchBackend", () => {
 
   test("simulator cold and warm launches preserve simctl argv", async () => {
     const commands: Array<{ file: string; args: string[] }> = [];
-    const simctl = new SimCtlClient(
-      { deviceId: simulatorUdid, name: "Test iOS Simulator", platform: "ios" },
-      async (file, args) => {
-        commands.push({ file, args });
-        return {
-          stdout: `${bundleId}: 1234`,
-          stderr: "",
-          toString: () => `${bundleId}: 1234`,
-          trim: () => `${bundleId}: 1234`,
-          includes: (value: string) => `${bundleId}: 1234`.includes(value),
-        };
-      },
-    );
+    const simctl = new SimCtlClient(null, async (file, args) => {
+      commands.push({ file, args });
+      return {
+        stdout: `${bundleId}: 1234`,
+        stderr: "",
+        toString: () => `${bundleId}: 1234`,
+        trim: () => `${bundleId}: 1234`,
+        includes: (value: string) => `${bundleId}: 1234`.includes(value),
+      };
+    });
     const backend: IosLaunchBackend = resolveIosLaunchBackend(simulatorUdid, {
       simctl,
       deviceAppLauncher: new FakeDeviceAppLauncher(),
@@ -300,14 +297,14 @@ describe("resolveIosTerminateBackend", () => {
     await expect(backend.terminateApp(bundleId)).rejects.toBe(error);
   });
 
-  test("cold-start adapter keeps simulator termination on the shared backend without a device argument", async () => {
+  test("cold-start adapter passes the selected simulator to the shared backend", async () => {
     const simctl = new FakeSimctl();
     const backend = resolveIosColdStartTerminateBackend(simulatorUdid, { simctl });
 
     expect(backend).toBeInstanceOf(SimulatorIosTerminateBackend);
     expect(backend?.kind).toBe("simulator");
     await backend?.terminateApp(bundleId);
-    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: undefined }]);
+    expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
   });
 
   test("cold-start adapter returns no backend for a physical device", () => {

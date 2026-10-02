@@ -249,10 +249,9 @@ final class HierarchyIntegrationTests: XCTestCase {
         let typedTextResult = await XCTWaiter().fulfillment(of: [typedTextExpectation], timeout: 5)
         XCTAssertEqual(typedTextResult, .completed)
 
-        let firstArrow = try await gestures.pressKey(key: "arrow_left", modifiers: [])
-        let secondArrow = try await gestures.pressKey(key: "arrow_left", modifiers: [])
-        XCTAssertEqual(firstArrow, true)
-        XCTAssertEqual(secondArrow, true)
+        // Unverified-after-send arrows are acceptable because the final text proves the caret moved.
+        guard await pressLeftArrow(gestures, press: "first") else { return }
+        guard await pressLeftArrow(gestures, press: "second") else { return }
         try await gestures.pressKey(key: "delete", modifiers: [])
         let deletedTextExpectation = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "value == %@", "abce"),
@@ -262,6 +261,23 @@ final class HierarchyIntegrationTests: XCTestCase {
         XCTAssertEqual(deletedTextResult, .completed)
         XCTAssertEqual((messageTextView.value as? String)?.count, 4)
         XCTAssertEqual(messageTextView.value as? String, "abce")
+    }
+
+    private func pressLeftArrow(_ gestures: GesturePerformer, press: String) async -> Bool {
+        let result: Result<Bool?, any Error>
+        do {
+            let verified = try await gestures.pressKey(key: "arrow_left", modifiers: [])
+            result = .success(verified)
+        } catch {
+            result = .failure(error)
+        }
+        switch classifyCaretMovePress(result) {
+        case .verified, .unverifiedAfterSend:
+            return true
+        case let .failure(reason):
+            XCTFail("\(press) arrow_left press failed: \(reason)")
+            return false
+        }
     }
 
     func testPressKeyForwardDeleteAtEndOfTextFailsClosed() async throws {

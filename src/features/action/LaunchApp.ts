@@ -21,7 +21,10 @@ import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { resolveMissingForegroundWindow } from "../observe/ObserveScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import { resolveIosLaunchBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+import {
+  resolveIosLaunchBackend,
+  resolveIosColdStartTerminator,
+} from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { runWithNestedPerfTracker } from "../../utils/PerfContext";
@@ -105,6 +108,7 @@ export interface DeviceAppLauncher {
 }
 
 interface LaunchAppDependencies {
+  coldStartTerminatorResolver?: typeof resolveIosColdStartTerminator;
   targetUserDetector?: TargetUserDetector;
   installedAppsProvider?: InstalledAppsProvider;
   performanceTrackerFactory?: () => PerformanceTracker;
@@ -124,6 +128,7 @@ function resolvePerformanceSamplingCoordinator(
 
 export class LaunchApp extends BaseVisualChange {
   private simctl: SimCtlClient;
+  private coldStartTerminatorResolver?: typeof resolveIosColdStartTerminator;
   private deviceAppLauncher: DeviceAppLauncher;
   private targetUserDetector: TargetUserDetector;
   private installedAppsProvider: InstalledAppsProvider;
@@ -152,6 +157,7 @@ export class LaunchApp extends BaseVisualChange {
   ) {
     super(device, adb, timer);
     this.device = device;
+    this.coldStartTerminatorResolver = dependencies.coldStartTerminatorResolver;
     this.simctl = simctl || new SimCtlClient(this.device);
     this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppManager();
     this.targetUserDetector = dependencies.targetUserDetector ?? {
@@ -490,7 +496,13 @@ export class LaunchApp extends BaseVisualChange {
             // XCUIApplication.launch() is slow for heavy apps (10s+ timeout) while
             // simctl launch completes in ~500ms. CtrlProxy's value is in the
             // activate() fast path, not cold boot.
-            if (simulator) {
+            const terminator = (this.coldStartTerminatorResolver ?? resolveIosColdStartTerminator)(
+              this.device.deviceId,
+              {
+                simctl: this.simctl,
+              },
+            );
+            if (terminator) {
               // simctl launch does not terminate an already-running instance, so
               // terminate first for cold-boot semantics. Physical devices skip this:
               // the devicectl launch below passes `--terminate-existing`, which is
@@ -498,7 +510,7 @@ export class LaunchApp extends BaseVisualChange {
               // would add a redundant round-trip).
               await perf.track("terminateApp", async () => {
                 try {
-                  await this.simctl.terminateApp(bundleId);
+                  await terminator.terminate(bundleId);
                 } catch {
                   // App might not be running
                 }

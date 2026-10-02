@@ -7,18 +7,11 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import {
-  getAppDataContainerPath,
-  IOS_APP_DATA_FOLDERS,
-  terminateAppIfRunning,
-} from "../../utils/ios-cmdline-tools/iosAppContainer";
-import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { resolveIosClearDataBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { promises as fs } from "fs";
-import * as path from "path";
 
 const CLEAR_APP_DATA_TIMEOUT_MS = 60_000;
 
@@ -57,6 +50,7 @@ export class ClearAppData {
     simctl?: SimCtlClient,
     reinstaller?: IosAppReinstaller,
     isSimulatorFn?: () => boolean,
+    private readonly backendResolver = resolveIosClearDataBackend,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -133,61 +127,13 @@ export class ClearAppData {
 
   private async executeIos(bundleId: string): Promise<ClearAppDataResult> {
     const simctl = this.simctlOverride ?? new SimCtlClient(this.device);
-    const isSimulator =
-      this.isSimulatorOverride ?? (() => isIosSimulatorUdid(this.device.deviceId));
-    return isSimulator()
-      ? this.clearIosSimulator(simctl, bundleId)
-      : this.clearIosPhysical(bundleId);
-  }
-
-  private async clearIosSimulator(
-    simctl: SimCtlClient,
-    bundleId: string,
-  ): Promise<ClearAppDataResult> {
-    logger.info(`[iOS] Clearing app data for ${bundleId} on simulator ${this.device.deviceId}`);
-
-    // The container can't be safely wiped while the app holds open file handles.
-    await terminateAppIfRunning(simctl, this.device.deviceId, bundleId);
-
-    const containerPath = await getAppDataContainerPath(simctl, this.device.deviceId, bundleId);
-    if (!containerPath) {
-      return {
-        success: false,
-        packageName: bundleId,
-        error: `Could not resolve data container for ${bundleId} (is it installed?)`,
-      };
-    }
-
-    try {
-      // Folders are independent — wipe them concurrently. force:true so a missing
-      // folder (e.g. an app that never wrote Documents) is a no-op, not an error.
-      await Promise.all(
-        IOS_APP_DATA_FOLDERS.map((folder) =>
-          fs.rm(path.join(containerPath, folder), { recursive: true, force: true }),
-        ),
-      );
-      logger.info(`[iOS] Cleared app data for ${bundleId}`);
-      return { success: true, packageName: bundleId };
-    } catch (error) {
-      logger.warn(`[iOS] Failed to clear app data for ${bundleId}: ${errorMessage(error)}`);
-      return { success: false, packageName: bundleId, error: errorMessage(error) };
-    }
-  }
-
-  private async clearIosPhysical(bundleId: string): Promise<ClearAppDataResult> {
-    logger.info(
-      `[iOS] Clearing app data for ${bundleId} via devicectl uninstall+reinstall on ${this.device.deviceId}`,
-    );
-    const reinstaller = this.reinstallerOverride ?? new DeviceAppManager();
-    try {
-      await reinstaller.clearAppDataViaReinstall(this.device.deviceId, bundleId);
-      logger.info(`[iOS] Cleared app data for ${bundleId} (reinstalled)`);
-      return { success: true, packageName: bundleId };
-    } catch (error) {
-      logger.warn(
-        `[iOS] Failed to clear app data for ${bundleId} via reinstall: ${errorMessage(error)}`,
-      );
-      return { success: false, packageName: bundleId, error: errorMessage(error) };
-    }
+    return this.backendResolver(
+      this.device.deviceId,
+      {
+        simctl,
+        createReinstaller: () => this.reinstallerOverride ?? new DeviceAppManager(),
+      },
+      this.isSimulatorOverride,
+    ).clearAppData(bundleId);
   }
 }

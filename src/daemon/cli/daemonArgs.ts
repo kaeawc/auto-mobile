@@ -40,6 +40,8 @@ export function parseDaemonArgs(
   if (envRunnerReadinessTimeout !== undefined) {
     options.runnerReadinessTimeoutMs = envRunnerReadinessTimeout;
   }
+  // --daemon-socket-path=<encoded path> is a discovery marker, intentionally
+  // ignored here: the manager forwards the authoritative namespace through ENV.
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
       options.port = parseInt(args[i + 1], 10);

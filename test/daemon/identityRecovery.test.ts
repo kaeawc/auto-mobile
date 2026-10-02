@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { republishOwnedIdentity, type IdentityRecoveryIO } from "../../src/daemon/identityRecovery";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { DaemonManager } from "../../src/daemon/manager";
+import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { executionTracker } from "../../src/server/executionTracker";
 import { ActionableError } from "../../src/models";
@@ -159,13 +159,14 @@ describe("provider-owned identity recovery", () => {
   test("Windows never probes socket identity with absent, present, stale, or malformed PID metadata", async () => {
     const dir = mkdtempSync(join(tmpdir(), "identity-win32-"));
     const pidPath = join(dir, "daemon.pid");
+    const controlPath = join(dir, "named-pipe");
     const manager = new DaemonManager(
       undefined,
       undefined,
       new FakeTimer(),
       join(dir, "lock"),
       pidPath,
-      "named-pipe",
+      controlPath,
       { findDaemonProcesses: () => [], isProcessRunning: (pid) => pid === 123 },
       undefined,
       undefined,
@@ -180,9 +181,9 @@ describe("provider-owned identity recovery", () => {
     );
     try {
       expect(await manager.status()).toEqual({ running: false });
-      writeFileSync(pidPath, JSON.stringify(complete));
+      writeFileSync(pidPath, JSON.stringify({ ...complete, socketPath: controlPath }));
       expect((await manager.status()).running).toBe(true);
-      writeFileSync(pidPath, JSON.stringify({ ...complete, pid: 999 }));
+      writeFileSync(pidPath, JSON.stringify({ ...complete, socketPath: controlPath, pid: 999 }));
       expect(await manager.status()).toEqual({ running: false });
       writeFileSync(pidPath, "malformed old metadata");
       expect(await manager.status()).toEqual({ running: false });
@@ -803,8 +804,15 @@ describe("provider-owned identity recovery", () => {
 
   test("live partial early-owner record does not trigger recovery", async () => {
     const h = harness();
-    h.setRecord({ pid: 123, startedAt: 100 } as PidFileData);
-    expect(await h.manager.status()).toEqual({ pid: 123, startedAt: 100, running: true });
+    // Real early-owner records carry the control socket even before bind/build
+    // metadata is published. Keep the partial fixture attributable to this namespace.
+    h.setRecord({ pid: 123, startedAt: 100, socketPath } as PidFileData);
+    expect(await h.manager.status()).toEqual({
+      pid: 123,
+      startedAt: 100,
+      socketPath,
+      running: true,
+    });
     expect(h.client.callDaemonMethodCalls).toHaveLength(0);
   });
 

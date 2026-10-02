@@ -4,7 +4,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { DaemonManager, runDaemonCommand } from "../../src/daemon/manager";
+import { runDaemonCommand } from "../../src/daemon/manager";
+import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
+import { FakeDaemonSpawner } from "../fakes/FakeDaemonSpawner";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   createDefaultDaemonProcessFinder,
@@ -51,6 +53,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { formatLockContent } from "../../src/utils/fileLock";
 import { logger } from "../../src/utils/logger";
 import {
+  SOCKET_PATH,
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_PROCESS_TABLE_SCAN_TIMEOUT_MS,
   DAEMON_RESTART_HANDOFF_DELAY_MS,
@@ -424,6 +427,7 @@ describe("DaemonManager restart", () => {
     const expected: DaemonStatus = {
       running: true,
       pid: incumbentPid,
+      socketPath: SOCKET_PATH,
       startedAt: 100,
       version: "0.0.73",
       buildId: "incumbent-build",
@@ -909,7 +913,7 @@ describe("DaemonManager acceptance-session restart", () => {
                 {
                   pid,
                   ppid: 1,
-                  command: "bun /acceptance/dist/src/index.js --daemon-mode",
+                  command: `bun /acceptance/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(socketPath)}`,
                   startedAt: 100,
                   processGenerationToken: "generation-1",
                 },
@@ -990,7 +994,7 @@ describe("DaemonManager acceptance-session restart", () => {
       {
         pid,
         ppid: 1,
-        command: "bun /acceptance/dist/src/index.js --daemon-mode",
+        command: `bun /acceptance/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(socketPath)}`,
         startedAt: 100,
         processGenerationToken: "generation-1",
       },
@@ -1095,7 +1099,7 @@ describe("DaemonManager control-state recovery", () => {
       {
         pid,
         ppid: 1,
-        command: "bun /old/dist/src/index.js --daemon-mode",
+        command: `bun /old/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(socketPath)}`,
         startedAt: 1,
         processGenerationToken: "old-generation",
       },
@@ -1527,7 +1531,7 @@ describe("DaemonManager stop", () => {
     }
   });
 
-  test("treats a PID recycled by a non-daemon after SIGKILL as stopped", async () => {
+  test("treats an alive PID absent from the daemon scan as inconclusive", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-stop-non-daemon-pid-reuse-"));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -1567,8 +1571,8 @@ describe("DaemonManager stop", () => {
             ) => Promise<{ stopped: boolean; replacedByOtherGeneration: boolean }>;
           }
         ).waitForStop(pid, 100, expected),
-      ).resolves.toEqual({ stopped: true, replacedByOtherGeneration: false });
-      expect(timer.now()).toBe(0);
+      ).resolves.toEqual({ stopped: false, replacedByOtherGeneration: false });
+      expect(timer.now()).toBe(100);
       expect(scans).toBe(1);
     } finally {
       rmSync(directory, { recursive: true, force: true });
@@ -2630,6 +2634,7 @@ describe("NetDaemonPortAvailabilityChecker", () => {
 describe("DaemonLauncher command resolution", () => {
   test("uses the current entry script when one is available", () => {
     const launch = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
       entryScript: "/tmp/auto-mobile/dist/src/index.js",
       version: "1.2.3",
       processExecPath: process.execPath,
@@ -2643,6 +2648,7 @@ describe("DaemonLauncher command resolution", () => {
 
   test("pins bunx fallback to the initiating package version", () => {
     const launch = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
       entryScript: null,
       version: "1.2.3",
       environment: { PATH: "/tools" },
@@ -2659,6 +2665,7 @@ describe("DaemonLauncher command resolution", () => {
   test("rejects unknown versions instead of falling back to latest", () => {
     expect(() =>
       new DaemonLauncher({
+        spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
         entryScript: null,
         version: "unknown",
         environment: { PATH: "/tools" },
@@ -2671,6 +2678,7 @@ describe("DaemonLauncher command resolution", () => {
     // A dev build reports e.g. "0.0.39+g1a2b3c4.dirty"; that is not an installable
     // npm tag, so the bunx fallback must pin the published release portion.
     const launch = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
       entryScript: null,
       version: "0.0.39+g1a2b3c4d5e6f.dirty.abc123def456",
       environment: { PATH: "/tools" },
@@ -3302,6 +3310,8 @@ describe("Daemon manager process detection", () => {
     const status: DaemonStatus = {
       running: true,
       pid: 101,
+      socketPath: join(directory, "daemon.sock"),
+      processGenerationToken: "version-test-generation",
       port: 3000,
       options: configuration.statusOptions ?? { debug: true },
       ...(peerVersion === undefined ? {} : { version: peerVersion }),
@@ -3332,6 +3342,7 @@ describe("Daemon manager process detection", () => {
       }
     }
 
+    let scans = 0;
     return {
       manager: new TestDaemonManager(
         undefined,
@@ -3340,7 +3351,22 @@ describe("Daemon manager process detection", () => {
         join(directory, "daemon.lock"),
         join(directory, "daemon.pid"),
         join(directory, "daemon.sock"),
-        new FakeDaemonProcessFinder([]),
+        {
+          // The observed incumbent is attributable to this namespace. After the
+          // mocked stop, later scans see no surviving namespace candidate.
+          findDaemonProcesses: () =>
+            ++scans === 1
+              ? [
+                  {
+                    pid: 101,
+                    ppid: 1,
+                    command: `auto-mobile --daemon-mode --daemon-socket-path=${encodeURIComponent(join(directory, "daemon.sock"))}`,
+                    processGenerationToken: "version-test-generation",
+                  },
+                ]
+              : [],
+          isProcessRunning: (pid) => pid === 101,
+        },
         processSpawner,
       ),
       status,
@@ -3572,7 +3598,18 @@ describe("Daemon manager process detection", () => {
     expect(manager.findAllDaemonProcesses()).toEqual([]);
   });
 
-  test("filters the active daemon PID while preserving distinct live daemons", () => {
+  test("filters the active daemon PID while preserving distinct namespace daemons", () => {
+    const manager = managerWithProcesses(
+      [201, 301].map((pid) => ({
+        pid,
+        ppid: 1,
+        command: `auto-mobile --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
+      })),
+    );
+    expect(manager.findOtherDaemonProcesses(201)).toEqual([301]);
+  });
+
+  test("filters the active daemon PID and ignores unattributed foreign daemons", () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-pid-file-test-"));
     const pidFilePath = join(dir, "daemon.pid");
     writeDaemonPidFile(pidFilePath, 201);
@@ -3603,7 +3640,7 @@ describe("Daemon manager process detection", () => {
     );
 
     try {
-      expect(manager.findOtherDaemonProcesses(201)).toEqual([301]);
+      expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -3756,6 +3793,8 @@ describe("Daemon manager process detection", () => {
       ).findLiveDaemonProcessesForStart.bind(manager);
 
       await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([]);
+      // Exactly the three bounded retry scans; socket attribution must not rescan
+      // the process table after those scans have timed out.
       expect(processFinder.calls).toBe(3);
       expect(portChecker.checkedProbes).toEqual([
         { host: "127.0.0.1", port: 3000 },
@@ -3779,7 +3818,11 @@ describe("Daemon manager process detection", () => {
     const strictPortFailure = new ActionableError(
       "Port 3000 on 127.0.0.1 is required for this daemon start but is already in use by another process.",
     );
-    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
+    const launcher = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
+      entryScript: "daemon-entry.ts",
+      timer,
+    });
     let capturedArgs: string[] | undefined;
     const launchSpy = spyOn(launcher, "launchAndWait").mockImplementation(async (request) => {
       capturedArgs = [...request.args];
@@ -3828,7 +3871,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("fails closed after persistent process-table timeouts when the canonical port is bound", async () => {
+  test("does not infer namespace ownership from a bound port after process-table timeouts", async () => {
     const directory = mkdtempSync(join(tmpdir(), "daemon-manager-timeout-bound-port-test-"));
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -3862,9 +3905,7 @@ describe("Daemon manager process detection", () => {
         }
       ).findLiveDaemonProcessesForStart.bind(manager);
 
-      await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([
-        -1,
-      ]);
+      await expect(findForStart({}, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual([]);
       expect(processFinder.calls).toBe(3);
       expect(portChecker.checkedProbes).toEqual([
         { host: "127.0.0.1", port: 3000 },
@@ -3924,7 +3965,7 @@ describe("Daemon manager process detection", () => {
     try {
       await expect(
         findForStart({ port: 4567 }, timer.now() + DAEMON_STARTUP_TIMEOUT_MS),
-      ).resolves.toEqual([-1]);
+      ).resolves.toEqual([]);
       expect(portChecker.checkedProbes).toEqual([
         { host: "127.0.0.1", port: 4567 },
         { host: "::1", port: 4567 },
@@ -3938,7 +3979,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("does not spawn when timeout degradation finds the default port occupied", async () => {
+  test("permits launch when timeout degradation finds only a foreign default-port listener", async () => {
     const directory = mkdtempSync(
       join(tmpdir(), "daemon-manager-timeout-default-port-owner-test-"),
     );
@@ -3946,8 +3987,12 @@ describe("Daemon manager process detection", () => {
     timer.enableAutoAdvance();
     const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
     const portChecker = new FakeDaemonPortAvailabilityChecker((port) => port !== 3000);
-    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
-    const launchSpy = spyOn(launcher, "launchAndWait");
+    const launcher = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
+      entryScript: "daemon-entry.ts",
+      timer,
+    });
+    const launchSpy = spyOn(launcher, "launchAndWait").mockResolvedValue(undefined);
 
     class TestDaemonManager extends DaemonManager {
       override async status(): Promise<DaemonStatus> {
@@ -3988,29 +4033,37 @@ describe("Daemon manager process detection", () => {
         portChecker,
       );
 
-      await expect(manager.start({ port: 4567 })).rejects.toBeInstanceOf(ActionableError);
+      await expect(manager.start({ port: 4567 })).resolves.toBe("started");
       expect(portChecker.checkedProbes).toEqual([
         { host: "127.0.0.1", port: 4567 },
         { host: "::1", port: 4567 },
         { host: "127.0.0.1", port: 3000 },
         { host: "::1", port: 3000 },
       ]);
-      expect(launchSpy).not.toHaveBeenCalled();
+      expect(launchSpy).toHaveBeenCalledTimes(1);
     } finally {
       launchSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  test("reuses a reachable daemon when timeout degradation finds the default port occupied", async () => {
+  test("reuses a socket-attributed daemon when the process scan times out", async () => {
     const directory = mkdtempSync(
       join(tmpdir(), "daemon-manager-timeout-reachable-default-owner-test-"),
     );
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(Number.POSITIVE_INFINITY);
+    const processFinder = new TimeoutThenSuccessDaemonProcessFinder(
+      Number.POSITIVE_INFINITY,
+      [],
+      new Set([301]),
+    );
     const portChecker = new FakeDaemonPortAvailabilityChecker((port) => port !== 3000);
-    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
+    const launcher = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
+      entryScript: "daemon-entry.ts",
+      timer,
+    });
     const launchSpy = spyOn(launcher, "launchAndWait");
 
     class TestDaemonManager extends DaemonManager {
@@ -4036,15 +4089,17 @@ describe("Daemon manager process detection", () => {
         undefined,
         undefined,
         portChecker,
+        undefined,
+        undefined,
+        {
+          socketExists: () => false,
+          readRecord: () => null,
+          probe: async () => ({ running: true, pid: 301 }),
+        },
       );
 
       await expect(manager.start({ port: 4567 })).resolves.toBe("joined");
-      expect(portChecker.checkedProbes).toEqual([
-        { host: "127.0.0.1", port: 4567 },
-        { host: "::1", port: 4567 },
-        { host: "127.0.0.1", port: 3000 },
-        { host: "::1", port: 3000 },
-      ]);
+      expect(portChecker.checkedProbes).toEqual([]);
       expect(launchSpy).not.toHaveBeenCalled();
     } finally {
       launchSpy.mockRestore();
@@ -4091,7 +4146,7 @@ describe("Daemon manager process detection", () => {
 
       const options: DaemonOptions = { host: "::1", port: 4567 };
       await expect(findForStart(options, timer.now() + DAEMON_STARTUP_TIMEOUT_MS)).resolves.toEqual(
-        [-1],
+        [],
       );
       expect(options.strictPort).toBeUndefined();
       expect(portChecker.checkedProbes).toEqual([
@@ -4208,7 +4263,7 @@ describe("Daemon manager process detection", () => {
           {
             pid: 301,
             ppid: 1,
-            command: "bun /worktree-b/dist/src/index.js --daemon-mode",
+            command: `bun /worktree-b/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(join(directory, "daemon.sock"))}`,
           },
         ];
       },
@@ -4257,8 +4312,58 @@ describe("Daemon manager process detection", () => {
 
       expect(error).toBeInstanceOf(ActionableError);
       expect(error.message).toContain("within 500ms");
-      expect(timer.now()).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(timer.now()).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(manager.defaultSpawner.calls).toEqual([]);
+      expect(manager.defaultSignals).toEqual([]);
     } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("starts through the fake launcher without waiting for an unattributed foreign daemon", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-foreign-daemon-test-"));
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new FakeDaemonClient({});
+    client.shouldFailConnect = true;
+    const connectSpy = spyOn(client, "connect");
+    const processFinder = new FakeDaemonProcessFinder([
+      { pid: 301, ppid: 1, command: "bun /worktree-b/dist/src/index.js --daemon-mode" },
+    ]);
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<DaemonStatus> {
+        return { running: false };
+      }
+      override async waitForReady(): Promise<boolean> {
+        return true;
+      }
+    }
+    const manager = new TestDaemonManager(
+      () => client,
+      undefined,
+      timer,
+      join(directory, "daemon.lock"),
+      join(directory, "daemon.pid"),
+      join(directory, "daemon.sock"),
+      processFinder,
+    );
+    const waitSpy = spyOn(
+      manager as unknown as { waitForExistingDaemon(timeout: number): Promise<boolean> },
+      "waitForExistingDaemon",
+    );
+    try {
+      await expect(manager.start()).resolves.toBe("started");
+      expect(waitSpy).not.toHaveBeenCalled();
+      expect(connectSpy).not.toHaveBeenCalled();
+      expect(timer.now()).toBe(0);
+      expect(manager.defaultSpawner.calls).toHaveLength(1);
+      expect(manager.defaultSpawner.calls[0]?.args).toContain(
+        `--daemon-socket-path=${encodeURIComponent(join(directory, "daemon.sock"))}`,
+      );
+      expect(manager.defaultSignals).toEqual([]);
+    } finally {
+      connectSpy.mockRestore();
+      waitSpy.mockRestore();
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -4269,7 +4374,11 @@ describe("Daemon manager process detection", () => {
     timer.enableAutoAdvance();
     const processFinder = new DeadlineBoundTimeoutDaemonProcessFinder(timer);
     const portChecker = new FakeDaemonPortAvailabilityChecker(true);
-    const launcher = new DaemonLauncher({ entryScript: "daemon-entry.ts", timer });
+    const launcher = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
+      entryScript: "daemon-entry.ts",
+      timer,
+    });
     const launchSpy = spyOn(launcher, "launchAndWait").mockImplementation(async (request) => {
       await timer.sleep(request.timeoutMs);
       throw new ActionableError("Daemon launch timed out within the startup deadline");
@@ -4328,7 +4437,7 @@ describe("Daemon manager process detection", () => {
         {
           pid: 301,
           ppid: 1,
-          command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+          command: `bun /worktree-b/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(join(dir, "daemon.sock"))}`,
         },
       ],
       new Set([301]),
@@ -4403,7 +4512,7 @@ describe("Daemon manager process detection", () => {
           {
             pid: 301,
             ppid: 1,
-            command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+            command: `bun /worktree-b/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(join(dir, "daemon.sock"))}`,
           },
         ];
       },
@@ -4485,7 +4594,7 @@ describe("Daemon manager process detection", () => {
           {
             pid: 86961,
             ppid: 1,
-            command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+            command: `bun /worktree-b/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(join(dir, "daemon.sock"))}`,
           },
         ];
       },
@@ -5174,7 +5283,7 @@ describe("Daemon manager process detection", () => {
         {
           pid: candidatePid,
           ppid: 1,
-          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
           startedAt: 451_000,
           processGenerationToken: "generation-451",
         },
@@ -5219,7 +5328,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("explicit restart never SIGKILLs a cross-namespace replacement after signaling the scanned generation", async () => {
+  test("explicit restart never SIGKILLs a foreign replacement after signalling a namespace orphan", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const candidatePid = 452;
@@ -5229,7 +5338,7 @@ describe("Daemon manager process detection", () => {
         {
           pid: candidatePid,
           ppid: 1,
-          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(replacementInstalled ? `${SOCKET_PATH}.foreign` : SOCKET_PATH)}`,
           startedAt: replacementInstalled ? 2_000 : 1_000,
           processGenerationToken: replacementInstalled
             ? "replacement-generation"
@@ -5279,11 +5388,14 @@ describe("Daemon manager process detection", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const candidatePid = 454;
+    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-restart-pid-reuse-"));
+    const pidFilePath = join(directory, "daemon.pid");
+    const socketPath = join(directory, "daemon.sock");
     let records: DaemonProcessRecord[] = [
       {
         pid: candidatePid,
         ppid: 1,
-        command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+        command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(socketPath)}`,
         startedAt: 1_000,
         processGenerationToken: "original-generation",
       },
@@ -5294,9 +5406,6 @@ describe("Daemon manager process detection", () => {
       isProcessRunning: (pid) => pid === candidatePid,
     };
     // The successor is this namespace's own: the PID record names its generation.
-    const directory = mkdtempSync(join(tmpdir(), "daemon-manager-restart-pid-reuse-"));
-    const pidFilePath = join(directory, "daemon.pid");
-    const socketPath = join(directory, "daemon.sock");
     const signaler = new FakeDaemonProcessSignaler((_pid, signal) => {
       if (signal === "SIGTERM") {
         writeStopPidFile(pidFilePath, candidatePid, socketPath, "replacement-generation", 2_000);
@@ -5347,10 +5456,11 @@ describe("Daemon manager process detection", () => {
     } finally {
       statusSpy.mockRestore();
       startSpy.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 
-  test("explicit restart force-stops every daemon from other PID-file namespaces", async () => {
+  test("explicit restart ignores every daemon from other PID-file namespaces", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-custom-restart-test-"));
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -5397,10 +5507,8 @@ describe("Daemon manager process detection", () => {
     try {
       await manager.restart();
 
-      expect(signaler.signals).toEqual([
-        { pid: 452, signal: "SIGTERM" },
-        { pid: 453, signal: "SIGTERM" },
-      ]);
+      expect(signaler.signals).toEqual([]);
+      expect(livePids).toEqual(new Set(candidatePids));
       expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       startSpy.mockRestore();
@@ -5409,7 +5517,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("explicit restart stops the recorded daemon and every cross-namespace daemon", async () => {
+  test("explicit restart stops the recorded daemon and leaves foreign daemons alive", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const recordedPid = 451;
@@ -5451,6 +5559,7 @@ describe("Daemon manager process detection", () => {
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
+      socketPath: SOCKET_PATH,
       processStartedAt: recordedPid * 1_000,
       processGenerationToken: `generation-${recordedPid}`,
     });
@@ -5463,7 +5572,8 @@ describe("Daemon manager process detection", () => {
       await manager.restart();
 
       expect(stopSpy).toHaveBeenCalledTimes(1);
-      expect(signaler.signals).toEqual([{ pid: crossNamespacePid, signal: "SIGTERM" }]);
+      expect(signaler.signals).toEqual([]);
+      expect(livePids.has(crossNamespacePid)).toBe(true);
       expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
     } finally {
       startSpy.mockRestore();
@@ -5472,7 +5582,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("explicit restart bounds recorded and cross-namespace shutdown in one cleanup window", async () => {
+  test("explicit restart bounds recorded and namespace-orphan shutdown in one cleanup window", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const recordedPid = 451;
@@ -5483,7 +5593,7 @@ describe("Daemon manager process detection", () => {
         [recordedPid, crossNamespacePid].map((pid) => ({
           pid,
           ppid: 1,
-          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
           startedAt: pid * 1_000,
           processGenerationToken: `generation-${pid}`,
         })),
@@ -5521,6 +5631,7 @@ describe("Daemon manager process detection", () => {
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
+      socketPath: SOCKET_PATH,
       processStartedAt: recordedPid * 1_000,
       processGenerationToken: `generation-${recordedPid}`,
     });
@@ -5554,7 +5665,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("explicit restart awaits the recorded daemon cleanup after a cross-namespace failure", async () => {
+  test("explicit restart awaits the recorded daemon cleanup after a namespace-orphan failure", async () => {
     const fakeTimer = new FakeTimer();
     const recordedPid = 451;
     const crossNamespacePid = 452;
@@ -5563,7 +5674,7 @@ describe("Daemon manager process detection", () => {
         [recordedPid, crossNamespacePid].map((pid) => ({
           pid,
           ppid: 1,
-          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
           startedAt: pid * 1_000,
           processGenerationToken: `generation-${pid}`,
         })),
@@ -5592,6 +5703,7 @@ describe("Daemon manager process detection", () => {
     const statusSpy = spyOn(manager, "status").mockResolvedValue({
       running: true,
       pid: recordedPid,
+      socketPath: SOCKET_PATH,
     });
     let recordedCleanupCompleted = false;
     const stopSpy = spyOn(manager, "stop").mockImplementation(async () => {
@@ -5625,7 +5737,7 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("explicit restart awaits every cross-namespace cleanup after one candidate fails", async () => {
+  test("explicit restart awaits every namespace-orphan cleanup after one candidate fails", async () => {
     const fakeTimer = new FakeTimer();
     const failingPid = 452;
     const slowPid = 453;
@@ -5635,7 +5747,7 @@ describe("Daemon manager process detection", () => {
         [failingPid, slowPid].map((pid) => ({
           pid,
           ppid: 1,
-          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
           startedAt: pid * 1_000,
           processGenerationToken: `generation-${pid}`,
         })),
@@ -5711,7 +5823,7 @@ describe("Daemon manager process detection", () => {
         {
           pid: candidatePid,
           ppid: 1,
-          command: "bun /other-checkout/dist/src/index.js --daemon-mode",
+          command: `bun /other-checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
           startedAt: 453_000,
           processGenerationToken: "generation-453",
         },
@@ -5760,7 +5872,7 @@ describe("Daemon manager process detection", () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     // Simulates the exact #6260 split-brain: the recorded/status() read finds
-    // nothing to stop, and the cross-namespace sweep's own candidate list is
+    // nothing to stop, and the namespace-orphan sweep's own candidate list is
     // ALSO empty at that instant (a process-table scan miss) even though the
     // old daemon (PID 71579-alike) is still alive — cleanup reports success
     // without ever having found it. The post-cleanup survivor re-check must
@@ -5775,7 +5887,13 @@ describe("Daemon manager process detection", () => {
         // once its transient miss condition (whatever caused it) clears.
         return scanCount === 1
           ? []
-          : [{ pid: orphanPid, ppid: 1, command: "bun /checkout/dist/src/index.js --daemon-mode" }];
+          : [
+              {
+                pid: orphanPid,
+                ppid: 1,
+                command: `bun /checkout/dist/src/index.js --daemon-mode --daemon-socket-path=${encodeURIComponent(SOCKET_PATH)}`,
+              },
+            ];
       },
       isProcessRunning: (pid) => pid === orphanPid,
     };
@@ -5814,10 +5932,10 @@ describe("Daemon manager process detection", () => {
       // PRRT fuUIM (issue #6260): the remediation must not hand out a bare
       // `kill <pid>` from this stale process-table snapshot — that PID can be
       // recycled to an unrelated process by the time anyone acts on it. It
-      // must instead point at an identity re-check using the same
-      // `--daemon-mode` command-line pattern findLiveDaemonProcesses() itself
-      // matches on, so only a still-matching PID gets killed.
+      // must instead point at a daemon identity re-check, now including namespace
+      // ownership and process generation as well as the daemon-mode marker.
       expect(message).toContain("--daemon-mode");
+      expect(message).toContain("process generation");
       expect(message).not.toContain(`kill ${orphanPid}\``);
       expect(startSpy).not.toHaveBeenCalled();
       // The port must never even be consulted once a live survivor is found —
@@ -6152,7 +6270,11 @@ describe("Daemon manager process detection", () => {
       "index.js",
     );
     const cleaner = new FakeExtractionCleaner();
-    const launcher = new DaemonLauncher({ entryScript, timer: fakeTimer });
+    const launcher = new DaemonLauncher({
+      spawn: (...args) => new FakeDaemonSpawner().spawn(...args),
+      entryScript,
+      timer: fakeTimer,
+    });
     const launchSpy = spyOn(launcher, "launchAndWait").mockImplementation(async () => {
       if (launchSpy.mock.calls.length === 1) {
         fakeTimer.advanceTime(12_345);

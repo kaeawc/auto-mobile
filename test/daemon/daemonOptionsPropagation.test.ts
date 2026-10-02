@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DaemonManager } from "../../src/daemon/manager";
+import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { parseDaemonArgs } from "../../src/daemon/cli/daemonArgs";
 import { daemonCommandOptions } from "../../src/daemon/cli/runDaemonCommand";
 import { parseArgs } from "../../src/cli/parseArgs";

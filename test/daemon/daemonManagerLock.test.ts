@@ -2,7 +2,7 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { existsSync, mkdirSync, writeFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { DaemonManager } from "../../src/daemon/manager";
+import { SafeDaemonManager as DaemonManager } from "../fakes/SafeDaemonManager";
 import { parseLockContent } from "../../src/utils/fileLock";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";

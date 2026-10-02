@@ -36,6 +36,22 @@ All cooperating agents must use the same absolute path. The legacy
 `AUTO_MOBILE_COORDINATION_DIR` alias is accepted when the preferred name is
 unset.
 
+## Daemon namespace
+
+Set `AUTOMOBILE_DAEMON_SOCKET_PATH`, `AUTOMOBILE_DAEMON_PID_FILE_PATH`, and
+`AUTOMOBILE_DAEMON_LOCK_FILE_PATH` to distinct absolute paths for each concurrent
+instance. Relative paths resolve from the daemon launch directory. The legacy
+`AUTO_MOBILE_` aliases are also accepted.
+
+Start, stop, and restart operate only on that namespace. A live process in
+another namespace is ignored, even when it uses the default TCP port. Lost PID
+records can still be recovered when the daemon answers on this socket or carries
+this socket's launch marker. An unmarked process that does not answer on this
+socket is left alone. Restart verifies and stops the namespace's current
+process generation before launching its replacement; it reuses the recorded
+bound port unless explicitly overridden, and fails if shutdown or identity
+cannot be verified.
+
 ## Database
 
 <div class="environment-variable-table" markdown>

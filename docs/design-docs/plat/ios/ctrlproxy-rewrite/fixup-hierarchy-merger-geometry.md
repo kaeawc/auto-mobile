@@ -2,7 +2,7 @@
 
 **Status:** Phase 8 ±tol half implemented: nearest L∞ distance, then document order.
 Golden-replay validation of real hierarchy pairs is pending a live runner.
-Containment interval trees remain deferred.
+Containment implemented via per-coordinate sorted indices with identical results; worst case remains O(n) per distinct query bounds.
 **Scope:** pure logic in `HierarchyMerger` (`Sources/CtrlProxy*/HierarchyMerger.swift`).
 Decoupled from the concurrency migration — can land as its own PR.
 

@@ -290,6 +290,14 @@ public enum HierarchyMerger {
             entries[lowerBound(range.lowerBound) ..< upperBound(range.upperBound)]
         }
 
+        func prefix(through value: Int) -> ArraySlice<(value: Int, id: NodeID)> {
+            entries[..<upperBound(value)]
+        }
+
+        func suffix(from value: Int) -> ArraySlice<(value: Int, id: NodeID)> {
+            entries[lowerBound(value)...]
+        }
+
         private func lowerBound(_ value: Int) -> Int {
             var low = 0
             var high = entries.count
@@ -325,6 +333,15 @@ public enum HierarchyMerger {
             .ids(inRange: range)
     }
 
+    /// Batch test seam: build once, as in a merge, and compare exact pre-order NodeIDs.
+    static func smallestEnclosingIDs(nodeBounds: [SdkBounds], queries: [ElementBounds]) -> [Int?] {
+        let nodes: [SdkViewNode] = nodeBounds.map { bounds in
+            SdkViewNode(className: "UIView", bounds: bounds)
+        }
+        let index = GeometryIndex(allNodes: nodes)
+        return queries.map { index.smallestEnclosingID(bounds: $0) }
+    }
+
     /// Built once per merge in O(n log n) time and O(n) space.
     private struct GeometryIndex {
         let allNodes: [SdkViewNode]
@@ -332,6 +349,7 @@ public enum HierarchyMerger {
         let top: CoordinateIndex
         let right: CoordinateIndex
         let bottom: CoordinateIndex
+        let areaRank: [Int]
 
         init(allNodes: [SdkViewNode]) {
             self.allNodes = allNodes
@@ -347,6 +365,63 @@ public enum HierarchyMerger {
             bottom = CoordinateIndex(entries: allNodes.enumerated().map {
                 (value: $0.element.bounds.bottom, id: $0.offset)
             })
+            // Keep signed areas (including inverted bounds), with the old stable
+            // sort's pre-order tie-break made explicit. Compute each area only once.
+            var areas: [(area: Int, id: NodeID)] = []
+            for (id, node) in allNodes.enumerated() {
+                let area: Int = node.bounds.width * node.bounds.height
+                areas.append((area: area, id: id))
+            }
+            let ordered: [(area: Int, id: NodeID)] = areas.sorted { lhs, rhs in
+                if lhs.area == rhs.area {
+                    return lhs.id < rhs.id
+                }
+                return lhs.area < rhs.area
+            }
+            var ranks = [Int](repeating: 0, count: allNodes.count)
+            for (rank, entry) in ordered.enumerated() {
+                ranks[entry.id] = rank
+            }
+            areaRank = ranks
+        }
+
+        /// Four one-sided prefix/suffix windows require four binary searches, O(log n),
+        /// then O(k) checks of the smallest window and a single area-rank comparison
+        /// per qualifying candidate. These are not interval-tree queries: k can be
+        /// Theta(n), e.g. inside a full-screen overlay stack, so worst case remains
+        /// O(n) per distinct query bounds (cached by MatchContext), no worse than the
+        /// old scan. Typical windows scan far fewer than n nodes; no per-query sort.
+        /// Select by (signed area, NodeID), without filtering class or identifier.
+        func smallestEnclosingID(bounds: ElementBounds) -> NodeID? {
+            let tol: Int = boundsTolerance
+            // Saturation preserves the inequalities wherever the old checked Int
+            // arithmetic was defined, without introducing overflow at query extremes.
+            let upperLimit = Int.max - tol
+            let lowerLimit = Int.min + tol
+            let maxLeft: Int = bounds.left > upperLimit ? Int.max : bounds.left + tol
+            let maxTop: Int = bounds.top > upperLimit ? Int.max : bounds.top + tol
+            let minRight: Int = bounds.right < lowerLimit ? Int.min : bounds.right - tol
+            let minBottom: Int = bounds.bottom < lowerLimit ? Int.min : bounds.bottom - tol
+            let windows: [ArraySlice<(value: Int, id: NodeID)>] = [
+                left.prefix(through: maxLeft),
+                top.prefix(through: maxTop),
+                right.suffix(from: minRight),
+                bottom.suffix(from: minBottom),
+            ]
+            guard let candidates = windows.min(by: { $0.count < $1.count }) else { return nil }
+            var bestID: NodeID?
+            var bestRank = Int.max
+            for entry in candidates {
+                let nodeBounds = allNodes[entry.id].bounds
+                guard nodeBounds.left <= maxLeft, nodeBounds.top <= maxTop,
+                      nodeBounds.right >= minRight, nodeBounds.bottom >= minBottom
+                else { continue }
+                if areaRank[entry.id] < bestRank {
+                    bestID = entry.id
+                    bestRank = areaRank[entry.id]
+                }
+            }
+            return bestID
         }
 
         /// Replaces ~625 probes per step (O(tol^4)) with four binary range searches
@@ -401,17 +476,11 @@ public enum HierarchyMerger {
         let bounds: BoundsKey?
     }
 
-    /// Holds the SDK indices plus per-merge memoization for the two lookup strategies
-    /// (direct match, smallest-enclosing scan). The enclosing scan runs against a list
-    /// sorted by area once, so the first container encountered is the smallest-area one.
+    /// Holds the SDK indices plus per-merge memoization for direct and enclosing queries.
     private final class MatchContext {
         let geometryIndex: GeometryIndex
         let identifierLookup: [String: SdkViewNode]
         let sdkNodesByClass: [String: [SdkViewNode]]
-        /// SDK nodes sorted by ascending area. Swift's sort is stable, so equal-area
-        /// nodes retain their original document order — matching the old scan's
-        /// "first smallest-area container wins" tie-break exactly.
-        let sortedByArea: [SdkViewNode]
         let counter: MatchCounter?
 
         // `Optional<SdkViewNode>` value distinguishes a cached miss (`.some(nil)`) from
@@ -427,9 +496,6 @@ public enum HierarchyMerger {
             geometryIndex = GeometryIndex(allNodes: allSdkNodes)
             self.identifierLookup = identifierLookup
             sdkNodesByClass = Dictionary(grouping: allSdkNodes, by: { classFamily($0.className) })
-            sortedByArea = allSdkNodes.sorted { lhs, rhs in
-                (lhs.bounds.width * lhs.bounds.height) < (rhs.bounds.width * rhs.bounds.height)
-            }
             self.counter = counter
         }
 
@@ -471,25 +537,13 @@ public enum HierarchyMerger {
 
         /// Smallest enclosing SDK node for `bounds` (for SwiftUI views whose accessibility
         /// bounds differ from UIKit). Cached per bounds so identical-bounds siblings do not
-        /// re-scan the tree.
+        /// repeat the index query, including cached misses.
         func enclosingMatch(bounds: ElementBounds?) -> SdkViewNode? {
             guard let bounds else { return nil }
             let key = BoundsKey(left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom)
             if let cached = enclosingCache[key] { return cached }
-            let tol = boundsTolerance
-            var result: SdkViewNode?
-            for node in sortedByArea {
-                let nb = node.bounds
-                if nb.left - tol <= bounds.left,
-                   nb.top - tol <= bounds.top,
-                   nb.right + tol >= bounds.right,
-                   nb.bottom + tol >= bounds.bottom
-                {
-                    // First container in ascending-area order is the smallest-area one.
-                    result = node
-                    break
-                }
-            }
+            let enclosingID: NodeID? = geometryIndex.smallestEnclosingID(bounds: bounds)
+            let result: SdkViewNode? = enclosingID.map { geometryIndex.allNodes[$0] }
             enclosingCache[key] = result
             return result
         }

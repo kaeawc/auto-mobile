@@ -1,3 +1,11 @@
+import { invalidateDisplayCaches } from "../features/observe/DisplayTransition";
+import {
+  AndroidDeviceClockAdapter,
+  restoreDeviceClock,
+  defaultDeviceClockRestoreRegistry,
+  type DeviceClockRestoreState,
+} from "../features/utility/DeviceClock";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { getAbortSignal } from "../utils/AbortContext";
 import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
@@ -90,6 +98,24 @@ interface NetworkConditionRestoreTarget {
   profile: NetworkConditionProfile;
 }
 
+/** Original auto-time value recorded before the first session clock write. */
+export type ClockSessionState = DeviceClockRestoreState;
+interface PendingClockRestore {
+  state: ClockSessionState;
+  removed: boolean;
+  controller: AbortController;
+  clear: () => void;
+  result: Promise<{ pending: Promise<void> | null }>;
+}
+
+export interface ClockRestorer {
+  restore(state: ClockSessionState, signal?: AbortSignal): Promise<void>;
+}
+export interface DeviceStateRestorerFactories {
+  networkCondition: (device: BootedDevice) => NetworkConditionRestorer;
+  clock: (device: BootedDevice) => ClockRestorer;
+}
+
 /** Narrow seam for restoring the device-wide network condition on release. */
 export interface NetworkConditionRestorer {
   restore(profile: NetworkConditionProfile): Promise<void>;
@@ -122,6 +148,7 @@ export interface SessionCacheData {
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
   biometricEnrollment?: BiometricEnrollmentSessionState; // Original iOS Simulator biometric enrollment, restored on release
   networkCondition?: NetworkConditionSessionState; // Original device-wide network condition, restored on release (#6012)
+  clock?: ClockSessionState;
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
   /**
    * Highest {@link DeviceReadinessLevel} actually achieved by
@@ -753,6 +780,13 @@ export class SessionManager {
   private readonly networkConditionRestorerFactory: (
     device: BootedDevice,
   ) => NetworkConditionRestorer;
+  private readonly clockRestorerFactory: (device: BootedDevice) => ClockRestorer;
+  private readonly pendingClockRestores = new Map<
+    string,
+    Map<ClockSessionState, PendingClockRestore>
+  >();
+  private readonly clockRemovalGenerations = new Map<string, number>();
+  private readonly clockMutationQueues = new Map<string, Promise<unknown>>();
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
   // Session timeout: 30 minutes
@@ -796,11 +830,13 @@ export class SessionManager {
     }),
     // Device-wide network conditioning is session-scoped state (issue #6012).
     // Keep this seam parallel to biometric/keep-awake so lifecycle tests never
-    // invoke adb. The default restores normal connectivity via the emulator
+    // invoke adb. The factories object also injects clock restoration while
+    // preserving the existing positional network-restorer contract.
+    // The default restores normal connectivity via the emulator
     // console; a released session must never leave a device impaired.
-    networkConditionRestorerFactory: (device: BootedDevice) => NetworkConditionRestorer = (
-      device,
-    ) => ({
+    networkConditionRestorerFactory:
+      | ((device: BootedDevice) => NetworkConditionRestorer)
+      | DeviceStateRestorerFactories = (device) => ({
       restore: async (profile) => {
         const result = await new DeviceState(device).setState({
           networkCondition: { profile },
@@ -818,7 +854,37 @@ export class SessionManager {
     this.getBarrier = getBarrier;
     this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
     this.biometricEnrollmentRestorerFactory = biometricEnrollmentRestorerFactory;
-    this.networkConditionRestorerFactory = networkConditionRestorerFactory;
+    this.networkConditionRestorerFactory =
+      typeof networkConditionRestorerFactory === "function"
+        ? networkConditionRestorerFactory
+        : networkConditionRestorerFactory.networkCondition;
+    this.clockRestorerFactory =
+      typeof networkConditionRestorerFactory === "function"
+        ? (device) => ({
+            restore: async (value, signal) => {
+              const adapter = new AndroidDeviceClockAdapter(
+                defaultAdbClientFactory.create(device),
+                signal,
+              );
+              const root = await adapter.ensureRoot();
+              if (!root.success) {
+                throw new Error(root.error);
+              }
+              value.rootedByUs ||= root.rootedByUs;
+              const result = await restoreDeviceClock(device, adapter, value, {
+                hostClock: this.timer,
+                invalidate: (deviceId) => {
+                  if (!signal?.aborted) {
+                    invalidateDisplayCaches(deviceId, "Device clock restored");
+                  }
+                },
+              });
+              if (!result.verified) {
+                throw new Error(result.error ?? "Clock restoration did not verify");
+              }
+            },
+          })
+        : networkConditionRestorerFactory.clock;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -1883,10 +1949,15 @@ export class SessionManager {
       ? (await this.restoreNetworkConditionBestEffort(existing)).pending
       : null;
 
+    const pendingClockRestoration = existing.cacheData.clock
+      ? (await this.getPendingClockRestoration(existing, null)).pending
+      : null;
     const previousDevice = existing.assignedDevice;
-    const pendingRebindCleanup = [pendingBiometricRestoration, pendingNetworkRestoration].filter(
-      (cleanup): cleanup is Promise<void> => cleanup !== null,
-    );
+    const pendingRebindCleanup = [
+      pendingBiometricRestoration,
+      pendingNetworkRestoration,
+      pendingClockRestoration,
+    ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
     if (pendingRebindCleanup.length > 0) {
       this.trackPendingDeviceCleanup(previousDevice, pendingRebindCleanup);
     }
@@ -2503,11 +2574,15 @@ export class SessionManager {
     const pendingNetworkRestoration = session.cacheData.networkCondition
       ? (await this.getPendingNetworkRestoration(session, pendingSetups)).pending
       : null;
+    const pendingClockRestoration = session.cacheData.clock
+      ? (await this.getPendingClockRestoration(session, pendingSetups)).pending
+      : null;
     return [
       pendingSetups,
       pendingRestoration,
       pendingBiometricRestoration,
       pendingNetworkRestoration,
+      pendingClockRestoration,
     ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
   }
 
@@ -3003,6 +3078,164 @@ export class SessionManager {
       return { pending: this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups) };
     }
     return { pending: (await this.restoreBiometricEnrollmentBestEffort(session)).pending };
+  }
+
+  /** Use the same setup drain and pending device cleanup as network restoration. */
+  private async getPendingClockRestoration(
+    session: Session,
+    pendingSetups: Promise<void> | null,
+  ): Promise<{ pending: Promise<void> | null }> {
+    if (pendingSetups) {
+      const deviceId = session.assignedDevice;
+      const generation = this.clockRemovalGenerations.get(deviceId) ?? 0;
+      return {
+        pending: pendingSetups.then(async () => {
+          if ((this.clockRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+            delete session.cacheData.clock;
+            return;
+          }
+          const result = await this.getPendingClockRestoration(session, null);
+          await result.pending;
+        }),
+      };
+    }
+    const state = session.cacheData.clock;
+    if (!state) {
+      return { pending: null };
+    }
+    const deviceId = session.assignedDevice;
+    let targets = this.pendingClockRestores.get(deviceId);
+    const existing = targets?.get(state);
+    if (existing) {
+      return existing.result;
+    }
+    if (!targets) {
+      targets = new Map();
+      this.pendingClockRestores.set(deviceId, targets);
+    }
+    const result = Promise.withResolvers<{ pending: Promise<void> | null }>();
+    const target: PendingClockRestore = {
+      state,
+      removed: false,
+      controller: new AbortController(),
+      result: result.promise,
+      clear: () => {
+        if (session.cacheData.clock === state) {
+          delete session.cacheData.clock;
+        }
+      },
+    };
+    // Publish the join point before starting any asynchronous restore work.
+    targets.set(state, target);
+    void this.startClockRestoration(deviceId, target).then(result.resolve, result.reject);
+    return target.result;
+  }
+
+  private async startClockRestoration(
+    deviceId: string,
+    target: PendingClockRestore,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const device: BootedDevice = { name: deviceId, deviceId, platform: "android" };
+    const signal = defaultDeviceClockRestoreRegistry.signal(deviceId);
+    const restore = () =>
+      defaultDeviceClockRestoreRegistry.runExclusive(
+        deviceId,
+        async () => {
+          target.controller.signal.throwIfAborted();
+          await this.clockRestorerFactory(device).restore(target.state, target.controller.signal);
+          target.controller.signal.throwIfAborted();
+          defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
+          target.clear();
+          const targets = this.pendingClockRestores.get(deviceId);
+          if (targets?.get(target.state) === target) {
+            targets.delete(target.state);
+            if (targets.size === 0) {
+              this.pendingClockRestores.delete(deviceId);
+            }
+          }
+        },
+        undefined,
+        signal,
+      );
+    const restoration = restore().then(
+      () => ({ outcome: "restored" as const }),
+      (error: unknown) => ({ outcome: "failed" as const, error }),
+    );
+    const timeout = new Error("Clock restoration timed out");
+    const result = await raceWithDeadline(restoration, {
+      timer: this.timer,
+      timeoutMs: NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
+      label: "Clock restoration",
+      timeoutError: () => timeout,
+    }).catch((error: unknown) => {
+      if (error === timeout) {
+        return { outcome: "timed-out" as const };
+      }
+      throw error;
+    });
+    if (result.outcome === "restored") {
+      return { pending: null };
+    }
+    logger.warn(`Clock restore ${result.outcome}; quarantining ${device.deviceId}`);
+    const pending = raceWithDeadline(
+      this.retryClockRestore(device.deviceId, target, restoration, restore),
+      {
+        timer: this.timer,
+        signal: target.controller.signal,
+        label: "Pending clock restoration",
+      },
+    ).catch((error: unknown) => {
+      if (!target.removed) {
+        throw toActionableError(error, "Clock restoration failed");
+      }
+      // Proven removal retires ownership; no restoration may reach a replacement.
+      logger.debug(`Retired clock restoration on removed device ${device.deviceId}`);
+    });
+    return { pending };
+  }
+
+  /** Same setup drain, deadline, retry delay and pool quarantine as network restoration.
+   * Clock ownership remains pending beyond the network path's bounded retry batch.
+   */
+  private async retryClockRestore(
+    deviceId: string,
+    target: PendingClockRestore,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+    restore: () => Promise<void>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(`Failed to restore clock on ${deviceId}`, result.error);
+    while (!target.removed) {
+      await this.timer.sleep(NETWORK_CONDITION_RESTORE_RETRY_DELAY_MS);
+      if (target.removed) {
+        return;
+      }
+      try {
+        await restore();
+        return;
+      } catch (error) {
+        logger.warn(`Clock restore retry failed on ${deviceId}; device remains quarantined`, error);
+      }
+    }
+  }
+
+  /** Removal retires in-memory ownership; no retries may target a replacement device. */
+  retireClockRestoration(deviceId: string): void {
+    defaultDeviceClockRestoreRegistry.retire(deviceId);
+    const targets = this.pendingClockRestores.get(deviceId);
+    this.clockRemovalGenerations.set(
+      deviceId,
+      (this.clockRemovalGenerations.get(deviceId) ?? 0) + 1,
+    );
+    for (const target of targets?.values() ?? []) {
+      target.removed = true;
+      target.controller.abort();
+      target.clear();
+    }
+    this.pendingClockRestores.delete(deviceId);
   }
 
   /**
@@ -3667,6 +3900,38 @@ export class SessionManager {
     this.updateSessionCache(sessionId, { deviceReadiness: "booted" });
   }
 
+  /** Tracked setup retains this exact session even after a bounded release times out. */
+  trackClockSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
+    const deviceId = session.assignedDevice;
+    const generation = this.clockRemovalGenerations.get(deviceId) ?? 0;
+    return this.trackSessionSetup(session, async () => {
+      try {
+        await createSetup();
+      } finally {
+        if ((this.clockRemovalGenerations.get(deviceId) ?? 0) !== generation) {
+          delete session.cacheData.clock;
+        } else if (this.sessions.get(session.sessionId) !== session && session.cacheData.clock) {
+          // Baseline capture can finish after bounded release. Hand unbounded
+          // retries to device quarantine so the setup/tool request can settle.
+          const restoration = await this.getPendingClockRestoration(session, null);
+          if (restoration.pending) {
+            this.trackPendingDeviceCleanup(deviceId, [restoration.pending]);
+          }
+        }
+      }
+    });
+  }
+
+  setClock(session: Session, state: ClockSessionState): void {
+    session.cacheData.clock ??= state;
+  }
+  getClock(sessionId: string): ClockSessionState | undefined {
+    return this.getSession(sessionId)?.cacheData.clock;
+  }
+  runClockMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    return this.runDeviceStateMutationExclusive(this.clockMutationQueues, sessionId, fn);
+  }
+
   /**
    * Preserve the pre-session iOS Simulator enrollment state. This setter is
    * intentionally write-once per session: every later enrollment change must
@@ -3733,12 +3998,20 @@ export class SessionManager {
    * so a dead session leaves no residue.
    */
   runNetworkConditionMutationExclusive<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.networkConditionMutationQueues.get(sessionId) ?? Promise.resolve();
+    return this.runDeviceStateMutationExclusive(this.networkConditionMutationQueues, sessionId, fn);
+  }
+
+  private runDeviceStateMutationExclusive<T>(
+    queues: Map<string, Promise<unknown>>,
+    sessionId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = queues.get(sessionId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(fn);
-    this.networkConditionMutationQueues.set(sessionId, next);
+    queues.set(sessionId, next);
     return next.finally(() => {
-      if (this.networkConditionMutationQueues.get(sessionId) === next) {
-        this.networkConditionMutationQueues.delete(sessionId);
+      if (queues.get(sessionId) === next) {
+        queues.delete(sessionId);
       }
     });
   }

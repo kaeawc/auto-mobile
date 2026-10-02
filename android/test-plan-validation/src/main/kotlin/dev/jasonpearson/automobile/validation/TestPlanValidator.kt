@@ -5,6 +5,9 @@ import com.networknt.schema.InputFormat
 import com.networknt.schema.Schema
 import com.networknt.schema.SchemaRegistry
 import com.networknt.schema.SpecificationVersion
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.format.DateTimeParseException
 import org.yaml.snakeyaml.Yaml
 
 /**
@@ -14,6 +17,9 @@ import org.yaml.snakeyaml.Yaml
 object TestPlanValidator {
   private var schema: Schema? = null
   private val yaml = Yaml()
+  // Same inclusive UTC instants as DeviceClock.ts; compare Instants, never local years.
+  private val MIN_DEVICE_CLOCK_INSTANT = Instant.parse("2000-01-01T00:00:00Z")
+  private val MAX_DEVICE_CLOCK_INSTANT = Instant.parse("2100-01-01T00:00:00Z")
 
   /**
    * setTimeout's real usable range: Node/Bun clamp any delay >= 2^31 (2147483648) to 1ms with a
@@ -120,6 +126,7 @@ object TestPlanValidator {
 
     // Validate tool names
     val toolNameErrors = validateToolNames(parsedObject, yamlContent)
+    val clockInstantErrors = validateClockInstantWindows(parsedObject)
 
     // Validate multi-device requirements (a plan using criticalSection/barrier
     // or any step-level device label must declare top-level 'devices') and
@@ -148,6 +155,7 @@ object TestPlanValidator {
     if (
       validationErrors.isEmpty() &&
         toolNameErrors.isEmpty() &&
+        clockInstantErrors.isEmpty() &&
         multiDeviceErrors.isEmpty() &&
         devicesFieldErrors.isEmpty() &&
         deviceLabelErrors.isEmpty() &&
@@ -161,12 +169,51 @@ object TestPlanValidator {
 
     // Add tool name and coordination validation errors
     errors.addAll(toolNameErrors)
+    errors.addAll(clockInstantErrors)
     errors.addAll(multiDeviceErrors)
     errors.addAll(devicesFieldErrors)
     errors.addAll(deviceLabelErrors)
     errors.addAll(barrierCoordinationErrors)
 
     return ValidationResult(valid = false, errors = errors)
+  }
+
+  /** networknt draft-07 ignores formatMinimum/Maximum; match the TS semantic check. */
+  private fun validateClockInstantWindows(parsedObject: Any?): List<ValidationError> {
+    val steps = (parsedObject as? Map<*, *>)?.get("steps") as? List<*> ?: return emptyList()
+    return steps.flatMapIndexed { index, raw ->
+      val step = raw as? Map<*, *> ?: return@flatMapIndexed emptyList()
+      if (step["tool"] != "setDeviceState") return@flatMapIndexed emptyList()
+      val clock =
+        effectiveCoordinationField(step, "clock") as? Map<*, *> ?: return@flatMapIndexed emptyList()
+      if (clock["mode"] != "set") return@flatMapIndexed emptyList()
+      val text = clock["instant"] as? String ?: return@flatMapIndexed emptyList()
+      val instant =
+        try {
+          OffsetDateTime.parse(text).toInstant()
+        } catch (e: DateTimeParseException) {
+          // Schema syntax errors are reported separately; retain a useful field error too.
+          null
+        }
+      if (
+        instant != null &&
+          instant >= MIN_DEVICE_CLOCK_INSTANT &&
+          instant <= MAX_DEVICE_CLOCK_INSTANT
+      ) {
+        emptyList()
+      } else {
+        val params = step["params"] as? Map<*, *>
+        val prefix = if (params?.containsKey("clock") == true) "params." else ""
+        listOf(
+          ValidationError(
+            field = "steps[$index].${prefix}clock.instant",
+            message =
+              "Clock instant must be within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive, after offset normalization).",
+            severity = ValidationSeverity.ERROR,
+          )
+        )
+      }
+    }
   }
 
   /** Validate that all tool names in steps are valid AutoMobile tools */

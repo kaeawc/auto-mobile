@@ -98,6 +98,29 @@ describe("applyStateAfterBiometricCaptureFailure", () => {
     };
   };
 
+  test("applies clock through the tracked setter after biometric capture fails", async () => {
+    const calls: SetDeviceStateInput[] = [];
+    const clock: SetDeviceStateInput["clock"] = { mode: "reset" };
+    const result = await applyStateAfterBiometricCaptureFailure(
+      {
+        setState: async (input) => {
+          calls.push(input);
+          return {
+            success: true,
+            deviceId: failure.deviceId,
+            platform: "android",
+            clock: { supported: true, capability: "full", automaticTime: true },
+          };
+        },
+      },
+      { biometrics: { enrollment: "enrolled" }, clock },
+      failure,
+    );
+    expect(calls).toEqual([{ clock }]);
+    expect(result.clock?.automaticTime).toBe(true);
+    expect(result.success).toBe(false);
+  });
+
   test("applies the independent Do Not Disturb field and keeps the biometric failure", async () => {
     const setter = setterReturning({
       success: true,

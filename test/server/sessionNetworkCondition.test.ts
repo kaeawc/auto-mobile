@@ -1,8 +1,10 @@
+import { FakeDeviceClockAdapter } from "../fakes/FakeDeviceClockAdapter";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { describe, expect, test } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { runSessionNetworkMutation } from "../../src/server/sessionNetworkCondition";
 import { applyStateAfterBiometricCaptureFailure } from "../../src/server/sessionBiometricEnrollment";
-import type { DeviceStateResult } from "../../src/features/utility/DeviceState";
+import { DeviceState, type DeviceStateResult } from "../../src/features/utility/DeviceState";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -531,6 +533,48 @@ describe("runSessionNetworkMutation", () => {
     }
   });
 
+  test("a combined network+clock failure retains applied network results and arms its TTL", async () => {
+    const timer = new FakeTimer();
+    const restored: string[] = [];
+    const manager = makeManager(timer, restored);
+    const clock = new FakeDeviceClockAdapter();
+    clock.writeError = new Error("date refused");
+    const device = { name: "Pixel", deviceId: "emulator-5554", platform: "android" as const };
+    const state = new DeviceState(device, {
+      timer,
+      clockAdapter: clock,
+      adbFactory: new FakeAdbClientFactory(),
+      invalidateClockCaches: () => {},
+    });
+    try {
+      await manager.createSession("net-clock", device.deviceId, "android");
+      const result = await runSessionNetworkMutation(
+        manager,
+        "net-clock",
+        device.deviceId,
+        true,
+        () =>
+          state.setState({
+            networkCondition: { profile: "3g", expiresInSeconds: 30 },
+            clock: { mode: "set", instant: "2030-01-01T00:00:00Z" },
+          }),
+        30,
+      );
+      expect(result.success).toBe(false);
+      expect(result.networkCondition).toMatchObject({ supported: true, appliedProfile: "3g" });
+      expect(result.clock).toMatchObject({
+        supported: true,
+        verified: false,
+        error: expect.stringContaining("date refused"),
+      });
+      timer.advanceTime(30_000);
+      await manager.getPendingDeviceCleanup(device.deviceId);
+      expect(restored).toEqual(["none"]);
+      expect(manager.getNetworkCondition("net-clock")).toBeUndefined();
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
   test("a combined request where DND fails but networkCondition succeeds is not treated as a network failure (#6178 PR #6183 review, P3)", async () => {
     const timer = new FakeTimer();
     const restored: string[] = [];

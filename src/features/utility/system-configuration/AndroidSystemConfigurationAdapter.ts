@@ -1,3 +1,4 @@
+import { ensureAndroidRoot } from "../../../utils/android-cmdline-tools/ensureAndroidRoot";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
@@ -30,8 +31,6 @@ import {
 
 type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
 const MIN_APP_LOCALE_API_LEVEL = 33;
-const ADB_ROOT_TIMEOUT_MS = 30_000;
-const ADB_WAIT_FOR_DEVICE_TIMEOUT_MS = 60_000;
 
 // Bounds for waiting on the framework to come back after the legacy (<33)
 // `stop; start` restart. We poll `sys.boot_completed` rather than racing the
@@ -258,39 +257,13 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
   private async ensureRootForLegacyLocale(
     apiLevel: number,
   ): Promise<{ success: true } | { success: false; error: string }> {
-    try {
-      await this.adb.executeCommand("root", ADB_ROOT_TIMEOUT_MS, undefined, true);
-      await this.adb.executeCommand(
-        "wait-for-device",
-        ADB_WAIT_FOR_DEVICE_TIMEOUT_MS,
-        undefined,
-        true,
-      );
-    } catch (error) {
-      const errorMsg = errorMessage(error);
-      return {
-        success: false,
-        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. Failed to run adb root; the target emulator is not root-capable or does not allow root ADB. adb root error: ${errorMsg}`,
-      };
-    }
-
-    try {
-      const idResult = await this.adb.executeCommand("shell id", undefined, undefined, true);
-      if (!idResult.stdout.includes("uid=0(root)")) {
-        return {
+    const result = await ensureAndroidRoot(this.adb);
+    return result.success
+      ? result
+      : {
           success: false,
-          error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. adb root completed, but ADB shell is still not root; the target emulator is not root-capable. shell id: ${idResult.stdout.trim() || "unknown"}`,
+          error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must use the root-backed system locale path. ${result.error}`,
         };
-      }
-    } catch (error) {
-      const errorMsg = errorMessage(error);
-      return {
-        success: false,
-        error: `Android API ${apiLevel} does not support app-scoped locale changes, so AutoMobile must verify root before changing the system locale. Failed to verify root shell after adb root: ${errorMsg}`,
-      };
-    }
-
-    return { success: true };
   }
 
   async setTimeZone(zoneId: string): Promise<SetTimeZoneResult> {

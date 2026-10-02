@@ -23,12 +23,13 @@ export async function applyStateAfterBiometricCaptureFailure(
   input: SetDeviceStateInput,
   failure: DeviceStateResult,
 ): Promise<DeviceStateResult> {
-  if (!input.doNotDisturb && !input.networkCondition) {
+  if (!input.doNotDisturb && !input.networkCondition && !input.clock) {
     return failure;
   }
   const applied = await deviceState.setState({
     ...(input.doNotDisturb ? { doNotDisturb: input.doNotDisturb } : {}),
     ...(input.networkCondition ? { networkCondition: input.networkCondition } : {}),
+    ...(input.clock ? { clock: input.clock } : {}),
   });
   const errors = [failure.error, applied.error].filter(
     (error): error is string => error !== undefined,

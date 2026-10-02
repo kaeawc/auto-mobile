@@ -451,7 +451,7 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
   }
 }
 
-function invalidateDisplayCaches(deviceId: string, reason: string): void {
+export function invalidateDisplayCaches(deviceId: string, reason: string): void {
   logger.info(`[DisplayTransition] ${deviceId}: ${reason}; clearing panel-scoped state`);
   getObserveCacheStore().clear(deviceId);
   getScreenshotStateStore().clear(deviceId);

@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../logger";
 import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
+import { clockInstantTextInWindow } from "../../models/DeviceClock";
 
 /**
  * Result of plan validation
@@ -181,7 +182,8 @@ export class PlanSchemaValidator {
     const valid = this.validateFn(parsed);
 
     if (valid) {
-      return { valid: true };
+      const errors = this.validateClockInstantWindows(parsed, yamlContent);
+      return errors.length ? { valid: false, errors } : { valid: true };
     }
 
     // Format validation errors with line/column information
@@ -191,6 +193,61 @@ export class PlanSchemaValidator {
       valid: false,
       errors,
     };
+  }
+
+  /** Draft-07 networknt has no format bounds; both consumers compare normalized instants. */
+  private validateClockInstantWindows(parsed: unknown, yamlContent: string): ValidationError[] {
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !("steps" in parsed) ||
+      !Array.isArray(parsed.steps)
+    ) {
+      return [];
+    }
+    return parsed.steps.flatMap((step: unknown, index): ValidationError[] => {
+      if (
+        !step ||
+        typeof step !== "object" ||
+        !("tool" in step) ||
+        step.tool !== "setDeviceState"
+      ) {
+        return [];
+      }
+      const params = "params" in step ? step.params : undefined;
+      const usesParams = params !== null && typeof params === "object" && "clock" in params;
+      const clock = usesParams ? params.clock : "clock" in step ? step.clock : undefined;
+      const field = `steps[${index}].${usesParams ? "params." : ""}clock.instant`;
+      return this.validateClockInstantWindow(clock, field, yamlContent);
+    });
+  }
+
+  private validateClockInstantWindow(
+    clock: unknown,
+    field: string,
+    yamlContent: string,
+  ): ValidationError[] {
+    if (
+      !clock ||
+      typeof clock !== "object" ||
+      !("mode" in clock) ||
+      clock.mode !== "set" ||
+      !("instant" in clock) ||
+      typeof clock.instant !== "string"
+    ) {
+      return [];
+    }
+    if (clockInstantTextInWindow(clock.instant)) {
+      return [];
+    }
+    return [
+      {
+        field,
+        message:
+          "Clock instant must be within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive, after offset normalization).",
+        ...this.findLineNumber(yamlContent, field),
+      },
+    ];
   }
 
   /**

@@ -1,3 +1,21 @@
+import { invalidateDisplayCaches } from "../observe/DisplayTransition";
+import {
+  AndroidDeviceClockAdapter,
+  cancellableDeviceClockAdapter,
+  defaultDeviceClockRestoreRegistry,
+  readDeviceClock,
+  writeDeviceClock,
+  validateDeviceClockInput,
+  preflightDeviceClock,
+  clockFailure,
+  DeviceClockValidationError,
+  type DeviceClockRestoreSlot,
+  type DeviceClockRestoreRegistry,
+  type PreparedDeviceClock,
+  type DeviceClockAdapter,
+  type DeviceClockState,
+  type SetDeviceClockInput,
+} from "./DeviceClock";
 import { errorMessage } from "../../utils/describeUnknownError";
 import {
   defaultAdbClientFactory,
@@ -28,6 +46,7 @@ import {
 } from "../../utils/ios-cmdline-tools/notifyutil";
 import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { shellQuote } from "../../utils/shellQuote";
+import { z } from "zod/v4";
 import {
   consolePortFromSerial,
   type EmulatorConsoleClient,
@@ -36,6 +55,8 @@ import {
   defaultEmulatorConsoleClientFactory,
   type EmulatorConsoleClientFactory,
 } from "../action/Telephony";
+
+export type { DeviceClockState, SetDeviceClockInput } from "./DeviceClock";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -70,7 +91,8 @@ export interface DoNotDisturbState {
   appliedMode?: DoNotDisturbMode;
 }
 
-export type BiometricEnrollment = "enrolled" | "not_enrolled";
+export const biometricEnrollmentSchema = z.enum(["enrolled", "not_enrolled"]);
+export type BiometricEnrollment = z.infer<typeof biometricEnrollmentSchema>;
 
 export interface BiometricEnrollmentState {
   supported: boolean;
@@ -314,6 +336,7 @@ export interface DeviceStateResult {
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
   location?: DeviceLocationState;
+  clock?: DeviceClockState;
   /** Requested fields skipped because the current platform cannot support them. */
   unsupported?: DeviceStateField[];
   error?: string;
@@ -335,6 +358,7 @@ export interface SetDeviceStateInput {
   };
   networkCondition?: SetNetworkConditionInput;
   location?: SetDeviceLocationInput;
+  clock?: SetDeviceClockInput;
 }
 
 export type SetDeviceLocationInput =
@@ -379,6 +403,7 @@ export const DEVICE_STATE_READABLE_FIELDS = [
   "connectivity",
   "biometrics",
   "networkCondition",
+  "clock",
 ] as const;
 
 export type DeviceStateField = (typeof DEVICE_STATE_READABLE_FIELDS)[number];
@@ -396,6 +421,7 @@ const DEVICE_STATE_WRITABLE_FIELD_PRESENCE: Record<keyof SetDeviceStateInput, tr
   connectivity: true,
   networkCondition: true,
   location: true,
+  clock: true,
 };
 
 /**
@@ -419,6 +445,7 @@ interface SelectedDeviceStates {
   connectivity?: DeviceConnectivityState;
   biometrics?: BiometricEnrollmentState;
   networkCondition?: NetworkConditionState;
+  clock?: DeviceClockState;
 }
 
 /**
@@ -442,7 +469,18 @@ export interface DeviceStateDependencies {
   timer?: Timer;
   consoleFactory?: EmulatorConsoleClientFactory;
   routeRegistry?: LocationRouteRegistry;
+  clockAdapter?: DeviceClockAdapter;
+  clockRestoreRegistry?: DeviceClockRestoreRegistry;
+  invalidateClockCaches?: (deviceId: string) => void;
+  clockMutation?: (
+    mutation: (slot?: DeviceClockRestoreSlot) => Promise<RequestedDeviceStates>,
+  ) => Promise<RequestedDeviceStates>;
 }
+
+type RequestedDeviceStates = Pick<
+  DeviceStateResult,
+  "doNotDisturb" | "biometrics" | "connectivity" | "networkCondition" | "location" | "clock"
+>;
 
 const IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION = "com.apple.BiometricKit.enrollmentChanged";
 const IOS_BIOMETRICS_UNSUPPORTED_ERROR =
@@ -1090,7 +1128,8 @@ function setDeviceStateInputIsEmpty(input: SetDeviceStateInput): boolean {
     !input.biometrics &&
     !input.connectivity &&
     !input.networkCondition &&
-    !input.location
+    !input.location &&
+    !input.clock
   );
 }
 
@@ -1212,6 +1251,41 @@ function setDeviceStateInputError(input: SetDeviceStateInput): string | undefine
   );
 }
 
+/** Validate every combined input before a clock or any other field can mutate. */
+function validateClockCombinedInputs(input: SetDeviceStateInput): void {
+  if (
+    input.biometrics &&
+    !biometricEnrollmentSchema.safeParse(input.biometrics.enrollment).success
+  ) {
+    throw new ActionableError('biometrics.enrollment must be "enrolled" or "not_enrolled"');
+  }
+  if (!input.networkCondition) {
+    return;
+  }
+  const network = input.networkCondition;
+  const invalid = networkConditionInputError(network);
+  if (invalid) {
+    throw new ActionableError(invalid);
+  }
+  const ranges = [
+    [network.delayMs, Infinity],
+    [network.downloadKbps, Infinity],
+    [network.uploadKbps, Infinity],
+    [network.packetLossPercent, 100],
+    [network.expiresInSeconds, MAX_NETWORK_CONDITION_TTL_SECONDS],
+  ];
+  if (
+    ranges.some(
+      ([value, max]) =>
+        value !== undefined && (!Number.isFinite(value) || value < 0 || value > max!),
+    )
+  ) {
+    throw new ActionableError(
+      "Network condition values must be finite, non-negative and within their schema bounds",
+    );
+  }
+}
+
 export class DeviceState {
   private device: BootedDevice;
 
@@ -1222,10 +1296,34 @@ export class DeviceState {
   private timer: Timer;
   private consoleFactory: EmulatorConsoleClientFactory;
   private routeRegistry: LocationRouteRegistry;
+  private readonly clockAdapter: DeviceClockAdapter;
+  private readonly clockRestoreRegistry: DeviceClockRestoreRegistry;
+  private readonly clockSignal: AbortSignal;
+  private readonly clockMutation: NonNullable<DeviceStateDependencies["clockMutation"]>;
+  private readonly invalidateClockCaches: (deviceId: string) => void;
 
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
+    this.clockRestoreRegistry =
+      dependencies.clockRestoreRegistry ?? defaultDeviceClockRestoreRegistry;
+    this.clockSignal = this.clockRestoreRegistry.signal(device.deviceId);
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
+    this.clockAdapter = cancellableDeviceClockAdapter(
+      dependencies.clockAdapter ??
+        new AndroidDeviceClockAdapter(
+          {
+            executeCommand: (...args) =>
+              this.adbFactory.create(this.device).executeCommand(...args),
+          },
+          this.clockSignal,
+        ),
+      this.clockSignal,
+    );
+    this.timer = dependencies.timer ?? defaultTimer;
+    this.clockMutation = dependencies.clockMutation ?? ((mutation) => mutation());
+    this.invalidateClockCaches =
+      dependencies.invalidateClockCaches ??
+      ((deviceId) => invalidateDisplayCaches(deviceId, "Device clock changed"));
     this.simctl = dependencies.simctl ?? null;
     this.timer = dependencies.timer ?? defaultTimer;
     this.consoleFactory = dependencies.consoleFactory ?? defaultEmulatorConsoleClientFactory;
@@ -1275,6 +1373,9 @@ export class DeviceState {
     include: readonly DeviceStateField[],
   ): Promise<SelectedDeviceStates> {
     return {
+      ...(include.includes("clock")
+        ? { clock: await readDeviceClock(this.device, this.clockAdapter) }
+        : {}),
       ...(include.includes("doNotDisturb") ? { doNotDisturb: await this.readDoNotDisturb() } : {}),
       ...(include.includes("connectivity") ? { connectivity: await this.readConnectivity() } : {}),
       ...(include.includes("biometrics")
@@ -1287,6 +1388,10 @@ export class DeviceState {
   }
 
   async setState(input: SetDeviceStateInput): Promise<DeviceStateResult> {
+    if (input.clock !== undefined) {
+      validateDeviceClockInput(input.clock);
+      validateClockCombinedInputs(input);
+    }
     if (setDeviceStateInputIsEmpty(input)) {
       return {
         success: false,
@@ -1298,7 +1403,7 @@ export class DeviceState {
 
     const inputError = setDeviceStateInputError(input);
     if (inputError) {
-      if (input.location?.mode === "route" || input.location?.mode === "stop") {
+      if (input.clock || input.location?.mode === "route" || input.location?.mode === "stop") {
         throw new ActionableError(inputError);
       }
       return {
@@ -1309,7 +1414,9 @@ export class DeviceState {
       };
     }
 
-    const states = await this.writeRequestedStates(input);
+    const states = input.clock
+      ? await this.writeClockCombinedStates(input)
+      : await this.writeRequestedStates(input);
     const requestedStates = Object.values(states).filter(
       (
         state,
@@ -1318,7 +1425,8 @@ export class DeviceState {
         | BiometricEnrollmentState
         | DeviceConnectivityState
         | NetworkConditionState
-        | DeviceLocationState => state !== undefined,
+        | DeviceLocationState
+        | DeviceClockState => state !== undefined,
     );
     const error = requestedStates.find((state) => state.error)?.error;
 
@@ -1333,15 +1441,48 @@ export class DeviceState {
     };
   }
 
+  private async writeClockCombinedStates(
+    input: SetDeviceStateInput,
+  ): Promise<RequestedDeviceStates> {
+    try {
+      // Track session setup before taking the device lock. Release drains those
+      // setups first, then takes this same lock for restoration.
+      return await this.clockMutation((sessionSlot) =>
+        this.clockRestoreRegistry.runExclusive(
+          this.device.deviceId,
+          async (slot) => {
+            const preflight = await this.preflightClock(input.clock);
+            this.clockSignal.throwIfAborted();
+            return this.writeRequestedStates(input, preflight.prepared, preflight.failure, slot);
+          },
+          sessionSlot,
+          this.clockSignal,
+        ),
+      );
+    } catch (error) {
+      if (error instanceof DeviceClockValidationError) {
+        throw error;
+      }
+      logger.warn(`Clock mutation failed for ${this.device.deviceId}`, error);
+      return { clock: clockFailure(error) };
+    }
+  }
+
+  private async preflightClock(
+    input: SetDeviceClockInput | undefined,
+  ): Promise<{ prepared?: PreparedDeviceClock; failure?: DeviceClockState }> {
+    return input?.mode === "advance"
+      ? preflightDeviceClock(this.device, this.clockAdapter, input)
+      : {};
+  }
+
   /** Write exactly the mutation fields supplied by the caller. */
   private async writeRequestedStates(
     input: SetDeviceStateInput,
-  ): Promise<
-    Pick<
-      DeviceStateResult,
-      "doNotDisturb" | "biometrics" | "connectivity" | "networkCondition" | "location"
-    >
-  > {
+    preparedClock?: PreparedDeviceClock,
+    failedClock?: DeviceClockState,
+    slot?: DeviceClockRestoreSlot,
+  ): Promise<RequestedDeviceStates> {
     return {
       ...(input.doNotDisturb
         ? { doNotDisturb: await this.writeDoNotDisturb(input.doNotDisturb) }
@@ -1356,7 +1497,35 @@ export class DeviceState {
         ? { networkCondition: await this.writeNetworkCondition(input.networkCondition) }
         : {}),
       ...(input.location ? { location: await this.writeLocation(input.location) } : {}),
+      ...(input.clock
+        ? { clock: failedClock ?? (await this.writeClock(input.clock, preparedClock, slot)) }
+        : {}),
     };
+  }
+
+  private async writeClock(
+    input: SetDeviceClockInput,
+    prepared?: PreparedDeviceClock,
+    slot?: DeviceClockRestoreSlot,
+  ): Promise<DeviceClockState> {
+    try {
+      return await writeDeviceClock(
+        this.device,
+        this.clockAdapter,
+        input,
+        slot,
+        {
+          hostClock: this.timer,
+          invalidate: this.invalidateClockCaches,
+          restoreRegistry: this.clockRestoreRegistry,
+          mutationSignal: this.clockSignal,
+        },
+        prepared,
+      );
+    } catch (error) {
+      logger.warn(`Clock mutation failed for ${this.device.deviceId}`, error);
+      return clockFailure(error);
+    }
   }
 
   private async writeLocation(input: SetDeviceLocationInput): Promise<DeviceLocationState> {

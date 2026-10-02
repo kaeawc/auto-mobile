@@ -54,15 +54,20 @@ async function waitForTarget(
 }
 
 describe("waitFor multi-panel element visibility", () => {
-  test("uses a handed-in screen size while preserving positional finder calls", () => {
+  test("uses multi-panel context while preserving legacy positional finder calls", () => {
+    // owner decision D43 (#6523): one screen-size source. Flag-less raw wait
+    // formerly rejected the right target; with device context it now accepts.
     const raw = issue8379SelectionHierarchy();
     const finder = new ElementResolver();
     const waitFor = { text: duoSelectionText };
     const screenSize = resolveActionableHierarchyScreenSize(raw, true) ?? undefined;
     expect(screenSize).toEqual({ width: 951, height: 669 });
-    expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), { screenSize })?.text).toBe(
-      duoSelectionText,
-    );
+    expect(
+      findWaitForElement(finder, waitFor, raw, "ios", new Map(), {
+        iosMultiPanel: true,
+        observationScreenSize: screenSize,
+      })?.text,
+    ).toBe(duoSelectionText);
     expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), false)).toBeNull();
     expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), {})).toBeNull();
     expect(findWaitForElement(finder, waitFor, raw, "ios", new Map(), true)?.text).toBe(

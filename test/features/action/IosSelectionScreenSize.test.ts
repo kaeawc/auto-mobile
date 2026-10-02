@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import { resolveElementScreenSize } from "../../../src/features/utility/ElementGeometry";
+import { screenSizeForOffscreenCheck } from "../../../src/features/utility/ElementGeometry";
 import { projectActionableHierarchy } from "../../../src/features/observe/HierarchyNormalization";
 import type { ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -27,8 +27,8 @@ test.each([false, true])(
     const target = new DefaultElementParser().parseNodeBounds(raw.hierarchy.node!.node![1])!;
     const selector = new FakeElementSelector(target);
     let selectedSize: ObserveResult["screenSize"] | undefined;
-    selector.selectClickable = (capture) => {
-      selectedSize = { width: capture.screenWidth!, height: capture.screenHeight! };
+    selector.selectClickable = (capture, options) => {
+      selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
       return { element: target, totalMatches: 1, indexInMatches: 0, strategy: "first" };
     };
     const tap = new TapAnyElement(selectionFixtureDevice(), new FakeAdbExecutor(), {
@@ -49,12 +49,14 @@ test.each([false, true])(
   },
 );
 
-test("tapAny single-panel iOS and Android retain metadata precedence even when bounds/pixels disagree", () => {
+test("tapAny single-panel iOS converges on runner geometry while Android keeps display metadata", () => {
+  // owner decision D43 (#6523): one screen-size source. Single-panel iOS formerly
+  // used 669x951, now 951x669; Android remains 669x951.
   const hierarchy = issue8379Hierarchy();
   const selector = new FakeElementSelector();
   let selectedSize: ObserveResult["screenSize"] | undefined;
-  selector.selectClickable = (capture) => {
-    selectedSize = { width: capture.screenWidth!, height: capture.screenHeight! };
+  selector.selectClickable = (capture, options) => {
+    selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
     return { element: null, totalMatches: 0, indexInMatches: -1, strategy: "first" };
   };
   for (const device of [
@@ -66,8 +68,12 @@ test("tapAny single-panel iOS and Android retain metadata precedence even when b
       timer: new FakeTimer(),
       elementSelector: selector,
     });
-    tap["findClickableElement"]({ action: "tap" }, hierarchy, { width: 951, height: 669 });
-    expect(selectedSize).toEqual(resolveElementScreenSize(hierarchy));
+    tap["findClickableElement"]({ action: "tap" }, hierarchy, {
+      observationScreenSize: { width: 951, height: 669 },
+    });
+    expect(selectedSize).toEqual(
+      device.platform === "ios" ? { width: 951, height: 669 } : { width: 669, height: 951 },
+    );
   }
 });
 
@@ -109,8 +115,8 @@ test("tapAny folded portrait stand-in, single iPhone and Android preserve the pr
   const hierarchy = structuredClone(portraitCapture.viewHierarchy);
   const selector = new FakeElementSelector();
   let selectedSize: ObserveResult["screenSize"] | undefined;
-  selector.selectClickable = (capture) => {
-    selectedSize = { width: capture.screenWidth!, height: capture.screenHeight! };
+  selector.selectClickable = (capture, options) => {
+    selectedSize = screenSizeForOffscreenCheck(capture, options?.screenSizeOptions);
     return { element: null, totalMatches: 0, indexInMatches: -1, strategy: "first" };
   };
   for (const device of [
@@ -123,6 +129,6 @@ test("tapAny folded portrait stand-in, single iPhone and Android preserve the pr
       elementSelector: selector,
     });
     tap["findClickableElement"]({ action: "tap" }, hierarchy);
-    expect(selectedSize).toEqual(resolveElementScreenSize(hierarchy));
+    expect(selectedSize).toEqual(screenSizeForOffscreenCheck(hierarchy));
   }
 });

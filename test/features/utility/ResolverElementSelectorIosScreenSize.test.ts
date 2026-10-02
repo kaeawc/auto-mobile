@@ -102,7 +102,7 @@ test("production observe identification passes the Duo flag on an unstamped cach
   expect(getHierarchySnapshot(hierarchy)?.hierarchy.screenHeight).toBe(669);
 });
 
-test("single iPhone and Android selector viewports retain the previous computation on stale-root captures", () => {
+test("single iPhone uses runner geometry and Android uses capture display metadata", () => {
   for (const device of [
     selectionFixtureDevice("ios", 1),
     selectionFixtureDevice("android", 1),
@@ -116,7 +116,13 @@ test("single iPhone and Android selector viewports retain the previous computati
         if (!(selector instanceof ResolverElementSelector)) {
           throw new Error("Expected production resolver selector");
         }
-        expect(selector["viewport"](hierarchy)).toEqual(extractHierarchyScreenSize(hierarchy));
+        // owner decision D43 (#6523): one screen-size source. Android formerly
+        // used root/pixel heuristics; now metadata. iOS root/pixels are unchanged.
+        expect(selector["viewport"](hierarchy)).toEqual(
+          device.platform === "ios"
+            ? extractHierarchyScreenSize(hierarchy)
+            : { width: hierarchy.screenWidth!, height: hierarchy.screenHeight! },
+        );
       }
     }
   }
@@ -157,5 +163,7 @@ test("Explore's legacy selector consumes the dimensions already reconciled by iO
   const target = new DefaultElementParser().parseNodeBounds(
     issue8379SelectionHierarchy().hierarchy.node!.node![1],
   )!;
-  expect(new DefaultElementSelector()["isElementCenterOffScreen"](target, hierarchy)).toBe(false);
+  expect(
+    new DefaultElementSelector().selectByText(hierarchy, duoSelectionText).element?.bounds,
+  ).toEqual(target.bounds);
 });

@@ -1,8 +1,13 @@
+import { getHierarchySnapshot } from "../observe/HierarchyCapture";
+import { getProjectedHierarchyScreenSize } from "../observe/HierarchyNormalization";
+import { extractHierarchyRootScreenSize } from "../observe/hierarchyScreenSize";
+import { logger } from "../../utils/logger";
 import { Element } from "../../models/Element";
 import { Point } from "../../models/Point";
 import type { ElementBounds } from "../../models/ElementBounds";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
-import type { ScreenSize } from "../../models/ScreenSize";
+import type { ScreenSize, ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
+export type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 
 /** Returns whether an element's center lies outside the screen. */
@@ -10,7 +15,7 @@ export function isElementCenterOffScreen(
   bounds: ElementBounds | undefined,
   screenSize: ScreenSize | undefined,
 ): boolean {
-  if (!bounds || !screenSize?.width || !screenSize.height) {
+  if (!bounds || !isUsableScreenSize(screenSize)) {
     return false;
   }
   const centerX = (bounds.left + bounds.right) / 2;
@@ -18,15 +23,76 @@ export function isElementCenterOffScreen(
   return centerX < 0 || centerX > screenSize.width || centerY < 0 || centerY > screenSize.height;
 }
 
-/** Prefer dimensions captured with the hierarchy, then use the observation fallback. */
-export function resolveElementScreenSize(
-  hierarchy: Pick<ViewHierarchyResult, "screenWidth" | "screenHeight">,
-  fallback?: ScreenSize,
+function sameCaptureDisplay(
+  hierarchy: ViewHierarchyResult,
+  display: ScreenSizeForOffscreenCheckOptions["display"],
+): boolean {
+  const identities = ["displayId", "panelUniqueId"] as const;
+  return identities.every(
+    (key) =>
+      hierarchy[key] === undefined || hierarchy[key] === null || hierarchy[key] === display?.[key],
+  );
+}
+
+export function isUsableScreenSize(size: ScreenSize | undefined): size is ScreenSize {
+  return !!size && [size.width, size.height].every((value) => Number.isFinite(value) && value > 0);
+}
+
+function offscreenPlatform(
+  hierarchy: ViewHierarchyResult,
+  options: ScreenSizeForOffscreenCheckOptions,
+  projected: ScreenSize | undefined,
+): "android" | "ios" {
+  return (
+    options.platform ?? getHierarchySnapshot(hierarchy)?.platform ?? (projected ? "ios" : "android")
+  );
+}
+
+/**
+ * Resolve the captured display/panel size in the element bounds' coordinate space.
+ * iOS uses the projection stamp, then root geometry with runner-pixel orientation
+ * and multi-panel evidence, then capture metadata, then observation size. Android
+ * uses capture metadata, then observation size; Android window bounds never size
+ * the screen. Explicit platform wins, followed by snapshot provenance; without
+ * either, only a projection stamp implies iOS, otherwise use Android's order.
+ * Observation fallback requires matching known capture display/panel identities;
+ * missing observation identity cannot establish a match for a targeted capture.
+ * Log once when iOS needs metadata or either platform needs observation fallback.
+ * Only finite positive dimensions are usable. With no source return undefined,
+ * preserving the unknown/not-off-screen policy.
+ */
+export function screenSizeForOffscreenCheck(
+  hierarchy: ViewHierarchyResult,
+  options: ScreenSizeForOffscreenCheckOptions = {},
 ): ScreenSize | undefined {
-  if (hierarchy.screenWidth && hierarchy.screenHeight) {
-    return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+  const projected = getProjectedHierarchyScreenSize(hierarchy);
+  const platform = offscreenPlatform(hierarchy, options, projected);
+  if (platform === "ios") {
+    const primary = projected ?? extractHierarchyRootScreenSize(hierarchy, options.iosMultiPanel);
+    if (primary) {
+      return primary;
+    }
   }
-  return fallback;
+  const metadata = {
+    width: hierarchy.screenWidth ?? 0,
+    height: hierarchy.screenHeight ?? 0,
+  };
+  if (isUsableScreenSize(metadata)) {
+    if (platform === "ios") {
+      logger.debug(
+        "Off-screen size fallback: capture metadata; iOS projection/root geometry unavailable",
+      );
+    }
+    return metadata;
+  }
+  const observation = options.observationScreenSize;
+  if (isUsableScreenSize(observation) && sameCaptureDisplay(hierarchy, options.display)) {
+    logger.debug(
+      "Off-screen size fallback: observation; capture screen size unavailable, display identity compatible",
+    );
+    return observation;
+  }
+  return undefined;
 }
 
 /**

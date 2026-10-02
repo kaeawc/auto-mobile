@@ -95,7 +95,10 @@ describe("iOS search bar focus fixture", () => {
 
   test("accepts the editable parent selected from text shared with its label", () => {
     const hierarchy = fixture(1);
-    const selection = new ResolverElementSelector().selectByText(hierarchy, "Search videos", {
+    // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
+    const selection = new ResolverElementSelector(undefined, undefined, {
+      platform: "ios",
+    }).selectByText(hierarchy, "Search videos", {
       selectionIntent: "focus-input",
     });
     expect(selection.element?.class).toBe("UISearchBar");
@@ -156,7 +159,10 @@ describe("iOS search bar focus fixture", () => {
 
   test("accepts focus on the inner field when the editable parent is selected", () => {
     const hierarchy = fixture(1);
-    const parent = new ResolverElementSelector().selectByText(hierarchy, "Search videos", {
+    // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
+    const parent = new ResolverElementSelector(undefined, undefined, {
+      platform: "ios",
+    }).selectByText(hierarchy, "Search videos", {
       selectionIntent: "focus-input",
     }).element!;
     const root = hierarchy.hierarchy.node!;
@@ -171,7 +177,10 @@ describe("iOS search bar focus fixture", () => {
 
   test("rejects focus on an unrelated editable field", () => {
     const hierarchy = fixture(3, true);
-    const selection = new ResolverElementSelector().selectByText(hierarchy, "Search videos", {
+    // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
+    const selection = new ResolverElementSelector(undefined, undefined, {
+      platform: "ios",
+    }).selectByText(hierarchy, "Search videos", {
       selectionIntent: "focus-input",
     });
     expect(selection.element).toBeDefined();

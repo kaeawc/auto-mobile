@@ -8,7 +8,7 @@ import {
 } from "../../../src/features/observe/HierarchyNormalization";
 import { extractHierarchyScreenSize } from "../../../src/features/observe/hierarchyScreenSize";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import { resolveElementScreenSize } from "../../../src/features/utility/ElementGeometry";
+import { screenSizeForOffscreenCheck } from "../../../src/features/utility/ElementGeometry";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { nodeBounds } from "../../../src/models/ViewHierarchyResult";
 import { parseBounds } from "../../../src/utils/bounds";
@@ -87,7 +87,10 @@ describe("tapOn iOS multi-panel screen size", () => {
     async (normalized) => {
       const raw = issue8379Hierarchy();
       const hierarchy = normalized ? normalizeIosHierarchy(raw) : raw;
-      expect(resolveElementScreenSize(hierarchy)).toEqual({ width: 669, height: 951 });
+      expect(screenSizeForOffscreenCheck(hierarchy, { platform: "android" })).toEqual({
+        width: 669,
+        height: 951,
+      });
       const tap = createTap(hierarchy);
       const captured = await tap["refreshViewHierarchy"](50);
       expect(captured).toBe(hierarchy);
@@ -113,15 +116,17 @@ describe("tapOn iOS multi-panel screen size", () => {
     expect(extractHierarchyScreenSize(hierarchy, true)).toEqual({ width: 393, height: 852 });
   });
 
-  test.each([0, 1])("iPhone with %i panels deliberately keeps legacy raw metadata", (panels) => {
+  test.each([0, 1])("iPhone with %i panels converges on runner geometry", (panels) => {
     const hierarchy = issue8379Hierarchy();
     expect(extractHierarchyScreenSize(hierarchy)).toEqual({ width: 951, height: 669 });
+    // owner decision D43 (#6523): one screen-size source. Previously 669x951
+    // from stale metadata; now 951x669, matching the capture pipeline.
     expect(replace(createTap(hierarchy, "ios", panels), hierarchy).screenSize).toEqual(
-      resolveElementScreenSize(hierarchy)!,
+      screenSizeForOffscreenCheck(hierarchy, { platform: "ios" })!,
     );
     expect(replace(createTap(hierarchy, "ios", panels), hierarchy).screenSize).toEqual({
-      width: 669,
-      height: 951,
+      width: 951,
+      height: 669,
     });
   });
 
@@ -132,7 +137,7 @@ describe("tapOn iOS multi-panel screen size", () => {
       height: 951,
     });
     expect(replace(createTap(hierarchy, "android", panels), hierarchy).screenSize).toEqual(
-      resolveElementScreenSize(hierarchy)!,
+      screenSizeForOffscreenCheck(hierarchy)!,
     );
   });
 
@@ -142,7 +147,7 @@ describe("tapOn iOS multi-panel screen size", () => {
       normalizeIosHierarchy(issue8379Hierarchy()),
       true,
     );
-    expect(resolveElementScreenSize(hierarchy)).toEqual({ width: 951, height: 669 });
+    expect(screenSizeForOffscreenCheck(hierarchy)).toEqual({ width: 951, height: 669 });
     expect(replace(createTap(hierarchy), hierarchy).screenSize).toEqual({
       width: 951,
       height: 669,
@@ -159,7 +164,7 @@ describe("tapOn iOS multi-panel screen size", () => {
     });
   });
 
-  test("multi-panel overflow without pixels differs from the flag-less selector viewport", () => {
+  test("multi-panel overflow without pixels requires caller context on an unprojected tree", () => {
     const hierarchy = sparseDuoHierarchy();
     expect(extractHierarchyScreenSize(hierarchy)).toEqual({ width: 669, height: 951 });
     expect(extractHierarchyScreenSize(hierarchy, true)).toEqual({ width: 951, height: 669 });
@@ -180,7 +185,7 @@ describe("tapOn iOS multi-panel screen size", () => {
       height: 669,
     });
     const projectedAgain = projectActionableHierarchy("ios", projected, true);
-    expect(resolveElementScreenSize(projectedAgain)).toEqual({ width: 951, height: 669 });
+    expect(screenSizeForOffscreenCheck(projectedAgain)).toEqual({ width: 951, height: 669 });
 
     const capture = new DefaultHierarchyCapture(
       "ios",

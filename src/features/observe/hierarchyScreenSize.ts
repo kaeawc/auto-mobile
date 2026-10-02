@@ -109,6 +109,17 @@ export function extractHierarchyScreenSize(
   viewHierarchy: ViewHierarchyResult | undefined,
   iosMultiPanel = false,
 ): { width: number; height: number } | null {
+  return (
+    extractHierarchyRootScreenSize(viewHierarchy, iosMultiPanel) ??
+    (viewHierarchy?.hierarchy ? captureMetadataSize(viewHierarchy) : null)
+  );
+}
+
+/** Resolve only application/root geometry, without the capture metadata fallback. */
+export function extractHierarchyRootScreenSize(
+  viewHierarchy: ViewHierarchyResult | undefined,
+  iosMultiPanel = false,
+): { width: number; height: number } | null {
   const hierarchy = viewHierarchy?.hierarchy;
   if (!hierarchy) {
     return null;
@@ -136,7 +147,7 @@ export function extractHierarchyScreenSize(
         : { width, height };
     }
   }
-  return captureMetadataSize(viewHierarchy!);
+  return null;
 }
 
 function captureMetadataSize(

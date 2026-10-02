@@ -58,7 +58,8 @@ import {
 
 export type { DeviceClockState, SetDeviceClockInput } from "./DeviceClock";
 
-export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
+export const doNotDisturbModeSchema = z.enum(["off", "none", "priority", "alarms"]);
+export type DoNotDisturbMode = z.infer<typeof doNotDisturbModeSchema>;
 
 /**
  * Machine-readable description of how faithfully a platform can apply a
@@ -112,7 +113,15 @@ export interface BiometricEnrollmentState {
  * identical to `none` and would only be a no-op that confusingly disabled Wi-Fi;
  * use `none` for a clean/fast link — issue #6012 review.)
  */
-export type NetworkConditionProfile = "none" | "offline" | "veryBad" | "2g" | "3g" | "4g";
+export const networkConditionProfileSchema = z.enum([
+  "none",
+  "offline",
+  "veryBad",
+  "2g",
+  "3g",
+  "4g",
+]);
+export type NetworkConditionProfile = z.infer<typeof networkConditionProfileSchema>;
 
 /**
  * How faithfully a platform can apply a requested network condition:

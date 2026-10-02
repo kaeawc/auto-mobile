@@ -1,3 +1,12 @@
+import {
+  pressButtonResultSchema,
+  wakeAndUnlockResultSchema,
+  launchAppResultSchema,
+  terminateAppResultSchema,
+  getDeviceStateResultSchema,
+  setDeviceStateResultSchema,
+} from "../../src/server/toolOutputSchemas";
+import type { DeviceStateResult } from "../../src/features/utility/DeviceState";
 import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
@@ -643,4 +652,185 @@ describe("observation arms advertise observationId resource join keys", () => {
       expect(keyOrder.indexOf("required")).toBeLessThan(keyOrder.indexOf("additionalProperties"));
     }
   });
+});
+
+const lifecycleSchemas = [
+  pressButtonResultSchema,
+  wakeAndUnlockResultSchema,
+  launchAppResultSchema,
+  terminateAppResultSchema,
+  getDeviceStateResultSchema,
+  setDeviceStateResultSchema,
+];
+test.each(lifecycleSchemas)(
+  "lifecycle object schemas require only message and permit extra variant metadata",
+  (schema) => {
+    expect(toJSONSchema(schema).required).toEqual(["message"]);
+    expect(schema.parse({ message: "Result", futureMetadata: true })).toEqual({
+      message: "Result",
+      futureMetadata: true,
+    });
+    expect(schema.safeParse({ success: true }).success).toBe(false);
+  },
+);
+
+const fieldVariants: Array<Partial<DeviceStateResult>> = [
+  { clock: { supported: false, capability: "unsupported", error: "unsupported" } },
+  { clock: { supported: true, capability: "full", error: "probe failed" } },
+  ...(["changed", "unchanged", "restored"] as const).map((outcome) => ({
+    clock: { supported: true, capability: "full" as const, verified: true, outcome },
+  })),
+  {
+    doNotDisturb: {
+      supported: true,
+      capability: "full",
+      enabled: true,
+      mode: "priority",
+      verified: true,
+    },
+  },
+  {
+    doNotDisturb: {
+      supported: true,
+      capability: "binary",
+      requestedMode: "alarms",
+      appliedMode: "none",
+      bestEffort: true,
+    },
+  },
+  {
+    doNotDisturb: {
+      supported: false,
+      capability: "unsupported",
+      requestedMode: "off",
+      verified: false,
+      error: "unsupported",
+    },
+  },
+  { doNotDisturb: { supported: true, capability: "full", error: "failed" } },
+  { doNotDisturb: { supported: true, capability: "full", verified: false, warning: "mismatch" } },
+  { biometrics: { supported: true, enrollment: "enrolled", verified: true } },
+  {
+    biometrics: {
+      supported: false,
+      enrollment: "not_enrolled",
+      verified: false,
+      error: "unsupported",
+    },
+  },
+  { biometrics: { supported: true, verified: false, error: "read failed" } },
+  { connectivity: { supported: false, verified: false, error: "unsupported" } },
+  {
+    connectivity: {
+      supported: true,
+      wifiEnabled: false,
+      verified: true,
+      rawValues: { wifiEnabled: "0" },
+    },
+  },
+  { connectivity: { supported: true, airplaneMode: true, warning: "partial read" } },
+  { connectivity: { supported: true, verified: false, warning: "write mismatch" } },
+  { connectivity: { supported: true, error: "read failed" } },
+  {
+    networkCondition: {
+      supported: false,
+      capability: "unsupported",
+      requestedProfile: "offline",
+      verified: false,
+      error: "unsupported",
+    },
+  },
+  { networkCondition: { supported: true, capability: "full", profile: "none", verified: true } },
+  {
+    networkCondition: {
+      supported: true,
+      capability: "partial",
+      appliedProfile: "3g",
+      warning: "cellular only",
+    },
+  },
+  {
+    networkCondition: {
+      supported: true,
+      capability: "partial",
+      verified: false,
+      error: "reset failed",
+    },
+  },
+  {
+    networkCondition: {
+      supported: true,
+      capability: "full",
+      rawStatus: "speed: full",
+      observedValues: { delayMs: 0 },
+    },
+  },
+  { location: { supported: false, error: "unsupported" } },
+  {
+    location: {
+      supported: true,
+      error: "command failed",
+      previousRoute: { endedReason: "failed", lastError: "emit failed" },
+    },
+  },
+  {
+    location: {
+      supported: true,
+      mode: "static",
+      latitude: 0,
+      longitude: 1,
+      previousRoute: { endedReason: "replaced" },
+    },
+  },
+  {
+    location: {
+      supported: true,
+      mode: "route",
+      waypointCount: 2,
+      loop: false,
+      expectedDurationMs: 1000,
+      previousRoute: { endedReason: "completed" },
+    },
+  },
+  {
+    location: {
+      supported: true,
+      mode: "stop",
+      stopped: true,
+      previousRoute: { endedReason: "stopped" },
+    },
+  },
+  { location: { supported: true, mode: "stop", stopped: false } },
+];
+test.each(fieldVariants)("device-state field variant validates (%j)", (fields) => {
+  const payload = {
+    message: "Result",
+    success: true,
+    deviceId: "fake",
+    platform: "android",
+    ...fields,
+  };
+  expect(getDeviceStateResultSchema.parse(payload)).toEqual(payload);
+  expect(setDeviceStateResultSchema.parse(payload)).toEqual(payload);
+});
+
+test("device-state output checks shared enums and field types", () => {
+  expect(
+    setDeviceStateResultSchema.safeParse({
+      message: "Result",
+      biometrics: { supported: true, enrollment: "invalid" },
+    }).success,
+  ).toBe(false);
+  expect(
+    setDeviceStateResultSchema.safeParse({
+      message: "Result",
+      networkCondition: { supported: true, profile: "5g" },
+    }).success,
+  ).toBe(false);
+  expect(
+    getDeviceStateResultSchema.safeParse({
+      message: "Result",
+      connectivity: { supported: true, wifiEnabled: "off" },
+    }).success,
+  ).toBe(false);
 });

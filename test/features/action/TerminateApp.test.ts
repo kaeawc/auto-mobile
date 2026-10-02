@@ -1,3 +1,12 @@
+import {
+  beforeEach as beforeOutputSchema,
+  afterEach as afterOutputSchema,
+  spyOn as spyOnOutputSchema,
+} from "bun:test";
+import { terminateAppResultSchema } from "../../../src/server/toolOutputSchemas";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   DefaultDeviceWindowCacheInvalidator,
@@ -752,3 +761,24 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     assertWellFormedPerfTree(result);
   });
 });
+
+// Validate the actual fake-backed branch results before and after finalization.
+const executeForOutputSchema = TerminateApp.prototype.execute;
+let executeOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  executeOutputSchemaSpy = spyOnOutputSchema(TerminateApp.prototype, "execute").mockImplementation(
+    async function (this: TerminateApp, ...args: Parameters<TerminateApp["execute"]>) {
+      const result = await executeForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(terminateAppResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "terminateApp",
+        outputSchema: terminateAppResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(terminateAppResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterOutputSchema(() => executeOutputSchemaSpy.mockRestore());

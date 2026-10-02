@@ -1,3 +1,15 @@
+import {
+  beforeEach as beforeOutputSchema,
+  afterEach as afterOutputSchema,
+  spyOn as spyOnOutputSchema,
+} from "bun:test";
+import {
+  setDeviceStateResultSchema,
+  getDeviceStateResultSchema,
+} from "../../../src/server/toolOutputSchemas";
+import { finalizeToolResponse } from "../../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
+import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import {
@@ -963,3 +975,45 @@ describe("DeviceState", () => {
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 });
+
+// Validate the actual fake-backed branch results before and after finalization.
+const getStateForOutputSchema = DeviceState.prototype.getState;
+let getStateOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  getStateOutputSchemaSpy = spyOnOutputSchema(DeviceState.prototype, "getState").mockImplementation(
+    async function (this: DeviceState, ...args: Parameters<DeviceState["getState"]>) {
+      const result = await getStateForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(getDeviceStateResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "getDeviceState",
+        outputSchema: getDeviceStateResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(getDeviceStateResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterOutputSchema(() => getStateOutputSchemaSpy.mockRestore());
+
+// Validate the actual fake-backed branch results before and after finalization.
+const setStateForOutputSchema = DeviceState.prototype.setState;
+let setStateOutputSchemaSpy: ReturnType<typeof spyOnOutputSchema>;
+beforeOutputSchema(() => {
+  setStateOutputSchemaSpy = spyOnOutputSchema(DeviceState.prototype, "setState").mockImplementation(
+    async function (this: DeviceState, ...args: Parameters<DeviceState["setState"]>) {
+      const result = await setStateForOutputSchema.apply(this, args);
+      const payload = { message: "Result", ...result };
+      expect(setDeviceStateResultSchema.parse(payload)).toBeDefined();
+      const finalized = finalizeToolResponse(createStructuredToolResponse(payload), {
+        name: "setDeviceState",
+        outputSchema: setDeviceStateResultSchema,
+        artifactWriter: new FakeArtifactWriter(),
+      });
+      expect(setDeviceStateResultSchema.parse(finalized.structuredContent)).toBeDefined();
+      return result;
+    },
+  );
+});
+afterOutputSchema(() => setStateOutputSchemaSpy.mockRestore());

@@ -97,6 +97,16 @@ describe("spilled output-schema residue contract (#6950)", () => {
   test("covers multiple registered object output schemas", () => {
     expect(OBJECT_OUTPUT_TOOLS.length).toBeGreaterThan(1);
     const names = OBJECT_OUTPUT_TOOLS.map(({ tool }) => tool.name);
+    for (const name of [
+      "wakeAndUnlock",
+      "pressButton",
+      "launchApp",
+      "terminateApp",
+      "getDeviceState",
+      "setDeviceState",
+    ]) {
+      expect(names).toContain(name);
+    }
     expect(names).toContain("rotate");
     expect(names).toContain("setPosture");
   });

@@ -1,3 +1,4 @@
+import { launchAppResultSchema, terminateAppResultSchema } from "./toolOutputSchemas";
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import {
@@ -927,7 +928,7 @@ export function registerAppTools() {
       const safeResult = result.error
         ? { ...result, error: redactLaunchMessage(result.error, mutationToken) }
         : result;
-      return createJSONToolResponse(buildLaunchAppResponse(args.appId, safeResult));
+      return createStructuredToolResponse(buildLaunchAppResponse(args.appId, safeResult));
     } catch (error) {
       if (mutationToken) {
         iosMutationTokens.clear(device.deviceId, args.appId, mutationToken);
@@ -977,7 +978,7 @@ export function registerAppTools() {
         throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
       }
 
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: `Terminated app ${args.appId}`,
         observation: result.observation,
         ...result,
@@ -1142,7 +1143,7 @@ export function registerAppTools() {
     "Launch app by package name. On Android an app that is already in the foreground returns success with alreadyForeground:true plus the observation, not an error; iOS re-launches it and returns an ordinary success without that marker.",
     launchAppSchema,
     launchAppHandler,
-    { defaultEnabled: true, transportRecovery: "connect" },
+    { defaultEnabled: true, transportRecovery: "connect", outputSchema: launchAppResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1150,7 +1151,7 @@ export function registerAppTools() {
     "Terminate app by package name",
     terminateAppSchema,
     terminateAppHandler,
-    { defaultEnabled: true },
+    { defaultEnabled: true, outputSchema: terminateAppResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(

@@ -954,3 +954,43 @@ The separate optional `storeRoute` is `sdk`, `container-plist`, or `defaults`.
 Simulator-global `defaults` domains remain available to direct internal calls
 without `appId`; their `resolvedStore` is the domain name, which cannot start with
 `-`. The MCP input schema requires `appId`.
+
+### Device lifecycle structured results
+
+`wakeAndUnlock`, `pressButton`, `launchApp`, `terminateApp`, `getDeviceState`, and
+`setDeviceState` declare output schemas and return the same JSON payload in text
+content and `structuredContent`. Ordinary clients receive `structuredContent`
+unless `--tool-results-no-structured-content` is enabled. Each schema requires
+`message`; variant fields are optional, and additional fields are accepted.
+
+`wakeAndUnlock` reports `success`, `platform`, `wasAsleep`, `wasLocked`, and
+`unlocked`, with optional `secure`, `usedRecordedCredential`, `error`, and
+`warning`. Returned unlock failures do not set MCP `isError`; operational errors
+may throw.
+
+`pressButton` reports `success`, `button`, and `keyCode`, with optional `error`,
+`warnings`, `staleDisplay`, `effect`, and finalized `observation`/`observationDiff`.
+Returned failures retain their structured payload and set MCP `isError`.
+
+`launchApp` reports `success` and `packageName`, with optional `activityName`,
+`userId`, `pid`, `alreadyForeground`, `foregroundActivityPackage`, `verifiedBy`,
+`verified`, `verifyFailureReason`, `observedAppId`, and action observation metadata.
+A stale launch observation may be replaced by `observationOmitted` containing
+`reason`, `expectedPackage`, and `reportedPackages`. Failed launches throw
+actionable errors; a successful launch with unverified foreground still returns
+its verification fields.
+
+`terminateApp` reports `success`, `packageName`, and `wasForeground`, with optional
+`wasInstalled`, `wasRunning`, `userId`, and action observation metadata. Already
+absent or stopped apps are successful no-ops. Failed terminations throw actionable
+errors.
+
+`getDeviceState` and `setDeviceState` report `success`, `deviceId`, and `platform`,
+with optional `error` and requested field results: `doNotDisturb`, `connectivity`,
+`biometrics`, `networkCondition`, `clock`, and (writes only) `location`. Reads may
+also include `displays` and `unsupported` field names. Field results report
+`supported` and optional verification, capability, method, values, warning, or
+error metadata. Clock writes can report `outcome` as `changed`, `unchanged`, or
+`restored`; degraded network writes report capability `partial`. Setter TTL
+rejection and biometric capture failures also return structured failure payloads
+without MCP `isError`.

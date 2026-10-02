@@ -111,6 +111,8 @@ import {
 } from "./elementSelectorSchemas";
 import {
   keyboardResultSchema,
+  pressButtonResultSchema,
+  wakeAndUnlockResultSchema,
   openLinkResultSchema,
   rotateResultSchema,
   setPostureResultSchema,
@@ -2149,7 +2151,7 @@ export async function pressButtonHandler(
     const message = result.success
       ? `Pressed button ${args.button}`
       : `Failed to press button ${args.button}: ${result.error || "unknown error"}`;
-    const response = createJSONToolResponse({
+    const response = createStructuredToolResponse({
       message,
       observation: result.observation,
       ...result,
@@ -2902,7 +2904,7 @@ export function registerInteractionTools() {
         ? "Device unlocked"
         : "Device awake"
       : `Failed to unlock device: ${result.error ?? "unknown error"}`;
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: result.warning ? `${message}. Warning: ${result.warning}` : message,
       ...result,
     });
@@ -3147,7 +3149,7 @@ export function registerInteractionTools() {
     "Press a device or navigation button. On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS.",
     pressButtonSchema,
     pressButtonHandler,
-    { defaultEnabled: true, supportsProgress: true },
+    { outputSchema: pressButtonResultSchema, defaultEnabled: true, supportsProgress: true },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -3171,7 +3173,7 @@ export function registerInteractionTools() {
     "Wake a device and unlock its keyguard. Android: swipe lock or secure PIN via `pin`; iOS: wake + swipe-dismiss (pin ignored).",
     wakeAndUnlockSchema,
     wakeAndUnlockHandler,
-    { defaultEnabled: true },
+    { outputSchema: wakeAndUnlockResultSchema, defaultEnabled: true },
   );
 
   ToolRegistry.registerDeviceAware(

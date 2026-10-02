@@ -1,3 +1,11 @@
+import { deviceClockInputSchema } from "../features/utility/DeviceClock";
+import {
+  biometricEnrollmentSchema,
+  doNotDisturbModeSchema,
+  networkConditionProfileSchema,
+  DEVICE_STATE_READABLE_FIELDS,
+} from "../features/utility/DeviceState";
+import { platformSchema } from "./toolSchemaHelpers";
 import { z } from "zod/v4";
 import { withJsonSchemaOverride, withPostFlattenJsonSchemaOverride } from "./toolSchemaHelpers";
 
@@ -1246,6 +1254,206 @@ export const observationOutputSchema = z.union([
   observationSummarySchema,
   toolOutputArtifactMetadataSchema,
 ]);
+
+/** Shared optional action metadata, including finalized observation variants. */
+const lifecycleActionOutputFields = {
+  message: z.string(),
+  success: z.boolean().optional(),
+  observation: observationOutputSchema.optional(),
+  observationDiff: observationDiffMetadataSchema.optional(),
+  effect: tapEffectSchema.optional(),
+  error: z.string().optional(),
+  staleDisplay: staleDisplaySchema.optional(),
+  warnings: z.array(z.string()).optional(),
+};
+
+export const pressButtonResultSchema = z
+  .object({
+    ...lifecycleActionOutputFields,
+    button: z.string().optional(),
+    keyCode: z.number().optional(),
+  })
+  .passthrough();
+
+export const wakeAndUnlockResultSchema = z
+  .object({
+    message: z.string(),
+    success: z.boolean().optional(),
+    platform: platformSchema.optional(),
+    wasAsleep: z.boolean().optional(),
+    wasLocked: z.boolean().optional(),
+    secure: z.boolean().optional(),
+    unlocked: z.boolean().optional(),
+    usedRecordedCredential: z.boolean().optional(),
+    error: z.string().optional(),
+    warning: z.string().optional(),
+  })
+  .passthrough();
+
+export const launchAppResultSchema = z
+  .object({
+    ...lifecycleActionOutputFields,
+    packageName: z.string().optional(),
+    activityName: z.string().optional(),
+    userId: z.number().optional(),
+    pid: z.number().optional(),
+    alreadyForeground: z.boolean().optional(),
+    foregroundActivityPackage: z.string().optional(),
+    verifiedBy: z.string().optional(),
+    verified: z.boolean().optional(),
+    verifyFailureReason: z.string().optional(),
+    observedAppId: z.string().optional(),
+    observationOmitted: z
+      .object({
+        reason: z.literal("stale_launch_observation"),
+        expectedPackage: z.string(),
+        reportedPackages: z.string(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const terminateAppResultSchema = z
+  .object({
+    ...lifecycleActionOutputFields,
+    packageName: z.string().optional(),
+    wasInstalled: z.boolean().optional(),
+    wasRunning: z.boolean().optional(),
+    wasForeground: z.boolean().optional(),
+    userId: z.number().optional(),
+  })
+  .passthrough();
+
+const deviceStateFieldOutputFields = {
+  supported: z.boolean(),
+  verified: z.boolean().optional(),
+  method: z.string().optional(),
+  warning: z.string().optional(),
+  error: z.string().optional(),
+};
+const networkConditionValuesOutputSchema = z
+  .object({
+    delayMs: z.number(),
+    downloadKbps: z.number(),
+    uploadKbps: z.number(),
+    packetLossPercent: z.number(),
+  })
+  .passthrough();
+
+const deviceStateOutputFields = {
+  message: z.string(),
+  success: z.boolean().optional(),
+  deviceId: z.string().optional(),
+  platform: platformSchema.optional(),
+  error: z.string().optional(),
+  displays: z
+    .object({
+      panels: z.array(
+        z
+          .object({
+            key: z.string(),
+            role: observationDisplaySchema.unwrap().shape.role,
+            sizePx: z.object({ width: z.number(), height: z.number() }).passthrough(),
+            scale: z.number().optional(),
+          })
+          .passthrough(),
+      ),
+      postures: z.array(observationDisplaySchema.unwrap().shape.posture),
+    })
+    .passthrough()
+    .optional(),
+  unsupported: z.array(z.enum(DEVICE_STATE_READABLE_FIELDS)).optional(),
+  doNotDisturb: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      enabled: z.boolean().optional(),
+      mode: doNotDisturbModeSchema.optional(),
+      rawValue: z.string().optional(),
+      bestEffort: z.boolean().optional(),
+      capability: z.string().optional(),
+      requestedMode: doNotDisturbModeSchema.optional(),
+      appliedMode: doNotDisturbModeSchema.optional(),
+    })
+    .passthrough()
+    .optional(),
+  biometrics: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      enrollment: biometricEnrollmentSchema.optional(),
+    })
+    .passthrough()
+    .optional(),
+  connectivity: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      airplaneMode: z.boolean().optional(),
+      wifiEnabled: z.boolean().optional(),
+      bluetoothEnabled: z.boolean().optional(),
+      locationEnabled: z.boolean().optional(),
+      rawValues: z.record(z.string(), z.string()).optional(),
+    })
+    .passthrough()
+    .optional(),
+  networkCondition: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      capability: z.string().optional(),
+      profile: networkConditionProfileSchema.optional(),
+      requestedProfile: networkConditionProfileSchema.optional(),
+      appliedProfile: networkConditionProfileSchema.optional(),
+      values: networkConditionValuesOutputSchema.optional(),
+      observedValues: networkConditionValuesOutputSchema.partial().optional(),
+      expiresInSeconds: z.number().optional(),
+      rawStatus: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+  location: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      mode: z.string().optional(),
+      latitude: z.number().optional(),
+      longitude: z.number().optional(),
+      stopped: z.boolean().optional(),
+      previousRoute: z
+        .object({ endedReason: z.string(), lastError: z.string().optional() })
+        .passthrough()
+        .optional(),
+      waypointCount: z.number().optional(),
+      totalDistanceMeters: z.number().optional(),
+      expectedDurationMs: z.number().optional(),
+      loop: z.boolean().optional(),
+      updateIntervalMs: z.number().optional(),
+    })
+    .passthrough()
+    .optional(),
+  clock: z
+    .object({
+      ...deviceStateFieldOutputFields,
+      capability: z.string(),
+      instant: z.string().optional(),
+      automaticTime: z.boolean().optional(),
+      mode: z
+        .union([
+          deviceClockInputSchema.options[0].shape.mode,
+          deviceClockInputSchema.options[1].shape.mode,
+          deviceClockInputSchema.options[2].shape.mode,
+        ])
+        .optional(),
+      requestedInstant: z.string().optional(),
+      appliedInstant: z.string().optional(),
+      readBack: z.boolean().optional(),
+      toleranceMs: z.number().optional(),
+      outcome: z.string().optional(),
+    })
+    .passthrough()
+    .optional(),
+};
+
+/** Reads and writes share field states; early failures carry only identity and error. */
+export const getDeviceStateResultSchema = z.object(deviceStateOutputFields).passthrough();
+export const setDeviceStateResultSchema = z.object(deviceStateOutputFields).passthrough();
 
 /** Rotation results include failures and successful orientation no-ops. */
 export const rotateResultSchema = z

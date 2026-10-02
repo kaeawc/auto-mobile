@@ -1,3 +1,4 @@
+import { getDeviceStateResultSchema, setDeviceStateResultSchema } from "./toolOutputSchemas";
 import { deviceClockInputSchema, validateDeviceClockInput } from "../features/utility/DeviceClock";
 import { runSessionClockMutation } from "./sessionClock";
 import { toActionableError } from "../models/ActionableError";
@@ -8,6 +9,8 @@ import { SystemConfigurationManager } from "../features/utility/SystemConfigurat
 import {
   DeviceState,
   biometricEnrollmentSchema,
+  doNotDisturbModeSchema,
+  networkConditionProfileSchema,
   DEVICE_STATE_READABLE_FIELDS,
   MAX_NETWORK_CONDITION_TTL_SECONDS,
   networkConditionInputDegrades,
@@ -146,7 +149,7 @@ export const changeLocalizationSchema = withAppIdAliases(
 const doNotDisturbStateInputSchema = z
   .object({
     enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),
-    mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode"),
+    mode: doNotDisturbModeSchema.optional().describe("Do Not Disturb mode"),
   })
   .refine((values) => values.enabled !== undefined || values.mode !== undefined, {
     message: "Provide enabled or mode for doNotDisturb",
@@ -243,8 +246,7 @@ function networkConditionTtlIsUnenforceable(
 
 const networkConditionInputSchema = z
   .object({
-    profile: z
-      .enum(["none", "offline", "veryBad", "2g", "3g", "4g"])
+    profile: networkConditionProfileSchema
       .optional()
       .describe(
         "Device-wide network profile. Documented values: none=unshaped, offline=no data, " +
@@ -862,7 +864,7 @@ export function registerUtilityTools() {
         hasLifecycleOwner,
       )
     ) {
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: NETWORK_CONDITION_TTL_UNENFORCEABLE_ERROR,
         success: false,
         deviceId: device.deviceId,
@@ -902,7 +904,7 @@ export function registerUtilityTools() {
         },
         capture.failure,
       );
-      return createJSONToolResponse({
+      return createStructuredToolResponse({
         message: result.error ?? "Failed to read biometric enrollment state",
         ...result,
       });
@@ -926,7 +928,7 @@ export function registerUtilityTools() {
       mutation,
     );
 
-    return createJSONToolResponse({
+    return createStructuredToolResponse({
       message: result.success
         ? "Applied device state"
         : (result.error ?? "Failed to apply device state"),
@@ -965,7 +967,7 @@ export function registerUtilityTools() {
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     getDeviceStateSchema,
     getDeviceStateHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: getDeviceStateResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(
@@ -974,6 +976,6 @@ export function registerUtilityTools() {
       " Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     setDeviceStateSchema,
     setDeviceStateHandler,
-    { defaultEnabled: false },
+    { defaultEnabled: false, outputSchema: setDeviceStateResultSchema },
   );
 }

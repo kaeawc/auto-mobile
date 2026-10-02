@@ -112,21 +112,49 @@ function collectDicts(node: PlistValue | undefined, out: PlistDict[]): void {
 
 /**
  * Find the settings dict among every `<dict>` in the archive's `$objects`
- * graph. The `$objects` array is flat and order-dependent, so more than one
- * dict can carry an `authorizationStatus` key (issue #6583); among those
- * candidates, pick the one that also carries the most other known settings
- * keys as siblings, rather than trusting document order.
+ * graph. More than one dict can carry an `authorizationStatus` key (issue
+ * #6583). Rank candidates by known settings key count, then total key count,
+ * then lexicographically greatest canonical content. Recursively sorted dict
+ * keys and type-tagged values make ties independent of document order; equal
+ * content is interchangeable. Array element order remains meaningful.
  */
 function findSettingsDict(root: PlistValue): PlistDict | undefined {
   const dicts: PlistDict[] = [];
   collectDicts(root, dicts);
   const candidates = dicts.filter((dict) => dict.get("authorizationStatus") !== undefined);
+  const score = (dict: PlistDict) =>
+    SETTINGS_KEYS.filter((key) => dict.get(key) !== undefined).length;
+  const canonical = (value: PlistValue): string => {
+    if (value instanceof Map) {
+      const entries = [...value.entries()]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, child]) => [key, canonical(child)]);
+      return JSON.stringify(["dict", entries]);
+    }
+    if (Array.isArray(value)) {
+      return JSON.stringify(["array", value.map(canonical)]);
+    }
+    if (Buffer.isBuffer(value)) {
+      return JSON.stringify(["data", value.toString("base64")]);
+    }
+    if (value instanceof Date) {
+      return JSON.stringify(["date", String(value.getTime())]);
+    }
+    if (typeof value === "object") {
+      // The remaining plist type is PlistReal; keep it distinct from integers.
+      return JSON.stringify(["real", Object.is(value.value, -0) ? "-0" : String(value.value)]);
+    }
+    return JSON.stringify([typeof value, Object.is(value, -0) ? "-0" : String(value)]);
+  };
   return candidates.reduce<PlistDict | undefined>((best, dict) => {
     if (!best) {
       return dict;
     }
-    const score = (d: PlistDict) => SETTINGS_KEYS.filter((key) => d.get(key) !== undefined).length;
-    return score(dict) > score(best) ? dict : best;
+    const rankDifference = score(dict) - score(best) || dict.size - best.size;
+    if (rankDifference !== 0) {
+      return rankDifference > 0 ? dict : best;
+    }
+    return canonical(dict) > canonical(best) ? dict : best;
   }, undefined);
 }
 

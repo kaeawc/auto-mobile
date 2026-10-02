@@ -2104,6 +2104,11 @@ export class SessionManager {
     return this.isCurrentSession(session) && !this.releasingSessions.has(session);
   }
 
+  /** Resolve an admitted release even after ordinary session lookup hides its identity. */
+  getReleasingSession(sessionId: string): Session | null {
+    return this.releasePromises.get(sessionId)?.session ?? null;
+  }
+
   /** Whether this is the newest published, releasing, or finalized incarnation for its UUID. */
   isLatestSessionIdentity(
     session: Session,
@@ -4117,6 +4122,9 @@ export class SessionManager {
     const session = this.getSession(sessionId);
     if (!session) {
       logger.warn(`Cannot record heartbeat for session ${sessionId}: not found`);
+      return;
+    }
+    if (!this.isAdmittedForAutomation(session)) {
       return;
     }
     const now = this.timer.now();

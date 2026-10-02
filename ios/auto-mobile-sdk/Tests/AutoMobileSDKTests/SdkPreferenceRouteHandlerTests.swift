@@ -172,6 +172,72 @@ final class SdkPreferenceRouteHandlerTests: XCTestCase {
         )
     }
 
+    func testRedactionFlagPreservesTypesOnGetAndEntries() throws {
+        let driver = FakeUserDefaultsDriver()
+        let fixtures: [(key: String, value: Any, type: KeyValueType)] = [
+            ("private_string", "secret", .string),
+            ("private_int", 42, .int),
+            ("private_double", 3.5, .double),
+            ("private_bool", true, .bool),
+            ("private_date", Date(timeIntervalSince1970: 1_700_000_000.123), .date),
+            ("private_data", Data([1, 2, 3]), .data),
+            ("access_token", "secret", .string),
+        ]
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(sensitiveKeys: Set(fixtures.map(\.key))))
+        for fixture in fixtures {
+            driver.setValue(suiteName: "duoStore", key: fixture.key, value: fixture.value, type: fixture.type)
+        }
+        let handler = resolvedHandler(driver)
+        let response = try handler.handle(body: request("entries"))
+        XCTAssertEqual(response.statusCode, 200)
+        let entries = try XCTUnwrap(payload(response)["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries.count, fixtures.count)
+        for fixture in fixtures {
+            let getResponse = try handler.handle(body: request("get", key: fixture.key))
+            XCTAssertEqual(getResponse.statusCode, 200)
+            let getEntry = try XCTUnwrap(payload(getResponse)["entry"] as? [String: Any])
+            let listedEntry = try XCTUnwrap(entries.first { $0["key"] as? String == fixture.key })
+            for entry in [getEntry, listedEntry] {
+                XCTAssertEqual(entry["key"] as? String, fixture.key)
+                XCTAssertEqual(entry["value"] as? String, "[REDACTED]")
+                let wireType = fixture.type == .bool ? "BOOLEAN" : fixture.type.rawValue.uppercased()
+                XCTAssertEqual(entry["type"] as? String, wireType)
+                XCTAssertEqual(entry["redacted"] as? Bool, true)
+                XCTAssertEqual(Set(entry.keys), Set(["key", "value", "type", "redacted"]))
+            }
+        }
+    }
+
+    func testUnredactedEntriesOmitFlagIncludingLiteralSentinelAndSensitiveNil() throws {
+        let driver = FakeUserDefaultsDriver()
+        driver.setValue(suiteName: "duoStore", key: "literal", value: "[REDACTED]", type: .string)
+        driver.setValue(suiteName: "duoStore", key: "normal", value: "hello", type: .string)
+        driver.setValue(suiteName: "duoStore", key: "configured_nil", value: nil, type: .string)
+        DatabaseInspector.shared.configure(StorageInspectionConfiguration(sensitiveKeys: ["configured_nil"]))
+        let handler = resolvedHandler(driver)
+        let response = try handler.handle(body: request("entries"))
+        XCTAssertEqual(response.statusCode, 200)
+        let entries = try XCTUnwrap(payload(response)["entries"] as? [[String: Any]])
+        XCTAssertEqual(entries.count, 3)
+        for key in ["literal", "normal", "configured_nil"] {
+            let getResponse = try handler.handle(body: request("get", key: key))
+            XCTAssertEqual(getResponse.statusCode, 200)
+            let getEntry = try XCTUnwrap(payload(getResponse)["entry"] as? [String: Any])
+            let listedEntry = try XCTUnwrap(entries.first { $0["key"] as? String == key })
+            for entry in [getEntry, listedEntry] {
+                XCTAssertFalse(entry.keys.contains("redacted"))
+                XCTAssertEqual(entry["type"] as? String, "STRING")
+                if key == "configured_nil" {
+                    XCTAssertFalse(entry.keys.contains("value"))
+                    XCTAssertEqual(Set(entry.keys), Set(["key", "type"]))
+                } else {
+                    XCTAssertEqual(entry["value"] as? String, key == "literal" ? "[REDACTED]" : "hello")
+                    XCTAssertEqual(Set(entry.keys), Set(["key", "value", "type"]))
+                }
+            }
+        }
+    }
+
     private func payload(_ response: SdkRouteResponse) throws -> [String: Any] {
         try XCTUnwrap(JSONSerialization.jsonObject(with: response.body) as? [String: Any])
     }

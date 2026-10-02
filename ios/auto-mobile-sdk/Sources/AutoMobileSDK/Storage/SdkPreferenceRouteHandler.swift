@@ -125,7 +125,10 @@
             let sensitive = StorageInspectionAccess.isSensitive(
                 pair.key, configured: DatabaseInspector.shared.inspectionConfiguration.sensitiveKeys
             )
-            return SdkPreferenceEntry(pair, value: sensitive && pair.value != nil ? "[REDACTED]" : pair.value)
+            let redacted = sensitive && pair.value != nil
+            return SdkPreferenceEntry(
+                pair, value: redacted ? "[REDACTED]" : pair.value, redacted: redacted ? true : nil
+            )
         }
 
         private static func parse(_ value: String, type: String) -> (value: Any, type: KeyValueType)? {
@@ -218,11 +221,13 @@
         let key: String
         let value: String?
         let type: String
+        let redacted: Bool?
 
-        init(_ pair: KeyValuePair, value: String?) {
+        init(_ pair: KeyValuePair, value: String?, redacted: Bool?) {
             key = pair.key
             self.value = value
             type = pair.type.rawValue.uppercased() == "BOOL" ? "BOOLEAN" : pair.type.rawValue.uppercased()
+            self.redacted = redacted
         }
     }
 

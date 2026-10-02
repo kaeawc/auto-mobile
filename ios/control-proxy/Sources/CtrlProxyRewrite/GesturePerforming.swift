@@ -27,6 +27,10 @@ public protocol GesturePerforming: Sendable {
     /// Tap at coordinates with optional duration for long press
     func tap(x: Double, y: Double, duration: TimeInterval) throws
 
+    /// Opt-in seam: existing conformers retain their plain tap through the default implementation.
+    /// The live performer overrides this to sample immediately before delivery, inside its guard.
+    func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics
+
     /// Double tap at coordinates
     func doubleTap(x: Double, y: Double) throws
 
@@ -185,6 +189,14 @@ public protocol GesturePerforming: Sendable {
 
 extension GesturePerforming {
     public func invalidateCaretMemo() {}
+
+    public func tapWithDiagnostics(x: Double, y: Double, durationMs: Int) throws -> TapDiagnostics {
+        try tap(x: x, y: y, duration: TimeInterval(durationMs) / 1000.0)
+        return TapDiagnostics(
+            requested: .init(x: x, y: y, durationMs: durationMs),
+            sampleErrors: ["sampler: unavailable for this GesturePerforming implementation"]
+        )
+    }
 
     public func pressKeyOutcome(key: String, modifiers: [String]) async throws -> PressKeyOutcome {
         try await PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers))

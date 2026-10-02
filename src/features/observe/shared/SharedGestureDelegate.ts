@@ -42,6 +42,11 @@ export class SharedGestureDelegate {
     return {};
   }
 
+  /** iOS overrides this opt-in seam; Android keeps its existing wire. */
+  protected tapDiagnosticParams(): { diagnostics?: true } {
+    return {};
+  }
+
   async requestTapCoordinates(
     x: number,
     y: number,
@@ -65,6 +70,7 @@ export class SharedGestureDelegate {
         duration,
         frameContext,
         ...displayParams,
+        ...this.tapDiagnosticParams(),
       },
       requiredCapability:
         displayParams.displayId === undefined ? undefined : "gesture_display_id_v1",

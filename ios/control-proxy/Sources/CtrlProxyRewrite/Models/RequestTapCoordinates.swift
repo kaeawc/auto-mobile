@@ -10,6 +10,7 @@ public struct RequestTapCoordinates: Decodable, Sendable {
     public var y: Double
     public var duration: Int?
     public var frameContext: String?
+    public var diagnostics: Bool?
 }
 
 extension RequestTapCoordinates: CommandPayload {}

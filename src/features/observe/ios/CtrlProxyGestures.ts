@@ -8,6 +8,7 @@
 import { SharedGestureDelegate } from "../shared/SharedGestureDelegate";
 import type { DelegateContext, GestureTimingResult } from "./types";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { logger, LogLevel } from "../../../utils/logger";
 import { sendCommand } from "../DeviceServiceUtils";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
@@ -17,6 +18,11 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
       roundCoordinates: false,
       includeSwipeTimeoutMs: true,
     });
+  }
+
+  /** Read the daemon's exported logger at request construction, with no signature changes. */
+  protected override tapDiagnosticParams(): { diagnostics?: true } {
+    return logger.getLogLevel() === LogLevel.DEBUG ? { diagnostics: true } : {};
   }
 
   /**

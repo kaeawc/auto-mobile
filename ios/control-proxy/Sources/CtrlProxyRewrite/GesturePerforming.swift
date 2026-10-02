@@ -85,10 +85,10 @@ public protocol GesturePerforming: Sendable {
     func appendText(text: String) throws
 
     /// Set text on a specific element
-    func setText(resourceId: String, text: String) throws
+    func setText(resourceId: String, text: String) async throws
 
     /// Clear text from element or focused field
-    func clearText(resourceId: String?) throws
+    func clearText(resourceId: String?) async throws
 
     /// Select all text
     func selectAll() throws
@@ -102,7 +102,7 @@ public protocol GesturePerforming: Sendable {
     /// and nil for keys without a caret post-condition.
     func pressKey(key: String, modifiers: [String]) throws -> Bool?
     func pressKeyOutcome(key: String, modifiers: [String]) throws -> PressKeyOutcome
-    func keyboard(action: String) throws -> KeyboardActionResult
+    func keyboard(action: String) async throws -> KeyboardActionResult
 
     // MARK: - Clipboard
 

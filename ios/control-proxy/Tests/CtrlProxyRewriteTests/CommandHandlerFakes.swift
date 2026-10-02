@@ -59,6 +59,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var onSwipe: (() -> Void)?
     var multiFingerSwipeCalls = 0
     var pinchCalls = 0
+    var setTextCalls = 0
     var clearTextCalls = 0
     var selectAllCalls = 0
     var imeActionCalls = 0
@@ -119,11 +120,11 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
 
     func typeText(text _: String) throws {}
     func appendText(text _: String) throws {}
-    func setText(resourceId _: String, text _: String) throws {}
-    func clearText(resourceId _: String?) throws { clearTextCalls += 1 }
+    func setText(resourceId _: String, text _: String) async throws { setTextCalls += 1 }
+    func clearText(resourceId _: String?) async throws { clearTextCalls += 1 }
     func selectAll() throws { selectAllCalls += 1 }
     func performImeAction(_: String) throws { imeActionCalls += 1 }
-    func keyboard(action: String) throws -> KeyboardActionResult {
+    func keyboard(action: String) async throws -> KeyboardActionResult {
         switch action {
         case "open": keyboardOpen = true
         case "close": keyboardOpen = false

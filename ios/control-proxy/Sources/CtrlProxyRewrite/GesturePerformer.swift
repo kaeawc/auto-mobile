@@ -26,13 +26,16 @@ import os
 /// `scopedLinkCandidates`, the privacy-resource name maps) are `nonisolated static` so the
 /// macOS test host can call them off the main actor.
 ///
-/// PHASE 8 FIXUP (parity-preserving keeps, not concurrency bugs): the keyboard-focus and
-/// keyboard-visibility polls (`tapAndAwaitKeyboardFocus`, `waitForKeyboardVisibility`) spin
-/// `RunLoop.current.run(until:)` with `Date()`-based deadlines, which blocks the main actor
-/// for up to their timeout. Ported verbatim to hold parity; a follow-up can replace them
-/// with a non-blocking wait.
+/// PHASE 8 FIXUP (partially resolved): only `tapAndAwaitKeyboardFocus` and
+/// `waitForKeyboardVisibility` now await `KeyboardWait` with an injected monotonic `Clock`,
+/// yielding the main actor between probes, with a final re-probe at the focus deadline.
+/// `waitForKeyboardClose` still uses `RunLoop.current.run(until:)` and systemUptime;
+/// the destructive-key post-condition loop still uses `RunLoop.current.run`. Both remain unchanged follow-ups.
+/// The waits honour task cancellation via `CancellationError`, but WebSocketServer's serial
+/// command-chain tasks are unstructured and never cancelled, so cancellation is currently unreachable in production.
 @MainActor
 public final class GesturePerformer: GesturePerforming {
+    private let keyboardClock: any Clock<Duration>
     private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "GesturePerformer")
 
     nonisolated static func consumerUsage(for button: String) throws -> UInt32 {
@@ -460,10 +463,15 @@ public final class GesturePerformer: GesturePerforming {
         /// Cached SpringBoard app reference for system alert handling.
         private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
-        public init(application: XCUIApplication? = nil, elementLocator: ElementLocating) {
+        public init(
+            application: XCUIApplication? = nil,
+            elementLocator: ElementLocating,
+            keyboardClock: any Clock<Duration> = ContinuousClock()
+        ) {
             DeviceRotation.startMonitoring()
             self.application = application
             self.elementLocator = elementLocator
+            self.keyboardClock = keyboardClock
         }
 
         /// `catchingObjCException` for methods that cannot propagate errors: a caught
@@ -642,28 +650,24 @@ public final class GesturePerformer: GesturePerforming {
             element: XCUIElement,
             resourceId: String
         )
-            throws
+            async throws
         {
-            let tapStart = Date()
-            print(
-                "[GesturePerformer] tapAndAwaitKeyboardFocus begin resourceId=\(resourceId) exists=\(element.exists) isHittable=\(element.isHittable) type=\(element.elementType.rawValue)"
+            let result = try await KeyboardWait.focus(
+                clock: keyboardClock,
+                tap: {
+                    try catchingObjCException {
+                        print(
+                            "[GesturePerformer] tapAndAwaitKeyboardFocus begin resourceId=\(resourceId) exists=\(element.exists) isHittable=\(element.isHittable) type=\(element.elementType.rawValue)"
+                        )
+                        element.tap()
+                    }
+                },
+                probe: { try self.detectKeyboardFocus(app: app) }
             )
-            element.tap()
-
-            let deadline = Date().addingTimeInterval(0.5)
-            var hasFocus = false
-            var strategy = "none"
-            var iterations = 0
-            while !hasFocus, Date() < deadline {
-                let result = try detectKeyboardFocus(app: app)
-                hasFocus = result.0
-                strategy = result.1
-                iterations += 1
-                if !hasFocus {
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-                }
-            }
-            let elapsedMs = Int(Date().timeIntervalSince(tapStart) * 1000)
+            let hasFocus = result.hasFocus
+            let strategy = result.strategy
+            let iterations = result.iterations
+            let elapsedMs = result.elapsedMs
             print(
                 "[GesturePerformer] tapAndAwaitKeyboardFocus done resourceId=\(resourceId) hasFocus=\(hasFocus) strategy=\(strategy) iterations=\(iterations) elapsedMs=\(elapsedMs)"
             )
@@ -1039,7 +1043,7 @@ public final class GesturePerformer: GesturePerforming {
             try typeText(text: text)
         }
 
-        public func setText(resourceId: String, text: String) throws {
+        public func setText(resourceId: String, text: String) async throws {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
@@ -1047,14 +1051,14 @@ public final class GesturePerformer: GesturePerforming {
                 throw GestureError.elementNotFound(resourceId)
             }
 
+            try await tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
             try catchingObjCException {
-                try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
                 GesturePerformer.clearFocusedText(app: app, element: element)
                 app.typeText(text)
             }
         }
 
-        public func clearText(resourceId: String? = nil) throws {
+        public func clearText(resourceId: String? = nil) async throws {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
@@ -1063,8 +1067,8 @@ public final class GesturePerformer: GesturePerforming {
                 guard let element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement else {
                     throw GestureError.elementNotFound(resourceId)
                 }
+                try await tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
                 try catchingObjCException {
-                    try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
                     GesturePerformer.clearFocusedText(app: app, element: element)
                 }
             } else {
@@ -1199,7 +1203,7 @@ public final class GesturePerformer: GesturePerforming {
             }
         }
 
-        public func keyboard(action: String) throws -> KeyboardActionResult {
+        public func keyboard(action: String) async throws -> KeyboardActionResult {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
@@ -1217,7 +1221,7 @@ public final class GesturePerformer: GesturePerforming {
                 try catchingObjCException {
                     focused.tap()
                 }
-                return KeyboardActionResult(open: waitForKeyboardVisibility(app: app, expected: true))
+                return try KeyboardActionResult(open: await waitForKeyboardVisibility(app: app, expected: true))
             case "close":
                 let closeDeadline = ProcessInfo.processInfo.systemUptime + 3.5
                 if !isKeyboardVisible(app: app) {
@@ -1686,15 +1690,15 @@ public final class GesturePerformer: GesturePerforming {
             timeout: TimeInterval = 1.0,
             interval: TimeInterval = 0.05
         )
-            -> Bool
+            async throws -> Bool
         {
-            let deadline = Date().addingTimeInterval(timeout)
-            var visible = isKeyboardVisible(app: app)
-            while visible != expected && Date() < deadline {
-                RunLoop.current.run(until: Date().addingTimeInterval(interval))
-                visible = isKeyboardVisible(app: app)
-            }
-            return visible
+            try await KeyboardWait.visibility(
+                clock: keyboardClock,
+                expected: expected,
+                timeout: .seconds(timeout),
+                interval: .seconds(interval),
+                probe: { self.isKeyboardVisible(app: app) }
+            )
         }
 
         private func waitForKeyboardClose(app: XCUIApplication, closeDeadline: TimeInterval) -> Bool {
@@ -2453,8 +2457,12 @@ public final class GesturePerformer: GesturePerforming {
         /// Non-iOS stub implementation
         private let elementLocator: ElementLocating
 
-        public init(elementLocator: ElementLocating) {
+        public init(
+            elementLocator: ElementLocating,
+            keyboardClock: any Clock<Duration> = ContinuousClock()
+        ) {
             self.elementLocator = elementLocator
+            self.keyboardClock = keyboardClock
         }
 
         public func tap(x _: Double, y _: Double, duration _: TimeInterval = 0) throws {
@@ -2531,11 +2539,11 @@ public final class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func setText(resourceId _: String, text _: String) throws {
+        public func setText(resourceId _: String, text _: String) async throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func clearText(resourceId _: String?) throws {
+        public func clearText(resourceId _: String?) async throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
@@ -2552,7 +2560,7 @@ public final class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
-        public func keyboard(action _: String) throws -> KeyboardActionResult {
+        public func keyboard(action _: String) async throws -> KeyboardActionResult {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

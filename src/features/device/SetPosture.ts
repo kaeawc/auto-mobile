@@ -480,6 +480,7 @@ export class SetPosture {
       );
     }
     throwIfAborted(signal);
+    ObservedAndroidDisplayCache.clear(this.device.deviceId);
     const result = await awaitWhileRequestIsLive(
       this.iosClientProvider(this.device).requestSetHingeAngle(angle),
       signal,

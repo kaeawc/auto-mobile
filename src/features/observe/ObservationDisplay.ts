@@ -121,13 +121,13 @@ export class ObservedAndroidDisplayCache {
       remembered === undefined ||
       (device.displays?.panels.length ?? 0) < 2 ||
       !isIosSimulatorUdid(device.deviceId) ||
-      panel?.key !== remembered.key ||
-      panel?.role !== remembered.role
+      (panel !== undefined && (panel.key !== remembered.key || panel.role !== remembered.role))
     ) {
       rememberedIosPostures.delete(device.deviceId);
       return undefined;
     }
-    return remembered.posture;
+    // An unknown panel cannot confirm the posture, but must preserve it for a later resolved read.
+    return panel === undefined ? undefined : remembered.posture;
   }
 
   constructor(private readonly timer: Pick<Timer, "now">) {}

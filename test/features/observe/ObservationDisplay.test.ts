@@ -332,6 +332,32 @@ describe("observation display stamp", () => {
     });
   });
 
+  test("an unknown iOS panel preserves remembered posture until a resolved mismatch", () => {
+    const device: BootedDevice = {
+      ...ios,
+      deviceId: "34C35F33-224C-4E74-B8C0-668FF03E49F5",
+      displays: simulatorDeviceDisplays(
+        parseSimulatorDisplays(loadDuoEnumerate()),
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+      ),
+    };
+    const inner = { pixelWidth: 2007, pixelHeight: 2853 };
+    try {
+      ObservedAndroidDisplayCache.rememberIosPosture(device.deviceId, {
+        ...observedIosDisplay(device, inner),
+        posture: "half_opened",
+      });
+      expect(observedIosDisplay(device, undefined).posture).toBe("unknown");
+      expect(observedIosDisplay(device, inner).posture).toBe("half_opened");
+      expect(observedIosDisplay(device, { pixelWidth: 1398, pixelHeight: 2034 }).posture).toBe(
+        "closed",
+      );
+      expect(observedIosDisplay(device, inner).posture).toBe("opened");
+    } finally {
+      ObservedAndroidDisplayCache.release(device.deviceId);
+    }
+  });
+
   test("folded iPhone Duo selects the live cover panel by runner pixel size", () => {
     const device: BootedDevice = {
       ...ios,

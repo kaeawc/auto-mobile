@@ -635,6 +635,44 @@ describe("SetPosture", () => {
     });
   }
 
+  test("a cancelled or failed iOS hinge request clears the remembered posture", async () => {
+    const inner = { pixelWidth: 2007, pixelHeight: 2853 };
+    for (const failure of ["abort", "runner failure"] as const) {
+      ObservedAndroidDisplayCache.release(duo.deviceId);
+      const { feature, client } = makeIosFeature(duo, [
+        {
+          ...observation,
+          display: observedIosDisplay(duo, inner),
+          screenSize: { width: 669, height: 951 },
+        },
+      ]);
+      try {
+        await feature.execute("half_opened");
+        expect(observedIosDisplay(duo, inner).posture).toBe("half_opened");
+        if (failure === "abort") {
+          const pending = spyOn(client, "requestSetHingeAngle").mockImplementation(
+            () => new Promise(() => {}),
+          );
+          try {
+            const controller = new AbortController();
+            const attempt = feature.execute("opened", undefined, controller.signal);
+            expect(pending).toHaveBeenCalledWith(180);
+            controller.abort();
+            await expect(attempt).rejects.toThrow();
+          } finally {
+            pending.mockRestore();
+          }
+        } else {
+          client.setHingeAngleResult({ success: false, error: "hinge failed", totalTimeMs: 0 });
+          await expect(feature.execute("opened")).rejects.toThrow("hinge failed");
+        }
+        expect(observedIosDisplay(duo, inner).posture).toBe("opened");
+      } finally {
+        ObservedAndroidDisplayCache.release(duo.deviceId);
+      }
+    }
+  });
+
   test("sets each iPhone Duo simulator posture and observes its display", async () => {
     for (const [posture, angle] of [
       ["closed", 0],

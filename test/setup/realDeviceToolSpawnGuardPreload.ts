@@ -1,4 +1,4 @@
-import { afterEach } from "bun:test";
+import { afterAll, afterEach } from "bun:test";
 import { appendFileSync, readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,4 +35,7 @@ if (process.platform !== "win32" && isUnitTestPath(testFile)) {
     report,
   });
   afterEach(() => drainViolations(report));
+  // Bun runs preload-registered afterAll after the file's own teardown hooks.
+  // Drain again so even a swallowed launch after the last test fails the file.
+  afterAll(() => drainViolations(report));
 }

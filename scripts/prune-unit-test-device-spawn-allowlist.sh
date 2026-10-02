@@ -20,6 +20,10 @@ Usage: scripts/prune-unit-test-device-spawn-allowlist.sh [options]
   --file-list FILE     Scan only these repo-relative unit paths; preserve unscanned entries.
   --dry-run            Print selection and settings without running tests or updating.
   --help               Show this help.
+Environment overrides:
+  AUTOMOBILE_SPAWN_GUARD_ALLOWLIST    Allow-list path; default scripts/unit-test-device-spawn-allowlist.txt.
+  AUTOMOBILE_SPAWN_GUARD_TEST_RUNNER  Executable path receiving only the selected file arguments;
+                                    default bun test --isolate --timeout 20000.
 Default: check listed files, report shrinkable entries and exit 1 if any exist.
 Each batch uses bun test --isolate --timeout 20000, bounded at 300 seconds.
 Failed/timed-out batches are retried one file per process, never concurrently.
@@ -34,7 +38,11 @@ repeat=2
 batch_size=20
 file_list=""
 batch_log_dir="${AUTOMOBILE_SPAWN_GUARD_BATCH_LOG_DIR:-scratch/unit-test-device-spawn-census}"
-allowlist="scripts/unit-test-device-spawn-allowlist.txt"
+allowlist="${AUTOMOBILE_SPAWN_GUARD_ALLOWLIST:-scripts/unit-test-device-spawn-allowlist.txt}"
+test_runner=(bun test --isolate --timeout 20000)
+if [[ -n "${AUTOMOBILE_SPAWN_GUARD_TEST_RUNNER:-}" ]]; then
+  test_runner=("${AUTOMOBILE_SPAWN_GUARD_TEST_RUNNER}")
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --update) update=1; shift ;;
@@ -99,6 +107,7 @@ records="${run_dir}/records.tsv"
 trap 'rm -f "${census_file}"' EXIT
 run_index=0
 uncertain=()
+last_batch_status=0
 
 run_batch() {
   local label="$1" batch_status=0
@@ -109,28 +118,27 @@ run_batch() {
   : > "${census_file}"
   set +e
   run_with_timeout 300 env AUTOMOBILE_SPAWN_GUARD_CENSUS_FILE="${census_file}" \
-    bun test --isolate --timeout 20000 "$@" > "${prefix}.log" 2>&1
+    "${test_runner[@]}" "$@" > "${prefix}.log" 2>&1
   batch_status=$?
   set -e
   cat "${census_file}" >> "${records}"
   printf '%s\n' "${batch_status}" > "${prefix}.status"
   printf '%s: %s files, exit %s\n' "${label}" "$#" "${batch_status}"
-  return "${batch_status}"
+  # Expected census failures must not terminate this set -e caller. Only the
+  # single runner command above disables errexit; publish its status separately.
+  last_batch_status="${batch_status}"
+  return 0
 }
 
 for ((pass=1; pass<=repeat; pass++)); do
   for ((offset=0; offset<${#files[@]}; offset+=batch_size)); do
     batch=("${files[@]:offset:batch_size}")
-    set +e
     run_batch "pass-${pass}-batch-${offset}" "${batch[@]}"
-    batch_rc=$?
-    set -e
+    batch_rc="${last_batch_status}"
     if [[ "${batch_rc}" -ne 0 ]]; then
       for file in "${batch[@]}"; do
-        set +e
         run_batch "pass-${pass}-single" "${file}"
-        single_rc=$?
-        set -e
+        single_rc="${last_batch_status}"
         if [[ "${single_rc}" -ne 0 ]]; then
           # A recorded blocked hit proves this file is an offender even if its
           # test expects a successful launch. Other failures cannot prove clean.

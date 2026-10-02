@@ -294,8 +294,12 @@ Unit tests must inject process/device fakes instead of spawning real `adb`,
 `xcrun`, `xcodebuild`, `simctl`, `devicectl`, `emulator`, `avdmanager`,
 `sdkmanager`, `ffmpeg`, or `curl`. The Bun preload guards `Bun.spawn` and
 `Bun.spawnSync`, including `node:child_process` APIs on Bun 1.3.14, tool lookups,
-and simple shell commands (including `;`, `&&`, `||`, and `|` segments). Swallowed
-errors still fail via `afterEach`. The allow-list in
+and simple shell commands (including `;`, `&&`, `||`, and `|` segments).
+The guard unwraps `sh`/`bash`/`zsh`/`dash -c`, `cmd /c`, `env`, `exec`,
+`command`, `timeout`, `nice`, `nohup`, and leading `NAME=VALUE` assignments;
+`which`/`where` lookups also detect guarded tools. It does not unwrap `stdbuf`,
+`setsid`, or `sudo`. `xcrun` is blocked directly. Swallowed
+errors still fail via `afterEach` and a final `afterAll` drain. The allow-list in
 `scripts/unit-test-device-spawn-allowlist.txt` may only shrink; listed tests keep
 their existing process behavior. The list loads only on a blocked-tool hit.
 
@@ -321,6 +325,11 @@ allow-listed files. Batches contain at most 20 files, run with `bun test --isola
 --timeout 20000`, and use the portable 300-second timeout helper. Failed batches
 are rerun one file per process. Logs, exit statuses, and per-file/tool counts stay
 in the batch log directory (`AUTOMOBILE_SPAWN_GUARD_BATCH_LOG_DIR` also supported).
+For isolated script tests, `AUTOMOBILE_SPAWN_GUARD_ALLOWLIST` overrides the
+allow-list path and `AUTOMOBILE_SPAWN_GUARD_TEST_RUNNER` selects one executable
+path (no command-string evaluation). That executable receives only the selected
+repo-relative file arguments and the census-file environment variable. Defaults
+remain the checked-in allow-list and `bun test --isolate --timeout 20000`.
 A failed single-file run without a recorded hit makes the census incomplete and
 prevents rewriting the list. This script is not part of prepush; never inject
 preloads through `BUN_OPTIONS` or route this census through `test-ts.sh`. After an

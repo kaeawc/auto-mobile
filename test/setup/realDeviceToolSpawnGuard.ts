@@ -56,32 +56,190 @@ function shellWords(command: string): string[] {
   );
 }
 
+// Bounded unwrapping: sh/bash/zsh/dash -c, cmd /c, which/where lookups,
+// env, exec, command, timeout, nice, nohup, and leading NAME=VALUE assignments.
+// stdbuf, setsid, sudo, shell functions/substitutions and other wrappers are not
+// unwrapped. xcrun is blocked directly, without inspecting its subcommand.
+function isAssignment(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z_0-9]*=/.test(value);
+}
+
+function blockedEnv(argv: readonly string[]): string | undefined {
+  let index = 1;
+  while (index < argv.length) {
+    const option = argv[index];
+    if (option === "--") {
+      index++;
+      break;
+    }
+    if (["-S", "--split-string"].includes(option) || /^(-S.|--split-string=)/.test(option)) {
+      const separate = option === "-S" || option === "--split-string";
+      const value = separate
+        ? (argv[index + 1] ?? "")
+        : option.replace(/^(-S|--split-string=)/, "");
+      const rest = argv.slice(index + (separate ? 2 : 1));
+      // Split strings can reintroduce env options. Conservatively block any
+      // guarded executable word, even when it is behind those options.
+      const words = shellWords(value);
+      return (
+        blockedShellCommand(value) ??
+        blockedLookup(words) ??
+        blockedToolForArgv([...words, ...rest])
+      );
+    }
+    if (["-u", "--unset", "-C", "--chdir"].includes(option)) {
+      index += 2;
+    } else if (
+      /^(-u.|-C.|--unset=|--chdir=)/.test(option) ||
+      ["-i", "--ignore-environment", "-", "-0", "-v"].includes(option)
+    ) {
+      index++;
+    } else {
+      break;
+    }
+  }
+  while (isAssignment(argv[index] ?? "")) {
+    index++;
+  }
+  return blockedToolForArgv(argv.slice(index));
+}
+
+function blockedExec(argv: readonly string[]): string | undefined {
+  let index = 1;
+  while (index < argv.length && argv[index].startsWith("-")) {
+    const option = argv[index++];
+    if (option === "--") {
+      break;
+    }
+    if (!/^-([cl]*a.*|[cl]+)$/.test(option)) {
+      return undefined;
+    }
+    // -a consumes the rest of its cluster, or the following argv operand.
+    if (/^-([cl]*a)$/.test(option)) {
+      index++;
+    }
+  }
+  return blockedToolForArgv(argv.slice(index));
+}
+
+function blockedCommand(argv: readonly string[]): string | undefined {
+  let index = 1;
+  let lookup = false;
+  while (index < argv.length && argv[index].startsWith("-")) {
+    const option = argv[index++];
+    if (option === "--") {
+      break;
+    }
+    if (!/^-[pvV]+$/.test(option)) {
+      return undefined;
+    }
+    lookup ||= /[vV]/.test(option);
+  }
+  return lookup ? blockedLookup(argv.slice(index)) : blockedToolForArgv(argv.slice(index));
+}
+
+function blockedLookup(argv: readonly string[]): string | undefined {
+  return argv.map(executableName).find((tool) => BLOCKED_TOOLS.has(tool));
+}
+
+function blockedTimeout(argv: readonly string[]): string | undefined {
+  let index = 1;
+  while (index < argv.length && argv[index].startsWith("-")) {
+    const option = argv[index++];
+    if (option === "--") {
+      break;
+    }
+    if (["-s", "--signal", "-k", "--kill-after"].includes(option)) {
+      index++;
+    } else if (
+      !/^(-[sk].|--(signal|kill-after)=)/.test(option) &&
+      !["--foreground", "--preserve-status", "--verbose", "-v"].includes(option)
+    ) {
+      return undefined;
+    }
+  }
+  // The next argument is the duration, even when it resembles a tool name.
+  return blockedToolForArgv(argv.slice(index + 1));
+}
+
+function blockedNice(argv: readonly string[]): string | undefined {
+  let index = 1;
+  while (index < argv.length && argv[index].startsWith("-")) {
+    const option = argv[index++];
+    if (option === "--") {
+      break;
+    }
+    if (["-n", "--adjustment"].includes(option)) {
+      index++;
+    } else if (!/^(-n.+|-\d+|--adjustment=.+)$/.test(option)) {
+      return undefined;
+    }
+  }
+  return blockedToolForArgv(argv.slice(index));
+}
+
+function blockedShellArgv(argv: readonly string[]): string | undefined {
+  for (let index = 1; index < argv.length; index++) {
+    const option = argv[index];
+    if (option === "--" || !/^[-+]/.test(option)) {
+      return undefined;
+    }
+    if (["-o", "-O", "+o", "+O"].includes(option)) {
+      index++;
+    } else if (/^-[a-z]*c[a-z]*$/.test(option)) {
+      return blockedShellCommand(argv[index + 1] ?? "");
+    }
+  }
+  return undefined;
+}
+
 export function blockedToolForArgv(argv: readonly string[]): string | undefined {
   const name = executableName(argv[0] ?? "");
   if (BLOCKED_TOOLS.has(name)) {
     return name;
   }
   if (["sh", "bash", "zsh", "dash"].includes(name)) {
-    const flag = argv.findIndex((arg) => /^-[a-z]*c[a-z]*$/.test(arg));
-    return flag < 0 ? undefined : blockedShellCommand(argv[flag + 1] ?? "");
+    return blockedShellArgv(argv);
   }
   if (name === "cmd") {
     const flag = argv.findIndex((arg) => arg.toLowerCase() === "/c");
     return flag < 0 ? undefined : blockedShellCommand(argv.slice(flag + 1).join(" "));
   }
-  if (["which", "where"].includes(name)) {
-    return argv
-      .slice(1)
-      .filter((arg) => !arg.startsWith("-"))
-      .map(executableName)
-      .find((tool) => BLOCKED_TOOLS.has(tool));
+  if (name === "which") {
+    return blockedLookup(argv.slice(1).filter((arg) => !arg.startsWith("-")));
   }
-  if (["exec", "command", "env"].includes(name) || /^[A-Za-z_][A-Za-z_0-9]*=/.test(argv[0] ?? "")) {
-    const remainder = argv.slice(name === "env" || name === "exec" || name === "command" ? 1 : 0);
-    const index = remainder.findIndex(
-      (arg) => !arg.startsWith("-") && !/^[A-Za-z_][A-Za-z_0-9]*=/.test(arg),
-    );
-    return index < 0 ? undefined : blockedToolForArgv(remainder.slice(index));
+  if (name === "where") {
+    const operands: string[] = [];
+    for (let index = 1; index < argv.length; index++) {
+      if (argv[index].toLowerCase() === "/r") {
+        index++;
+      } else if (!argv[index].startsWith("/")) {
+        operands.push(argv[index]);
+      }
+    }
+    return blockedLookup(operands);
+  }
+  if (name === "env") {
+    return blockedEnv(argv);
+  }
+  if (name === "exec") {
+    return blockedExec(argv);
+  }
+  if (name === "command") {
+    return blockedCommand(argv);
+  }
+  if (name === "timeout") {
+    return blockedTimeout(argv);
+  }
+  if (name === "nice") {
+    return blockedNice(argv);
+  }
+  if (name === "nohup") {
+    return blockedToolForArgv(argv.slice(argv[1] === "--" ? 2 : 1));
+  }
+  if (isAssignment(argv[0] ?? "")) {
+    const index = argv.findIndex((arg) => !isAssignment(arg));
+    return index < 0 ? undefined : blockedToolForArgv(argv.slice(index));
   }
   return undefined;
 }

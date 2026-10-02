@@ -78,6 +78,83 @@ test("lookups and shell command segments detect blocked tools", () => {
   expect(blockedToolForArgv(["sh", "-c", "git status"])).toBeUndefined();
 });
 
+test("wrapper option operands are skipped before recursively checking commands", () => {
+  const blocked = [
+    ["env", "-u", "ANDROID_SERIAL", "adb", "devices"],
+    ["env", "-uANDROID_SERIAL", "adb"],
+    ["env", "--unset=ANDROID_SERIAL", "adb"],
+    ["env", "--unset", "ANDROID_SERIAL", "adb"],
+    ["env", "-C", "/tmp", "adb"],
+    ["env", "-C/tmp", "adb"],
+    ["env", "--chdir=/tmp", "adb"],
+    ["env", "--chdir", "/tmp", "adb"],
+    ["env", "-S", "adb devices"],
+    ["env", "-S", "-u ANDROID_SERIAL adb devices"],
+    ["env", "-S", "echo ready && adb devices"],
+    ["env", "-Sadb devices"],
+    ["env", "--split-string=adb devices"],
+    ["env", "--split-string", "adb devices"],
+    ["env", "-i", "--ignore-environment", "-", "-0", "-v", "--", "FOO=1", "adb"],
+    ["timeout", "-s", "TERM", "-k", "2s", "--foreground", "3s", "adb"],
+    [
+      "timeout",
+      "--signal=TERM",
+      "--kill-after=2s",
+      "--preserve-status",
+      "--verbose",
+      "--",
+      "3",
+      "adb",
+    ],
+    ["timeout", "-sTERM", "-k2", "3", "adb"],
+    ["nice", "-n", "10", "adb"],
+    ["nice", "-n10", "adb"],
+    ["nice", "-10", "adb"],
+    ["nice", "--adjustment=10", "adb"],
+    ["nice", "--adjustment", "10", "adb"],
+    ["nohup", "--", "adb"],
+    ["exec", "-a", "label", "-c", "-l", "adb"],
+    ["exec", "-alabel", "adb"],
+    ["exec", "-cla", "label", "adb"],
+    ["command", "-p", "adb"],
+    ["command", "-v", "git", "adb"],
+    ["command", "-V", "git", "adb"],
+    ["command", "-pv", "git", "adb"],
+    ["bash", "-lc", "adb devices"],
+    ["sh", "-e", "-c", "adb devices"],
+    ["bash", "-o", "errexit", "-c", "adb devices"],
+    ["where", "/r", "/tmp", "adb"],
+    ["FOO=1", "BAR=2", "env", "-u", "NAME", "nice", "-n", "3", "nohup", "adb"],
+  ];
+  for (const argv of blocked) {
+    expect(blockedToolForArgv(argv), JSON.stringify(argv)).toBe("adb");
+  }
+  const benign = [
+    ["env", "-u", "ANDROID_SERIAL", "git", "status"],
+    ["env", "-u", "adb", "git", "status"],
+    ["env", "-uadb", "git"],
+    ["env", "--unset", "adb", "git"],
+    ["env", "--unset=adb", "git"],
+    ["env", "-C", "adb", "git"],
+    ["env", "--chdir", "adb", "git"],
+    ["env", "-S", "git status"],
+    ["timeout", "-s", "adb", "3", "git"],
+    ["timeout", "-k", "adb", "3", "git"],
+    ["nice", "-n", "10", "git"],
+    ["nohup", "git"],
+    ["exec", "-a", "adb", "git"],
+    ["exec", "-aadb", "git"],
+    ["command", "-p", "git"],
+    ["command", "-v", "git"],
+    ["where", "/r", "adb", "git"],
+    ["sh", "script.sh", "-c", "adb"],
+    ["bash", "-o", "adb", "script.sh"],
+  ];
+  for (const argv of benign) {
+    expect(blockedToolForArgv(argv), JSON.stringify(argv)).toBeUndefined();
+  }
+});
+
 test("spawn argument extraction rejects malformed inputs", () => {
   expect(spawnArgv([["git", "status"]])).toEqual(["git", "status"]);
   expect(spawnArgv([{ cmd: ["git"] }])).toEqual(["git"]);

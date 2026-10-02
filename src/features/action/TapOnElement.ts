@@ -40,6 +40,7 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementGeometry, resolveElementScreenSize } from "../utility/ElementGeometry";
+import { resolveActionableHierarchyScreenSize } from "../observe/HierarchyNormalization";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -1196,6 +1197,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   private getScreenSizeFromHierarchy(
     viewHierarchy: ViewHierarchyResult,
   ): ObserveResult["screenSize"] | undefined {
+    if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
+      return (
+        resolveActionableHierarchyScreenSize(viewHierarchy, true) ??
+        resolveElementScreenSize(viewHierarchy)
+      );
+    }
     return resolveElementScreenSize(viewHierarchy);
   }
 

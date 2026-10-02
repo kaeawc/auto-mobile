@@ -339,7 +339,6 @@
 2	src/utils/plan/PlanExecutor.ts	eslint(max-lines-per-function)
 2	src/utils/plan/PlanMigrator.ts	eslint(complexity)
 2	src/utils/retry/RetryExecutor.ts	eslint(max-depth)
-2	src/utils/screenshot/ScreenshotMatcher.ts	eslint(max-depth)
 3	src/cli/index.ts	auto-mobile(catch-convention)
 3	src/cli/index.ts	eslint(complexity)
 3	src/daemon/daemon.ts	eslint(complexity)

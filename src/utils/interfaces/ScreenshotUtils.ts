@@ -91,51 +91,6 @@ export interface ScreenshotUtils {
   getScreenshotFiles(cacheDir: string): Promise<string[]>;
 
   /**
-   * Batch compare multiple screenshots in parallel for better performance
-   * @param targetBuffer Target screenshot buffer to compare against
-   * @param screenshotPaths Array of screenshot file paths to compare
-   * @param tolerancePercent Similarity tolerance percentage (e.g., 0.2 for 0.2%)
-   * @param fastMode Enable fast mode for bulk comparisons
-   * @returns Promise with array of comparison results
-   */
-  batchCompareScreenshots(
-    targetBuffer: Buffer,
-    screenshotPaths: string[],
-    tolerancePercent?: number,
-    fastMode?: boolean,
-  ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>>;
-
-  /**
-   * Two-stage batch comparison: fast perceptual hash filtering + precise pixel comparison
-   * @param targetBuffer Target screenshot buffer to compare against
-   * @param screenshotPaths Array of screenshot file paths to compare
-   * @param tolerancePercent Similarity tolerance percentage (e.g., 0.2 for 0.2%)
-   * @param fastMode Enable fast mode for bulk comparisons
-   * @returns Promise with array of comparison results
-   */
-  optimizedBatchCompareScreenshots(
-    targetBuffer: Buffer,
-    screenshotPaths: string[],
-    tolerancePercent?: number,
-    fastMode?: boolean,
-  ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>>;
-
-  /**
-   * Find similar screenshots in cache directory within tolerance
-   * @param targetBuffer Target screenshot buffer to compare against
-   * @param cacheDir Cache directory to search
-   * @param tolerancePercent Similarity tolerance percentage (e.g., 0.2 for 0.2%)
-   * @param maxComparisons Maximum number of files to compare (default 10)
-   * @returns Promise with similar screenshot result
-   */
-  findSimilarScreenshots(
-    targetBuffer: Buffer,
-    cacheDir: string,
-    tolerancePercent?: number,
-    maxComparisons?: number,
-  ): Promise<{ filePath: string; similarity: number; matchFound: boolean }>;
-
-  /**
    * Extract timestamp from screenshot filename
    * Assumes filename format: screenshot_timestamp.extension or hierarchy_timestamp.json
    * @param filePath Path to screenshot file

@@ -3,7 +3,6 @@ import { NodeCryptoService } from "../crypto";
 import { ScreenshotComparator, ScreenshotComparisonResult } from "./ScreenshotComparator";
 import { PerceptualHasher } from "./PerceptualHasher";
 import { ScreenshotCache } from "./ScreenshotCache";
-import { ScreenshotMatcher, SimilarScreenshotResult } from "./ScreenshotMatcher";
 
 /**
  * Facade class that maintains backward compatibility with the original ScreenshotUtils API
@@ -131,76 +130,6 @@ export class ScreenshotUtils {
    */
   static async getScreenshotFiles(cacheDir: string): Promise<string[]> {
     return ScreenshotCache.getScreenshotFiles(cacheDir);
-  }
-
-  // ============================================================================
-  // Screenshot Matching (delegates to ScreenshotMatcher)
-  // ============================================================================
-
-  /**
-   * Batch compare multiple screenshots in parallel for better performance
-   * @param targetBuffer Target screenshot buffer to compare against
-   * @param screenshotPaths Array of screenshot file paths to compare
-   * @param tolerancePercent Similarity tolerance percentage (e.g., 0.2 for 0.2%)
-   * @param fastMode Enable fast mode for bulk comparisons
-   * @returns Promise with array of comparison results
-   */
-  static async batchCompareScreenshots(
-    targetBuffer: Buffer,
-    screenshotPaths: string[],
-    tolerancePercent?: number,
-    fastMode?: boolean,
-  ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    return ScreenshotMatcher.batchCompareScreenshots(
-      targetBuffer,
-      screenshotPaths,
-      tolerancePercent,
-      fastMode,
-    );
-  }
-
-  /**
-   * Two-stage batch comparison: fast perceptual hash filtering + precise pixel comparison
-   * @param targetBuffer Target screenshot buffer to compare against
-   * @param screenshotPaths Array of screenshot file paths to compare
-   * @param tolerancePercent Similarity tolerance percentage (e.g., 0.2 for 0.2%)
-   * @param fastMode Enable fast mode for bulk comparisons
-   * @returns Promise with array of comparison results
-   */
-  static async optimizedBatchCompareScreenshots(
-    targetBuffer: Buffer,
-    screenshotPaths: string[],
-    tolerancePercent?: number,
-    fastMode?: boolean,
-  ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
-    return ScreenshotMatcher.optimizedBatchCompareScreenshots(
-      targetBuffer,
-      screenshotPaths,
-      tolerancePercent,
-      fastMode,
-    );
-  }
-
-  /**
-   * Find similar screenshots in cache directory within tolerance
-   * @param targetBuffer Target screenshot buffer to compare against
-   * @param cacheDir Cache directory to search
-   * @param tolerancePercent Similarity tolerance percentage (e.g., 0.2 for 0.2%)
-   * @param maxComparisons Maximum number of files to compare (default 10)
-   * @returns Promise with similar screenshot result
-   */
-  static async findSimilarScreenshots(
-    targetBuffer: Buffer,
-    cacheDir: string,
-    tolerancePercent?: number,
-    maxComparisons?: number,
-  ): Promise<SimilarScreenshotResult> {
-    return ScreenshotMatcher.findSimilarScreenshots(
-      targetBuffer,
-      cacheDir,
-      tolerancePercent,
-      maxComparisons,
-    );
   }
 
   // ============================================================================

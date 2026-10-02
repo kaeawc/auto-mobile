@@ -1,3 +1,4 @@
+import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -84,6 +85,7 @@ export class DragAndDrop extends BaseVisualChange {
     this.selector =
       deps.selector ??
       new ResolverElementSelector(undefined, undefined, {
+        platform: device.platform,
         iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
       });
     this.hierarchyCapture =
@@ -106,10 +108,10 @@ export class DragAndDrop extends BaseVisualChange {
     if (!hierarchy) {
       throw new ActionableError("Selected display has no view hierarchy");
     }
-    const source = this.resolveTarget(hierarchy, options.source, "source");
-    const destination = this.resolveTarget(hierarchy, options.target, "target");
-    const start = this.geometry.getElementCenter(source);
-    const end = this.geometry.getElementCenter(destination);
+    const { sourcePoint: start, targetPoint: end } = this.resolveTargetPoints(hierarchy, {
+      ...options,
+      observation: target.observation,
+    });
     const duration = this.getDragDurationMs(options);
     const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
       this.accessibilityService,
@@ -260,10 +262,10 @@ export class DragAndDrop extends BaseVisualChange {
             return { success: false, error: "Unable to get view hierarchy, cannot drag and drop" };
           }
 
-          const source = this.resolveTarget(viewHierarchy, options.source, "source");
-          const target = this.resolveTarget(viewHierarchy, options.target, "target");
-          const sourcePoint = this.geometry.getElementCenter(source);
-          const targetPoint = this.geometry.getElementCenter(target);
+          const { sourcePoint, targetPoint } = this.resolveTargetPoints(viewHierarchy, {
+            ...options,
+            observation: observeResult,
+          });
 
           // Once beforeSend lands, also pass this as the dispatch's beforeSend.
           fence?.assertCurrent();
@@ -401,9 +403,37 @@ export class DragAndDrop extends BaseVisualChange {
     return null;
   }
 
+  private resolveTargetPoints(
+    hierarchy: ViewHierarchyResult,
+    options: DragAndDropOptions & { observation: ObserveResult },
+  ) {
+    const screenSizeOptions = {
+      observationScreenSize: options.observation.screenSize,
+      display: options.observation.viewHierarchy,
+    };
+    const source = this.resolveTarget(
+      hierarchy,
+      { ...options.source, screenSizeOptions },
+      "source",
+    );
+    const target = this.resolveTarget(
+      hierarchy,
+      { ...options.target, screenSizeOptions },
+      "target",
+    );
+    return {
+      sourcePoint: this.geometry.getElementCenter(source),
+      targetPoint: this.geometry.getElementCenter(target),
+    };
+  }
+
   private resolveTarget(
     viewHierarchy: ViewHierarchyResult,
-    target: { text?: string; elementId?: string },
+    target: {
+      text?: string;
+      elementId?: string;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
+    },
     label: "source" | "target",
   ) {
     const selectorCount = [target.elementId, target.text].filter(Boolean).length;
@@ -415,6 +445,7 @@ export class DragAndDrop extends BaseVisualChange {
     if (target.elementId) {
       const element = this.selector.selectByResourceId(viewHierarchy, target.elementId, {
         intentAction: "drag",
+        screenSizeOptions: target.screenSizeOptions,
       }).element;
       if (!element) {
         throw new ActionableError(
@@ -426,6 +457,7 @@ export class DragAndDrop extends BaseVisualChange {
     if (target.text) {
       const selection = this.selector.selectByText(viewHierarchy, target.text, {
         intentAction: "drag",
+        screenSizeOptions: target.screenSizeOptions,
       });
       const element = selection.matchedElement ?? selection.element;
       if (!element) {

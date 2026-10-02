@@ -12,7 +12,10 @@ import {
   type ResolutionAction,
 } from "./ElementResolver";
 import { SearchableHierarchy, type SearchableEntry } from "./SearchableNode";
-import { resolveActionableHierarchyScreenSize } from "../observe/HierarchyNormalization";
+import {
+  screenSizeForOffscreenCheck,
+  type ScreenSizeForOffscreenCheckOptions,
+} from "./ElementGeometry";
 import type { TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 
@@ -26,6 +29,7 @@ interface SelectionOptions {
   selectionIntent?: TextSelectionIntent;
   intentAction?: ResolutionAction;
   scrollableContainer?: boolean;
+  screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
 }
 
 /** Compatibility at the injected selector boundary; all matching belongs to ElementResolver. */
@@ -33,7 +37,7 @@ export class ResolverElementSelector implements ElementSelector {
   constructor(
     private readonly resolver: Pick<ElementResolver, "resolve"> = new ElementResolver(),
     private readonly projection = new SearchableHierarchy(),
-    private readonly options: { iosMultiPanel?: boolean } = {},
+    private readonly options: ScreenSizeForOffscreenCheckOptions = {},
   ) {}
 
   selectByText(
@@ -131,7 +135,7 @@ export class ResolverElementSelector implements ElementSelector {
     return result.chosen !== null;
   }
 
-  private viewport(capture: ViewHierarchyResult) {
+  private viewport(capture: ViewHierarchyResult, options: ScreenSizeForOffscreenCheckOptions = {}) {
     const snapshot = getHierarchySnapshot(capture);
     if (
       snapshot?.searchRaw ||
@@ -139,12 +143,7 @@ export class ResolverElementSelector implements ElementSelector {
     ) {
       return undefined;
     }
-    return (
-      resolveActionableHierarchyScreenSize(capture, this.options.iosMultiPanel) ??
-      (capture.screenWidth && capture.screenHeight
-        ? { width: capture.screenWidth, height: capture.screenHeight }
-        : undefined)
-    );
+    return screenSizeForOffscreenCheck(capture, { ...this.options, ...options });
   }
 
   private select(
@@ -166,7 +165,7 @@ export class ResolverElementSelector implements ElementSelector {
         container: options.container ?? undefined,
       },
       {
-        viewport: this.viewport(capture),
+        viewport: this.viewport(capture, options.screenSizeOptions),
         action:
           options.intentAction ??
           (options.selectionIntent === "focus-input" ? "focus-input" : "tap"),

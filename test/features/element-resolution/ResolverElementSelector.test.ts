@@ -434,9 +434,13 @@ test("focus promotes an iOS text label to its text-field role ancestor (#7759)",
       },
     },
   };
+  // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
   expect(
-    new ResolverElementSelector().selectByText(capture, "Email", { intentAction: "focus-input" })
-      .element?.bounds,
+    new ResolverElementSelector(undefined, undefined, { platform: "ios" }).selectByText(
+      capture,
+      "Email",
+      { intentAction: "focus-input" },
+    ).element?.bounds,
   ).toEqual(inputBounds);
 });
 

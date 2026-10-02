@@ -10,8 +10,11 @@ import { DefaultElementSelector } from "../../src/features/utility/DefaultElemen
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import {
   isElementCenterOffScreen,
-  resolveElementScreenSize,
+  screenSizeForOffscreenCheck,
 } from "../../src/features/utility/ElementGeometry";
+import { TapAnyElement } from "../../src/features/action/TapAnyElement";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeElementSelector } from "../fakes/FakeElementSelector";
 import { SearchableHierarchy } from "../../src/features/utility/SearchableNode";
 import type { ConditionResolver } from "../../src/features/observe/ConditionPredicates";
 import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
@@ -699,7 +702,7 @@ describe("element center visibility consistency", () => {
   ];
 
   test.each(cases)(
-    "four consumers agree: $name",
+    "shared geometry and four consumers agree: $name",
     ({ bounds: elementBounds, screen: size, offScreen }) => {
       const element: Element = {
         text: "Match",
@@ -719,7 +722,7 @@ describe("element center visibility consistency", () => {
       const snapshot = { id: "center-consistency", nodes: projection };
       const sharedOffScreen = isElementCenterOffScreen(
         element.bounds,
-        resolveElementScreenSize(hierarchy),
+        screenSizeForOffscreenCheck(hierarchy),
       );
 
       // Real parsers discard boundless Elements. Supply one at the existing injected
@@ -753,6 +756,14 @@ describe("element center visibility consistency", () => {
         },
       );
 
+      const tapAny = new TapAnyElement(
+        { deviceId: "agreement", name: "Agreement", platform: "android" },
+        new FakeAdbExecutor(),
+        { timer: new FakeTimer(), elementSelector: new FakeElementSelector(element) },
+      );
+      expect(tapAny["findClickableElement"]({ action: "tap" }, hierarchy).element !== null).toBe(
+        !sharedOffScreen,
+      );
       expect(sharedOffScreen).toBe(offScreen);
       expect(selector.selectByText(hierarchy, "Match").element !== null).toBe(!sharedOffScreen);
       expect(

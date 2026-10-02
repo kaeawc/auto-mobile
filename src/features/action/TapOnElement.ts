@@ -48,8 +48,12 @@ import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
-import { DefaultElementGeometry, resolveElementScreenSize } from "../utility/ElementGeometry";
-import { resolveActionableHierarchyScreenSize } from "../observe/HierarchyNormalization";
+import {
+  DefaultElementGeometry,
+  screenSizeForOffscreenCheck,
+  isUsableScreenSize,
+  type ScreenSizeForOffscreenCheckOptions,
+} from "../utility/ElementGeometry";
 import { ResolverElementSelector } from "../utility/ResolverElementSelector";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -164,7 +168,10 @@ interface AndroidTapVerification {
   dispatch?: (point: { x: number; y: number }) => Promise<void>;
 }
 
-type TapVerificationOptions = TapOnElementOptions & { verification?: AndroidTapVerification };
+type TapVerificationOptions = TapOnElementOptions & {
+  verification?: AndroidTapVerification;
+  screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
+};
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 type FocusIdentifierKey = "resource-id" | "view-id" | "test-tag";
@@ -427,6 +434,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     this.elementSelector =
       options.elementSelector ??
       new ResolverElementSelector(undefined, undefined, {
+        platform: device.platform,
         iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
       });
     this.talkBackDriverFactory =
@@ -1005,7 +1013,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     screenSize?: ObserveResult["screenSize"],
     options?: TapOnElementOptions,
   ): boolean {
-    if (!screenSize?.width || !screenSize?.height) {
+    if (!isUsableScreenSize(screenSize)) {
       return false;
     }
     return !this.visibleTapBounds(selection, viewHierarchy, screenSize, options);
@@ -1041,12 +1049,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     // Some injected/legacy captures omit screen dimensions. In that case we
     // still constrain the point to the matched/actionable overlap; live observe
     // supplies dimensions for the viewport and chrome checks.
-    const screen = screenSize ? getScreenBounds(screenSize, undefined, true) : undefined;
+    const screen = isUsableScreenSize(screenSize)
+      ? getScreenBounds(screenSize, undefined, true)
+      : undefined;
     const visible = overlap && screen ? intersectTapBounds(overlap, screen) : overlap;
     if (!visible) {
       return null;
     }
-    if (!screenSize || this.device.platform !== "ios") {
+    if (!isUsableScreenSize(screenSize) || this.device.platform !== "ios") {
       return visible;
     }
     const belowStatusBar = this.clipBelowStatusBar(
@@ -1226,14 +1236,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private getScreenSizeFromHierarchy(
     viewHierarchy: ViewHierarchyResult,
+    options: ScreenSizeForOffscreenCheckOptions = {},
   ): ObserveResult["screenSize"] | undefined {
-    if (this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1) {
-      return (
-        resolveActionableHierarchyScreenSize(viewHierarchy, true) ??
-        resolveElementScreenSize(viewHierarchy)
-      );
-    }
-    return resolveElementScreenSize(viewHierarchy);
+    return screenSizeForOffscreenCheck(viewHierarchy, {
+      ...options,
+      platform: this.device.platform,
+      iosMultiPanel:
+        this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1,
+    });
   }
 
   /**
@@ -1255,6 +1265,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     viewHierarchy: ViewHierarchyResult,
     refreshedFromDevice: boolean,
   ): void {
+    const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
+      observationScreenSize: observeResult.screenSize,
+      display: observeResult.viewHierarchy,
+    });
     observeResult.viewHierarchy = viewHierarchy;
     // The replacement is device-authored; keep the enclosing observation in
     // that same clock domain so later freshness floors never compare it with
@@ -1263,9 +1277,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (updatedAt !== undefined) {
       observeResult.updatedAt = updatedAt;
     }
-    const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
     if (screenSize) {
       observeResult.screenSize = screenSize;
+    } else if (observeResult.screenSize) {
+      observeResult.screenSize = { width: 0, height: 0 };
     }
     if (this.device.platform === "ios") {
       observeResult.rotation = resolveIosObserveRotation(
@@ -1372,6 +1387,19 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
   }
 
+  private withObservationScreenSize(
+    options: TapVerificationOptions,
+    observation: Partial<Pick<ObserveResult, "viewHierarchy" | "screenSize">>,
+  ): TapVerificationOptions {
+    return {
+      ...options,
+      screenSizeOptions: {
+        observationScreenSize: observation.screenSize,
+        display: observation.viewHierarchy,
+      },
+    };
+  }
+
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   findElementInHierarchy(
     options: TapVerificationOptions,
@@ -1394,6 +1422,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           selection: this.selectDisplaySiblingOrMiss(options, () =>
             this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
               container: options.container,
+              screenSizeOptions: options.screenSizeOptions,
               fuzzyMatch: true,
               caseSensitive: false,
               strategy: options.selectionStrategy,
@@ -1408,6 +1437,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return {
         selection: this.elementSelector.selectByText(viewHierarchy, text, {
           container: options.container,
+          screenSizeOptions: options.screenSizeOptions,
           partialMatch: true,
           caseSensitive: false,
           strategy: options.selectionStrategy,
@@ -1422,12 +1452,13 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (options.textAny) {
       let lastSelection: ElementSelectionResult | null = null;
       let offScreenSelection: ElementSelectionResult | null = null;
-      const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
+      const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, options.screenSizeOptions);
       for (const text of options.textAny) {
         const selection = options.sibling
           ? this.selectDisplaySiblingOrMiss(options, () =>
               this.elementSelector.selectClickableSiblingOfText(viewHierarchy, text, {
                 container: options.container,
+                screenSizeOptions: options.screenSizeOptions,
                 fuzzyMatch: true,
                 caseSensitive: false,
                 strategy: options.selectionStrategy,
@@ -1437,6 +1468,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             )
           : this.elementSelector.selectByText(viewHierarchy, text, {
               container: options.container,
+              screenSizeOptions: options.screenSizeOptions,
               partialMatch: true,
               caseSensitive: false,
               strategy: options.selectionStrategy,
@@ -1473,6 +1505,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           selection: this.selectDisplaySiblingOrMiss(options, () =>
             this.elementSelector.selectClickableSiblingOfResourceId(viewHierarchy, elementId, {
               container: options.container,
+              screenSizeOptions: options.screenSizeOptions,
               partialMatch: false,
               strategy: options.selectionStrategy,
               intentAction,
@@ -1486,6 +1519,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return {
         selection: this.elementSelector.selectByResourceId(viewHierarchy, elementId, {
           container: options.container,
+          screenSizeOptions: options.screenSizeOptions,
           partialMatch: false,
           strategy: options.selectionStrategy,
           intentAction: lookupAction,
@@ -1498,6 +1532,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return {
       selection: this.elementSelector.selectByTestTag(viewHierarchy, this.requireTestTag(options), {
         container: options.container,
+        screenSizeOptions: options.screenSizeOptions,
         strategy: options.selectionStrategy,
         intentAction: lookupAction,
         index: options.index,
@@ -1719,7 +1754,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private findIndexedFocusSelection(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
     nodes: readonly SearchableEntry[],
     identifier: { key: FocusIdentifierKey; value: string },
@@ -1802,7 +1837,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const identifier = this.findFocusIdentifier(target, nodes);
     if (identifier?.shared) {
       return this.verifyIndexedFocusTarget(
-        options,
+        this.withObservationScreenSize(options, observation),
         target,
         observation.viewHierarchy,
         identifier,
@@ -1829,7 +1864,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!options.testTag && !(options.elementId && target["resource-id"])) {
       return false;
     }
-    return this.isRefoundFocusTarget(options, target, observation.viewHierarchy);
+    return this.isRefoundFocusTarget(
+      this.withObservationScreenSize(options, observation),
+      target,
+      observation.viewHierarchy,
+    );
   }
 
   private requireTestTag(options: TapOnElementOptions): string {
@@ -1897,7 +1936,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       logger.warn(`[TapOnElement] Fresh capture failed: ${errorMessage(error)}`);
       return null;
     }
-    if (screenSize && this.device.platform === "android") {
+    if (isUsableScreenSize(screenSize) && this.device.platform === "android") {
       await this.checkRefreshedDisplay(captured, screenSize, observedGeneration, signal);
     }
     return captured;
@@ -2037,6 +2076,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       }
     | { ok: false; error: string }
   > {
+    options = this.withObservationScreenSize(options, observeResult);
     const stableMatchesRequired = androidPreTapConsecutiveStableMatchesRequired(options);
     const originalSelection = observeResult.viewHierarchy
       ? this.findElementInHierarchy(options, observeResult.viewHierarchy).selection
@@ -2299,9 +2339,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     let lastHash = this.hashViewHierarchy(viewHierarchy);
 
     let latestViewHierarchy = viewHierarchy;
-    let latestScreenSize =
-      this.getScreenSizeFromHierarchy(latestViewHierarchy) ?? observeResult.screenSize;
-    const initialSearch = this.findElementInHierarchy(options, latestViewHierarchy);
+    let latestScreenSize = this.getScreenSizeFromHierarchy(latestViewHierarchy, {
+      observationScreenSize: observeResult.screenSize,
+      display: observeResult.viewHierarchy,
+    });
+    const initialSearch = this.findElementInHierarchy(
+      this.withObservationScreenSize(options, observeResult),
+      latestViewHierarchy,
+    );
     let selection = initialSearch.selection;
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
@@ -2352,8 +2397,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           continue;
         }
 
+        latestScreenSize = this.getScreenSizeFromHierarchy(refreshedHierarchy, {
+          observationScreenSize: latestScreenSize,
+          display: latestViewHierarchy,
+        });
         latestViewHierarchy = refreshedHierarchy;
-        latestScreenSize = this.getScreenSizeFromHierarchy(refreshedHierarchy) ?? latestScreenSize;
         const hash = this.hashViewHierarchy(refreshedHierarchy);
         if (hash && hash !== lastHash) {
           changeCount += 1;
@@ -2363,7 +2411,16 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           lastHash = hash;
         }
 
-        const searchResult = this.findElementInHierarchy(options, refreshedHierarchy);
+        const searchResult = this.findElementInHierarchy(
+          {
+            ...options,
+            screenSizeOptions: {
+              observationScreenSize: latestScreenSize,
+              display: latestViewHierarchy,
+            },
+          },
+          refreshedHierarchy,
+        );
         selection = searchResult.selection;
         element = selection.element;
         containerFoundEver = containerFoundEver || searchResult.containerFound;
@@ -2549,19 +2606,22 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
   private resolveContainerElement(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string },
+    options: TapVerificationOptions,
   ): Element | undefined {
+    const container = options.container;
     if (!container) {
       return undefined;
     }
     if (container.elementId) {
       return this.elementSelector.selectByResourceId(viewHierarchy, container.elementId, {
         intentAction: "inspect",
+        screenSizeOptions: options.screenSizeOptions,
       }).element as Element | undefined;
     }
     if (container.text) {
       return this.elementSelector.selectByText(viewHierarchy, container.text, {
         intentAction: "inspect",
+        screenSizeOptions: options.screenSizeOptions,
         caseSensitive: false,
       }).element as Element | undefined;
     }
@@ -2661,7 +2721,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!freshHierarchy) {
       throw new ActionableError("tapOn ensureChecked: unable to refresh toggle before tapping");
     }
-    const refound = this.findElementInHierarchy(options, freshHierarchy).selection;
+    const refound = this.findElementInHierarchy(
+      this.withObservationScreenSize(options, observation),
+      freshHierarchy,
+    ).selection;
     if (!refound.element) {
       throw new ActionableError("tapOn ensureChecked: toggle not found in fresh hierarchy");
     }
@@ -2679,7 +2742,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     const readChecked = (): boolean | "not found" => {
       const refound = observation.viewHierarchy
-        ? this.findElementInHierarchy(options, observation.viewHierarchy).selection.element
+        ? this.findElementInHierarchy(
+            this.withObservationScreenSize(options, observation),
+            observation.viewHierarchy,
+          ).selection.element
         : undefined;
       return refound ? isTruthyFlag(refound.checked) : "not found";
     };
@@ -2909,7 +2975,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         this.strategy.longPressDurationMs,
         element,
         {
-          ...options,
+          ...this.withObservationScreenSize(options, target.observation),
           verification: { refresh: options.verification.refresh, dispatch: dispatchAction },
         },
         false,
@@ -2983,7 +3049,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private selectElementOnDisplay(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
   ): ElementSelectionResult {
     if (options.action === "focus") {
@@ -3016,7 +3082,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
     // Preserve focus's inspect fallback for the editable-input error.
     if (options.action === "focus") {
-      const selection = this.selectElementOnDisplay(options, observation.viewHierarchy);
+      const selection = this.selectElementOnDisplay(
+        this.withObservationScreenSize(options, observation),
+        observation.viewHierarchy,
+      );
       if (selection.element) {
         return { selection, stats: { durationMs: 0, requestCount: 0, changeCount: 0 } };
       }
@@ -3250,7 +3319,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
 
           if (options.accessibilityLink) {
             const occurrence = options.index ?? 0;
-            const owner = this.resolveContainerElement(viewHierarchy, options.container);
+            const owner = this.resolveContainerElement(
+              viewHierarchy,
+              this.withObservationScreenSize(options, observeResult),
+            );
             if (options.container && !owner) {
               return { success: false, error: "Semantic link container is no longer present" };
             }
@@ -3460,8 +3532,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           }
 
           this.logClickableParentSelection(usedParent);
-          const screenSize =
-            this.getScreenSizeFromHierarchy(viewHierarchy) ?? observeResult.screenSize;
+          const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy, {
+            observationScreenSize: observeResult.screenSize,
+            display: observeResult.viewHierarchy,
+          });
           const visibleBounds = this.visibleTapBounds(
             finalSelection,
             viewHierarchy,
@@ -3546,7 +3620,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
               action,
               longPressDuration,
               tapElement,
-              { ...options, displayFence: fence },
+              { ...this.withObservationScreenSize(options, observeResult), displayFence: fence },
               isAccessibilityServiceEnabled,
               observeResult.screenSize,
               signal,
@@ -3849,7 +3923,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
    * Only called when retryIfNoChange is true.
    */
   private resolveEnsureCheckedRetryTarget(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
     action: string,
     requireResourceId: boolean,
@@ -3868,8 +3942,18 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return this.resolveTapTargetElement(refound, hierarchy, action, requireResourceId).element;
   }
 
+  private withRetryScreenSize(
+    options: TapVerificationOptions,
+    screenSize: ObserveResult["screenSize"],
+  ): TapVerificationOptions {
+    return {
+      ...options,
+      screenSizeOptions: options.screenSizeOptions ?? { observationScreenSize: screenSize },
+    };
+  }
+
   private refreshedRetrySelection(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
     tapElement: Element,
     previous?: ElementSelectionResult,
@@ -3883,7 +3967,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
   }
 
   private resolveRefreshedRetryTarget(
-    options: TapOnElementOptions,
+    options: TapVerificationOptions,
     hierarchy: ViewHierarchyResult,
     action: string,
     isTalkBackEnabled: boolean,
@@ -3944,14 +4028,15 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       return;
     }
 
+    const retryOptions = this.withRetryScreenSize(options, screenSize);
     const refreshedSelection = this.refreshedRetrySelection(
-      options,
+      retryOptions,
       probe.hierarchy,
       tapElement,
       selection,
     );
     const retryTarget = this.resolveRefreshedRetryTarget(
-      options,
+      retryOptions,
       probe.hierarchy,
       action,
       isTalkBackEnabled,
@@ -3966,8 +4051,8 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
         ? refreshedSelection
         : (selection ?? { ...refreshedSelection, element: retryTarget }),
       probe.hierarchy,
-      screenSize,
-      options,
+      this.getScreenSizeFromHierarchy(probe.hierarchy, retryOptions.screenSizeOptions),
+      retryOptions,
       retryTarget,
     );
     if (!retryBounds) {

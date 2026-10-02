@@ -1,3 +1,4 @@
+import type { ScreenSizeForOffscreenCheckOptions } from "../../src/models/ScreenSize";
 import type { Element } from "../../src/models/Element";
 import type { ElementSelectionResult } from "../../src/models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
@@ -73,6 +74,7 @@ export class FakeElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
       selectionIntent?: TextSelectionIntent;
     },
   ): ElementSelectionResult {
@@ -93,6 +95,7 @@ export class FakeElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     void viewHierarchy;
@@ -109,6 +112,7 @@ export class FakeElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     void viewHierarchy;
@@ -137,11 +141,7 @@ export class FakeElementSelector implements ElementSelector {
 
   selectClickable(
     viewHierarchy: ViewHierarchyResult,
-    options?: {
-      container?: { elementId?: string; text?: string } | null;
-      strategy?: ElementSelectionStrategy;
-      scrollableContainer?: boolean;
-    },
+    options?: Parameters<ElementSelector["selectClickable"]>[1],
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
@@ -159,6 +159,7 @@ export class FakeElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     void viewHierarchy;
@@ -177,6 +178,7 @@ export class FakeElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     void viewHierarchy;

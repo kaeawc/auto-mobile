@@ -1139,7 +1139,8 @@ describe("toSkeleton — acceptance criteria", () => {
       expect("index" in offscreen!).toBe(false);
       const indexed = rows.filter((entry) => entry.index !== undefined);
       expect(indexed.map((entry) => entry.index)).toEqual([0, 1]);
-      const selector = new ResolverElementSelector();
+      // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
+      const selector = new ResolverElementSelector(undefined, undefined, { platform: "ios" });
       for (const row of indexed) {
         const result = selector.selectByText(viewHierarchy, row.label!, {
           index: row.index,
@@ -1184,7 +1185,8 @@ describe("toSkeleton — acceptance criteria", () => {
           (entry) => entry.label === label,
         );
         expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
-        const selector = new ResolverElementSelector();
+        // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
+        const selector = new ResolverElementSelector(undefined, undefined, { platform: "ios" });
         for (const row of rows) {
           const result = selector.selectByText(viewHierarchy, label, {
             index: row.index,
@@ -1281,7 +1283,8 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(rows).toHaveLength(2);
       expect(rows.map((entry) => entry.index)).toEqual([0, 1]);
 
-      const selector = new ResolverElementSelector();
+      // owner decision D43 (#6523): the screen size follows the capture platform; this fixture is an iOS capture, so say so
+      const selector = new ResolverElementSelector(undefined, undefined, { platform: "ios" });
       for (const row of rows) {
         const result = selector.selectByText(viewHierarchy, row.label!, {
           index: row.index,

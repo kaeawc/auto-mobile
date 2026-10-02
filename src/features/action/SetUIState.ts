@@ -1,3 +1,4 @@
+import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -215,6 +216,7 @@ export class SetUIState extends BaseVisualChange {
   ) {
     super(device, adb, dependencies.timer ?? defaultTimer);
     this.iosSelector = new ResolverElementSelector(undefined, undefined, {
+      platform: device.platform,
       iosMultiPanel: device.platform === "ios" && (device.displays?.panels.length ?? 0) > 1,
     });
     this.fieldTypeDetector = dependencies.fieldTypeDetector ?? new FieldTypeDetector();
@@ -464,7 +466,7 @@ export class SetUIState extends BaseVisualChange {
       const visibleFields = this.findVisibleFieldsInScreenOrder(
         options.fields,
         processed,
-        lastObservation?.viewHierarchy,
+        lastObservation,
       );
 
       if (visibleFields.length > 0) {
@@ -774,7 +776,7 @@ export class SetUIState extends BaseVisualChange {
   private findVisibleFieldsInScreenOrder(
     fields: FieldSpec[],
     processed: Set<number>,
-    viewHierarchy?: ViewHierarchyResult,
+    observation?: ObserveResult,
   ): Array<{ fieldSpec: FieldSpec; fieldIndex: number; element: Element }> {
     const matches: Array<{ fieldSpec: FieldSpec; fieldIndex: number; element: Element }> = [];
 
@@ -783,7 +785,16 @@ export class SetUIState extends BaseVisualChange {
         continue;
       }
 
-      const element = this.findElement(fields[i].selector, viewHierarchy);
+      const element = this.findElement(
+        {
+          ...fields[i].selector,
+          screenSizeOptions: {
+            observationScreenSize: observation?.screenSize,
+            display: observation?.viewHierarchy,
+          },
+        },
+        observation?.viewHierarchy,
+      );
       if (element) {
         matches.push({ fieldSpec: fields[i], fieldIndex: i, element });
       }
@@ -1205,7 +1216,16 @@ export class SetUIState extends BaseVisualChange {
       return previousElement;
     }
 
-    const found = this.findElement(fieldSpec.selector, observation.viewHierarchy);
+    const found = this.findElement(
+      {
+        ...fieldSpec.selector,
+        screenSizeOptions: {
+          observationScreenSize: observation.screenSize,
+          display: observation.viewHierarchy,
+        },
+      },
+      observation.viewHierarchy,
+    );
     if (found) {
       return found;
     }
@@ -1224,7 +1244,7 @@ export class SetUIState extends BaseVisualChange {
    * Find element in view hierarchy
    */
   private findElement(
-    selector: ElementSelector,
+    selector: ElementSelector & { screenSizeOptions?: ScreenSizeForOffscreenCheckOptions },
     viewHierarchy?: ViewHierarchyResult,
   ): Element | null {
     if (!viewHierarchy) {
@@ -1237,6 +1257,7 @@ export class SetUIState extends BaseVisualChange {
           this.iosSelector.selectByText(viewHierarchy, selector.text, {
             intentAction: "inspect",
             selectionIntent: "focus-input",
+            screenSizeOptions: selector.screenSizeOptions,
           }).element ?? null
         );
       }
@@ -1480,7 +1501,16 @@ export class SetUIState extends BaseVisualChange {
     }
 
     // Find the element again
-    let element = this.findElement(fieldSpec.selector, observation.viewHierarchy);
+    let element = this.findElement(
+      {
+        ...fieldSpec.selector,
+        screenSizeOptions: {
+          observationScreenSize: observation.screenSize,
+          display: observation.viewHierarchy,
+        },
+      },
+      observation.viewHierarchy,
+    );
     // A text selector can name the field's current label/value, which changes
     // after input. Prefer the matched field's stable resource ID in the fresh
     // hierarchy when the original text no longer identifies it.

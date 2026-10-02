@@ -3,7 +3,7 @@ import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeo
 import type { Element } from "../../../src/models/Element";
 import {
   isElementCenterOffScreen,
-  resolveElementScreenSize,
+  screenSizeForOffscreenCheck,
 } from "../../../src/features/utility/ElementGeometry";
 
 function elementWithBounds(bounds: {
@@ -173,11 +173,21 @@ describe("element center screen geometry", () => {
   });
 
   test("prefers complete hierarchy dimensions and falls back when either is missing", () => {
-    expect(resolveElementScreenSize({ screenWidth: 120, screenHeight: 90 }, screen)).toEqual({
+    expect(
+      screenSizeForOffscreenCheck(
+        { hierarchy: {}, screenWidth: 120, screenHeight: 90 },
+        { observationScreenSize: screen },
+      ),
+    ).toEqual({
       width: 120,
       height: 90,
     });
-    expect(resolveElementScreenSize({ screenWidth: 120 }, screen)).toBe(screen);
-    expect(resolveElementScreenSize({}, undefined)).toBeUndefined();
+    expect(
+      screenSizeForOffscreenCheck(
+        { hierarchy: {}, screenWidth: 120 },
+        { observationScreenSize: screen },
+      ),
+    ).toBe(screen);
+    expect(screenSizeForOffscreenCheck({ hierarchy: {} })).toBeUndefined();
   });
 });

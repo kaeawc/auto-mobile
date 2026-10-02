@@ -161,7 +161,7 @@ describe("TapAnyElement", () => {
       const result = (tapAny as any).findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
-        { width: 1080, height: 1920 },
+        { observationScreenSize: { width: 1080, height: 1920 } },
       );
 
       expect(result.element).toBeNull();
@@ -174,7 +174,7 @@ describe("TapAnyElement", () => {
       const result = (tapAny as any).findClickableElement(
         { action: "tap" },
         { hierarchy: { node: {} } },
-        { width: 1080, height: 1920 },
+        { observationScreenSize: { width: 1080, height: 1920 } },
       );
 
       expect(result.element).not.toBeNull();
@@ -428,8 +428,10 @@ test.each([false, true])(
     const adb = new FakeAdbClient();
     const requests: string[] = [];
     const fresh = {
-      // A fresh capture without dimensions must not inherit the cached 100px screen.
-      ...(failFirstCapture ? {} : { screenWidth: 500, screenHeight: 500 }),
+      // A capture from another display must not inherit the cached 100px screen.
+      ...(failFirstCapture
+        ? { displayId: 7 }
+        : { displayId: 0, screenWidth: 500, screenHeight: 500 }),
       hierarchy: {
         node: {
           bounds: { left: 0, top: 0, right: 500, bottom: 500 },
@@ -483,7 +485,7 @@ test.each([false, true])(
     const cached = {
       observationId: "old-capture",
       screenSize: { width: 100, height: 100 },
-      viewHierarchy: { hierarchy: { node: {} } },
+      viewHierarchy: { displayId: 0, hierarchy: { node: {} } },
     };
     tapAny.observedInteraction = (action) => action(cached);
     // The search capture completes before the gesture; only the post-tap probe changes.

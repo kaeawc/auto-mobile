@@ -6,18 +6,25 @@ import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
 import type { ElementFinder, TextSelectionIntent } from "../../utils/interfaces/ElementFinder";
 import { defaultRandom } from "../../utils/Random";
 import { DefaultElementFinder } from "./ElementFinder";
-import { isElementCenterOffScreen, resolveElementScreenSize } from "./ElementGeometry";
+import {
+  isElementCenterOffScreen,
+  screenSizeForOffscreenCheck,
+  type ScreenSizeForOffscreenCheckOptions,
+} from "./ElementGeometry";
 
 export class DefaultElementSelector implements ElementSelector {
   private finder: ElementFinder;
   private random: () => number;
+  private readonly screenSizeOptions: ScreenSizeForOffscreenCheckOptions;
 
   constructor(
     finder: ElementFinder = new DefaultElementFinder(),
-    random: () => number = () => defaultRandom.next(),
+    options: (() => number) | (ScreenSizeForOffscreenCheckOptions & { random?: () => number }) = {},
   ) {
     this.finder = finder;
-    this.random = random;
+    this.random =
+      typeof options === "function" ? options : (options.random ?? (() => defaultRandom.next()));
+    this.screenSizeOptions = typeof options === "function" ? {} : options;
   }
 
   selectByText(
@@ -29,6 +36,7 @@ export class DefaultElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
       selectionIntent?: TextSelectionIntent;
     } = {},
   ): ElementSelectionResult {
@@ -43,7 +51,10 @@ export class DefaultElementSelector implements ElementSelector {
       true,
       options.selectionIntent,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, {
+      index: options.index,
+      screenSizeOptions: options.screenSizeOptions,
+    });
   }
 
   selectByResourceId(
@@ -54,6 +65,7 @@ export class DefaultElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -64,7 +76,10 @@ export class DefaultElementSelector implements ElementSelector {
       options?.partialMatch ?? false,
       false,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, {
+      index: options?.index,
+      screenSizeOptions: options?.screenSizeOptions,
+    });
   }
 
   selectByTestTag(
@@ -74,6 +89,7 @@ export class DefaultElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -83,7 +99,10 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       false,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, {
+      index: options?.index,
+      screenSizeOptions: options?.screenSizeOptions,
+    });
   }
 
   selectClickableParentByText(
@@ -113,6 +132,7 @@ export class DefaultElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       strategy?: ElementSelectionStrategy;
       scrollableContainer?: boolean;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -121,7 +141,9 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.scrollableContainer ?? false,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy);
+    return this.pickMatch(matches, strategy, viewHierarchy, {
+      screenSizeOptions: options?.screenSizeOptions,
+    });
   }
 
   selectClickableSiblingOfText(
@@ -133,6 +155,7 @@ export class DefaultElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -143,7 +166,10 @@ export class DefaultElementSelector implements ElementSelector {
       options?.fuzzyMatch ?? true,
       options?.caseSensitive ?? false,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
+    return this.pickMatch(matches, strategy, viewHierarchy, {
+      index: options?.index,
+      screenSizeOptions: options?.screenSizeOptions,
+    });
   }
 
   selectClickableSiblingOfResourceId(
@@ -154,6 +180,7 @@ export class DefaultElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
@@ -163,27 +190,31 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.partialMatch ?? false,
     );
-    return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
-  }
-
-  private isElementCenterOffScreen(element: Element, viewHierarchy: ViewHierarchyResult): boolean {
-    return isElementCenterOffScreen(element.bounds, resolveElementScreenSize(viewHierarchy));
+    return this.pickMatch(matches, strategy, viewHierarchy, {
+      index: options?.index,
+      screenSizeOptions: options?.screenSizeOptions,
+    });
   }
 
   private pickMatch(
     matches: Element[],
     strategy: ElementSelectionStrategy,
     viewHierarchy: ViewHierarchyResult,
-    index?: number,
+    options: { index?: number; screenSizeOptions?: ScreenSizeForOffscreenCheckOptions } = {},
   ): ElementSelectionResult {
+    const { index } = options;
     const totalMatches = matches.length;
     if (totalMatches === 0) {
       return { element: null, indexInMatches: -1, totalMatches: 0, strategy };
     }
 
+    const screenSize = screenSizeForOffscreenCheck(viewHierarchy, {
+      ...this.screenSizeOptions,
+      ...options.screenSizeOptions,
+    });
     const visibleMatches = matches
       .map((element, matchIndex) => ({ element, index: matchIndex }))
-      .filter((match) => !this.isElementCenterOffScreen(match.element, viewHierarchy));
+      .filter((match) => !isElementCenterOffScreen(match.element.bounds, screenSize));
 
     if (visibleMatches.length === 0) {
       return { element: null, indexInMatches: -1, totalMatches, strategy };

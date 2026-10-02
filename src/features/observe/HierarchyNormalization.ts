@@ -12,13 +12,20 @@ import type { ScreenSize } from "../../models/ScreenSize";
 // retains the pre-pruning size without trusting stale runner point metadata.
 const projectedScreenSizes = new WeakMap<ViewHierarchyResult["hierarchy"], ScreenSize>();
 
+/** Read projection provenance without interpreting an unprojected root as a screen. */
+export function getProjectedHierarchyScreenSize(
+  hierarchy: ViewHierarchyResult,
+): ScreenSize | undefined {
+  return projectedScreenSizes.get(hierarchy.hierarchy);
+}
+
 /** Prefer the size recorded before visibility pruning, then resolve an unprojected tree. */
 export function resolveActionableHierarchyScreenSize(
   hierarchy: ViewHierarchyResult,
   iosMultiPanel = false,
 ): ScreenSize | null {
   return (
-    projectedScreenSizes.get(hierarchy.hierarchy) ??
+    getProjectedHierarchyScreenSize(hierarchy) ??
     extractHierarchyScreenSize(hierarchy, iosMultiPanel)
   );
 }

@@ -1,3 +1,4 @@
+import type { ScreenSizeForOffscreenCheckOptions } from "../../models/ScreenSize";
 import type { ResolutionAction } from "../../features/utility/ElementResolver";
 import type { ElementSelectionResult } from "../../models/ElementSelectionResult";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
@@ -20,6 +21,7 @@ export interface ElementSelector {
       intentAction?: ResolutionAction;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
       selectionIntent?: TextSelectionIntent;
     },
   ): ElementSelectionResult;
@@ -34,6 +36,7 @@ export interface ElementSelector {
       intentAction?: ResolutionAction;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult;
 
@@ -46,6 +49,7 @@ export interface ElementSelector {
       intentAction?: ResolutionAction;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult;
 
@@ -56,6 +60,7 @@ export interface ElementSelector {
       strategy?: ElementSelectionStrategy;
       intentAction?: ResolutionAction;
       scrollableContainer?: boolean;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult;
 
@@ -70,6 +75,7 @@ export interface ElementSelector {
       intentAction?: ResolutionAction;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult;
 
@@ -83,6 +89,7 @@ export interface ElementSelector {
       intentAction?: ResolutionAction;
       /** 0-based position among on-screen matches; overrides strategy. Out of range → null. */
       index?: number;
+      screenSizeOptions?: ScreenSizeForOffscreenCheckOptions;
     },
   ): ElementSelectionResult;
 }

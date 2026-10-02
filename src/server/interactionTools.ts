@@ -83,6 +83,8 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { classifyDisplayInventory } from "../utils/deviceMatcher";
 import { logger } from "../utils/logger";
 import {
+  awaitWhileRequestIsLive,
+  throwIfAborted,
   createJSONToolResponse,
   createStructuredToolResponse,
   StructuredToolResponse,
@@ -1123,6 +1125,7 @@ export async function selectAndroidOpenLinkChooser(
   opened: OpenURLResult,
   url?: string,
   chooser: Pick<HandleIntentChooser, "execute"> = new HandleIntentChooser(device),
+  signal?: AbortSignal,
 ): Promise<OpenURLResult> {
   if (device.platform !== "android") {
     throw new ActionableError("chooserAppPackage is supported only on Android.");
@@ -1130,7 +1133,9 @@ export async function selectAndroidOpenLinkChooser(
   if (!opened.success) {
     return opened;
   }
-  const selection = await chooser.execute("custom", packageName, url);
+  throwIfAborted(signal);
+  const selection = await chooser.execute("custom", packageName, url, signal);
+  throwIfAborted(signal);
   if (!selection.detected || !selection.success) {
     return {
       ...opened,
@@ -2413,6 +2418,33 @@ async function handleInstalledImeAction(
   return createJSONToolResponse(await catalog.select(args.imeId, signal));
 }
 
+// Per-command factories preserve the default device implementations in production.
+let keyboardFactory: (device: BootedDevice) => Pick<Keyboard, "execute"> = (device) =>
+  new Keyboard(device);
+export function setKeyboardFactory(factory: typeof keyboardFactory): void {
+  keyboardFactory = factory;
+}
+export function resetKeyboardFactory(): void {
+  keyboardFactory = (device) => new Keyboard(device);
+}
+let openUrlFactory: (device: BootedDevice) => Pick<OpenURL, "execute"> = (device) =>
+  new OpenURL(device);
+export function setOpenUrlFactory(factory: typeof openUrlFactory): void {
+  openUrlFactory = factory;
+}
+export function resetOpenUrlFactory(): void {
+  openUrlFactory = (device) => new OpenURL(device);
+}
+let openLinkChooserFactory: (device: BootedDevice) => Pick<HandleIntentChooser, "execute"> = (
+  device,
+) => new HandleIntentChooser(device);
+export function setOpenLinkChooserFactory(factory: typeof openLinkChooserFactory): void {
+  openLinkChooserFactory = factory;
+}
+export function resetOpenLinkChooserFactory(): void {
+  openLinkChooserFactory = (device) => new HandleIntentChooser(device);
+}
+
 export function registerInteractionTools() {
   // tapOn, tapAny, dragAndDrop, selectAllText, pressButton, and swipeOn handlers
   // are defined at module scope (each with an
@@ -2427,11 +2459,12 @@ export function registerInteractionTools() {
     signal?: AbortSignal,
   ) => {
     try {
+      throwIfAborted(signal);
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
 
       if (args.action === "open") {
-        const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress);
-        await captureSystemTrayTerminalEvidence(device, result.observation);
+        const result = await ensureSystemTrayOpen(device, awaitTimeoutMs, progress, signal);
+        await captureSystemTrayTerminalEvidence(device, result.observation, signal);
         const success = result.skipped || result.opened;
         const response = createJSONToolResponse({
           message: result.skipped
@@ -2447,8 +2480,8 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "close") {
-        const result = await ensureSystemTrayClosed(device, awaitTimeoutMs, progress);
-        await captureSystemTrayTerminalEvidence(device, result.observation);
+        const result = await ensureSystemTrayClosed(device, awaitTimeoutMs, progress, signal);
+        await captureSystemTrayTerminalEvidence(device, result.observation, signal);
         const success = result.skipped || result.closed;
         const response = createJSONToolResponse({
           message: result.skipped
@@ -2471,9 +2504,9 @@ export function registerInteractionTools() {
         if (!appId) {
           throw new ActionableError("list action requires notification.appId");
         }
-        signal?.throwIfAborted();
+        throwIfAborted(signal);
         const appIds = await readCompleteTrayAppIds(device, signal);
-        signal?.throwIfAborted();
+        throwIfAborted(signal);
         if (!appIds.includes(appId)) {
           throw new ActionableError(`App ${appId} is not installed.`);
         }
@@ -2486,7 +2519,7 @@ export function registerInteractionTools() {
           progress,
           signal,
         );
-        await captureSystemTrayTerminalEvidence(device, result.observation);
+        await captureSystemTrayTerminalEvidence(device, result.observation, signal);
         return createJSONToolResponse({
           message: formatTrayListMessage(appId, result),
           ...result,
@@ -2500,17 +2533,18 @@ export function registerInteractionTools() {
       let installedApps: string[] = [];
 
       if (notification.appId) {
+        throwIfAborted(signal);
         installedApps =
           device.platform === "android"
-            ? await readCompleteTrayAppIds(device, signal)
-            : await new ListInstalledApps(device).execute();
+            ? await awaitWhileRequestIsLive(readCompleteTrayAppIds(device, signal), signal)
+            : await awaitWhileRequestIsLive(new ListInstalledApps(device).execute(signal), signal);
         if (!installedApps.includes(notification.appId)) {
           throw new ActionableError(`App ${notification.appId} is not installed.`);
         }
 
-        appLabel = await getSystemTrayDependencies().appLabelResolver(
-          device,
-          notification.appId,
+        throwIfAborted(signal);
+        appLabel = await awaitWhileRequestIsLive(
+          getSystemTrayDependencies().appLabelResolver(device, notification.appId, signal),
           signal,
         );
         appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
@@ -2523,13 +2557,14 @@ export function registerInteractionTools() {
           appMatchTexts,
           awaitTimeoutMs,
           progress,
+          signal,
         );
 
         if (!match) {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
         }
 
-        await captureSystemTrayTerminalEvidence(device, observation);
+        await captureSystemTrayTerminalEvidence(device, observation, signal);
         return createJSONToolResponse({
           message: "Found notification in system tray",
           match: match.match.matches,
@@ -2546,6 +2581,7 @@ export function registerInteractionTools() {
           appMatchTexts,
           awaitTimeoutMs,
           progress,
+          signal,
         );
 
         if (!initialMatch.match) {
@@ -2558,7 +2594,7 @@ export function registerInteractionTools() {
           appMatchTexts,
           actionStartMs + awaitTimeoutMs,
           progress,
-          { observation: initialMatch.observation, match: initialMatch.match },
+          { observation: initialMatch.observation, match: initialMatch.match, signal },
         );
 
         const tapMatch = resolveNotificationTapElement(match, notification);
@@ -2568,13 +2604,13 @@ export function registerInteractionTools() {
           );
         }
 
-        await tapElement(device, tapMatch.element);
+        await tapElement(device, tapMatch.element, signal);
         const { observation: nextObservation, settled } = await observeSystemTrayAfterTap(
           device,
           baseline,
           signal,
         );
-        await captureSystemTrayTerminalEvidence(device, nextObservation);
+        await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
 
         return createJSONToolResponse({
           message:
@@ -2602,6 +2638,7 @@ export function registerInteractionTools() {
           appMatchTexts,
           awaitTimeoutMs,
           progress,
+          signal,
         );
 
         if (!initialMatch.match) {
@@ -2614,7 +2651,7 @@ export function registerInteractionTools() {
           appMatchTexts,
           actionStartMs + awaitTimeoutMs,
           progress,
-          { observation: initialMatch.observation, match: initialMatch.match },
+          { observation: initialMatch.observation, match: initialMatch.match, signal },
         );
         const groupExpansionState = match.candidate.groupNode
           ? resolveNotificationGroupExpansionState(match.candidate.groupNode)
@@ -2645,15 +2682,20 @@ export function registerInteractionTools() {
           );
         }
 
-        await swipeElement(device, swipeTarget);
+        await swipeElement(device, swipeTarget, signal);
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute({
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-          skipPerformanceAudit: true,
-        });
-        await captureSystemTrayTerminalEvidence(device, nextObservation);
+        throwIfAborted(signal);
+        const nextObservation = await awaitWhileRequestIsLive(
+          observeScreen.execute({
+            skipScreenshot: true,
+            skipAccessibilityAudit: true,
+            skipPerformanceAudit: true,
+            signal,
+          }),
+          signal,
+        );
+        await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
 
         return createJSONToolResponse({
           message: "Dismissed notification",
@@ -2706,6 +2748,7 @@ export function registerInteractionTools() {
             clearMatchTexts,
             500,
             progress,
+            signal,
           );
 
           if (!match) {
@@ -2717,9 +2760,13 @@ export function registerInteractionTools() {
             break;
           }
 
-          await swipeElement(device, swipeTarget);
+          await swipeElement(device, swipeTarget, signal);
           swipeCount++;
-          await timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100);
+          throwIfAborted(signal);
+          await awaitWhileRequestIsLive(
+            timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100),
+            signal,
+          );
         }
 
         const remainingKeys =
@@ -2729,12 +2776,17 @@ export function registerInteractionTools() {
 
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute({
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-          skipPerformanceAudit: true,
-        });
-        await captureSystemTrayTerminalEvidence(device, nextObservation);
+        throwIfAborted(signal);
+        const nextObservation = await awaitWhileRequestIsLive(
+          observeScreen.execute({
+            skipScreenshot: true,
+            skipAccessibilityAudit: true,
+            skipPerformanceAudit: true,
+            signal,
+          }),
+          signal,
+        );
+        await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
 
         const result = formatClearAllResult(
           notification.appId,
@@ -2749,6 +2801,7 @@ export function registerInteractionTools() {
 
       throw new ActionableError(`Unknown systemTray action: ${args.action}`);
     } catch (error) {
+      throwIfAborted(signal);
       if (error instanceof ActionableError) {
         throw error;
       }
@@ -2819,6 +2872,7 @@ export function registerInteractionTools() {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ) => {
+    throwIfAborted(signal);
     // #6154 follow-up: `platform` is optional on the wire, so the schema's
     // iOS-rejects-activityName check (raw request platform) can be skipped
     // entirely when the caller omitted it. Re-validate against the resolved
@@ -2828,11 +2882,20 @@ export function registerInteractionTools() {
       throw new ActionableError("chooserAppPackage is supported only on Android.");
     }
 
-    const openUrl = new OpenURL(device);
-    const opened = await openUrl.execute(args.url);
+    const openUrl = openUrlFactory(device);
+    const opened = await openUrl.execute(args.url, signal);
+    throwIfAborted(signal);
     const result = args.chooserAppPackage
-      ? await selectAndroidOpenLinkChooser(device, args.chooserAppPackage, opened, opened.url)
+      ? await selectAndroidOpenLinkChooser(
+          device,
+          args.chooserAppPackage,
+          opened,
+          opened.url,
+          openLinkChooserFactory(device),
+          signal,
+        )
       : opened;
+    throwIfAborted(signal);
     const iosClient = device.platform === "ios" ? IOSCtrlProxyClient.getInstance(device) : null;
     const acceptedOpenAlert =
       args.acceptOpenAlert && result.success
@@ -2940,11 +3003,14 @@ export function registerInteractionTools() {
       if (args.action === "listImes" || args.action === "setIme" || args.action === "tapImeKey") {
         return handleInstalledImeAction(device, args, signal);
       }
-      const keyboard = new Keyboard(device);
-      const result = await keyboard.execute(args.action);
+      throwIfAborted(signal);
+      const keyboard = keyboardFactory(device);
+      const result = await keyboard.execute(args.action, signal);
+      throwIfAborted(signal);
 
       return createJSONToolResponse(result);
     } catch (error) {
+      throwIfAborted(signal);
       throw toActionableError(error, `Failed to execute keyboard ${args.action}`);
     }
   };

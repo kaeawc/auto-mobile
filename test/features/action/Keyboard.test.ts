@@ -283,12 +283,11 @@ describe("Keyboard", () => {
     controller.abort();
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
 
-    const result = await keyboard.execute("open", controller.signal);
-
-    expect(result.success).toBe(false);
-    expect(result.open).toBe(false);
-    // One post-action read, then the abort short-circuits before any sleep.
-    expect(fakeHierarchy.getCallCount()).toBe(2);
+    await expect(keyboard.execute("open", controller.signal)).rejects.toThrow(
+      "Operation cancelled",
+    );
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    expect(fakeHierarchy.getCallCount()).toBe(0);
     expect(fakeTimer.getSleepCallCount()).toBe(0);
   });
 
@@ -368,11 +367,11 @@ describe("Keyboard", () => {
     controller.abort();
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
 
-    const result = await keyboard.execute("close", controller.signal);
-
-    expect(result.success).toBe(false);
-    expect(result.open).toBe(true);
-    expect(fakeHierarchy.getCallCount()).toBe(2);
+    await expect(keyboard.execute("close", controller.signal)).rejects.toThrow(
+      "Operation cancelled",
+    );
+    expect(fakeAdb.getExecutedCommands()).toEqual([]);
+    expect(fakeHierarchy.getCallCount()).toBe(0);
     expect(fakeTimer.getSleepCallCount()).toBe(0);
   });
 

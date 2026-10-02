@@ -1,3 +1,6 @@
+import { throwIfAborted } from "../../utils/toolUtils";
+import type { Timer } from "../../utils/SystemTimer";
+import { defaultTimer } from "../../utils/SystemTimer";
 import { DeepLinkManager } from "../../utils/DeepLinkManager";
 import { BootedDevice, IntentChooserResult, ObserveResult } from "../../models";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -5,17 +8,37 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 
 export class HandleIntentChooser extends BaseVisualChange {
-  private deepLinkManager: DeepLinkManager;
+  private readonly deepLinkManagerFactory: (
+    signal?: AbortSignal,
+  ) => Pick<DeepLinkManager, "handleIntentChooser">;
 
   /**
    * Create an TerminateApp instance
    * @param device - Optional device
    * @param adb - Optional AdbClient instance for testing
    */
-  constructor(device: BootedDevice, adb: AdbClient | null = null) {
-    super(device, adb);
+  constructor(
+    device: BootedDevice,
+    adb: AdbClient | null = null,
+    deepLinkManagerFactory: (
+      signal?: AbortSignal,
+    ) => Pick<DeepLinkManager, "handleIntentChooser"> = (signal) =>
+      new DeepLinkManager(
+        device,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        timer,
+        signal,
+      ),
+    timer: Timer = defaultTimer,
+  ) {
+    super(device, adb, timer);
     this.device = device;
-    this.deepLinkManager = new DeepLinkManager(device);
+    this.deepLinkManagerFactory = deepLinkManagerFactory;
   }
 
   /**
@@ -28,7 +51,10 @@ export class HandleIntentChooser extends BaseVisualChange {
     preference: "always" | "just_once" | "custom" = "just_once",
     customAppPackage?: string,
     url?: string,
+    signal?: AbortSignal,
   ): Promise<IntentChooserResult> {
+    throwIfAborted(signal);
+    const deepLinkManager = this.deepLinkManagerFactory(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("handleIntentChooser");
 
@@ -39,16 +65,13 @@ export class HandleIntentChooser extends BaseVisualChange {
           return { success: false, error: "View hierarchy not found" };
         }
 
+        throwIfAborted(signal);
         return await perf.track("handleChooser", () =>
-          this.deepLinkManager.handleIntentChooser(
-            viewHierarchy,
-            preference,
-            customAppPackage,
-            url,
-          ),
+          deepLinkManager.handleIntentChooser(viewHierarchy, preference, customAppPackage, url),
         );
       },
       {
+        signal,
         changeExpected: false,
         timeoutMs: 500,
         perf,

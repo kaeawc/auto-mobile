@@ -1,3 +1,4 @@
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange } from "./BaseVisualChange";
@@ -47,15 +48,21 @@ export async function waitForIosForegroundChange(
   expectedAppId: string,
   reader: ForegroundObservationReader,
   timer: Timer,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const deadline = timer.now() + FOREGROUND_CHANGE_TIMEOUT_MS;
   for (let attempt = 1; timer.now() < deadline; attempt++) {
     try {
-      const observation = await raceWithDeadline(reader.read(), {
-        timer,
-        timeoutMs: deadline - timer.now(),
-        label: "iOS foreground change observation",
-      });
+      throwIfAborted(signal);
+      const observation = await awaitWhileRequestIsLive(
+        raceWithDeadline(reader.read(), {
+          timer,
+          timeoutMs: deadline - timer.now(),
+          label: "iOS foreground change observation",
+        }),
+        signal,
+      );
+      throwIfAborted(signal);
       const currentApp = foregroundAppId(observation);
       if (
         observation.freshness?.isFresh !== false &&
@@ -66,12 +73,17 @@ export async function waitForIosForegroundChange(
         return true;
       }
     } catch (error) {
+      throwIfAborted(signal);
       logger.warn(`[OpenURL] Could not confirm foreground change: ${error}`, error);
       return false;
     }
     const remaining = deadline - timer.now();
     if (remaining > 0) {
-      await timer.sleep(Math.min(remaining, foregroundPollBackoff.delayForAttempt(attempt)));
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(
+        timer.sleep(Math.min(remaining, foregroundPollBackoff.delayForAttempt(attempt))),
+        signal,
+      );
     }
   }
   return false;
@@ -130,7 +142,8 @@ export class OpenURL extends BaseVisualChange {
     this.devicectl = devicectl;
   }
 
-  async execute(url: string): Promise<OpenURLResult> {
+  async execute(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
+    throwIfAborted(signal);
     const perf = createGlobalPerformanceTracker();
     perf.serial("openURL");
 
@@ -170,9 +183,14 @@ export class OpenURL extends BaseVisualChange {
       try {
         // Use LaunchApp to properly launch the application
         const launchApp = new LaunchApp(this.device, this.adb);
-        const launchResult = await perf.track("launchApp", () =>
-          launchApp.execute(packageName, false, true),
+        throwIfAborted(signal);
+        const launchResult = await awaitWhileRequestIsLive(
+          perf.track("launchApp", () =>
+            launchApp.execute(packageName, false, true, undefined, undefined, undefined, signal),
+          ),
+          signal,
         );
+        throwIfAborted(signal);
 
         perf.end();
         if (launchResult.success) {
@@ -190,6 +208,7 @@ export class OpenURL extends BaseVisualChange {
           };
         }
       } catch (error) {
+        throwIfAborted(signal);
         logger.error(`[OpenURL] Exception while launching app ${packageName}:`, error);
         perf.end();
         return {
@@ -208,10 +227,12 @@ export class OpenURL extends BaseVisualChange {
         // Platform-specific URL opening execution
         switch (this.device.platform) {
           case "android":
-            return await perf.track("androidOpenURL", () => this.executeAndroidOpenURL(trimmedUrl));
+            return await perf.track("androidOpenURL", () =>
+              this.executeAndroidOpenURL(trimmedUrl, signal),
+            );
           case "ios":
             return await perf.track("iOSOpenURL", () =>
-              this.executeiOSOpenURL(trimmedUrl, previousObservation),
+              this.executeiOSOpenURL(trimmedUrl, previousObservation, signal),
             );
           default:
             perf.end();
@@ -219,6 +240,7 @@ export class OpenURL extends BaseVisualChange {
         }
       },
       {
+        signal,
         changeExpected: false,
         timeoutMs: 12000,
         perf,
@@ -231,7 +253,7 @@ export class OpenURL extends BaseVisualChange {
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
-  private async executeAndroidOpenURL(url: string): Promise<OpenURLResult> {
+  private async executeAndroidOpenURL(url: string, signal?: AbortSignal): Promise<OpenURLResult> {
     // Pass URL through as-is to am start without any reformatting.
     // Android's Intent system handles both hierarchical (scheme://authority/path)
     // and opaque (scheme:scheme-specific-part) URIs correctly.
@@ -240,10 +262,14 @@ export class OpenURL extends BaseVisualChange {
     // sees it; adb hands that element to the device's `sh`, which does parse it,
     // so the URL is single-quoted for that shell (issue #4213). Double quotes
     // would leave `"`, `$`, backticks and `\` live.
-    await this.adb.execute([
-      "shell",
-      `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`,
-    ]);
+    throwIfAborted(signal);
+    await awaitWhileRequestIsLive(
+      this.adb.execute(["shell", `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`], {
+        signal,
+      }),
+      signal,
+    );
+    throwIfAborted(signal);
 
     return {
       success: true,
@@ -262,11 +288,12 @@ export class OpenURL extends BaseVisualChange {
   private async executeiOSOpenURL(
     url: string,
     previousObservation?: ObserveResult,
+    signal?: AbortSignal,
   ): Promise<OpenURLResult> {
     if (isIosSimulatorUdid(this.device.deviceId)) {
-      return this.executeiOSSimulatorOpenURL(url, previousObservation);
+      return this.executeiOSSimulatorOpenURL(url, previousObservation, signal);
     }
-    return this.executeiOSPhysicalOpenURL(url);
+    return this.executeiOSPhysicalOpenURL(url, signal);
   }
 
   /**
@@ -277,18 +304,25 @@ export class OpenURL extends BaseVisualChange {
   private async executeiOSSimulatorOpenURL(
     url: string,
     previousObservation?: ObserveResult,
+    signal?: AbortSignal,
   ): Promise<OpenURLResult> {
     const simctl = this.simctl ?? new SimCtlClient();
     try {
       // xcrun simctl openurl <device> <url>, issued as argv so the URL reaches
       // execFile byte-for-byte. The string path re-splits its command, which
       // mangles quotes and backslashes (issue #4213 / #4196).
-      await simctl.executeCommandArgs(["openurl", this.device.deviceId, url]);
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(
+        simctl.executeCommandArgs(["openurl", this.device.deviceId, url]),
+        signal,
+      );
+      throwIfAborted(signal);
       // `simctl openurl` can present a SpringBoard-owned confirmation without
       // changing the tracked app hierarchy. Retire the pre-link cache so the
       // post-action observation performs a real cross-window capture.
       IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
     } catch (error) {
+      throwIfAborted(signal);
       logger.error(`[OpenURL] simctl openurl failed: ${error}`);
       return {
         success: false,
@@ -309,6 +343,7 @@ export class OpenURL extends BaseVisualChange {
           {
             read: () =>
               this.observeScreen.execute({
+                signal,
                 freshness: "fresh",
                 minTimestamp: openedAt,
                 skipScreenshot: true,
@@ -316,6 +351,7 @@ export class OpenURL extends BaseVisualChange {
               }),
           },
           this.timer,
+          signal,
         )
       : true;
     return {
@@ -335,10 +371,14 @@ export class OpenURL extends BaseVisualChange {
    * @param url - URL to open
    * @returns Result of the URL opening operation
    */
-  private async executeiOSPhysicalOpenURL(url: string): Promise<OpenURLResult> {
+  private async executeiOSPhysicalOpenURL(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<OpenURLResult> {
     const devicectl = this.devicectl ?? new DeviceAppManager();
 
-    if (!(await devicectl.isUrlLaunchAvailable())) {
+    throwIfAborted(signal);
+    if (!(await awaitWhileRequestIsLive(devicectl.isUrlLaunchAvailable(), signal))) {
       return {
         success: false,
         url,
@@ -360,12 +400,18 @@ export class OpenURL extends BaseVisualChange {
       const bundleId = useSystemResolver
         ? SAFARI_BUNDLE_ID
         : (IOSCtrlProxyManager.getExistingTargetBundleId(this.device) ?? SAFARI_BUNDLE_ID);
-      await devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url);
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(
+        devicectl.launchWithPayloadUrl(this.device.deviceId, bundleId, url),
+        signal,
+      );
+      throwIfAborted(signal);
       return {
         success: true,
         url,
       };
     } catch (error) {
+      throwIfAborted(signal);
       logger.error(`[OpenURL] devicectl open URL failed: ${error}`);
       return {
         success: false,

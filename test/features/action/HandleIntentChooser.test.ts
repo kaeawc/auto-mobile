@@ -73,10 +73,9 @@ describe("HandleIntentChooser", () => {
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
     // Create HandleIntentChooser instance
-    handleIntentChooser = new HandleIntentChooser(testDevice);
+    handleIntentChooser = new HandleIntentChooser(testDevice, null, () => fakeDeepLinkManager);
 
     // Replace the internal managers with our fakes
-    (handleIntentChooser as any).deepLinkManager = fakeDeepLinkManager;
     (handleIntentChooser as any).observeScreen = fakeObserveScreen;
     (handleIntentChooser as any).window = fakeWindow;
     (handleIntentChooser as any).awaitIdle = fakeAwaitIdle;

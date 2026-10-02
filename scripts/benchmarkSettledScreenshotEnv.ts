@@ -74,22 +74,3 @@ export function assertServerBuilt(serverPath: string, exists: boolean): void {
     throw new Error(`Benchmark server entry is missing: ${serverPath}; run "bun run build" first.`);
   }
 }
-
-export function isPrivateDaemonStartRefusal(message: string): boolean {
-  return (
-    message.includes("Found live AutoMobile daemon process") ||
-    message.includes("Refusing to terminate a live daemon during start")
-  );
-}
-
-export function assertNoPrivateDaemonStartRefusal(message: string): void {
-  if (isPrivateDaemonStartRefusal(message)) {
-    throw new Error(
-      "Another AutoMobile daemon process (likely the resident daemon) is alive. " +
-        "The daemon manager currently refuses to start a private-namespace daemon next to it " +
-        "(issue #8749). The benchmark deliberately will not stop or reuse that daemon. " +
-        "Wait for the #8749 fix, or stop the resident daemon yourself before running. " +
-        `Original error: ${message}`,
-    );
-  }
-}

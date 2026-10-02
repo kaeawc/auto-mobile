@@ -5,8 +5,6 @@
  * launch cwd live in a unique short temp directory. Parent env is never mutated.
  * Both child launches require the private namespace; cleanup closes MCP, stops
  * only that namespace's daemon, then removes the directory (retained on stop failure).
- * Until #8749 is fixed, another live daemon can block private startup; that refusal
- * aborts immediately without stopping or reusing the resident daemon.
  * Failure reasons are reported in JSON/table; all-failed series are INVALID and
  * exit nonzero unless --allow-failures. A missing build fails before any child.
  * Device coordination remains shared. pressButton volume_up is valid on Android
@@ -36,7 +34,6 @@ import {
   type ScreenshotMode,
 } from "./benchmarkSettledScreenshotReport";
 import {
-  assertNoPrivateDaemonStartRefusal,
   assertPrivateDaemonNamespace,
   assertServerBuilt,
   buildBenchmarkChildEnv,
@@ -103,9 +100,6 @@ export async function runBenchmark(
       if (state.parseError) {
         deps.log(`Warning: ${name} response JSON could not be parsed: ${state.parseError}`);
       }
-      // Inspect raw text as well: an envelope can contain a generic structured
-      // message alongside the actionable daemon-start refusal in text content.
-      assertNoPrivateDaemonStartRefusal([describeFailure(envelope), ...state.texts].join("\n"));
       return envelope;
     };
     if (options.app) {

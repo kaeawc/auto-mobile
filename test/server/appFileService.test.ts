@@ -31,6 +31,8 @@ import {
 } from "../../src/server/sharedStorageService";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
+import * as iosProcessState from "../../src/features/action/CrashApp";
+import * as androidProcessState from "../../src/utils/android-cmdline-tools/androidProcessState";
 import { shellQuote } from "../../src/utils/shellQuote";
 
 function execResult(stdout: string, stderr = "") {
@@ -55,6 +57,224 @@ describe("AppFileService", () => {
     name: "iPhone",
     platform: "ios",
   };
+
+  describe("running-app warnings", () => {
+    const appId = "com.example.app";
+    const dataRoot = "/simulators/SIM-1/data";
+    const processArgs = ["spawn", iosSimulatorDevice.deviceId, "launchctl", "list"];
+    const androidDevice: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+    };
+    const target = { domain: "app_containers" as const, appId, container: "documents" as const };
+    const files = ["one", "two", "three"].map((contentText) => ({
+      contentText,
+      destinationPath: `${contentText}.txt`,
+    }));
+
+    function iosHarness() {
+      const fileSystem = new TestAppFileFileSystem();
+      const simctl = new FakeSimCtlClient();
+      simctl.setCommandResult(
+        `get_app_container '${iosSimulatorDevice.deviceId}' '${appId}' data`,
+        dataRoot,
+      );
+      const service = createAppFileServiceForTesting({
+        simctlFactory: () => simctl as unknown as SimCtlClient,
+        fileSystem,
+      });
+      return { service, fileSystem, simctl };
+    }
+
+    for (const legacy of [false, true]) {
+      test(`iOS ${legacy ? "legacy" : "batch"} warns only after successful writes without terminating`, async () => {
+        const { service, fileSystem, simctl } = iosHarness();
+        // No captured launchctl fixture exists; inject the parser result from CrashApp.test.ts.
+        const rename = spyOn(fileSystem, "rename");
+        const parse = spyOn(iosProcessState, "findIosSimulatorAppProcess").mockImplementation(
+          () => {
+            expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+            expect(rename).toHaveBeenCalledTimes(legacy ? 1 : 3);
+            return {
+              pid: 27955,
+              serviceLabel: "UIKitApplication:com.example.app[bbbb][rb-legacy]",
+            };
+          },
+        );
+        try {
+          const result = legacy
+            ? await service.putFile({
+                device: iosSimulatorDevice,
+                appId,
+                container: "documents",
+                ...files[0]!,
+              })
+            : await service.putFile({ device: iosSimulatorDevice, target, files });
+          expect(result).toHaveProperty("warning", expect.stringContaining(appId));
+          expect(result).toHaveProperty("warning", expect.stringContaining("is running"));
+          expect(result).toHaveProperty(
+            "warning",
+            expect.stringContaining("re-reads the file or is relaunched"),
+          );
+          expect(parse).toHaveBeenCalledTimes(1);
+          expect(simctl.getMethodCalls("executeCommandArgs")[0]).toMatchObject({
+            args: processArgs,
+            timeoutMs: 5_000,
+          });
+          expect(simctl.getMethodCalls("terminateApp")).toEqual([]);
+          expect(simctl.getMethodCalls("executeCommand")).toHaveLength(1);
+          for (const file of legacy ? [files[0]!] : files) {
+            expect(
+              await fileSystem.readText(join(dataRoot, "Documents", file.destinationPath)),
+            ).toBe(file.contentText);
+          }
+        } finally {
+          parse.mockRestore();
+          rename.mockRestore();
+        }
+      });
+    }
+
+    test("iOS not running omits the warning key", async () => {
+      const { service, simctl } = iosHarness();
+      // Reuse the empty-table output from CrashApp.test.ts.
+      simctl.setCommandArgsResult(processArgs, "PID\tStatus\tLabel\n");
+      const result = await service.putFile({ device: iosSimulatorDevice, target, files });
+      expect(result.success).toBe(true);
+      expect(result).not.toHaveProperty("warning");
+      expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+    });
+
+    for (const failure of ["throw", "unreadable", "abort"] as const) {
+      test(`iOS ${failure} process check logs and preserves successful write`, async () => {
+        const { service, simctl, fileSystem } = iosHarness();
+        const controller = new AbortController();
+        const commandSpy = failure === "abort" ? spyOn(simctl, "executeCommandArgs") : undefined;
+        if (failure === "unreadable") {
+          simctl.setCommandArgsResult(processArgs, "");
+        } else if (failure === "throw") {
+          simctl.setCommandArgsError(processArgs, new Error(failure));
+        } else {
+          const execute = simctl.executeCommandArgs.bind(simctl);
+          commandSpy!.mockImplementation(async (args, timeoutMs, signal?: AbortSignal) => {
+            expect(signal).toBe(controller.signal);
+            // Cancellation arrives during the optional process read, after all writes.
+            controller.abort();
+            signal?.throwIfAborted();
+            return execute(args, timeoutMs);
+          });
+        }
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          const result = await service.putFile({
+            device: iosSimulatorDevice,
+            target,
+            files,
+            signal: controller.signal,
+          });
+          expect(result.success).toBe(true);
+          expect(result).not.toHaveProperty("warning");
+          expect(warn).toHaveBeenCalled();
+          expect(await fileSystem.readText(join(dataRoot, "Documents", "three.txt"))).toBe("three");
+        } finally {
+          warn.mockRestore();
+          commandSpy?.mockRestore();
+        }
+      });
+    }
+
+    for (const writtenUser of [0, 10]) {
+      test(`Android warns only for the written user ${writtenUser} with one batch check`, async () => {
+        const adb = new FakeAdbExecutor();
+        const timer = new FakeTimer();
+        const controller = new AbortController();
+        // No captured dumpsys fixture exists; inject the parsed user-10 result from androidProcessState.test.ts.
+        const read = spyOn(androidProcessState, "readAndroidPackageProcesses").mockImplementation(
+          async (_adb, _appId, options) => {
+            expect(
+              adb.getExecutedCommands().filter((command) => command.startsWith("push ")),
+            ).toHaveLength(3);
+            return {
+              processes: [{ pid: 333, processName: appId, userId: 10 }],
+              isRunning: options?.userId === 10,
+              stdout: "",
+            };
+          },
+        );
+        const service = createAppFileServiceForTesting({
+          adbFactory: adbFactoryFor(adb),
+          fileSystem: new TestAppFileFileSystem(),
+          timer,
+        });
+        try {
+          const result = await service.putFile({
+            device: androidDevice,
+            userId: writtenUser,
+            target,
+            files,
+            signal: controller.signal,
+          });
+          if (writtenUser === 10) {
+            expect(result).toHaveProperty("warning", expect.stringContaining(appId));
+          } else {
+            expect(result).not.toHaveProperty("warning");
+          }
+          expect(read).toHaveBeenCalledTimes(1);
+          expect(read).toHaveBeenCalledWith(adb, appId, {
+            userId: writtenUser,
+            signal: controller.signal,
+            timer,
+          });
+          expect(
+            adb.getExecutedCommands().some((command) => /force-stop|terminate|kill/.test(command)),
+          ).toBe(false);
+        } finally {
+          read.mockRestore();
+        }
+      });
+    }
+
+    for (const failure of ["device offline", "unreadable", "abort"] as const) {
+      test(`Android ${failure} process check logs and preserves successful write`, async () => {
+        const adb = new FakeAdbExecutor();
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const controller = new AbortController();
+        if (failure === "device offline") {
+          adb.setCommandError("shell dumpsys activity processes", new Error(failure));
+        }
+        if (failure === "abort") {
+          adb.setThrowOnAbortedSignal();
+          adb.abortAfterCommand("shell rm -f", controller);
+        }
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const service = createAppFileServiceForTesting({
+          adbFactory: adbFactoryFor(adb),
+          fileSystem: new TestAppFileFileSystem(),
+          timer,
+        });
+        try {
+          const result = await service.putFile({
+            device: androidDevice,
+            userId: 10,
+            target,
+            files: [files[0]!],
+            signal: controller.signal,
+          });
+          expect(result.success).toBe(true);
+          expect(result).not.toHaveProperty("warning");
+          expect(warn).toHaveBeenCalled();
+          expect(adb.getExecutedCommands().some((command) => command.includes(" cp "))).toBe(true);
+          if (failure === "device offline") {
+            expect(timer.now()).toBe(200);
+          }
+        } finally {
+          warn.mockRestore();
+        }
+      });
+    }
+  });
 
   test("selects the matching provider and passes normalized put requests", async () => {
     const androidDevice: BootedDevice = {
@@ -684,7 +904,8 @@ describe("AppFileService", () => {
       expect(adbFactory.getFakeClient().getAllCommands()[1]).toBe(
         `shell run-as 'com.example.app'${userId === 10 ? " --user 10" : ""} sh -c ${shellQuote(script)}`,
       );
-      expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(3);
+      expect(adbFactory.getFakeClient().getAllCommands()).toHaveLength(4);
+      expect(adbFactory.getFakeClient().getLastCommand()).toBe("shell dumpsys activity processes");
     }
   });
 
@@ -976,6 +1197,7 @@ describe("AppFileService", () => {
         }),
       ).rejects.toBe(failure);
 
+      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
       if (destinationExists) {
         expect(await fileSystem.readText(target)).toBe("original");
       } else {
@@ -1020,6 +1242,7 @@ describe("AppFileService", () => {
       }),
     ).rejects.toBe(failure);
 
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([]);
     expect(await fileSystem.readText(target)).toBe("original");
     expect(await fileSystem.readdir(dirname(target))).toEqual([{ name: "value.txt" }]);
     expect(fileSystem.removedPaths.filter((path) => path.includes(".value.txt."))).toHaveLength(1);
@@ -2263,6 +2486,7 @@ for (const operation of ["put", "list", "read"] as const) {
           expect(adb.getExecutedCommands()).toEqual([
             ...resolution,
             ...appFileOperationCommands(operation, container, scenario.resolved!),
+            ...(operation === "put" ? ["shell dumpsys activity processes"] : []),
           ]);
         }
         // Single-user omitted ID costs one listUsers + one pm list, no current-user read.
@@ -2412,7 +2636,11 @@ describe("Android app-file resource user round trips", () => {
         ) {
           resolution.push("shell am get-current-user");
         }
-        expect(adb.getExecutedCommands()).toEqual([...resolution, ...commands]);
+        expect(adb.getExecutedCommands()).toEqual([
+          ...resolution,
+          ...commands,
+          ...(operation === "put" ? ["shell dumpsys activity processes"] : []),
+        ]);
         expect(adb.listUsersCalls).toBe(scenario.explicit === undefined ? 1 : 0);
 
         ResourceRegistry.registerTemplate(

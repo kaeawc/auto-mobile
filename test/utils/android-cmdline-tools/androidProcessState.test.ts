@@ -83,6 +83,7 @@ describe("readAndroidPackageProcesses", () => {
 
     const state = await readAndroidPackageProcesses(adb, "com.example.app", { userId: 0 });
 
+    expect(state.stdout).toBe(PROCESS_LIST);
     expect(state.isRunning).toBe(true);
     expect(state.processes).toEqual([{ pid: 1234, processName: "com.example.app", userId: 0 }]);
     expect(adb.getCommandCalls()).toEqual([

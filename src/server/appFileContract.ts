@@ -153,6 +153,7 @@ export interface LegacyPutAppFileArgs {
 }
 
 export interface PutAppFileResult {
+  warning?: string;
   success: true;
   deviceId: string;
   platform: Platform;
@@ -177,6 +178,7 @@ export interface PutAppFileWriteResult {
 }
 
 export interface PutAppFileBatchResult {
+  warning?: string;
   success: true;
   deviceId: string;
   platform: Platform;

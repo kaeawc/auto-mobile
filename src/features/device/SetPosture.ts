@@ -20,6 +20,7 @@ import { displayTransitions, type DisplayTransitionSink } from "../observe/Displ
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { displayInventoryOutcome } from "../../models/DeviceInfo";
 
 export type RequestedPosture = Exclude<Posture, "unknown">;
 export type DisplayPreset = "phone" | "unfolded" | "tablet";
@@ -167,11 +168,14 @@ function isEmulator(device: BootedDevice): boolean {
   return device.deviceId.startsWith("emulator-");
 }
 
-function validateInventoryPosture(device: BootedDevice, requested: RequestedPosture): void {
-  const supported = device.displays?.postures;
-  if (supported && !supported.includes(requested)) {
+function validateSupportedPosture(
+  requested: RequestedPosture,
+  supported: Posture[],
+  states?: AndroidDeviceState[],
+): void {
+  if (!supported.includes(requested)) {
     throw new ActionableError(
-      `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ")}.`,
+      `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ") || "none"}. Nothing was changed. ${states ? `Supported states: ${states.map((state) => `${state.name} (${state.identifier})`).join(", ") || "none"}. ` : ""}Select a device that reports display panels and the requested posture and retry.`,
     );
   }
 }
@@ -227,15 +231,14 @@ async function setPhysicalPosture(
   adb: ReturnType<AdbClientFactory["create"]>,
   requested: RequestedPosture,
   states: AndroidDeviceState[],
+  supportsOpenedReset: boolean,
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
   const match = states.find((state) => state.posture === requested);
-  if (!match && requested !== "opened") {
+  if (!match && !(requested === "opened" && supportsOpenedReset)) {
     const supported = [...new Set(states.map((state) => state.posture))];
-    throw new ActionableError(
-      `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ") || "none"}.`,
-    );
+    validateSupportedPosture(requested, supported, states);
   }
   const command = match
     ? `shell cmd device_state state ${match.identifier}`
@@ -257,23 +260,30 @@ async function observeAndroidPosture(
   requested: RequestedPosture,
   states: AndroidDeviceState[],
   timer: Timer,
+  observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  if (states.length === 0 || !states.some((state) => state.posture === requested)) {
-    return;
-  }
+  const hasStateMapping = states.some((state) => state.posture === requested);
   const startedAt = timer.now();
   let actual: AndroidDeviceState | undefined;
+  let observedPosture: Posture = "unknown";
   do {
     throwIfAborted(signal);
-    const { stdout } = await awaitWhileRequestIsLive(
-      adb.executeCommand("shell cmd device_state state"),
-      signal,
-    );
-    const identifier = parseAndroidCommittedStateIdentifier(stdout);
-    actual = states.find((state) => state.identifier === identifier);
-    if (actual?.posture === requested) {
+    if (hasStateMapping) {
+      const { stdout } = await awaitWhileRequestIsLive(
+        adb.executeCommand("shell cmd device_state state"),
+        signal,
+      );
+      const identifier = parseAndroidCommittedStateIdentifier(stdout);
+      actual = states.find((state) => state.identifier === identifier);
+      observedPosture = actual?.posture ?? "unknown";
+    } else {
+      // Console-only postures and reset-to-open devices need observed evidence,
+      // rather than treating a missing committed-state mapping as success.
+      observedPosture = (await awaitWhileRequestIsLive(observe(), signal)).display.posture;
+    }
+    if (observedPosture === requested) {
       return;
     }
     const elapsed = timer.now() - startedAt;
@@ -287,7 +297,7 @@ async function observeAndroidPosture(
     );
   } while (true);
   throw new ActionableError(
-    `Android posture did not reach '${requested}' after ${ANDROID_POSTURE_TIMEOUT_MS} ms; committed state is ${actual ? `'${actual.posture}' (${actual.name}, ${actual.identifier})` : "unknown"}. Check whether a device_state override is still active.`,
+    `Posture command was sent, but the posture did not change to '${requested}' after ${ANDROID_POSTURE_TIMEOUT_MS} ms; ${hasStateMapping ? `committed state is ${actual ? `'${actual.posture}' (${actual.name}, ${actual.identifier})` : "unknown"}` : `observed posture is '${observedPosture}'`}. Check whether a device_state override is still active.`,
   );
 }
 
@@ -311,6 +321,34 @@ async function readAndroidStates(
     }
     throw toActionableError(error, "Could not read Android device states");
   }
+}
+
+async function readSupportedAndroidStates(
+  device: BootedDevice,
+  adb: ReturnType<AdbClientFactory["create"]>,
+  requested: RequestedPosture,
+  signal?: AbortSignal,
+) {
+  // Posture inventory can be useful even on AVDs with no panel inventory;
+  // classifyDisplayInventory classifies panels, so use the hydration outcome.
+  const inventoryPostures =
+    device[displayInventoryOutcome]?.kind === "unreadable" ? undefined : device.displays?.postures;
+  if (inventoryPostures) {
+    validateSupportedPosture(requested, inventoryPostures);
+  }
+  const states = await readAndroidStates(adb, signal);
+  const supported = inventoryPostures ?? [...new Set(states.map((state) => state.posture))];
+  const supportsOpenedReset = supported.some(
+    (posture) => posture !== "unknown" && posture !== "opened",
+  );
+  if (!inventoryPostures) {
+    validateSupportedPosture(
+      requested,
+      !isEmulator(device) && supportsOpenedReset ? [...supported, "opened"] : supported,
+      states,
+    );
+  }
+  return { states, inventoryPostures, supportsOpenedReset };
 }
 
 export class SetPosture {
@@ -344,8 +382,6 @@ export class SetPosture {
         return await this.executeIos(requested, displayPreset, signal);
       }
 
-      validateInventoryPosture(this.device, requested);
-
       const adb = this.adbFactory.create(this.device);
       const emulator = isEmulator(this.device);
       if (displayPreset && !emulator) {
@@ -354,24 +390,39 @@ export class SetPosture {
         );
       }
 
-      const states = await readAndroidStates(adb, signal);
+      const { states, inventoryPostures, supportsOpenedReset } = await readSupportedAndroidStates(
+        this.device,
+        adb,
+        requested,
+        signal,
+      );
 
       if (requested === "rear_display") {
-        await setPhysicalPosture(adb, requested, states, signal);
+        await setPhysicalPosture(adb, requested, states, supportsOpenedReset, signal);
       } else if (emulator) {
         await setEmulatorPosture(
           adb,
           requested,
           displayPreset,
           states.some((state) => state.posture === "rear_display") ||
-            Boolean(this.device.displays?.postures.includes("rear_display")),
+            Boolean(inventoryPostures?.includes("rear_display")),
           signal,
         );
       } else {
-        await setPhysicalPosture(adb, requested, states, signal);
+        await setPhysicalPosture(adb, requested, states, supportsOpenedReset, signal);
       }
 
-      await observeAndroidPosture(adb, requested, states, this.timer, signal);
+      await observeAndroidPosture(
+        adb,
+        requested,
+        states,
+        this.timer,
+        () => {
+          ObservedAndroidDisplayCache.clear(this.device.deviceId);
+          return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+        },
+        signal,
+      );
 
       throwIfAborted(signal);
       // A posture-only change need not produce a display push or new geometry.

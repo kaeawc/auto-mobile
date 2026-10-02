@@ -16,6 +16,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { displayInventoryOutcome } from "../../../src/models/DeviceInfo";
 import { parseAndroidCommittedStateIdentifier } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 
 const fixture = (name: string): string =>
@@ -56,7 +57,12 @@ function makeDevice(
   };
 }
 
-function makeFeature(device: BootedDevice, adb: FakeAdbExecutor, timer = new FakeTimer()) {
+function makeFeature(
+  device: BootedDevice,
+  adb: FakeAdbExecutor,
+  timer = new FakeTimer(),
+  observed: ObserveResult = observation,
+) {
   timer.enableAutoAdvance();
   const adbFactory: AdbClientFactory = { create: () => adb };
   const tracker = new DisplayTransitionTracker(() => {});
@@ -66,7 +72,7 @@ function makeFeature(device: BootedDevice, adb: FakeAdbExecutor, timer = new Fak
       execute: async () => {
         observeCount += 1;
         tracker.notifyTransition(device.deviceId, "fake observed identity change");
-        return observation;
+        return observed;
       },
     }) as ObserveScreen;
   return {
@@ -83,9 +89,120 @@ function makeFeature(device: BootedDevice, adb: FakeAdbExecutor, timer = new Fak
 }
 
 describe("SetPosture", () => {
+  test.each(["emulator-5554", "R5CT123"])(
+    "refuses plain phone closed and opened without changing %s",
+    async (deviceId) => {
+      for (const posture of ["closed", "opened"] as const) {
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse(
+          "shell cmd device_state print-states",
+          createExecResult(phoneStates, ""),
+        );
+        const device = makeDevice(deviceId);
+        delete device.displays;
+        const { feature, getObserveCount } = makeFeature(device, adb);
+        const attempt = feature.execute(posture);
+        await expect(attempt).rejects.toBeInstanceOf(ActionableError);
+        await expect(attempt).rejects.toThrow("Supported postures: none. Nothing was changed.");
+        expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states"]);
+        expect(getObserveCount()).toBe(0);
+      }
+    },
+  );
+
+  test("reads fold support before dispatch when emulator inventory is absent", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+    const device = makeDevice();
+    delete device.displays;
+    const { feature } = makeFeature(device, adb);
+    await expect(feature.execute("closed")).resolves.toMatchObject({ posture: "closed" });
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd device_state print-states",
+      "shell cmd device_state state reset",
+      "emu fold",
+      "shell cmd device_state state",
+    ]);
+  });
+
+  test("refuses unavailable device_state service without hydrated fold support", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "shell cmd device_state print-states",
+      new Error("Can't find service: device_state"),
+    );
+    const device = makeDevice();
+    delete device.displays;
+    const { feature } = makeFeature(device, adb);
+    await expect(feature.execute("closed")).rejects.toThrow(
+      "Supported postures: none. Nothing was changed.",
+    );
+    expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states"]);
+  });
+
+  test("falls back to print-states when hydration is marked unreadable", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(phoneStates, ""),
+    );
+    const device = makeDevice();
+    device[displayInventoryOutcome] = { kind: "unreadable", reason: "inventory unavailable" };
+    const { feature } = makeFeature(device, adb);
+    await expect(feature.execute("closed")).rejects.toThrow("Nothing was changed.");
+    expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states"]);
+  });
+
+  test("fails when an unmapped posture remains unknown after dispatch", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "shell cmd device_state print-states",
+      createExecResult(phoneStates, ""),
+    );
+    const { feature, timer } = makeFeature(makeDevice(), adb, new FakeTimer(), {
+      ...observation,
+      display: { ...display, posture: "unknown" },
+    });
+    await expect(feature.execute("closed")).rejects.toThrow("observed posture is 'unknown'");
+    expect(timer.now()).toBe(3000);
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell cmd device_state print-states",
+      "shell cmd device_state state reset",
+      "emu fold",
+    ]);
+  });
+
+  test("fails after command dispatch when the committed posture never changes", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(openedState, ""));
+    const { feature, timer, getObserveCount } = makeFeature(makeDevice(), adb);
+    await expect(feature.execute("closed")).rejects.toThrow(
+      "Posture command was sent, but the posture did not change to 'closed' after 3000 ms",
+    );
+    expect(adb.wasCommandExecuted("emu fold")).toBe(true);
+    expect(timer.now()).toBe(3000);
+    expect(getObserveCount()).toBe(0);
+  });
+
+  test("does not silently succeed for an inventory posture without a committed-state mapping", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    const { feature, timer } = makeFeature(makeDevice(), adb);
+    await expect(feature.execute("tent")).rejects.toThrow(
+      "Posture command was sent, but the posture did not change to 'tent' after 3000 ms",
+    );
+    expect(adb.wasCommandExecuted("emu posture 5")).toBe(true);
+    expect(timer.now()).toBe(3000);
+  });
+
   test("returns the real tracker generation after the fake observation notifies", async () => {
     const device = makeDevice();
-    const { feature, tracker } = makeFeature(device, new FakeAdbExecutor());
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+    const { feature, tracker } = makeFeature(device, adb);
     const result = await feature.execute("closed");
     expect(tracker.identityRevision(device.deviceId)).toBe(1);
     expect("display" in result && result.display.generation).toBe(
@@ -171,14 +288,21 @@ describe("SetPosture", () => {
         "shell cmd device_state print-states",
         createExecResult(phoneStates, ""),
       );
-      const { feature, getObserveCount } = makeFeature(makeDevice(), adb);
+      const { feature, getObserveCount } = makeFeature(makeDevice(), adb, new FakeTimer(), {
+        ...observation,
+        display: { ...display, posture },
+      });
       const result = await feature.execute(posture);
       expect(adb.getExecutedCommands()).toEqual([
         "shell cmd device_state print-states",
         ...commands,
       ]);
-      expect(getObserveCount()).toBe(1);
-      expect(result).toEqual({ posture, display: { ...display, generation: 1 }, locked: true });
+      expect(getObserveCount()).toBe(2);
+      expect(result).toEqual({
+        posture,
+        display: { ...display, posture, generation: 2 },
+        locked: true,
+      });
     }
   });
 
@@ -188,7 +312,15 @@ describe("SetPosture", () => {
       "shell cmd device_state print-states",
       createExecResult(phoneStates, ""),
     );
-    const { feature } = makeFeature(makeDevice("emulator-5554", ["closed", "opened"]), adb);
+    const { feature } = makeFeature(
+      makeDevice("emulator-5554", ["closed", "opened"]),
+      adb,
+      new FakeTimer(),
+      {
+        ...observation,
+        display: { ...display, posture: "opened" },
+      },
+    );
     await feature.execute("opened", "tablet");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
@@ -197,13 +329,21 @@ describe("SetPosture", () => {
     ]);
   });
 
-  test("non-foldable emulator proceeds when device_state service is absent", async () => {
+  test("uses observed posture when hydrated fold support exists but device_state is absent", async () => {
     const adb = new FakeAdbExecutor();
     adb.setCommandError(
       "shell cmd device_state print-states",
       new Error("Can't find service: device_state"),
     );
-    const { feature } = makeFeature(makeDevice("emulator-5554", ["closed", "opened"]), adb);
+    const { feature } = makeFeature(
+      makeDevice("emulator-5554", ["closed", "opened"]),
+      adb,
+      new FakeTimer(),
+      {
+        ...observation,
+        display: { ...display, posture: "closed" },
+      },
+    );
     await feature.execute("closed");
     expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states", "emu fold"]);
   });
@@ -359,12 +499,16 @@ describe("SetPosture", () => {
       "shell cmd device_state print-states",
       createExecResult(phoneStates, ""),
     );
-    const { feature } = makeFeature(makeDevice("R5CT123"), adb);
+    const { feature, getObserveCount } = makeFeature(makeDevice("R5CT123"), adb, new FakeTimer(), {
+      ...observation,
+      display: { ...display, posture: "opened" },
+    });
     await feature.execute("opened");
     expect(adb.getExecutedCommands()).toEqual([
       "shell cmd device_state print-states",
       "shell cmd device_state state reset",
     ]);
+    expect(getObserveCount()).toBe(2);
   });
 
   test("rejects a posture absent from device inventory with supported postures", async () => {
@@ -668,6 +812,8 @@ describe("SetPosture", () => {
 
   test("omits locked when the fresh observation has no lock signal", async () => {
     const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
     const adbFactory: AdbClientFactory = { create: () => adb };
     const unlockedObservation = {
       display,

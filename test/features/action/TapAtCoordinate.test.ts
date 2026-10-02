@@ -1,3 +1,4 @@
+import { resolveIosObserveRotation } from "../../../src/features/observe/iosObserveRotation";
 import { createTapAt, observation } from "../../helpers/tapAtCoordinate";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { issue8379Hierarchy, issue8379SyntheticOutlier } from "../../fixtures/issue8379Hierarchy";
@@ -1439,4 +1440,36 @@ describe("TapAtCoordinate", () => {
     expect(dispatches).toEqual(["epoch:1", "epoch:2"]);
     expect(observeScreen.getExecuteCallCount()).toBe(2);
   });
+});
+
+test("iOS snapshot tap accepts size-derived rotation and rejects a later rotation before dispatch", async () => {
+  const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
+  const initial: ObserveResult = {
+    ...observation(100, 200),
+    display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    rotation: resolveIosObserveRotation(undefined, { width: 100, height: 200 }),
+    viewHierarchy: { ...observation(100, 200).viewHierarchy!, rotation: undefined },
+  };
+  const capture = references.capture(iosDevice.deviceId, initial);
+  expect(capture.status).toBe("captured");
+  if (capture.status !== "captured") {
+    throw new Error("Missing iOS snapshot reference");
+  }
+  const { tapAt, observeScreen, iosDispatches } = createTapAt(
+    iosDevice,
+    100,
+    200,
+    undefined,
+    undefined,
+    references,
+  );
+  observeScreen.setObserveResult(initial);
+  expect(
+    (await tapAt.execute({ x: 10, y: 20, snapshotId: capture.reference.snapshotId })).success,
+  ).toBe(true);
+  observeScreen.setObserveResult({ ...initial, rotation: 1 });
+  expect(
+    await tapAt.execute({ x: 10, y: 20, snapshotId: capture.reference.snapshotId }),
+  ).toMatchObject({ success: false, error: expect.stringContaining("rotation") });
+  expect(iosDispatches).toHaveLength(1);
 });

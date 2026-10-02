@@ -108,7 +108,12 @@ export interface ViewHierarchyResult {
   pixelWidth?: number;
   /** Physical screenshot pixel height reported by the runner (#4548, additive). */
   pixelHeight?: number;
-  /** Display rotation: 0=portrait, 1=landscape90, 2=reverse, 3=landscape270 */
+  /**
+   * Runner rotation only: 0 portrait, 1 landscapeLeft (device top left, counter-clockwise /
+   * Android ROTATION_90), 2 portrait upside down, 3 landscapeRight (ROTATION_270).
+   * iOS omits unknown/unstable orientation; size-derived observe rotation is never copied here
+   * because screenshot crops require the runner's actual quarter-turn direction.
+   */
   rotation?: number;
   /** System insets (status bar, nav bar, gesture insets) */
   systemInsets?: { top: number; bottom: number; left: number; right: number };

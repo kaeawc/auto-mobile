@@ -1,3 +1,4 @@
+import { resolveIosObserveRotation } from "../observe/iosObserveRotation";
 import type { DisplayFenceDependencies } from "./BaseVisualChange";
 import { withStaleDisplay, StaleDisplayError } from "../../models/StaleDisplayError";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -1229,6 +1230,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const screenSize = this.getScreenSizeFromHierarchy(viewHierarchy);
     if (screenSize) {
       observeResult.screenSize = screenSize;
+    }
+    if (this.device.platform === "ios") {
+      observeResult.rotation = resolveIosObserveRotation(
+        viewHierarchy.rotation,
+        observeResult.screenSize,
+      );
     }
     if (refreshedFromDevice) {
       this.markObservationFreshAfterSyncRefresh(observeResult);

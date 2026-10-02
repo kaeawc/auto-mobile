@@ -21910,7 +21910,7 @@
   },
   {
     "name": "setPosture",
-    "description": "Set Android device posture or iPhone Duo simulator hinge posture, and optionally the Resizable Android emulator display preset",
+    "description": "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console syntax is unconfirmed and detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android has no angle read-back; iOS reports the runner angle when present.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -21918,6 +21918,12 @@
         "posture": {
           "type": "string",
           "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+        },
+        "hingeAngle": {
+          "description": "Best effort hinge angle in degrees, 0-180 inclusive; specify exactly one of posture or hingeAngle. Emulator/simulator only; no displayPreset.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 180
         },
         "displayPreset": {
           "type": "string",
@@ -21948,7 +21954,6 @@
           "type": "string"
         }
       },
-      "required": ["posture"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -21964,7 +21969,16 @@
         },
         "posture": {
           "type": "string",
-          "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]
+          "enum": ["closed", "half_opened", "opened", "rear_display", "flipped", "tent", "unknown"]
+        },
+        "hingeAngle": {
+          "type": "number"
+        },
+        "observedHingeAngle": {
+          "type": "number"
+        },
+        "postureReason": {
+          "type": "string"
         },
         "display": {
           "type": "object",

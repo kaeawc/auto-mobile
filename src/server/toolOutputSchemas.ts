@@ -1516,12 +1516,21 @@ export const setPostureResultSchema = z
   .object({
     message: z.string(),
     status: z.literal("unsupported").optional(),
-    posture: observationDisplaySchema.unwrap().shape.posture.exclude(["unknown"]).optional(),
+    posture: observationDisplaySchema.unwrap().shape.posture.optional(),
+    hingeAngle: z.number().finite().optional(),
+    observedHingeAngle: z.number().finite().optional(),
+    postureReason: z.string().optional(),
     display: observationDisplaySchema,
     locked: z.boolean().optional(),
     warnings: z.array(z.string()).optional(),
   })
-  .passthrough();
+  .passthrough()
+  .refine(
+    (result) =>
+      result.posture !== "unknown" ||
+      (result.hingeAngle !== undefined && Boolean(result.postureReason)),
+    "Unknown posture requires a hingeAngle request and postureReason.",
+  );
 
 export const tapOnResultSchema = z
   .object({

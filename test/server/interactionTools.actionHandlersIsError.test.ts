@@ -300,7 +300,10 @@ describe("setPostureHandler structured result", () => {
     },
     { status: "unsupported", message: "Physical iOS hinge posture can only be read, not set." },
   ] as const)("keeps the text payload unchanged for %j", async (result) => {
-    setSetPostureFactory(() => ({ execute: async () => result }));
+    setSetPostureFactory(() => ({
+      execute: async () => result,
+      executeHingeAngle: async () => result,
+    }));
     const response = await setPostureHandler(fakeDevice, { posture: "opened" });
     const message = "status" in result ? result.message : "Set device posture to opened";
     expect(response.structuredContent).toEqual({ message, ...result });
@@ -310,6 +313,9 @@ describe("setPostureHandler structured result", () => {
 
   test("operational failures still throw actionable errors", async () => {
     setSetPostureFactory(() => ({
+      executeHingeAngle: async () => {
+        throw new Error("posture failed");
+      },
       execute: async () => {
         throw new Error("posture failed");
       },

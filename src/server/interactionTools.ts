@@ -48,6 +48,8 @@ import {
   SetPosture,
   type SetPostureOutput,
   type RequestedPosture,
+  HINGE_ANGLE_MIN_DEGREES,
+  HINGE_ANGLE_MAX_DEGREES,
 } from "../features/device/SetPosture";
 import { OpenURL } from "../features/action/OpenURL";
 import { HandleIntentChooser } from "../features/action/HandleIntentChooser";
@@ -1295,13 +1297,39 @@ export const rotateSchema = addDeviceTargetingToSchema(
 export const setPostureSchema = addDeviceTargetingToSchema(
   z
     .object({
-      posture: z.enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent"]),
+      posture: z
+        .enum(["closed", "half_opened", "opened", "rear_display", "flipped", "tent"])
+        .optional(),
+      hingeAngle: z
+        .number()
+        .finite()
+        .min(HINGE_ANGLE_MIN_DEGREES)
+        .max(HINGE_ANGLE_MAX_DEGREES)
+        .optional()
+        .describe(
+          "Best effort hinge angle in degrees, 0-180 inclusive; specify exactly one of posture or hingeAngle. Emulator/simulator only; no displayPreset.",
+        ),
       displayPreset: z.enum(["phone", "unfolded", "tablet"]).optional(),
       platform: platformSchema.optional(),
       ...responseShapeControlFields,
     })
     .strict(),
-);
+).superRefine((args, context) => {
+  if ((args.posture !== undefined) === (args.hingeAngle !== undefined)) {
+    context.addIssue({
+      code: "custom",
+      message: "Specify exactly one of posture or hingeAngle.",
+      path: ["posture"],
+    });
+  }
+  if (args.hingeAngle !== undefined && args.displayPreset !== undefined) {
+    context.addIssue({
+      code: "custom",
+      message: "displayPreset requires posture and cannot be combined with hingeAngle.",
+      path: ["displayPreset"],
+    });
+  }
+});
 
 const clipboardTextRequiredMessage = "text is required when action is copy";
 const optionalClipboardTextSchema = z
@@ -2250,7 +2278,7 @@ export function resetRotateFactory(): void {
   rotateFactory = (device, options) => new Rotate(device, null, defaultTimer, options);
 }
 
-export type SetPostureLike = Pick<SetPosture, "execute">;
+export type SetPostureLike = Pick<SetPosture, "execute" | "executeHingeAngle">;
 
 let setPostureFactory: (device: BootedDevice) => SetPostureLike = (device) =>
   new SetPosture(device);
@@ -2265,17 +2293,31 @@ export function resetSetPostureFactory(): void {
 
 export async function setPostureHandler(
   device: BootedDevice,
-  args: { posture: RequestedPosture; displayPreset?: "phone" | "unfolded" | "tablet" },
+  args: {
+    posture?: RequestedPosture;
+    hingeAngle?: number;
+    displayPreset?: "phone" | "unfolded" | "tablet";
+  },
   _progress?: ProgressCallback,
   signal?: AbortSignal,
 ) {
   try {
-    const result: SetPostureOutput = await setPostureFactory(device).execute(
-      args.posture,
-      args.displayPreset,
-      signal,
-    );
-    const message = "status" in result ? result.message : `Set device posture to ${result.posture}`;
+    throwIfAborted(signal);
+    const parsed = setPostureSchema.parse(args);
+    const action = setPostureFactory(device);
+    const result: SetPostureOutput =
+      parsed.hingeAngle !== undefined
+        ? await action.executeHingeAngle(parsed.hingeAngle, {
+            displayPreset: parsed.displayPreset,
+            signal,
+          })
+        : await action.execute(parsed.posture!, parsed.displayPreset, signal);
+    const message =
+      "status" in result
+        ? result.message
+        : result.hingeAngle !== undefined
+          ? `Set hinge angle to ${result.hingeAngle} degrees; device reports posture ${result.posture}${result.postureReason ? ` (${result.postureReason})` : ""}`
+          : `Set device posture to ${result.posture}`;
     return createStructuredToolResponse({ message, ...result });
   } catch (error) {
     throw toActionableError(error, "Failed to set device posture");
@@ -3361,7 +3403,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "setPosture",
-    "Set Android device posture or iPhone Duo simulator hinge posture, and optionally the Resizable Android emulator display preset",
+    "Set Android device posture or iPhone Duo simulator posture, with an optional Resizable Android display preset. Specify exactly one of posture or hingeAngle (finite degrees, 0-180 inclusive). Hinge angle is BEST EFFORT, emulator/simulator only, without displayPreset; unsupported returns status: unsupported with a reason and no state change. Android console syntax is unconfirmed and detected at call time; iOS requires a runner advertising set_hinge_angle (#8547). Angle results echo hingeAngle and device posture read-back, or unknown with postureReason. Android has no angle read-back; iOS reports the runner angle when present.",
     setPostureSchema,
     setPostureHandler,
     { defaultEnabled: false, outputSchema: setPostureResultSchema },

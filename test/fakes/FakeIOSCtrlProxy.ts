@@ -43,6 +43,11 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../src/utils/constants";
  * Tracks method calls for test assertions
  */
 export class FakeIOSCtrlProxy implements IOSCtrlProxy {
+  supportedCommands: string[] | null = null;
+
+  async getSupportedCommands(): Promise<string[] | null> {
+    return this.supportedCommands;
+  }
   constructor(private readonly timer: Timer = defaultTimer) {}
 
   // Configurable response data

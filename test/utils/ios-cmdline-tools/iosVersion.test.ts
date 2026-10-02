@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   compareIosVersions,
   parseIosMajorVersion,
@@ -187,6 +189,39 @@ describe("iosVersionStringFromRuntimeId", () => {
 });
 
 describe("iosMajorVersionFromDevicectlDetails", () => {
+  test("reads object osVersionNumber from the omit-deprecated listing capture", () => {
+    const capture: { result: { devices: Record<string, unknown>[] } } = JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../fixtures/ios-devicectl/list-devices-simulators-only-omit-deprecated.json",
+        ),
+        "utf8",
+      ),
+    );
+    // DERIVED: a captured listing record wrapped in a details-like envelope,
+    // not captured `devicectl device info details` output.
+    const json = JSON.stringify({ result: capture.result.devices[0] });
+    expect(iosMajorVersionFromDevicectlDetails(json)).toBe(26);
+  });
+
+  test("reads object osVersionNumber after removing deprecated listing keys", () => {
+    const capture: { result: { devices: Record<string, unknown>[] } } = JSON.parse(
+      readFileSync(
+        join(import.meta.dir, "../../fixtures/ios-devicectl/list-devices-simulators-only.json"),
+        "utf8",
+      ),
+    );
+    // DERIVED: strip deprecated fields in memory and wrap the listing record
+    // in a details-like envelope; this is not captured `device info details` output.
+    const device = capture.result.devices[0];
+    delete device.deviceProperties;
+    delete device.hardwareProperties;
+    delete device.connectionProperties;
+    delete device._deprecationNotice;
+    expect(iosMajorVersionFromDevicectlDetails(JSON.stringify({ result: device }))).toBe(26);
+  });
+
   test("reads osVersionNumber from the deviceProperties envelope", () => {
     const json = JSON.stringify({
       result: { deviceProperties: { osVersionNumber: "18.6" } },

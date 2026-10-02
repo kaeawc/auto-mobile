@@ -61,6 +61,9 @@ Not captured (needs a targeted simulator):
   and `device info apps` on a shut-down simulator. Tests use constructed minimal objects for 1000.
 - A successful `device info apps` capture exists but is deliberately NOT committed: its app `url`
   values embed the capturing user's home directory, and these fixtures are verbatim (no redaction).
+- Real `devicectl device info details --json-output` output for a physical device
+  and/or simulator is still owed. The version-parser tests use DERIVED listing
+  records wrapped in details-like envelopes, not captured details output.
 
 Captured 2026-10-02 (Xcode 26.6 / CoreDevice 651.13.4; host-only help, no device targeted):
 

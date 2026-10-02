@@ -35,6 +35,15 @@ const device = { deviceId: "gesture-diagnostics", platform: "ios", name: "Fake i
 afterEach(() => setDebugPerfEnabled(false));
 
 describe("iOS gesture phase diagnostics", () => {
+  test("bound error preserves the running phase without a perf tree", () => {
+    const error =
+      "Command request_swipe exceeded execution bound 4500ms in phase xcuitestGesture after 4502ms; XCUITest call is still executing and the runner stays busy until it returns";
+    expect(
+      decodeCtrlProxyMessage({ type: "swipe_result", requestId: "bound", success: false, error })
+        ?.result,
+    ).toMatchObject({ success: false, error });
+  });
+
   test("real encoder fixture retains children and adds summary to the deadline error", () => {
     const decoded = decodeCtrlProxyMessage(message);
     expect(decoded?.result).toMatchObject({

@@ -2,6 +2,13 @@
 import Foundation
 import XCTest
 
+private struct LegacySwipePayload: Decodable {
+    let x1: Double
+    let y1: Double
+    let x2: Double
+    let y2: Double
+}
+
 private struct DeadlineForwardingHandler: CommandHandling {
     let swipeHandler: CommandHandler
     let other: @Sendable (WebSocketRequest) -> any WebSocketResponsePayload
@@ -39,6 +46,7 @@ final class SwipeDeadlineTests: XCTestCase {
         gestures: RewriteFakeGesturePerformer, clock: FakeMonotonicClock,
         logSink: any GestureLogSink = SystemGestureLogSink(),
         timings: [PerfTiming]? = nil,
+        timer: any ProxyTimer = FakeProxyTimer(mode: .manual),
         other: @escaping @Sendable (WebSocketRequest) -> any WebSocketResponsePayload = { request in
             WebSocketResponse.success(type: "screenshot", requestId: request.requestId, totalTimeMs: 0)
         }
@@ -56,8 +64,174 @@ final class SwipeDeadlineTests: XCTestCase {
             frameContext: FakeFrameContextRecording(token: nil),
             busyBudgetMs: 3000,
             monotonicNowMs: { clock.now() },
-            gestureLogSink: logSink
+            gestureLogSink: logSink,
+            timer: timer
         )
+    }
+
+    func testDispatchDecisionAndBoundArePure() {
+        XCTAssertEqual(swipeDispatchMode(lockScreen: nil), .xcuitest)
+        XCTAssertEqual(swipeDispatchMode(lockScreen: false), .xcuitest)
+        XCTAssertEqual(swipeDispatchMode(lockScreen: true), .synthesizedLockScreen)
+        XCTAssertNil(gestureExecutionBoundMs(deadlineMs: nil, executionStartedAtMs: 1000))
+        XCTAssertEqual(gestureExecutionBoundMs(deadlineMs: 6000, executionStartedAtMs: 1000), 4500)
+        XCTAssertEqual(gestureExecutionBoundMs(deadlineMs: 1100, executionStartedAtMs: 1000), 250)
+        XCTAssertEqual(gestureExecutionBoundMs(deadlineMs: 900, executionStartedAtMs: 1000), 250)
+    }
+
+    func testLockScreenFlagDecodeAndRouting() async throws {
+        for (field, expected) in [("", nil), (",\"lockScreen\":true", true), (",\"lockScreen\":false", false)] {
+            let data = swipe("flag", timeout: field)
+            let request = try JSONDecoder().decode(RequestSwipe.self, from: data)
+            XCTAssertEqual(request.lockScreen, expected)
+            let legacy = try JSONDecoder().decode(LegacySwipePayload.self, from: data)
+            XCTAssertEqual(
+                [legacy.x1, legacy.y1, legacy.x2, legacy.y2],
+                [request.x1, request.y1, request.x2, request.y2]
+            )
+            let gestures = RewriteFakeGesturePerformer()
+            let done = expectation(description: "routed swipe")
+            let responder = CapturingResponder(onEach: { done.fulfill() })
+            let server = server(gestures: gestures, clock: FakeMonotonicClock())
+            server.dispatchCommand(data, responder: responder)
+            await fulfillment(of: [done], timeout: 2)
+            XCTAssertEqual(gestures.swipeCalls, expected == true ? 0 : 1)
+            XCTAssertEqual(gestures.lockScreenSwipeCalls, expected == true ? 1 : 0)
+            XCTAssertEqual(try response(responder)["success"] as? Bool, true)
+        }
+        // Unknown fields remain ignorable; older runners decode the same envelope.
+        XCTAssertNil(
+            try JSONDecoder().decode(RequestSwipe.self, from: swipe("extra", timeout: ",\"futureField\":true"))
+                .lockScreen
+        )
+        for invalid in ["1", "\"true\"", "{}", "[]"] {
+            XCTAssertThrowsError(try JSONDecoder().decode(
+                RequestSwipe.self,
+                from: swipe("bad", timeout: ",\"lockScreen\":\(invalid)")
+            ))
+        }
+    }
+
+    func testHandlerWinsCancelsWatchdogAndKeepsResponseShape() async throws {
+        let timer = FakeProxyTimer(mode: .manual)
+        let sink = FakeGestureLogSink()
+        let server = server(
+            gestures: RewriteFakeGesturePerformer(),
+            clock: FakeMonotonicClock(),
+            logSink: sink,
+            timer: timer
+        )
+        let done = expectation(description: "fast swipe")
+        let responder = CapturingResponder(onEach: { done.fulfill() })
+        server.dispatchCommand(swipe("fast", timeout: ",\"timeoutMs\":5000"), responder: responder)
+        await fulfillment(of: [done], timeout: 2)
+        // Cancellation can precede the watchdog starting. Let its cancellation-aware
+        // wait observe it before inspecting the fake, without delaying the real response.
+        var spins = 0
+        while timer.cancelledWaitCount == 0, spins < 10000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertEqual(timer.cancelledWaitCount, 1)
+        XCTAssertEqual(timer.pendingWaiterCount, 0)
+        timer.advance(by: 5000)
+        XCTAssertEqual(responder.captured.count, 1)
+        XCTAssertEqual(sink.lines.count, 0)
+        XCTAssertEqual(
+            try Set(response(responder).keys),
+            Set(["type", "timestamp", "requestId", "success", "totalTimeMs"])
+        )
+    }
+
+    // This test must stay off the main actor: the fake deliberately blocks it exactly
+    // like synchronous XCUITest. All test clock advancement/response inspection is off-main.
+    nonisolated func testWatchdogRespondsWhileMainActorStalledAndRetainsChain() async throws {
+        let timer = FakeProxyTimer(mode: .manual)
+        let clock = FakeMonotonicClock()
+        let sink = FakeGestureLogSink()
+        let coordinator = CommandFailureCoordinator()
+        let started = XCTestExpectation(description: "gesture started")
+        let bounded = XCTestExpectation(description: "bound response")
+        let queuedDone = XCTestExpectation(description: "queued command after release")
+        let nextDone = XCTestExpectation(description: "next command")
+        let release = DispatchSemaphore(value: 0)
+        let server = await MainActor.run {
+            let gestures = RewriteFakeGesturePerformer()
+            gestures.onSwipe = {
+                GesturePhaseDiagnostics.current?.begin("xcuitestGesture")
+                started.fulfill()
+                release.wait()
+                GesturePhaseDiagnostics.current?.begin("postGesture")
+            }
+            return WebSocketServer(
+                commandHandler: DeadlineForwardingHandler(
+                    swipeHandler: CommandHandler(
+                        elementLocator: RewriteFakeElementLocator(),
+                        gesturePerformer: gestures,
+                        perf: FakePerfTracking(flushResult: nil)
+                    ),
+                    other: { request in
+                        WebSocketResponse.success(type: "screenshot", requestId: request.requestId, totalTimeMs: 0)
+                    }
+                ), perf: FakePerfTracking(flushResult: nil), frameContext: FakeFrameContextRecording(token: nil),
+                failureCoordinator: coordinator, monotonicNowMs: { clock.now() }, gestureLogSink: sink, timer: timer
+            )
+        }
+        defer { release.signal() }
+        let responder = CapturingResponder(onEach: {
+            XCTAssertFalse(Thread.isMainThread, "timeout must be sent while the main thread is blocked")
+            bounded.fulfill()
+        })
+        let queued = CapturingResponder(onEach: { queuedDone.fulfill() })
+        let busy = CapturingResponder()
+        let next = CapturingResponder(onEach: { nextDone.fulfill() })
+        server.dispatchCommand(
+            Data(#"{"type":"request_swipe","requestId":"stuck","x1":1,"y1":2,"x2":3,"y2":4,"timeoutMs":5000}"#.utf8),
+            responder: responder
+        )
+        await fulfillment(of: [started], timeout: 2)
+        var spins = 0
+        while timer.pendingWaiterCount == 0, spins < 10000 {
+            await Task.yield()
+            spins += 1
+        }
+        XCTAssertEqual(timer.pendingWaiterCount, 1)
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"queued"}"#.utf8), responder: queued)
+        XCTAssertTrue(queued.captured.isEmpty)
+        clock.advance(by: 4499)
+        timer.advance(by: 4499)
+        XCTAssertTrue(responder.captured.isEmpty)
+        clock.advance(by: 1)
+        timer.advance(by: 1)
+        await fulfillment(of: [bounded], timeout: 2)
+        let result = try JSONDecoder().decode(WebSocketResponse.self, from: XCTUnwrap(responder.captured.first))
+        XCTAssertEqual(result.type, "swipe_result")
+        XCTAssertEqual(result.requestId, "stuck")
+        XCTAssertEqual(result.success, false)
+        XCTAssertTrue(result.error?.contains("xcuitestGesture") == true)
+        XCTAssertTrue(result.error?.contains("4500ms") == true)
+        XCTAssertTrue(result.error?.contains("still executing") == true)
+        XCTAssertTrue(result.error?.contains("runner stays busy") == true)
+        XCTAssertEqual(sink.lines.count, 1)
+        XCTAssertTrue(sink.lines[0].contains("boundHit=true phaseAtBound=xcuitestGesture"))
+        XCTAssertTrue(coordinator.recordDeflectedFailure("late failure"))
+        XCTAssertTrue(queued.captured.isEmpty)
+        clock.advance(by: 6000)
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"busy"}"#.utf8), responder: busy)
+        let busyResponse = try JSONDecoder().decode(WebSocketResponse.self, from: XCTUnwrap(busy.captured.first))
+        XCTAssertEqual(busyResponse.error, "runner_busy")
+        XCTAssertEqual(busyResponse.blockingCommandType, "request_swipe")
+        XCTAssertEqual(busyResponse.blockingElapsedMs, 10500)
+        release.signal()
+        await fulfillment(of: [queuedDone], timeout: 2)
+        XCTAssertEqual(responder.captured.count, 1) // late deadlineExceeded is discarded
+        XCTAssertEqual(sink.lines.count, 2)
+        XCTAssertTrue(sink.lines[1].contains("xcuitestGestureMs=10500"))
+        XCTAssertTrue(sink.lines[1].contains("phaseAtBound=xcuitestGesture"))
+        XCTAssertFalse(coordinator.recordDeflectedFailure("after completion"))
+        server.dispatchCommand(Data(#"{"type":"request_screenshot","requestId":"next"}"#.utf8), responder: next)
+        await fulfillment(of: [nextDone], timeout: 2)
+        XCTAssertEqual(responder.captured.count, 1)
     }
 
     func testSwipeWithoutTimeoutKeepsLegacySuccessShape() async throws {

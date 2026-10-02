@@ -57,6 +57,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var tapCalls = 0
     var diagnosticTapCalls = 0
     var tapDiagnosticsResult: TapDiagnostics?
+    var lockScreenSwipeCalls = 0
     var swipeCalls = 0
     var onSwipe: (() -> Void)?
     var onPressKey: (() -> Void)?
@@ -104,6 +105,15 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     func longPress(x _: Double, y _: Double, duration _: TimeInterval) throws {}
     func swipe(startX _: Double, startY _: Double, endX _: Double, endY _: Double, duration _: TimeInterval) throws {
         swipeCalls += 1
+        onSwipe?()
+    }
+
+    func lockScreenSwipe(
+        startX _: Double, startY _: Double, endX _: Double, endY _: Double, duration _: TimeInterval
+    )
+        throws
+    {
+        lockScreenSwipeCalls += 1
         onSwipe?()
     }
 

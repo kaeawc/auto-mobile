@@ -1064,6 +1064,37 @@ public final class GesturePerformer: GesturePerforming {
             }
         }
 
+        /// App-independent event delivery avoids stale-app activation and lock-screen idle waits.
+        public func lockScreenSwipe(
+            startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval
+        )
+            throws
+        {
+            GesturePhaseDiagnostics.current?.begin("targetResolution")
+            // No XCUIApplication is resolved: the lock screen may leave the tracked app stale.
+            let synthesized = try catchingObjCException { () -> Bool in
+                GesturePhaseDiagnostics.current?.begin("coordinateResolution")
+                let orientation = DeviceRotation.currentGestureInterfaceOrientation()
+                var errorMessage: NSString?
+                var symbolsUnavailable: ObjCBool = false
+                GesturePhaseDiagnostics.current?.begin("synthesizedGesture")
+                defer { GesturePhaseDiagnostics.current?.begin("postGesture") }
+                let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
+                    CGFloat(startX), CGFloat(startY), CGFloat(endX), CGFloat(endY),
+                    1, 0, duration, orientation.rawValue, &symbolsUnavailable, &errorMessage
+                )
+                guard !succeeded else { return true }
+                guard symbolsUnavailable.boolValue else {
+                    throw GestureError.gestureFailed(errorMessage as String? ?? "lock-screen swipe synthesis failed")
+                }
+                return false
+            }
+            if !synthesized {
+                // Availability fallback retains the existing XCUITest behavior and phase name.
+                try swipe(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration)
+            }
+        }
+
         public func multiFingerSwipe(
             startX: Double,
             startY: Double,

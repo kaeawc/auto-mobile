@@ -8,7 +8,12 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { DelegateContext, GestureTimingResult, BaseResult } from "./types";
+import type {
+  DelegateContext,
+  GestureTimingResult,
+  BaseResult,
+  SwipeRequestOptions,
+} from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
 /** Default transport budget for coordinate taps and VoiceOver activation. */
@@ -91,6 +96,21 @@ export class SharedGestureDelegate {
     });
   }
 
+  /** Normalize the existing string slot and keep the lock-screen opt-in iOS-only. */
+  private swipeContextParams(contextOptions?: string | SwipeRequestOptions): {
+    frameContext?: string;
+    lockScreen?: true;
+  } {
+    const options =
+      typeof contextOptions === "string" ? { frameContext: contextOptions } : contextOptions;
+    return {
+      frameContext: options?.frameContext,
+      ...(this.config.includeSwipeTimeoutMs && options?.lockScreen === true
+        ? { lockScreen: true }
+        : {}),
+    };
+  }
+
   async requestSwipe(
     x1: number,
     y1: number,
@@ -99,7 +119,7 @@ export class SharedGestureDelegate {
     duration: number = 300,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string,
+    contextOptions?: string | SwipeRequestOptions,
     onDispatch?: () => void,
     signal?: AbortSignal,
     displayId?: number,
@@ -116,7 +136,7 @@ export class SharedGestureDelegate {
         x2: this.coord(x2),
         y2: this.coord(y2),
         duration,
-        frameContext,
+        ...this.swipeContextParams(contextOptions),
         ...(this.config.includeSwipeTimeoutMs ? { timeoutMs } : {}),
         ...displayParams,
       },

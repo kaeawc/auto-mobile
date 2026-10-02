@@ -1611,51 +1611,61 @@ describe("IOSCtrlProxyClient", function () {
   });
 
   describe("requestSwipe", function () {
-    test("should send swipe request and return result", async function () {
-      const testTimer = fakeTimer;
+    test.each([undefined, false, true])(
+      "should send swipe request with lockScreen=%s and return result",
+      async function (lockScreen) {
+        const testTimer = fakeTimer;
 
-      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = IOSCtrlProxyClient.createForTesting(
-        testDevice,
-        serverPort,
-        factory,
-        testTimer,
-      );
-
-      try {
-        const resultPromise = testClient.requestSwipe(100, 200, 100, 500, 300, 4200);
-        const socket = await waitForSocket(getSocket);
-        expect(socket).not.toBeNull();
-        await waitForSocketOpen(socket);
-        await waitForSentMessages(socket, 1);
-
-        // Parse sent message to get requestId
-        const sentMessage = commandPayloads(socket!)[0];
-        expect(sentMessage.type).toBe("request_swipe");
-        expect(sentMessage.x1).toBe(100);
-        expect(sentMessage.y1).toBe(200);
-        expect(sentMessage.x2).toBe(100);
-        expect(sentMessage.y2).toBe(500);
-        expect(sentMessage.duration).toBe(300);
-        expect(sentMessage.timeoutMs).toBe(4200);
-
-        // Simulate response
-        socket!.simulateMessage(
-          JSON.stringify({
-            type: "swipe_result",
-            requestId: sentMessage.requestId,
-            success: true,
-            totalTimeMs: 320,
-          }),
+        const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+        const testClient = IOSCtrlProxyClient.createForTesting(
+          testDevice,
+          serverPort,
+          factory,
+          testTimer,
         );
 
-        const result = await resultPromise;
-        expect(result.success).toBe(true);
-        expect(result.totalTimeMs).toBe(320);
-      } finally {
-        await testClient.close();
-      }
-    });
+        try {
+          const resultPromise = testClient.requestSwipe(100, 200, 100, 500, 300, 4200, undefined, {
+            lockScreen,
+          });
+          const socket = await waitForSocket(getSocket);
+          expect(socket).not.toBeNull();
+          await waitForSocketOpen(socket);
+          await waitForSentMessages(socket, 1);
+
+          // Parse sent message to get requestId
+          const sentMessage = commandPayloads(socket!)[0];
+          expect(sentMessage.type).toBe("request_swipe");
+          expect(sentMessage.x1).toBe(100);
+          expect(sentMessage.y1).toBe(200);
+          expect(sentMessage.x2).toBe(100);
+          expect(sentMessage.y2).toBe(500);
+          expect(sentMessage.duration).toBe(300);
+          expect(sentMessage.timeoutMs).toBe(4200);
+          if (lockScreen === true) {
+            expect(sentMessage.lockScreen).toBe(true);
+          } else {
+            expect(sentMessage).not.toHaveProperty("lockScreen");
+          }
+
+          // Simulate response
+          socket!.simulateMessage(
+            JSON.stringify({
+              type: "swipe_result",
+              requestId: sentMessage.requestId,
+              success: true,
+              totalTimeMs: 320,
+            }),
+          );
+
+          const result = await resultPromise;
+          expect(result.success).toBe(true);
+          expect(result.totalTimeMs).toBe(320);
+        } finally {
+          await testClient.close();
+        }
+      },
+    );
 
     test("should return error when not connected", async function () {
       const testTimer = fakeTimer;

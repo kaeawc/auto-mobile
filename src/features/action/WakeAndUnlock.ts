@@ -43,11 +43,17 @@ export interface LockCredentialStore {
  * and swiping the non-secure lock screen away. Implemented over the existing
  * gesture primitives; a fake in tests.
  */
+export interface IosUnlockOptions {
+  remainingMs: () => number;
+  signal?: AbortSignal;
+  readUnlocked?: () => Promise<boolean | undefined>;
+}
+
 export interface IosScreenUnlocker {
   wakeAndDismiss(
-    remainingMs?: () => number,
+    options?: IosUnlockOptions | (() => number),
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<{ success: boolean; error?: string; warning?: string }>;
 }
 
 /** The same runner recovery operations used by iOS observe. */
@@ -419,8 +425,21 @@ export class WakeAndUnlock {
       return recoveryResult;
     }
     throwIfAborted(signal);
+    let stageLock: DeviceLockState | undefined;
     const result = await awaitWhileRequestIsLive(
-      this.iosUnlocker.wakeAndDismiss(() => deadline - this.timer.now(), signal),
+      this.iosUnlocker.wakeAndDismiss({
+        remainingMs: () => deadline - this.timer.now(),
+        signal,
+        ...(simulator
+          ? {
+              readUnlocked: async () => {
+                const lock = await this.readIosLockState(deadline, signal);
+                stageLock = lock;
+                return lock ? !lock.locked : undefined;
+              },
+            }
+          : {}),
+      }),
       signal,
     );
     // A transport timeout leaves the Swift gesture's completion unknown. Never
@@ -430,10 +449,43 @@ export class WakeAndUnlock {
         ? this.iosResult(true, false)
         : this.iosResult(false, false, result.error);
     }
+    return this.finishIosUnlock({ result, stageLock, deadline, signal });
+  }
+
+  private async finishIosUnlock({
+    result,
+    stageLock,
+    deadline,
+    signal,
+  }: {
+    result: { success: boolean; error?: string; warning?: string };
+    stageLock?: DeviceLockState;
+    deadline: number;
+    signal?: AbortSignal;
+  }): Promise<WakeAndUnlockResult> {
     const swipeFailure = result.success
       ? undefined
       : (result.error ?? "iOS lock-screen swipe failed");
-    return this.confirmIosSimulatorUnlocked(deadline, swipeFailure, signal);
+    const confirmed =
+      stageLock?.locked === false
+        ? {
+            ...this.iosResult(true, true),
+            ...(swipeFailure
+              ? {
+                  warning: `the lock-screen swipe did not complete (${swipeFailure}); the device is unlocked`,
+                }
+              : {}),
+          }
+        : await this.confirmIosSimulatorUnlocked({
+            deadline,
+            swipeFailure,
+            signal,
+            lastLock: result.warning ? undefined : stageLock,
+          });
+    logger.info(`[WakeAndUnlock] iOS unlock confirmed: ${result.warning ?? "fast swipe"}`);
+    return result.warning && confirmed.success
+      ? { ...confirmed, warning: [confirmed.warning, result.warning].filter(Boolean).join("; ") }
+      : confirmed;
   }
 
   private async prepareIosUnlock(
@@ -484,17 +536,24 @@ export class WakeAndUnlock {
     }
   }
 
-  private async confirmIosSimulatorUnlocked(
-    deadline: number,
-    swipeFailure: string | undefined,
-    signal?: AbortSignal,
-  ): Promise<WakeAndUnlockResult> {
+  private async confirmIosSimulatorUnlocked({
+    deadline,
+    swipeFailure,
+    signal,
+    lastLock,
+  }: {
+    deadline: number;
+    swipeFailure: string | undefined;
+    signal?: AbortSignal;
+    lastLock?: DeviceLockState;
+  }): Promise<WakeAndUnlockResult> {
     throwIfAborted(signal);
-    const finalLock = await this.pollIosUnlocked(
-      deadline,
-      swipeFailure === undefined ? IOS_UNLOCK_POLL_MAX_MS : Infinity,
-      signal,
-    );
+    const finalLock =
+      (await this.pollIosUnlocked(
+        deadline,
+        swipeFailure === undefined ? IOS_UNLOCK_POLL_MAX_MS : Infinity,
+        signal,
+      )) ?? lastLock;
     if (!finalLock) {
       throw new ActionableError(
         `wakeAndUnlock: could not read the iOS lock state after the swipe${swipeFailure ? ` (swipe failed: ${swipeFailure})` : ""}; re-observe the device`,
@@ -511,6 +570,10 @@ export class WakeAndUnlock {
       logger.warn(
         `[WakeAndUnlock] iOS lock-screen swipe failed (${swipeFailure}) but the lock state is unlocked; trusting the lock state`,
       );
+      return {
+        ...this.iosResult(true, true),
+        warning: `the lock-screen swipe did not complete (${swipeFailure}); the device is unlocked`,
+      };
     }
     return this.iosResult(true, true);
   }

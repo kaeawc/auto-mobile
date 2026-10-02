@@ -17,6 +17,7 @@ public enum CommandError: LocalizedError, Sendable {
     case missingParameter(String)
     case invalidParameter(String, String)
     case executionFailed(String)
+    case gestureBoundExceeded(command: String, phase: String, boundMs: Int64, elapsedMs: Int64)
     case deadlineExceeded(command: String, deadlineMs: Int64, gestureCompleted: Bool)
 
     public var errorDescription: String? {
@@ -31,6 +32,8 @@ public enum CommandError: LocalizedError, Sendable {
             return "Invalid value '\(value)' for parameter '\(param)'"
         case let .executionFailed(reason):
             return "Command execution failed: \(reason)"
+        case let .gestureBoundExceeded(command, phase, boundMs, elapsedMs):
+            return "Command \(command) exceeded execution bound \(boundMs)ms in phase \(phase) after \(elapsedMs)ms; XCUITest call is still executing and the runner stays busy until it returns"
         case let .deadlineExceeded(command, deadlineMs, gestureCompleted):
             let outcome = gestureCompleted
                 ? "gesture completed after its deadline; outcome is indeterminate"

@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -21,8 +22,10 @@ describe("CallTool handler revives non-finite sentinels only for daemon-forwarde
   // A direct in-memory / stdio client's server is `daemonMode: false` (the default
   // in the stdio entrypoint and every embedded consumer).
   let directFixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     daemonFixture = new McpTestFixture({ daemonMode: true });
     await daemonFixture.setup();
     directFixture = new McpTestFixture({ daemonMode: false });
@@ -36,6 +39,7 @@ describe("CallTool handler revives non-finite sentinels only for daemon-forwarde
     if (directFixture) {
       await directFixture.teardown();
     }
+    restoreHermeticServer();
   });
 
   test("a daemon-forwarded sentinel-encoded duration is revived and rejected as a non-finite number", async () => {

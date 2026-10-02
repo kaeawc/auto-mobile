@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -111,14 +112,18 @@ class ForwardingDaemonClient extends FakeDaemonClient {
 }
 
 describe("tools/call entry points share one dispatcher (issue #6545)", () => {
-  const direct = new McpTestFixture();
-  const daemonLoopback = new McpTestFixture({ daemonMode: true });
+  let direct: McpTestFixture;
+  let daemonLoopback: McpTestFixture;
   let proxyClient: Client;
   let closeProxy: () => Promise<void>;
   let isAvailableSpy: ReturnType<typeof spyOn> | undefined;
+  let restoreHermeticServer: () => void;
   const handlerArgs: Record<string, unknown>[] = [];
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
+    direct = new McpTestFixture();
+    daemonLoopback = new McpTestFixture({ daemonMode: true });
     ToolRegistry.register(
       OK_TOOL,
       "parity probe that succeeds",
@@ -195,6 +200,7 @@ describe("tools/call entry points share one dispatcher (issue #6545)", () => {
     ToolRegistry.unregister(FAIL_TOOL);
     ToolRegistry.unregister(DECLARED_SESSION_TOOL);
     ToolRegistry.unregister(ERROR_CASE_TOOL);
+    restoreHermeticServer();
   });
 
   const entryPoints: Array<[string, CallEntryPoint]> = [

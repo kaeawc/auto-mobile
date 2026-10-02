@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
@@ -88,8 +89,10 @@ const readResourceResponseSchema = z.object({
 describe("MCP navigation build lens resources", () => {
   let fixture: McpTestFixture;
   let provider: BuildLensGraphProvider;
+  let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
   });
@@ -105,6 +108,7 @@ describe("MCP navigation build lens resources", () => {
 
   afterAll(async () => {
     await fixture.teardown();
+    restoreHermeticServer();
   });
 
   async function read(uri: string): Promise<string> {

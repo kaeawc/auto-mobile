@@ -1,3 +1,4 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { getMcpServerVersion } from "../../src/utils/mcpVersion";
@@ -5,8 +6,10 @@ import { z } from "zod/v4";
 
 describe("MCP Server Initialization", () => {
   let fixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
   });
@@ -15,6 +18,7 @@ describe("MCP Server Initialization", () => {
     if (fixture) {
       await fixture.teardown();
     }
+    restoreHermeticServer();
   });
 
   test("should handle initialize endpoint request", async function () {

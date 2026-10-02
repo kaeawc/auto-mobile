@@ -1,11 +1,14 @@
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 
 describe("MCP Ping", () => {
   let fixture: McpTestFixture;
+  let restoreHermeticServer: () => void;
 
   beforeAll(async () => {
+    restoreHermeticServer = installHermeticServerFixture();
     fixture = new McpTestFixture();
     await fixture.setup();
   });
@@ -14,6 +17,7 @@ describe("MCP Ping", () => {
     if (fixture) {
       await fixture.teardown();
     }
+    restoreHermeticServer();
   });
 
   // D5 (issue #4181, rank 15): three tautologies removed. Their bodies were

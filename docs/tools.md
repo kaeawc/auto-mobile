@@ -507,6 +507,22 @@ During canonical-shape phase 1, every device surface returns the complete shared
 static facts are top-level, changing state is under `runtime`, and the previous nested and flat
 aliases remain present as compatibility fields.
 
+`setPosture` checks Android posture support before sending any fold, unfold,
+posture, or device-state override/reset command. It uses hydrated supported
+postures, falling back to `cmd device_state print-states` when that inventory is
+absent or unreadable. Unsupported requests fail with an actionable error listing
+the supported postures/states and confirming that nothing was changed. Empty
+state lists and DEFAULT-only states do not establish fold support. If the
+device-state service is unavailable, hydrated fold support and an observed
+matching posture are required.
+
+After dispatch, Android must reach the requested committed state or, for postures
+without a committed-state mapping, report the requested posture in a fresh
+observation. If the posture remains old or unknown after the polling timeout,
+the error explains that the command was sent but the posture did not change.
+Physical foldables may reset to `opened` without an OPENED state only when fold
+support is confirmed; they must still confirm the resulting posture.
+
 ### Keeping an Android orientation locked
 
 `rotate` preserves its existing behavior when `lockOrientation` is omitted: it

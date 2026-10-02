@@ -252,11 +252,14 @@ describe("registered interaction handlers honor cancellation", () => {
     const observe = new FakeObserveScreen();
     setSetPostureFactory(
       () =>
-        new SetPosture(device, {
-          timer,
-          adbFactory: { create: () => adb },
-          observeFactory: () => observe,
-        }),
+        new SetPosture(
+          { ...device, displays: { panels: [], postures: ["closed", "opened"] } },
+          {
+            timer,
+            adbFactory: { create: () => adb },
+            observeFactory: () => observe,
+          },
+        ),
     );
     await expect(
       handler("setPosture")(

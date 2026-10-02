@@ -3,7 +3,7 @@ import {
   UninstallApp as ProductionUninstallApp,
   DeviceAppUninstaller,
 } from "../../../src/features/action/UninstallApp";
-import type { DeviceWindowCacheInvalidator } from "../../../src/features/action/TerminateApp";
+import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import type { BootedDevice } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
@@ -42,14 +42,6 @@ class UninstallApp extends ProductionUninstallApp {
       trackerFactory,
       cacheInvalidator,
     );
-  }
-}
-
-class FakeDeviceWindowCacheInvalidator implements DeviceWindowCacheInvalidator {
-  public calls: BootedDevice[] = [];
-
-  invalidate(device: BootedDevice): void {
-    this.calls.push(device);
   }
 }
 

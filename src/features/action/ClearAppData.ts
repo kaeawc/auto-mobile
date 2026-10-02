@@ -7,7 +7,14 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
-import { resolveIosClearDataBackend } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+import {
+  resolveIosClearDataBackend,
+  type IosClearDataBackendDeps,
+} from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "./TerminateApp";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
@@ -18,6 +25,14 @@ const CLEAR_APP_DATA_TIMEOUT_MS = 60_000;
 /** Reinstall-based data clear for physical iOS devices (devicectl). */
 export interface IosAppReinstaller {
   clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void>;
+}
+
+export interface ClearAppDataOptions {
+  simctl?: IosClearDataBackendDeps["simctl"];
+  reinstaller?: IosAppReinstaller;
+  isSimulatorFn?: () => boolean;
+  backendResolver?: typeof resolveIosClearDataBackend;
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 
 /**
@@ -40,23 +55,24 @@ export interface IosAppReinstaller {
 export class ClearAppData {
   private device: BootedDevice;
   private adbFactory: AdbClientFactory;
-  private simctlOverride?: SimCtlClient;
+  private simctlOverride?: IosClearDataBackendDeps["simctl"];
   private reinstallerOverride?: IosAppReinstaller;
   private isSimulatorOverride?: () => boolean;
+  private readonly backendResolver: typeof resolveIosClearDataBackend;
+  private readonly cacheInvalidator: DeviceWindowCacheInvalidator;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    simctl?: SimCtlClient,
-    reinstaller?: IosAppReinstaller,
-    isSimulatorFn?: () => boolean,
-    private readonly backendResolver = resolveIosClearDataBackend,
+    options: ClearAppDataOptions = {},
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
-    this.simctlOverride = simctl;
-    this.reinstallerOverride = reinstaller;
-    this.isSimulatorOverride = isSimulatorFn;
+    this.simctlOverride = options.simctl;
+    this.reinstallerOverride = options.reinstaller;
+    this.isSimulatorOverride = options.isSimulatorFn;
+    this.backendResolver = options.backendResolver ?? resolveIosClearDataBackend;
+    this.cacheInvalidator = options.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   }
 
   async execute(packageName: string, userId?: number): Promise<ClearAppDataResult> {
@@ -90,10 +106,14 @@ export class ClearAppData {
     try {
       // pm clear both clears data AND stops the app, no need for separate force-stop
       const result = await perf.track("pmClear", async () => {
-        return await adb.executeCommand(
-          `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
-          CLEAR_APP_DATA_TIMEOUT_MS,
-        );
+        try {
+          return await adb.executeCommand(
+            `shell pm clear --user ${targetUserId} ${shellQuote(packageName)}`,
+            CLEAR_APP_DATA_TIMEOUT_MS,
+          );
+        } finally {
+          this.cacheInvalidator.invalidate(this.device);
+        }
       });
 
       const output = `${result.stdout}${result.stderr}`.trim();
@@ -127,13 +147,18 @@ export class ClearAppData {
 
   private async executeIos(bundleId: string): Promise<ClearAppDataResult> {
     const simctl = this.simctlOverride ?? new SimCtlClient(this.device);
-    return this.backendResolver(
+    const backend = this.backendResolver(
       this.device.deviceId,
       {
         simctl,
         createReinstaller: () => this.reinstallerOverride ?? new DeviceAppManager(),
       },
       this.isSimulatorOverride,
-    ).clearAppData(bundleId);
+    );
+    try {
+      return await backend.clearAppData(bundleId);
+    } finally {
+      this.cacheInvalidator.invalidate(this.device);
+    }
   }
 }

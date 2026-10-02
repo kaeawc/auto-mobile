@@ -165,24 +165,28 @@ export class LaunchApp extends BaseVisualChange {
     };
     this.performanceTrackerFactory =
       dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
+    this.cacheInvalidator =
+      dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
     this.clearAppDataFactory =
       dependencies.clearAppDataFactory ??
-      ((device, simctl) => new ClearAppData(device, undefined, simctl));
+      ((device, simctl) =>
+        new ClearAppData(device, undefined, { simctl, cacheInvalidator: this.cacheInvalidator }));
     this.createAndroidClearAppData = this.resolveAndroidClearAppDataFactory(
       dependencies.createAndroidClearAppData,
     );
     this.createAndroidColdBoot = this.resolveAndroidColdBootFactory(
       dependencies.createAndroidColdBoot,
     );
-    this.cacheInvalidator =
-      dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
     this.performanceSamplingCoordinator = resolvePerformanceSamplingCoordinator(dependencies);
   }
 
   private resolveAndroidClearAppDataFactory(
     factory: ((device: BootedDevice) => AndroidClearAppDataAction) | undefined,
   ): (device: BootedDevice) => AndroidClearAppDataAction {
-    return factory ?? ((device) => new ClearAppData(device));
+    return (
+      factory ??
+      ((device) => new ClearAppData(device, undefined, { cacheInvalidator: this.cacheInvalidator }))
+    );
   }
 
   private resolveAndroidColdBootFactory(
@@ -498,6 +502,8 @@ export class LaunchApp extends BaseVisualChange {
                   await terminator.terminateApp(bundleId);
                 } catch {
                   // App might not be running
+                } finally {
+                  this.cacheInvalidator.invalidate(this.device);
                 }
               });
               this.assertLaunchNotAborted(signal);

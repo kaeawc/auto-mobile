@@ -44,6 +44,10 @@ import {
   resolveIosInstallBackend,
   type IosInstallBackend,
 } from "../../utils/ios-cmdline-tools/IosDeviceBackend";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  type DeviceWindowCacheInvalidator,
+} from "./TerminateApp";
 
 const ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS = 120_000;
 const IOS_PHYSICAL_VERIFY_TIMEOUT_MS = 10_000;
@@ -64,6 +68,7 @@ export class InstallApp {
   private physicalAppLister?: IosPhysicalAppLister;
   private timer?: Timer;
   private plist: PlistReader;
+  private cacheInvalidatorOverride?: DeviceWindowCacheInvalidator;
   private installedAppsRepository: InstalledAppsStore = new InstalledAppsRepository();
 
   constructor(
@@ -79,6 +84,7 @@ export class InstallApp {
     physicalAppLister?: IosPhysicalAppLister,
     timer?: Timer,
     private readonly iosInstallBackendResolver?: typeof resolveIosInstallBackend,
+    cacheInvalidator?: DeviceWindowCacheInvalidator,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -90,7 +96,12 @@ export class InstallApp {
     this.physicalAppLister = physicalAppLister;
     this.timer = timer;
     this.plist = plist;
+    this.cacheInvalidatorOverride = cacheInvalidator;
     this.setInstalledAppsRepository(installedAppsRepository);
+  }
+
+  private get cacheInvalidator(): DeviceWindowCacheInvalidator {
+    return (this.cacheInvalidatorOverride ??= new DefaultDeviceWindowCacheInvalidator());
   }
 
   private getIosInstallBackend(): IosInstallBackend {
@@ -233,6 +244,7 @@ export class InstallApp {
     );
 
     if (installAttempt.success) {
+      this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
     }
 
@@ -252,11 +264,13 @@ export class InstallApp {
       await perf.track("downgradeUninstall", () =>
         this.uninstallAndroidForDowngrade(packageName!, targetUserId, signal),
       );
+      this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
       installAttempt = await perf.track("adbReinstall", () =>
         this.runAndroidInstall(installArgs, signal),
       );
       if (installAttempt.success) {
+        this.cacheInvalidator.invalidate(this.device);
         await this.markInstalledAppsCacheStale(true);
         warnings.push(
           `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`,
@@ -504,6 +518,7 @@ export class InstallApp {
       this.installiOSSimulatorWithDowngradeRecovery(appPath, backend, signal),
     );
 
+    this.cacheInvalidator.invalidate(this.device);
     await this.markInstalledAppsCacheStale(true);
 
     if (signal?.aborted) {
@@ -609,6 +624,7 @@ export class InstallApp {
         // Best-effort terminate; proceed with uninstall regardless.
       }
       await this.simctl.uninstallApp(bundleId, this.device.deviceId);
+      this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
       if (signal?.aborted) {
         throw new Error(OPERATION_CANCELLED_MESSAGE);
@@ -630,6 +646,7 @@ export class InstallApp {
 
     try {
       await perf.track("devicectlInstall", () => backend.installApp(ipaPath));
+      this.cacheInvalidator.invalidate(this.device);
       await this.markInstalledAppsCacheStale(true);
     } catch (error) {
       const text = this.extractErrorText(error);

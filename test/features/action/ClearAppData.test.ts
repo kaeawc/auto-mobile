@@ -147,7 +147,7 @@ describe("ClearAppData", () => {
         const fakeSimctl = new FakeSimCtlClient();
         fakeSimctl.setContainerPath(bundleId, container);
 
-        const result = await new ClearAppData(simDevice, undefined, fakeSimctl as any).execute(
+        const result = await new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(
           bundleId,
         );
 
@@ -165,7 +165,7 @@ describe("ClearAppData", () => {
 
       test("returns failure when the data container cannot be resolved", async () => {
         const fakeSimctl = new FakeSimCtlClient();
-        const result = await new ClearAppData(simDevice, undefined, fakeSimctl as any).execute(
+        const result = await new ClearAppData(simDevice, undefined, { simctl: fakeSimctl }).execute(
           bundleId,
         );
         expect(result.success).toBe(false);
@@ -183,12 +183,10 @@ describe("ClearAppData", () => {
           },
         };
 
-        const result = await new ClearAppData(
-          physicalDevice,
-          undefined,
-          fakeSimctl as any,
+        const result = await new ClearAppData(physicalDevice, undefined, {
+          simctl: fakeSimctl,
           reinstaller,
-        ).execute(bundleId);
+        }).execute(bundleId);
 
         expect(result.success).toBe(true);
         expect(calls).toEqual([[physicalDevice.deviceId, bundleId]]);
@@ -205,12 +203,10 @@ describe("ClearAppData", () => {
           },
         };
 
-        const result = await new ClearAppData(
-          physicalDevice,
-          undefined,
-          fakeSimctl as any,
+        const result = await new ClearAppData(physicalDevice, undefined, {
+          simctl: fakeSimctl,
           reinstaller,
-        ).execute(bundleId);
+        }).execute(bundleId);
 
         expect(result.success).toBe(false);
         expect(result.error).toBe(failureMessage);

@@ -45,6 +45,9 @@ class DeferredPersistence extends FakeDeviceSessionPersistence {
   releaseWrites = 0;
   deferRelease = false;
   deferUpsert = false;
+  deferOwnership = false;
+  readonly ownershipStarted = Promise.withResolvers<void>();
+  readonly finishOwnership = Promise.withResolvers<void>();
   readonly releaseStarted = Promise.withResolvers<void>();
   readonly finishRelease = Promise.withResolvers<void>();
   readonly upsertStarted = Promise.withResolvers<void>();
@@ -55,6 +58,16 @@ class DeferredPersistence extends FakeDeviceSessionPersistence {
   ): Promise<void> {
     this.activityWrites++;
     await super.recordActivity(...args);
+  }
+
+  override async recordLivenessOwnership(
+    ...args: Parameters<FakeDeviceSessionPersistence["recordLivenessOwnership"]>
+  ): Promise<void> {
+    if (this.deferOwnership) {
+      this.ownershipStarted.resolve();
+      await this.finishOwnership.promise;
+    }
+    await super.recordLivenessOwnership(...args);
   }
 
   override async markReleased(
@@ -154,6 +167,7 @@ describe("requests during device session release", () => {
     finishRestore.resolve();
     persistence.finishRelease.resolve();
     persistence.finishUpsert.resolve();
+    persistence.finishOwnership.resolve();
     registry.dispose();
     manager.stopCleanupTimer();
   });
@@ -230,6 +244,48 @@ describe("requests during device session release", () => {
         });
       });
     }
+  }
+
+  for (const policy of [CLI_SESSION_LIVENESS_POLICY, "heartbeat"] as const) {
+    test(`release during ownership claim rejects ${policy} heartbeat without policy mutation`, async () => {
+      const session = await manager.createSession(sessionId, deviceId, "android");
+      if (policy === "heartbeat") {
+        manager.adoptCliLivenessPolicy(sessionId, 60000);
+      }
+      manager.setKeepScreenAwake(sessionId, { applied: true });
+      const before = liveness(session);
+      timer.advanceTime(1);
+      persistence.deferOwnership = true;
+      const heartbeat = handleDaemonRequest(
+        request("daemon/heartbeat", {
+          sessionId,
+          livenessOwnerToken: "new-owner",
+          claimLivenessOwnership: true,
+          livenessPolicy: policy,
+          idleTimeoutMs: 60000,
+        }),
+        state,
+      );
+      await persistence.ownershipStarted.promise;
+      const release = manager.releaseSession(sessionId, "explicit-release");
+      await restoreStarted.promise;
+      expect(manager.isAdmittedForAutomation(session)).toBe(false);
+      persistence.finishOwnership.resolve();
+      const response = await heartbeat;
+      const after = liveness(session);
+      finishRestore.resolve();
+      await release;
+      expect(response).toEqual(notFound);
+      expect(after).toEqual({
+        ...before,
+        livenessOwnerToken: "new-owner",
+        livenessOwnershipClaims: ["new-owner"],
+      });
+      expect((await persistence.getSession?.(sessionId))?.liveness_owner_token).toBeNull();
+      const replacement = await manager.createSession(sessionId, deviceId, "android");
+      expect(replacement.livenessOwnerToken).toBeUndefined();
+      expect(replacement.livenessOwnershipClaims).toBeUndefined();
+    });
   }
 
   test("direct recordHeartbeat during Phase A does not mutate or persist activity", async () => {

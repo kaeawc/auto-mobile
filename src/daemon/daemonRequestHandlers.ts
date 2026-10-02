@@ -243,6 +243,16 @@ export async function handleDaemonRequest(
           ? ((await manager.claimLivenessOwnership?.(sessionId, livenessOwnerToken)) ?? false)
           : (manager.hasLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false) ||
             (manager.claimUnownedLivenessOwnership?.(sessionId, livenessOwnerToken) ?? false);
+        // A claim can yield while release ends admission or replaces this UUID.
+        // Keep the request bound to the device session admitted above.
+        const currentSession = manager.getSession(sessionId);
+        if (
+          !currentSession ||
+          currentSession !== session ||
+          manager.isAdmittedForAutomation?.(currentSession) === false
+        ) {
+          return { success: false, error: `Session not found: ${sessionId}` };
+        }
         if (!ownsLiveness) {
           // A stale reconnect must be a complete liveness no-op: it cannot
           // restore a policy or extend lastUsedAt/lastHeartbeat/expiresAt.

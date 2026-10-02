@@ -712,9 +712,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     screenHeight: number | undefined,
     metadata: ScreenshotMetadata = {},
     options: PushScreenshotOptions = {},
-  ): void {
+  ): boolean {
     if (!this.acceptObservationFramePush(deviceId, options.initialFrameSubscriber)) {
-      return;
+      return false;
     }
     const {
       screenshotMimeType,
@@ -780,6 +780,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         `[DeviceDataStream] Pushed screenshot_update to ${sentCount} subscribers (device: ${deviceId})`,
       );
     }
+    return sentCount > 0;
   }
 
   /**

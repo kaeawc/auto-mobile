@@ -197,6 +197,8 @@ export interface InitialObservationFrame {
   };
   screenshotFailure?: { error: unknown };
   captureSequence?: number;
+  hierarchyDelivered?: boolean;
+  screenshotDelivered?: boolean;
   frameContextGeneration?: number;
   liveFrameGeneration?: number;
   deviceSessionUuid?: string | null;
@@ -350,13 +352,16 @@ function deliverInitialObservationFrame(
   if (!isInitialObservationFrameCurrent(deviceId, frame, dependencies.streamServer)) {
     return;
   }
-  // The first fresh delivery reached every entitled current subscriber, including
-  // joined waiters. Only a subsequent cache hit needs a targeted replay.
-  if (subscriber && !subscriber.replay && frame.captureSequence !== undefined) {
-    // Each live request boundary still reports the shared screenshot failure.
-    if (frame.screenshotFailure) {
-      throw frame.screenshotFailure.error;
-    }
+  // Fresh waiters reuse the broadcast hierarchy, but may still need to send
+  // its screenshot if the first target disappeared between the two pushes.
+  if (subscriber && !subscriber.replay && frame.hierarchyDelivered) {
+    pushInitialObservationScreenshot(
+      deviceId,
+      frame,
+      frame.captureSequence ?? null,
+      dependencies.streamServer,
+      subscriber,
+    );
     return;
   }
   const sequence = dependencies.streamServer.pushHierarchyUpdate(
@@ -377,6 +382,7 @@ function deliverInitialObservationFrame(
     frame.recordHierarchy(sequence);
   }
   if (sequence !== null) {
+    frame.hierarchyDelivered = true;
     frame.captureSequence = sequence;
     frame.frameContextGeneration =
       dependencies.streamServer.getCurrentFrameContextGeneration?.(deviceId);
@@ -423,8 +429,12 @@ function pushInitialObservationScreenshot(
   subscriber?: InitialFrameSubscriber,
 ): void {
   const screenshot = frame.screenshot;
-  if (screenshot && (!subscriber || sequence !== null)) {
-    streamServer.pushScreenshotUpdate(
+  if (
+    screenshot &&
+    (!subscriber || sequence !== null) &&
+    (!subscriber || subscriber.replay || !frame.screenshotDelivered)
+  ) {
+    const sent = streamServer.pushScreenshotUpdate(
       deviceId,
       screenshot.data,
       screenshot.width,
@@ -444,6 +454,9 @@ function pushInitialObservationScreenshot(
         ...(screenshot.frameContext === undefined ? {} : { frameContext: screenshot.frameContext }),
       },
     );
+    if (sent) {
+      frame.screenshotDelivered = true;
+    }
   }
   if (frame.screenshotFailure) {
     throw frame.screenshotFailure.error;

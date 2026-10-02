@@ -144,6 +144,7 @@ describe("DeviceDataStreamSocketServer", () => {
     );
     const device = { id: "device-1", name: "Pixel", platform: "android" as const };
     let captures = 0;
+    const recordedSequences: Array<number | null> = [];
     let context = "ctx-a";
     let screenshot: () => Promise<void> = async () => {};
     let connect: () => Promise<boolean> = async () => true;
@@ -169,7 +170,9 @@ describe("DeviceDataStreamSocketServer", () => {
             }),
             requestHierarchySyncWithoutObservationStreamPush: async () => null,
             convertToViewHierarchyResult: () => hierarchy(capturedContext),
-            recordInitialObservationStreamHierarchy: () => {},
+            recordInitialObservationStreamHierarchy: (_hierarchy, sequence) => {
+              recordedSequences.push(sequence);
+            },
             captureScreenshotForObservationStream: async () => {
               await screenshot();
               return {
@@ -197,6 +200,7 @@ describe("DeviceDataStreamSocketServer", () => {
       request,
       frames,
       hierarchy,
+      recordedSequences,
       get captures() {
         return captures;
       },
@@ -602,6 +606,32 @@ describe("DeviceDataStreamSocketServer", () => {
         .getWrittenMessages<{ type: string; deviceId?: string; captureSequence?: number }>()
         .filter((message) => message.type === "screenshot_update"),
     ).toHaveLength(1);
+  });
+
+  it("delivers the coalesced screenshot after the first subscriber is removed during hierarchy push", async () => {
+    const h = initialFrameHarness();
+    const first = server.simulateSubscription({ deviceId: "device-1" });
+    const second = server.simulateSubscription({ deviceId: "device-1" });
+    const pushHierarchy = server.pushHierarchyUpdate.bind(server);
+    const hierarchyPush = spyOn(server, "pushHierarchyUpdate").mockImplementation((...args) => {
+      const sequence = pushHierarchy(...args);
+      server.closeConnectionForTest(first.socket);
+      return sequence;
+    });
+    try {
+      await Promise.all([h.request(first.subscriptionId), h.request(second.subscriptionId)]);
+      expect(h.captures).toBe(1);
+      expect(hierarchyPush).toHaveBeenCalledTimes(1);
+      const hierarchies = h.frames(second.socket).filter((f) => f.type === "hierarchy_update");
+      const screenshots = h.frames(second.socket).filter((f) => f.type === "screenshot_update");
+      expect(hierarchies).toHaveLength(1);
+      expect(screenshots).toHaveLength(1);
+      expect(screenshots[0].captureSequence).toBe(hierarchies[0].captureSequence);
+      expect(h.recordedSequences).toEqual([hierarchies[0].captureSequence]);
+      expect(h.frames(first.socket).filter((f) => f.type === "screenshot_update")).toHaveLength(0);
+    } finally {
+      hierarchyPush.mockRestore();
+    }
   });
 
   it("aborts only removed initial-frame waiters on unsubscribe and socket disconnect", async () => {

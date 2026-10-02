@@ -11,6 +11,9 @@ export const INITIAL_FRAME_FRESHNESS_WINDOW_MS = 1_000;
 // Whole started-job budget: hierarchy (3s) + screenshot (3s), with 14s for
 // connection/setup and fallback overhead. Queued time does not consume this budget.
 export const INITIAL_FRAME_CAPTURE_DEADLINE_MS = 20_000;
+// After the 20s waiter deadline, a running capture keeps its slot for at most
+// this bound, measured from capture start on the injected Timer.
+export const INITIAL_FRAME_CAPTURE_SLOT_BACKSTOP_MS = 60_000;
 
 interface InitialFrameResult {
   frame: InitialObservationFrame;
@@ -173,15 +176,68 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
   }
 
   private async capture(entry: Capture): Promise<void> {
+    const startedAt = this.timer.now();
+    let settled = true; // A synchronous throw from run also releases the slot.
+    let finished = false;
+    let deadlineExpired = false;
+    let released = false;
+    let backstopHandle: NodeJS.Timeout | undefined;
+    const releaseSlot = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      if (backstopHandle !== undefined) {
+        this.timer.clearTimeout(backstopHandle);
+        backstopHandle = undefined;
+      }
+      this.active--;
+      this.drain();
+    };
+    const onSettled = () => {
+      settled = true;
+      if (finished) {
+        releaseSlot();
+      }
+    };
     try {
       const generation = this.getLiveFrameGeneration(entry.deviceId);
       const deviceSessionUuid = this.getDeviceSessionUuid?.(entry.deviceId);
       entry.liveFrameGeneration = generation;
       entry.deviceSessionUuid = deviceSessionUuid;
-      const captured = await raceWithDeadline(entry.run, {
+      const underlying = entry.run();
+      settled = false;
+      // Observe settlement without chaining the raced promise, so the normal
+      // completion path releases in finally without an extra microtask turn.
+      void underlying.then(onSettled, (error: unknown) => {
+        if (deadlineExpired && !released) {
+          logger.warn(
+            `[Daemon] Initial observation capture rejected after its deadline for ${entry.deviceId}: ${errorMessage(error)}`,
+            error,
+          );
+        }
+        onSettled();
+      });
+      const captured = await raceWithDeadline(underlying, {
         timer: this.timer,
         timeoutMs: INITIAL_FRAME_CAPTURE_DEADLINE_MS,
         label: `Initial observation frame for ${entry.deviceId}`,
+        onTimeout: () => {
+          deadlineExpired = true;
+          // Normal captures need only the waiter deadline timer. An unsettled
+          // capture holds its slot until settlement or 60s from its start.
+          backstopHandle = this.timer.setTimeout(
+            () => {
+              if (!settled && !released) {
+                logger.warn(
+                  `[Daemon] Initial observation capture slot backstop for ${entry.deviceId} after ${this.timer.now() - startedAt}ms; releasing its slot`,
+                );
+                releaseSlot();
+              }
+            },
+            Math.max(0, INITIAL_FRAME_CAPTURE_SLOT_BACKSTOP_MS - (this.timer.now() - startedAt)),
+          );
+        },
       });
       // Device/session boundaries and live pushes supersede this result. Drop it
       // before caching or completing waiters; a later subscription can recapture.
@@ -210,8 +266,12 @@ export class DefaultObservationInitialFrameCoordinator implements ObservationIni
       }
     } finally {
       this.captures.delete(entry.deviceId);
-      this.active--;
-      this.drain();
+      finished = true;
+      // Deadline completion releases waiters, but device work still occupies
+      // its slot until settlement or the hard backstop.
+      if (settled) {
+        releaseSlot();
+      }
     }
   }
 }

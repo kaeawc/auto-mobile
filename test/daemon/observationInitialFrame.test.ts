@@ -11,6 +11,7 @@ import {
   DefaultObservationInitialFrameCoordinator,
   INITIAL_FRAME_FRESHNESS_WINDOW_MS,
   INITIAL_FRAME_CAPTURE_DEADLINE_MS,
+  INITIAL_FRAME_CAPTURE_SLOT_BACKSTOP_MS,
 } from "../../src/daemon/observationInitialFrameCoordinator";
 import type { InitialFrameSubscriber } from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -67,7 +68,7 @@ class FakeObservationStreamServer {
       rotation?: number;
       initialFrameSubscriber?: InitialFrameSubscriber;
     },
-  ): void {
+  ): boolean {
     const screenshotOptions =
       options?.captureSequence === undefined && options?.rotation === undefined
         ? undefined
@@ -85,6 +86,7 @@ class FakeObservationStreamServer {
       ...(screenshotOptions === undefined ? {} : { options: screenshotOptions }),
       ...(options?.frameContext === undefined ? {} : { frameContext: options.frameContext }),
     });
+    return true;
   }
 }
 
@@ -1219,10 +1221,12 @@ class FakeTargetedInitialFrameServer extends FakeObservationStreamServer {
     height: number,
     metadata?: Record<string, unknown>,
     options?: Parameters<FakeObservationStreamServer["pushScreenshotUpdate"]>[5],
-  ): void {
-    for (const destination of this.destinations(deviceId, options?.initialFrameSubscriber)) {
+  ): boolean {
+    const destinations = this.destinations(deviceId, options?.initialFrameSubscriber);
+    for (const destination of destinations) {
       destination.pushScreenshotUpdate(deviceId, data, width, height, metadata, options);
     }
+    return destinations.length > 0;
   }
 }
 
@@ -1631,19 +1635,221 @@ describe("initial capture deadline and diagnostics", () => {
     }
   }
 
-  it("releases two hung capture slots at the deadline and admits a third device", async () => {
+  it("backstops two never-settling captures at 60s without admitting a third at 20s", async () => {
     const timer = new FakeTimer();
+    timer.advanceTime(7_000);
     const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
     const never = new Promise<InitialObservationFrame>(() => {});
     const signal = new AbortController().signal;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const stuck = ["one", "two"].map((deviceId) =>
+        coordinator
+          .request(deviceId, () => never, signal)
+          .then(
+            (value) => value,
+            (error: unknown) => error,
+          ),
+      );
+      let started = false;
+      const third = coordinator.request(
+        "three",
+        async () => {
+          started = true;
+          return frame();
+        },
+        signal,
+      );
+      timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+      await flushMicrotasks();
+      for (const result of await Promise.all(stuck)) {
+        expect(result).toBeInstanceOf(ActionableError);
+        expect(result instanceof ActionableError ? result.message : undefined).toContain(
+          "timed out after 20000ms",
+        );
+      }
+      expect(started).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+      timer.advanceTime(
+        INITIAL_FRAME_CAPTURE_SLOT_BACKSTOP_MS - INITIAL_FRAME_CAPTURE_DEADLINE_MS - 1,
+      );
+      await flushMicrotasks();
+      expect(started).toBe(false);
+      timer.advanceTime(1);
+      await flushMicrotasks();
+      expect(started).toBe(true);
+      expect((await third)?.frame.screenshot?.data).toBe("shot");
+      expect(warn).toHaveBeenCalledTimes(2);
+      for (const deviceId of ["one", "two"]) {
+        expect(warn.mock.calls.filter(([message]) => message.includes(deviceId))).toHaveLength(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining(`${deviceId} after 60000ms`));
+      }
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("cancels the slot backstop when a capture settles at 30s and preserves two-slot admission", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const gates = Array.from({ length: 4 }, () => deferred<InitialObservationFrame>());
+    const signal = new AbortController().signal;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    let running = 0;
+    let peak = 0;
+    let minimum = 0;
+    try {
+      const requests = gates.map((gate, index) =>
+        coordinator
+          .request(
+            `device-${index}`,
+            async () => {
+              running++;
+              peak = Math.max(peak, running);
+              try {
+                return await gate.promise;
+              } finally {
+                running--;
+                minimum = Math.min(minimum, running);
+              }
+            },
+            signal,
+          )
+          .then(
+            (value) => value,
+            (error: unknown) => error,
+          ),
+      );
+      expect(running).toBe(2);
+      timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+      await flushMicrotasks();
+      expect(await requests[0]).toBeInstanceOf(ActionableError);
+      expect(await requests[1]).toBeInstanceOf(ActionableError);
+      expect(running).toBe(2);
+      expect(timer.getPendingTimeouts()).toEqual([40_000, 40_000]);
+      timer.advanceTime(10_000);
+      gates[0].resolve(frame());
+      await flushMicrotasks();
+      expect(running).toBe(2);
+      // The first backstop was cleared; the third capture now has its normal deadline.
+      expect(timer.getPendingTimeouts()).toEqual([40_000, 20_000]);
+      gates[1].resolve(frame());
+      await flushMicrotasks();
+      expect(running).toBe(2);
+      expect(timer.getPendingTimeouts()).toEqual([20_000, 20_000]);
+      gates[2].resolve(frame());
+      gates[3].resolve(frame());
+      await Promise.all(requests);
+      expect(running).toBe(0);
+      expect(peak).toBe(2);
+      expect(minimum).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      timer.advanceTime(INITIAL_FRAME_CAPTURE_SLOT_BACKSTOP_MS);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not double-release backstopped slots on late resolution or rejection", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const abandoned = [
+      Promise.withResolvers<InitialObservationFrame>(),
+      Promise.withResolvers<InitialObservationFrame>(),
+    ];
+    const gates = Array.from({ length: 3 }, () => deferred<InitialObservationFrame>());
+    const signal = new AbortController().signal;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    let running = 0;
+    let peak = 0;
+    let minimum = 0;
+    const started: string[] = [];
+    try {
+      const stuck = abandoned.map((gate, index) =>
+        coordinator
+          .request(`stuck-${index}`, () => gate.promise, signal)
+          .then(
+            (value) => value,
+            (error: unknown) => error,
+          ),
+      );
+      const replacements = gates.map((gate, index) =>
+        coordinator.request(
+          `replacement-${index}`,
+          async () => {
+            started.push(`replacement-${index}`);
+            running++;
+            peak = Math.max(peak, running);
+            try {
+              return await gate.promise;
+            } finally {
+              running--;
+              minimum = Math.min(minimum, running);
+            }
+          },
+          signal,
+        ),
+      );
+      timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+      await flushMicrotasks();
+      expect(started).toEqual([]);
+      timer.advanceTime(INITIAL_FRAME_CAPTURE_SLOT_BACKSTOP_MS - INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+      await flushMicrotasks();
+      expect(started).toEqual(["replacement-0", "replacement-1"]);
+      expect(running).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(2);
+      timer.advanceTime(1);
+      abandoned[0].resolve(frame());
+      abandoned[1].reject(new Error("rejected after the slot backstop"));
+      await flushMicrotasks();
+      expect(started).toEqual(["replacement-0", "replacement-1"]);
+      expect(running).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(2);
+      for (const result of await Promise.all(stuck)) {
+        expect(result).toBeInstanceOf(ActionableError);
+      }
+      gates[0].resolve(frame());
+      await flushMicrotasks();
+      expect(started).toEqual(["replacement-0", "replacement-1", "replacement-2"]);
+      expect(running).toBe(2);
+      gates[1].resolve(frame());
+      gates[2].resolve(frame());
+      await Promise.all(replacements);
+      expect(running).toBe(0);
+      expect(peak).toBe(2);
+      expect(minimum).toBe(0);
+      let recaptured = false;
+      const fresh = await coordinator.request(
+        "stuck-0",
+        async () => {
+          recaptured = true;
+          return frame();
+        },
+        signal,
+      );
+      expect(recaptured).toBe(true);
+      expect(fresh?.replay).toBe(false);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("fails hung capture waiters at the deadline but admits a third device only after settlement", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const hung = [deferred<InitialObservationFrame>(), deferred<InitialObservationFrame>()];
+    const signal = new AbortController().signal;
     const first = coordinator
-      .request("one", () => never, signal)
+      .request("one", () => hung[0].promise, signal)
       .then(
         () => undefined,
         (error: unknown) => error,
       );
     const second = coordinator
-      .request("two", () => never, signal)
+      .request("two", () => hung[1].promise, signal)
       .then(
         () => undefined,
         (error: unknown) => error,
@@ -1662,10 +1868,61 @@ describe("initial capture deadline and diagnostics", () => {
     expect(started).toBe(false);
     timer.advanceTime(1);
     await flushMicrotasks();
-    expect(started).toBe(true);
     expect(await first).toBeInstanceOf(ActionableError);
     expect(await second).toBeInstanceOf(ActionableError);
+    expect(started).toBe(false);
+    hung[0].resolve(frame());
     expect((await third)?.frame.screenshot?.data).toBe("shot");
+    expect(started).toBe(true);
+    hung[1].resolve(frame());
+    await flushMicrotasks();
+  });
+
+  it("never exceeds two underlying captures after their waiters time out", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer);
+    const gates = Array.from({ length: 4 }, () => deferred<InitialObservationFrame>());
+    const signal = new AbortController().signal;
+    let running = 0;
+    let peak = 0;
+    const requests = gates.map((gate, index) =>
+      coordinator
+        .request(
+          `device-${index}`,
+          async () => {
+            running++;
+            peak = Math.max(peak, running);
+            try {
+              return await gate.promise;
+            } finally {
+              running--;
+            }
+          },
+          signal,
+        )
+        .then(
+          (value) => value,
+          (error: unknown) => error,
+        ),
+    );
+    expect(running).toBe(2);
+    timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+    await flushMicrotasks();
+    expect(await requests[0]).toBeInstanceOf(ActionableError);
+    expect(await requests[1]).toBeInstanceOf(ActionableError);
+    expect(running).toBe(2);
+    expect(peak).toBe(2);
+    gates[0].resolve(frame());
+    await flushMicrotasks();
+    expect(running).toBe(2);
+    gates[1].resolve(frame());
+    await flushMicrotasks();
+    expect(running).toBe(2);
+    gates[2].resolve(frame());
+    gates[3].resolve(frame());
+    await Promise.all(requests);
+    expect(running).toBe(0);
+    expect(peak).toBe(2);
   });
 
   it("ignores a capture resolving after its deadline without delivering or caching it", async () => {
@@ -1700,6 +1957,56 @@ describe("initial capture deadline and diagnostics", () => {
     );
     expect(recaptured).toBe(true);
     expect(retry?.replay).toBe(false);
+  });
+
+  it("warns on a late rejection and releases its underlying capture slot", async () => {
+    const timer = new FakeTimer();
+    const coordinator = new DefaultObservationInitialFrameCoordinator(timer, 1);
+    const late = Promise.withResolvers<InitialObservationFrame>();
+    const failure = new Error("late capture rejection");
+    const signal = new AbortController().signal;
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const first = coordinator
+        .request("first", () => late.promise, signal)
+        .then(
+          (value) => value,
+          (error: unknown) => error,
+        );
+      let started = false;
+      const next = coordinator.request(
+        "next",
+        async () => {
+          started = true;
+          return frame();
+        },
+        signal,
+      );
+      timer.advanceTime(INITIAL_FRAME_CAPTURE_DEADLINE_MS);
+      expect(await first).toBeInstanceOf(ActionableError);
+      expect(started).toBe(false);
+      late.reject(failure);
+      expect((await next)?.frame.screenshot?.data).toBe("shot");
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("after its deadline"), failure);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("releases the capture slot when run throws synchronously", async () => {
+    const coordinator = new DefaultObservationInitialFrameCoordinator(new FakeTimer(), 1);
+    const signal = new AbortController().signal;
+    const failure = new Error("synchronous capture failure");
+    const first = coordinator.request(
+      "first",
+      () => {
+        throw failure;
+      },
+      signal,
+    );
+    await expect(first).rejects.toBe(failure);
+    const next = await coordinator.request("next", async () => frame(), signal);
+    expect(next?.frame.screenshot?.data).toBe("shot");
   });
 
   it("warns when a shared capture fails after all waiters abort", async () => {

@@ -29,7 +29,7 @@ import os
 /// PHASE 8 FIXUP (resolved): focus, visibility, close, and destructive-key post-condition
 /// waits now await `KeyboardWait` with an injected monotonic `Clock`, yielding the main
 /// actor between probes and checking the condition after the deadline's final sleep.
-/// Close-action gates use the same clock. The arrow-budget systemUptime code is out of scope.
+/// Close-action gates and horizontal-arrow budgets use the same injected clock.
 /// The waits honour task cancellation via `CancellationError`, but WebSocketServer's serial
 /// command-chain tasks are unstructured and never cancelled, so cancellation is currently unreachable in production.
 @MainActor
@@ -56,6 +56,7 @@ public final class GesturePerformer: GesturePerforming {
         case elementNotFound(String)
         case gestureFailed(String)
         case arrowNoEffect
+        case arrowBudgetExhausted(step: String, elapsedMs: Int)
         case notSupported(String)
         case missingParameter(String)
         case clipboardEmpty
@@ -72,6 +73,8 @@ public final class GesturePerformer: GesturePerforming {
                 return "Gesture failed: \(reason)"
             case .arrowNoEffect:
                 return "arrow keys have no effect on this iOS runtime; use Cmd+arrow (line start/end) or sendKeys text editing instead"
+            case let .arrowBudgetExhausted(step, elapsedMs):
+                return "arrow key was not sent: runner time budget exhausted at \(step) after \(elapsedMs)ms; retry"
             case let .notSupported(feature):
                 return "Feature not supported: \(feature)"
             case let .missingParameter(param):
@@ -281,9 +284,13 @@ public final class GesturePerformer: GesturePerforming {
         case initialProbe, appKey, outcomeProbe, retry, completion
     }
 
+    // One arrow press took ≈3.2s in a passing XCTestRunner CI simulator job;
+    // failing jobs exhausted the old 3.5s budget before sending the key.
+    nonisolated static let arrowBudgetMs = 6000
+
     /// Reserve time for the remaining synchronous XCUITest calls and their response.
     nonisolated static func arrowBudgetAllows(elapsedMs: Double, step: ArrowBudgetStep) -> Bool {
-        let remainingMs = 3500 - elapsedMs
+        let remainingMs = Double(arrowBudgetMs) - elapsedMs
         switch step {
         case .initialProbe: return remainingMs >= 2700
         case .appKey: return remainingMs >= 1800
@@ -291,6 +298,111 @@ public final class GesturePerformer: GesturePerforming {
         case .outcomeProbe: return remainingMs >= 1200
         case .completion: return remainingMs > 0
         }
+    }
+
+    struct ArrowBudget<C: Clock> where C.Duration == Duration {
+        let clock: C
+        let startedAt: C.Instant
+
+        nonisolated init(clock: C) {
+            self.clock = clock
+            startedAt = clock.now
+        }
+
+        /// Pre-send exhaustion is an error; after sending, verification stays unverified.
+        nonisolated func check(step: ArrowBudgetStep, consumedBy: String = "") throws -> Bool {
+            let elapsed = startedAt.duration(to: clock.now).components
+            let elapsedMs = Double(elapsed.seconds) * 1000 + Double(elapsed.attoseconds) / 1e15
+            guard GesturePerformer.arrowBudgetAllows(elapsedMs: elapsedMs, step: step) else {
+                switch step {
+                case .initialProbe, .appKey:
+                    throw GestureError.arrowBudgetExhausted(step: consumedBy, elapsedMs: Int(elapsedMs))
+                case .outcomeProbe, .completion, .retry:
+                    return false
+                }
+            }
+            return true
+        }
+    }
+
+    /// The runner supplies XCUITest operations; host tests supply fast clock-driven fakes.
+    nonisolated static func performHorizontalArrow<C: Clock, Element>(
+        clock: C, key: String,
+        requireFocus: () throws -> Void,
+        resolveInput: () throws -> (Element?, String?),
+        probeCaret: (Element, String?) throws -> Int?,
+        sendKey: () throws -> Void,
+        retryKey: (Element) throws -> Void,
+        readValue: (Element) throws -> String,
+        restoreValue: (Element, String) throws -> Void
+    )
+        throws -> Bool where C.Duration == Duration
+    {
+        try requireFocus()
+        // Focus acquisition is outside the arrow budget. Resolving the focused
+        // element and its value below is the budgeted "focus check".
+        let budget = ArrowBudget(clock: clock)
+        _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
+        let (element, original) = try resolveInput()
+        _ = try budget.check(step: .initialProbe, consumedBy: "focus check")
+        let caretBefore: Int?
+        let lastStep: String
+        if let element {
+            caretBefore = try probeCaret(element, original)
+            lastStep = "caret probe"
+        } else {
+            caretBefore = nil
+            lastStep = "focus check"
+        }
+        _ = try budget.check(step: .appKey, consumedBy: lastStep)
+        try sendKey()
+        guard let element, let original else { return false }
+
+        for attempt in 0 ... 1 {
+            guard let outcome = try observeArrowOutcome(
+                key: key, original: original, caretBefore: caretBefore, budget: budget,
+                readValue: { try readValue(element) },
+                probeCaret: { try probeCaret(element, original) },
+                restoreValue: { try restoreValue(element, original) }
+            ) else { return false }
+            switch outcome {
+            case .moved, .boundaryNoOp: return true
+            case .wrongDirection:
+                throw GestureError.gestureFailed("arrow key moved the caret in the wrong direction")
+            case .valueChanged:
+                return false
+            case .noEffect:
+                if attempt == 1 { throw GestureError.arrowNoEffect }
+            }
+            // The first send was a verified interior no-op, but an exhausted retry
+            // budget leaves the whole retry sequence unverified; do not report no effect.
+            guard try budget.check(step: .retry) else { return false }
+            try retryKey(element)
+        }
+        return false
+    }
+
+    private nonisolated static func observeArrowOutcome<C: Clock>(
+        key: String, original: String, caretBefore: Int?, budget: ArrowBudget<C>,
+        readValue: () throws -> String,
+        probeCaret: () throws -> Int?,
+        restoreValue: () throws -> Void
+    )
+        throws -> ArrowOutcome? where C.Duration == Duration
+    {
+        guard try budget.check(step: .outcomeProbe) else { return nil }
+        let observed = try readValue()
+        if arrowOutcome(key: key, original: original, observed: observed, before: caretBefore, after: nil)
+            == .valueChanged
+        {
+            try restoreValue()
+            throw GestureError.gestureFailed("arrow key changed the focused field value")
+        }
+        guard try budget.check(step: .outcomeProbe), let caretBefore else { return nil }
+        let caretAfter = try probeCaret()
+        guard try budget.check(step: .completion), let caretAfter else { return nil }
+        // probeCaretIndex already checked that deleting its marker restored original.
+        return arrowOutcome(key: key, original: original, observed: observed, before: caretBefore, after: caretAfter)
     }
 
     nonisolated static func arrowOutcome(
@@ -1380,16 +1492,42 @@ public final class GesturePerformer: GesturePerforming {
             let isDestructiveKey = normalizedKey == "backspace" || normalizedKey == "delete"
             let isHorizontalArrow = normalizedKey == "arrow_left" || normalizedKey == "arrow_right"
             let isPlainHorizontalArrow = isHorizontalArrow && modifierFlags.isEmpty
-            let arrowStartedAt = isPlainHorizontalArrow ? ProcessInfo.processInfo.systemUptime : nil
+            if isPlainHorizontalArrow {
+                return try GesturePerformer.performHorizontalArrow(
+                    clock: keyboardClock, key: normalizedKey,
+                    requireFocus: {
+                        try self.requireKeyboardFocus(
+                            app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
+                        )
+                    },
+                    resolveInput: {
+                        let element = self.resolveFocusedTextElement(app: app)
+                        let original = try element.map { element in
+                            try catchingObjCException { self.fieldText(element) }
+                        }
+                        return (element, original)
+                    },
+                    probeCaret: { element, original in
+                        try self.probeCaretIndex(app: app, focusedElement: element, original: original)
+                    },
+                    sendKey: { try catchingObjCException { app.typeKey(keyboardKey, modifierFlags: []) } },
+                    retryKey: { element in
+                        try catchingObjCException { element.typeKey(keyboardKey, modifierFlags: []) }
+                    },
+                    readValue: { element in try catchingObjCException { self.fieldText(element) } },
+                    restoreValue: { element, original in
+                        try self.restoreForwardDeleteProbe(
+                            app: app, focusedElement: element, original: original, marker: ""
+                        )
+                    }
+                )
+            }
 
             try requireKeyboardFocus(
                 app: app, context: "ensure a text field is focused before pressing a key", forKeyPress: true
             )
 
-            if isPlainHorizontalArrow {
-                try ensureArrowBudget(startedAt: arrowStartedAt, step: .initialProbe)
-            }
-            let focusedElement = isDestructiveKey || isPlainHorizontalArrow ? resolveFocusedTextElement(app: app) : nil
+            let focusedElement = isDestructiveKey ? resolveFocusedTextElement(app: app) : nil
             let focusedKind = try focusedElement.map { element in
                 try catchingObjCException { GesturePerformer.focusedElementKind(element.elementType) }
             }
@@ -1397,17 +1535,12 @@ public final class GesturePerformer: GesturePerforming {
                 try catchingObjCException { fieldText(element) }
             }
             let caretBefore: Int?
-            if isPlainHorizontalArrow || normalizedKey == "delete", let focusedElement {
-                try ensureArrowBudget(startedAt: arrowStartedAt, step: .initialProbe)
+            if normalizedKey == "delete", let focusedElement {
                 caretBefore = try probeCaretIndex(
                     app: app, focusedElement: focusedElement, original: valueBeforeKeyPress
                 )
             } else {
                 caretBefore = nil
-            }
-
-            if isPlainHorizontalArrow {
-                try ensureArrowBudget(startedAt: arrowStartedAt, step: .appKey)
             }
 
             if isDestructiveKey, !GesturePerformer.canVerifyDestructiveKey(focusedValue: valueBeforeKeyPress) {
@@ -1453,31 +1586,6 @@ public final class GesturePerformer: GesturePerforming {
                 } else {
                     app.typeKey(keyboardKey, modifierFlags: modifierFlags)
                 }
-            }
-
-            if isPlainHorizontalArrow {
-                guard let focusedElement, let valueBeforeKeyPress else { return false }
-                guard let firstOutcome = try observeArrowOutcome(
-                    key: normalizedKey, app: app, focusedElement: focusedElement,
-                    original: valueBeforeKeyPress, caretBefore: caretBefore, budgetStartedAt: arrowStartedAt
-                ) else { return false }
-                if firstOutcome == .moved || firstOutcome == .boundaryNoOp { return true }
-                if firstOutcome == .wrongDirection {
-                    throw GestureError.gestureFailed("arrow key moved the caret in the wrong direction")
-                }
-
-                // App-level delivery can miss the focused field. Retry only after a verified interior no-op.
-                try ensureArrowBudget(startedAt: arrowStartedAt, step: .retry)
-                try catchingObjCException { focusedElement.typeKey(keyboardKey, modifierFlags: []) }
-                guard let secondOutcome = try observeArrowOutcome(
-                    key: normalizedKey, app: app, focusedElement: focusedElement,
-                    original: valueBeforeKeyPress, caretBefore: caretBefore, budgetStartedAt: arrowStartedAt
-                ) else { return false }
-                if secondOutcome == .moved || secondOutcome == .boundaryNoOp { return true }
-                if secondOutcome == .wrongDirection {
-                    throw GestureError.gestureFailed("arrow key moved the caret in the wrong direction")
-                }
-                throw GestureError.arrowNoEffect
             }
 
             if isHorizontalArrow { return false }
@@ -1549,39 +1657,6 @@ public final class GesturePerformer: GesturePerforming {
                 return nil
             case .delivered, .boundaryNoOp:
                 return nil
-            }
-        }
-
-        private func observeArrowOutcome(
-            key: String, app: XCUIApplication, focusedElement: XCUIElement,
-            original: String, caretBefore: Int?, budgetStartedAt: TimeInterval?
-        )
-            throws -> ArrowOutcome?
-        {
-            try ensureArrowBudget(startedAt: budgetStartedAt, step: .outcomeProbe)
-            let observed = try catchingObjCException { fieldText(focusedElement) }
-            if GesturePerformer.arrowOutcome(
-                key: key, original: original, observed: observed, before: caretBefore, after: nil
-            ) == .valueChanged {
-                try restoreForwardDeleteProbe(app: app, focusedElement: focusedElement, original: original, marker: "")
-                throw GestureError.gestureFailed("arrow key changed the focused field value")
-            }
-            try ensureArrowBudget(startedAt: budgetStartedAt, step: .outcomeProbe)
-            guard let caretBefore else { return nil }
-            let caretAfter = try probeCaretIndex(app: app, focusedElement: focusedElement, original: original)
-            try ensureArrowBudget(startedAt: budgetStartedAt, step: .completion)
-            guard let caretAfter else { return nil }
-            // probeCaretIndex already checked that deleting its marker restored original.
-            return GesturePerformer.arrowOutcome(
-                key: key, original: original, observed: observed, before: caretBefore, after: caretAfter
-            )
-        }
-
-        private func ensureArrowBudget(startedAt: TimeInterval?, step: ArrowBudgetStep) throws {
-            guard let startedAt else { return }
-            let elapsedMs = (ProcessInfo.processInfo.systemUptime - startedAt) * 1000
-            guard GesturePerformer.arrowBudgetAllows(elapsedMs: elapsedMs, step: step) else {
-                throw GestureError.arrowNoEffect
             }
         }
 

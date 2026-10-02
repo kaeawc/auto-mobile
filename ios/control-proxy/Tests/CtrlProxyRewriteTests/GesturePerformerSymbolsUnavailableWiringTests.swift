@@ -70,7 +70,9 @@ final class GesturePerformerSymbolsUnavailableWiringTests: XCTestCase {
         let pressKey = try gesturePerformerFunction(named: "performPressKey(")
         XCTAssertTrue(pressKey.contains("async throws"))
         XCTAssertTrue(pressKey.contains("try await KeyboardWait.destructivePostCondition("))
-        let focusGuard = try XCTUnwrap(pressKey.range(of: "try requireKeyboardFocus("))
+        XCTAssertTrue(pressKey.contains("GesturePerformer.performHorizontalArrow("))
+        XCTAssertTrue(pressKey.contains("clock: keyboardClock, key: normalizedKey"))
+        let focusGuard = try XCTUnwrap(pressKey.range(of: "requireKeyboardFocus("))
         let keyPressFocus = try XCTUnwrap(pressKey.range(of: "forKeyPress: true"))
         let synthesis = try XCTUnwrap(pressKey.range(of: "app.typeKey(keyboardKey, modifierFlags: modifierFlags)"))
 

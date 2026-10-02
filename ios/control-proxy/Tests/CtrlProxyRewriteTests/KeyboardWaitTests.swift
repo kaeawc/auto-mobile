@@ -578,13 +578,9 @@ final class KeyboardWaitTests: XCTestCase {
             XCTAssertTrue(function.contains("try await " + poller))
             XCTAssertFalse(function.contains("RunLoop.current.run"))
             XCTAssertFalse(function.contains("Date()"))
+            XCTAssertFalse(function.contains("systemUptime"))
             if name == "performPressKey" {
-                // The horizontal-arrow budget is intentionally unchanged.
-                let pollStart = try XCTUnwrap(function.range(of: "var valueAfterKeyPress = valueBeforeKeyPress"))
-                XCTAssertFalse(function[pollStart.lowerBound...].contains("systemUptime"))
                 XCTAssertTrue(function.contains("catchingObjCException({ focusedElement.exists })"))
-            } else {
-                XCTAssertFalse(function.contains("systemUptime"))
             }
         }
         let closeStart = try XCTUnwrap(source.range(of: "private func closeKeyboard<C: Clock>("))

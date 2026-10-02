@@ -7,11 +7,20 @@ import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
 import type { DelegateContext, CtrlProxyKeyboardResult, CtrlProxyPressKeyResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
+// Runner's 6000ms arrow budget plus headroom for an in-flight XCUITest call and response.
+export const IOS_ARROW_PRESS_KEY_TIMEOUT_MS = 9000;
+// Forward delete can retry Right Arrow + caret probe before its 1s post-condition poll.
+export const IOS_DELETE_PRESS_KEY_TIMEOUT_MS = 11000;
+export const IOS_DEFAULT_PRESS_KEY_TIMEOUT_MS = 5000;
+
 export function pressKeyTimeoutMs(key: InputKeyName, timeoutMs?: number): number {
   if (timeoutMs !== undefined) {
     return timeoutMs;
   }
-  return key === "arrow_left" || key === "arrow_right" ? 7000 : 5000;
+  if (key === "arrow_left" || key === "arrow_right") {
+    return IOS_ARROW_PRESS_KEY_TIMEOUT_MS;
+  }
+  return key === "delete" ? IOS_DELETE_PRESS_KEY_TIMEOUT_MS : IOS_DEFAULT_PRESS_KEY_TIMEOUT_MS;
 }
 
 export class CtrlProxyKeyboard {

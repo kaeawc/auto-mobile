@@ -1,6 +1,79 @@
 @testable import CtrlProxyRewrite
 import Foundation
+import os
 import XCTest
+
+private final class ArrowTestClock: Clock, Sendable {
+    struct Instant: InstantProtocol {
+        let offset: Duration
+
+        func advanced(by duration: Duration) -> Instant { Instant(offset: offset + duration) }
+        func duration(to other: Instant) -> Duration { other.offset - offset }
+        static func < (lhs: Instant, rhs: Instant) -> Bool { lhs.offset < rhs.offset }
+    }
+
+    private let instant = OSAllocatedUnfairLock(initialState: Instant(offset: .zero))
+    var now: Instant { instant.withLock { $0 } }
+    var minimumResolution: Duration { .nanoseconds(1) }
+
+    func advance(by duration: Duration) {
+        instant.withLock { $0 = $0.advanced(by: duration) }
+    }
+
+    func sleep(until deadline: Instant, tolerance _: Duration?) async throws {
+        try Task.checkCancellation()
+        instant.withLock { $0 = max($0, deadline) }
+    }
+}
+
+/// Exercises the production sequencer with synchronous operations and no wall-clock waits.
+private final class ArrowKeyScenario {
+    let clock = ArrowTestClock()
+    var key = "arrow_left"
+    var focusDuration: Duration = .zero
+    var lookupDuration: Duration = .zero
+    var probeDurations: [Duration] = [.zero, .zero, .zero]
+    var readDuration: Duration = .zero
+    var sendDuration: Duration = .zero
+    var retryDuration: Duration = .zero
+    var caretPositions: [Int?] = [1, 0]
+    var observedValue = "abc"
+    var sends = 0
+    var probes = 0
+    var reads = 0
+    var restorations = 0
+
+    func run() throws -> Bool {
+        try GesturePerformer.performHorizontalArrow(
+            clock: clock, key: key,
+            requireFocus: { self.clock.advance(by: self.focusDuration) },
+            resolveInput: {
+                self.clock.advance(by: self.lookupDuration)
+                return ("field", "abc")
+            },
+            probeCaret: { _, _ in
+                let index = self.probes
+                self.probes += 1
+                self.clock.advance(by: self.probeDurations[index])
+                return self.caretPositions[index]
+            },
+            sendKey: {
+                self.sends += 1
+                self.clock.advance(by: self.sendDuration)
+            },
+            retryKey: { _ in
+                self.sends += 1
+                self.clock.advance(by: self.retryDuration)
+            },
+            readValue: { _ in
+                self.reads += 1
+                self.clock.advance(by: self.readDuration)
+                return self.observedValue
+            },
+            restoreValue: { _, _ in self.restorations += 1 }
+        )
+    }
+}
 
 final class PressKeyTests: XCTestCase {
     func testFocusedEmptyOtherIsEligibleForKeyPressButNotTextInputDetection() {
@@ -187,20 +260,168 @@ final class PressKeyTests: XCTestCase {
         )
     }
 
+    func testHorizontalArrowBudgetExhaustedNamesStepAndSaysKeyWasNotSent() {
+        let description = GesturePerformer.GestureError.arrowBudgetExhausted(
+            step: "caret probe", elapsedMs: 4500
+        ).localizedDescription
+        XCTAssertEqual(
+            description,
+            "arrow key was not sent: runner time budget exhausted at caret probe after 4500ms; retry"
+        )
+        XCTAssertFalse(description.contains("no effect"))
+    }
+
     func testArrowBudgetReservesTimeForEachRemainingOperation() {
         let allows = GesturePerformer.arrowBudgetAllows
+        XCTAssertEqual(GesturePerformer.arrowBudgetMs, 6000)
         XCTAssertTrue(allows(0, .initialProbe))
-        XCTAssertTrue(allows(800, .initialProbe))
-        XCTAssertFalse(allows(801, .initialProbe))
-        XCTAssertTrue(allows(1700, .appKey))
-        XCTAssertFalse(allows(1701, .appKey))
-        XCTAssertTrue(allows(2300, .outcomeProbe))
-        XCTAssertFalse(allows(2301, .outcomeProbe))
-        XCTAssertTrue(allows(1500, .retry))
-        XCTAssertFalse(allows(1501, .retry))
-        XCTAssertFalse(allows(3500, .outcomeProbe))
-        XCTAssertTrue(allows(3499, .completion))
-        XCTAssertFalse(allows(3500, .completion))
+        XCTAssertTrue(allows(3300, .initialProbe))
+        XCTAssertFalse(allows(3301, .initialProbe))
+        XCTAssertTrue(allows(4200, .appKey))
+        XCTAssertFalse(allows(4201, .appKey))
+        XCTAssertTrue(allows(4800, .outcomeProbe))
+        XCTAssertFalse(allows(4801, .outcomeProbe))
+        XCTAssertTrue(allows(4000, .retry))
+        XCTAssertFalse(allows(4001, .retry))
+        XCTAssertFalse(allows(6000, .outcomeProbe))
+        XCTAssertTrue(allows(5999, .completion))
+        XCTAssertFalse(allows(6000, .completion))
+    }
+
+    func testArrowBudgetExhaustedDuringFocusCheckDoesNotSendKey() {
+        let scenario = ArrowKeyScenario()
+        scenario.lookupDuration = .seconds(4)
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.arrowBudgetExhausted(step, elapsedMs) = error else {
+                return XCTFail("Expected pre-send budget error, got \(error)")
+            }
+            XCTAssertEqual(step, "focus check")
+            XCTAssertEqual(elapsedMs, 4000)
+            XCTAssertTrue(error.localizedDescription.contains("was not sent"))
+        }
+        XCTAssertEqual(scenario.sends, 0)
+        XCTAssertEqual(scenario.probes, 0)
+    }
+
+    func testArrowBudgetExhaustedDuringCaretProbeDoesNotSendKey() {
+        let scenario = ArrowKeyScenario()
+        scenario.probeDurations[0] = .milliseconds(4500)
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.arrowBudgetExhausted(step, elapsedMs) = error else {
+                return XCTFail("Expected pre-send budget error, got \(error)")
+            }
+            XCTAssertEqual(step, "caret probe")
+            XCTAssertEqual(elapsedMs, 4500)
+        }
+        XCTAssertEqual(scenario.sends, 0)
+        XCTAssertEqual(scenario.probes, 1)
+    }
+
+    func testArrowBudgetExhaustedAfterSendReturnsUnverifiedWithoutProbing() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.sendDuration = .seconds(5)
+        XCTAssertFalse(try scenario.run())
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 1)
+        XCTAssertEqual(scenario.reads, 0)
+    }
+
+    func testArrowBudgetExhaustedDuringValueReadReturnsUnverified() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.readDuration = .seconds(5)
+        XCTAssertFalse(try scenario.run())
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 1)
+        XCTAssertEqual(scenario.reads, 1)
+    }
+
+    func testArrowBudgetExhaustedDuringOutcomeProbeDoesNotClaimObservedMovement() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.probeDurations[1] = .seconds(6)
+        XCTAssertFalse(try scenario.run())
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 2)
+    }
+
+    func testArrowRetryBudgetExhaustedReturnsUnverifiedAfterFirstNoOp() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1]
+        scenario.readDuration = .milliseconds(4100)
+        XCTAssertFalse(try scenario.run())
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.probes, 2)
+    }
+
+    func testArrowVerifiedNoOpAfterRetryThrowsArrowNoEffect() {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1, 1]
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case GesturePerformer.GestureError.arrowNoEffect = error else {
+                return XCTFail("Expected verified no-op, got \(error)")
+            }
+        }
+        XCTAssertEqual(scenario.sends, 2)
+        XCTAssertEqual(scenario.probes, 3)
+    }
+
+    func testArrowBudgetExhaustedAfterRetrySendRemainsUnverified() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1]
+        scenario.retryDuration = .seconds(6)
+        XCTAssertFalse(try scenario.run())
+        XCTAssertEqual(scenario.sends, 2)
+        XCTAssertEqual(scenario.probes, 2)
+    }
+
+    func testArrowMovementAndBoundaryNoOpsRemainVerified() throws {
+        for (key, before, after) in [
+            ("arrow_left", 1, 0), ("arrow_right", 1, 2),
+            ("arrow_left", 0, 0), ("arrow_right", 3, 3),
+        ] {
+            let scenario = ArrowKeyScenario()
+            scenario.key = key
+            scenario.caretPositions = [before, after]
+            XCTAssertTrue(try scenario.run())
+            XCTAssertEqual(scenario.sends, 1)
+        }
+    }
+
+    func testArrowRetryCanVerifyMovement() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1, 0]
+        XCTAssertTrue(try scenario.run())
+        XCTAssertEqual(scenario.sends, 2)
+    }
+
+    func testArrowMissingCaretVerificationRemainsUnverifiedAfterRetry() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.caretPositions = [1, 1, nil]
+        XCTAssertFalse(try scenario.run())
+        XCTAssertEqual(scenario.sends, 2)
+    }
+
+    func testArrowBudgetStartsAfterFocusAcquisition() throws {
+        let scenario = ArrowKeyScenario()
+        scenario.focusDuration = .seconds(4) // Alone would exhaust the old pre-focus 3.5s budget.
+        scenario.lookupDuration = .seconds(1)
+        scenario.probeDurations = [.seconds(1), .milliseconds(200)]
+        scenario.sendDuration = .seconds(1)
+        XCTAssertTrue(try scenario.run())
+        XCTAssertEqual(scenario.clock.now.offset, .milliseconds(7200))
+        XCTAssertEqual(scenario.sends, 1)
+    }
+
+    func testArrowChangedValueRestoresOriginalAndDoesNotReportNoEffect() {
+        let scenario = ArrowKeyScenario()
+        scenario.observedValue = "changed"
+        XCTAssertThrowsError(try scenario.run()) { error in
+            guard case let GesturePerformer.GestureError.gestureFailed(reason) = error else {
+                return XCTFail("Expected changed-value error, got \(error)")
+            }
+            XCTAssertEqual(reason, "arrow key changed the focused field value")
+        }
+        XCTAssertEqual(scenario.sends, 1)
+        XCTAssertEqual(scenario.restorations, 1)
     }
 
     func testDecodePreservesKeyAndModifiersAndResponseType() throws {

@@ -176,6 +176,7 @@
 		D847B2F9A22C5FF67696252F /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64BB7DB0036B1C9E9A425225 /* WebSocketServer.swift */; };
 		D8943948CAA0358CCD814D8B /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		D895DC45A618CEA47E4E073C /* SdkViewHierarchy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87A5CE5AE6DC6AFD89DE1819 /* SdkViewHierarchy.swift */; };
+		DA605EB34DB35B42E23CA42C /* RotateDecision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37ACE06E7E094821A95431F2 /* RotateDecision.swift */; };
 		DC93BE53E25D0A26FED732E8 /* RotationChangeGeneration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4077C07753B2627ACB9A9B2E /* RotationChangeGeneration.swift */; };
 		DDED3791C6C44B16E2B018D8 /* ConnectionRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70078B2ADB6C85E6C05F0DE4 /* ConnectionRegistry.swift */; };
 		E0989A2F71DC6B3F6F81997E /* Data+SHA1.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEBC55A3713496CF7629433A /* Data+SHA1.swift */; };
@@ -303,6 +304,7 @@
 		32AE30FA5A10090859AA0A0D /* RequestExecuteSql.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestExecuteSql.swift; sourceTree = "<group>"; };
 		3498BA01D6DD57FED426ED1E /* RequestRotate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestRotate.swift; sourceTree = "<group>"; };
 		3773883F9E4A7E4687D9CC38 /* RequestClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestClipboard.swift; sourceTree = "<group>"; };
+		37ACE06E7E094821A95431F2 /* RotateDecision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotateDecision.swift; sourceTree = "<group>"; };
 		39038B59AD313BFBFADB326B /* RotationSampling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationSampling.swift; sourceTree = "<group>"; };
 		3B98B12598A786158E51133D /* RequestSetNetworkFaultRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetNetworkFaultRules.swift; sourceTree = "<group>"; };
 		3CB3829011D3086CDB1E76EB /* SdkHierarchyFetching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyFetching.swift; sourceTree = "<group>"; };
@@ -538,6 +540,7 @@
 				D255CDBF98698FAA7A8CDCF3 /* PinchFallback.swift */,
 				D6B661E440E6E947D57E698A /* ProxyTimer.swift */,
 				AE3F18728033EBBB0EE739F5 /* RangeReplaceableCollection+MaxSizeEnforcement.swift */,
+				37ACE06E7E094821A95431F2 /* RotateDecision.swift */,
 				EAC48E451DFCE3B42F3D5888 /* RotationCaptureSample.swift */,
 				4077C07753B2627ACB9A9B2E /* RotationChangeGeneration.swift */,
 				DBD3177C0F58A1754B1C7660 /* RotationChangeMonitor.swift */,
@@ -1044,6 +1047,7 @@
 				2A84B11D7E830D6A32E4CB92 /* RequestTapCoordinates.swift in Sources */,
 				2C778CBD38DDCB88BD1FBC9B /* RequestType.swift in Sources */,
 				7220409A615CBE920CE42B74 /* ResponseType.swift in Sources */,
+				DA605EB34DB35B42E23CA42C /* RotateDecision.swift in Sources */,
 				E53A1740DE940DD253673D4B /* RotateResponse.swift in Sources */,
 				EEB7FAE75867F81AE372517D /* RotationCaptureSample.swift in Sources */,
 				DC93BE53E25D0A26FED732E8 /* RotationChangeGeneration.swift in Sources */,

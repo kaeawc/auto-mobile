@@ -142,6 +142,27 @@ test("known pin mismatch fails closed even with preinstalled skip configured", a
   }
 });
 
+test("known pin treats an unreadable installed APK SHA as unverified mismatch", async () => {
+  installed(null);
+  const previous = process.env.AUTOMOBILE_VERSION;
+  process.env.AUTOMOBILE_VERSION = "0.0.18";
+  try {
+    const reading = await AndroidCtrlProxyManager.createDetached(
+      device,
+      adb,
+    ).inspectCompatibility();
+    expect(reading.status).toBe("unverifiable");
+    expect(reading.knownPinMismatch).toBe(true);
+    expectOnlyReads();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.AUTOMOBILE_VERSION;
+    } else {
+      process.env.AUTOMOBILE_VERSION = previous;
+    }
+  }
+});
+
 test("unknown pin rejects before adb reads", async () => {
   AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
   const previous = process.env.AUTOMOBILE_VERSION;

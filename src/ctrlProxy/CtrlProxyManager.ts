@@ -155,6 +155,7 @@ export interface CtrlProxyCompatibilityInspection {
   expectedSha256: string;
   installedSha256: string | null;
   installedShaSource: "device" | "host" | "none";
+  /** A known explicit release pin cannot be verified against this installed APK. */
   knownPinMismatch: boolean;
 }
 
@@ -1436,8 +1437,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         status,
         installedSha256: sha.sha256,
         installedShaSource: sha.source,
-        knownPinMismatch:
-          status === "mismatch" && AndroidCtrlProxyManager.isKnownExplicitPinConfigured(),
+        knownPinMismatch: AndroidCtrlProxyManager.isKnownPinUnverified(status),
       };
     });
   }
@@ -2836,6 +2836,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return false;
     }
     return isExplicitPin() && isPinnedVersionKnown();
+  }
+
+  private static isKnownPinUnverified(status: CtrlProxyCompatibilityInspection["status"]): boolean {
+    return (
+      (status === "mismatch" || status === "unverifiable") &&
+      AndroidCtrlProxyManager.isKnownExplicitPinConfigured()
+    );
   }
 
   private static createKnownPinMismatchError(

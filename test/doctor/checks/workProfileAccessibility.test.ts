@@ -42,6 +42,20 @@ describe("checkWorkProfileAccessibility", () => {
     expect(result.message).toBe("device=emulator-5554; No work profiles detected");
   });
 
+  test("warns when Android users could not be listed", async () => {
+    fakeAdb.setDevices([{ name: "emulator-5554", platform: "android", deviceId: "emulator-5554" }]);
+    fakeAdb.setUsers([]);
+
+    const result = await checkWorkProfileAccessibility(fakeFactory);
+
+    expect(result).toMatchObject({
+      status: "warn",
+      message: "device=emulator-5554; Could not list Android users",
+      recommendation:
+        "Re-run doctor and verify adb access to that device; doctor only reports status.",
+    });
+  });
+
   test("returns pass when work profile has accessibility service enabled", async () => {
     const device: BootedDevice = {
       name: "emulator-5554",

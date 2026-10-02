@@ -44,6 +44,7 @@ function captureHarness(
   options: {
     frame?: Buffer;
     readError?: Error;
+    read?: () => Promise<Buffer>;
     exitCode?: number;
     stderr?: string;
     manual?: boolean;
@@ -72,6 +73,9 @@ function captureHarness(
     readFile: async () => "",
     readFileBuffer: async (path) => {
       events.push("read");
+      if (options.read) {
+        return options.read();
+      }
       if (options.readError) {
         throw options.readError;
       }
@@ -161,6 +165,95 @@ test("simctl screenshot reads PNG bytes from an absolute private temp path and r
   expect(h.calls[0]).not.toContain("-");
   expect(h.files.size).toBe(0);
   expect(h.events).toEqual(["close", "read", "cleanup"]);
+});
+
+for (const cancellation of ["caller", "timeout"] as const) {
+  for (const lateRead of ["resolve", "reject"] as const) {
+    test(`simctl screenshot abandons pending read on ${cancellation} cancellation with late ${lateRead}`, async () => {
+      const caller = new AbortController();
+      const cause = new Error("pending read cancelled");
+      let release: (buffer: Buffer) => void = () => {};
+      let rejectRead: (error: Error) => void = () => {};
+      const read = new Promise<Buffer>((resolve, reject) => {
+        release = resolve;
+        rejectRead = reject;
+      });
+      let notifyRead: () => void = () => {};
+      const readStarted = new Promise<void>((resolve) => {
+        notifyRead = resolve;
+      });
+      const h = captureHarness({
+        manual: true,
+        read: () => {
+          notifyRead();
+          return read;
+        },
+      });
+      let outcome: unknown;
+      const screenshot = h.simctl.screenshot(udid, "primary-1", caller.signal).then(
+        (buffer) => {
+          outcome = buffer;
+        },
+        (error: unknown) => {
+          outcome = error;
+        },
+      );
+      await h.started;
+      h.timer.advanceTime(4_000);
+      h.children[0]!.emit("close", 0);
+      await readStarted;
+      h.timer.advanceTime(cancellation === "timeout" ? 6_000 : 25);
+      if (cancellation === "caller") {
+        caller.abort(cause);
+      }
+      // Flush promise continuations without waiting for the deliberately pending read.
+      for (let turn = 0; turn < 20; turn++) {
+        await Promise.resolve();
+      }
+      try {
+        expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+        expect(outcome).toMatchObject({
+          reason: cancellation === "caller" ? "aborted-by-caller" : "aborted-by-timeout",
+          exitCode: 0,
+          message:
+            cancellation === "caller"
+              ? "simctl screenshot cancelled by the caller after 4025ms: pending read cancelled"
+              : "simctl screenshot timed out after 10000ms",
+          ...(cancellation === "caller" ? { cause } : {}),
+        });
+        expect(h.removed).toEqual(["/fake/capture-1"]);
+        expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        if (lateRead === "resolve") {
+          release(png(2853, 2007));
+        } else {
+          rejectRead(new Error("late read failure"));
+        }
+        await screenshot;
+      }
+      const cancelled = outcome;
+      for (let turn = 0; turn < 20; turn++) {
+        await Promise.resolve();
+      }
+      expect(outcome).toBe(cancelled);
+      expect(h.removed).toHaveLength(1);
+    });
+  }
+}
+
+test("simctl screenshot honors caller abort between close and read", async () => {
+  const caller = new AbortController();
+  const cause = new Error("cancelled after close");
+  const h = captureHarness({ manual: true });
+  const screenshot = h.simctl.screenshot(udid, "primary-1", caller.signal);
+  await h.started;
+  h.files.set(h.calls[0]!.at(-1)!, png(2853, 2007));
+  h.children[0]!.emit("close", 0);
+  caller.abort(cause);
+  await expect(screenshot).rejects.toMatchObject({ reason: "aborted-by-caller", cause });
+  expect(h.events).not.toContain("read");
+  expect(h.removed).toEqual(["/fake/capture-1"]);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
 });
 
 for (const scenario of [

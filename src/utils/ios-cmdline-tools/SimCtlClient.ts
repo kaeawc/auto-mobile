@@ -2752,8 +2752,7 @@ export class SimCtlClient implements SimCtl {
     }
     try {
       const path = resolve(dir, `screenshot-${this.idGenerator.next()}.png`);
-      const stderr = await this.captureScreenshotFile(deviceId, display, path, signal);
-      return await this.readScreenshotFile(path, stderr);
+      return await this.captureScreenshotFile(deviceId, display, path, signal);
     } finally {
       try {
         await this.fileSystem.rm(dir, { recursive: true, force: true });
@@ -2793,29 +2792,29 @@ export class SimCtlClient implements SimCtl {
     display: string,
     path: string,
     signal?: AbortSignal,
-  ): Promise<string> {
+  ): Promise<Buffer> {
     const startedAt = this.timer.now();
     const args = ["simctl", "io", deviceId, "screenshot", `--display=${display}`, path];
     const timeout = new AbortController();
     const handle = this.timer.setTimeout(() => timeout.abort(), 10_000);
     const captureSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
+    const errors: Buffer[] = [];
+    const stderrText = (): string => Buffer.concat(errors).toString();
+    const abortFailure = (cause?: unknown, exitCode?: number | null): SimctlScreenshotError => {
+      const elapsed = this.timer.now() - startedAt;
+      const timedOut = captureSignal.reason === timeout.signal.reason && timeout.signal.aborted;
+      const reason = timedOut ? "aborted-by-timeout" : "aborted-by-caller";
+      const message = timedOut
+        ? `simctl screenshot timed out after ${elapsed}ms`
+        : `simctl screenshot cancelled by the caller after ${elapsed}ms: ${errorMessage(signal?.reason)}`;
+      return new SimctlScreenshotError(reason, message, {
+        exitCode,
+        stderr: stderrText(),
+        cause: cause ?? captureSignal.reason,
+      });
+    };
     try {
-      return await new Promise<string>((resolve, reject) => {
-        const errors: Buffer[] = [];
-        const stderrText = (): string => Buffer.concat(errors).toString();
-        const abortFailure = (cause?: unknown, exitCode?: number | null): SimctlScreenshotError => {
-          const elapsed = this.timer.now() - startedAt;
-          const timedOut = captureSignal.reason === timeout.signal.reason && timeout.signal.aborted;
-          const reason = timedOut ? "aborted-by-timeout" : "aborted-by-caller";
-          const message = timedOut
-            ? `simctl screenshot timed out after ${elapsed}ms`
-            : `simctl screenshot cancelled by the caller after ${elapsed}ms: ${errorMessage(signal?.reason)}`;
-          return new SimctlScreenshotError(reason, message, {
-            exitCode,
-            stderr: stderrText(),
-            cause: cause ?? captureSignal.reason,
-          });
-        };
+      const stderr = await new Promise<string>((resolve, reject) => {
         let child: ChildProcess;
         try {
           if (captureSignal.aborted) {
@@ -2865,6 +2864,15 @@ export class SimCtlClient implements SimCtl {
           }
         });
       });
+      try {
+        return await raceWithDeadline(() => this.readScreenshotFile(path, stderr), {
+          timer: this.timer,
+          signal: captureSignal,
+          label: "simctl screenshot",
+        });
+      } catch (error) {
+        throw captureSignal.aborted ? abortFailure(captureSignal.reason, 0) : error;
+      }
     } finally {
       this.timer.clearTimeout(handle);
     }

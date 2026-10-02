@@ -1725,6 +1725,9 @@ export class DevicePool {
       if (started > 0) {
         await this.refreshDevices();
         stats = this.getStatsForPlatform(platform);
+      } else if (platform === "android") {
+        // A queued start may have joined a boot without launching a device.
+        stats = this.getStatsForPlatform(platform);
       }
     }
 
@@ -2077,6 +2080,9 @@ export class DevicePool {
             await this.trackStartedDeviceProcess(startResult.ready, startResult.childProcess);
           });
           started++;
+        } else if (startResult === undefined && device.platform === "android") {
+          // Rediscover the winner after releasing the lifecycle lease.
+          await this.refreshDevices();
         }
       }
 
@@ -2100,7 +2106,7 @@ export class DevicePool {
       signal: AbortSignal,
       retainLeaseUntil: (settlement: Promise<unknown>) => void,
     ) => Promise<T>,
-  ): Promise<T> {
+  ): Promise<T | undefined> {
     const timeoutMs = this.remainingStartDeadline(deadlineMs);
     const controller = new AbortController();
     const timeoutError = new ActionableError(
@@ -2130,6 +2136,28 @@ export class DevicePool {
         : settlement;
     };
     try {
+      // Recovery claimed before candidate selection is suppressed there. When
+      // recovery or another start claims after selection, acquisition waits for
+      // its lease; revalidate under that lease to join the winner's boot instead
+      // of launching the same AVD again (#8381).
+      if (device.platform === "android" && operation === "start") {
+        const booted = await this.deviceManager.getBootedDevices("android");
+        const pooled = this.getDevicesByPlatform("android");
+        const bootedIds = new Set([
+          ...booted.map((entry) => entry.deviceId),
+          ...pooled.map((entry) => entry.id),
+        ]);
+        const bootedNames = new Set([
+          ...booted.map((entry) => entry.name),
+          ...pooled.map((entry) => entry.avdName ?? entry.name),
+        ]);
+        if (
+          this.isAutoStartSuppressed(device) ||
+          (await this.isDeviceImageRunningForCandidate(device, bootedIds, bootedNames))
+        ) {
+          return undefined;
+        }
+      }
       const childProcess = await runWithAbortSignal(signal, () =>
         this.deviceManager.startDevice(device, this.remainingStartDeadline(deadlineMs)),
       );
@@ -2248,6 +2276,10 @@ export class DevicePool {
         },
       );
       if (!startResult) {
+        if (startResult === undefined && criteria.platform === "android") {
+          // Rediscover the winner after releasing the lifecycle lease.
+          await this.refreshDevices();
+        }
         return null;
       }
       // Start readiness and the lifecycle lease settle before assignmentMutex;
@@ -2316,6 +2348,13 @@ export class DevicePool {
     bootedIds: Set<string>,
     bootedNames: Set<string>,
   ): Promise<boolean> {
+    if (
+      image.platform === "android" &&
+      ((image.deviceId !== undefined && bootedIds.has(image.deviceId)) ||
+        bootedNames.has(image.name))
+    ) {
+      return true;
+    }
     if (image.isRunning === true) {
       return true;
     }

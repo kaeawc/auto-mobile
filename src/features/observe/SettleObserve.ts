@@ -57,6 +57,7 @@ export class RealSettleObserve implements SettleObserve {
       this.observeScreen,
       this.timer,
       {
+        display: options.display,
         timeoutMs,
         pollMs,
         signal: options.signal,

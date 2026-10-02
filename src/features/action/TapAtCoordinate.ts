@@ -321,20 +321,26 @@ export class TapAtCoordinate extends BaseVisualChange {
         error: resolved.error,
       };
     }
-    assertCurrent();
-    await this.dispatchGesture(options, resolved, observation, signal, displayId, assertCurrent);
-    const after = await this.observeScreen.execute({
-      display,
-      freshness: "fresh",
-      signal,
-    });
-    return {
-      success: true,
-      x: resolved.x,
-      y: resolved.y,
-      action,
-      observation: after,
-    };
+    return this.observedInteraction(
+      async () => {
+        assertCurrent();
+        await this.dispatchGesture(
+          options,
+          resolved,
+          observation,
+          signal,
+          displayId,
+          assertCurrent,
+        );
+        return { success: true, x: resolved.x, y: resolved.y, action };
+      },
+      {
+        changeExpected: false,
+        display: observation.display.key,
+        previousObservation: observation,
+        signal,
+      },
+    );
   }
 
   async execute(

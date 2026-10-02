@@ -13,6 +13,8 @@ import { hierarchyUpdatedAtToMillis } from "./observeTimestamp";
  * once.
  */
 export interface ObservePollOptions {
+  /** Physical panel for every capture in this poll. */
+  display?: string;
   /**
    * Hard budget in ms. Mandatory: the loop stops scheduling polls once elapsed
    * time reaches it. It can overshoot by up to one `pollMs` plus one observe, so
@@ -295,6 +297,8 @@ export async function pollObserveUntil(
     const cacheStartedAt = timer.now();
 
     const observation = await observeScreen.execute({
+      display: options.display,
+      freshness: options.display === undefined ? undefined : "fresh",
       minTimestamp,
       timeoutMs: Math.max(1, options.timeoutMs - (timer.now() - start)),
       skipWaitForFresh: false,

@@ -112,16 +112,10 @@ export class DragAndDrop extends BaseVisualChange {
       target.displayId,
       signal,
     );
-    const after = await this.observeScreen.execute({
-      display: options.display,
-      freshness: "fresh",
-      signal,
-    });
     return {
       success: true,
       duration,
       distance: Math.hypot(end.x - start.x, end.y - start.y),
-      observation: after,
     };
   }
 
@@ -147,7 +141,15 @@ export class DragAndDrop extends BaseVisualChange {
           this.displayTransitionReader,
         );
         if (this.device.platform === "android") {
-          return await this.executeOnAndroidDisplay(options, target, signal);
+          return await this.observedInteraction(
+            () => this.executeOnAndroidDisplay(options, target, signal),
+            {
+              changeExpected: false,
+              display: target.observation.display.key,
+              previousObservation: target.observation,
+              signal,
+            },
+          );
         }
       } catch (error) {
         logger.warn(`dragAndDrop display routing failed: ${errorMessage(error)}`, error);
@@ -165,11 +167,9 @@ export class DragAndDrop extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<DragAndDropResult> {
-    if (options.display !== undefined) {
-      const result = await this.executeExplicitDisplay(options, signal);
-      if (result) {
-        return result;
-      }
+    const targeted = await this.executeExplicitDisplay(options, signal);
+    if (targeted) {
+      return targeted;
     }
     const perf = createGlobalPerformanceTracker();
     perf.serial("dragAndDrop");
@@ -262,6 +262,7 @@ export class DragAndDrop extends BaseVisualChange {
         },
         {
           changeExpected: false,
+          display: options.display,
           progress,
           perf,
           signal,

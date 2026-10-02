@@ -259,6 +259,7 @@ export class PinchOn extends BaseVisualChange {
         },
         {
           changeExpected: false,
+          display: options.display,
           timeoutMs: 8000,
           progress,
           perf,

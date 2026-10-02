@@ -275,11 +275,6 @@ export class SwipeOn extends BaseVisualChange {
       target.displayId,
       signal,
     );
-    const after = await this.observeScreen.execute({
-      display: options.display,
-      freshness: "fresh",
-      signal,
-    });
     return {
       success: true,
       targetType: bounds ? "element" : "screen",
@@ -288,7 +283,6 @@ export class SwipeOn extends BaseVisualChange {
       x2,
       y2,
       duration,
-      observation: after,
     };
   }
 
@@ -340,7 +334,15 @@ export class SwipeOn extends BaseVisualChange {
         );
         throwIfAborted(signal);
         if (this.device.platform === "android") {
-          return await this.executeOnAndroidDisplay(options, target, signal);
+          return await this.observedInteraction(
+            () => this.executeOnAndroidDisplay(options, target, signal),
+            {
+              changeExpected: false,
+              display: target.observation.display.key,
+              previousObservation: target.observation,
+              signal,
+            },
+          );
         }
       } catch (error) {
         throwIfAborted(signal);
@@ -691,6 +693,7 @@ export class SwipeOn extends BaseVisualChange {
       },
       {
         changeExpected: false,
+        display: options.display,
         timeoutMs: 500,
         progress,
         perf,
@@ -793,6 +796,7 @@ export class SwipeOn extends BaseVisualChange {
           containerElementId: undefined, // No nested container restriction
         },
         changeExpected: false,
+        display: options.display,
         timeoutMs: 500,
         progress,
         perf,

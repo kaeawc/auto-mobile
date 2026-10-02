@@ -95,6 +95,12 @@ function promotedLabelScreen(
   return observation;
 }
 
+function autoTimer(): FakeTimer {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  return timer;
+}
+
 function adb(): FakeAdbExecutor {
   const result = new FakeAdbExecutor();
   result.setCommandResponse("cmd display get-displays", {
@@ -113,6 +119,240 @@ describe("explicit action display", () => {
 
   afterEach(() => DaemonState.getInstance().reset());
 
+  for (const kind of ["tapOn", "tapAt", "swipeOn", "dragAndDrop"] as const) {
+    for (const outcome of ["changed", "unchanged", "empty", "unavailable", "throws"] as const) {
+      test(`${kind} targeted post-capture: ${outcome}`, async () => {
+        const executor = adb();
+        const timer = autoTimer();
+        const before = screen("internal", "Notifications");
+        // An unrelated cached external panel must never become the baseline.
+        const cached = screen("external", "Other panel");
+        const destination = screen(
+          "internal",
+          outcome === "changed" ? "Notification history" : "Notifications",
+        );
+        if (outcome === "empty") {
+          destination.viewHierarchy = undefined;
+        }
+        if (outcome === "unavailable") {
+          destination.viewHierarchy = { hierarchy: { error: "service unavailable" } };
+        }
+        let dispatched = false;
+        let invalidated = false;
+        const calls: string[] = [];
+        class PanelObserve extends FakeObserveScreen {
+          override async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
+            calls.push("wrong-panel-cache");
+            return cached;
+          }
+        }
+        const observe = new PanelObserve();
+        observe.setObserveResult(() => {
+          calls.push(dispatched ? "post" : "pre");
+          if (dispatched && outcome === "throws") {
+            throw new Error("post-capture unavailable");
+          }
+          const observation = invalidated ? destination : before;
+          return {
+            ...observation,
+            viewHierarchy: observation.viewHierarchy
+              ? { ...observation.viewHierarchy, updatedAt: 1_800_000_000_000 + calls.length }
+              : undefined,
+          };
+        });
+        const deps = { timer, lastRenderedObservation: () => before };
+        const action =
+          kind === "tapOn"
+            ? new TapOnElement(android, executor, deps)
+            : kind === "tapAt"
+              ? new TapAtCoordinate(android, executor, deps)
+              : kind === "swipeOn"
+                ? new SwipeOn(android, executor as unknown as AdbClient, {
+                    ...deps,
+                    observeScreen: observe,
+                  })
+                : new DragAndDrop(android, executor as unknown as AdbClient, timer, deps);
+        action.observeScreen = observe;
+        const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
+        const invalidate = spyOn(client, "invalidateCache").mockImplementation(() => {
+          calls.push("invalidate");
+          invalidated = true;
+        });
+        const executeCommand = executor.executeCommand.bind(executor);
+        const dispatch = spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+          if (args[0].includes("touchscreen")) {
+            calls.push("dispatch");
+            dispatched = true;
+          }
+          return executeCommand(...args);
+        });
+        try {
+          const result =
+            action instanceof TapOnElement
+              ? await action.execute({ action: "tap", text: "Notifications", display: "inner" })
+              : action instanceof TapAtCoordinate
+                ? await action.execute({ x: 40, y: 50, display: "inner" })
+                : action instanceof SwipeOn
+                  ? await action.execute({ direction: "up", display: "inner" })
+                  : await action.execute({
+                      source: { text: "Notifications" },
+                      target: { text: "Notifications" },
+                      display: "inner",
+                    });
+          expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
+          expect(calls).not.toContain("wrong-panel-cache");
+          expect(
+            observe
+              .getExecuteOptions()
+              .every((options) => options.display === "inner" || options.display === "internal"),
+          ).toBe(true);
+          const postOptions = observe.getExecuteOptions().slice(1);
+          expect(postOptions.every((options) => options.freshness === "fresh")).toBe(true);
+          if (outcome === "throws") {
+            expect(result.success).toBe(false);
+            expect(result.error).toContain("post-capture unavailable");
+            expect(result.observation).toBeUndefined();
+          } else {
+            expect(result.success).toBe(true);
+            expect(result.observation?.viewHierarchy?.hierarchy).toEqual(
+              destination.viewHierarchy?.hierarchy,
+            );
+            expect(result.effect?.screenChanged).toBe(
+              outcome === "changed" || outcome === "unavailable",
+            );
+            if (outcome === "empty") {
+              expect(result.effect?.basis).toBe("insufficient observation data");
+            }
+            if (outcome === "changed" || outcome === "unchanged") {
+              expect(timer.getSleepHistory().length).toBeGreaterThan(0);
+              expect(
+                postOptions.some((options) => (options.minTimestamp ?? 0) > 1_800_000_000_000),
+              ).toBe(true);
+            }
+          }
+        } finally {
+          invalidate.mockRestore();
+          dispatch.mockRestore();
+        }
+      });
+    }
+  }
+
+  test("display tap returns the destination instead of the pre-tap cache and includes effect", async () => {
+    const executor = adb();
+    const timer = autoTimer();
+    timer.enableAutoAdvance();
+    const before = screen("internal", "Notifications");
+    const after = screen("internal", "Notification history");
+    before.activeWindow = {
+      appId: "com.android.settings",
+      activityName: "Settings",
+      layoutSeqSum: 0,
+    };
+    after.activeWindow = {
+      appId: "com.android.settings",
+      activityName: "Notifications",
+      layoutSeqSum: 0,
+    };
+    let invalidated = false;
+    let dispatched = false;
+    const calls: string[] = [];
+    const action = new TapOnElement(android, executor, {
+      timer,
+      lastRenderedObservation: () => before,
+    });
+    const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
+    const invalidate = spyOn(client, "invalidateCache").mockImplementation(() => {
+      calls.push("invalidate");
+      invalidated = true;
+    });
+    const executeCommand = executor.executeCommand.bind(executor);
+    const dispatch = spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+      if (args[0].includes("touchscreen")) {
+        calls.push("dispatch");
+        dispatched = true;
+      }
+      return executeCommand(...args);
+    });
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(() => {
+      calls.push(dispatched ? "post" : "pre");
+      const observation = invalidated ? after : before;
+      return {
+        ...observation,
+        viewHierarchy: observation.viewHierarchy
+          ? { ...observation.viewHierarchy, updatedAt: 1_800_000_000_000 + calls.length }
+          : undefined,
+      };
+    });
+    action.observeScreen = observe;
+    try {
+      const result = await action.execute({
+        text: "Notifications",
+        action: "tap",
+        display: "inner",
+      });
+      expect(result.observation?.viewHierarchy?.hierarchy).toEqual(after.viewHierarchy?.hierarchy);
+      expect(result.effect).toEqual({ screenChanged: true, basis: "activeWindow changed" });
+      expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
+      expect(
+        observe
+          .getExecuteOptions()
+          .every((options) => options.display === "internal" || options.display === "inner"),
+      ).toBe(true);
+    } finally {
+      invalidate.mockRestore();
+      dispatch.mockRestore();
+    }
+  });
+
+  test("iOS targeted tapAt uses shared post-action handling on its live panel", async () => {
+    const executor = adb();
+    const timer = autoTimer();
+    const before = screen("internal", "Notifications");
+    const after = screen("internal", "Notification history");
+    const calls: string[] = [];
+    let dispatched = false;
+    const client = {
+      requestTapCoordinates: async () => {
+        calls.push("dispatch");
+        dispatched = true;
+        return { success: true };
+      },
+    };
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(() => {
+      calls.push(dispatched ? "post" : "pre");
+      const observation = dispatched ? after : before;
+      return {
+        ...observation,
+        viewHierarchy: {
+          ...observation.viewHierarchy!,
+          updatedAt: 1_800_000_000_000 + calls.length,
+        },
+      };
+    });
+    const action = new TapAtCoordinate(ios, executor, {
+      timer,
+      androidClient: client,
+      iosClient: client,
+      lastRenderedObservation: () => before,
+      invalidateIosCache: () => calls.push("invalidate"),
+    });
+    action.observeScreen = observe;
+    const result = await action.execute({ x: 40, y: 50, display: "inner" });
+    expect(result.success).toBe(true);
+    expect(result.effect?.screenChanged).toBe(true);
+    expect(result.observation?.viewHierarchy?.hierarchy).toEqual(after.viewHierarchy?.hierarchy);
+    expect(calls.slice(0, 4)).toEqual(["pre", "dispatch", "invalidate", "post"]);
+    expect(
+      observe
+        .getExecuteOptions()
+        .every((options) => options.display === "inner" || options.display === "internal"),
+    ).toBe(true);
+    expect(executor.getExecutedCommands()).toEqual([]);
+  });
+
   test("flag-off observe records the rendered panel for the real session reader", async () => {
     const originalDiff = serverConfig.isActionsDiffObserveEnabled();
     const originalNoObserve = serverConfig.isActionsNoObserveEnabled();
@@ -127,7 +367,7 @@ describe("explicit action display", () => {
     observe.setObserveResult(screen("external"));
     const client = { requestTapCoordinates: async () => ({ success: true }) };
     const action = new TapAtCoordinate(android, executor, {
-      timer,
+      timer: autoTimer(),
       androidClient: client,
       iosClient: client,
     });
@@ -177,6 +417,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(screen("external"));
     const swipe = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+      timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: sessionRenderedObservation,
     });
@@ -187,7 +428,7 @@ describe("explicit action display", () => {
     expect(fakeAdb.getCommandCalls().at(-1)?.signal).toBe(signal);
     expect(observe.getExecuteOptions().at(-1)?.signal).toBe(signal);
 
-    const drag = new DragAndDrop(android, fakeAdb as unknown as AdbClient, timer, {
+    const drag = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer(), {
       lastRenderedObservation: sessionRenderedObservation,
     });
     drag.observeScreen = observe;
@@ -202,6 +443,7 @@ describe("explicit action display", () => {
     ).toBe(true);
 
     const pinch = new PinchOn(android, fakeAdb as unknown as AdbClient, {
+      timer: autoTimer(),
       lastRenderedObservation: sessionRenderedObservation,
     });
     pinch.observeScreen = observe;
@@ -235,7 +477,7 @@ describe("explicit action display", () => {
     observe.setObserveResult(observation);
     const client = { requestTapCoordinates: async () => ({ success: true }) };
     const action = new TapAtCoordinate(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       androidClient: client,
       iosClient: client,
       lastRenderedObservation: () => observation,
@@ -259,7 +501,7 @@ describe("explicit action display", () => {
       },
     };
     const action = new TapAtCoordinate(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       androidClient: client,
       iosClient: client,
     });
@@ -288,7 +530,7 @@ describe("explicit action display", () => {
     );
     try {
       const action = new TapOnElement(android, executor, {
-        timer: new FakeTimer(),
+        timer: autoTimer(),
         tapStrategy: {
           isAccessibilityServiceEnabled: async () => false,
           shouldRunPreTapStability: () => false,
@@ -321,6 +563,7 @@ describe("explicit action display", () => {
     observe.setObserveResult(observation);
     const swipes: string[] = [];
     const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+      timer: autoTimer(),
       observeScreen: observe,
     });
     Object.assign(action, {
@@ -344,7 +587,7 @@ describe("explicit action display", () => {
 
   test("dragAndDrop without display keeps CtrlProxy dispatch and never probes displays", async () => {
     const fakeAdb = new FakeAdbClient();
-    const timer = new FakeTimer();
+    const timer = autoTimer();
     timer.enableAutoAdvance();
     const drags: number[][] = [];
     const client = {
@@ -420,7 +663,7 @@ describe("explicit action display", () => {
     observe.setObserveResult(screen("internal"));
     const keys: string[] = [];
     const action = new SendKeys(android, new FakeAdbClientFactory(executor), {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       observer: observe,
       timestampProvider: { now: async () => 1 },
       executor: {
@@ -445,7 +688,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -464,7 +707,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -486,6 +729,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new SwipeOn(android, executor as unknown as AdbClient, {
+      timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: () => observation,
     });
@@ -507,7 +751,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -533,7 +777,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -581,7 +825,7 @@ describe("explicit action display", () => {
     ];
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
-    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, new FakeTimer(), {
+    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer(), {
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -612,6 +856,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+      timer: autoTimer(),
       observeScreen: observe,
       lastRenderedObservation: () => observation,
     });
@@ -629,6 +874,7 @@ describe("explicit action display", () => {
 
     const defaultCoordinates: number[] = [];
     const defaultAction = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+      timer: autoTimer(),
       observeScreen: observe,
     });
     Object.assign(defaultAction, {
@@ -663,7 +909,7 @@ describe("explicit action display", () => {
       const observe = new FakeObserveScreen();
       observe.setObserveResult(observation);
       const action = new TapOnElement(android, executor, {
-        timer: new FakeTimer(),
+        timer: autoTimer(),
         lastRenderedObservation: () => observation,
       });
       action.observeScreen = observe;
@@ -695,7 +941,7 @@ describe("explicit action display", () => {
       const observe = new FakeObserveScreen();
       observe.setObserveResult(observation);
       const displayAction = new TapOnElement(android, executor, {
-        timer: new FakeTimer(),
+        timer: autoTimer(),
         lastRenderedObservation: () => observation,
       });
       displayAction.observeScreen = observe;
@@ -718,7 +964,7 @@ describe("explicit action display", () => {
         );
       }
 
-      const timer = new FakeTimer();
+      const timer = autoTimer();
       timer.enableAutoAdvance();
       const defaultAction = new TapOnElement(android, adb(), { timer });
       const defaultPoints: Array<{ x: number; y: number }> = [];
@@ -756,7 +1002,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new TapOnElement(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
@@ -778,7 +1024,7 @@ describe("explicit action display", () => {
     ];
     const executor = adb();
     const observe = new FakeObserveScreen();
-    const action = new TapOnElement(android, executor, { timer: new FakeTimer() });
+    const action = new TapOnElement(android, executor, { timer: autoTimer() });
     action.observeScreen = observe;
     for (const extra of unsupported) {
       const result = await action.execute({
@@ -807,6 +1053,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     const fakeAdb = new FakeAdbClient();
     const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {
+      timer: autoTimer(),
       observeScreen: observe,
     });
     for (const extra of unsupported) {
@@ -820,7 +1067,7 @@ describe("explicit action display", () => {
 
   test("dragAndDrop rejects press and hold durations with display", async () => {
     const fakeAdb = new FakeAdbClient();
-    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, new FakeTimer());
+    const action = new DragAndDrop(android, fakeAdb as unknown as AdbClient, autoTimer());
     for (const extra of [{ pressDurationMs: 700 }, { holdDurationMs: 200 }]) {
       const result = await action.execute({
         source: { text: "Source" },
@@ -840,7 +1087,7 @@ describe("explicit action display", () => {
     observe.setObserveResult(screen("external"));
     const client = { requestTapCoordinates: async () => ({ success: true }) };
     const action = new TapAtCoordinate(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       androidClient: client,
       iosClient: client,
       lastRenderedObservation: () => screen("internal"),
@@ -861,7 +1108,7 @@ describe("explicit action display", () => {
     );
     const client = { requestTapCoordinates: async () => ({ success: true }) };
     const action = new TapAtCoordinate(ios, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       androidClient: client,
       iosClient: client,
       lastRenderedObservation: () => screen("internal"),
@@ -880,7 +1127,7 @@ describe("explicit action display", () => {
     displayTransitions.notifyTransition(android.deviceId, "panel changed");
     const client = { requestTapCoordinates: async () => ({ success: true }) };
     const action = new TapAtCoordinate(android, executor, {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       androidClient: client,
       iosClient: client,
       lastRenderedObservation: () => observation,
@@ -904,7 +1151,7 @@ describe("explicit action display", () => {
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
     const action = new SendKeys(android, new FakeAdbClientFactory(executor), {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       observer: observe,
       timestampProvider: { now: async () => 1 },
       lastRenderedObservation: () => observation,
@@ -936,7 +1183,7 @@ describe("explicit action display", () => {
     const focused: string[] = [];
     const typed: string[] = [];
     const action = new SendKeys(android, new FakeAdbClientFactory(executor), {
-      timer: new FakeTimer(),
+      timer: autoTimer(),
       observer: observe,
       timestampProvider: { now: async () => 1 },
       lastRenderedObservation: () => observation,

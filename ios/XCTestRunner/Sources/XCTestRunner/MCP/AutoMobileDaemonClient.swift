@@ -1,24 +1,30 @@
 import Foundation
-import Network
+import os
 
-/// MCP client over the daemon's Unix-domain socket (Network.framework `NWConnection`).
-///
-/// Concurrency (closes race #2): the reference ordered `connection`/`buffer`/`requestId` with the
-/// per-request semaphores alone, so two threads calling `callTool`/`resetSession` on one client would
-/// race. True queue-confinement is impossible here — the public methods block on semaphores waiting
-/// for `NWConnection` callbacks dispatched to the *same* `queue`, so funneling the methods onto it
-/// would deadlock. Instead `operationLock` serializes whole public operations: only the lock holder
-/// (and, while it is blocked on a receive semaphore, that connection callback) touches the mutable
-/// state, so cross-thread use is now safe. The lock is held across network I/O, so it is an `NSLock`
-/// (not a short-critical-section unfair lock). `@unchecked Sendable` is justified by that serialization.
-public final class AutoMobileDaemonClient: AutoMobileMCPClient, @unchecked Sendable {
+/// MCP over a Unix socket. The async gate preserves one request in flight while resetSession uses
+/// only a short state lock, so teardown can interrupt I/O without waiting for the current holder.
+public final class AutoMobileDaemonClient: AutoMobileMCPClient, Sendable {
+    private struct State: Sendable {
+        var connection: (any AsyncDaemonLineConnection)?
+        var requestId: Int64 = 0
+        var resetGeneration = 0
+    }
+
+    /// Groups internal seams instead of growing a long initializer; public construction is unchanged.
+    struct Options: Sendable {
+        var logger: any AutoMobileLogger = StdoutLogger()
+        var clientVersion: String?
+        var scheduler: any DeadlineScheduler = SystemDeadlineScheduler()
+        var gate = AsyncSerialGate()
+    }
+
     private let socketPath: String
-    private let logger: AutoMobileLogger
+    private let logger: any AutoMobileLogger
     private let clientVersion: String
-    private let connectionFactory: DaemonLineConnectionFactory
-    private let operationLock = NSLock()
-    private var connection: DaemonLineConnection?
-    private var requestId: Int64 = 0
+    private let connectionFactory: any AsyncDaemonLineConnectionFactory
+    private let scheduler: any DeadlineScheduler
+    private let gate: AsyncSerialGate
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     public convenience init(
         socketPath: String,
@@ -27,22 +33,36 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, @unchecked Senda
     ) {
         self.init(
             socketPath: socketPath,
-            logger: logger,
-            clientVersion: clientVersion,
-            connectionFactory: NWDaemonLineConnectionFactory()
+            connectionFactory: NWAsyncDaemonLineConnectionFactory(),
+            options: Options(logger: logger, clientVersion: clientVersion)
         )
     }
 
-    init(
+    /// Legacy sync seam retained for existing tests; removed in PR 3. Its adapter owns the factory.
+    convenience init(
         socketPath: String,
         logger: AutoMobileLogger = StdoutLogger(),
         clientVersion: String? = nil,
         connectionFactory: DaemonLineConnectionFactory
     ) {
+        self.init(
+            socketPath: socketPath,
+            connectionFactory: LegacyDaemonLineConnectionFactory(connectionFactory),
+            options: Options(logger: logger, clientVersion: clientVersion)
+        )
+    }
+
+    init(
+        socketPath: String,
+        connectionFactory: any AsyncDaemonLineConnectionFactory,
+        options: Options = Options()
+    ) {
         self.socketPath = socketPath
-        self.logger = logger
-        self.clientVersion = clientVersion ?? DaemonManager.resolveDaemonClientVersion()
+        logger = options.logger
+        clientVersion = options.clientVersion ?? DaemonManager.resolveDaemonClientVersion()
         self.connectionFactory = connectionFactory
+        scheduler = options.scheduler
+        gate = options.gate
     }
 
     /// The frozen P0 daemon-socket `mcp_request` envelope plus its trailing `\n` framing, extracted
@@ -72,102 +92,191 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, @unchecked Senda
         return payload
     }
 
+    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
+    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
+    /// The operation must not need the main actor. Its own deadline bounds the wait, excluding gate queue time.
     public func initialize(timeout: TimeInterval) throws {
-        operationLock.lock()
-        defer { operationLock.unlock() }
-        PerfTimer.log("DaemonClient.initialize START")
-        try ensureConnection(timeout: timeout)
-        PerfTimer.log("DaemonClient.initialize END")
+        try BlockingAsyncCall.run { try await self.initialize(timeout: timeout) }
     }
 
+    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
+    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
+    /// The operation must not need the main actor. Its own deadline bounds the wait, excluding gate queue time.
     public func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
-        operationLock.lock()
-        defer { operationLock.unlock() }
+        let params = try encodeParams(["name": name, "arguments": arguments])
+        return try BlockingAsyncCall.run { try await self.callTool(name: name, params: params, timeout: timeout) }
+    }
+
+    /// Deprecated: use the async overload; the sync API will be removed in the next minor release (issue #6061).
+    /// Only for synchronous XCTest threads, never the cooperative pool or @MainActor async code.
+    /// The operation must not need the main actor. Its own deadline bounds the wait, excluding gate queue time.
+    public func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
+        try BlockingAsyncCall.run { try await self.readResource(uri: uri, timeout: timeout) }
+    }
+
+    public func initialize(timeout: TimeInterval) async throws {
+        try await gate.acquire()
+        defer { gate.release() }
+        PerfTimer.log("DaemonClient.initialize START")
+        let connection = currentConnection()
+        do {
+            try await withDeadline(
+                seconds: timeout, scheduler: scheduler, onTimeout: { connection.cancel() },
+                timeoutError: MCPClientError.requestFailed("Timed out connecting to daemon socket"),
+                operation: { try await connection.connect(timeout: timeout) }
+            )
+            PerfTimer.log("DaemonClient.initialize END")
+        } catch {
+            dropConnection(connection)
+            throw mapTransportError(error)
+        }
+    }
+
+    public func callTool(
+        name: String,
+        arguments: [String: Any],
+        timeout: TimeInterval
+    )
+        async throws -> MCPToolResponse
+    {
+        // Params cross the gate suspension as Data, not an untyped dictionary.
+        let params = try encodeParams(["name": name, "arguments": arguments])
+        return try await callTool(name: name, params: params, timeout: timeout)
+    }
+
+    private func callTool(name: String, params: Data, timeout: TimeInterval) async throws -> MCPToolResponse {
         PerfTimer.log("DaemonClient.callTool START: name=\(name)")
-        let params: [String: Any] = [
-            "name": name,
-            "arguments": arguments,
-        ]
-        let result = try sendRequest(method: "tools/call", params: params, timeout: timeout)
+        let result = try await sendRequest(method: "tools/call", params: params, timeout: timeout)
         let text = try extractTextContent(from: result)
         PerfTimer.log("DaemonClient.callTool END: name=\(name), responseLength=\(text.count)")
         return MCPToolResponse(text: text)
     }
 
-    public func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
-        operationLock.lock()
-        defer { operationLock.unlock() }
+    public func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
+        let params = try encodeParams(["uri": uri])
         PerfTimer.log("DaemonClient.readResource START: uri=\(uri)")
-        let params: [String: Any] = [
-            "uri": uri,
-        ]
-        let result = try sendRequest(method: "resources/read", params: params, timeout: timeout)
+        let result = try await sendRequest(method: "resources/read", params: params, timeout: timeout)
         let text = try extractResourceTextContent(from: result)
         PerfTimer.log("DaemonClient.readResource END: uri=\(uri), responseLength=\(text.count)")
         return MCPResourceResponse(text: text)
     }
 
     public func resetSession() {
-        operationLock.lock()
-        defer { operationLock.unlock() }
-        dropConnection()
+        let connection = state.withLock { current in
+            current.resetGeneration += 1
+            let connection = current.connection
+            current.connection = nil
+            return connection
+        }
+        connection?.cancel()
     }
 
-    private func ensureConnection(timeout: TimeInterval) throws {
-        if connection != nil {
-            PerfTimer.log("ensureConnection: already connected")
-            return
-        }
-
-        PerfTimer.log("ensureConnection: creating line connection to \(socketPath)")
-        let connection = connectionFactory.makeConnection(socketPath: socketPath)
-        do {
-            try connection.connect(timeout: timeout)
-            self.connection = connection
-            PerfTimer.log("ensureConnection: connected successfully")
-        } catch {
-            connection.cancel()
-            throw MCPClientError.requestFailed(error.localizedDescription)
-        }
-    }
-
-    private func sendRequest(method: String, params: [String: Any], timeout: TimeInterval) throws -> [String: Any] {
-        PerfTimer.log("sendRequest START: method=\(method)")
-        try ensureConnection(timeout: timeout)
-        guard let connection = connection else {
-            throw MCPClientError.requestFailed("Daemon connection unavailable")
-        }
-
-        requestId += 1
-        guard let payload = Self.encodeRequestLine(
-            id: "\(requestId)",
-            method: method,
-            params: params,
-            timeoutMs: Int(timeout * 1000),
-            clientVersion: clientVersion
-        ) else {
+    private func encodeParams(_ params: [String: Any]) throws -> Data {
+        // Foundation can raise an Objective-C exception for unsupported values, outside Swift's
+        // throws mechanism. Validate first so encoding failure remains a recoverable client error.
+        guard JSONSerialization.isValidJSONObject(params),
+              let data = try? JSONSerialization.data(withJSONObject: params)
+        else {
             throw MCPClientError.requestFailed("Failed to encode daemon request")
         }
-        PerfTimer.log("sendRequest: sending \(payload.count) bytes")
+        return data
+    }
 
-        do {
-            try connection.sendLine(payload, timeout: timeout)
-        } catch {
-            dropConnection()
-            throw MCPClientError.requestFailed(error.localizedDescription)
+    /// Factory creation does no I/O. Publishing before connect lets resetSession interrupt even the
+    /// handshake; a failed/cancelled connection is removed before the gate passes to the next caller.
+    private func currentConnection() -> any AsyncDaemonLineConnection {
+        let snapshot = state.withLock { ($0.connection, $0.resetGeneration) }
+        if let connection = snapshot.0 { return connection }
+        // The gate serializes construction. An injected factory may signal continuation-backed
+        // events, so invoke it outside the state lock that resetSession's cancellation path takes.
+        let connection = connectionFactory.makeConnection(socketPath: socketPath)
+        let published = state.withLock { current in
+            guard current.resetGeneration == snapshot.1 else { return false }
+            current.connection = connection
+            return true
         }
-        PerfTimer.log("sendRequest: sent successfully, waiting for response")
+        // Preserve reset's interrupt even if it arrived while construction ran outside the lock.
+        if !published { connection.cancel() }
+        return connection
+    }
 
-        let responseData = try receiveLine(expectedId: "\(requestId)", timeout: timeout)
+    private func dropConnection(_ connection: any AsyncDaemonLineConnection) {
+        state.withLock { current in
+            if current.connection === connection { current.connection = nil }
+        }
+        connection.cancel()
+    }
+
+    private func mapTransportError(_ error: any Error) -> any Error {
+        if error is CancellationError { return error }
+        if let error = error as? MCPClientError { return error }
+        return MCPClientError.requestFailed(error.localizedDescription)
+    }
+
+    private func sendRequest(method: String, params: Data, timeout: TimeInterval) async throws -> [String: Any] {
+        try await gate.acquire()
+        defer { gate.release() }
+        try Task.checkCancellation()
+        // Assign ids in gate order; encode the entire frozen envelope before spawning deadline children.
+        let id = state.withLock { current in
+            current.requestId += 1
+            return String(current.requestId)
+        }
+        guard let params = try JSONSerialization.jsonObject(with: params) as? [String: Any],
+              let payload = Self.encodeRequestLine(
+                  id: id, method: method, params: params,
+                  timeoutMs: Int(timeout * 1000), clientVersion: clientVersion
+              )
+        else { throw MCPClientError.requestFailed("Failed to encode daemon request") }
+        let connection = currentConnection()
+        PerfTimer.log("sendRequest START: method=\(method)")
+        let timeoutError = OSAllocatedUnfairLock(
+            initialState:
+            MCPClientError.requestFailed("Timed out connecting to daemon socket")
+        )
+        let responseData: Data
+        do {
+            responseData = try await withDeadline(
+                seconds: timeout, scheduler: scheduler, onTimeout: { connection.cancel() },
+                timeoutError: timeoutError.withLock { $0 },
+                operation: {
+                    try await withTaskCancellationHandler {
+                        try Task.checkCancellation()
+                        try await connection.connect(timeout: timeout)
+                        try Task.checkCancellation()
+                        timeoutError.withLock { $0 = .requestFailed("Timed out sending daemon request") }
+                        PerfTimer.log("sendRequest: sending \(payload.count) bytes")
+                        try await connection.sendLine(payload, timeout: timeout)
+                        timeoutError.withLock { $0 = .requestFailed("Timed out waiting for daemon response") }
+                        PerfTimer.log("sendRequest: sent successfully, waiting for response")
+                        while true {
+                            try Task.checkCancellation()
+                            let line = try await connection.receiveLine(timeout: timeout)
+                            let object = try JSONSerialization.jsonObject(with: line)
+                            guard let response = object as? [String: Any] else {
+                                throw MCPClientError.invalidResponse("Expected JSON object response from daemon")
+                            }
+                            guard Self.jsonId(response["id"]) == id else {
+                                self.logger.info("Skipping daemon frame with non-matching id")
+                                continue
+                            }
+                            return line
+                        }
+                    } onCancel: {
+                        connection.cancel()
+                    }
+                }
+            )
+        } catch {
+            dropConnection(connection)
+            throw mapTransportError(error)
+        }
         PerfTimer.log("sendRequest: received \(responseData.count) bytes")
-
-        let jsonObject = try JSONSerialization.jsonObject(with: responseData, options: [])
+        let jsonObject = try JSONSerialization.jsonObject(with: responseData)
         guard let response = jsonObject as? [String: Any] else {
             throw MCPClientError.invalidResponse("Expected JSON object response from daemon")
         }
-
-        let success = response["success"] as? Bool ?? false
-        if !success {
+        guard response["success"] as? Bool ?? false else {
             let message = response["error"] as? String ?? "Daemon returned error"
             PerfTimer.log("sendRequest ERROR: \(message)")
             throw MCPClientError.serverError(message)
@@ -179,46 +288,10 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, @unchecked Senda
         return result
     }
 
-    private func receiveLine(expectedId: String, timeout: TimeInterval) throws -> Data {
-        guard let connection = connection else {
-            throw MCPClientError.requestFailed("Daemon connection unavailable")
-        }
-        let deadline = Date().addingTimeInterval(timeout)
-        do {
-            while true {
-                let remaining = deadline.timeIntervalSinceNow
-                guard remaining > 0 else {
-                    throw MCPClientError.requestFailed("Timed out waiting for daemon response")
-                }
-                let line = try connection.receiveLine(timeout: remaining)
-                let object = try JSONSerialization.jsonObject(with: line, options: [])
-                guard let response = object as? [String: Any] else {
-                    throw MCPClientError.invalidResponse("Expected JSON object response from daemon")
-                }
-                guard Self.jsonId(response["id"]) == expectedId else {
-                    logger.info("Skipping daemon frame with non-matching id")
-                    continue
-                }
-                return line
-            }
-        } catch {
-            dropConnection()
-            if let clientError = error as? MCPClientError {
-                throw clientError
-            }
-            throw MCPClientError.requestFailed(error.localizedDescription)
-        }
-    }
-
     private static func jsonId(_ value: Any?) -> String? {
         if let value = value as? String { return value }
         if let value = value as? NSNumber { return value.stringValue }
         return nil
-    }
-
-    private func dropConnection() {
-        connection?.cancel()
-        connection = nil
     }
 
     private func extractTextContent(from result: [String: Any]) throws -> String {
@@ -244,116 +317,4 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, @unchecked Senda
         }
         throw MCPClientError.invalidResponse("Missing resource text content")
     }
-}
-
-protocol DaemonLineConnectionFactory {
-    func makeConnection(socketPath: String) -> DaemonLineConnection
-}
-
-protocol DaemonLineConnection: AnyObject {
-    func connect(timeout: TimeInterval) throws
-    func sendLine(_ data: Data, timeout: TimeInterval) throws
-    func receiveLine(timeout: TimeInterval) throws -> Data
-    func cancel()
-}
-
-private struct NWDaemonLineConnectionFactory: DaemonLineConnectionFactory {
-    func makeConnection(socketPath: String) -> DaemonLineConnection {
-        NWDaemonLineConnection(socketPath: socketPath)
-    }
-}
-
-private final class NWDaemonLineConnection: DaemonLineConnection, @unchecked Sendable {
-    private let socketPath: String
-    private let queue = DispatchQueue(label: "AutoMobileDaemonClient")
-    private var connection: NWConnection?
-    private var buffer = Data()
-
-    init(socketPath: String) { self.socketPath = socketPath }
-
-    func connect(timeout: TimeInterval) throws {
-        let connection = NWConnection(to: .unix(path: socketPath), using: .tcp)
-        let semaphore = DispatchSemaphore(value: 0)
-        let result = NWConnectionResult()
-        connection.stateUpdateHandler = { state in
-            switch state {
-            case .ready: semaphore.signal()
-            case let .failed(error): result.error = error; semaphore.signal()
-            case .cancelled: result.error = MCPClientError.requestFailed("Daemon connection cancelled"); semaphore
-                .signal()
-            default: break
-            }
-        }
-        connection.start(queue: queue)
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            connection.cancel()
-            throw MCPClientError.requestFailed("Timed out connecting to daemon socket")
-        }
-        if let error = result.error {
-            connection.cancel()
-            throw error
-        }
-        self.connection = connection
-    }
-
-    func sendLine(_ data: Data, timeout: TimeInterval) throws {
-        guard let connection = connection else { throw MCPClientError.requestFailed("Daemon connection unavailable") }
-        let semaphore = DispatchSemaphore(value: 0)
-        let result = NWConnectionResult()
-        connection.send(
-            content: data,
-            completion: .contentProcessed { error in result.error = error; semaphore.signal() }
-        )
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            throw MCPClientError.requestFailed("Timed out sending daemon request")
-        }
-        if let error = result.error { throw error }
-    }
-
-    func receiveLine(timeout: TimeInterval) throws -> Data {
-        guard let connection = connection else { throw MCPClientError.requestFailed("Daemon connection unavailable") }
-        let semaphore = DispatchSemaphore(value: 0)
-        let result = NWReceiveResult()
-        receiveChunk(on: connection, result: result, semaphore: semaphore)
-        guard semaphore.wait(timeout: .now() + timeout) == .success else {
-            throw MCPClientError.requestFailed("Timed out waiting for daemon response")
-        }
-        if let error = result.error { throw error }
-        guard let line = result.line else { throw MCPClientError.invalidResponse("Daemon response missing data") }
-        return line
-    }
-
-    private func receiveChunk(on connection: NWConnection, result: NWReceiveResult, semaphore: DispatchSemaphore) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [self] data, _, isComplete, error in
-            if let data {
-                buffer.append(data)
-                if let range = buffer.firstRange(of: Data([0x0A])) {
-                    result.line = buffer.subdata(in: 0 ..< range.lowerBound)
-                    buffer.removeSubrange(0 ... range.lowerBound)
-                    semaphore.signal()
-                    return
-                }
-            }
-            if let error { result.error = error; semaphore.signal(); return }
-            if isComplete {
-                result.error = MCPClientError.requestFailed("Daemon connection closed"); semaphore.signal(); return
-            }
-            receiveChunk(on: connection, result: result, semaphore: semaphore)
-        }
-    }
-
-    func cancel() {
-        connection?.cancel()
-        connection = nil
-        buffer = Data()
-    }
-}
-
-private final class NWConnectionResult: @unchecked Sendable {
-    var error: Error?
-}
-
-private final class NWReceiveResult: @unchecked Sendable {
-    var line: Data?
-    var error: Error?
 }

@@ -72,6 +72,13 @@ let timingData = observer.getTimingData()
 try observer.exportTimingData(to: "timing-history.json")
 ```
 
+### Async transport migration
+
+`AutoMobileMCPClient` now provides async `initialize`, `callTool`, and `readResource` overloads.
+The sync methods are deprecated and will be removed in the next minor release (#6061).
+They are only for synchronous XCTest threads; never call them from the cooperative pool or
+`@MainActor` async code. The executor and test case migrate in later PRs; no dates are promised.
+
 ## Configuration
 
 ### Environment Variables

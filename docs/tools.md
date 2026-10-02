@@ -432,7 +432,12 @@ List/read app-file MCP resources use
 and <code>automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}{?userId}</code>.
 Append <code>?userId=10</code> to select a work profile; omit it for the same
 Android app-installation resolution as <code>putAppFile</code>. Invalid IDs are
-rejected. File links from a nonzero-user listing retain that user's query.
+rejected. Returned put and list file links pin the resolved Android user:
+explicit IDs always round-trip, including <code>?userId=0</code>, without extra
+discovery. Auto-resolved nonzero users always retain <code>?userId=N</code>;
+auto-resolved user 0 retains <code>?userId=0</code> only when the app is installed
+for several users. A sole user-0 installation keeps the existing query-free URI.
+This rule also applies to <code>externalFiles</code>. iOS URIs have no user query.
 
 </details>
 

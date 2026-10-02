@@ -88,16 +88,19 @@ export interface AppFileProviderReadRequest extends AppFileReadRequest {
 export interface AppFileWriteProvider {
   readonly platform: Platform;
   readonly domain: StorageDomain;
-  putFile(
-    request: PutAppFileProviderRequest,
-  ): Promise<void | { effects?: PutAppFileWriteResult["effects"] }>;
+  putFile(request: PutAppFileProviderRequest): Promise<void | AppFileProviderWriteResult>;
   /**
    * Optional batch path for providers whose device operation must use one
    * consistent target (for example, a single Android user profile).
    */
   putFiles?(
     requests: PutAppFileProviderRequest[],
-  ): Promise<Array<void | { effects?: PutAppFileWriteResult["effects"] }>>;
+  ): Promise<Array<void | AppFileProviderWriteResult>>;
+}
+
+interface AppFileProviderWriteResult {
+  effects?: PutAppFileWriteResult["effects"];
+  resourceUserId?: number;
 }
 
 export interface AppFileListProvider {
@@ -418,7 +421,7 @@ class DefaultAppFileService implements AppFileService {
                   deviceId: request.device.deviceId,
                   appId: target.appId,
                   container: target.container,
-                  userId: request.userId || undefined,
+                  userId: providerResult?.resourceUserId,
                   path: file.destinationPath,
                 }),
               }
@@ -544,19 +547,30 @@ class DefaultAppFileService implements AppFileService {
   }
 }
 
+interface AndroidAppFileUser {
+  userId: number;
+  pinInResourceUri: boolean;
+}
+
+// Explicit IDs (including 0) always round-trip. Auto-resolved 0 is pinned only
+// when several users have the app installed; a sole user-0 installation keeps
+// its existing query-free URI. Nonzero resolved users are always pinned.
 async function resolveAndroidAppFileUser(
   adb: AdbExecutor,
   device: BootedDevice,
   appId: string,
   userId?: number,
   signal?: AbortSignal,
-): Promise<number> {
+): Promise<AndroidAppFileUser> {
   const resolver = new AndroidUserTargetResolver(adb);
   if (userId !== undefined) {
     if (!Number.isSafeInteger(userId) || userId < 0) {
       throw new ActionableError("Android userId must be a non-negative safe integer.");
     }
-    return (await resolver.resolve({ explicitUserId: userId, signal })).userId;
+    return {
+      userId: (await resolver.resolve({ explicitUserId: userId, signal })).userId,
+      pinInResourceUri: true,
+    };
   }
 
   try {
@@ -575,7 +589,7 @@ async function resolveAndroidAppFileUser(
       }
     }
     if (candidates.length === 1) {
-      return candidates[0]!;
+      return { userId: candidates[0]!, pinInResourceUri: candidates[0] !== 0 };
     }
     if (candidates.length === 0) {
       throw new ActionableError(
@@ -584,7 +598,7 @@ async function resolveAndroidAppFileUser(
     }
     const current = await resolver.resolve({ currentUser: true, signal });
     if (current.source === "currentUser" && candidates.includes(current.userId)) {
-      return current.userId;
+      return { userId: current.userId, pinInResourceUri: true };
     }
     throw new ActionableError(
       `Android app ${appId} on ${device.deviceId} is installed for candidate users ${candidates.join(", ")}, but no installed foreground user could be selected. Pass userId explicitly (resource query ?userId=N).`,
@@ -612,11 +626,11 @@ class AndroidAppFileProvider
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
   ) {}
 
-  async putFile(request: PutAppFileProviderRequest): Promise<void> {
-    await this.putFiles([request]);
+  async putFile(request: PutAppFileProviderRequest): Promise<AppFileProviderWriteResult> {
+    return (await this.putFiles([request]))[0]!;
   }
 
-  async putFiles(requests: PutAppFileProviderRequest[]): Promise<void[]> {
+  async putFiles(requests: PutAppFileProviderRequest[]): Promise<AppFileProviderWriteResult[]> {
     if (requests.length === 0) {
       return [];
     }
@@ -637,16 +651,17 @@ class AndroidAppFileProvider
       );
     }
     const adb = this.adbFactory.create(request.device);
-    const userId = await resolveAndroidAppFileUser(
+    const { userId, pinInResourceUri } = await resolveAndroidAppFileUser(
       adb,
       request.device,
       appTarget.appId,
       request.userId,
       request.signal,
     );
-    const results: void[] = [];
+    const results: AppFileProviderWriteResult[] = [];
     for (const file of requests) {
-      results.push(await this.writeFile(file, adb, userId));
+      await this.writeFile(file, adb, userId);
+      results.push({ resourceUserId: pinInResourceUri ? userId : undefined });
     }
     return results;
   }
@@ -765,7 +780,7 @@ class AndroidAppFileProvider
       );
     }
 
-    const userId = await resolveAndroidAppFileUser(
+    const { userId, pinInResourceUri } = await resolveAndroidAppFileUser(
       adb,
       request.device,
       request.appId,
@@ -850,7 +865,7 @@ class AndroidAppFileProvider
           appId: request.appId,
           container: request.container,
           path: file.path,
-          userId: userId || undefined,
+          userId: pinInResourceUri ? userId : undefined,
         }),
       })),
     };
@@ -869,7 +884,7 @@ class AndroidAppFileProvider
       );
     }
 
-    const userId = await resolveAndroidAppFileUser(
+    const { userId } = await resolveAndroidAppFileUser(
       adb,
       request.device,
       request.appId,
@@ -1580,15 +1595,6 @@ function mapAndroidAppFileError(
 ): ActionableError {
   const message = errorMessage(error);
   const user = context.userId ? ` for user ${context.userId}` : "";
-  if (
-    context.access === "run-as" &&
-    command.includes(" --user ") &&
-    /unknown option|invalid option|unrecognized option|Usage: run-as/i.test(message)
-  ) {
-    return new ActionableError(
-      `run-as --user appears unsupported on ${context.device.deviceId}'s Android version (unverified which API level)${user}. Omit userId only if the app is installed for the device's primary user, or use a debuggable build via an adb-user-0 session. Original error: ${message}`,
-    );
-  }
   if (/not debuggable/i.test(message)) {
     return new ActionableError(
       `Android ${context.container} app file ${context.operation} for ${context.appId}${user} on ${context.device.deviceId} ` +
@@ -1611,6 +1617,17 @@ function mapAndroidAppFileError(
       `Android ${context.container} app file ${context.operation} for ${context.appId}${user} on ${context.device.deviceId} ` +
         `was denied by the device. ${context.access === "run-as" ? "Use a debuggable build for private storage or choose externalFiles." : "Check app install state and external storage access."} ` +
         `Original error: ${message}`,
+    );
+  }
+
+  if (
+    context.access === "run-as" &&
+    command.includes(" --user ") &&
+    (/^\s*run-as: (unknown|invalid|unrecognized) option\b/im.test(message) ||
+      /^\s*usage: run-as\b/im.test(message))
+  ) {
+    return new ActionableError(
+      `run-as --user appears unsupported on ${context.device.deviceId}'s Android version (unverified which API level)${user}. Omit userId only if the app is installed for the device's primary user, or use a debuggable build via an adb-user-0 session. Original error: ${message}`,
     );
   }
 

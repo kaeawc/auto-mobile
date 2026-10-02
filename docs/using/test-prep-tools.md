@@ -43,6 +43,12 @@ The list resource is
 append `/{path}` before the query to read a file. For example:
 `automobile:devices/emulator-5554/apps/com.example.app/files/documents/settings.json?userId=10`.
 Both accept the same optional `?userId=N`; omission auto-resolves on Android.
+Returned put and list file URIs pin the resolved Android user. Explicit IDs
+always round-trip, including `?userId=0`, without extra discovery. Auto-resolved
+nonzero users always include `?userId=N`; auto-resolved user 0 includes
+`?userId=0` only when the app is installed for several users. A sole user-0
+installation keeps the existing query-free URI. The same rule applies to
+`externalFiles`; iOS URIs have no user query.
 
 **Unverified:** `run-as --user` API support has no captured fixture. Unsupported
 option/usage errors identify this uncertainty (unverified which API level),

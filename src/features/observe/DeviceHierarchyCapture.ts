@@ -29,6 +29,8 @@ import {
 import type { SettleObserve } from "./interfaces/SettleObserve";
 import type { HierarchySyncDiagnostics, ObserverHierarchyRequestOptions } from "./android/types";
 
+export const DEFAULT_HIERARCHY_READ_TIMEOUT_MS = 15000;
+
 /** Dynamic platform bridge: normalizers own the raw response shape. */
 export interface HierarchySyncClient {
   requestHierarchySync(
@@ -233,7 +235,7 @@ export function createDeviceHierarchyCapture(
     },
     async (request) => {
       const timer = dependencies.timer ?? defaultTimer;
-      const timeoutMs = request.timeoutMs ?? 15000;
+      const timeoutMs = request.timeoutMs ?? DEFAULT_HIERARCHY_READ_TIMEOUT_MS;
       const deadline = timer.now() + timeoutMs;
       const { syncClient, transient, owned } = resolveHierarchyClient(
         device,

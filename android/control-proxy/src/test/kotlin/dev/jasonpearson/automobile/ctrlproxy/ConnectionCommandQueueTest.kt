@@ -9,9 +9,7 @@ import dev.jasonpearson.automobile.protocol.RequestHierarchy
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.EmptyCoroutineContext
-import kotlin.coroutines.startCoroutine
+import io.ktor.websocket.CloseReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +19,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -45,18 +45,56 @@ class ConnectionCommandQueueTest {
     }
   }
 
-  private class Frame(val request: WebSocketRequest) {
+  private companion object {
+    private fun client() =
+      WebSocketServer.ConnectedClient(
+        1,
+        object : WebSocketServer.ClientTransport {
+          override suspend fun send(message: String) = Unit
+
+          override suspend fun close(reason: CloseReason) = Unit
+        },
+        Channel(1),
+        Channel(1),
+      )
+  }
+
+  private class FakeOrigin(
+    override val client: WebSocketServer.ConnectedClient,
+    override val lifetime: Job,
+    override val ownerRecorded: Boolean = false,
+    private val errors: suspend (ErrorResponse) -> Unit = {},
+  ) : QueuedCommandOrigin {
+    override suspend fun sendError(response: ErrorResponse) = errors(response)
+  }
+
+  private class Frame(val request: WebSocketRequest, val ownerRecorded: Boolean) {
     val accepted = CompletableDeferred<WebSocketResponse?>()
   }
 
-  private class ReadLoop(scope: CoroutineScope, handler: WebSocketMessageHandler) {
+  private class ReadLoop(
+    scope: CoroutineScope,
+    handler: WebSocketMessageHandler,
+    val client: WebSocketServer.ConnectedClient,
+    errors: suspend (ErrorResponse) -> Unit,
+  ) {
     private val frames = Channel<Frame>(Channel.UNLIMITED)
     val job = scope.launch {
-      for (frame in frames) frame.accepted.complete(handler.handleMessage(frame.request))
+      for (frame in frames) {
+        val origin = FakeOrigin(client, currentCoroutineContext().job, frame.ownerRecorded, errors)
+        frame.accepted.complete(
+          withContext(CommandOriginContext(origin)) {
+            handler.handleMessage(frame.request)
+          }
+        )
+      }
     }
 
-    suspend fun send(request: WebSocketRequest): WebSocketResponse? {
-      val frame = Frame(request)
+    suspend fun send(
+      request: WebSocketRequest,
+      ownerRecorded: Boolean = false,
+    ): WebSocketResponse? {
+      val frame = Frame(request, ownerRecorded)
       frames.send(frame)
       return frame.accepted.await()
     }
@@ -67,7 +105,6 @@ class ConnectionCommandQueueTest {
     val failures = mutableListOf<Throwable>()
     val warnings = mutableListOf<String>()
     val owners = mutableSetOf<String>()
-    var ownerProbe: (String) -> Boolean = { it in owners }
     val errorReplies: List<Pair<String?, String>>
       get() = replies.map { (it as ErrorResponse).let { error -> error.requestId to error.error } }
 
@@ -76,7 +113,7 @@ class ConnectionCommandQueueTest {
         test.backgroundScope.coroutineContext + StandardTestDispatcher(test.testScheduler)
       )
     val queue =
-      ConnectionCommandQueue<Job>(
+      ConnectionCommandQueue(
         scope = scope,
         dispatcher = StandardTestDispatcher(test.testScheduler),
         delegate = delegate,
@@ -86,7 +123,7 @@ class ConnectionCommandQueueTest {
             owners.remove(requestId)
           }
         },
-        hasRequestOwner = { ownerProbe(it) },
+        hasRequestOwner = { it in owners },
         logError = { _, error -> failures += error },
         logWarning = { warnings += it },
         logDebug = {},
@@ -94,7 +131,7 @@ class ConnectionCommandQueueTest {
       )
     val handler = QueuedWebSocketMessageHandler(delegate, queue)
 
-    fun connection() = ReadLoop(scope, handler)
+    fun connection() = ReadLoop(scope, handler, client()) { replies += it }
   }
 
   @Test
@@ -239,7 +276,7 @@ class ConnectionCommandQueueTest {
   }
 
   @Test
-  fun `busy owned command uses snapshot even when ownership disappears before rejection`() =
+  fun `busy owned command uses supplied policy even when ownership disappears before rejection`() =
     runTest {
       val held = CompletableDeferred<Unit>()
       val fixture =
@@ -254,15 +291,14 @@ class ConnectionCommandQueueTest {
       val connection = fixture.connection()
       connection.send(RequestHierarchy(requestId = "held"))
       connection.send(RequestHierarchy(requestId = "pending"))
-      fixture.owners += "rejected"
-      fixture.ownerProbe = { requestId ->
-        if (requestId == "rejected") {
-          // Disconnect/consumption wins before the reply sink runs.
-          fixture.owners.remove(requestId)
-          true
-        } else requestId in fixture.owners
-      }
-      connection.send(RequestClipboard(requestId = "rejected", action = "get"))
+      // Fails on base: yes (without an owner snapshot the base broadcasts this as an unowned
+      // error).
+      // The server's ownership policy remains true even when disconnect clears the owner map.
+      fixture.owners.remove("rejected")
+      connection.send(
+        RequestClipboard(requestId = "rejected", action = "get"),
+        ownerRecorded = true,
+      )
       assertEquals(1, fixture.warnings.size)
       assertTrue(fixture.replies.isEmpty())
       held.complete(Unit)
@@ -330,7 +366,7 @@ class ConnectionCommandQueueTest {
     val fixture = Fixture(this, delegate)
     fixture.owners += "commit"
     val connection = fixture.connection()
-    connection.send(RequestCommitText(requestId = "commit", text = "abcd"))
+    connection.send(RequestCommitText(requestId = "commit", text = "abcd"), ownerRecorded = true)
     connection.send(RequestCancelImeCommit(targetRequestId = "commit"))
     runCurrent()
     assertTrue(fixture.replies.isEmpty())
@@ -357,7 +393,7 @@ class ConnectionCommandQueueTest {
     val delegate = FakeHandler()
     val fixture = Fixture(this, delegate)
     try {
-      fixture.queue.enqueue(lifetime, lifetime, RequestHierarchy(requestId = "pending"))
+      fixture.queue.enqueue(FakeOrigin(client(), lifetime), RequestHierarchy(requestId = "pending"))
       lifetime.cancel() // A child is still unwinding, so invokeOnCompletion has not run yet.
       assertFalse(lifetime.isActive)
       assertFalse(lifetime.isCompleted)
@@ -376,13 +412,13 @@ class ConnectionCommandQueueTest {
   }
 
   @Test
-  fun `generic key and service shutdown clean up workers without connection shutdown`() = runTest {
+  fun `client key and service shutdown clean up workers without connection shutdown`() = runTest {
     val service = Job()
     val scope = CoroutineScope(service + StandardTestDispatcher(testScheduler))
     val lifetime = Job()
     val calls = mutableListOf<String?>()
     val queue =
-      ConnectionCommandQueue<String>(
+      ConnectionCommandQueue(
         scope,
         StandardTestDispatcher(testScheduler),
         FakeHandler {
@@ -397,14 +433,22 @@ class ConnectionCommandQueueTest {
       )
     try {
       val finishedConnection = Job()
-      queue.enqueue("finished", finishedConnection, RequestHierarchy(requestId = "finished"))
+      val finishedClient = client()
+      val activeClient = client()
+      queue.enqueue(
+        FakeOrigin(finishedClient, finishedConnection),
+        RequestHierarchy(requestId = "finished"),
+      )
       runCurrent()
       finishedConnection.complete()
       runCurrent()
       assertEquals(0, queue.connectionCount)
-      queue.enqueue("finished", finishedConnection, RequestHierarchy(requestId = "dropped"))
+      queue.enqueue(
+        FakeOrigin(finishedClient, finishedConnection),
+        RequestHierarchy(requestId = "dropped"),
+      )
       assertEquals(0, queue.connectionCount)
-      queue.enqueue("connection", lifetime, RequestHierarchy(requestId = "held"))
+      queue.enqueue(FakeOrigin(activeClient, lifetime), RequestHierarchy(requestId = "held"))
       runCurrent()
       service.cancelAndJoin()
       assertTrue(lifetime.isActive)
@@ -416,33 +460,100 @@ class ConnectionCommandQueueTest {
     }
   }
 
+  // Fails on base: yes (base accepts missing origins and queues by Job instead of failing).
   @Test
-  fun `missing job keeps inline delegate suspension and returns its response`() = runTest {
-    val held = CompletableDeferred<Unit>()
-    val expected = CorrelatedErrorReporter.frame("inline", "reply")
-    val delegate = FakeHandler {
-      held.await()
-      expected
-    }
+  fun `missing origin fails fast rather than bypassing connection ordering`() = runTest {
+    val delegate = FakeHandler()
     val fixture = Fixture(this, delegate)
-    val completed = CompletableDeferred<WebSocketResponse?>()
-    val call: suspend () -> WebSocketResponse? = {
+    val failure = runCatching {
       fixture.handler.handleMessage(RequestHierarchy(requestId = "inline"))
     }
-    call.startCoroutine(
-      object : Continuation<WebSocketResponse?> {
-        override val context = EmptyCoroutineContext
-
-        override fun resumeWith(result: Result<WebSocketResponse?>) {
-          completed.complete(result.getOrThrow())
-        }
-      }
-    )
-    assertEquals(listOf("inline"), delegate.calls)
-    assertFalse(completed.isCompleted)
+      .exceptionOrNull()
+    assertTrue(failure is IllegalStateException)
+    assertEquals("Queued WebSocket dispatch requires an originating client", failure?.message)
+    assertTrue(delegate.calls.isEmpty())
     assertEquals(0, fixture.queue.connectionCount)
-    held.complete(Unit)
-    assertEquals(expected, completed.await())
+  }
+
+  // Fails on base: yes (base has no disconnect hook; its active child only cancels on Job
+  // completion).
+  @Test
+  fun `disconnect immediately cancels in-flight child and drops pending commands`() = runTest {
+    val cancelled = CompletableDeferred<Unit>()
+    val delegate = FakeHandler {
+      try {
+        awaitCancellation()
+      } finally {
+        cancelled.complete(Unit)
+      }
+    }
+    val fixture = Fixture(this, delegate)
+    val connection = fixture.connection()
+    connection.send(RequestHierarchy(requestId = "held"))
+    connection.send(RequestHierarchy(requestId = "pending"))
+    runCurrent()
+    fixture.queue.disconnect(connection.client)
+    assertEquals(0, fixture.queue.connectionCount)
+    assertTrue(connection.job.isActive)
+    runCurrent()
+    assertTrue(cancelled.isCompleted)
+    assertEquals(listOf("held"), delegate.calls)
+    assertTrue(fixture.replies.isEmpty())
+    connection.send(RequestHierarchy(requestId = "late"))
+    assertEquals(0, fixture.queue.connectionCount)
+    assertEquals(listOf("held"), delegate.calls)
+  }
+
+  // Fails on base: yes (enqueue snapshots a missing owner as unowned and dispatches it).
+  @Test
+  fun `owned command whose owner cleared before enqueue is skipped`() = runTest {
+    val delegate = FakeHandler()
+    val fixture = Fixture(this, delegate)
+    val connection = fixture.connection()
+    connection.send(
+      RequestClipboard(requestId = "disconnected-owner", action = "get"),
+      ownerRecorded = true,
+    )
+    runCurrent()
+    assertTrue(delegate.calls.isEmpty())
     assertTrue(fixture.replies.isEmpty())
   }
+
+  // Fails on base: yes (base lacks disconnect and a client liveness tombstone).
+  @Test
+  fun `disconnect and lifetime completion are idempotent in either order and isolate clients`() =
+    runTest {
+      val delegate = FakeHandler { awaitCancellation() }
+      val fixture = Fixture(this, delegate)
+      val first = fixture.connection()
+      val second = fixture.connection()
+      val healthy = fixture.connection()
+      first.send(RequestHierarchy(requestId = "first"))
+      second.send(RequestHierarchy(requestId = "second"))
+      healthy.send(RequestHierarchy(requestId = "healthy"))
+      runCurrent()
+      assertEquals(3, fixture.queue.connectionCount)
+      fixture.queue.disconnect(first.client)
+      fixture.queue.disconnect(first.client)
+      first.send(RequestHierarchy(requestId = "late"))
+      assertEquals(2, fixture.queue.connectionCount)
+      first.job.cancelAndJoin()
+      second.job.cancelAndJoin()
+      fixture.queue.enqueue(
+        FakeOrigin(second.client, Job()),
+        RequestHierarchy(requestId = "late-before-hook"),
+      )
+      assertEquals(1, fixture.queue.connectionCount)
+      fixture.queue.disconnect(second.client)
+      fixture.queue.disconnect(second.client)
+      fixture.queue.enqueue(
+        FakeOrigin(second.client, Job()),
+        RequestHierarchy(requestId = "late-again"),
+      )
+      runCurrent()
+      assertEquals(1, fixture.queue.connectionCount)
+      assertTrue(healthy.job.isActive)
+      assertEquals(listOf("first", "second", "healthy"), delegate.calls)
+      assertTrue(fixture.replies.isEmpty())
+    }
 }

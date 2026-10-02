@@ -56,6 +56,8 @@ class WebSocketServer(
     },
   private val sdkInt: () -> Int = { Build.VERSION.SDK_INT },
   private val sendTimeoutMs: Long = OUTBOUND_SEND_TIMEOUT_MS,
+  /** Non-blocking queue cleanup, invoked after ownership removal outside the connections lock. */
+  private val onClientDisconnected: (ConnectedClient) -> Unit = {},
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -287,14 +289,17 @@ class WebSocketServer(
 
   internal data class OutgoingFrame(var message: String, val tier: OutgoingTier)
 
-  internal class ConnectedClient
+  /** Opaque client identity for disconnect hooks; transport state stays module-internal. */
+  class ConnectedClient
   internal constructor(
-    val id: Int,
-    val transport: ClientTransport,
-    val outgoing: Channel<OutgoingFrame>,
-    val ready: Channel<Unit>,
+    internal val id: Int,
+    internal val transport: ClientTransport,
+    internal val outgoing: Channel<OutgoingFrame>,
+    internal val ready: Channel<Unit>,
   ) {
-    lateinit var sender: Job
+    // Permanent liveness tombstone; read-loop completion may lag an outbound disconnect.
+    @Volatile internal var isConnected = true
+    internal lateinit var sender: Job
     internal var pendingCount = 0
     internal var droppedCount = 0L
     internal var pendingDroppableCount = 0
@@ -368,6 +373,7 @@ class WebSocketServer(
       synchronized(connections) {
         if (!connections.remove(client)) null
         else {
+          client.isConnected = false
           requestConnections.values.removeAll { it == client }
           if (connections.isEmpty()) activeClientConnection = CompletableDeferred()
           val count = client.pendingCount
@@ -380,6 +386,7 @@ class WebSocketServer(
         }
       }
     if (discarded == null) return
+    onClientDisconnected(client)
     Log.w(
       TAG,
       "Disconnecting client #${client.id}: $reason; discarded $discarded queued frames; shed ${client.droppedCount} frames total",
@@ -689,7 +696,10 @@ class WebSocketServer(
   }
 
   internal fun registerRequestOwner(requestId: String, connection: ConnectedClient) {
-    synchronized(connections) { requestConnections[requestId] = connection }
+    synchronized(connections) {
+      // A late read-loop dispatch must not restore ownership after disconnect cleared it.
+      if (connections.contains(connection)) requestConnections[requestId] = connection
+    }
   }
 
   internal fun hasRequestOwner(requestId: String): Boolean =
@@ -712,15 +722,19 @@ class WebSocketServer(
     }
     // Registration cannot replace this owner between selection and enqueue. Once queued, a reused
     // ID may register and its response follows through the bounded per-client outgoing queue.
+    var overflowed: ConnectedClient? = null
     synchronized(connections) {
       val target = requestConnections.remove(requestId)
       if (target == null) {
         Log.w(TAG, "Dropping response for disconnected or completed request $requestId")
       } else {
-        sendToClient(target, message)
+        if (connections.contains(target) && !enqueueForClient(target, outgoingFrame(message))) {
+          overflowed = target
+        }
         onCorrelatedRoutingStep()
       }
     }
+    overflowed?.let { disconnectClient(it, "Outgoing buffer full") }
     return true
   }
 
@@ -821,8 +835,8 @@ class WebSocketServer(
       connections.forEach { client ->
         if (enqueueForClient(client, frame.copy())) delivered = true else overflowed.add(client)
       }
-      overflowed.forEach { disconnectClient(it, "Outgoing buffer full") }
     }
+    overflowed.forEach { disconnectClient(it, "Outgoing buffer full") }
     return delivered
   }
 
@@ -854,7 +868,7 @@ class WebSocketServer(
    * recording commands are uncorrelated on success, so recording them would leak until disconnect.
    * See [handleClientMessage], #3190, and #6621.
    */
-  private fun recordsRequestOwner(request: ProtocolRequest): Boolean =
+  internal fun recordsRequestOwner(request: ProtocolRequest): Boolean =
     when (request) {
       is RequestHierarchy,
       is RequestHierarchyIfStale,
@@ -957,20 +971,29 @@ class WebSocketServer(
     // Hierarchy requests and the fire-and-forget settings / recording commands do not echo it, so
     // their entries would remain until disconnect and leave a stale id available for later
     // same-id error misrouting (#3190, #6621; follow-up to #3159). Their correlated error path (a
-    // handler throw) still targets the originating connection directly via `sendErrorResponse`,
-    // not this map, so skipping the record preserves PR #3159's targeted delivery.
-    if (recordsRequestOwner(request)) {
+    // handler throw or queue-full rejection) uses the origin context to call `sendErrorResponse`
+    // directly, preserving targeted delivery without retaining an owner mapping.
+    val recordsOwner = recordsRequestOwner(request)
+    if (recordsOwner) {
       request.requestId?.let { requestId ->
         registerRequestOwner(requestId, connection)
       }
     }
-    // Dispatch inline on the WebSocket read loop (already a coroutine) rather than launching into
-    // `scope`, so commands execute in wire order: a synchronous command such as
-    // set_accessibility_flags fully applies before the next frame (e.g. a request_hierarchy that
-    // must observe those flags) is dispatched. Long-running actions launch their own coroutines
-    // inside the callbacks, so this does not block the read loop.
+    // The read loop enqueues; one per-client FIFO worker executes commands in wire order.
+    // Owned replies retain atomic owner routing; unowned errors target this origin directly and
+    // successful unowned responses retain ordinary broadcasting (including hierarchy frames).
+    val readLoopLifetime = currentCoroutineContext().job
+    val origin =
+      object : QueuedCommandOrigin {
+        override val client = connection
+        override val lifetime = readLoopLifetime
+        override val ownerRecorded = recordsOwner
+
+        override suspend fun sendError(response: ErrorResponse) =
+          sendErrorResponse(connection, response)
+      }
     try {
-      val response = handler.handleMessage(request)
+      val response = withContext(CommandOriginContext(origin)) { handler.handleMessage(request) }
       if (response != null) {
         broadcast(response)
         request.requestId?.let { requestId ->

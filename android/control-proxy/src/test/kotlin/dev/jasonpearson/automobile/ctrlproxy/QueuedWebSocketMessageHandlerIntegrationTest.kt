@@ -4,11 +4,14 @@ import dev.jasonpearson.automobile.protocol.RequestCancelImeCommit
 import dev.jasonpearson.automobile.protocol.RequestClipboard
 import dev.jasonpearson.automobile.protocol.RequestCommitText
 import dev.jasonpearson.automobile.protocol.RequestHierarchy
+import dev.jasonpearson.automobile.protocol.WebSocketFrameData
+import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketRequest
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.server.cio.CIO as ServerCIO
@@ -25,11 +28,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -75,9 +79,11 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       WebSocketServer(
         port = 0,
         scope = scope,
+        onClientDisconnected = queuedHandler::disconnect,
         messageHandler =
           handler { request ->
-            readLoops += currentCoroutineContext().job
+            readLoops +=
+              checkNotNull(currentCoroutineContext()[CommandOriginContext]).origin.lifetime
             queuedHandler.handleMessage(request)
           },
       )
@@ -126,24 +132,42 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
     }
   }
 
-  private class RecordingTransport : WebSocketServer.ClientTransport {
+  private class RecordingTransport(private val stalled: Boolean = false) :
+    WebSocketServer.ClientTransport {
     val frames = mutableListOf<String>()
+    var closeReason: CloseReason? = null
 
     override suspend fun send(message: String) {
+      if (stalled) awaitCancellation()
       frames += message
     }
 
-    override suspend fun close(reason: CloseReason) = Unit
+    override suspend fun close(reason: CloseReason) {
+      closeReason = reason
+    }
   }
 
   /** Real service factory/reply routing and server queues, with virtual-time transport fakes. */
-  private class RoutingFixture(test: TestScope, delegate: WebSocketMessageHandler) {
+  private class RoutingFixture(
+    test: TestScope,
+    delegate: WebSocketMessageHandler,
+    capacity: Int = INBOUND_COMMAND_CAPACITY,
+    sendTimeoutMs: Long = WebSocketServer.OUTBOUND_SEND_TIMEOUT_MS,
+    stallFirst: Boolean = false,
+  ) {
     val dispatcher = StandardTestDispatcher(test.testScheduler)
     val scope = CoroutineScope(test.backgroundScope.coroutineContext + dispatcher)
     val proxy: CtrlProxy = Robolectric.buildService(CtrlProxy::class.java).get()
-    val handler = proxy.queuedMessageHandler(delegate, scope, dispatcher)
-    val server = WebSocketServer(port = 0, scope = scope, messageHandler = handler)
-    val first = RecordingTransport()
+    val handler = proxy.queuedMessageHandler(delegate, scope, dispatcher, capacity)
+    val server =
+      WebSocketServer(
+        port = 0,
+        scope = scope,
+        messageHandler = handler,
+        sendTimeoutMs = sendTimeoutMs,
+        onClientDisconnected = handler::disconnect,
+      )
+    val first = RecordingTransport(stallFirst)
     val second = RecordingTransport()
     val owner: WebSocketServer.ConnectedClient
 
@@ -157,7 +181,12 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       server.registerClient(2, second)
     }
 
+    suspend fun dispatch(request: WebSocketRequest) {
+      server.handleClientMessage(Json.encodeToString(WebSocketRequest.serializer(), request), owner)
+    }
+
     fun close() {
+      server.unregisterClient(owner)
       ReflectionHelpers.setField(server, "server", null)
       server.stop()
     }
@@ -168,6 +197,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       override suspend fun handleMessage(request: WebSocketRequest) = body(request)
     }
 
+  // Fails on base: yes (new immediate removal assertion fails while its read-loop Job is active).
   @Test
   fun `owned pending command is skipped after disconnect while read loop remains active`() =
     runTest {
@@ -184,14 +214,15 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         )
       fixture.server.registerRequestOwner("pending", fixture.owner)
       val loop = backgroundScope.launch {
-        fixture.handler.handleMessage(RequestHierarchy(requestId = "held"))
-        fixture.handler.handleMessage(RequestClipboard(requestId = "pending", action = "get"))
+        fixture.dispatch(RequestHierarchy(requestId = "held"))
+        fixture.dispatch(RequestClipboard(requestId = "pending", action = "get"))
         awaitCancellation()
       }
       try {
         runCurrent()
         assertEquals(listOf("held"), calls)
         fixture.server.unregisterClient(fixture.owner)
+        assertEquals(0, fixture.handler.connectionCount)
         assertTrue(loop.isActive)
         held.complete(Unit)
         runCurrent()
@@ -219,7 +250,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       )
     fixture.server.registerRequestOwner("answered", fixture.owner)
     try {
-      fixture.handler.handleMessage(RequestClipboard(requestId = "answered", action = "get"))
+      fixture.dispatch(RequestClipboard(requestId = "answered", action = "get"))
       runCurrent()
       assertEquals(1, fixture.first.frames.size)
       assertTrue(fixture.first.frames.single().contains("terminal reply"))
@@ -243,7 +274,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       )
     fixture.server.registerRequestOwner("running", fixture.owner)
     try {
-      fixture.handler.handleMessage(RequestClipboard(requestId = "running", action = "get"))
+      fixture.dispatch(RequestClipboard(requestId = "running", action = "get"))
       runCurrent()
       fixture.server.unregisterClient(fixture.owner)
       assertTrue(coroutineContext[Job]!!.isActive)
@@ -267,7 +298,7 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         },
       )
     try {
-      fixture.handler.handleMessage(RequestHierarchy(requestId = "hierarchy"))
+      fixture.dispatch(RequestHierarchy(requestId = "hierarchy"))
       runCurrent()
       // Inline broadcast(response) drops an orphaned correlation, even for an unowned type.
       assertTrue(fixture.first.frames.isEmpty())
@@ -278,16 +309,15 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
   }
 
   @Test
-  fun `unowned handler error uses documented external broadcast fallback`() = runTest {
+  fun `unowned handler error reaches only its originating client`() = runTest {
     val fixture = RoutingFixture(this, handler { throw IllegalStateException("hierarchy failed") })
     try {
-      fixture.handler.handleMessage(RequestHierarchy(requestId = "hierarchy"))
+      fixture.dispatch(RequestHierarchy(requestId = "hierarchy"))
       runCurrent()
-      // Follow-up: pass the originating ConnectedClient into dispatch and use sendErrorResponse
-      // for unowned errors/busy replies. Until then this fallback intentionally reaches A and B.
+      // Fails on base: yes (EXTERNAL_ERROR broadcasts the failure to both clients).
       assertEquals(1, fixture.first.frames.size)
-      assertEquals(fixture.first.frames, fixture.second.frames)
-      assertTrue(fixture.second.frames.single().contains("Handler error: hierarchy failed"))
+      assertTrue(fixture.second.frames.isEmpty())
+      assertTrue(fixture.first.frames.single().contains("Handler error: hierarchy failed"))
     } finally {
       fixture.close()
     }
@@ -329,9 +359,9 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         )
       fixture.server.registerRequestOwner("commit", fixture.owner)
       try {
-        fixture.handler.handleMessage(RequestCommitText(requestId = "commit", text = "abcd"))
+        fixture.dispatch(RequestCommitText(requestId = "commit", text = "abcd"))
         runCurrent()
-        fixture.handler.handleMessage(RequestCancelImeCommit(targetRequestId = "commit"))
+        fixture.dispatch(RequestCancelImeCommit(targetRequestId = "commit"))
         runCurrent()
         assertTrue(cancelSeen)
         assertFalse(commitFinished)
@@ -397,10 +427,10 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
         )
       fixture.server.registerRequestOwner("commit", fixture.owner)
       val loop = backgroundScope.launch {
-        fixture.handler.handleMessage(RequestCommitText(requestId = "commit", text = "abcd"))
-        fixture.handler.handleMessage(RequestHierarchy(requestId = "slow"))
+        fixture.dispatch(RequestCommitText(requestId = "commit", text = "abcd"))
+        fixture.dispatch(RequestHierarchy(requestId = "slow"))
         slowStarted.await()
-        fixture.handler.handleMessage(RequestCancelImeCommit(targetRequestId = "commit"))
+        fixture.dispatch(RequestCancelImeCommit(targetRequestId = "commit"))
         awaitCancellation()
       }
       try {
@@ -425,6 +455,227 @@ class QueuedWebSocketMessageHandlerIntegrationTest {
       } finally {
         finishCommit.complete(Unit)
         slow.complete(Unit)
+        loop.cancelAndJoin()
+        fixture.close()
+      }
+    }
+
+  private class LoopbackFixture(
+    test: TestScope,
+    delegate: WebSocketMessageHandler,
+    capacity: Int,
+  ) {
+    private val dispatcher = StandardTestDispatcher(test.testScheduler)
+    private val scope = CoroutineScope(test.backgroundScope.coroutineContext + dispatcher)
+    private val proxy = Robolectric.buildService(CtrlProxy::class.java).get()
+    val queued = proxy.queuedMessageHandler(delegate, scope, dispatcher, capacity)
+    val accepted = Channel<String?>(Channel.UNLIMITED)
+    private val loops = ConcurrentHashMap.newKeySet<Job>()
+    val server =
+      WebSocketServer(
+        port = 0,
+        scope = scope,
+        onClientDisconnected = queued::disconnect,
+        messageHandler =
+          object : WebSocketMessageHandler {
+            override suspend fun handleMessage(request: WebSocketRequest): WebSocketResponse? {
+              val origin = checkNotNull(currentCoroutineContext()[CommandOriginContext]).origin
+              loops += origin.lifetime
+              val response = queued.handleMessage(request)
+              accepted.trySend(request.requestId)
+              return response
+            }
+          },
+      )
+    val client = HttpClient(CIO) { install(WebSockets) }
+    lateinit var first: DefaultClientWebSocketSession
+    lateinit var second: DefaultClientWebSocketSession
+
+    init {
+      ReflectionHelpers.getField<CoroutineScope>(proxy, "serviceScope").cancel()
+      ReflectionHelpers.setField(proxy, "webSocketServer", server)
+    }
+
+    suspend fun connect() {
+      val port = requireNotNull(server.getActualPort())
+      first = client.webSocketSession(urlString = "ws://127.0.0.1:$port/ws")
+      second = client.webSocketSession(urlString = "ws://127.0.0.1:$port/ws")
+      first.incoming.receive()
+      second.incoming.receive()
+    }
+
+    suspend fun close() {
+      if (::first.isInitialized) first.close()
+      if (::second.isInitialized) second.close()
+      loops.forEach { it.join() }
+      client.close()
+      server.stop()
+    }
+  }
+
+  private suspend fun TestScope.withLoopbackClients(
+    delegate: WebSocketMessageHandler,
+    capacity: Int = INBOUND_COMMAND_CAPACITY,
+    body: suspend (LoopbackFixture) -> Unit,
+  ) {
+    val fixture = LoopbackFixture(this, delegate, capacity)
+    try {
+      fixture.server.start()
+      runCurrent()
+      fixture.connect()
+      body(fixture)
+    } finally {
+      fixture.close()
+      runCurrent()
+    }
+  }
+
+  private suspend fun send(
+    session: DefaultClientWebSocketSession,
+    request: WebSocketRequest,
+  ) = session.send(Frame.Text(Json.encodeToString(WebSocketRequest.serializer(), request)))
+
+  // Fails on base: yes (EXTERNAL_ERROR broadcasts the unowned throw before the second client's
+  // barrier).
+  @Test
+  fun `loopback unowned handler failure targets origin and leaves peer stream clean`() = runTest {
+    withLoopbackClients(
+      handler { request ->
+        if (request is RequestHierarchy) error("hierarchy failed")
+        CorrelatedErrorReporter.frame(request.requestId, "barrier")
+      }
+    ) { fixture ->
+      send(fixture.first, RequestHierarchy(requestId = "failure"))
+      val failure = fixture.first.incoming.receive() as Frame.Text
+      assertEquals("failure", requestId(failure))
+      assertTrue(failure.readText().contains("Handler error: hierarchy failed"))
+      send(fixture.second, RequestClipboard(requestId = "barrier", action = "get"))
+      assertEquals("barrier", requestId(fixture.second.incoming.receive()))
+      assertTrue(fixture.second.incoming.tryReceive().isFailure)
+      assertTrue(fixture.first.incoming.tryReceive().isFailure)
+    }
+  }
+
+  // Fails on base: yes (EXTERNAL_ERROR broadcasts the unowned busy rejection to the peer).
+  @Test
+  fun `loopback unowned queue full rejection targets origin only`() = runTest {
+    val held = CompletableDeferred<Unit>()
+    val started = CompletableDeferred<Unit>()
+    try {
+      withLoopbackClients(
+        handler { request ->
+          if (request.requestId == "held") {
+            started.complete(Unit)
+            held.await()
+          }
+          if (request is RequestClipboard)
+            CorrelatedErrorReporter.frame(request.requestId, "barrier")
+          else null
+        },
+        capacity = 1,
+      ) { fixture ->
+        send(fixture.first, RequestHierarchy(requestId = "held"))
+        started.await()
+        assertEquals("held", fixture.accepted.receive())
+        send(fixture.first, RequestHierarchy(requestId = "pending"))
+        assertEquals("pending", fixture.accepted.receive())
+        send(fixture.first, RequestHierarchy(requestId = "rejected"))
+        val rejection = fixture.first.incoming.receive() as Frame.Text
+        assertEquals("rejected", requestId(rejection))
+        assertTrue(rejection.readText().contains("ctrlproxy_busy"))
+        send(fixture.second, RequestClipboard(requestId = "barrier", action = "get"))
+        assertEquals("barrier", requestId(fixture.second.incoming.receive()))
+        assertTrue(fixture.second.incoming.tryReceive().isFailure)
+        held.complete(Unit)
+      }
+    } finally {
+      held.complete(Unit)
+    }
+  }
+
+  // Fails on base: no (owned errors and uncorrelated successful results already follow these
+  // rules).
+  @Test
+  fun `loopback owned errors stay targeted and successful unowned results broadcast`() = runTest {
+    val event =
+      WebSocketFrameResponse(
+        timestamp = 0,
+        event =
+          WebSocketFrameData(
+            connectionId = "socket",
+            url = "ws://example",
+            direction = "in",
+            frameType = "text",
+          ),
+      )
+    withLoopbackClients(
+      handler { request ->
+        if (request is RequestClipboard) error("owned failure")
+        event
+      }
+    ) { fixture ->
+      send(fixture.first, RequestClipboard(requestId = "owned", action = "get"))
+      val failure = fixture.first.incoming.receive() as Frame.Text
+      assertEquals("owned", requestId(failure))
+      assertTrue(failure.readText().contains("Handler error: owned failure"))
+      send(fixture.first, RequestHierarchy(requestId = "hierarchy"))
+      val firstEvent = (fixture.first.incoming.receive() as Frame.Text).readText()
+      val peerEvent = (fixture.second.incoming.receive() as Frame.Text).readText()
+      assertEquals(firstEvent, peerEvent)
+      assertTrue(peerEvent.contains("websocket_frame_event"))
+      assertTrue(fixture.second.incoming.tryReceive().isFailure)
+    }
+  }
+
+  // Fails on base: yes (unowned pending commands continue while the read-loop Job is active).
+  @Test
+  fun `outbound timeout cancels unowned queue immediately while read loop stays active`() =
+    runTest {
+      val cancelled = CompletableDeferred<Unit>()
+      val calls = mutableListOf<String?>()
+      val fixture =
+        RoutingFixture(
+          this,
+          handler { request ->
+            calls += request.requestId
+            try {
+              awaitCancellation()
+            } finally {
+              cancelled.complete(Unit)
+            }
+          },
+          sendTimeoutMs = 100,
+          stallFirst = true,
+        )
+      val loop = backgroundScope.launch {
+        fixture.dispatch(RequestHierarchy(requestId = "held"))
+        fixture.dispatch(RequestHierarchy(requestId = "pending"))
+        awaitCancellation()
+      }
+      try {
+        runCurrent()
+        assertEquals(1, fixture.handler.connectionCount)
+        fixture.server.sendToClient(fixture.owner, "trigger-timeout")
+        runCurrent()
+        advanceTimeBy(100)
+        runCurrent()
+        assertEquals("Outbound send timed out", fixture.first.closeReason?.message)
+        assertTrue(loop.isActive)
+        assertEquals(0, fixture.handler.connectionCount)
+        assertTrue(cancelled.isCompleted)
+        assertEquals(listOf("held"), calls)
+        fixture.dispatch(RequestHierarchy(requestId = "late"))
+        fixture.dispatch(RequestClipboard(requestId = "late-owned", action = "get"))
+        assertFalse(fixture.server.hasRequestOwner("late-owned"))
+        runCurrent()
+        assertEquals(0, fixture.handler.connectionCount)
+        assertEquals(listOf("held"), calls)
+        fixture.server.unregisterClient(fixture.owner)
+        fixture.handler.disconnect(fixture.owner)
+        assertEquals(0, fixture.handler.connectionCount)
+        assertEquals(1, fixture.server.getConnectionCount())
+        assertTrue(fixture.second.frames.isEmpty())
+      } finally {
         loop.cancelAndJoin()
         fixture.close()
       }

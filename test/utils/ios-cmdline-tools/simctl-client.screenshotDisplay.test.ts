@@ -11,7 +11,7 @@ import { logger } from "../../../src/utils/logger";
 import { captureIosPanelScreenshot } from "../../../src/features/observe/ios/CtrlProxyScreenshot";
 import type { BootedDevice } from "../../../src/models";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve, sep } from "node:path";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
@@ -40,8 +40,20 @@ function png(width: number, height: number): Buffer {
   return buffer;
 }
 
+function fakeCaptureDir(n: number): string {
+  return resolve("fake", `capture-${n}`);
+}
+
+async function flushMicrotasks(): Promise<void> {
+  for (let turn = 0; turn < 40; turn++) {
+    await Promise.resolve();
+  }
+}
+
 function captureHarness(
   options: {
+    mkdtemp?: () => Promise<string>;
+    cleanup?: () => Promise<void>;
     frame?: Buffer;
     readError?: Error;
     read?: () => Promise<Buffer>;
@@ -67,7 +79,7 @@ function captureHarness(
   const fileSystem: SimCtlFileSystem = {
     mkdtemp: async (prefix) => {
       expect(isAbsolute(prefix)).toBe(true);
-      return join(resolve("/fake"), `capture-${++count}`);
+      return options.mkdtemp ? options.mkdtemp() : fakeCaptureDir(++count);
     },
     writeFile: async () => {},
     readFile: async () => "",
@@ -92,8 +104,11 @@ function captureHarness(
       if (options.cleanupError) {
         throw options.cleanupError;
       }
+      if (options.cleanup) {
+        await options.cleanup();
+      }
       for (const key of files.keys()) {
-        if (key.startsWith(path + "/") || key.startsWith(path + "\\")) {
+        if (key.startsWith(path + sep)) {
           files.delete(key);
         }
       }
@@ -153,6 +168,144 @@ function captureHarness(
   );
   return { simctl, timer, calls, files, removed, events, started, children };
 }
+
+for (const cancellation of ["caller", "timeout"] as const) {
+  test(`pending mkdtemp honors ${cancellation} cancellation and cleans its late directory`, async () => {
+    let release: (dir: string) => void = () => {};
+    const directory = new Promise<string>((resolve) => {
+      release = resolve;
+    });
+    const h = captureHarness({ mkdtemp: () => directory });
+    const caller = new AbortController();
+    const cause = new Error("setup cancelled");
+    let outcome: unknown;
+    const pending = h.simctl.screenshot(udid, "primary-1", caller.signal).then(
+      (value) => {
+        outcome = value;
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+    h.timer.advanceTime(cancellation === "timeout" ? 10_000 : 25);
+    if (cancellation === "caller") {
+      caller.abort(cause);
+    }
+    await flushMicrotasks();
+    expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+    expect(outcome).toMatchObject({
+      reason: cancellation === "caller" ? "aborted-by-caller" : "aborted-by-timeout",
+      message:
+        cancellation === "caller"
+          ? "simctl screenshot cancelled by the caller after 25ms: setup cancelled"
+          : "simctl screenshot timed out after 10000ms",
+    });
+    expect((outcome as Error).cause).toBeInstanceOf(Error);
+    if (cancellation === "caller") {
+      expect((outcome as Error).cause).toBe(cause);
+    }
+    expect(h.calls).toEqual([]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    release(fakeCaptureDir(1));
+    await flushMicrotasks();
+    expect(h.removed).toEqual([fakeCaptureDir(1)]);
+    expect(h.calls).toEqual([]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    await pending;
+  });
+}
+
+for (const failed of [false, true]) {
+  test(`stalled cleanup preserves ${failed ? "typed failure" : "PNG success"} after its bound`, async () => {
+    const debug = spyOn(logger, "debug").mockImplementation(() => {});
+    const frame = png(2853, 2007);
+    const h = captureHarness({
+      frame,
+      exitCode: failed ? 17 : 0,
+      cleanup: () => new Promise<void>(() => {}),
+    });
+    let outcome: unknown;
+    const pending = h.simctl.screenshot(udid, "primary-1").then(
+      (value) => {
+        outcome = value;
+      },
+      (error: unknown) => {
+        outcome = error;
+      },
+    );
+    try {
+      await flushMicrotasks();
+      expect(h.removed).toEqual([fakeCaptureDir(1)]);
+      h.timer.advanceTime(1_000);
+      await flushMicrotasks();
+      if (failed) {
+        expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+        expect(outcome).toMatchObject({ reason: "non-zero-exit", exitCode: 17 });
+      } else {
+        expect(outcome).toEqual(frame);
+      }
+      expect(debug.mock.calls.some((call) => String(call[0]).includes("cleanup"))).toBe(true);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      await pending;
+    } finally {
+      debug.mockRestore();
+    }
+  });
+}
+
+test("stalled child settlement preserves caller abort after its bound", async () => {
+  const debug = spyOn(logger, "debug").mockImplementation(() => {});
+  const h = captureHarness({ manual: true, abortOnError: false });
+  const caller = new AbortController();
+  const cause = new Error("child cancelled");
+  let outcome: unknown;
+  const pending = h.simctl.screenshot(udid, "primary-1", caller.signal).then(
+    (value) => {
+      outcome = value;
+    },
+    (error: unknown) => {
+      outcome = error;
+    },
+  );
+  try {
+    await h.started;
+    h.timer.advanceTime(25);
+    caller.abort(cause);
+    await flushMicrotasks();
+    expect(h.removed).toEqual([]);
+    h.timer.advanceTime(1_000);
+    await flushMicrotasks();
+    expect(outcome).toBeInstanceOf(SimctlScreenshotError);
+    expect(outcome).toMatchObject({
+      reason: "aborted-by-caller",
+      cause,
+      message: "simctl screenshot cancelled by the caller after 25ms: child cancelled",
+    });
+    expect(h.removed).toEqual([fakeCaptureDir(1)]);
+    expect(debug.mock.calls.some((call) => String(call[0]).includes("cleanup"))).toBe(true);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    await pending;
+  } finally {
+    debug.mockRestore();
+  }
+});
+
+test("mkdtemp failure before abort remains a typed read failure", async () => {
+  const cause = new Error("setup denied");
+  const h = captureHarness({
+    mkdtemp: async () => {
+      throw cause;
+    },
+  });
+  await expect(h.simctl.screenshot(udid, "primary-1")).rejects.toMatchObject({
+    reason: "read-failure",
+    cause,
+    message: "Unable to prepare simctl screenshot temp directory",
+  });
+  expect(h.calls).toEqual([]);
+  expect(h.removed).toEqual([]);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
 
 test("simctl screenshot reads PNG bytes from an absolute private temp path and removes it", async () => {
   const frame = png(2853, 2007);
@@ -221,7 +374,7 @@ for (const cancellation of ["caller", "timeout"] as const) {
               : "simctl screenshot timed out after 10000ms",
           ...(cancellation === "caller" ? { cause } : {}),
         });
-        expect(h.removed).toEqual(["/fake/capture-1"]);
+        expect(h.removed).toEqual([fakeCaptureDir(1)]);
         expect(h.timer.getPendingTimeoutCount()).toBe(0);
       } finally {
         if (lateRead === "resolve") {
@@ -252,7 +405,7 @@ test("simctl screenshot honors caller abort between close and read", async () =>
   caller.abort(cause);
   await expect(screenshot).rejects.toMatchObject({ reason: "aborted-by-caller", cause });
   expect(h.events).not.toContain("read");
-  expect(h.removed).toEqual(["/fake/capture-1"]);
+  expect(h.removed).toEqual([fakeCaptureDir(1)]);
   expect(h.timer.getPendingTimeoutCount()).toBe(0);
 });
 

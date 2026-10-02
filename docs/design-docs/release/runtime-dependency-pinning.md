@@ -71,6 +71,91 @@ manifest) and enforced by:
 
 ## Refreshing the graph (dependency / security updates)
 
+### Automatic refresh on Dependabot PRs
+
+`.github/workflows/dependabot-runtime-pins.yml` handles opened, synchronized,
+and reopened Dependabot PRs touching `package.json` or `bun.lock`. Both jobs
+require the `dependabot[bot]` actor and a head repository matching this repository.
+They use read-only permissions, bounded timeouts, and checkouts that disable LFS
+and persist no credentials. All actions are pinned to full commit SHAs.
+
+The **regenerate** job checks out the exact PR head SHA, installs dependencies,
+builds, runs `pin-runtime-deps.ts --write`, installs again, and formats. It receives
+no secrets. It runs `--check` before uploading an artifact containing only
+`package.json`, `bun.lock`, and `scripts/release/runtime-graph.json`, preserving
+their repository-relative paths. A failed check fails the job: no artifact is
+uploaded and the dependent push job does not run. The artifact name includes the
+PR number, run ID, and run attempt; retention is one day.
+
+The split addresses a specific threat: lifecycle scripts and dependency code
+executed on the PR runner can rewrite the commit script, plant Git hooks, change
+Git config, shadow commands through `PATH`/`GITHUB_PATH`, or poison later steps
+through `GITHUB_ENV` (for example `BASH_ENV` or loader variables). A final-step
+secret in that same job would still be exposed to the tampered environment.
+
+The **push** job uses a fresh runner, never executes PR code, and restores no
+cache. It sparse-checks out the trusted commit script from the repository's
+**default branch** into a separate directory and downloads only the named
+artifact. Only the final trusted script step receives `AUTO_MOBILE_PR_TOKEN` via
+its environment. The script validates the artifact as data: exactly three
+regular files and the necessary directories, no symlinks, hardlinks, extra paths
+or dotfiles, a 20 MiB cap per file (well above current pin-file sizes), and one
+JSON object each for the package and graph manifests, parsed with `jq`.
+
+The script creates a temporary repository with templates disabled, ignores
+global/system Git config, and disables hooks, filesystem monitors, external
+protocol helpers, credential helpers, and commit signing on every Git invocation.
+It fetches only the PR branch and verifies that its head still equals the starting
+SHA. It populates only the index, never the PR working tree, avoiding PR symlinks
+while copying the three validated files. It stages their exact bytes with
+`hash-object --no-filters` and `update-index --cacheinfo`, bypassing PR attribute
+filters and encoding conversions; directory conflicts fail without pushing. It
+commits as `github-actions[bot]` and uses a normal fast-forward push; concurrent
+branch updates are rejected. No changes produce a successful notice. The raw
+PAT and its base64 encoding are registered with Actions masking; authentication
+uses an HTTP extraheader supplied through `GIT_CONFIG_COUNT` environment entries,
+never a remote URL, command argument, or persisted Git configuration. The temporary
+repository is removed on exit.
+
+The trigger is `pull_request`, not `pull_request_target`: dependency code runs
+with read-only permissions rather than a privileged base-repository context.
+The separate runner and trusted default-branch script isolate the PAT from that
+code. The PAT remains a repository-write credential. A malicious change to the
+three files can still be pushed **as data**: these are the dependency changes
+Dependabot proposed plus regenerated pins, and normal review and CI still apply.
+Artifact validation is structural only; it does not establish that the dependency
+content or regenerated pins are safe or semantically correct. The regenerate
+runner can tamper with its own check and artifact, so its check is a correctness
+gate, not a security attestation. The default branch and pinned actions remain
+part of the trusted boundary.
+
+**Owner setup:** configure the existing `AUTO_MOBILE_PR_TOKEN` PAT in this
+repository's **Dependabot secrets** store too, with branch push access. Dependabot
+`pull_request` runs receive Dependabot secrets, not Actions secrets. Missing
+configuration produces a clear error even when the artifact has no changes.
+The trusted script must first be present on the default branch before this
+workflow can use it. The default `GITHUB_TOKEN` is read-only here and its pushes
+would not retrigger CI. The PAT follow-up commit retriggers `pull_request` CI,
+giving the new head fresh required checks. That run's actor is the PAT owner,
+so the Dependabot-only guard prevents a loop. No skip-CI marker is used.
+
+A human/PAT push makes Dependabot stop auto-rebasing that PR. Use
+`@dependabot recreate` when it needs to be regenerated; Dependabot's new update
+reruns this workflow.
+
+Real version conflicts still need human intervention, as do coordinated
+`sharp`/`@img` updates ignored by `.github/dependabot.yml`. There is no new
+nested-lockfile-entry pruner: although `bun install` runs, it may retain a stale
+redundant nested entry. For example, #8330 retained
+`file-type/uint8array-extras@1.5.0` after hoisting `uint8array-extras@1.6.0`.
+If regeneration or `--check` reports
+`Residual runtime dependency owners are not bundled: file-type`, the job fails
+loudly and a human must prune the redundant entry and refresh the graph.
+Reviewing `.github/dependabot.yml` ignore rules after this workflow lands is a
+follow-up; this change leaves those rules unchanged.
+
+### Manual refresh
+
 When a runtime dependency or a security override changes the resolved graph
 (e.g. a Dependabot bump to `jimp` or one of their transitives, or a manual
 `sharp` bump):

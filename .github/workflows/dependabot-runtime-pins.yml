@@ -1,0 +1,97 @@
+name: Dependabot Runtime Pins
+
+# pull_request uses Dependabot secrets, not Actions secrets. Unlike
+# pull_request_target, it does not grant a privileged base context to PR code.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths: [package.json, bun.lock]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependabot-runtime-pins-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Git Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          lfs: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      # Lifecycle scripts/dependency code can tamper with this runner. It never
+      # receives secrets, and only pin data crosses to the fresh push runner.
+      - name: Regenerate runtime pins
+        run: |
+          bun install
+          bun run build
+          bun scripts/release/pin-runtime-deps.ts --write
+          bun install
+          bun run format
+
+      - name: Check runtime pins
+        run: bun scripts/release/pin-runtime-deps.ts --check
+
+      - name: Upload runtime pins
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: runtime-pins-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # v6 uses the least common ancestor (repo root) for multiple paths,
+          # preserving scripts/release/runtime-graph.json in the download.
+          path: |
+            package.json
+            bun.lock
+            scripts/release/runtime-graph.json
+          if-no-files-found: error
+          retention-days: 1
+
+  push:
+    needs: regenerate
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trusted commit script
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: trusted
+          sparse-checkout: scripts/ci/commit-runtime-pins.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+          lfs: false
+
+      # Same-run downloads use the artifact service token, not actions: read.
+      - name: Download runtime pins
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: runtime-pins-${{ github.event.pull_request.number }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: runtime-pins
+
+      # Only trusted base code receives the PAT, on a runner that never ran PR
+      # code. The PAT retriggers CI; its owner's actor guard prevents a loop.
+      - name: Commit and push runtime pins
+        env:
+          TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PINS_DIR: ${{ github.workspace }}/runtime-pins
+        run: bash trusted/scripts/ci/commit-runtime-pins.sh

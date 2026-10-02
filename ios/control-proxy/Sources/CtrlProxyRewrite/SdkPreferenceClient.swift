@@ -28,19 +28,29 @@ protocol SdkPreferenceFetching: Sendable {
 
 final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
     private let baseURL: URL
+    private let endpointResolver: SdkEndpointResolver?
     private let transport: any HTTPRequesting
 
     convenience init(port: UInt16 = 8766) {
+        self.init(port: port, endpointResolver: .production(legacyPort: port))
+    }
+
+    convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
         let url = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5
         config.waitsForConnectivity = false
-        self.init(baseURL: url, transport: URLSessionHTTPTransport(session: URLSession(configuration: config)))
+        self.init(
+            baseURL: url,
+            transport: URLSessionHTTPTransport(session: URLSession(configuration: config)),
+            endpointResolver: endpointResolver
+        )
     }
 
-    init(baseURL: URL, transport: any HTTPRequesting) {
+    init(baseURL: URL, transport: any HTTPRequesting, endpointResolver: SdkEndpointResolver? = nil) {
         self.baseURL = baseURL
+        self.endpointResolver = endpointResolver
         self.transport = transport
     }
 
@@ -133,7 +143,9 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
         do {
-            let (data, response) = try await transport.data(for: request)
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: request, transport: transport, resolver: endpointResolver
+            )
             guard let http = response as? HTTPURLResponse else {
                 throw PreferenceError.unavailable("non-HTTP SDK response")
             }
@@ -158,6 +170,8 @@ final class SdkPreferenceClient: SdkPreferenceFetching, Sendable {
                 throw PreferenceError.server(reason)
             }
             return try JSONDecoder().decode(PreferenceResponse.self, from: data)
+        } catch let SdkEndpointError.wrongSimulator(expected, actual) {
+            throw PreferenceError.wrongSimulator(expectedUdid: expected, actualUdid: actual)
         } catch let error as PreferenceError {
             throw error
         } catch {
@@ -195,7 +209,8 @@ private struct PreferenceErrorPayload: Decodable {
     let error: String
 }
 
-private enum PreferenceError: LocalizedError {
+enum PreferenceError: LocalizedError {
+    case wrongSimulator(expectedUdid: String, actualUdid: String)
     case unavailable(String)
     case rejected(String)
     case conflict(String)
@@ -206,6 +221,8 @@ private enum PreferenceError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        case let .wrongSimulator(expected, actual):
+            return SdkEndpointError.wrongSimulatorMessage(expectedUdid: expected, actualUdid: actual)
         case let .unavailable(reason):
             return "iOS key-value storage requires the target app to embed the AutoMobile SDK, "
                 + "initialize it, and call UserDefaultsInspector.shared.setEnabled(true): \(reason)"

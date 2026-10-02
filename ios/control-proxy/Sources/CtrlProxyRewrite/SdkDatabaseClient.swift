@@ -1,31 +1,34 @@
 import Foundation
 
-/// Async HTTP client relaying SQLite inspection to the SDK's in-app server (port 8766).
-/// Ported from the reference `SdkDatabaseClient.swift`.
-///
-/// Rewrite archetype: a **stateless `Sendable`** async client (see `SdkHierarchyClient`).
-/// The reference blocked a `URLSession` completion on a `DispatchSemaphore`; this awaits
-/// `transport.data(for:)` over the injectable `HTTPRequesting` seam. All stored state is
-/// immutable, so the client is `Sendable` with no isolation. The error mapping is ported
-/// verbatim: a transport error and a non-2xx status both surface as
-/// `SdkDatabaseError.unavailable` (the latter carrying the SDK's error payload when
-/// present), a non-HTTP response as `.badResponse`.
+/// Async HTTP client relaying SQLite inspection to the SDK's in-app server.
+/// The shared endpoint resolver verifies simulator identity before any database data
+/// is decoded. Fixed endpoint/transport injection retains the existing test seam.
 public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
     private let baseURL: URL
+    private let endpointResolver: SdkEndpointResolver?
     private let transport: any HTTPRequesting
 
     public convenience init(port: UInt16 = 8766) {
+        self.init(port: port, endpointResolver: .production(legacyPort: port))
+    }
+
+    convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
         let baseURL = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5
         config.waitsForConnectivity = false
-        self.init(baseURL: baseURL, transport: URLSessionHTTPTransport(session: URLSession(configuration: config)))
+        self.init(
+            baseURL: baseURL,
+            transport: URLSessionHTTPTransport(session: URLSession(configuration: config)),
+            endpointResolver: endpointResolver
+        )
     }
 
     /// Designated initializer over the `HTTPRequesting` seam (tests inject stubs).
-    init(baseURL: URL, transport: any HTTPRequesting) {
+    init(baseURL: URL, transport: any HTTPRequesting, endpointResolver: SdkEndpointResolver? = nil) {
         self.baseURL = baseURL
+        self.endpointResolver = endpointResolver
         self.transport = transport
     }
 
@@ -112,7 +115,9 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
         request.httpBody = body
 
         do {
-            let (data, response) = try await transport.data(for: request)
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: request, transport: transport, resolver: endpointResolver
+            )
             guard let http = response as? HTTPURLResponse else {
                 throw SdkDatabaseError.badResponse("database inspection returned a non-HTTP response")
             }
@@ -122,6 +127,8 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
                 throw SdkDatabaseError.unavailable("\(Self.unavailableMessage): \(message)")
             }
             return data
+        } catch let SdkEndpointError.wrongSimulator(expected, actual) {
+            throw SdkDatabaseError.wrongSimulator(expectedUdid: expected, actualUdid: actual)
         } catch let error as SdkDatabaseError {
             throw error
         } catch {

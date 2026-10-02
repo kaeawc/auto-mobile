@@ -30,6 +30,7 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const android = {
@@ -104,6 +105,30 @@ function autoTimer(): FakeTimer {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   return timer;
+}
+
+function focusScreen(focused: boolean): ObserveResult {
+  const observation = screen("external", "");
+  observation.viewHierarchy = {
+    ...observation.viewHierarchy!,
+    updatedAt: focused ? 2 : 1,
+    hierarchy: {
+      node: {
+        class: "android.widget.EditText",
+        "resource-id": "external-field",
+        testTag: "external-field",
+        editable: true,
+        focused,
+        bounds: { left: 20, top: 30, right: 80, bottom: 90 },
+        node: {
+          class: "android.widget.TextView",
+          text: "Field",
+          bounds: { left: 25, top: 35, right: 75, bottom: 45 },
+        },
+      },
+    },
+  };
+  return observation;
 }
 
 function adb(): FakeAdbExecutor {
@@ -1028,6 +1053,9 @@ describe("explicit action display", () => {
       { ensureTap: true },
       { textAny: ["One", "Two"] },
       { accessibilityLink: "Link" },
+      { focusFirst: true },
+      { screenReaderNavigation: true },
+      { preTapStability: true },
     ];
     const executor = adb();
     const observe = new FakeObserveScreen();
@@ -1180,6 +1208,175 @@ describe("explicit action display", () => {
       "KEYCODE_ENTER",
     ]);
     expect(observe.getExecuteOptions().at(-1)?.display).toBe("external");
+  });
+
+  for (const route of ["CtrlProxy", "adb"] as const) {
+    for (const outcome of [
+      "confirmed",
+      "non-editable",
+      "already-focused",
+      "unconfirmed",
+      "stale",
+    ] as const) {
+      test(`tapOn display focus ${route}: ${outcome}`, async () => {
+        const executor = adb();
+        const before =
+          outcome === "non-editable"
+            ? screen("external", "Field")
+            : focusScreen(outcome === "already-focused");
+        const after = focusScreen(outcome !== "unconfirmed");
+        let dispatched = false;
+        const observe = new FakeObserveScreen();
+        observe.setObserveResult(() => (dispatched ? after : before));
+        const action = new TapOnElement(android, executor, {
+          timer: autoTimer(),
+          lastRenderedObservation: () => before,
+        });
+        action.observeScreen = observe;
+        const client = AndroidCtrlProxyClient.getExistingInstance(android.deviceId)!;
+        const capability = spyOn(client, "supportsCommand").mockImplementation(async () => {
+          if (outcome === "stale") {
+            displayTransitions.notifyTransition(android.deviceId, "panel changed before focus");
+          }
+          return route === "CtrlProxy";
+        });
+        const tap = spyOn(client, "requestTapCoordinates").mockImplementation(async () => {
+          dispatched = true;
+          return { success: true, totalTimeMs: 0 };
+        });
+        const executeCommand = executor.executeCommand.bind(executor);
+        const input = spyOn(executor, "executeCommand").mockImplementation(async (...args) => {
+          if (args[0].includes("touchscreen")) {
+            dispatched = true;
+          }
+          return executeCommand(...args);
+        });
+        try {
+          const result = await action.execute({
+            text: "Field",
+            action: "focus",
+            display: "external",
+          });
+          const commands = executor
+            .getExecutedCommands()
+            .filter((command) => command.includes("touchscreen"));
+          if (outcome === "confirmed" || outcome === "already-focused") {
+            expect(result.success).toBe(true);
+            expect(result.action).toBe("focus");
+            expect(result.focusVerified).toBe(true);
+            expect(result.element?.["resource-id"]).toBe("external-field");
+          } else {
+            expect(result.success).toBe(false);
+            if (outcome === "non-editable") {
+              expect(result.error).toBe('Cannot focus "Field" because it is not an editable input');
+            } else if (outcome === "unconfirmed") {
+              expect(result.error).toContain("Failed to confirm focus on editable input");
+              expect(result.focusVerified).toBe(false);
+            } else {
+              expect(result.error).toContain("Re-observe the active panel");
+              expect(result.staleDisplay?.retry).toBe("observe");
+            }
+          }
+          if (outcome === "already-focused") {
+            expect(result.wasAlreadyFocused).toBe(true);
+            expect(result.focusChanged).toBe(false);
+          }
+          if (outcome === "confirmed" || outcome === "unconfirmed") {
+            if (route === "CtrlProxy") {
+              expect(tap).toHaveBeenCalledTimes(1);
+              expect(tap.mock.calls[0].slice(0, 2)).toEqual([50, 60]);
+              expect(tap.mock.calls[0].at(-2)).toBe(2);
+              expect(tap.mock.calls[0].at(-1)).toBeFunction();
+              expect(commands).toEqual([]);
+            } else {
+              expect(tap).not.toHaveBeenCalled();
+              expect(commands).toEqual(["shell input touchscreen -d 2 tap 50 60"]);
+            }
+            expect(result.observation?.viewHierarchy?.hierarchy).toEqual(
+              after.viewHierarchy?.hierarchy,
+            );
+            expect(observe.getExecuteOptions().at(-1)).toMatchObject({
+              display: "external",
+              freshness: "fresh",
+            });
+          } else {
+            expect(tap).not.toHaveBeenCalled();
+            expect(commands).toEqual([]);
+          }
+        } finally {
+          input.mockRestore();
+          tap.mockRestore();
+          capability.mockRestore();
+        }
+      });
+    }
+  }
+
+  test("sendKeys real focuser types, clears and sends IME keys on the selected display", async () => {
+    const executor = adb();
+    const before = focusScreen(false);
+    const after = focusScreen(true);
+    let dispatched = false;
+    const observe = new FakeObserveScreen();
+    observe.setObserveResult(() => (dispatched ? after : before));
+    // Keep the real default focuser, selector, dispatch and observation wrapper.
+    // Only its device observation boundary is replaced with the existing fake.
+    const capture = spyOn(RealObserveScreen.prototype, "execute").mockImplementation((options) =>
+      observe.execute(options),
+    );
+    const screenshot = spyOn(RealObserveScreen.prototype, "captureScreenshot").mockResolvedValue();
+    const audit = spyOn(RealObserveScreen.prototype, "runAccessibilityAudit").mockResolvedValue();
+    const tap = spyOn(AndroidCtrlProxyClient.prototype, "requestTapCoordinates").mockImplementation(
+      async () => {
+        dispatched = true;
+        return { success: true, totalTimeMs: 0 };
+      },
+    );
+    capabilitySpy.mockResolvedValue(true);
+    const typed: string[] = [];
+    const executed: string[] = [];
+    const action = new SendKeys(android, new FakeAdbClientFactory(executor), {
+      timer: autoTimer(),
+      observer: observe,
+      timestampProvider: { now: async () => 1 },
+      lastRenderedObservation: () => before,
+      executor: {
+        type: async (command) => {
+          typed.push(command.text);
+          executed.push("type");
+          return { index: 0, action: "type", success: true };
+        },
+        key: async (command) => {
+          executed.push(`key:${command.key}`);
+          return { index: 0, action: "key", success: true };
+        },
+        clear: async () => {
+          executed.push("clear");
+          return { success: true };
+        },
+      },
+    });
+    try {
+      const result = await action.execute(
+        [{ action: "type", text: "hello" }, { action: "clear" }, { action: "key", key: "done" }],
+        { text: "Field" },
+        undefined,
+        undefined,
+        "external",
+      );
+      expect(result.success).toBe(true);
+      expect(tap).toHaveBeenCalledTimes(1);
+      expect(tap.mock.calls[0].at(-2)).toBe(2);
+      expect(typed).toEqual(["hello"]);
+      expect(executed).toEqual(["type", "clear", "key:done"]);
+      expect(observe.getExecuteOptions().at(-1)?.display).toBe("external");
+      expect(result.observation?.viewHierarchy?.hierarchy).toEqual(after.viewHierarchy?.hierarchy);
+    } finally {
+      tap.mockRestore();
+      audit.mockRestore();
+      screenshot.mockRestore();
+      capture.mockRestore();
+    }
   });
 
   test("sendKeys text focuses a field on the selected display", async () => {

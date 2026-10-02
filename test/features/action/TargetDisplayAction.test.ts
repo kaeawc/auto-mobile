@@ -1076,11 +1076,7 @@ describe("explicit action display", () => {
   });
 
   test("swipeOn rejects every unsupported display option without claiming search success", async () => {
-    const unsupported: Array<Partial<SwipeOnOptions>> = [
-      { lookFor: { text: "Found" } },
-      { autoTarget: true },
-      { includeSystemInsets: true },
-    ];
+    const unsupported: Array<Partial<SwipeOnOptions>> = [{ autoTarget: true }];
     const observe = new FakeObserveScreen();
     const fakeAdb = new FakeAdbClient();
     const action = new SwipeOn(android, fakeAdb as unknown as AdbClient, {

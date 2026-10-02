@@ -1,4 +1,8 @@
-import { withStaleDisplay, StaleDisplayError } from "../../../models/StaleDisplayError";
+import {
+  withStaleDisplay,
+  StaleDisplayError,
+  staleDisplayError,
+} from "../../../models/StaleDisplayError";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { BaseVisualChange, ProgressCallback } from "../BaseVisualChange";
@@ -268,7 +272,11 @@ export class SwipeOn extends BaseVisualChange {
     if (options.container && !bounds) {
       throw new ActionableError("Swipe container not found on selected display");
     }
-    const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, bounds);
+    const swipeBounds =
+      options.includeSystemInsets === false
+        ? this.insetDisplaySwipeBounds({ observation, bounds })
+        : bounds;
+    const { x1, y1, x2, y2 } = displaySwipeCoordinates(options, observation, swipeBounds);
     const duration = resolveSwipeDuration({ ...options, geometry: this.geometry });
     const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
       this.accessibilityService,
@@ -308,6 +316,139 @@ export class SwipeOn extends BaseVisualChange {
       y2,
       duration: totalDuration,
     };
+  }
+
+  private insetDisplaySwipeBounds({
+    observation,
+    bounds,
+  }: {
+    observation: ObserveResult;
+    bounds?: Element["bounds"];
+  }): Element["bounds"] {
+    const screen = getScreenBounds(observation.screenSize, observation.systemInsets);
+    return bounds
+      ? {
+          left: Math.max(bounds.left, screen.left),
+          top: Math.max(bounds.top, screen.top),
+          right: Math.min(bounds.right, screen.right),
+          bottom: Math.min(bounds.bottom, screen.bottom),
+        }
+      : screen;
+  }
+
+  private validateSelectedDisplayObservation(options: {
+    observation: ObserveResult;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    includeSystemInsets?: boolean;
+  }): ObserveResult {
+    const { observation, target, includeSystemInsets } = options;
+    target.assertCurrent();
+    if (observation.display.key !== target.observation.display.key) {
+      throw staleDisplayError(
+        target.observation.display.generation,
+        this.displayTransitionReader.identityRevision(this.device.deviceId),
+        this.displayTransitionReader.currentObservedPanel(this.device.deviceId)?.key,
+      );
+    }
+    if (includeSystemInsets !== undefined && observation.insets?.available !== true) {
+      throw new ActionableError(
+        `includeSystemInsets is not supported with \`display\` for display "${target.observation.display.key}": per-display system insets are unavailable`,
+      );
+    }
+    // Unavailable metadata can contain default-display or compatibility values.
+    return observation.insets?.available === true
+      ? observation
+      : { ...observation, systemInsets: { top: 0, right: 0, bottom: 0, left: 0 } };
+  }
+
+  private async searchOnAndroidDisplay({
+    options,
+    target,
+    progress,
+    signal,
+  }: {
+    options: SwipeOnOptions;
+    target: Awaited<ReturnType<typeof prepareTargetDisplayAction>>;
+    progress?: ProgressCallback;
+    signal?: AbortSignal;
+  }): Promise<SwipeOnResult> {
+    const direction = resolveSwipeDirection(options);
+    if (direction.error) {
+      throw new ActionableError(direction.error);
+    }
+    const useCtrlProxy = await supportsCtrlProxyGestureDisplay(
+      this.accessibilityService,
+      target.displayId,
+    );
+    const display = target.observation.display.key;
+    const validateObservation = (observation: ObserveResult) =>
+      this.validateSelectedDisplayObservation({
+        observation,
+        target,
+        includeSystemInsets: options.includeSystemInsets,
+      });
+    // Forward optional finalization/cache seams while checking every capture,
+    // including BaseVisualChange's retries and settle polls.
+    const postActionObserveScreen: ObserveScreen = {
+      execute: async (captureOptions) => {
+        target.assertCurrent();
+        return validateObservation(await this.observeScreen.execute(captureOptions));
+      },
+      getMostRecentCachedObserveResult: this.observeScreen.getMostRecentCachedObserveResult.bind(
+        this.observeScreen,
+      ),
+      appendRawViewHierarchy: this.observeScreen.appendRawViewHierarchy.bind(this.observeScreen),
+      captureScreenshot: this.observeScreen.captureScreenshot?.bind(this.observeScreen),
+      runAccessibilityAudit: this.observeScreen.runAccessibilityAudit?.bind(this.observeScreen),
+      processRecomposition: this.observeScreen.processRecomposition?.bind(this.observeScreen),
+      captureCacheGeneration: this.observeScreen.captureCacheGeneration?.bind(this.observeScreen),
+      cacheObserveResult: this.observeScreen.cacheObserveResult?.bind(this.observeScreen),
+    };
+    const result = await this.scrollUntilVisible.executeWithStrategy({
+      options: { ...options, direction: direction.direction as SwipeDirection },
+      progress,
+      signal,
+      strategy: {
+        observe: async () => {
+          target.assertCurrent();
+          return validateObservation(
+            await this.observeScreen.execute({
+              display,
+              freshness: "cached-ok",
+              skipScreenshot: true,
+              skipAccessibilityAudit: true,
+              signal,
+            }),
+          );
+        },
+        swipe: async ({ previousObservation, ...coordinates }) => {
+          const result = await this.observedInteraction(
+            async () => {
+              await this.dispatchDisplaySwipeLeg({ ...coordinates, target, useCtrlProxy, signal });
+              return { success: true };
+            },
+            {
+              changeExpected: false,
+              timeoutMs: 500,
+              display,
+              previousObservation,
+              progress,
+              signal,
+              deferPostActionScreenshot: true,
+              postActionObserveScreen,
+            },
+          );
+          return {
+            ...coordinates,
+            targetType: "screen",
+            success: result.success,
+            observation: validateObservation(result.observation),
+          };
+        },
+      },
+    });
+    target.assertCurrent();
+    return result;
   }
 
   private async dispatchDisplaySwipeLeg(options: {
@@ -370,13 +511,19 @@ export class SwipeOn extends BaseVisualChange {
 
   private async executeExplicitDisplay(
     options: SwipeOnOptions,
-    signal?: AbortSignal,
+    context: { progress?: ProgressCallback; signal?: AbortSignal } = {},
   ): Promise<SwipeOnResult | undefined> {
+    const { progress, signal } = context;
     if (options.display !== undefined) {
       try {
         const unsupported = (
           ["lookFor", "focusTarget", "autoTarget", "includeSystemInsets", "scrollMode"] as const
-        ).find((key) => options[key] !== undefined);
+        ).find(
+          (key) =>
+            options[key] !== undefined &&
+            (this.device.platform !== "android" ||
+              (key !== "lookFor" && key !== "includeSystemInsets")),
+        );
         if (unsupported) {
           throw new ActionableError(`${unsupported} is not supported with \`display\` yet`);
         }
@@ -395,15 +542,22 @@ export class SwipeOn extends BaseVisualChange {
         );
         throwIfAborted(signal);
         if (this.device.platform === "android") {
-          return await this.observedInteraction(
-            () => this.executeOnAndroidDisplay(options, target, signal),
-            {
-              changeExpected: false,
-              display: target.observation.display.key,
-              previousObservation: target.observation,
-              signal,
-            },
-          );
+          this.validateSelectedDisplayObservation({
+            observation: target.observation,
+            target,
+            includeSystemInsets: options.includeSystemInsets,
+          });
+          return options.lookFor
+            ? await this.searchOnAndroidDisplay({ options, target, progress, signal })
+            : await this.observedInteraction(
+                () => this.executeOnAndroidDisplay(options, target, signal),
+                {
+                  changeExpected: false,
+                  display: target.observation.display.key,
+                  previousObservation: target.observation,
+                  signal,
+                },
+              );
         }
       } catch (error) {
         throwIfAborted(signal);
@@ -420,7 +574,7 @@ export class SwipeOn extends BaseVisualChange {
     signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
     throwIfAborted(signal);
-    const targeted = await this.executeExplicitDisplay(options, signal);
+    const targeted = await this.executeExplicitDisplay(options, { progress, signal });
     if (targeted) {
       return targeted;
     }

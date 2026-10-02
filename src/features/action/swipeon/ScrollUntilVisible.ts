@@ -103,6 +103,19 @@ interface ScrollUntilVisibleDependencies {
   ) => Promise<void>;
 }
 
+/** Display targeting supplies transport only; matching and scroll recovery stay shared. */
+export interface ScrollUntilVisibleStrategy {
+  observe: () => Promise<ObserveResult>;
+  swipe: (options: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    duration: number;
+    previousObservation: ObserveResult;
+  }) => Promise<SwipeOnResult & { observation: ObserveResult }>;
+}
+
 export class ScrollUntilVisible {
   private static readonly MAX_ATTEMPTS = 5;
 
@@ -141,21 +154,39 @@ export class ScrollUntilVisible {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     signal?: AbortSignal,
   ): Promise<SwipeOnResult> {
+    return this.executeWithStrategy({ options, progress, perf, signal });
+  }
+
+  async executeWithStrategy({
+    options,
+    progress,
+    perf = new NoOpPerformanceTracker(),
+    signal,
+    strategy,
+  }: {
+    options: SwipeOnResolvedOptions;
+    progress?: ProgressCallback;
+    perf?: PerformanceTracker;
+    signal?: AbortSignal;
+    strategy?: ScrollUntilVisibleStrategy;
+  }): Promise<SwipeOnResult> {
+    const observe =
+      strategy?.observe ??
+      (() =>
+        this.deps.observeScreen.execute({
+          freshness: "cached-ok",
+          skipScreenshot: true,
+          skipAccessibilityAudit: true,
+          signal,
+        }));
     throwIfAborted(signal);
     logger.info(
       `[SwipeOn] Starting scroll-until-visible: direction=${options.direction}, lookFor=${JSON.stringify(options.lookFor)}`,
     );
 
-    const observationFence = this.deps.captureDisplayFence?.();
+    const observationFence = strategy ? undefined : this.deps.captureDisplayFence?.();
     // Get initial observation
-    let lastObservation = await perf.track("initialObserve", () =>
-      this.deps.observeScreen.execute({
-        freshness: "cached-ok",
-        skipScreenshot: true,
-        skipAccessibilityAudit: true,
-        signal,
-      }),
-    );
+    let lastObservation = await perf.track("initialObserve", () => observe());
     throwIfAborted(signal);
     if (!lastObservation.viewHierarchy || !lastObservation.screenSize) {
       throw new Error("Failed to get initial observation for scrolling until visible.");
@@ -163,7 +194,16 @@ export class ScrollUntilVisible {
 
     // Find the scrollable container
     let containerElement = await perf.track("findContainer", () =>
-      this.findScrollableContainer(options, lastObservation),
+      this.findScrollableContainer(
+        options,
+        lastObservation,
+        strategy
+          ? this.screenBoundsContainer({
+              observation: lastObservation,
+              includeSystemInsets: options.includeSystemInsets,
+            })
+          : undefined,
+      ),
     );
 
     logger.info(
@@ -212,7 +252,7 @@ export class ScrollUntilVisible {
     // Check if TalkBack is enabled (not just any accessibility service)
     const isTalkBackEnabled = await perf.track("checkTalkBack", async () => {
       throwIfAborted(signal);
-      if (this.deps.device.platform !== "android") {
+      if (strategy || this.deps.device.platform !== "android") {
         return false;
       }
       // Pass the real ADB executor (not null) so TalkBack detection works on a
@@ -320,57 +360,68 @@ export class ScrollUntilVisible {
 
       // Execute swipe with observedInteraction
       let iosDispatchTimestamp: number | undefined;
-      const swipeResult = await this.deps.observedInteraction(
-        async (_observeResult, fence) => {
-          gestureOptions.displayFence = {
-            assertCurrent: () => {
-              observationFence?.assertCurrent();
-              fence?.assertCurrent();
+      const swipeResult = strategy
+        ? await strategy.swipe({
+            x1: Math.floor(startX),
+            y1: Math.floor(startY),
+            x2: Math.floor(endX),
+            y2: Math.floor(endY),
+            duration: activeDuration,
+            previousObservation: lastObservation,
+          })
+        : await this.deps.observedInteraction(
+            async (_observeResult, fence) => {
+              gestureOptions.displayFence = {
+                assertCurrent: () => {
+                  observationFence?.assertCurrent();
+                  fence?.assertCurrent();
+                },
+              };
+              throwIfAborted(signal);
+              const swipeRunner =
+                this.deps.device.platform === "ios"
+                  ? this.deps.voiceOverExecutor
+                  : this.deps.talkBackExecutor;
+              if (!swipeRunner) {
+                throw new Error(
+                  "VoiceOver swipe runner is not configured for iOS scroll-until-visible",
+                );
+              }
+              const result = await swipeRunner.executeSwipeGesture(
+                Math.floor(startX),
+                Math.floor(startY),
+                Math.floor(endX),
+                Math.floor(endY),
+                activeDirection,
+                containerElement,
+                gestureOptions,
+                perf,
+                boomerang,
+                signal,
+              );
+              if (this.deps.device.platform === "ios" && result.success) {
+                iosDispatchTimestamp = this.deps.timer.now();
+                IOSCtrlProxyClient.getExistingInstance(
+                  this.deps.device.deviceId,
+                )?.invalidateCache();
+              }
+              return result;
             },
-          };
-          throwIfAborted(signal);
-          const swipeRunner =
-            this.deps.device.platform === "ios"
-              ? this.deps.voiceOverExecutor
-              : this.deps.talkBackExecutor;
-          if (!swipeRunner) {
-            throw new Error(
-              "VoiceOver swipe runner is not configured for iOS scroll-until-visible",
-            );
-          }
-          const result = await swipeRunner.executeSwipeGesture(
-            Math.floor(startX),
-            Math.floor(startY),
-            Math.floor(endX),
-            Math.floor(endY),
-            activeDirection,
-            containerElement,
-            gestureOptions,
-            perf,
-            boomerang,
-            signal,
+            {
+              changeExpected: false,
+              timeoutMs: 500,
+              progress,
+              perf,
+              signal,
+              skipPreviousObserve: scrollIteration > 1,
+              deferPostActionScreenshot: true,
+              observationTimestampProvider: () => iosDispatchTimestamp,
+              predictionContext: {
+                toolName: "swipeOn",
+                toolArgs: this.deps.buildPredictionArgs(options),
+              },
+            },
           );
-          if (this.deps.device.platform === "ios" && result.success) {
-            iosDispatchTimestamp = this.deps.timer.now();
-            IOSCtrlProxyClient.getExistingInstance(this.deps.device.deviceId)?.invalidateCache();
-          }
-          return result;
-        },
-        {
-          changeExpected: false,
-          timeoutMs: 500,
-          progress,
-          perf,
-          signal,
-          skipPreviousObserve: scrollIteration > 1,
-          deferPostActionScreenshot: true,
-          observationTimestampProvider: () => iosDispatchTimestamp,
-          predictionContext: {
-            toolName: "swipeOn",
-            toolArgs: this.deps.buildPredictionArgs(options),
-          },
-        },
-      );
       throwIfAborted(signal);
 
       if (swipeResult.observation?.viewHierarchy) {
@@ -416,7 +467,14 @@ export class ScrollUntilVisible {
       const elapsedMs = this.deps.timer.now() - startTime;
       const idleCheckMaxMs = Math.min(1500, Math.max(0, maxTime - elapsedMs - 300));
       if (idleCheckMaxMs > 100) {
-        lastObservation = await this.waitForScrollIdle(lastObservation, idleCheckMaxMs, signal);
+        lastObservation = await waitForScrollIdle(lastObservation, {
+          observe,
+          timer: this.deps.timer,
+          maxWaitMs: idleCheckMaxMs,
+          pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
+          logPrefix: "[SwipeOn]",
+          signal,
+        });
       }
 
       // Check if hierarchy changed (detect scroll end)
@@ -425,12 +483,7 @@ export class ScrollUntilVisible {
         logger.info(
           `[SwipeOn] Iteration ${scrollIteration}: stale unchanged observation; re-observing once before scroll-end decision`,
         );
-        lastObservation = await this.deps.observeScreen.execute({
-          freshness: "cached-ok",
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-          signal,
-        });
+        lastObservation = await observe();
         currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
       }
       const fingerprintChanged = currentFingerprint !== lastFingerprint;
@@ -625,7 +678,7 @@ export class ScrollUntilVisible {
   async findScrollableContainer(
     options: SwipeOnOptions,
     observeResult: ObserveResult,
-    fallbackElement: Element = this.screenBoundsContainer(observeResult),
+    fallbackElement: Element = this.screenBoundsContainer({ observation: observeResult }),
   ): Promise<Element> {
     let element: Element | null = null;
     const viewHierarchy = observeResult.viewHierarchy!;
@@ -664,10 +717,16 @@ export class ScrollUntilVisible {
     return element;
   }
 
-  private screenBoundsContainer(observation: ObserveResult): Element {
+  private screenBoundsContainer({
+    observation,
+    includeSystemInsets,
+  }: {
+    observation: ObserveResult;
+    includeSystemInsets?: boolean;
+  }): Element {
     const screenSize = observation.screenSize || { width: 1080, height: 1920 };
     return {
-      bounds: getScreenBounds(screenSize, observation.systemInsets),
+      bounds: getScreenBounds(screenSize, observation.systemInsets, includeSystemInsets),
       scrollable: true,
     } as Element;
   }
@@ -783,27 +842,6 @@ export class ScrollUntilVisible {
         (observation.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom,
       ),
     };
-  }
-
-  private async waitForScrollIdle(
-    currentObservation: ObserveResult,
-    maxWaitMs: number,
-    signal?: AbortSignal,
-  ): Promise<ObserveResult> {
-    return waitForScrollIdle(currentObservation, {
-      observe: () =>
-        this.deps.observeScreen.execute({
-          freshness: "cached-ok",
-          skipScreenshot: true,
-          skipAccessibilityAudit: true,
-          signal,
-        }),
-      timer: this.deps.timer,
-      maxWaitMs,
-      pollIntervalMs: SCROLL_IDLE_POLL_INTERVAL_MS,
-      logPrefix: "[SwipeOn]",
-      signal,
-    });
   }
 
   private resolveContainerSwipeCoordinates(

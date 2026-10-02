@@ -4370,6 +4370,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
               quiescenceMs = HierarchyQuiescence.POLL_MS,
               maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
               pollIntervalMs = 10L,
+              snapshotOptions = HierarchySnapshotOptions(displayId = displayId),
             )
         },
       ) { outcome ->

@@ -19,6 +19,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.BeforeClass
 import org.junit.Test
@@ -57,6 +58,31 @@ class HierarchyDebouncerSuppressionTest {
 
   private fun await(latch: CountDownLatch) {
     assertTrue("timed out waiting for extraction", latch.await(1, TimeUnit.SECONDS))
+  }
+
+  @Test
+  fun `quiescence extraction forwards explicit and default snapshot options`() = runTest {
+    val optionsSeen = mutableListOf<HierarchySnapshotOptions>()
+    val debouncer =
+      HierarchyDebouncer(
+        scope = backgroundScope,
+        timeProvider = FakeTime(),
+        extractHierarchy = { _, snapshotOptions ->
+          optionsSeen.add(snapshotOptions)
+          ViewHierarchy(packageName = "current")
+        },
+      )
+    val explicit = HierarchySnapshotOptions(displayId = 2)
+    debouncer.extractAfterQuiescence(
+      quiescenceMs = 0,
+      initialEventWaitMs = 0,
+      snapshotOptions = explicit,
+    )
+    debouncer.extractAfterQuiescence(quiescenceMs = 0, initialEventWaitMs = 0)
+    assertEquals(2, optionsSeen.size)
+    assertSame(explicit, optionsSeen.first())
+    assertEquals(2, optionsSeen.first().displayId)
+    assertNull(optionsSeen.last().displayId)
   }
 
   @Test

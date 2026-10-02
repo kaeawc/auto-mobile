@@ -293,6 +293,7 @@ internal constructor(
     maxWaitMs: Long = HierarchyQuiescence.TIMEOUT_MS,
     pollIntervalMs: Long = 10L,
     initialEventWaitMs: Long = 200L, // Max time to wait for first event
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
   ): ViewHierarchy? {
     val startTime = timeProvider.currentTimeMillis()
     val initialTimestamp = lastEventTimestamp // Capture timestamp BEFORE the action
@@ -378,7 +379,7 @@ internal constructor(
           }
 
           // Now extract the hierarchy
-          extractAndCompare(skipFlowEmit = true)
+          extractAndCompare(skipFlowEmit = true, snapshotOptions = snapshotOptions)
         }
 
       val totalWait = timeProvider.currentTimeMillis() - startTime

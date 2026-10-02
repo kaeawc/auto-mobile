@@ -1,7 +1,126 @@
 import { describe, expect, test } from "bun:test";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { segmentGraphemes } from "../../../src/features/action/SendKeys";
-import { android, createSendKeysHarness, ios, smallCorpus as corpus } from "./SendKeysTestHarness";
+import {
+  SendKeys,
+  segmentGraphemes,
+  type SendKeysCommand,
+} from "../../../src/features/action/SendKeys";
+import {
+  android,
+  createSendKeysHarness,
+  ios,
+  observer,
+  smallCorpus as corpus,
+} from "./SendKeysTestHarness";
+
+describe("sendKeys unsafe caret across commands", () => {
+  function harness(caretPlaced: false | undefined) {
+    const h = createSendKeysHarness(android);
+    const insert = h.client.insert;
+    h.client.insert = async (text, options) => ({
+      ...(await insert(text, options)),
+      ...(text === "é" ? { caretPlaced } : {}),
+    });
+    const sendKeys = new SendKeys(android, undefined, {
+      executor: h.executor,
+      observer,
+      timestampProvider: { now: async () => 1 },
+      timer: new FakeTimer(),
+    });
+    return { ...h, sendKeys };
+  }
+  const unsafe: SendKeysCommand = { action: "type", text: "é", mode: "eventAll" };
+  const ascii: SendKeysCommand = { action: "type", text: "abc", mode: "eventAll" };
+
+  test("carries unsafe caret to the next eventAll type command", async () => {
+    const h = harness(false);
+    expect(await h.sendKeys.execute([unsafe, ascii])).toMatchObject({ success: true });
+    expect(h.deliveries).toEqual([
+      { kind: "insert", text: "é" },
+      { kind: "insert", text: "abc" },
+    ]);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+  });
+
+  for (const reset of [
+    { action: "clear" },
+    { action: "key", key: "arrow_right" },
+    { action: "key", key: "next" },
+  ] satisfies SendKeysCommand[]) {
+    test(`resets unsafe caret on ${reset.action === "key" ? reset.key : reset.action}`, async () => {
+      const h = harness(false);
+      expect(await h.sendKeys.execute([unsafe, reset, ascii])).toMatchObject({ success: true });
+      expect(h.inserted).toEqual(["é"]);
+      expect(h.deliveries.slice(-3)).toEqual([
+        { kind: "keyevent", text: "a" },
+        { kind: "keyevent", text: "b" },
+        { kind: "keyevent", text: "c" },
+      ]);
+    });
+  }
+
+  test("resets unsafe caret on replace's clear", async () => {
+    const h = harness(false);
+    expect(await h.sendKeys.execute([unsafe, { ...ascii, operation: "replace" }])).toMatchObject({
+      success: true,
+    });
+    expect(h.clientCalls).toEqual(["insert:é", "clear"]);
+    expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
+      "keyevent",
+      "keyevent",
+      "keyevent",
+    ]);
+  });
+
+  test("resets unsafe caret between sendKeys calls on the same executor", async () => {
+    const h = harness(false);
+    expect(await h.sendKeys.execute([unsafe])).toMatchObject({ success: true });
+    expect(await h.sendKeys.execute([ascii])).toMatchObject({ success: true });
+    expect(h.inserted).toEqual(["é"]);
+    expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
+      "keyevent",
+      "keyevent",
+      "keyevent",
+    ]);
+  });
+
+  test("old APK with undefined caretPlaced retains subsequent key events", async () => {
+    const h = harness(undefined);
+    expect(await h.sendKeys.execute([unsafe, ascii])).toMatchObject({ success: true });
+    expect(h.inserted).toEqual(["é"]);
+    expect(h.deliveries.slice(-3).map((delivery) => delivery.kind)).toEqual([
+      "keyevent",
+      "keyevent",
+      "keyevent",
+    ]);
+  });
+
+  for (const mode of ["a11y", "eventLast"] as const) {
+    test(`carries unsafe caret from ${mode} inserts into eventAll`, async () => {
+      const h = harness(false);
+      // eventLast's suffix insert can succeed with an unknown caret after its real tail event.
+      const text = mode === "eventLast" ? "xé" : "é";
+      expect(await h.sendKeys.execute([{ ...unsafe, text, mode }, ascii])).toMatchObject({
+        success: true,
+      });
+      expect(h.inserted).toEqual(["é", "abc"]);
+      expect(h.deliveries.at(-1)).toEqual({ kind: "insert", text: "abc" });
+    });
+  }
+
+  for (const mode of ["eventLast", "eventOnly", "imeKeyEvents"] as const) {
+    test(`${mode} refuses subsequent text at an unsafe caret without mutation`, async () => {
+      const h = harness(false);
+      expect(await h.sendKeys.execute([unsafe, { ...ascii, mode }])).toMatchObject({
+        success: false,
+        completedCommands: 1,
+        failedIndex: 1,
+        error: expect.stringContaining("caret"),
+      });
+      expect(h.deliveries).toEqual([{ kind: "insert", text: "é" }]);
+    });
+  }
+});
 
 describe("sendKeys Unicode delivery", () => {
   test("segments multi-code-point graphemes as complete units", () => {
@@ -286,7 +405,7 @@ describe("Android eventAll caret and preceding input", () => {
     }
   });
 
-  test("caret remainder has no expectedSuffix and a later command resumes ordinary routing", async () => {
+  test("caret remainder and later commands stay on insertion without an expectedSuffix", async () => {
     const h = createSendKeysHarness(android);
     const seen: Array<{ expectedSuffix?: string } | undefined> = [];
     const insert = h.client.insert;
@@ -298,10 +417,9 @@ describe("Android eventAll caret and preceding input", () => {
     await h.executor.type({ action: "type", text: "a👍🏽b", mode: "eventAll" });
     expect(seen).toEqual([{ expectedSuffix: "a" }, undefined]);
     await h.executor.type({ action: "type", text: "c", mode: "eventAll" });
-    expect(h.adb.getExecutedCommands()).toEqual([
-      "shell input keyevent KEYCODE_A",
-      "shell input keyevent KEYCODE_C",
-    ]);
+    expect(seen).toEqual([{ expectedSuffix: "a" }, undefined, undefined]);
+    expect(h.inserted).toEqual(["👍🏽", "b", "c"]);
+    expect(h.adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_A"]);
   });
 
   test("eventAll reports a length mismatch as a lengths-only warning", async () => {

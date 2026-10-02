@@ -88,6 +88,9 @@ function descriptor(
 const allowAllAuthenticator: StreamSocketAuthenticator = { authorize: () => {} };
 
 class TestableServer extends WebRtcStreamSocketServer {
+  simulateStarted(): void {
+    this.onServerStarted();
+  }
   constructor(
     deps: WebRtcStreamSocketServerDependencies,
     authenticator: StreamSocketAuthenticator = allowAllAuthenticator,
@@ -180,6 +183,139 @@ function lastResponse(socket: FakeSocket): WebRtcStreamSocketResponse {
 }
 
 describe("WebRtcStreamSocketServer", () => {
+  test("ownership hooks stay lazy, reauthorize resolved sessions, and unsubscribe on close", async () => {
+    let notify: (deviceId: string) => void = () => {
+      throw new Error("not subscribed");
+    };
+    let unsubscribed = 0;
+    let reconciled = 0;
+    let stoppedAll = 0;
+    const authorized: string[] = [];
+    const server = new TestableServer(
+      makeDeps({
+        ownershipChanges: () => ({
+          onDeviceOwnershipChange: (callback) => {
+            notify = callback;
+            return () => {
+              unsubscribed++;
+            };
+          },
+        }),
+        reconcileOwnership: async (deviceId, isAuthorized) => {
+          reconciled++;
+          expect(deviceId).toBe(ANDROID.deviceId);
+          expect(isAuthorized("session-owner")).toBe(true);
+          expect(isAuthorized("session-released")).toBe(false);
+        },
+        stopAllStreams: async () => {
+          stoppedAll++;
+        },
+      }),
+      {
+        authorize: ({ sessionUuid, requireOwnership }) => {
+          if (!requireOwnership) {
+            return;
+          }
+          authorized.push(sessionUuid ?? "missing");
+          if (sessionUuid !== "session-owner") {
+            throw new ActionableError("ownership lost");
+          }
+        },
+      },
+    );
+    server.simulateStarted();
+    notify(ANDROID.deviceId);
+    expect(reconciled).toBe(0);
+    await server.simulate(new FakeSocket(), { action: "list", id: "load" });
+    expect(() => notify(ANDROID.deviceId)).not.toThrow();
+    await flushMicrotasks();
+    expect(reconciled).toBe(1);
+    expect(authorized).toEqual(["session-owner", "session-released"]);
+    await server.close();
+    await server.close();
+    expect(unsubscribed).toBe(1);
+    expect(stoppedAll).toBe(1);
+    notify(ANDROID.deviceId);
+    expect(reconciled).toBe(1);
+  });
+
+  test("close does not load unused dependencies and bounds failing cleanup", async () => {
+    let unusedCleanupCalls = 0;
+    const unused = new TestableServer(
+      makeDeps({
+        stopAllStreams: async () => {
+          unusedCleanupCalls++;
+        },
+      }),
+    );
+    await unused.close();
+    expect(unusedCleanupCalls).toBe(0);
+    const timer = new FakeTimer();
+    // A list request loads the injected manager seam without binding a socket.
+    class RequestHarness extends WebRtcStreamSocketServer {
+      load(): Promise<WebRtcStreamSocketResponse> {
+        return this.handleRequest({ action: "list" });
+      }
+    }
+    const harness = new RequestHarness(
+      "/fake/webrtc-stream.sock",
+      timer,
+      makeDeps({ stopAllStreams: () => new Promise<void>(() => {}) }),
+      allowAllAuthenticator,
+      permissiveDeviceAdmissionGate,
+    );
+    await harness.load();
+    const closing = harness.close();
+    timer.advanceTime(5000);
+    await expect(closing).resolves.toBeUndefined();
+  });
+
+  test("shutdown prevents a pending device resolution from starting a new capture", async () => {
+    let resolveDevice: (device: BootedDevice) => void = () => {
+      throw new Error("not resolving");
+    };
+    const server = new TestableServer(
+      makeDeps({
+        resolveDevice: () =>
+          new Promise<BootedDevice>((resolve) => {
+            resolveDevice = resolve;
+          }),
+      }),
+    );
+    const socket = new FakeSocket();
+    const request = server.simulate(socket, { action: "start", id: "pending" });
+    await flushMicrotasks();
+    await server.close();
+    resolveDevice(ANDROID);
+    await request;
+    expect(started).toEqual([]);
+    expect(lastResponse(socket).success).toBe(false);
+    await server.simulate(socket, { action: "list", id: "closed" });
+    expect(lastResponse(socket).success).toBe(false);
+  });
+
+  test("an unexpected synchronous reconcile failure stays outside the ownership notifier", async () => {
+    let notify: (deviceId: string) => void = () => {};
+    const server = new TestableServer(
+      makeDeps({
+        ownershipChanges: () => ({
+          onDeviceOwnershipChange: (callback) => {
+            notify = callback;
+            return () => {};
+          },
+        }),
+        reconcileOwnership: () => {
+          throw new Error("unexpected reconcile failure");
+        },
+      }),
+    );
+    server.simulateStarted();
+    await server.simulate(new FakeSocket(), { action: "list" });
+    expect(() => notify(ANDROID.deviceId)).not.toThrow();
+    await flushMicrotasks();
+    await server.close();
+  });
+
   test("fails empty default Android discovery without retrying or sleeping", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

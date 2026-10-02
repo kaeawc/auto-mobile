@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { logger } from "../../src/utils/logger";
+import { createWebRtcStreamDeviceIncarnationListener } from "../../src/server/webrtcStreamIncarnationListener";
 import {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
@@ -6,6 +8,10 @@ import {
   setWebRtcStreamManagerDependencies,
   startWebRtcStream,
   stopWebRtcStream,
+  stopWebRtcStreamsForDevice,
+  reconcileWebRtcStreamsForDeviceOwnership,
+  stopAllWebRtcStreams,
+  WEBRTC_STREAM_STOP_TIMEOUT_MS,
   waitForWebRtcStreamReadiness,
   WEBRTC_STREAM_LEASE_TTL_MS,
   type WebRtcStreamManagerDependencies,
@@ -123,11 +129,13 @@ class AsyncConnectedPublisher extends FakePublisher {
 class FakeSource {
   started = false;
   stopped = false;
+  stopCalls = 0;
   keyFrameRequests = 0;
   async start(): Promise<void> {
     this.started = true;
   }
   async stop(): Promise<void> {
+    this.stopCalls++;
     this.stopped = true;
   }
   requestKeyFrame(): boolean {
@@ -169,6 +177,166 @@ afterEach(() => {
 });
 
 describe("webrtcStreamManager", () => {
+  for (const boundary of ["ownership", "incarnation", "device", "shutdown"] as const) {
+    test(`${boundary} cleanup claims streams before explicit stop and lease expiry`, async () => {
+      const { sources } = installFakes();
+      const timer = new FakeTimer();
+      setWebRtcStreamManagerDependencies({ timer });
+      const stream = await startWebRtcStream({
+        device: ANDROID,
+        sessionUuid: "released",
+        overrides: { whipEndpoint: ENDPOINT },
+      });
+      await startWebRtcStream({
+        device: IOS,
+        sessionUuid: "other",
+        overrides: { whipEndpoint: ENDPOINT },
+      });
+      const listener = createWebRtcStreamDeviceIncarnationListener();
+      const cleanup =
+        boundary === "ownership"
+          ? reconcileWebRtcStreamsForDeviceOwnership(ANDROID.deviceId, () => false)
+          : boundary === "incarnation"
+            ? Promise.resolve(listener.prepareForIncarnationChange?.(ANDROID.deviceId))
+            : boundary === "device"
+              ? stopWebRtcStreamsForDevice(ANDROID.deviceId, "disconnect")
+              : stopAllWebRtcStreams("shutdown");
+      expect(sources[0].stopCalls).toBe(1);
+      await expect(stopWebRtcStream(stream.streamId)).rejects.toThrow(ActionableError);
+      await cleanup;
+      await listener.onDeviceIncarnationChanged(ANDROID.deviceId);
+      await cleanup;
+      expect(sources[1].stopCalls).toBe(boundary === "shutdown" ? 1 : 0);
+      timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS);
+      await flushPublisherStart();
+      expect(sources[0].stopCalls).toBe(1);
+    });
+  }
+
+  test("ownership revokes only unauthorized leases and retains anonymous leases", async () => {
+    const { sources } = installFakes();
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({ timer, isSessionLive: () => true });
+    const stream = await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "released",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await startWebRtcStream({
+      device: ANDROID,
+      sessionUuid: "owner",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await startWebRtcStream({
+      device: IOS,
+      sessionUuid: "released",
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    await reconcileWebRtcStreamsForDeviceOwnership(
+      ANDROID.deviceId,
+      (session) => session === "owner",
+    );
+    expect(getWebRtcStreamDescriptor(stream.streamId)?.consumerCount).toBe(2);
+    expect(() => getWebRtcStreamDescriptor(stream.streamId, stream.lease?.id, "released")).toThrow(
+      ActionableError,
+    );
+    expect(sources.map((source) => source.stopCalls)).toEqual([0, 0]);
+    await reconcileWebRtcStreamsForDeviceOwnership(ANDROID.deviceId, () => false);
+    expect(getWebRtcStreamDescriptor(stream.streamId)?.consumerCount).toBe(1);
+    expect(timer.getPendingTimeouts()).toEqual([
+      WEBRTC_STREAM_LEASE_TTL_MS,
+      WEBRTC_STREAM_LEASE_TTL_MS,
+    ]);
+  });
+
+  test("explicit stop claims before lifecycle cleanup", async () => {
+    const { sources } = installFakes();
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({ timer });
+    const stream = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    const stop = stopWebRtcStream(stream.streamId);
+    await stopWebRtcStreamsForDevice(ANDROID.deviceId, "rebind");
+    await stop;
+    timer.advanceTime(WEBRTC_STREAM_LEASE_TTL_MS);
+    expect(sources[0].stopCalls).toBe(1);
+  });
+
+  test("an already queued lease callback cannot stop a lifecycle-claimed source twice", async () => {
+    class QueuedTimer extends FakeTimer {
+      callbacks: Array<() => void> = [];
+      override setTimeout(callback: () => void, ms: number): NodeJS.Timeout {
+        this.callbacks.push(callback);
+        return super.setTimeout(callback, ms);
+      }
+    }
+    const { sources } = installFakes();
+    const timer = new QueuedTimer();
+    setWebRtcStreamManagerDependencies({ timer });
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    const expiry = timer.callbacks[0];
+    await stopWebRtcStreamsForDevice(ANDROID.deviceId, "restore");
+    expiry();
+    expect(sources[0].stopCalls).toBe(1);
+  });
+
+  test("lifecycle cleanup during source startup retires its late completion exactly once", async () => {
+    const { sources } = installFakes();
+    setWebRtcStreamManagerDependencies({
+      timer: new FakeTimer(),
+      createSource: () => {
+        const source = new FakeSource();
+        source.start = async () => {
+          source.started = true;
+          await stopWebRtcStreamsForDevice(ANDROID.deviceId, "restore during start");
+        };
+        sources.push(source);
+        return source as unknown as AndroidH264Source;
+      },
+    });
+    const stream = await startWebRtcStream({
+      device: ANDROID,
+      overrides: { whipEndpoint: ENDPOINT },
+    });
+    expect(stream.state).toBe("stopped");
+    expect(sources[0].stopCalls).toBe(1);
+    expect(listWebRtcStreams()).toEqual([]);
+  });
+
+  test("hung source cleanup is concurrent and bounded, and warns instead of throwing", async () => {
+    const { sources, publishers } = installFakes();
+    const timer = new FakeTimer();
+    setWebRtcStreamManagerDependencies({ timer });
+    await startWebRtcStream({ device: ANDROID, overrides: { whipEndpoint: ENDPOINT } });
+    await startWebRtcStream({ device: IOS, overrides: { whipEndpoint: ENDPOINT } });
+    sources[0].stop = () => {
+      sources[0].stopCalls++;
+      return new Promise<void>(() => {});
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      let settled = false;
+      const cleanup = stopAllWebRtcStreams("shutdown").then(() => {
+        settled = true;
+      });
+      await flushPublisherStart();
+      expect(sources.map((source) => source.stopCalls)).toEqual([1, 1]);
+      expect(publishers.every((publisher) => publisher.stopped)).toBe(true);
+      timer.advanceTime(WEBRTC_STREAM_STOP_TIMEOUT_MS - 1);
+      await flushPublisherStart();
+      expect(settled).toBe(false);
+      timer.advanceTime(1);
+      await cleanup;
+      expect(warn).toHaveBeenCalled();
+      expect(listWebRtcStreams()).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("rejects another live session renewing an owned lease", async () => {
     installFakes();
     setWebRtcStreamManagerDependencies({ isSessionLive: () => true });

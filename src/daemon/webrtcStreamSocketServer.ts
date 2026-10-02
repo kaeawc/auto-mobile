@@ -9,6 +9,8 @@ import type {
   listWebRtcStreams,
   startWebRtcStream,
   stopWebRtcStream,
+  reconcileWebRtcStreamsForDeviceOwnership,
+  stopAllWebRtcStreams,
   waitForWebRtcStreamReadiness,
 } from "../server/webrtcStreamManager";
 import type {
@@ -25,6 +27,10 @@ import {
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "./deviceAdmissionGate";
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { DefaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import { DaemonState } from "./daemonState";
+import type { DeviceOwnershipChanges } from "./videoStreamSocketServer";
+import { errorMessage } from "../utils/describeUnknownError";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
 
 /** Injectable dependencies so the server can be tested without a device pool. */
 export interface WebRtcStreamSocketServerDependencies {
@@ -34,6 +40,9 @@ export interface WebRtcStreamSocketServerDependencies {
   listStreams: typeof listWebRtcStreams;
   getStream: typeof getWebRtcStreamDescriptor;
   awaitReadiness?: typeof waitForWebRtcStreamReadiness;
+  ownershipChanges?: () => DeviceOwnershipChanges | null;
+  reconcileOwnership?: typeof reconcileWebRtcStreamsForDeviceOwnership;
+  stopAllStreams?: typeof stopAllWebRtcStreams;
 }
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
@@ -46,6 +55,13 @@ const WEBRTC_STREAM_PURPOSE = "to start a WebRTC stream";
 function loadManager() {
   return import("../server/webrtcStreamManager");
 }
+
+function defaultOwnershipChanges(): DeviceOwnershipChanges | null {
+  const state = DaemonState.getInstance();
+  return state.isInitialized() ? state.getSessionManager() : null;
+}
+
+const WEBRTC_SOCKET_CLOSE_TIMEOUT_MS = 5_000;
 
 export async function resolveWebRtcStreamDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
@@ -174,6 +190,9 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   private resolvedDeps: WebRtcStreamSocketServerDependencies | null = null;
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
+  private removeOwnershipListener: (() => void) | null = null;
+  private closed = false;
+  private closing: Promise<void> | null = null;
 
   constructor(
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
@@ -194,9 +213,66 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     return request.action === "stop";
   }
 
+  protected override onServerStarted(): void {
+    this.closed = false;
+    this.closing = null;
+    this.removeOwnershipListener?.();
+    const ownershipChanges = this.injectedDeps
+      ? this.injectedDeps.ownershipChanges
+      : defaultOwnershipChanges;
+    this.removeOwnershipListener =
+      ownershipChanges?.()?.onDeviceOwnershipChange((deviceId) => {
+        void this.reconcileOwnership(deviceId).catch((error) => {
+          logger.warn(`[WebRtcStream] ownership cleanup failed: ${errorMessage(error)}`, error);
+        });
+      }) ?? null;
+  }
+
+  private async reconcileOwnership(deviceId: string): Promise<void> {
+    // Never load werift merely because an idle daemon changed device ownership.
+    if (this.closed || !this.resolvedDeps?.reconcileOwnership) {
+      return;
+    }
+    await this.resolvedDeps.reconcileOwnership(deviceId, (sessionUuid) => {
+      try {
+        this.authenticator.authorize({ sessionUuid, deviceId, requireOwnership: true });
+        return true;
+      } catch (error) {
+        logger.warn(`[WebRtcStream] revoking lease for ${deviceId}: ${errorMessage(error)}`, error);
+        return false;
+      }
+    });
+  }
+
+  override close(): Promise<void> {
+    if (this.closing) {
+      return this.closing;
+    }
+    this.closed = true;
+    this.removeOwnershipListener?.();
+    this.removeOwnershipListener = null;
+    this.closing = raceWithDeadline(
+      async () => {
+        await Promise.all([
+          this.resolvedDeps?.stopAllStreams?.("socket server shutdown"),
+          super.close(),
+        ]);
+      },
+      {
+        timer: this.timer,
+        timeoutMs: WEBRTC_SOCKET_CLOSE_TIMEOUT_MS,
+        label: "WebRTC socket server shutdown",
+      },
+    ).catch((error) => {
+      logger.warn(`[WebRtcStream] shutdown cleanup failed: ${errorMessage(error)}`, error);
+    });
+    return this.closing;
+  }
+
   /** Resolve dependencies, lazily loading the (werift-heavy) manager on first use. */
   private async getDeps(): Promise<WebRtcStreamSocketServerDependencies> {
     if (this.injectedDeps) {
+      this.resolvedDeps = this.injectedDeps;
       return this.injectedDeps;
     }
     if (!this.resolvedDeps) {
@@ -208,6 +284,8 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
         listStreams: manager.listWebRtcStreams,
         getStream: manager.getWebRtcStreamDescriptor,
         awaitReadiness: manager.waitForWebRtcStreamReadiness,
+        reconcileOwnership: manager.reconcileWebRtcStreamsForDeviceOwnership,
+        stopAllStreams: manager.stopAllWebRtcStreams,
       };
     }
     return this.resolvedDeps;
@@ -216,12 +294,14 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   protected async handleRequest(
     request: WebRtcStreamSocketRequest,
   ): Promise<WebRtcStreamSocketResponse> {
+    this.assertOpen();
     // Authenticate before touching device state or the WebRTC stack (issue
     // #4751). An unauthenticated or cross-session request is rejected here.
     this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
     const sessionUuid =
       this.authenticator.resolveSessionIdentity?.(request.sessionUuid) ?? request.sessionUuid;
     const deps = await this.getDeps();
+    this.assertOpen();
     switch (request.action) {
       case "start":
         return this.handleStart(deps, request, sessionUuid);
@@ -273,6 +353,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       this.admissionGate.assertDeviceActionable(request.deviceId, WEBRTC_STREAM_PURPOSE);
     }
     const device = await deps.resolveDevice(request.deviceId, request.platform ?? "android");
+    this.assertOpen();
     this.admissionGate.assertDeviceActionable(device.deviceId, WEBRTC_STREAM_PURPOSE);
     authorizeResolvedDevice(this.authenticator, request.sessionUuid, device.deviceId);
     const stream = await deps.startStream({
@@ -354,6 +435,12 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
 
   protected createErrorResponse(id: string | undefined, error: string): WebRtcStreamSocketResponse {
     return { id, success: false, type: "webrtc_stream_response", error };
+  }
+
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new ActionableError("WebRTC stream socket server is closed.");
+    }
   }
 }
 

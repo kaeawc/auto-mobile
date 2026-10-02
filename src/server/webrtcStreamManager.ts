@@ -4,6 +4,8 @@ import { logger } from "../utils/logger";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { DaemonState } from "../daemon/daemonState";
+import { raceWithDeadline } from "../utils/raceWithDeadline";
+import { registerWebRtcStreamIncarnationCleanup } from "./webrtcStreamIncarnationListener";
 import {
   createH264CaptureSource,
   resolveVideoServerJar,
@@ -153,6 +155,75 @@ const streams = new Map<string, WebRtcStreamRecord>();
 const FRAME_STALL_TIMEOUT_MS = 10_000;
 export const DEFAULT_STREAM_READY_TIMEOUT_MS = 30_000;
 export const WEBRTC_STREAM_LEASE_TTL_MS = 60_000;
+export const WEBRTC_STREAM_STOP_TIMEOUT_MS = 5_000;
+
+/** Claim synchronously, before any cleanup await can race another stop path. */
+function claimStreamRecord(record: WebRtcStreamRecord): boolean {
+  if (streams.get(record.streamId) !== record) {
+    return false;
+  }
+  discardDeadRecord(record);
+  return true;
+}
+
+async function stopClaimedRecords(records: WebRtcStreamRecord[], reason: string): Promise<void> {
+  await Promise.all(
+    records.filter(claimStreamRecord).map(async (record) => {
+      try {
+        await raceWithDeadline(() => stopActiveRecord(record), {
+          timer: dependencies.timer,
+          timeoutMs: WEBRTC_STREAM_STOP_TIMEOUT_MS,
+          label: `WebRTC stream ${record.streamId} cleanup (${reason})`,
+        });
+      } catch (error) {
+        logger.warn(`[WebRtcStream] cleanup failed (${reason}): ${errorMessage(error)}`, error);
+      }
+    }),
+  );
+}
+
+/** Best-effort lifecycle cleanup, bounded independently for every device stream. */
+export function stopWebRtcStreamsForDevice(deviceId: string, reason: string): Promise<void> {
+  return stopClaimedRecords(
+    [...streams.values()].filter((record) => record.device.deviceId === deviceId),
+    reason,
+  );
+}
+
+/** Revoke session leases immediately when device ownership changes. */
+export function reconcileWebRtcStreamsForDeviceOwnership(
+  deviceId: string,
+  isLeaseHolderAuthorized: (sessionUuid: string) => boolean,
+): Promise<void> {
+  const revoked: WebRtcStreamRecord[] = [];
+  // Quarantine/removal without session release has no multi-subscriber event,
+  // just like the video relay. Immediate cleanup there needs a device-removal/
+  // quarantine hook; until then those streams still depend on lease expiry.
+  for (const record of streams.values()) {
+    if (record.device.deviceId !== deviceId) {
+      continue;
+    }
+    for (const [leaseId, lease] of record.leases) {
+      // Anonymous leases (auth disabled) cannot be revoked by session ownership.
+      if (lease.sessionUuid !== undefined && !isLeaseHolderAuthorized(lease.sessionUuid)) {
+        record.leases.delete(leaseId);
+      }
+    }
+    if (record.leases.size === 0) {
+      revoked.push(record);
+    } else {
+      scheduleLeaseExpiry(record);
+    }
+  }
+  return stopClaimedRecords(revoked, "device ownership changed");
+}
+
+/** Stop all live captures on daemon shutdown without serial cleanup delays. */
+export function stopAllWebRtcStreams(reason: string): Promise<void> {
+  return stopClaimedRecords([...streams.values()], reason);
+}
+
+registerWebRtcStreamIncarnationCleanup({ stopStreamsForDevice: stopWebRtcStreamsForDevice });
 
 /** Override manager dependencies (tests). */
 export function setWebRtcStreamManagerDependencies(
@@ -255,10 +326,7 @@ function scheduleLeaseExpiry(record: WebRtcStreamRecord): void {
         scheduleLeaseExpiry(record);
         return;
       }
-      streams.delete(record.streamId);
-      void stopActiveRecord(record).catch((error) => {
-        logger.debug(`[WebRtcStream] lease expiry cleanup failed: ${error}`);
-      });
+      void stopClaimedRecords([record], "lease expired");
     },
     Math.max(0, earliestExpiry - dependencies.timer.now()),
   );
@@ -491,12 +559,15 @@ async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   record.sourceStarted = false;
   record.frameMetrics = undefined;
   if (record.source) {
-    record.sourceTelemetry = record.source.getTelemetry?.() ?? record.sourceTelemetry;
-    await record.source.stop().catch((error) => {
-      logger.debug(`[WebRtcStream] source stop failed: ${error}`);
-    });
+    const source = record.source;
+    record.sourceTelemetry = source.getTelemetry?.() ?? record.sourceTelemetry;
+    // Detach before awaiting: lifecycle cleanup and a late start completion must
+    // not call stop twice on the same source, even if its stop never settles.
     record.source = null;
     record.sourceState = "stopped";
+    await source.stop().catch((error) => {
+      logger.warn(`[WebRtcStream] source stop failed: ${errorMessage(error)}`, error);
+    });
   }
 }
 
@@ -594,12 +665,12 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
     record.publisher.notifySourceFailed(error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
-  // The stream may have been stopped while the source was starting. stop() only
-  // reaches record.source, which was still null when it ran, so stop the source
-  // we just spawned to avoid an orphaned screenrecord process.
+  // A lifecycle stop may have claimed this source while start was pending.
+  // Retire a late-starting source if it has not already been claimed for stop.
   if (streams.get(record.streamId) !== record) {
-    record.source = null;
-    await source.stop().catch(() => {});
+    if (record.source === source) {
+      await stopSource(record);
+    }
     return false;
   }
   record.sourceStarted = true;
@@ -637,10 +708,13 @@ function discardDeadRecord(record: WebRtcStreamRecord): void {
 /** Stop live media components while retaining best-effort cleanup semantics. */
 async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
   setLifecycleState(record, "stopping");
-  await stopSource(record);
-  await record.publisher.stop().catch((error) => {
-    logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
-  });
+  // A stuck capture must not prevent the publisher from closing its transport.
+  await Promise.all([
+    stopSource(record),
+    record.publisher.stop().catch((error) => {
+      logger.warn(`[WebRtcStream] publisher stop failed: ${errorMessage(error)}`, error);
+    }),
+  ]);
 }
 
 async function prepareAndPublish(record: WebRtcStreamRecord): Promise<void> {
@@ -720,8 +794,13 @@ export async function startWebRtcStream(
     if (streams.get(streamId) === record) {
       markFailure(record, record.failure?.code ?? "capture_start_failed", error, "degraded");
       record.initialStartFailed = true;
-      await record.source?.stop().catch(() => {});
-      await record.publisher.stop().catch(() => {});
+      await stopSource(record);
+      await record.publisher.stop().catch((stopError) => {
+        logger.warn(
+          `[WebRtcStream] publisher cleanup failed: ${errorMessage(stopError)}`,
+          stopError,
+        );
+      });
       // The initial start never became live, so this record can never recover
       // (prepareAndPublish/onBeforeEstablish never ran to restart the source).
       // A lone caller needs no retained failure lookup; raced leases do.
@@ -761,11 +840,7 @@ export async function stopWebRtcStream(
       return describeRecord(record);
     }
   }
-  streams.delete(record.streamId);
-  if (record.leaseExpiryHandle) {
-    dependencies.timer.clearTimeout(record.leaseExpiryHandle);
-    record.leaseExpiryHandle = null;
-  }
+  claimStreamRecord(record);
   await stopActiveRecord(record);
   return { ...describeRecord(record), state: "stopped" };
 }

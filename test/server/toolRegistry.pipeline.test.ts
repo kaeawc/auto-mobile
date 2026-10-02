@@ -25,6 +25,7 @@ import {
   getMcpRecordingStatus,
   resetMcpRecordingState,
   startMcpRecording,
+  stopMcpRecording,
 } from "../../src/server/mcpRecordingManager";
 import {
   stripToolResultStructuredContent,
@@ -498,6 +499,56 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     resetMcpRecordingState();
   });
 
+  test("a call from connection B is not captured by connection A's recorder", async () => {
+    const timer = new FakeTimer();
+    startMcpRecording({ connectionId: "A", timer });
+    const handler = new DefaultAfterToolCallHandler();
+    await handler.handle({
+      name: "tapOn",
+      args: { text: "Only B", __mcpSessionId: "B" },
+      device: undefined,
+      internalCall: false,
+      response: createStructuredToolResponse({ success: true }),
+      shouldResolveDevice: false,
+      timer,
+      toolStartMs: 0,
+    });
+    expect(getMcpRecordingStatus({ connectionId: "A", timer })?.stepCount).toBe(0);
+  });
+
+  test("interleaved successful calls record only into their connection's plan", async () => {
+    const timer = new FakeTimer();
+    startMcpRecording({ connectionId: "A", timer });
+    startMcpRecording({ connectionId: "B", timer });
+    const handler = new DefaultAfterToolCallHandler();
+    for (const connectionId of ["A", "B", "A", "B"]) {
+      await handler.handle({
+        name: "tapOn",
+        args: { text: `Only ${connectionId}`, __mcpSessionId: connectionId },
+        device: undefined,
+        internalCall: false,
+        response: createStructuredToolResponse({ success: true }),
+        shouldResolveDevice: false,
+        timer,
+        toolStartMs: 0,
+      });
+    }
+    const a = stopMcpRecording({ connectionId: "A", timer });
+    expect(a.stepCount).toBe(2);
+    expect(a.planContent).toContain("Only A");
+    expect(a.planContent).not.toContain("Only B");
+    expect(a.planContent).not.toContain("__mcpSessionId");
+    expect(getMcpRecordingStatus({ connectionId: "B", timer })).toMatchObject({
+      recording: true,
+      stepCount: 2,
+    });
+    const b = stopMcpRecording({ connectionId: "B", timer });
+    expect(b.stepCount).toBe(2);
+    expect(b.planContent).toContain("Only B");
+    expect(b.planContent).not.toContain("Only A");
+    expect(b.planContent).not.toContain("__mcpSessionId");
+  });
+
   test("configured artifact directory creates a writer and replaces observe output metadata", async () => {
     const writer = new FakeObservationArtifactWriter();
     const requestedDirectories: string[] = [];
@@ -683,7 +734,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     });
     const timer = new FakeTimer();
     timer.setCurrentTime(25);
-    startMcpRecording(timer);
+    startMcpRecording({ timer });
     serverConfig.setToolOutputsDir("/tmp/artifacts");
 
     try {
@@ -704,7 +755,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       ).rejects.toThrow("artifact disk is full");
 
       expect(telemetryEvents).toHaveLength(0);
-      expect(getMcpRecordingStatus(timer)?.stepCount).toBe(0);
+      expect(getMcpRecordingStatus({ timer })?.stepCount).toBe(0);
     } finally {
       (TelemetryRecorder as any).getInstance = originalGetInstance;
     }

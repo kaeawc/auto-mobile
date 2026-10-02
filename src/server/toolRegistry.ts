@@ -40,6 +40,7 @@ import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
 import { getMcpRecorder } from "./mcpRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
@@ -1372,7 +1373,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     });
 
     if (toolSuccess) {
-      getMcpRecorder()?.record(name, args);
+      getMcpRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(name, args);
     }
 
     return {

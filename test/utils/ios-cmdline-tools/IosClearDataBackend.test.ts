@@ -63,6 +63,8 @@ describe("iOS clear-data backends", () => {
     expect(resolveIosClearDataBackend(physicalId, h.deps)).toBeInstanceOf(
       PhysicalIosClearDataBackend,
     );
+    expect(resolveIosClearDataBackend(simulatorId, h.deps).kind).toBe("simulator");
+    expect(resolveIosClearDataBackend(physicalId, h.deps).kind).toBe("physical");
     expect(h.creations()).toBe(0);
   });
 

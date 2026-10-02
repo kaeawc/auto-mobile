@@ -3052,6 +3052,8 @@ describe("LaunchApp", () => {
 
       return {
         iosLaunchApp,
+        installedApps,
+        fakeCtrlProxy,
         deviceAppLauncher,
         simctlCalls,
         terminateCalls,
@@ -3064,6 +3066,33 @@ describe("LaunchApp", () => {
         },
       };
     }
+
+    test.each([true, false])(
+      "malformed IDs keep physical launch guards (success=%s)",
+      async (success) => {
+        fakeTimer.enableAutoAdvance();
+        const h = createDeviceHarness({
+          deviceId: "unrecognized-device",
+          launchResult: success
+            ? { success: true, pid: 123 }
+            : { success: false, error: "device unavailable" },
+        });
+        const listing = spyOn(h.installedApps, "listInstalledApps");
+        const retarget = spyOn(h.fakeCtrlProxy, "requestLaunchApp");
+        try {
+          const result = await h.iosLaunchApp.execute(userBundleId);
+          expect(result.success).toBe(success);
+          expect(h.deviceAppLauncher.launchCalls).toHaveLength(1);
+          expect(h.simctlCalls).toEqual([]);
+          expect(listing).not.toHaveBeenCalled();
+          expect(retarget).not.toHaveBeenCalled();
+        } finally {
+          listing.mockRestore();
+          retarget.mockRestore();
+          h.cleanup();
+        }
+      },
+    );
 
     test("launch arguments force a fresh simulator process and reach simctl", async () => {
       fakeTimer.enableAutoAdvance();

@@ -568,6 +568,7 @@ describe("InstallApp", () => {
         (deviceId) => {
           calls.push(`resolve:${deviceId}`);
           return {
+            kind: transport === "simulator" ? "simulator" : "physical",
             installApp: async (path) => {
               calls.push(`install:${path}`);
             },
@@ -587,6 +588,25 @@ describe("InstallApp", () => {
       );
     },
   );
+
+  test("malformed IDs still reject simulator artifacts with the physical error", async () => {
+    const simctl = new FakeSimctl();
+    const installer = new FakeDeviceAppInstaller();
+    const action = new InstallApp(
+      { ...iosPhysicalDevice, deviceId: "unrecognized-device" },
+      fakeAdbFactory,
+      null,
+      null,
+      () => createPerformanceTracker(false, fakeTimer),
+      simctl,
+      installer,
+    );
+    await expect(action.execute("/tmp/MyApp.app")).rejects.toThrow(
+      "iOS physical devices do not support .app bundles. Use a signed .ipa file instead.",
+    );
+    expect(installer.calls).toEqual([]);
+    expect(simctl.wasMethodCalled("installApp")).toBe(false);
+  });
 
   test("installs iOS .ipa on physical device via devicectl", async () => {
     const ipaPath = "/tmp/MyApp.ipa";

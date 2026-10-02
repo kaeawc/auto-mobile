@@ -72,6 +72,7 @@ describe("resolveIosDeviceBackend", () => {
     });
 
     expect(backend).toBeInstanceOf(SimulatorIosDeviceBackend);
+    expect(backend?.kind).toBe("simulator");
     await backend.uninstallApp(bundleId);
     expect(calls).toEqual([
       { operation: "terminate", bundleId, deviceId: simulatorUdid },
@@ -87,6 +88,7 @@ describe("resolveIosDeviceBackend", () => {
     });
 
     expect(backend).toBeInstanceOf(PhysicalIosDeviceBackend);
+    expect(backend?.kind).toBe("physical");
     await backend.uninstallApp(bundleId);
     expect(calls).toEqual([
       { operation: "uninstall", deviceId: physicalUdid, bundleId, isSimulator: false },
@@ -126,6 +128,8 @@ describe("resolveIosLaunchBackend", () => {
       deviceAppLauncher: launcher,
     };
 
+    expect(resolveIosLaunchBackend(simulatorUdid, deps).kind).toBe("simulator");
+    expect(resolveIosLaunchBackend(physicalUdid, deps).kind).toBe("physical");
     await resolveIosLaunchBackend(simulatorUdid, deps).launchApp(bundleId, {
       foregroundIfRunning: false,
       launchArguments,
@@ -249,6 +253,7 @@ describe("resolveIosTerminateBackend", () => {
     });
 
     expect(backend).toBeInstanceOf(SimulatorIosTerminateBackend);
+    expect(backend?.kind).toBe("simulator");
     expect(backend.requiresInstalledAppCheck).toBe(true);
     expect(await backend.terminateApp(bundleId)).toEqual({ wasInstalled: true, wasRunning: true });
     expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: simulatorUdid }]);
@@ -266,6 +271,7 @@ describe("resolveIosTerminateBackend", () => {
     });
 
     expect(backend).toBeInstanceOf(PhysicalIosTerminateBackend);
+    expect(backend?.kind).toBe("physical");
     expect(backend.requiresInstalledAppCheck).toBe(false);
     expect(await backend.terminateApp(bundleId)).toEqual({ wasInstalled: true, wasRunning: false });
     expect(terminator.terminateCalls).toEqual([{ deviceUdid: physicalUdid, bundleId }]);
@@ -299,6 +305,7 @@ describe("resolveIosTerminateBackend", () => {
     const backend = resolveIosColdStartTerminateBackend(simulatorUdid, { simctl });
 
     expect(backend).toBeInstanceOf(SimulatorIosTerminateBackend);
+    expect(backend?.kind).toBe("simulator");
     await backend?.terminateApp(bundleId);
     expect(simctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: undefined }]);
   });
@@ -332,6 +339,7 @@ describe("resolveIosInstallBackend", () => {
     });
 
     expect(backend).toBeInstanceOf(SimulatorIosInstallBackend);
+    expect(backend?.kind).toBe("simulator");
     await backend.installApp("/tmp/Test.app");
     expect(await backend.listApps()).toEqual(apps);
     expect(simctl.getMethodCalls("installApp")).toEqual([
@@ -361,6 +369,7 @@ describe("resolveIosInstallBackend", () => {
     });
 
     expect(backend).toBeInstanceOf(PhysicalIosInstallBackend);
+    expect(backend?.kind).toBe("physical");
     await backend.installApp("/tmp/Test.ipa");
     expect(await backend.listApps()).toBe(apps);
     expect(calls).toEqual([
@@ -401,4 +410,23 @@ describe("resolveIosInstallBackend", () => {
       await expect(backend.listApps()).rejects.toBe(listingError);
     },
   );
+});
+
+test("malformed IDs keep launch and install on physical backends", () => {
+  const deviceId = "unrecognized-device";
+  const simctl = new FakeSimctl();
+  expect(
+    resolveIosLaunchBackend(deviceId, {
+      simctl,
+      deviceAppLauncher: new FakeDeviceAppLauncher(),
+    }).kind,
+  ).toBe("physical");
+  expect(
+    resolveIosInstallBackend(deviceId, {
+      simctl,
+      deviceAppInstaller: { installApp: async () => {} },
+      physicalAppLister: { listInstalledApps: async () => [] },
+    }).kind,
+  ).toBe("physical");
+  expect(resolveIosColdStartTerminateBackend(deviceId, { simctl })).toBeNull();
 });

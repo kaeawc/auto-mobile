@@ -70,7 +70,8 @@ public struct WebSocketResponse: Codable, Sendable {
         text: String? = nil,
         pinchPath: String? = nil,
         resolvedStore: String? = nil,
-        tapDiagnostics: TapDiagnostics? = nil
+        tapDiagnostics: TapDiagnostics? = nil,
+        warning: String? = nil
     )
         -> WebSocketResponse
     {
@@ -80,6 +81,7 @@ public struct WebSocketResponse: Codable, Sendable {
             success: true,
             totalTimeMs: totalTimeMs,
             text: text,
+            warning: warning,
             pinchPath: pinchPath,
             resolvedStore: resolvedStore,
             tapDiagnostics: tapDiagnostics

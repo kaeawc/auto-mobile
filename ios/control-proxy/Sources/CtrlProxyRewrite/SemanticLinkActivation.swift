@@ -9,7 +9,7 @@ import Foundation
 /// attributed text / link accessibility elements and reports each link's center
 /// point; this projects the requested `(owner, text, occurrence)` onto that point
 /// so the runner can activate the exact link by coordinate. Pure tree query over
-/// the (Sendable) SDK models — ported verbatim.
+/// the (Sendable) SDK models.
 public enum SemanticLinkActivation {
     public struct Coordinate: Equatable, Sendable {
         public let x: Double
@@ -21,21 +21,30 @@ public enum SemanticLinkActivation {
         }
     }
 
-    /// The activation point for the requested link, or `nil` when it cannot be
+    public struct Resolution: Equatable, Sendable {
+        public let coordinate: Coordinate
+        public let ownerNote: String?
+    }
+
+    /// The activation point and optional owner note, or `nil` when it cannot be
     /// resolved from the SDK hierarchy (no SDK match, or the matched link has no
     /// geometry) — in which case the caller falls back to the XCUITest path.
     ///
-    /// - With `ownerResourceId`: match within elements carrying that identifier,
-    ///   using the link's own per-owner `occurrence`.
-    /// - Without an owner: index the `occurrence`-th matching-text link across the
-    ///   whole tree in document order.
+    /// `occurrence` is the zero-based index among case-insensitive matching links
+    /// within the owning text element, using the SDK link's own occurrence value.
+    /// With `ownerResourceId`, match elements carrying that identifier as before.
+    /// Without it, select the first owner carrying matching text in preorder;
+    /// never skip to a later owner for a missing occurrence or geometry. Multiple
+    /// candidate owners produce a note naming the selected owner and count (#6631).
+    /// The XCUITest fallback keeps this per-owner meaning: without an owner it
+    /// allows only occurrence 0, since its flat links query has no owner grouping.
     public static func coordinate(
         in hierarchy: SdkViewHierarchy?,
         ownerResourceId: String?,
         text: String,
         occurrence: Int
     )
-        -> Coordinate?
+        -> Resolution?
     {
         guard let root = hierarchy?.root else { return nil }
 
@@ -44,22 +53,27 @@ public enum SemanticLinkActivation {
                 if let link = owner.semanticLinks?.first(where: {
                     $0.occurrence == occurrence && matches($0.text, text)
                 }), let coordinate = coordinate(of: link) {
-                    return coordinate
+                    return Resolution(coordinate: coordinate, ownerNote: nil)
                 }
             }
             return nil
         }
 
-        var matchIndex = 0
-        for node in preorder(root) {
-            for link in node.semanticLinks ?? [] where matches(link.text, text) {
-                if matchIndex == occurrence {
-                    return coordinate(of: link)
-                }
-                matchIndex += 1
-            }
-        }
-        return nil
+        let owners = matchingNodes(from: root, where: {
+            $0.semanticLinks?.contains(where: { matches($0.text, text) }) == true
+        })
+        guard let owner = owners.first,
+              let link = owner.semanticLinks?.first(where: {
+                  $0.occurrence == occurrence && matches($0.text, text)
+              }), let coordinate = coordinate(of: link)
+        else { return nil }
+
+        let ownerName = owner.accessibilityIdentifier ?? "\(owner.className) (candidate owner 1)"
+        let ownerNote = owners.count > 1
+            ? "Using owner '\(ownerName)', the first of \(owners.count) candidate owners; "
+            + "scope with container/subtext for a specific owner."
+            : nil
+        return Resolution(coordinate: coordinate, ownerNote: ownerNote)
     }
 
     private static func matches(_ lhs: String, _ rhs: String) -> Bool {

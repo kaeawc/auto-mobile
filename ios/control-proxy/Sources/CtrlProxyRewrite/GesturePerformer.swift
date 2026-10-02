@@ -497,6 +497,15 @@ public final class GesturePerformer: GesturePerforming {
         return .noEffect
     }
 
+    /// A flat XCUITest links query cannot map a per-owner occurrence above zero.
+    nonisolated static func validateSemanticLinkFallback(occurrence: Int, ownerResourceId: String?) throws {
+        guard ownerResourceId != nil || occurrence <= 0 else {
+            throw GestureError.gestureFailed(
+                "Semantic link occurrence > 0 needs an owner in the XCUITest fallback; scope with container/subtext."
+            )
+        }
+    }
+
     /// Includes a scoped owner when the owner is itself a link; XCUITest's
     /// descendants query otherwise excludes that element.
     nonisolated static func scopedLinkCandidates<Element>(
@@ -2127,6 +2136,10 @@ public final class GesturePerformer: GesturePerforming {
             return nil
         }
 
+        /// Activates the zero-based case-insensitive matching link within its owner.
+        /// Scoped candidates include the owner's link descendants and the owner itself
+        /// when it is a link. Without an owner, only occurrence 0 is supported: tap the
+        /// first matching hittable app link, since XCUITest exposes no owner grouping.
         public func activateAccessibilityLink(
             text: String,
             occurrence: Int,
@@ -2137,6 +2150,7 @@ public final class GesturePerformer: GesturePerforming {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, occurrence >= 0 else {
                 throw GestureError.gestureFailed("Semantic link text must be non-blank and occurrence non-negative")
             }
+            try Self.validateSemanticLinkFallback(occurrence: occurrence, ownerResourceId: ownerResourceId)
             guard let app = resolveNavigationApp() else {
                 throw GestureError.noApplication
             }

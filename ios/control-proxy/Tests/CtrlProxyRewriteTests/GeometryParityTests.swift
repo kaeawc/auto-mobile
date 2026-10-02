@@ -218,7 +218,7 @@ final class GeometryParityTests: XCTestCase {
 
     // MARK: - Semantic link resolution
 
-    /// Two owners each carrying a "Terms" link, to exercise owner-scoped + document-order paths.
+    /// Two owners each carrying a "Terms" link, to exercise the first-owner rule.
     private let sdkJSON = """
     {
       "timestamp": 0, "screenScale": 3.0, "screenWidth": 393, "screenHeight": 852,
@@ -254,21 +254,119 @@ final class GeometryParityTests: XCTestCase {
         let ownerA = try XCTUnwrap(coord("owner_a", "Terms", 0), "owner-scoped resolve")
         let ownerBCaseInsensitive = try XCTUnwrap(coord("owner_b", "terms", 0), "case-insensitive owner-scoped resolve")
 
-        // Document order: first Terms is owner_a's, second is owner_b's.
-        XCTAssertEqual(try coord(nil, "Terms", 0).map { [$0.x, $0.y] }, [ownerA.x, ownerA.y], "doc-order 0 == owner_a")
-        XCTAssertEqual(
-            try coord(nil, "Terms", 1).map { [$0.x, $0.y] },
-            [ownerBCaseInsensitive.x, ownerBCaseInsensitive.y],
-            "doc-order 1 == owner_b"
-        )
+        // Owner-less requests choose owner_a; occurrence never advances to owner_b.
+        XCTAssertEqual(try coord(nil, "Terms", 0).map { [$0.x, $0.y] }, [ownerA.x, ownerA.y], "first owner == owner_a")
+        XCTAssertNil(try coord(nil, "Terms", 1), "owner_a has no occurrence 1; do not skip to owner_b")
         // The two owners' links resolve to distinct coordinates.
         XCTAssertNotEqual([ownerA.x, ownerA.y], [ownerBCaseInsensitive.x, ownerBCaseInsensitive.y])
 
         // Misses resolve to nil.
         XCTAssertNil(try coord("owner_a", "Terms", 1), "owner_a has no occurrence 1")
-        XCTAssertNil(try coord(nil, "Terms", 2), "only two Terms links exist")
+        XCTAssertNil(try coord(nil, "Terms", 2), "first owner has no occurrence 2")
         XCTAssertNil(try coord(nil, "Missing", 0), "no such text")
         XCTAssertNil(try coord("nonexistent_owner", "Terms", 0), "no such owner")
+    }
+
+    private func link(_ occurrence: Int, x: Double? = nil) -> SdkSemanticLink {
+        SdkSemanticLink(text: "Terms", occurrence: occurrence, centerX: x, centerY: x.map { $0 + 10 })
+    }
+
+    private func owner(_ id: String?, links: [SdkSemanticLink], children: [SdkViewNode]? = nil) -> SdkViewNode {
+        SdkViewNode(
+            className: "Label",
+            bounds: SdkBounds(left: 0, top: 0, right: 200, bottom: 40),
+            accessibilityIdentifier: id,
+            semanticLinks: links,
+            children: children
+        )
+    }
+
+    private func hierarchy(_ owners: [SdkViewNode]) -> SdkViewHierarchy {
+        SdkViewHierarchy(
+            timestamp: 0, bundleId: nil, screenScale: 3, screenWidth: 393, screenHeight: 852,
+            root: owner(nil, links: [], children: owners)
+        )
+    }
+
+    private func resolve(
+        _ hierarchy: SdkViewHierarchy,
+        owner: String? = nil,
+        text: String = "terms",
+        occurrence: Int
+    )
+        -> SemanticLinkActivation.Resolution?
+    {
+        SemanticLinkActivation.coordinate(in: hierarchy, ownerResourceId: owner, text: text, occurrence: occurrence)
+    }
+
+    func testSemanticLinkOccurrencesStayWithinFirstOwner() throws {
+        // Nest owner_b under owner_a to also exercise parent-before-child order.
+        let ownerB = owner("owner_b", links: [link(0, x: 50), link(1, x: 60)])
+        let tree = hierarchy([owner("owner_a", links: [link(0, x: 10), link(1, x: 20)], children: [ownerB])])
+        for (id, xs) in [("owner_a", [10.0, 20.0]), ("owner_b", [50.0, 60.0])] {
+            for occurrence in xs.indices {
+                let result = try XCTUnwrap(resolve(tree, owner: id, occurrence: occurrence))
+                XCTAssertEqual(result.coordinate, .init(x: xs[occurrence], y: xs[occurrence] + 10))
+                XCTAssertNil(result.ownerNote)
+            }
+        }
+        for (occurrence, x) in [10.0, 20.0].enumerated() {
+            let result = try XCTUnwrap(resolve(tree, occurrence: occurrence))
+            XCTAssertEqual(result.coordinate, .init(x: x, y: x + 10))
+            let note = try XCTUnwrap(result.ownerNote)
+            XCTAssertTrue(note.contains("owner_a"))
+            XCTAssertTrue(note.contains("2 candidate owners"))
+            XCTAssertTrue(note.contains("container/subtext"))
+        }
+    }
+
+    func testUniqueSemanticLinkOwnerUsesNonMonotonicOccurrenceValues() throws {
+        let tree = hierarchy([owner("unique", links: [link(1, x: 20), link(0, x: 10)])])
+        for (occurrence, x) in [10.0, 20.0].enumerated() {
+            let unscoped = try XCTUnwrap(resolve(tree, occurrence: occurrence))
+            let scoped = try XCTUnwrap(resolve(tree, owner: "unique", occurrence: occurrence))
+            XCTAssertEqual(unscoped.coordinate, .init(x: x, y: x + 10))
+            XCTAssertEqual(unscoped, scoped)
+            XCTAssertNil(unscoped.ownerNote)
+        }
+    }
+
+    func testSemanticLinkMissingOccurrenceDoesNotSkipFirstOwner() {
+        let tree = hierarchy([
+            owner("first", links: [link(0, x: 10)]),
+            owner("second", links: [link(0, x: 50), link(1, x: 60)]),
+        ])
+        XCTAssertNil(resolve(tree, occurrence: 1))
+        XCTAssertEqual(resolve(tree, owner: "second", occurrence: 1)?.coordinate, .init(x: 60, y: 70))
+    }
+
+    func testSemanticLinkMissingGeometryDoesNotSkipFirstOwner() {
+        let tree = hierarchy([
+            owner("first", links: [link(1), link(0, x: 10)]),
+            owner("second", links: [link(1, x: 60)]),
+        ])
+        XCTAssertNil(resolve(tree, occurrence: 1))
+        XCTAssertNil(resolve(tree, owner: "first", occurrence: 1))
+        XCTAssertEqual(resolve(tree, owner: "second", occurrence: 1)?.coordinate, .init(x: 60, y: 70))
+    }
+
+    func testSemanticLinkUnnamedOwnerNoteAndSingleLinkMisses() throws {
+        let single = hierarchy([owner(nil, links: [link(0, x: 10)])])
+        let result = try XCTUnwrap(resolve(single, text: "TERMS", occurrence: 0))
+        XCTAssertEqual(result.coordinate, .init(x: 10, y: 20))
+        XCTAssertNil(result.ownerNote)
+        XCTAssertNil(resolve(single, text: "Missing", occurrence: 0))
+        XCTAssertNil(resolve(single, owner: "missing", occurrence: 0))
+        XCTAssertNil(resolve(hierarchy([owner(nil, links: [link(0)])]), occurrence: 0))
+
+        let multiple = hierarchy([
+            owner("irrelevant", links: [SdkSemanticLink(text: "Privacy", occurrence: 0)]),
+            owner(nil, links: [link(0, x: 10)]),
+            owner("second", links: [link(0, x: 50)]),
+        ])
+        let note = try XCTUnwrap(resolve(multiple, occurrence: 0)?.ownerNote)
+        XCTAssertTrue(note.contains("Label (candidate owner 1)"))
+        XCTAssertTrue(note.contains("2 candidate owners"))
     }
 }
 

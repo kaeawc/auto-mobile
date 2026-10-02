@@ -1232,22 +1232,23 @@ final class CommandHandler: CommandHandling {
     {
         // Prefer the in-app SDK's per-link geometry: it is the only source that can
         // disambiguate duplicate inline links and see SwiftUI inline links, which
-        // XCUITest's `.link` query cannot (issue #5560). A resolved center is tapped
-        // directly; otherwise fall back to the XCUITest `.link` path, which still throws
-        // cleanly (never a false success) when nothing matches.
+        // XCUITest's `.link` query cannot (issue #5560). Occurrence is per owner;
+        // owner-less SDK requests select the first matching owner and report a note
+        // when several qualify. Unresolved requests retain the XCUITest fallback,
+        // which refuses owner-less occurrence > 0 because it cannot group owners.
         let fresh: SdkViewHierarchy? = if await sdkServerMatchesTrackedForegroundApp() {
             await sdkHierarchyClient?.fetchFreshHierarchy()
         } else {
             nil
         }
-        let coordinate = SemanticLinkActivation.coordinate(
+        let resolution = SemanticLinkActivation.coordinate(
             in: fresh,
             ownerResourceId: request.ownerResourceId,
             text: request.text,
             occurrence: request.occurrence
         )
         try await performContextCheckedGesture(expected: request.frameContext) {
-            if let coordinate {
+            if let coordinate = resolution?.coordinate {
                 try self.gesturePerformer.tap(x: coordinate.x, y: coordinate.y, duration: 0)
             } else {
                 try self.gesturePerformer.activateAccessibilityLink(
@@ -1260,7 +1261,8 @@ final class CommandHandler: CommandHandling {
         return WebSocketResponse.success(
             type: ResponseType.actionResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: totalTimeMs(from: startTime),
+            warning: resolution?.ownerNote
         )
     }
 

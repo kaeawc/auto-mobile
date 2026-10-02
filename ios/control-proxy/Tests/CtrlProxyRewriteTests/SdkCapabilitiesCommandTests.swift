@@ -4,10 +4,12 @@ import XCTest
 
 private actor FakeSdkHierarchyClient: SdkHierarchyFetching {
     private var serverInfo: SdkHierarchyServerInfo?
+    private let hierarchy: SdkViewHierarchy?
     private var networkErrorCalls = 0
 
-    init(serverInfo: SdkHierarchyServerInfo?) {
+    init(serverInfo: SdkHierarchyServerInfo?, hierarchy: SdkViewHierarchy? = nil) {
         self.serverInfo = serverInfo
+        self.hierarchy = hierarchy
     }
 
     func networkErrorCallCount() -> Int {
@@ -15,7 +17,7 @@ private actor FakeSdkHierarchyClient: SdkHierarchyFetching {
     }
 
     func fetchHierarchy() async -> SdkViewHierarchy? { nil }
-    func fetchFreshHierarchy() async -> SdkViewHierarchy? { nil }
+    func fetchFreshHierarchy() async -> SdkViewHierarchy? { hierarchy }
     func fetchServerInfo() async -> SdkHierarchyServerInfo? { serverInfo }
     func isAvailable() async -> Bool { serverInfo != nil }
     func setMockRules(_: [NetworkMockRuleDTO]) async -> Bool { serverInfo != nil }
@@ -98,6 +100,93 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
 
     private func request(_ json: String) throws -> WebSocketRequest {
         try JSONDecoder().decode(WebSocketRequest.self, from: Data(json.utf8))
+    }
+
+    private func semanticLinkHandler(_ ownerLinks: [[SdkSemanticLink]])
+        -> (CommandHandler, RewriteFakeGesturePerformer)
+    {
+        let bounds = SdkBounds(left: 0, top: 0, right: 200, bottom: 100)
+        let hierarchy = SdkViewHierarchy(
+            timestamp: 0, bundleId: "com.example.sdk", screenScale: 3, screenWidth: 393, screenHeight: 852,
+            root: SdkViewNode(
+                className: "Root", bounds: bounds,
+                children: ownerLinks.enumerated().map { index, links in
+                    SdkViewNode(
+                        className: "Label", bounds: bounds, accessibilityIdentifier: "owner_\(index)",
+                        semanticLinks: links
+                    )
+                }
+            )
+        )
+        let sdkClient = FakeSdkHierarchyClient(
+            serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.sdk"), hierarchy: hierarchy
+        )
+        let locator = RewriteFakeElementLocator()
+        locator.foregroundBundleId = "com.example.sdk"
+        let gestures = RewriteFakeGesturePerformer()
+        return (
+            CommandHandler(
+                elementLocator: locator, gesturePerformer: gestures, perf: PerfProvider(), sdkHierarchyClient: sdkClient
+            ),
+            gestures
+        )
+    }
+
+    func testOwnerlessSemanticLinkTapsItsOccurrenceCoordinateWithoutFallback() async throws {
+        let (handler, gestures) = semanticLinkHandler([[
+            SdkSemanticLink(text: "Terms", occurrence: 1, centerX: 20, centerY: 30),
+            SdkSemanticLink(text: "Terms", occurrence: 0, centerX: 10, centerY: 20),
+        ]])
+        let payload = try await handler.handle(
+            request(#"{"type":"request_activate_accessibility_link","text":"terms","occurrence":1}"#)
+        ) as? WebSocketResponse
+        let response = try XCTUnwrap(payload)
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertNil(response.warning)
+        XCTAssertEqual(gestures.tapCalls, 1)
+        XCTAssertEqual(gestures.lastTap?.x, 20)
+        XCTAssertEqual(gestures.lastTap?.y, 30)
+        XCTAssertEqual(gestures.activateAccessibilityLinkCalls, 0)
+    }
+
+    func testOwnerlessSemanticLinkMultipleOwnersReturnsWarning() async throws {
+        let (handler, gestures) = semanticLinkHandler([
+            [SdkSemanticLink(text: "Terms", occurrence: 0, centerX: 10, centerY: 20)],
+            [SdkSemanticLink(text: "Terms", occurrence: 0, centerX: 50, centerY: 60)],
+        ])
+        let payload = try await handler.handle(
+            request(#"{"type":"request_activate_accessibility_link","text":"Terms","occurrence":0}"#)
+        ) as? WebSocketResponse
+        let response = try XCTUnwrap(payload)
+
+        XCTAssertEqual(response.success, true)
+        let warning = try XCTUnwrap(response.warning)
+        XCTAssertTrue(warning.contains("owner_0"))
+        XCTAssertTrue(warning.contains("2 candidate owners"))
+        XCTAssertTrue(warning.contains("container/subtext"))
+        // Check the actual optional wire field, not just the in-memory envelope.
+        let decoded = try JSONDecoder().decode(WebSocketResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertEqual(decoded.warning, warning)
+        XCTAssertEqual(gestures.lastTap?.x, 10)
+        XCTAssertEqual(gestures.tapCalls, 1)
+        XCTAssertEqual(gestures.activateAccessibilityLinkCalls, 0)
+    }
+
+    func testOwnerlessSemanticLinkUnresolvedFirstOwnerStillCallsFallback() async throws {
+        let (handler, gestures) = semanticLinkHandler([
+            [SdkSemanticLink(text: "Terms", occurrence: 0, centerX: 10, centerY: 20)],
+            [SdkSemanticLink(text: "Terms", occurrence: 0, centerX: 50, centerY: 60)],
+        ])
+        let payload = try await handler.handle(
+            request(#"{"type":"request_activate_accessibility_link","text":"Terms","occurrence":1}"#)
+        ) as? WebSocketResponse
+        let response = try XCTUnwrap(payload)
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertNil(response.warning)
+        XCTAssertEqual(gestures.tapCalls, 0)
+        XCTAssertEqual(gestures.activateAccessibilityLinkCalls, 1)
     }
 
     func testAbsentSdkIsReportedWithoutIssuingNetworkMutation() async throws {

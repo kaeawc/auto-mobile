@@ -55,6 +55,7 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
     var keyCalls: [(String, [String])] = []
     var keyError: CommandError?
     var tapCalls = 0
+    var lastTap: (x: Double, y: Double)?
     var diagnosticTapCalls = 0
     var tapStrategies: [String?] = []
     var tapDiagnosticsResult: TapDiagnostics?
@@ -96,7 +97,11 @@ final class RewriteFakeGesturePerformer: GesturePerforming {
         try await PressKeyOutcome(verified: pressKey(key: key, modifiers: modifiers), warning: keyWarning)
     }
 
-    func tap(x _: Double, y _: Double, duration _: TimeInterval) throws { tapCalls += 1 }
+    func tap(x: Double, y: Double, duration _: TimeInterval) throws {
+        tapCalls += 1
+        lastTap = (x, y)
+    }
+
     func tap(x: Double, y: Double, duration: TimeInterval, strategy: String?) throws {
         tapStrategies.append(strategy)
         try tap(x: x, y: y, duration: duration)

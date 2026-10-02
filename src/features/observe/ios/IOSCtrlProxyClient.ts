@@ -3793,6 +3793,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.voiceOver.requestAction(action, resourceId, label, timeoutMs, perf, options);
   }
 
+  /**
+   * On iOS, occurrence is the zero-based index among case-insensitive text matches
+   * within the owning text element. Without ownerResourceId, use the first owner
+   * carrying a matching link in document order (previously counted tree-wide).
+   * Multiple candidate owners produce a runner warning; scope with container/subtext
+   * for a specific owner. The XCUITest fallback refuses owner-less occurrence > 0.
+   * Android remains unchanged: count matching links in document order within the
+   * owner's subtree, or the whole active-window tree when owner-less.
+   */
   async requestActivateAccessibilityLink(
     text: string,
     occurrence: number,

@@ -31,6 +31,7 @@ import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
+import { FakeHierarchyCapture } from "../../fakes/FakeHierarchyCapture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -973,8 +974,10 @@ describe("explicit action display", () => {
       const executor = adb();
       const observe = new FakeObserveScreen();
       observe.setObserveResult(observation);
+      const capture = new FakeHierarchyCapture(() => observation.viewHierarchy!);
       const displayAction = new TapOnElement(android, executor, {
         timer: autoTimer(),
+        hierarchyCapture: capture,
         lastRenderedObservation: () => observation,
       });
       displayAction.observeScreen = observe;
@@ -985,13 +988,25 @@ describe("explicit action display", () => {
       });
       expect(displayResult.success).toBe(caseName === "zero area");
       if (caseName === "outside the screen") {
-        expect(displayResult.error).toContain(
-          "Matched element has no visible tap area on selected display",
+        expect(displayResult.error).toBe(
+          'Matched element "Network & internet" has no visible tap area (bounds {"left":220,"top":30,"right":280,"bottom":50}). Scroll it into view with swipeOn, then retry tapOn.',
         );
+        expect(displayResult.searchUntil).toEqual({
+          durationMs: 1450,
+          requestCount: 30,
+          changeCount: 0,
+        });
+        expect(capture.requests).toHaveLength(30);
+        expect(
+          capture.requests.every(
+            (request) => request.displayId === 2 && request.freshness === "fresh",
+          ),
+        ).toBe(true);
         expect(
           executor.getExecutedCommands().filter((command) => command.includes("touchscreen tap")),
         ).toEqual([]);
       } else {
+        expect(capture.requests).toEqual([]);
         expect(executor.getExecutedCommands()).toContain(
           "shell input touchscreen -d 2 tap 100 100",
         );
@@ -1021,7 +1036,9 @@ describe("explicit action display", () => {
       });
       expect(defaultResult.success).toBe(caseName === "zero area");
       if (caseName === "outside the screen") {
-        expect(defaultResult.error).toContain("no visible tap area");
+        expect(defaultResult.error).toBe(
+          `Failed to perform tap on element: ${displayResult.error}`,
+        );
         expect(defaultPoints).toEqual([]);
       } else {
         expect(defaultPoints).toEqual([{ x: 100, y: 100 }]);
@@ -1034,22 +1051,29 @@ describe("explicit action display", () => {
     const observation = screen("external", "Settings");
     const observe = new FakeObserveScreen();
     observe.setObserveResult(observation);
+    const capture = new FakeHierarchyCapture(() => observation.viewHierarchy!);
     const action = new TapOnElement(android, executor, {
       timer: autoTimer(),
+      hierarchyCapture: capture,
       lastRenderedObservation: () => observation,
     });
     action.observeScreen = observe;
     const result = await action.execute({ text: "Other app", action: "tap", display: "external" });
     expect(result.success).toBe(false);
-    expect(result.error).toContain("Element not found on selected display");
+    expect(result.error).toBe("Element not found with provided text 'Other app'");
+    expect(result.searchUntil).toEqual({ durationMs: 1450, requestCount: 30, changeCount: 0 });
+    expect(capture.requests).toHaveLength(30);
+    expect(
+      capture.requests.every((request) => request.displayId === 2 && request.freshness === "fresh"),
+    ).toBe(true);
+    expect(
+      executor.getExecutedCommands().filter((command) => command.includes("touchscreen")),
+    ).toEqual([]);
   });
 
   test("tapOn rejects display options it cannot honor before dispatch", async () => {
     const unsupported: Array<Partial<TapOnElementOptions>> = [
-      { sibling: true },
       { subtext: { text: "Link" } },
-      { searchUntil: { duration: 100 } },
-      { textAny: ["One", "Two"] },
       { accessibilityLink: "Link" },
       { focusFirst: true },
       { screenReaderNavigation: true },

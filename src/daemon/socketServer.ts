@@ -96,7 +96,7 @@ import {
 import { assertToolEnabledForAnySession } from "../features/toolSelection/toolSelectionPolicy";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { ToolRegistry } from "../server/toolRegistry";
-import { validateTypeForPlatform } from "../server/storageTools";
+import { preferenceSetWarning, validateTypeForPlatform } from "../server/storageTools";
 import {
   clearAndroidKeyValueFileDirect,
   directFileFallbackRelaunchWarning,
@@ -4347,8 +4347,9 @@ export class UnixSocketServer {
         const fileName = args.fileName;
         const key = args.key;
         let usedDirectFileFallback = false;
+        let resolution: PreferenceStoreResolution | undefined;
         if (args.value === null || args.value === undefined) {
-          ({ usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+          ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
             platform,
             device,
             appId,
@@ -4363,7 +4364,7 @@ export class UnixSocketServer {
           validateTypeForPlatform(platform, args.type as KeyValueType);
           const value = args.value;
           const type = args.type as KeyValueType;
-          ({ usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+          ({ usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
             platform,
             device,
             appId,
@@ -4373,9 +4374,18 @@ export class UnixSocketServer {
               setAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key, value, type),
           ));
         }
-        return usedDirectFileFallback
-          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
-          : { success: true };
+        const resolvedStore = resolution?.resolvedStore;
+        const effectiveValueDiffers = resolution?.effectiveValueDiffers;
+        const warning = preferenceSetWarning(
+          usedDirectFileFallback ? directFileFallbackRelaunchWarning(appId, fileName) : undefined,
+          effectiveValueDiffers,
+        );
+        return {
+          success: true,
+          ...(resolvedStore ? { resolvedStore } : {}),
+          ...(effectiveValueDiffers ? { effectiveValueDiffers } : {}),
+          ...(warning ? { warning } : {}),
+        };
       }
       case "ide/removeKeyValue": {
         const args = request.params as {
@@ -4396,7 +4406,7 @@ export class UnixSocketServer {
         const appId = args.appId;
         const fileName = args.fileName;
         const key = args.key;
-        const { usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+        const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
           platform,
           device,
           appId,
@@ -4404,9 +4414,15 @@ export class UnixSocketServer {
           () => client.removePreference(appId, fileName, key),
           (adb) => removeAndroidKeyValueDirect(adb, device.deviceId, appId, fileName, key),
         );
-        return usedDirectFileFallback
-          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
-          : { success: true };
+        const resolvedStore = resolution?.resolvedStore;
+        const warning = usedDirectFileFallback
+          ? directFileFallbackRelaunchWarning(appId, fileName)
+          : undefined;
+        return {
+          success: true,
+          ...(resolvedStore ? { resolvedStore } : {}),
+          ...(warning ? { warning } : {}),
+        };
       }
       case "ide/clearKeyValueFile": {
         const args = request.params as {
@@ -4425,7 +4441,7 @@ export class UnixSocketServer {
         );
         const appId = args.appId;
         const fileName = args.fileName;
-        const { usedDirectFileFallback } = await this.runIdeKeyValueMutation(
+        const { usedDirectFileFallback, resolution } = await this.runIdeKeyValueMutation(
           platform,
           device,
           appId,
@@ -4433,9 +4449,15 @@ export class UnixSocketServer {
           () => client.clearPreferenceStore(appId, fileName),
           (adb) => clearAndroidKeyValueFileDirect(adb, device.deviceId, appId, fileName),
         );
-        return usedDirectFileFallback
-          ? { success: true, warning: directFileFallbackRelaunchWarning(appId, fileName) }
-          : { success: true };
+        const resolvedStore = resolution?.resolvedStore;
+        const warning = usedDirectFileFallback
+          ? directFileFallbackRelaunchWarning(appId, fileName)
+          : undefined;
+        return {
+          success: true,
+          ...(resolvedStore ? { resolvedStore } : {}),
+          ...(warning ? { warning } : {}),
+        };
       }
       default:
         return undefined;
@@ -4483,7 +4505,7 @@ export class UnixSocketServer {
    * `adb shell run-as` XML edit the MCP `setKeyValue`/`removeKeyValue`/`clearKeyValueFile`
    * tools use — so the desktop Storage pane can write/delete/clear even when inspection is
    * off, exactly like the MCP path. iOS has no on-device XML fallback, so `viaSdk` runs alone.
-   * Returns whether the direct-file fallback ran, so the caller can surface a relaunch warning.
+   * Returns the SDK resolution and whether the fallback ran, for store and warning reporting.
    */
   private async runIdeKeyValueMutation(
     platform: "android" | "ios",
@@ -4492,20 +4514,25 @@ export class UnixSocketServer {
     fileName: string,
     viaSdk: () => Promise<PreferenceStoreResolution | void>,
     viaDirectFile: (adb: ReturnType<AdbClientFactory["create"]>) => Promise<void>,
-  ): Promise<{ usedDirectFileFallback: boolean }> {
+  ): Promise<{
+    usedDirectFileFallback: boolean;
+    resolution: PreferenceStoreResolution | undefined;
+  }> {
     if (platform !== "android") {
-      await viaSdk();
-      return { usedDirectFileFallback: false };
+      const resolution = (await viaSdk()) || undefined;
+      return { usedDirectFileFallback: false, resolution };
     }
-    return withAndroidSharedPreferencesInspectionFallback(
+    let resolution: PreferenceStoreResolution | undefined;
+    const result = await withAndroidSharedPreferencesInspectionFallback(
       appId,
       fileName,
       () => this.adbClientFactory.create(device),
       async () => {
-        await viaSdk();
+        resolution = (await viaSdk()) || undefined;
       },
       viaDirectFile,
     );
+    return { ...result, resolution };
   }
 
   private async assertSocketToolEnabled(deviceId: string, toolName: string): Promise<void> {

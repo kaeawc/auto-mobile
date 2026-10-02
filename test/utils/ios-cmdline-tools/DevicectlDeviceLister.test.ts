@@ -796,10 +796,12 @@ describe("devicectl invocation failures (constructed errors)", () => {
     const timer = new FakeTimer();
     const warnings: string[] = [];
     const debug: string[] = [];
-    // DERIVED from the captured listing: remove reality from one connected simulator.
+    // DERIVED from the captured listing: remove reality and visibility from one connected simulator.
     const listing = loadDerivedDevicectlListing();
     const record = listing.result.devices[0];
     delete record.properties.hardware.reality;
+    delete record.visibilityClass;
+    delete record.properties.state.visibilityClass;
     const lister = makeLister({
       timer,
       readFile: async () => JSON.stringify(listing),
@@ -887,5 +889,162 @@ describe("devicectl invocation failures (constructed errors)", () => {
     await lister.listConnectedDevices();
     await lister.listConnectedDevices();
     expect(warnings).toHaveLength(2);
+  });
+});
+
+// Constructed minimal objects only; real CoreDeviceError 1000 and 1001 captures are still owed.
+describe("constructed failure envelopes at the lister boundary", () => {
+  for (const throws of [false, true]) {
+    for (const [code, kind, label] of [
+      [1000, "device-not-found", "device not found"],
+      [1001, "capability-unsupported", "capability unsupported"],
+      [1002, "other", "other"],
+    ] as const) {
+      test(`constructed ${code} envelope on ${throws ? "non-zero" : "zero"} exit retains a typed outcome`, async () => {
+        const removed: string[] = [];
+        let reads = 0;
+        const lister = makeLister({
+          execute: async () => {
+            if (throws) {
+              throw Object.assign(new Error("could not run"), { code: 1 });
+            }
+            return okExec;
+          },
+          readFile: async () => {
+            reads++;
+            return JSON.stringify({
+              info: { outcome: "failed" },
+              error: { domain: "constructed.CoreDevice", code },
+            });
+          },
+          rm: async (path) => {
+            removed.push(path);
+          },
+        });
+        const discovery = await lister.listConnectedDevices();
+        expect(discovery).toMatchObject({
+          complete: false,
+          error: {
+            code: "failed",
+            coreDeviceError: { code, kind, domain: "constructed.CoreDevice" },
+          },
+        });
+        if (!discovery.complete) {
+          expect(discovery.error.message).toContain(`CoreDeviceError ${code} (${label})`);
+          expect(discovery.error.message).not.toContain("could not run");
+        }
+        expect(reads).toBe(1);
+        expect(removed).toEqual([TEMP_DIR]);
+      });
+    }
+  }
+
+  test("constructed plain invocation failure has no CoreDevice error; optional read failures debug and scrub paths", async () => {
+    for (const raw of [
+      undefined,
+      "{invalid",
+      "[]",
+      JSON.stringify({ info: { outcome: "failed" }, error: { code: "1000" } }),
+    ]) {
+      const debug: string[] = [];
+      const removed: string[] = [];
+      const lister = makeLister({
+        execute: async () => {
+          throw Object.assign(new Error("could not run"), {
+            code: 1,
+            stderr: `${TEMP_DIR}: could not run`,
+          });
+        },
+        readFile: async () => {
+          if (raw === undefined) {
+            throw new Error("no file");
+          }
+          return raw;
+        },
+        logger: {
+          warn: () => {},
+          debug: (message) => {
+            debug.push(message);
+          },
+        },
+        rm: async (path) => {
+          removed.push(path);
+        },
+      });
+      const discovery = await lister.listConnectedDevices();
+      if (discovery.complete) {
+        throw new Error("expected failure");
+      }
+      expect(discovery.error.coreDeviceError).toBeUndefined();
+      expect(discovery.error.message).toContain("exit code 1");
+      expect(discovery.error.message).toContain("could not run");
+      expect(discovery.error.message).not.toContain(TEMP_DIR);
+      if (raw === undefined || raw === "{invalid") {
+        expect(debug).toHaveLength(1);
+      }
+      expect(removed).toEqual([TEMP_DIR]);
+    }
+  });
+
+  test("constructed timeout and unavailable failures do not read optional JSON", async () => {
+    for (const code of ["ETIMEDOUT", "ENOENT"]) {
+      let reads = 0;
+      const lister = makeLister({
+        execute: async () => {
+          throw Object.assign(new Error("could not run"), { code });
+        },
+        readFile: async () => {
+          reads++;
+          return "[]";
+        },
+      });
+      const discovery = await lister.listConnectedDevices();
+      expect(discovery.complete).toBe(false);
+      expect(reads).toBe(0);
+    }
+  });
+
+  test("constructed failure dedupe warns on CoreDevice kind changes and resets after recovery", async () => {
+    const timer = new FakeTimer();
+    const warnings: string[] = [];
+    const debug: string[] = [];
+    let raw = JSON.stringify({
+      info: { outcome: "failed" },
+      error: { domain: "CoreDevice", code: 1000 },
+    });
+    const lister = makeLister({
+      timer,
+      readFile: async () => raw,
+      logger: {
+        warn: (message) => {
+          warnings.push(message);
+        },
+        debug: (message) => {
+          debug.push(message);
+        },
+      },
+    });
+    await lister.listConnectedDevices();
+    timer.advanceTime(3_000);
+    await lister.listConnectedDevices();
+    expect(warnings).toHaveLength(1);
+    expect(debug).toHaveLength(1);
+    raw = JSON.stringify({
+      info: { outcome: "failed" },
+      error: { domain: "CoreDevice", code: 1001 },
+    });
+    timer.advanceTime(3_000);
+    await lister.listConnectedDevices();
+    expect(warnings).toHaveLength(2);
+    raw = "[]";
+    timer.advanceTime(3_000);
+    await lister.listConnectedDevices();
+    raw = JSON.stringify({
+      info: { outcome: "failed" },
+      error: { domain: "CoreDevice", code: 1001 },
+    });
+    timer.advanceTime(3_000);
+    await lister.listConnectedDevices();
+    expect(warnings).toHaveLength(3);
   });
 });

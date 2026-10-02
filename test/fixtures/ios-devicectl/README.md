@@ -16,8 +16,12 @@ no physical devices. Files are verbatim, including simulator names and UDIDs.
 
 `manifest.json` is hand-authored expectation metadata, not a capture. It declares
 physical, available simulator, not-available, and unidentified counts, expected
-discovery completeness, and optional sorted physical/simulator UDIDs. A row may
-declare `sameStateAs` to require identical classification to another capture.
+discovery completeness, optional `notAvailableReasons` counts by typed reason (both
+current captures declare `{ "shutdown": 6 }`), and optional sorted physical/simulator
+UDIDs. A row may
+declare `sameStateAs` to require identical classification to another capture; tests
+also pair every record of the current two captures by identifier and compare its
+classification and device fields.
 
 `complete: true` requires a recognized successful envelope and positive
 classification of every record: a physical iOS device, a simulator, or an
@@ -30,7 +34,8 @@ simulator-shaped hardware UDID. These three fields identify simulators before
 availability filtering, including shutdown/disconnected simulators. A generic
 CoreDevice `identifier` UUID or a simulator-shaped UDID alone is insufficient.
 Tests label in-memory mutations as DERIVED; physical-shaped variants change
-only reality/udid/platform and are not physical-device capture evidence.
+reality/udid/platform and remove simulator visibility markers; they are not
+physical-device capture evidence.
 
 To add a physical or mixed capture, drop its untouched `list-devices-*.json` file
 here and add its expectation row to the manifest; no loader or test code changes
@@ -41,9 +46,13 @@ directory uses LF via `.gitattributes`.
 
 Not captured (needs hardware):
 
-- Physical only
+- Physical only, including records under `properties.*` and whether `identifier` differs from the UDID
 - Mixed physical + simulators
 - Paired Watch / Apple TV
 
-Not captured (needs a targeted simulator): a real CoreDeviceError 1001
-"not supported by this device" failure and the shut-down-simulator failure.
+Not captured (needs a targeted simulator):
+
+- `booting` / `shuttingDown` simulator records (tests use DERIVED in-memory variants).
+- Real failed-command envelopes for CoreDeviceError 1000 and 1001: a captured
+  `--device <duplicate name>` failure and a shut-down `device info apps` failure.
+  Tests use constructed minimal objects, not captured output.

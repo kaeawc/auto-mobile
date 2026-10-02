@@ -13,6 +13,12 @@ import {
   defaultDiscoveryObservationSequence,
   type DiscoveryObservationSequence,
 } from "../DiscoveryObservationSequence";
+import {
+  asRecord,
+  asString,
+  parseDevicectlFailureEnvelope,
+  type DevicectlFailureEnvelope,
+} from "./devicectlFailureEnvelope";
 import { inferIosFormFactor, isIosPhysicalUdid, isIosSimulatorUdid } from "./iosDeviceType";
 
 /** Minimal injected seam for the diagnostic-only devicectl availability probe. */
@@ -74,6 +80,7 @@ export type DevicectlListingErrorCode = "unavailable" | "failed" | "timeout";
 export interface DevicectlListingError {
   code: DevicectlListingErrorCode;
   message: string;
+  coreDeviceError?: DevicectlFailureEnvelope;
 }
 
 /** Invocation, envelope, or unidentified-record failures replay retained devices as incomplete. */
@@ -81,7 +88,13 @@ export type PhysicalIosDeviceDiscovery =
   | { devices: BootedDevice[]; complete: true }
   | { devices: BootedDevice[]; complete: false; error: DevicectlListingError };
 
-type NotAvailableReason = "non-ios" | "unreachable" | "not-booted";
+type NotAvailableReason =
+  | "non-ios"
+  | "unreachable"
+  | "booting"
+  | "shutting-down"
+  | "shutdown"
+  | "not-booted";
 export type DevicectlListingParse =
   | {
       ok: true;
@@ -118,16 +131,6 @@ const UNREACHABLE_TUNNEL_STATES = new Set(["unavailable", "disconnected"]);
 const IOS_PLATFORM_VALUES = new Set(["ios", "ipados"]);
 // These CoreDevice platforms are explicitly outside this iOS inventory; unknown values are drift.
 const NON_IOS_PLATFORM_VALUES = new Set(["watchos", "tvos", "xros", "visionos"]);
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
 
 /**
  * Pull the device array out of a `devicectl list devices --json-output` payload.
@@ -192,6 +195,7 @@ function readDeviceFields(record: Record<string, unknown>) {
     udid: hardwareString("udid") ?? asString(record.identifier),
     hardwareUdid: hardwareString("udid"),
     reality: hardwareString("reality"),
+    visibilityClass: asString(record.visibilityClass) ?? asString(state?.visibilityClass),
     productType: hardwareString("productType"),
     name: stateString("name") ?? hardwareString("marketingName") ?? hardwareString("deviceType"),
     bootState: stateString("bootState"),
@@ -200,12 +204,13 @@ function readDeviceFields(record: Record<string, unknown>) {
   };
 }
 
-/** All three fields are present on booted and shutdown records in both host captures. */
+/** Require iOS platform and hardware UDID alongside positive simulator kind evidence. */
 function isRecognizedSimulator(fields: ReturnType<typeof readDeviceFields>): boolean {
   return (
     fields.platform !== undefined &&
     IOS_PLATFORM_VALUES.has(fields.platform) &&
-    fields.reality === "simulated" &&
+    (fields.reality === "simulated" ||
+      (fields.reality === undefined && fields.visibilityClass === "simulators")) &&
     fields.hardwareUdid !== undefined &&
     isIosSimulatorUdid(fields.hardwareUdid)
   );
@@ -221,6 +226,7 @@ function deviceKind(
   if (
     fields.udid &&
     isIosPhysicalUdid(fields.udid) &&
+    fields.visibilityClass !== "simulators" &&
     (fields.reality === undefined || fields.reality === "physical")
   ) {
     return "physical";
@@ -234,8 +240,17 @@ function unavailableReason(
 ): NotAvailableReason | undefined {
   // Availability never substitutes for positive kind evidence.
   if (kind === "simulator") {
-    if (fields.bootState !== "booted") {
-      return "not-booted";
+    switch (fields.bootState?.toLowerCase()) {
+      case "booted":
+        break;
+      case "booting":
+        return "booting";
+      case "shuttingdown":
+        return "shutting-down";
+      case "shutdown":
+        return "shutdown";
+      default:
+        return "not-booted";
     }
     return fields.connectionState === "connected" ? undefined : "unreachable";
   }
@@ -280,6 +295,23 @@ function unidentifiedFields(fields: ReturnType<typeof readDeviceFields>): string
   return `platform=${platform}, reality=${reality}, udid-shape=${udidShape(fields.udid)}, hardware-udid-shape=${udidShape(fields.hardwareUdid)}, connection-state=${connection}`;
 }
 
+/** Resolve kind contradictions before deliberately excluding a non-iOS platform. */
+function classifyExcludedEntry(
+  fields: ReturnType<typeof readDeviceFields>,
+): DevicectlRecordOutcome | undefined {
+  // Contradictory kind evidence must not be silently excluded by the platform filter.
+  if (fields.reality === "physical" && fields.visibilityClass === "simulators") {
+    return { kind: "unidentifiable", reason: unidentifiedFields(fields) };
+  }
+  if (fields.platform && NON_IOS_PLATFORM_VALUES.has(fields.platform)) {
+    return { kind: "not-available", reason: "non-ios" };
+  }
+  if (fields.platform && !IOS_PLATFORM_VALUES.has(fields.platform)) {
+    return { kind: "unidentifiable", reason: unidentifiedFields(fields) };
+  }
+  return undefined;
+}
+
 /** Every record needs positive classification before the listing can be authoritative. */
 function classifyDeviceEntry(entry: unknown): DevicectlRecordOutcome {
   const record = asRecord(entry);
@@ -287,11 +319,9 @@ function classifyDeviceEntry(entry: unknown): DevicectlRecordOutcome {
     return { kind: "unidentifiable", reason: "entry is not an object" };
   }
   const fields = readDeviceFields(record);
-  if (fields.platform && NON_IOS_PLATFORM_VALUES.has(fields.platform)) {
-    return { kind: "not-available", reason: "non-ios" };
-  }
-  if (fields.platform && !IOS_PLATFORM_VALUES.has(fields.platform)) {
-    return { kind: "unidentifiable", reason: unidentifiedFields(fields) };
+  const excluded = classifyExcludedEntry(fields);
+  if (excluded) {
+    return excluded;
   }
   const kind = deviceKind(fields);
   if (!kind || !fields.udid) {
@@ -409,8 +439,9 @@ function invocationFailureDetail(error: unknown, code: DevicectlListingErrorCode
  * How long a devicectl listing is reused before re-shelling out.
  *
  * iOS booted-device resolution is a hot path — the app resources and the daemon's
- * device sweep both call it — while `devicectl list devices` costs on the order
- * of a second. The window is short enough that a freshly-plugged device shows up
+ * device sweep both call it. Per issue #8623 findings, `devicectl list devices`
+ * and `simctl list devices -j` each took about 0.2 s on devicectl 651.13.4.
+ * The window is short enough that a freshly-plugged device shows up
  * within one sweep, and long enough that a burst of resource reads spawns one
  * process rather than one per read.
  */
@@ -480,7 +511,7 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   } | null = null;
   private lastGood: { devices: BootedDevice[]; observedAt: number; staleAfter: number } | null =
     null;
-  private previousFailureCode: DevicectlListingErrorCode | undefined;
+  private previousFailureKey: string | undefined;
   private previousUnidentifiedKey = "[]";
   private inFlight: Promise<PhysicalIosDeviceDiscovery> | null = null;
 
@@ -509,6 +540,9 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     let tempDir: string | null = null;
     let invoking = false;
     try {
+      // --json-output - works on devicectl 651.13.4 (#8623 findings), but older CoreDevice
+      // versions are unverified. DeviceAppManager.ts also uses files; keep this temp file
+      // until a minimum supported version is decided.
       tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-devices-"));
       const jsonPath = join(tempDir, "devices.json");
       // The listing is deduped via `inFlight`, so this span attributes to
@@ -528,7 +562,12 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
       );
       invoking = false;
       const raw = await this.deps.readFile(jsonPath);
-      const parsed = parseDevicectlDeviceList(JSON.parse(raw) as unknown);
+      const data: unknown = JSON.parse(raw);
+      const envelope = parseDevicectlFailureEnvelope(data);
+      if (envelope) {
+        return this.failedEnvelope(envelope);
+      }
+      const parsed = parseDevicectlDeviceList(data);
       if (!parsed.ok) {
         return this.failedListing("failed", parsed.reason);
       }
@@ -543,10 +582,16 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
       this.deps.logger.debug(
         `[DevicectlDeviceLister] dropped ${parsed.simulators.length} simulator record(s); simctl owns simulator discovery`,
       );
-      this.previousFailureCode = undefined;
+      this.previousFailureKey = undefined;
       return this.remember({ devices: parsed.physical, complete: true });
     } catch (error) {
       const code = invoking ? classifyDevicectlInvocationError(error) : "failed";
+      const envelope = invoking
+        ? await this.readInvocationFailureEnvelope(tempDir, code)
+        : undefined;
+      if (envelope) {
+        return this.failedEnvelope(envelope);
+      }
       const detail = invoking ? invocationFailureDetail(error, code) : errorMessage(error);
       return this.failedListing(
         code,
@@ -563,6 +608,33 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
         }
       }
     }
+  }
+
+  private async readInvocationFailureEnvelope(
+    tempDir: string | null,
+    code: DevicectlListingErrorCode,
+  ): Promise<DevicectlFailureEnvelope | undefined> {
+    if (!tempDir || code !== "failed") {
+      return undefined;
+    }
+    try {
+      const data: unknown = JSON.parse(await this.deps.readFile(join(tempDir, "devices.json")));
+      return parseDevicectlFailureEnvelope(data);
+    } catch (error) {
+      // Safe because the file may simply not exist or contain incomplete JSON after invocation failure.
+      this.deps.logger.debug("[DevicectlDeviceLister] Optional failure envelope could not be read");
+      return undefined;
+    }
+  }
+
+  private failedEnvelope(envelope: DevicectlFailureEnvelope): PhysicalIosDeviceDiscovery {
+    const label = envelope.kind.replaceAll("-", " ");
+    return this.failedListing(
+      "failed",
+      `CoreDeviceError ${envelope.code} (${label})`,
+      [],
+      envelope,
+    );
   }
 
   private logUnidentified(reasons: string[]): void {
@@ -584,19 +656,22 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     code: DevicectlListingErrorCode,
     detail: string,
     recognized: BootedDevice[] = [],
+    coreDeviceError?: DevicectlListingError["coreDeviceError"],
   ): PhysicalIosDeviceDiscovery {
-    const error = {
+    const error: DevicectlListingError = {
       code,
       message: `devicectl could not list physical iOS devices (${code}): ${detail.split(/\r?\n/, 1)[0]}`,
+      ...(coreDeviceError ? { coreDeviceError } : {}),
     };
     const message = `[DevicectlDeviceLister] ${error.message}`;
-    if (this.previousFailureCode === code) {
+    const key = `${code}:${coreDeviceError?.kind ?? "invocation"}`;
+    if (this.previousFailureKey === key) {
       // Repeated host-tool failures are expected until the host configuration changes.
       this.deps.logger.debug(message);
     } else {
       this.deps.logger.warn(message);
     }
-    this.previousFailureCode = code;
+    this.previousFailureKey = key;
     return this.remember({ devices: [], complete: false, error }, recognized);
   }
 

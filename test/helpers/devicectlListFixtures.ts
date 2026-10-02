@@ -10,6 +10,7 @@ export interface DevicectlFixtureExpectation {
   availableSimulators: number;
   notAvailable: number;
   unidentified: number;
+  notAvailableReasons?: Record<string, number>;
   /** True only if the envelope and every record are positively classified. */
   complete: boolean;
   physicalUdids?: string[];
@@ -57,9 +58,10 @@ export function loadDevicectlListFixture(name: string): string {
 
 interface DerivedDevicectlRecord {
   identifier: string;
+  visibilityClass?: string;
   properties: {
     hardware: Record<string, unknown>;
-    state: { bootState: string };
+    state: { bootState: string; visibilityClass?: string };
     connection: { state: string };
   };
   hardwareProperties?: Record<string, unknown>;
@@ -72,7 +74,7 @@ export function loadDerivedDevicectlListing(
   return JSON.parse(loadDevicectlListFixture(name));
 }
 
-/** DERIVED physical shape: change only reality/udid/platform on a captured record. */
+/** DERIVED physical shape: change reality/udid/platform and remove simulator visibility on a captured record. */
 export function derivePhysicalDevicectlRecord(record: DerivedDevicectlRecord, udid: string) {
   const derived = structuredClone(record);
   for (const hardware of [derived.properties.hardware, derived.hardwareProperties]) {
@@ -80,5 +82,7 @@ export function derivePhysicalDevicectlRecord(record: DerivedDevicectlRecord, ud
       Object.assign(hardware, { reality: "physical", udid, platform: "iOS" });
     }
   }
+  delete derived.visibilityClass;
+  delete derived.properties.state.visibilityClass;
   return derived;
 }

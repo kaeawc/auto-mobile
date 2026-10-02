@@ -21,11 +21,12 @@ describe("Fast Validation independence from XCTestRunner", () => {
     const job = loadWorkflow(WORKFLOW).jobs?.["ios-xctest-runner-simulator-tests"];
     expect(job).toBeDefined();
     expect(job?.needs).toEqual(["detect-changes", "fast-validation"]);
-    expect(job?.if).toBe("${{ false }}");
+    expect(job?.if).toContain("ios_integration_should_run");
+    expect(job?.if).toContain("fast-validation.result == 'success'");
     expect(loadJobSteps(WORKFLOW, "ios-xctest-runner-simulator-tests").length).toBeGreaterThan(0);
   });
 
-  test("keeps the disabled XCTestRunner job out of every job's needs", () => {
+  test("keeps the advisory XCTestRunner job out of every job's needs", () => {
     const jobs = loadWorkflow(WORKFLOW).jobs ?? {};
     for (const [jobId, job] of Object.entries(jobs)) {
       if (jobId === "ios-xctest-runner-simulator-tests") {

@@ -1,0 +1,3 @@
+# One repo-relative test path per line; blank lines and # comments are ignored.
+# An entry skips a known auto-advance/real-I/O race tracked by an issue.
+# Entries must reference that tracking issue in a trailing comment: path  # issue

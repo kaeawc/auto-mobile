@@ -305,9 +305,8 @@ jobs:
       # the device discovery / observe / gesture-action / iOS-runner / schema surface
       # — or to package.json/bun.lock, which setup-auto-mobile-npm-package installs —
       # CAN break the iOS XCUITest integration test even though it is pure TypeScript,
-      # so keep the native_integration filter ready to wire that macOS job
-      # (ios-xctest-runner-simulator-tests) to these paths when it is re-enabled.
-      # Kept narrower than all of src/** so internal-only TS edits skip.
+      # so wire that ONE macOS integration job (ios-xctest-runner-simulator-tests) to
+      # these paths. Kept narrower than all of src/** so internal-only TS edits skip.
       - name: "Check for native-integration-affecting changes"
         id: filter-native-integration
         uses: dorny/paths-filter@v3
@@ -338,19 +337,23 @@ jobs:
               - 'schemas/**'
               - 'ios/**'
               - 'scripts/ios/**'
-              # When enabled, the XCTestRunner job runs these readiness scripts
-              # directly; retain these paths so changes select it after re-enabling.
+              # The XCTestRunner job runs these readiness scripts directly, so
+              # changes to them must exercise the job (they were skipped before).
               - 'scripts/ci/**'
-              # When enabled, the XCTestRunner job composes simulator bring-up
-              # (select Xcode, ensure runtime, boot, daemon-ready) from this action.
-              # Retain this path so bring-up changes select it after re-enabling.
+              # The XCTestRunner job composes its simulator bring-up (select Xcode,
+              # ensure runtime, boot, daemon-ready) from this composite action, so a
+              # change to it must exercise the job — otherwise a bring-up refactor
+              # would land unvalidated and only surface on nightly / the next
+              # native_integration PR.
               - '.github/actions/ios-simulator-bring-up/**'
               # This workflow owns the Simulator workflow's command and gating.
               - '.github/workflows/pull_request.yml'
-              # When enabled, this job runs a bun-side integration test
-              # (iosVideoRecordingStartStop), so the bun test config and any test-setup
-              # preload affect it. Retain these paths so changes select it after
-              # re-enabling; see issue #3109.
+              # This job runs a bun-side integration test (iosVideoRecordingStartStop),
+              # so the bun test config and any test-setup preload affect it. bunfig.toml
+              # wires a [test].preload that runs before EVERY bun test the job invokes,
+              # and test/setup/** holds those preloaded modules; a change to either can
+              # break the integration test deterministically (issue #3109), so they
+              # must exercise this job pre-merge instead of landing latent.
               - 'bunfig.toml'
               - 'test/setup/**'
               - 'test/integration/iosVideoRecordingStartStop.integration.test.ts'
@@ -437,9 +440,10 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # This is the retained condition for the XCTestRunner simulator job, currently
-      # disabled (#8584); its sole consumer is that disabled job. It selects native
-      # integration changes (including ios/**) and run-native / run-ios labels.
+      # The iOS simulator integration test is the one macOS job wired to src/** (via
+      # the native_integration filter) so TS changes that drive iOS devices are still
+      # caught on PR. It also runs whenever ios/** changes (native_integration
+      # includes ios/**) and on the run-native / run-ios labels.
       - name: "Decide if iOS integration test should run"
         id: ios_integration_should_run
         env:
@@ -2156,10 +2160,10 @@ jobs:
     # The advisory simulator lane should not consume a scarce macOS runner for
     # a revision already rejected by inexpensive Ubuntu validation.
     needs: [detect-changes, fast-validation]
-    # Disabled until XCTestRunner is in use again. Re-enable by removing this line;
-    # it was previously gated on needs.detect-changes.outputs.ios_integration_should_run == 'true' &&
-    # needs.fast-validation.result == 'success'. See #8584.
-    if: ${{ false }}
+    # Wired to native_integration (src/** device surface + ios/**), NOT ios_should_run,
+    # so this TS<->runner integration test still runs on the TypeScript PRs that can
+    # break it while the pure-Swift build jobs skip on src-only changes.
+    if: needs.detect-changes.outputs.ios_integration_should_run == 'true' && needs.fast-validation.result == 'success'
     timeout-minutes: 45
     # CI's XCUITest cold-start routinely exceeds the defaults; give the daemon a
     # generous health-poll window (240 × 500ms = 120s) so it doesn't give up (and
@@ -3461,9 +3465,10 @@ jobs:
   # of the individual conditional jobs, avoiding the GitHub Actions issue where
   # skipped matrix jobs produce uninterpolated check names that block merges.
 
-  # Full iOS roll-up (superset). This is the broad, NON-required signal. The
-  # XCTestRunner simulator job is currently disabled (#8584) and is not listed
-  # here. The required, deterministic subset lives in ios-build-gate
+  # Full iOS roll-up (superset). This is the broad, NON-required signal: it
+  # leaves ios-xctest-runner-simulator-tests outside both gates as a standalone
+  # advisory lane and must not gate merges. The required, deterministic subset
+  # lives in ios-build-gate
   # below ("iOS Build"), which this gate reuses so the build-leg membership is
   # declared in exactly one place (add a new iOS *build* job to ios-build-gate,
   # not here).
@@ -3748,9 +3753,9 @@ jobs:
     # ios-playground-tests normally runs on CircleCI; the GHA job stays in this
     # roll-up for the label-forced-without-iOS-paths fallback, where it runs here.
     # In the common iOS-path case it is skipped (result 'skipped'), which this
-    # gate treats as non-failing. XCTestRunner Simulator Tests remains outside
-    # this roll-up and is currently disabled (#8584); when enabled, it is a
-    # standalone, non-required advisory check.
+    # gate treats as non-failing. XCTestRunner Simulator Tests is intentionally
+    # not part of this roll-up: the ~10-30 minute, simulator-flaky macOS lane
+    # remains a standalone, non-required advisory check outside the gate.
     needs:
       - detect-changes
       - ios-build-gate
@@ -3758,10 +3763,10 @@ jobs:
       - ios-spm-root-package-build
     runs-on: ubuntu-latest
     steps:
-      # HARD dependencies below fail this roll-up. The macOS XCTestRunner
-      # Simulator Tests lane is standalone and non-required, so it is not an
-      # advisory dependency here. The lane is currently disabled (#8584); see
-      # scripts/ci/known-flakes.txt for its prior failure signatures.
+      # HARD dependencies below fail this roll-up. The ~10-30 minute,
+      # simulator-flaky macOS XCTestRunner Simulator Tests lane is intentionally
+      # standalone and non-required outside this gate, so it is not an advisory
+      # dependency here. See scripts/ci/known-flakes.txt.
       - name: "Check results"
         run: |
           hard_results=(
@@ -3884,9 +3889,8 @@ jobs:
   # projects). Reports a stable context name so it can be a required status
   # check without the matrix-skip footgun (a gated-out matrix job reports its
   # literal "(${{ ... }})" name instead of the expanded one). Deliberately
-  # excludes ios-xctest-runner-simulator-tests, which is currently disabled
-  # (#8584) and must not gate merges. When enabled, it remains a non-required
-  # advisory check outside this deterministic build gate.
+  # excludes ios-xctest-runner-simulator-tests, which is simulator-flaky and
+  # must not gate merges — it remains a standalone advisory lane outside both gates.
   ios-build-gate:
     timeout-minutes: 10
     name: "iOS Build"

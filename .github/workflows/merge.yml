@@ -1119,8 +1119,7 @@ jobs:
     name: "Run JUnit Runner Emulator Tests"
     # Disabled on merge: low signal and runner-heavy. Runs nightly instead
     # (see nightly.yml). PRs cover the TS<->device path via the iOS simulator
-    # integration tripwire (pull_request.yml native_integration filter), which
-    # is currently disabled (#8584).
+    # integration tripwire (pull_request.yml native_integration filter).
     if: ${{ false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15

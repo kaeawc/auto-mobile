@@ -11,6 +11,37 @@ the exact arguments supported by your connection.
 
 ## Observe & navigate
 
+The default skeleton projection optionally includes `windowTruncations`:
+`[{ windowId: 67, package: "com.android.systemui", reasons: ["max_nodes"] }]`.
+There is one entry for each window with capture truncation reasons. Complete
+windows have no entry; when none are truncated, the field is absent, adding zero
+bytes to the output. `package` is optional and comes only from the window's own
+metadata or its linked hierarchy root, never from bounds or another window.
+The existing flat `truncationReasons` field keeps its meaning and behavior.
+
+- `max_nodes`: this window's share of the node budget was exhausted.
+- `max_depth`: the tree was deeper than the depth cap.
+- `cancelled`: the capture was cancelled mid-walk.
+
+Unknown reason codes from newer APKs pass through unchanged. Reasons within an
+entry are deduplicated in capture order; host-output `max_children[...]` caps
+are excluded because they do not describe window capture loss.
+Observe again after a cancellation, or narrow the next read with an element
+query, selector, or the configured `observeScope` experiments instead of
+re-reading the whole screen. If the relevant window is complete, act on that
+window. The host's observe API does not expose node/depth limit controls: its
+hierarchy request omits those optional protocol values, so the APK uses its
+defaults (10,000 nodes and depth 100).
+
+For `project: "full"` or `raw: true`, per-window reasons remain at
+`viewHierarchy.windows[].truncationReasons`; `windowTruncations` is not duplicated
+there. An action diff includes `windowTruncations` from the **current** observation
+only, even when full/raw was requested; flat diff reasons can also describe the
+baseline. With `display: "all"`, each skeleton display entry carries its own
+`windowTruncations`. An APK built before PR #8798 never sends per-window reasons,
+so the new field is simply absent: this is additive and nothing else changes.
+iOS has no per-window capture reasons.
+
 `observe` accepts an optional `display` panel key, a panel role (`inner`,
 `cover`, `rear`, or `external`), `"active"`, or opt-in Android `"all"`. With no argument, it follows
 the focused window's panel when available, then the current posture's default

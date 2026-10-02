@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { toJSONSchema } from "zod/v4";
 import {
   elementSchema,
+  displayObservationSchema,
   observeDiffSchema,
   observationSummarySchema,
   observeResultSchema,
@@ -28,6 +29,59 @@ import { ToolRegistry, toolHasOutputSchema } from "../../src/server/toolRegistry
 import { registerObserveTools } from "../../src/server/observeTools";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { ObservationInsets } from "../../src/models/ObservationInsets";
+
+describe("windowTruncations output schemas", () => {
+  const windowTruncations = [
+    { windowId: 67, package: "com.android.systemui", reasons: ["future_code"] },
+  ];
+  test.each([
+    { name: "observe", schema: observeResultSchema, base: {} },
+    { name: "action observation", schema: observationSummarySchema, base: {} },
+    {
+      name: "diff",
+      schema: observeDiffSchema,
+      base: { isDiff: true, skeleton: [], added: [], removed: [], changed: [] },
+    },
+    {
+      name: "display",
+      schema: displayObservationSchema,
+      base: {
+        display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+        screenSize: { width: 1080, height: 2400 },
+        freshness: { isFresh: true },
+      },
+    },
+  ])("windowTruncations is typed and advertised in $name", ({ schema, base }) => {
+    expect(schema.safeParse({ ...base, windowTruncations }).success).toBe(true);
+    expect(schema.safeParse(base).success).toBe(true);
+    expect(
+      schema.safeParse({ ...base, windowTruncations: [{ windowId: 67, reasons: "max_nodes" }] })
+        .success,
+    ).toBe(false);
+    expect(
+      schema.safeParse({ ...base, windowTruncations: [{ windowId: "67", reasons: [] }] }).success,
+    ).toBe(false);
+    expect(JSON.stringify(toJSONSchema(schema))).toContain('"windowTruncations"');
+  });
+
+  test("windowTruncations full hierarchy wire reasons are advertised, optional, and nullish", () => {
+    const { observe } = loadAndroidHomeObserve();
+    expect(observeResultSchema.safeParse(observe).success).toBe(true);
+    observe.viewHierarchy!.windows![0].truncationReasons = null;
+    expect(observeResultSchema.safeParse(observe).success).toBe(true);
+    observe.viewHierarchy!.windows![0].truncationReasons = ["future_code"];
+    expect(observeResultSchema.safeParse(observe).success).toBe(true);
+    expect(JSON.stringify(toJSONSchema(observeResultSchema))).toContain("Per-window capture");
+    const malformed: unknown = {
+      ...observe,
+      viewHierarchy: {
+        ...observe.viewHierarchy,
+        windows: [{ ...observe.viewHierarchy!.windows![0], truncationReasons: [42] }],
+      },
+    };
+    expect(observeResultSchema.safeParse(malformed).success).toBe(false);
+  });
+});
 
 /**
  * `observe` outputSchema coverage (issue #3025). The headline `observe` tool had

@@ -5,7 +5,7 @@ import type { ViewHierarchyNode } from "../../../models/ViewHierarchyResult";
 import { nodeAttributes as hierarchyNodeAttributes } from "../../../models/ViewHierarchyResult";
 import { projectSkeleton, projectSkeletonElement } from "./SkeletonProjection";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
-import { captureFidelityTruncationReasons } from "../truncationReasons";
+import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
 import { parseBounds } from "../../../utils/bounds";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
@@ -232,6 +232,12 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
   const truncationReasons = captureFidelityTruncationReasons(out.viewHierarchy?.truncationReasons);
   if (truncationReasons.length > 0) {
     out.truncationReasons = truncationReasons;
+  }
+  const windowTruncations = collectWindowTruncations(out.viewHierarchy?.windows);
+  if (windowTruncations) {
+    out.windowTruncations = windowTruncations;
+  } else {
+    delete out.windowTruncations;
   }
   delete out.viewHierarchy;
   delete out.elements;
@@ -772,6 +778,8 @@ export interface ObserveDiff {
    * from the post-action observation, not by {@link diffObserveResult}.
    */
   truncationReasons?: string[];
+  /** Window attribution from the current capture only, never the baseline. */
+  windowTruncations?: ObserveResult["windowTruncations"];
   /**
    * Whether the observation this diff was computed from passed the
    * embedded-observation stability gate (issue #6866). Populated by the

@@ -25,7 +25,10 @@ import { boundStructuredField, truncateBodyText } from "../utils/truncateBodyTex
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { isDeviceSessionAcquisitionTool } from "./deviceSessionResult";
-import { isHostOutputTruncationReason } from "../features/observe/truncationReasons";
+import {
+  collectWindowTruncations,
+  isHostOutputTruncationReason,
+} from "../features/observe/truncationReasons";
 import { buildObservationScreenshotUri } from "./observationResourceUris";
 import { stripInternalObservationFields } from "./observationInternalFields";
 
@@ -161,7 +164,7 @@ function resolveObserveProjection(args?: Record<string, unknown>): "full" | "ske
  * diff-mode client needs with the same shape as a full observation. Sourced
  * from the raw (pre-sanitize) observation so projection never suppresses it.
  * Add a field here when it is a straight copy; the contract test walks this
- * list. `skeleton`, `context`, `keyboard`, and `truncationReasons` are excluded
+ * list. `skeleton`, `context`, `keyboard`, `truncationReasons`, and `windowTruncations` are excluded
  * because they require projection or provenance merging.
  */
 export const DIFF_PASSTHROUGH_METADATA_FIELDS = [
@@ -531,6 +534,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
               "context",
               "keyboard",
               "truncationReasons",
+              "windowTruncations",
               "screenshotPath",
               "observeScope",
             ]),
@@ -655,6 +659,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             servedObservation,
             payload.observation as ObserveResult,
           );
+          // Window attribution describes the current capture, unlike the merged flat reasons.
+          const windowTruncations =
+            servedObservation.windowTruncations ??
+            collectWindowTruncations((payload.observation as ObserveResult).viewHierarchy?.windows);
+          Object.assign(diff, windowTruncations ? { windowTruncations } : {});
           const screenChangedWithEmptyDiff =
             hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
           observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;

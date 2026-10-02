@@ -28,16 +28,24 @@ import { FakeScreenshotFileWriter } from "../../fakes/FakeScreenshotFileWriter";
 import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { androidDevice } from "./takeScreenshotTestHelpers";
 
+function normalizeFakePath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+function samePath(a: string, b: string): boolean {
+  return normalizeFakePath(a) === normalizeFakePath(b);
+}
+
 class RetentionFiles extends FakeFileSystem {
   metadata = new Map<string, { size: number; mtimeMs: number; isFile(): boolean }>();
   add(name: string, size: number, mtimeMs: number): string {
     const path = `/screenshots/${name}`;
     this.setFile(path, "frame");
-    this.metadata.set(path, { size, mtimeMs, isFile: () => true });
+    this.metadata.set(normalizeFakePath(path), { size, mtimeMs, isFile: () => true });
     return path;
   }
   override async stat(path: string) {
-    const metadata = this.metadata.get(path);
+    const metadata = this.metadata.get(normalizeFakePath(path));
     if (!metadata || !this.existsSync(path)) {
       throw new Error("missing file");
     }
@@ -85,6 +93,29 @@ test("returned old-mtime path survives the next size sweep", async () => {
   await observationScreenshotEvidence(path, "cached", undefined, files, timer, protection);
   await sweep();
   expect(files.existsSync(path)).toBe(true);
+});
+test("an equivalent protected spelling survives an over-budget sweep", async () => {
+  timer.advanceTime(60_000);
+  const path = files.add("screenshot_0_device_equivalent.png", 129 * 1024 * 1024, 0);
+  await protection.protect("/screenshots/./screenshot_0_device_equivalent.png");
+  await sweep();
+  expect(files.existsSync(path)).toBe(true);
+});
+
+test("equivalent reference spellings in both stores survive a stale sweep", async () => {
+  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  const statePath = files.add("snapshot-of-state.png", 1, 0);
+  const observePath = files.add("snapshot-of-observe.png", 1, 0);
+  states.update("retention", "/screenshots/./snapshot-of-state.png");
+  await getObserveCacheStore().put("retention", {
+    updatedAt: timer.now(),
+    screenSize: { width: 1, height: 1 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    screenshotPath: "/screenshots/./snapshot-of-observe.png",
+  });
+  await sweep();
+  expect(files.existsSync(statePath)).toBe(true);
+  expect(files.existsSync(observePath)).toBe(true);
 });
 test("previous-run stale screenshots are swept even below the size cap", async () => {
   timer.advanceTime(24 * 60 * 60 * 1000 + 1);
@@ -162,7 +193,7 @@ test("stale sweep excludes unrelated files, directories, references and protecte
   const unrelated = files.add("unrelated.txt", 1, 0);
   const crashedPull = files.add("screenshot_0_device_crashed.png.temp", 1, 0);
   const directory = files.add("snapshot-of-directory.png", 1, 0);
-  files.metadata.set(directory, { size: 1, mtimeMs: 0, isFile: () => false });
+  files.metadata.set(normalizeFakePath(directory), { size: 1, mtimeMs: 0, isFile: () => false });
   getScreenshotStateStore().update("retention", referenced);
   await protection.protect(protectedPath);
   await sweep();
@@ -195,13 +226,13 @@ test("stat and unlink failures log their errors and do not stop other stale dele
   const realStat = files.stat.bind(files);
   const realUnlink = files.unlink.bind(files);
   const stat = spyOn(files, "stat").mockImplementation(async (path) => {
-    if (path === badStat) {
+    if (samePath(path, badStat)) {
       throw statError;
     }
     return realStat(path);
   });
   const unlink = spyOn(files, "unlink").mockImplementation(async (path) => {
-    if (path === badUnlink) {
+    if (samePath(path, badUnlink)) {
       throw unlinkError;
     }
     await realUnlink(path);
@@ -276,8 +307,28 @@ test("a reference added while another unlink is pending prevents deleting the ne
   const next = files.add("screenshot_0_device_next.png", 1, 0);
   const remove = files.unlink.bind(files);
   const unlink = spyOn(files, "unlink").mockImplementation(async (path) => {
-    if (path === first) {
+    if (samePath(path, first)) {
       states.update("retention", next);
+    }
+    await remove(path);
+  });
+  try {
+    await sweep();
+    expect(files.existsSync(first)).toBe(false);
+    expect(files.existsSync(next)).toBe(true);
+  } finally {
+    unlink.mockRestore();
+  }
+});
+
+test("a newly added equivalent reference prevents deleting the next stale file", async () => {
+  timer.advanceTime(SCREENSHOT_STALE_AGE_MS + 1);
+  const first = files.add("snapshot-of-first.png", 1, 0);
+  const next = files.add("screenshot_0_device_next.png", 1, 0);
+  const remove = files.unlink.bind(files);
+  const unlink = spyOn(files, "unlink").mockImplementation(async (path) => {
+    if (samePath(path, first)) {
+      states.update("retention", "/screenshots/./screenshot_0_device_next.png");
     }
     await remove(path);
   });

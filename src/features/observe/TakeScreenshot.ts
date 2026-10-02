@@ -27,6 +27,7 @@ import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import {
   selectScreenshotsToEvict,
+  screenshotPathKey,
   SCREENSHOT_MIN_LIFETIME_MS,
   SCREENSHOT_CACHE_MAX_SIZE_BYTES,
   SCREENSHOT_STALE_AGE_MS,
@@ -330,11 +331,14 @@ export class TakeScreenshot implements ScreenshotService {
           candidates.map((name) => this.readCachedScreenshot(path.join(cacheDir, name))),
         )
       ).filter((file): file is ScreenshotCacheFile => file !== undefined);
-      const referencedPaths = new Set([
-        ...getScreenshotStateStore().getReferencedScreenshotPaths(),
-        ...(await getObserveCacheStore().getReferencedScreenshotPaths()),
-      ]);
-      const isReferenced = (filePath: string): boolean => referencedPaths.has(filePath);
+      const referencedPaths = new Set(
+        [
+          ...getScreenshotStateStore().getReferencedScreenshotPaths(),
+          ...(await getObserveCacheStore().getReferencedScreenshotPaths()),
+        ].map((filePath) => screenshotPathKey(filePath)),
+      );
+      const isReferenced = (filePath: string): boolean =>
+        referencedPaths.has(screenshotPathKey(filePath));
       const isProtected = (filePath: string): boolean => this.pathProtection.isProtected(filePath);
       const nowMs = this.timer.now();
       const stale = files.filter((file) => nowMs - file.mtimeMs > SCREENSHOT_STALE_AGE_MS);
@@ -389,7 +393,13 @@ export class TakeScreenshot implements ScreenshotService {
       }
       const deleted = await this.pathProtection.removeIfUnprotected(filePath, () => {
         // Screenshot completion can add a cache reference after plan selection.
-        if (getScreenshotStateStore().getReferencedScreenshotPaths().includes(filePath)) {
+        if (
+          getScreenshotStateStore()
+            .getReferencedScreenshotPaths()
+            .some(
+              (referencedPath) => screenshotPathKey(referencedPath) === screenshotPathKey(filePath),
+            )
+        ) {
           return Promise.resolve(false);
         }
         return this.removeCachedScreenshot(filePath);

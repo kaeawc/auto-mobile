@@ -1,8 +1,11 @@
+import nodePath from "node:path";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import {
   SCREENSHOT_CACHE_MAX_SIZE_BYTES,
   SCREENSHOT_MIN_LIFETIME_MS,
+  screenshotPathKey,
+  type ScreenshotPathModule,
 } from "./screenshotCacheEviction";
 
 /**
@@ -27,18 +30,22 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
   private readonly removals = new Map<string, Promise<boolean>>();
   private lastPrunedAt: number | undefined;
 
-  constructor(private readonly timer: Timer = defaultTimer) {}
+  constructor(
+    private readonly timer: Timer = defaultTimer,
+    private readonly pathModule: ScreenshotPathModule = nodePath,
+  ) {}
 
   async protect(path: string): Promise<void> {
-    const removal = this.removals.get(path);
+    const key = screenshotPathKey(path, this.pathModule);
+    const removal = this.removals.get(key);
     if (removal) {
       await removal;
     }
     const now = this.timer.now();
     this.prune(now);
-    const deadline = Math.max(this.deadlines.get(path) ?? 0, now + SCREENSHOT_MIN_LIFETIME_MS);
-    this.deadlines.delete(path);
-    this.deadlines.set(path, deadline);
+    const deadline = Math.max(this.deadlines.get(key) ?? 0, now + SCREENSHOT_MIN_LIFETIME_MS);
+    this.deadlines.delete(key);
+    this.deadlines.set(key, deadline);
     if (this.deadlines.size > MAX_SCREENSHOT_PATH_PROTECTIONS) {
       const oldest = this.deadlines.keys().next().value;
       if (oldest !== undefined) {
@@ -51,23 +58,24 @@ export class BoundedScreenshotPathProtection implements ScreenshotPathProtection
   }
 
   async removeIfUnprotected(path: string, remove: () => Promise<boolean>): Promise<boolean> {
-    if (this.isProtected(path) || this.removals.has(path)) {
+    const key = screenshotPathKey(path, this.pathModule);
+    if (this.isProtected(path) || this.removals.has(key)) {
       return false;
     }
     // Register before invoking asynchronous filesystem code; publication waits
     // for it to finish, then stats the path and never returns a deleted file.
     const removal = Promise.resolve().then(remove);
-    this.removals.set(path, removal);
+    this.removals.set(key, removal);
     try {
       return await removal;
     } finally {
-      this.removals.delete(path);
+      this.removals.delete(key);
     }
   }
 
   isProtected(path: string): boolean {
     this.prune(this.timer.now());
-    return this.deadlines.has(path);
+    return this.deadlines.has(screenshotPathKey(path, this.pathModule));
   }
 
   private prune(now: number): void {

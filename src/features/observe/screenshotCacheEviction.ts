@@ -1,3 +1,16 @@
+import nodePath from "node:path";
+
+export type ScreenshotPathModule = Pick<typeof nodePath, "normalize" | "sep">;
+
+/** Lexical file identity without cwd resolution; Windows keys also ignore case. */
+export function screenshotPathKey(
+  path: string,
+  pathModule: ScreenshotPathModule = nodePath,
+): string {
+  const normalized = pathModule.normalize(path);
+  return pathModule.sep === "\\" ? normalized.toLowerCase() : normalized;
+}
+
 export interface ScreenshotCacheFile {
   path: string;
   size: number;

@@ -1869,6 +1869,7 @@ export async function tapOnHandler(
   device: BootedDevice,
   args: TapOnArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const tapOnTextCommand = tapOnElementFactory(device);
@@ -1894,6 +1895,7 @@ export async function tapOnHandler(
       subtext: args.subtext,
     },
     progress,
+    signal,
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -1916,6 +1918,7 @@ export async function tapAtHandler(
   device: BootedDevice,
   args: TapAtArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const result = await tapAtElementFactory(device).execute(
@@ -1929,6 +1932,7 @@ export async function tapAtHandler(
       durationMs: args.durationMs,
     },
     progress,
+    signal,
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
@@ -2001,6 +2005,7 @@ export async function tapAnyHandler(
   device: BootedDevice,
   args: TapAnyArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const tapAnyCommand = tapAnyElementFactory(device);
@@ -2014,6 +2019,7 @@ export async function tapAnyHandler(
       searchUntil: args.searchUntil,
     },
     progress,
+    signal,
   );
 
   const searchSummary = buildTapAnySearchSummary(result);
@@ -2052,6 +2058,7 @@ export async function dragAndDropHandler(
   device: BootedDevice,
   args: DragAndDropArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const dragAndDrop = dragAndDropFactory(device);
@@ -2065,6 +2072,7 @@ export async function dragAndDropHandler(
       holdDurationMs: args.holdDurationMs,
     },
     progress,
+    signal,
   );
 
   const message = result.success

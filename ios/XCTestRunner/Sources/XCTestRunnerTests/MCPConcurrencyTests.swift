@@ -95,6 +95,27 @@ final class MCPConcurrencyTests: XCTestCase {
         XCTAssertEqual(sameValue, 42)
     }
 
+    func testDeadlineWorkerAndTimerUseCallerPriority() async throws {
+        let scheduler = PriorityRecordingDeadlineScheduler()
+        let operation = SingleResumeCell<Void>()
+        let task = Task.detached(priority: .high) {
+            try await withDeadline(
+                seconds: 5,
+                scheduler: scheduler,
+                timeoutError: MCPClientError.requestFailed("timeout")
+            ) {
+                let priority = Task.currentPriority
+                try await operation.wait()
+                return priority
+            }
+        }
+        let timerPriority = try await scheduler.priority.wait()
+        operation.resume(returning: ())
+        let workerPriority = try await task.value
+        XCTAssertEqual(workerPriority, .high)
+        XCTAssertEqual(timerPriority, .high)
+    }
+
     func testDeadlineWinsDiscardsLateOperationResult() async throws {
         let scheduler = VirtualDeadlineScheduler()
         let operation = SingleResumeCell<Int>()
@@ -210,5 +231,15 @@ final class MCPConcurrencyTests: XCTestCase {
         catch { XCTAssertEqual(error as? MCPClientError, .sessionExpired) }
         do { _ = try await client.readResource(uri: "test", timeout: 1); XCTFail("Expected failure") }
         catch { XCTAssertEqual(error as? MCPClientError, .sessionExpired) }
+    }
+}
+
+private struct PriorityRecordingDeadlineScheduler: DeadlineScheduler {
+    let priority = SingleResumeCell<TaskPriority>()
+    private let gate = SingleResumeCell<Void>()
+
+    func sleep(seconds _: TimeInterval) async throws {
+        priority.resume(returning: Task.currentPriority)
+        try await gate.wait()
     }
 }

@@ -9,6 +9,6 @@ public struct StaticRecoveryConfigProvider: RecoveryConfigProviding {
         self.maxToolCalls = maxToolCalls
     }
 
-    public func isRecoveryEnabled() -> Bool { enabled }
-    public func maxRecoveryToolCalls() -> Int { maxToolCalls }
+    public func isRecoveryEnabled() async -> Bool { enabled }
+    public func maxRecoveryToolCalls() async -> Int { maxToolCalls }
 }

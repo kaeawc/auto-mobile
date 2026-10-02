@@ -166,8 +166,15 @@ open class AutoMobileTestCase: XCTestCase {
             buildTestMetadata()
         }
         PerfTimer.log("Executing with metadata: testClass=\(metadata.testClass), testMethod=\(metadata.testMethod)")
+        // Synchronous XCTest bodies normally run on the main thread. This blocking bridge is safe
+        // only while the awaited runner path never hops to the main actor or main queue; awaiting
+        // that work while blocking the main thread would deadlock. Keep that invariant and never
+        // call this bridge from the cooperative pool or main-actor async code. Capture identity here.
+        let sessionUuid = AutoMobileSession.currentSessionUuid()
         let result = try PerfTimer.measure("executor.execute") {
-            try executor.execute(testMetadata: metadata)
+            try BlockingAsyncCall.run {
+                try await executor.execute(testMetadata: metadata, sessionUuid: sessionUuid)
+            }
         }
         PerfTimer.log("executePlan END - success=\(result.success), steps=\(result.executedSteps)/\(result.totalSteps)")
         return result

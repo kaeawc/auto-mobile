@@ -1,22 +1,23 @@
 import Foundation
 
-/// Separate from the public synchronous timer so transport deadlines can suspend and be cancelled
-/// without changing the executor's timing API during the first migration step.
-protocol DeadlineScheduler: Sendable {
+/// Cancellation-aware async delay shared by transport deadlines, recovery and executor retries.
+/// Implementations must release their sleep when cancelled; tests inject virtual time.
+public protocol DeadlineScheduler: Sendable {
     func sleep(seconds: TimeInterval) async throws
 }
 
 /// Task.sleep releases the executor thread and reacts to cancellation of a losing deadline task.
-struct SystemDeadlineScheduler: DeadlineScheduler {
-    func sleep(seconds: TimeInterval) async throws {
+public struct SystemDeadlineScheduler: DeadlineScheduler {
+    public init() {}
+    public func sleep(seconds: TimeInterval) async throws {
         try await Task.sleep(for: .seconds(max(0, seconds)))
     }
 }
 
-/// Races one bounded, cancellation-aware operation against its deadline. A shared cell arbitrates
-/// timeout, result, and outer cancellation before cancelling the losing child. Children must release
-/// their waits on cancellation; structured concurrency joins them before returning. Late callbacks
-/// cannot replace the winning result. onTimeout tears down daemon I/O only when timeout actually wins.
+/// Races an operation against one deadline without joining an operation that ignores cancellation.
+/// Only the single-resume cell owns completion. Losing tasks are cancelled outside locks; an
+/// uncooperative operation may retain its captures until it finishes, but its late result is inert.
+/// Detached tasks inherit neither actor isolation nor task locals: routing must be explicit values.
 func withDeadline<Value: Sendable>(
     seconds: TimeInterval,
     scheduler: any DeadlineScheduler,
@@ -28,30 +29,41 @@ func withDeadline<Value: Sendable>(
 {
     try Task.checkCancellation()
     let result = SingleResumeCell<Value>()
-    return try await withTaskCancellationHandler {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask {
-                do {
-                    try Task.checkCancellation()
-                    try result.resume(returning: await operation())
-                } catch {
-                    result.resume(throwing: error)
-                }
-            }
-            group.addTask {
-                do {
-                    try await scheduler.sleep(seconds: seconds)
-                    try Task.checkCancellation()
-                    if result.resume(throwing: timeoutError()) { onTimeout() }
-                } catch {
-                    // Cancellation of the losing timer must not replace the operation's result.
-                    if !Task.isCancelled { result.resume(throwing: error) }
-                }
-            }
-            defer { group.cancelAll() }
-            return try await result.wait()
+    let worker = Task.detached(priority: Task.currentPriority) {
+        do {
+            try Task.checkCancellation()
+            let value = try await operation()
+            result.resume(returning: value)
+        } catch {
+            result.resume(throwing: error)
         }
-    } onCancel: {
-        result.cancel()
     }
+    let deadline = Task.detached(priority: Task.currentPriority) {
+        do {
+            try await scheduler.sleep(seconds: seconds)
+            try Task.checkCancellation()
+            if result.resume(throwing: timeoutError()) { onTimeout() }
+        } catch {
+            // The losing timer's cancellation must not replace the winning result.
+            if !Task.isCancelled { result.resume(throwing: error) }
+        }
+    }
+    let completion: Result<Value, any Error>
+    do {
+        let value = try await withTaskCancellationHandler {
+            try await result.wait()
+        } onCancel: {
+            result.cancel()
+            worker.cancel()
+            deadline.cancel()
+        }
+        completion = .success(value)
+    } catch {
+        completion = .failure(error)
+    }
+    worker.cancel()
+    deadline.cancel()
+    // Join only the cancellation-aware scheduler, so timeout teardown finishes before returning.
+    await deadline.value
+    return try completion.get()
 }

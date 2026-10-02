@@ -4,8 +4,9 @@ import os
 /// Resolves the `ai-recovery` gate by reading the `automobile:config/feature-flags/ai-recovery`
 /// resource from the daemon over the shared `AutoMobileMCPClient`. Mirrors Android
 /// `DaemonRecoveryConfigProvider`. The result is memoized for the life of the provider so at most one
-/// resource read happens. On any read/parse failure it logs and falls back to the daemon-side
-/// defaults (enabled, `maxToolCalls: 5`).
+/// non-cancelled resource read happens. A failed read caches the fallback defaults for the provider's
+/// lifetime; only a cancelled read is not cached. Read failures are logged and use the daemon-side
+/// defaults (enabled, `maxToolCalls: 5`); parse failures use the same defaults.
 ///
 /// Concurrency (closes race #4): the reference's `var cached` memo was read-then-written with no
 /// synchronization. Here it is **lock-confined** (`OSAllocatedUnfairLock`), double-checked so the
@@ -19,6 +20,7 @@ public final class DaemonRecoveryConfigProvider: RecoveryConfigProviding {
     private let clientProvider: @Sendable () -> AutoMobileMCPClient?
     private let timeoutSeconds: TimeInterval
     private let logger: AutoMobileLogger
+    private let gate = AsyncSerialGate()
     private let cached = OSAllocatedUnfairLock<(enabled: Bool, maxToolCalls: Int)?>(initialState: nil)
 
     public init(
@@ -31,14 +33,24 @@ public final class DaemonRecoveryConfigProvider: RecoveryConfigProviding {
         self.logger = logger
     }
 
-    public func isRecoveryEnabled() -> Bool { resolve().enabled }
-    public func maxRecoveryToolCalls() -> Int { resolve().maxToolCalls }
+    public func isRecoveryEnabled() async -> Bool { await resolve().enabled }
+    public func maxRecoveryToolCalls() async -> Int { await resolve().maxToolCalls }
 
-    private func resolve() -> (enabled: Bool, maxToolCalls: Int) {
+    private func resolve() async -> (enabled: Bool, maxToolCalls: Int) {
         if let existing = cached.withLock({ $0 }) {
             return existing
         }
-        let resolved = fetch()
+        do {
+            try await gate.acquire()
+        } catch {
+            logger.warn("Cancelled ai-recovery feature flag lookup: \(error)")
+            return (Self.defaultEnabled, Self.defaultMaxToolCalls)
+        }
+        defer { gate.release() }
+        if let existing = cached.withLock({ $0 }) { return existing }
+        let resolved = await fetch()
+        // A cancelled read must not poison the memo with fallback defaults.
+        if Task.isCancelled { return resolved }
         return cached.withLock { current in
             if let existing = current {
                 return existing
@@ -48,13 +60,13 @@ public final class DaemonRecoveryConfigProvider: RecoveryConfigProviding {
         }
     }
 
-    private func fetch() -> (enabled: Bool, maxToolCalls: Int) {
+    private func fetch() async -> (enabled: Bool, maxToolCalls: Int) {
         guard let client = clientProvider() else {
             return (Self.defaultEnabled, Self.defaultMaxToolCalls)
         }
         do {
-            try client.initialize(timeout: timeoutSeconds)
-            let response = try client.readResource(uri: Self.resourceURI, timeout: timeoutSeconds)
+            try await client.initialize(timeout: timeoutSeconds)
+            let response = try await client.readResource(uri: Self.resourceURI, timeout: timeoutSeconds)
             return Self.parse(response.text)
         } catch {
             // Log-then-default: a missing/unreadable flag must not block a test run; the daemon-side

@@ -2,6 +2,7 @@ import XCTest
 @testable import XCTestRunner
 import XCTestRunnerTestSupport
 
+/// Sequential fake: setup precedes execution; captured calls are inspected only after awaiting it.
 private final class LaunchPlanContractMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     struct ToolCall {
         let name: String
@@ -12,11 +13,17 @@ private final class LaunchPlanContractMCPClient: AutoMobileMCPClient, @unchecked
     private(set) var initializeTimeouts: [TimeInterval] = []
     private(set) var toolCalls: [ToolCall] = []
 
-    func initialize(timeout: TimeInterval) throws {
+    private func initializeResult(timeout: TimeInterval) throws {
         initializeTimeouts.append(timeout)
     }
 
-    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
+    private func callToolResult(
+        name: String,
+        arguments: [String: Any],
+        timeout: TimeInterval
+    )
+        throws -> MCPToolResponse
+    {
         toolCalls.append(ToolCall(name: name, arguments: arguments, timeout: timeout))
 
         switch name {
@@ -31,8 +38,26 @@ private final class LaunchPlanContractMCPClient: AutoMobileMCPClient, @unchecked
         }
     }
 
-    func readResource(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
+    private func readResourceResult(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
         throw MCPClientError.invalidResponse("Unexpected resource read")
+    }
+
+    func initialize(timeout: TimeInterval) throws { try initializeResult(timeout: timeout) }
+    func initialize(timeout: TimeInterval) async throws { try initializeResult(timeout: timeout) }
+    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
+        try callToolResult(name: name, arguments: arguments, timeout: timeout)
+    }
+
+    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> MCPToolResponse {
+        try callToolResult(name: name, arguments: arguments, timeout: timeout)
+    }
+
+    func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
+        try readResourceResult(uri: uri, timeout: timeout)
+    }
+
+    func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
+        try readResourceResult(uri: uri, timeout: timeout)
     }
 
     func resetSession() {}
@@ -82,8 +107,9 @@ class RemindersIntegrationBase: AutoMobileTestCase {
     }
 }
 
+@MainActor
 final class RemindersLaunchPlanTests: XCTestCase {
-    func testLaunchRemindersPlan() throws {
+    func testLaunchRemindersPlan() async throws {
         let client = LaunchPlanContractMCPClient()
         let executor = try AutoMobilePlanExecutor(
             configuration: AutoMobilePlanExecutor.Configuration(
@@ -97,9 +123,11 @@ final class RemindersLaunchPlanTests: XCTestCase {
             timer: FakeTimer(),
             logger: LaunchPlanContractLogger(),
             sessionIdProvider: { "launch-plan-contract-session" },
-            recoveryModelConfig: nil
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
-        let result = try executor.execute(
+        let result = try await executor.execute(
             testMetadata: AutoMobilePlanExecutor.TestMetadata(
                 testClass: "RemindersLaunchPlanTests",
                 testMethod: "testLaunchRemindersPlan",

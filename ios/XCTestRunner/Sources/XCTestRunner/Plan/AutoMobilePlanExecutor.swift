@@ -3,21 +3,24 @@ import Foundation
 /// Loads a plan, resolves its platform/devices, drives the daemon over an `AutoMobileMCPClient` to run
 /// it, and — on failure, when enabled — hands off to an AI recovery handler and resumes.
 ///
-/// Deliberately SYNCHRONOUS and non-`Sendable`: it is created and driven from synchronous XCTest
-/// bodies on one thread, and the transport clients block internally. All stored dependencies are
-/// immutable `let`s over `Sendable` seams, so the `@Sendable` closures it builds for
-/// `DaemonRecoveryConfigProvider` / `TachikomaPlanRecoveryHandler` are satisfied by capturing the
-/// already-`Sendable` `mcpClient`. Making the executor itself async/`Sendable` is deferred (Phase 8) —
-/// it would reintroduce the `AutoMobileSession` thread-local hazard and force the `[String: Any]` wire
-/// arguments across an isolation boundary.
-public final class AutoMobilePlanExecutor {
+/// Async execution owns an explicit session value: the caller's ID or a fresh ID for this run.
+/// An injected session provider runs on an arbitrary executor thread, not the caller's thread.
+/// Immutable dependencies refine Sendable; execution state and wire arguments remain local to a run.
+/// Concurrent runs require distinct transport clients if their session lifetimes must be independent.
+public final class AutoMobilePlanExecutor: Sendable {
     private let configuration: Configuration
     private let planLoader: AutoMobilePlanLoading
     private let mcpClient: AutoMobileMCPClient
-    private let timer: AutoMobileTimer
+    private let deadlineScheduler: any DeadlineScheduler
     private let logger: AutoMobileLogger
     private let daemonEnsurer: AutoMobileDaemonEnsuring
-    private let sessionIdProvider: () -> String
+    private let sessionIdProvider: (@Sendable () -> String)?
+    private let idGenerator: @Sendable () -> String
+    private static let daemonEnsureQueue = DispatchQueue(
+        label: "com.automobile.xctestrunner.daemon-ensure",
+        qos: .utility,
+        attributes: .concurrent
+    )
     private let recoveryConfigProvider: RecoveryConfigProviding
     // Nil = no AI recovery (no injected handler and no model API key in the environment); the executor
     // then behaves exactly as it did before this feature — a failed step throws.
@@ -29,18 +32,21 @@ public final class AutoMobilePlanExecutor {
         mcpClient: AutoMobileMCPClient? = nil,
         timer: AutoMobileTimer = SystemTimer(),
         logger: AutoMobileLogger = StdoutLogger(),
-        sessionIdProvider: @escaping () -> String = { AutoMobileSession.currentSessionUuid() },
+        sessionIdProvider: (@Sendable () -> String)? = nil,
         recoveryHandler: PlanRecoveryHandler? = nil,
         recoveryConfigProvider: RecoveryConfigProviding? = nil,
         recoveryModelConfig: RecoveryModelConfig? = RecoveryModelConfig.resolve(),
-        daemonEnsurer: AutoMobileDaemonEnsuring = SystemDaemonEnsurer()
+        daemonEnsurer: AutoMobileDaemonEnsuring = SystemDaemonEnsurer(),
+        deadlineScheduler: any DeadlineScheduler = SystemDeadlineScheduler(),
+        idGenerator: @escaping @Sendable () -> String = { UUID().uuidString }
     ) {
+        self.deadlineScheduler = deadlineScheduler
         self.configuration = configuration
         self.planLoader = planLoader
-        self.timer = timer
         self.logger = logger
         self.daemonEnsurer = daemonEnsurer
         self.sessionIdProvider = sessionIdProvider
+        self.idGenerator = idGenerator
 
         if let mcpClient = mcpClient {
             self.mcpClient = mcpClient
@@ -78,14 +84,34 @@ public final class AutoMobilePlanExecutor {
                 configProvider: self.recoveryConfigProvider,
                 modelConfig: recoveryModelConfig,
                 timer: timer,
-                logger: logger
+                logger: logger,
+                deadlineScheduler: deadlineScheduler
             )
         } else {
             self.recoveryHandler = nil
         }
     }
 
-    public func execute(testMetadata: TestMetadata? = nil) throws -> ExecutePlanResult {
+    public func execute(
+        testMetadata: TestMetadata? = nil,
+        sessionUuid: String? = nil
+    )
+        async throws -> ExecutePlanResult
+    {
+        // Async entry may already be on a cooperative-pool thread. Never consult thread-local
+        // identity here by default. A custom provider runs once on an arbitrary thread; the sync
+        // XCTest bridge captures its thread-local identity and passes that value explicitly.
+        let sessionUuid = sessionUuid ?? sessionIdProvider?() ?? idGenerator()
+        return try await executeWithRetries(testMetadata: testMetadata, sessionUuid: sessionUuid)
+    }
+
+    private func executeWithRetries(
+        testMetadata: TestMetadata?,
+        sessionUuid: String
+    )
+        async throws -> ExecutePlanResult
+    {
+        try Task.checkCancellation()
         var lastError: Error?
 
         // Preflight the daemon before the first attempt so a stale/version-skewed daemon on the
@@ -94,7 +120,7 @@ public final class AutoMobilePlanExecutor {
         // manages (its env/default path) — a custom socket path is the caller's own daemon that
         // DaemonManager can't target. No-op for HTTP transport.
         if case let .daemonUnixSocket(path) = configuration.transport, path == DaemonManager.socketPath {
-            _ = daemonEnsurer.ensureDaemonRunning(repoRoot: configuration.daemonRepoRoot)
+            try await ensureDaemonRunning()
         }
 
         for attempt in 0 ... configuration.retryCount {
@@ -102,20 +128,23 @@ public final class AutoMobilePlanExecutor {
                 if attempt > 0 {
                     logger.info("Retry attempt \(attempt + 1) of \(configuration.retryCount + 1)")
                 }
-                return try executeAttempt(
+                return try await executeAttempt(
                     startStep: configuration.startStep,
                     recoveryAlreadyAttempted: false,
                     deviceIdOverride: nil,
-                    sessionUuidOverride: nil,
+                    sessionUuidOverride: sessionUuid,
                     testMetadata: testMetadata
                 )
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 lastError = error
                 let shouldRetry = shouldRetry(error: error, attempt: attempt)
                 logger.warn("Plan execution attempt \(attempt + 1) failed: \(error)")
                 if shouldRetry {
-                    recoverDaemonBeforeRetry()
-                    timer.sleep(seconds: configuration.retryDelaySeconds)
+                    try await recoverDaemonBeforeRetry()
+                    try await deadlineScheduler.sleep(seconds: configuration.retryDelaySeconds)
                 } else {
                     break
                 }
@@ -132,32 +161,51 @@ public final class AutoMobilePlanExecutor {
     /// daemon via the version-matched ensure path (#2744) and drop the stale session, so a handshake
     /// rejection self-heals instead of failing every retry against the same wrong-version daemon.
     /// No-op for HTTP transport, which does not share the per-uid daemon socket.
-    private func recoverDaemonBeforeRetry() {
+    private func recoverDaemonBeforeRetry() async throws {
         guard case let .daemonUnixSocket(path) = configuration.transport else {
             return
         }
         // Only the DaemonManager-managed (env/default) socket can be restarted here; for a custom
         // socket path (the caller's own daemon) just drop the session so the retry reconnects.
         if path == DaemonManager.socketPath {
-            _ = daemonEnsurer.ensureDaemonRunning(repoRoot: configuration.daemonRepoRoot)
+            try await ensureDaemonRunning()
         }
+        try Task.checkCancellation()
         mcpClient.resetSession()
+    }
+
+    /// The synchronous ensurer may block for seconds. Keep it off the cooperative pool and allow
+    /// cancellation to finish the await without joining it. The cell ignores any late completion
+    /// and resumes outside its lock; no executor state is changed by the background call.
+    private func ensureDaemonRunning() async throws {
+        try Task.checkCancellation()
+        let completion = SingleResumeCell<Void>()
+        let ensurer = daemonEnsurer
+        let repoRoot = configuration.daemonRepoRoot
+        Self.daemonEnsureQueue.async {
+            guard !completion.isResolved else { return }
+            _ = ensurer.ensureDaemonRunning(repoRoot: repoRoot)
+            completion.resume(returning: ())
+        }
+        try await completion.wait()
+        try Task.checkCancellation()
     }
 
     /// Execute the plan once from `startStep`. On a step failure, if AI recovery is enabled and has not
     /// yet been attempted for this test, hand the failure to the recovery handler and — on success —
     /// resume from the step after the failed one (see `handleFailure`). `sessionUuidOverride` lets a
     /// resume reuse the failed attempt's session so it continues on the same device; the transient
-    /// retry loop passes nil and gets a fresh session each attempt, as before.
+    /// retry loop also reuses the one explicit session value captured by execute().
     private func executeAttempt(
         startStep: Int,
         recoveryAlreadyAttempted: Bool,
         deviceIdOverride: String?,
-        sessionUuidOverride: String?,
+        sessionUuidOverride: String,
         testMetadata: TestMetadata?
     )
-        throws -> ExecutePlanResult
+        async throws -> ExecutePlanResult
     {
+        try Task.checkCancellation()
         PerfTimer
             .log("executeAttempt START (startStep=\(startStep), recoveryAlreadyAttempted=\(recoveryAlreadyAttempted))")
         let planContent: String
@@ -165,6 +213,8 @@ public final class AutoMobilePlanExecutor {
             planContent = try PerfTimer.measure("loadPlan") {
                 try planLoader.loadPlan(at: configuration.planPath, bundle: configuration.planBundle)
             }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as PlanLoaderError {
             throw ExecutorError.planNotFound(error.description)
         } catch {
@@ -197,7 +247,7 @@ public final class AutoMobilePlanExecutor {
         let platform = try resolvePlatform(from: planMetadata)
         PerfTimer.log("resolved platform=\(platform)")
 
-        let sessionUuid = sessionUuidOverride ?? sessionIdProvider()
+        let sessionUuid = sessionUuidOverride
         PerfTimer.log("sessionUuid=\(sessionUuid)")
 
         let arguments = PerfTimer.measure("buildExecutePlanArguments") {
@@ -214,27 +264,19 @@ public final class AutoMobilePlanExecutor {
         PerfTimer.log("arguments built, keys=\(arguments.keys.sorted())")
 
         do {
-            try PerfTimer.measure("mcpClient.initialize") {
-                try mcpClient.initialize(timeout: configuration.timeoutSeconds)
-            }
-            _ = try PerfTimer.measure("mcpClient.callTool(setToolEnabled)") {
-                try mcpClient.callTool(
-                    name: "setToolEnabled",
-                    arguments: [
-                        "toolName": "executePlan",
-                        "sessionUuid": sessionUuid,
-                    ],
-                    timeout: configuration.timeoutSeconds
-                )
-            }
-            PerfTimer.log("calling executePlan tool with timeout=\(configuration.timeoutSeconds)s")
-            let response = try PerfTimer.measure("mcpClient.callTool(executePlan)") {
-                try mcpClient.callTool(
-                    name: "executePlan",
-                    arguments: arguments,
-                    timeout: configuration.timeoutSeconds
-                )
-            }
+            try Task.checkCancellation()
+            try await mcpClient.initialize(timeout: configuration.timeoutSeconds)
+            try Task.checkCancellation()
+            _ = try await mcpClient.callTool(
+                name: "setToolEnabled",
+                arguments: ["toolName": "executePlan", "sessionUuid": sessionUuid],
+                timeout: configuration.timeoutSeconds
+            )
+            try Task.checkCancellation()
+            let response = try await mcpClient.callTool(
+                name: "executePlan", arguments: arguments, timeout: configuration.timeoutSeconds
+            )
+            try Task.checkCancellation()
             PerfTimer.log("executePlan response received, length=\(response.text.count) chars")
             let result = try PerfTimer.measure("decodeExecutePlanResult") {
                 try decodeExecutePlanResult(from: response.text)
@@ -246,7 +288,7 @@ public final class AutoMobilePlanExecutor {
             if result.success {
                 return result
             }
-            return try handleFailure(
+            return try await handleFailure(
                 result: result,
                 planContent: substituted,
                 secretValues: secretValues,
@@ -256,7 +298,10 @@ public final class AutoMobilePlanExecutor {
                 recoveryAlreadyAttempted: recoveryAlreadyAttempted,
                 testMetadata: testMetadata
             )
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as MCPClientError {
+            try Task.checkCancellation()
             PerfTimer.log("executeAttempt ERROR: MCPClientError - \(error.description)")
             throw ExecutorError.mcpFailure(error.description)
         } catch let error as ExecutorError {
@@ -282,7 +327,7 @@ public final class AutoMobilePlanExecutor {
         recoveryAlreadyAttempted: Bool,
         testMetadata: TestMetadata?
     )
-        throws -> ExecutePlanResult
+        async throws -> ExecutePlanResult
     {
         let failureMessage = buildFailureMessage(from: result)
 
@@ -294,7 +339,7 @@ public final class AutoMobilePlanExecutor {
               let failedStep = result.failedStep,
               failedStep.stepIndex >= 0,
               !(testMetadata?.isCi ?? false),
-              recoveryConfigProvider.isRecoveryEnabled()
+              await recoveryConfigProvider.isRecoveryEnabled()
         else {
             throw ExecutorError.executionFailed(failureMessage)
         }
@@ -309,7 +354,9 @@ public final class AutoMobilePlanExecutor {
             deviceIdOverride: deviceIdOverride
         )
 
-        let outcome = handler.attemptRecovery(context)
+        try Task.checkCancellation()
+        let outcome = await handler.attemptRecovery(context)
+        try Task.checkCancellation()
         if !outcome.success {
             logger.warn("AI recovery failed")
             throw ExecutorError.executionFailed("\(failureMessage)\n  AI recovery attempted but did not succeed.")
@@ -319,7 +366,7 @@ public final class AutoMobilePlanExecutor {
         // session. `recoveryAlreadyAttempted: true` prevents a second recovery within this attempt.
         let resumeStep = failedStep.stepIndex + 1
         logger.info("AI recovery succeeded, resuming plan from step \(resumeStep + 1)")
-        var resumeResult = try executeAttempt(
+        var resumeResult = try await executeAttempt(
             startStep: resumeStep,
             recoveryAlreadyAttempted: true,
             deviceIdOverride: context.deviceId,

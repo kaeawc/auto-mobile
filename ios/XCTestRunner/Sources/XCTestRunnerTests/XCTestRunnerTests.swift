@@ -2,8 +2,9 @@ import XCTest
 @testable import XCTestRunner
 import XCTestRunnerTestSupport
 
+@MainActor
 final class XCTestRunnerTests: XCTestCase {
-    func testExecutePlanBuildsExpectedArguments() throws {
+    func testExecutePlanBuildsExpectedArguments() async throws {
         let planContent = "name: Test Plan\nsteps:\n  - tool: observe"
         let planLoader = FakePlanLoader(content: planContent)
         let mcpClient = FakeMCPClient()
@@ -28,7 +29,10 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: timer,
-            logger: NullLogger()
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
         let metadata = AutoMobilePlanExecutor.TestMetadata(
@@ -39,7 +43,7 @@ final class XCTestRunnerTests: XCTestCase {
             isCi: true
         )
 
-        _ = try executor.execute(testMetadata: metadata)
+        _ = try await executor.execute(testMetadata: metadata)
 
         XCTAssertEqual(mcpClient.calls.count, 2)
         let toolSelectionCall = mcpClient.calls[0]
@@ -66,10 +70,11 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertTrue(timer.sleeps.isEmpty)
     }
 
-    func testExecutePlanRetriesOnFailure() throws {
+    func testExecutePlanRetriesOnFailure() async throws {
         let planLoader = FakePlanLoader(content: "name: Retry Plan\nsteps:\n  - tool: observe")
         let mcpClient = FakeMCPClient()
         let timer = FakeTimer()
+        let scheduler = VirtualDeadlineScheduler()
 
         mcpClient.queueError(NSError(domain: "MCP", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timeout"]))
         mcpClient.queueResponse(success: true, executedSteps: 1, totalSteps: 1)
@@ -91,16 +96,24 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: timer,
-            logger: NullLogger()
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: scheduler
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        let task = Task { try await executor.execute(testMetadata: nil) }
+        try await scheduler.registered.wait(for: 1)
+        scheduler.advance(by: 1)
+        _ = try await task.value
 
         XCTAssertEqual(mcpClient.executePlanCalls.count, 2)
-        XCTAssertEqual(timer.sleeps, [1])
+        XCTAssertEqual(scheduler.requestedDelays, [1])
+        XCTAssertEqual(scheduler.pendingCount, 0)
+        XCTAssertTrue(timer.sleeps.isEmpty, "retry must suspend through the async scheduler")
     }
 
-    func testExecutePlanFailsWhenToolSelectionIsUnavailable() throws {
+    func testExecutePlanFailsWhenToolSelectionIsUnavailable() async throws {
         let mcpClient = FakeMCPClient()
         mcpClient.toolSelectionError = MCPClientError.serverError("Unknown tool: setToolEnabled")
         mcpClient.queueResponse(success: true, executedSteps: 1, totalSteps: 1)
@@ -120,14 +133,17 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: FakePlanLoader(content: "name: Test Plan\nsteps:\n  - tool: observe"),
             mcpClient: mcpClient,
             timer: FakeTimer(),
-            logger: NullLogger()
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil))
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil) }
         XCTAssertEqual(mcpClient.calls.map(\.name), ["setToolEnabled"])
     }
 
-    func testDaemonSocketPreflightPassesConfiguredRepoRootToDaemonManager() throws {
+    func testDaemonSocketPreflightPassesConfiguredRepoRootToDaemonManager() async throws {
         let planLoader = FakePlanLoader(content: "name: Daemon Plan\nsteps:\n  - tool: observe")
         let mcpClient = FakeMCPClient()
         let daemonEnsurer = FakeDaemonEnsurer()
@@ -145,18 +161,21 @@ final class XCTestRunnerTests: XCTestCase {
             mcpClient: mcpClient,
             timer: FakeTimer(),
             logger: NullLogger(),
-            daemonEnsurer: daemonEnsurer
+            recoveryModelConfig: nil,
+            daemonEnsurer: daemonEnsurer,
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         XCTAssertEqual(daemonEnsurer.repoRoots, [repoRoot])
     }
 
-    func testExecutePlanStopsAfterRetries() throws {
+    func testExecutePlanStopsAfterRetries() async throws {
         let planLoader = FakePlanLoader(content: "name: Fail Plan\nsteps:\n  - tool: observe")
         let mcpClient = FakeMCPClient()
         let timer = FakeTimer()
+        let scheduler = VirtualDeadlineScheduler()
 
         mcpClient.queueError(NSError(domain: "MCP", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timeout"]))
         mcpClient.queueError(NSError(domain: "MCP", code: 1, userInfo: [NSLocalizedDescriptionKey: "Timeout"]))
@@ -178,14 +197,22 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: timer,
-            logger: NullLogger()
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: scheduler
         )
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil))
-        XCTAssertEqual(timer.sleeps, [1])
+        let task = Task { try await executor.execute(testMetadata: nil) }
+        try await scheduler.registered.wait(for: 1)
+        scheduler.advance(by: 1)
+        await assertAsyncThrowsError { try await task.value }
+        XCTAssertEqual(scheduler.requestedDelays, [1])
+        XCTAssertEqual(scheduler.pendingCount, 0)
+        XCTAssertTrue(timer.sleeps.isEmpty, "retry must suspend through the async scheduler")
     }
 
-    func testParameterSubstitution() throws {
+    func testParameterSubstitution() async throws {
         let planContent = "name: Substitution\nsteps:\n  - tool: launchApp\n    appId: ${appId}"
         let planLoader = FakePlanLoader(content: planContent)
         let mcpClient = FakeMCPClient()
@@ -209,10 +236,13 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: FakeTimer(),
-            logger: NullLogger()
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         guard let encoded = mcpClient.executePlanCalls.first?.arguments["planContent"] as? String else {
             XCTFail("Missing plan content")
@@ -225,7 +255,7 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertTrue(decoded.contains("appId: com.example.app"))
     }
 
-    func testPlanPlatformOverridesDefault() throws {
+    func testPlanPlatformOverridesDefault() async throws {
         let planContent = "name: Platform Plan\nplatform: android\nsteps:\n  - tool: observe"
         let planLoader = FakePlanLoader(content: planContent)
         let mcpClient = FakeMCPClient()
@@ -250,15 +280,18 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: FakeTimer(),
-            logger: NullLogger()
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         XCTAssertEqual(mcpClient.executePlanCalls.first?.arguments["platform"] as? String, "android")
     }
 
-    func testPlanDevicesPassedToExecutePlan() throws {
+    func testPlanDevicesPassedToExecutePlan() async throws {
         let planContent = """
         name: Multi-device Plan
         devices:
@@ -291,10 +324,13 @@ final class XCTestRunnerTests: XCTestCase {
             planLoader: planLoader,
             mcpClient: mcpClient,
             timer: FakeTimer(),
-            logger: NullLogger()
+            logger: NullLogger(),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let devices = mcpClient.executePlanCalls.first?.arguments["devices"] as? [String]
         XCTAssertEqual(devices, ["ios-1"])
@@ -305,7 +341,7 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertNotNil(observer)
     }
 
-    func testExecutePlanFailureIncludesFailedStepInfo() throws {
+    func testExecutePlanFailureIncludesFailedStepInfo() async throws {
         let planContent = "name: Fail Plan\nsteps:\n  - tool: tapOn\n    element: Submit Button"
         let planLoader = FakePlanLoader(content: planContent)
         let mcpClient = FakeMCPClient()
@@ -344,10 +380,12 @@ final class XCTestRunnerTests: XCTestCase {
             logger: NullLogger(),
             // Disable AI recovery so this test deterministically exercises the failure-throw path
             // regardless of whether the environment has a model API key configured.
-            recoveryModelConfig: nil
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil)) { error in
+        await assertAsyncThrowsError({ try await executor.execute(testMetadata: nil) }, verify: { error in
             let errorDescription = String(describing: error)
             XCTAssertTrue(errorDescription.contains("step 4"), "Error should contain step index (1-based)")
             XCTAssertTrue(errorDescription.contains("tapOn"), "Error should contain tool name")
@@ -357,7 +395,7 @@ final class XCTestRunnerTests: XCTestCase {
             )
             XCTAssertTrue(errorDescription.contains("iPhone-15-Pro"), "Error should contain device")
             XCTAssertTrue(errorDescription.contains("3/10"), "Error should contain step counts")
-        }
+        })
     }
 
     func testDaemonStartupResultReadyIsTheOnlyReadyCase() {
@@ -390,7 +428,10 @@ final class XCTestRunnerTests: XCTestCase {
             stderr: "package unavailable"
         ).diagnosticMessage.contains("package unavailable"))
         XCTAssertTrue(DaemonStartupResult.packageRunnerNotFound.diagnosticMessage.contains("bunx"))
-        XCTAssertTrue(DaemonStartupResult.invalidPackageVersion("next").diagnosticMessage.contains("exact package version"))
+        XCTAssertTrue(
+            DaemonStartupResult.invalidPackageVersion("next").diagnosticMessage
+                .contains("exact package version")
+        )
         XCTAssertTrue(DaemonStartupResult.launchTimeout.diagnosticMessage.contains("timed out"))
         XCTAssertTrue(DaemonStartupResult.readinessTimeout.diagnosticMessage.contains("did not"))
         XCTAssertTrue(DaemonStartupResult.versionSkew.diagnosticMessage.contains("different-version"))
@@ -420,7 +461,7 @@ final class XCTestRunnerTests: XCTestCase {
         XCTAssertEqual(DaemonManager.startupFailure(for: .failed()), .launchFailed)
     }
 
-    func testExecutePlanFailureFallsBackToErrorWhenNoFailedStep() throws {
+    func testExecutePlanFailureFallsBackToErrorWhenNoFailedStep() async throws {
         let planContent = "name: Fail Plan\nsteps:\n  - tool: observe"
         let planLoader = FakePlanLoader(content: planContent)
         let mcpClient = FakeMCPClient()
@@ -454,16 +495,18 @@ final class XCTestRunnerTests: XCTestCase {
             logger: NullLogger(),
             // Disable AI recovery so this test deterministically exercises the failure-throw path
             // regardless of whether the environment has a model API key configured.
-            recoveryModelConfig: nil
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil)) { error in
+        await assertAsyncThrowsError({ try await executor.execute(testMetadata: nil) }, verify: { error in
             let errorDescription = String(describing: error)
             XCTAssertTrue(
                 errorDescription.contains("Connection timeout"),
                 "Error should contain fallback error message"
             )
-        }
+        })
     }
 
     /// `setUpWithError()` deliberately performs NO daemon or simulator I/O: it resolves
@@ -565,6 +608,7 @@ private struct FakePlanLoader: AutoMobilePlanLoading {
     }
 }
 
+/// Sequential fake: setup precedes execution; captured calls are inspected only after awaiting it.
 private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     struct Call {
         let name: String
@@ -625,11 +669,17 @@ private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
         queuedResults.append(.failure(error))
     }
 
-    func initialize(timeout _: TimeInterval) throws {
+    private func initializeResult(timeout _: TimeInterval) throws {
         initializeCount += 1
     }
 
-    func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
+    private func callToolResult(
+        name: String,
+        arguments: [String: Any],
+        timeout _: TimeInterval
+    )
+        throws -> MCPToolResponse
+    {
         calls.append(Call(name: name, arguments: arguments))
         if name == "setToolEnabled" {
             if let toolSelectionError {
@@ -643,8 +693,26 @@ private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
         return try queuedResults.removeFirst().get()
     }
 
-    func readResource(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
+    private func readResourceResult(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
         return MCPResourceResponse(text: "{}")
+    }
+
+    func initialize(timeout: TimeInterval) throws { try initializeResult(timeout: timeout) }
+    func initialize(timeout: TimeInterval) async throws { try initializeResult(timeout: timeout) }
+    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
+        try callToolResult(name: name, arguments: arguments, timeout: timeout)
+    }
+
+    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> MCPToolResponse {
+        try callToolResult(name: name, arguments: arguments, timeout: timeout)
+    }
+
+    func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
+        try readResourceResult(uri: uri, timeout: timeout)
+    }
+
+    func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
+        try readResourceResult(uri: uri, timeout: timeout)
     }
 
     func resetSession() {}

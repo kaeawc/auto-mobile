@@ -1,10 +1,8 @@
 import Foundation
 
 extension AutoMobilePlanExecutor {
-    /// Inputs for one plan execution. Not `Sendable` because `planBundle` is a `Bundle` (Foundation
-    /// does not mark it `Sendable`); the executor is a synchronous, single-isolation object, so the
-    /// configuration never crosses a concurrency boundary and does not need to be.
-    public struct Configuration {
+    /// Immutable inputs for one execution. Foundation Bundle is safe to share across threads.
+    public struct Configuration: Sendable {
         public let transport: Transport
         /// Source checkout whose built daemon should own the managed socket, when available.
         public let daemonRepoRoot: String?

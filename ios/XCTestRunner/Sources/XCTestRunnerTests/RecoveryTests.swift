@@ -6,6 +6,7 @@ import XCTestRunnerTestSupport
 // Unit tests for AI-assisted failure recovery. All tests are hermetic: the model is faked
 // (`StubModelResponder`) so nothing here touches the network or needs an API key.
 
+@MainActor
 final class RecoveryExecutorTests: XCTestCase {
     private let fourStepPlan = """
     name: Recovery Plan
@@ -16,7 +17,7 @@ final class RecoveryExecutorTests: XCTestCase {
       - tool: inputText
     """
 
-    func testRecoverySucceedsAndResumesFromNextStep() throws {
+    func testRecoverySucceedsAndResumesFromNextStep() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 2, totalSteps: 4,
@@ -27,7 +28,7 @@ final class RecoveryExecutorTests: XCTestCase {
         let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
         let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true)
 
-        let result = try executor.execute(testMetadata: nil)
+        let result = try await executor.execute(testMetadata: nil)
 
         XCTAssertTrue(result.success)
         XCTAssertTrue(result.aiRecoveryAttempted)
@@ -49,7 +50,7 @@ final class RecoveryExecutorTests: XCTestCase {
         XCTAssertEqual(executePlanCalls[1].arguments["deviceId"] as? String, "sim-1")
     }
 
-    func testRecoveryFailureThrowsOriginalAndDoesNotResume() throws {
+    func testRecoveryFailureThrowsOriginalAndDoesNotResume() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 1, totalSteps: 3,
@@ -59,16 +60,16 @@ final class RecoveryExecutorTests: XCTestCase {
         let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: false))
         let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true)
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil)) { error in
+        await assertAsyncThrowsError({ try await executor.execute(testMetadata: nil) }, verify: { error in
             let description = String(describing: error)
             XCTAssertTrue(description.contains("boom"), "should retain the original failure message")
             XCTAssertTrue(description.contains("AI recovery attempted"), "should note the failed recovery")
-        }
+        })
         XCTAssertEqual(handler.receivedContexts.count, 1)
         XCTAssertEqual(client.executePlanCalls.count, 1, "must not resume when recovery failed")
     }
 
-    func testRecoverySkippedWhenFlagDisabled() throws {
+    func testRecoverySkippedWhenFlagDisabled() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 1, totalSteps: 3,
@@ -78,12 +79,12 @@ final class RecoveryExecutorTests: XCTestCase {
         let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
         let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: false)
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil))
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil) }
         XCTAssertTrue(handler.receivedContexts.isEmpty, "flag off must not call the handler")
         XCTAssertEqual(client.executePlanCalls.count, 1)
     }
 
-    func testRecoverySkippedInCiMode() throws {
+    func testRecoverySkippedInCiMode() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 1, totalSteps: 3,
@@ -94,11 +95,11 @@ final class RecoveryExecutorTests: XCTestCase {
         let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true)
 
         let metadata = AutoMobilePlanExecutor.TestMetadata(testClass: "T", testMethod: "m", isCi: true)
-        XCTAssertThrowsError(try executor.execute(testMetadata: metadata))
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: metadata) }
         XCTAssertTrue(handler.receivedContexts.isEmpty, "CI mode must skip recovery")
     }
 
-    func testRecoverySkippedWhenAiAssistanceDisabled() throws {
+    func testRecoverySkippedWhenAiAssistanceDisabled() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 1, totalSteps: 3,
@@ -108,11 +109,11 @@ final class RecoveryExecutorTests: XCTestCase {
         let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
         let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true, aiAssistance: false)
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil))
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil) }
         XCTAssertTrue(handler.receivedContexts.isEmpty, "aiAssistance=false must skip recovery")
     }
 
-    func testRecoveryAttemptedAtMostOncePerTest() throws {
+    func testRecoveryAttemptedAtMostOncePerTest() async throws {
         let client = RecoveryMCPClient()
         // Initial failure, then the resumed run also fails: recovery must NOT fire a second time.
         client.queueExecutePlan(planJSON(
@@ -127,7 +128,7 @@ final class RecoveryExecutorTests: XCTestCase {
         let handler = SpyRecoveryHandler(outcome: RecoveryOutcome(success: true))
         let executor = makeExecutor(client: client, handler: handler, recoveryEnabled: true)
 
-        XCTAssertThrowsError(try executor.execute(testMetadata: nil))
+        await assertAsyncThrowsError { try await executor.execute(testMetadata: nil) }
         XCTAssertEqual(handler.receivedContexts.count, 1, "recovery is allowed at most once per test")
         XCTAssertEqual(client.executePlanCalls.count, 2, "initial attempt + one resume")
         XCTAssertEqual(client.executePlanCalls[1].arguments["startStep"] as? Int, 2)
@@ -159,18 +160,24 @@ final class RecoveryExecutorTests: XCTestCase {
             timer: FakeTimer(),
             logger: SilentLogger(),
             recoveryHandler: handler,
-            recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: recoveryEnabled, maxToolCalls: 5)
+            recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: recoveryEnabled, maxToolCalls: 5),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
     }
 }
 
+@MainActor
 final class RecoveryConfigAndModelTests: XCTestCase {
-    func testDaemonRecoveryConfigReadsFlagFromResource() {
+    func testDaemonRecoveryConfigReadsFlagFromResource() async {
         let client = RecoveryMCPClient()
         client.flagResourceText = jsonString(["enabled": false, "config": ["maxToolCalls": 9]])
         let provider = DaemonRecoveryConfigProvider(clientProvider: { client }, logger: SilentLogger())
-        XCTAssertFalse(provider.isRecoveryEnabled())
-        XCTAssertEqual(provider.maxRecoveryToolCalls(), 9)
+        let enabled = await provider.isRecoveryEnabled()
+        let maxCalls = await provider.maxRecoveryToolCalls()
+        XCTAssertFalse(enabled)
+        XCTAssertEqual(maxCalls, 9)
     }
 
     func testDaemonRecoveryConfigParseDefaultsOnGarbage() {
@@ -247,6 +254,7 @@ final class RecoveryConfigAndModelTests: XCTestCase {
     }
 }
 
+@MainActor
 final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
     private func makeContext() -> FailedStepContext {
         FailedStepContext(
@@ -262,7 +270,7 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
         )
     }
 
-    func testHandlerRunsToolLoopThenVerifiesWithObserve() {
+    func testHandlerRunsToolLoopThenVerifiesWithObserve() async {
         let client = RecoveryMCPClient()
         let responder = StubModelResponder([
             StubModelResponder.toolCall(name: "observe"),
@@ -271,7 +279,7 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
         ])
         let handler = makeHandler(client: client, responder: responder, maxToolCalls: 5)
 
-        let outcome = handler.attemptRecovery(makeContext())
+        let outcome = await handler.attemptRecovery(makeContext())
 
         XCTAssertTrue(outcome.success, "a non-nil post-recovery observe means success")
         XCTAssertEqual(client.calls.map { $0.name }, ["observe", "tapOn", "observe"])
@@ -284,7 +292,7 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
         XCTAssertNotNil(tapCall?.arguments["selector"], "model-provided selector is preserved")
     }
 
-    func testHandlerNoOpsWithoutModelConfig() {
+    func testHandlerNoOpsWithoutModelConfig() async {
         let client = RecoveryMCPClient()
         let handler = TachikomaPlanRecoveryHandler(
             mcpClient: client,
@@ -292,22 +300,23 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
             modelConfig: nil,
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in StubModelResponder([]) }
+            responderFactory: { _ in StubModelResponder([]) },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
 
-        let outcome = handler.attemptRecovery(makeContext())
+        let outcome = await handler.attemptRecovery(makeContext())
 
         XCTAssertFalse(outcome.success)
         XCTAssertTrue(client.calls.isEmpty, "no model config means no device interaction")
     }
 
-    func testHandlerRespectsMaxToolCallBudget() {
+    func testHandlerRespectsMaxToolCallBudget() async {
         let client = RecoveryMCPClient()
         // The model keeps asking to tap forever; the budget of 2 must cap real device tool calls.
         let responder = StubModelResponder(alwaysReturn: StubModelResponder.toolCall(name: "tapOn"))
         let handler = makeHandler(client: client, responder: responder, maxToolCalls: 2)
 
-        _ = handler.attemptRecovery(makeContext())
+        _ = await handler.attemptRecovery(makeContext())
 
         XCTAssertEqual(client.calls.filter { $0.name == "tapOn" }.count, 2, "budget caps tool calls")
         XCTAssertEqual(client.calls.filter { $0.name == "observe" }.count, 1, "one final verification observe")
@@ -326,7 +335,8 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in responder }
+            responderFactory: { _ in responder },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
     }
 }
@@ -335,6 +345,7 @@ final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
 /// during AI-assisted recovery. These tests drive the FULL executor → recovery handler → model call
 /// path with a real `TachikomaPlanRecoveryHandler` and a capturing `ModelResponding` so the assertion
 /// is against the actual `ModelRequest` that would go over the wire, not a helper's rendering of it.
+@MainActor
 final class PlanRecoverySecretRedactionTests: XCTestCase {
     private let secret = "SECRET-hunter2-TOKEN"
     private let visible = "keepme-visible-env"
@@ -351,7 +362,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         text: "${ENVIRONMENT}"
     """
 
-    func testSecretIsRedactedFromModelRequestWhileNonSecretIsPreserved() throws {
+    func testSecretIsRedactedFromModelRequestWhileNonSecretIsPreserved() async throws {
         let client = RecoveryMCPClient()
         // Fail on the inputText step; the secret also surfaces in the error string and on-screen sample.
         client.queueExecutePlan(planJSON(
@@ -374,11 +385,12 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         let executor = makeExecutor(client: client, handler: handler)
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first, "recovery must issue a model request")
         let text = requestText(request)
@@ -394,7 +406,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         XCTAssertTrue(daemonPlan.contains(secret), "daemon executePlan payload must stay unredacted")
     }
 
-    func testSecretDeclaredOnlyViaConfigurationIsRedacted() throws {
+    func testSecretDeclaredOnlyViaConfigurationIsRedacted() async throws {
         let client = RecoveryMCPClient()
         client.queueExecutePlan(planJSON(
             success: false, executedSteps: 1, totalSteps: 3,
@@ -408,7 +420,8 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         // Declare the secret ONLY through Configuration.secretParameterKeys — the plan here does NOT
         // list `secretParameters`, isolating the Configuration path.
@@ -426,13 +439,13 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             configSecretKeys: ["TOKEN"]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         XCTAssertFalse(requestText(request).contains(secret), "config-declared secret must also be redacted")
     }
 
-    func testSecretRedactedWhenSecretParametersIsFlushZeroIndentBlockSequence() throws {
+    func testSecretRedactedWhenSecretParametersIsFlushZeroIndentBlockSequence() async throws {
         // Flush (zero-indent) block sequence — valid YAML that the iOS line parser previously dropped,
         // silently disabling redaction on iOS while Android (snakeyaml) still redacted (#6029).
         let flushPlan = """
@@ -457,11 +470,12 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         let executor = makeExecutor(client: client, handler: handler, planText: flushPlan)
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         XCTAssertFalse(
@@ -470,7 +484,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
-    func testSecretRedactedWhenSecretParametersIsMultilineFlowSequence() throws {
+    func testSecretRedactedWhenSecretParametersIsMultilineFlowSequence() async throws {
         // Multiline bracketed flow sequence — valid YAML the iOS line scanner previously dropped,
         // silently disabling redaction and letting the secret reach the LLM recovery context (#6097).
         let multilinePlan = """
@@ -496,11 +510,12 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         let executor = makeExecutor(client: client, handler: handler, planText: multilinePlan)
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         XCTAssertFalse(
@@ -509,7 +524,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
-    func testSecretsRedactedWhenMultilineFlowKeyContainsQuotedHash() throws {
+    func testSecretsRedactedWhenMultilineFlowKeyContainsQuotedHash() async throws {
         // Two keys, the first quoting a `#`. A comment strip that runs before quote state truncates
         // the first item, drops the second, and leaks the second secret to the recovery LLM (#6097 P1).
         let secretA = "SECRETA-hash-9f1"
@@ -538,7 +553,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             parameters: ["API#TOKEN": secretA, "PASSWORD": secretB]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         let text = requestText(request)
@@ -546,7 +561,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         XCTAssertFalse(text.contains(secretB), "the following key must not be dropped, so its value redacts")
     }
 
-    func testSecretsRedactedWhenMultilineFlowKeyContainsEscapedQuoteBeforeBracket() throws {
+    func testSecretsRedactedWhenMultilineFlowKeyContainsEscapedQuoteBeforeBracket() async throws {
         // The first key is a double-quoted scalar with an escaped quote before a `]`. Without escape
         // tracking the sequence terminator is found early, PASSWORD is dropped, and its secret leaks.
         let secretA = "SECRETA-esc-4c2"
@@ -575,7 +590,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             parameters: ["a\"]b": secretA, "PASSWORD": secretB]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         let text = requestText(request)
@@ -583,7 +598,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         XCTAssertFalse(text.contains(secretB), "the following key must not be dropped, so its value redacts")
     }
 
-    func testSecretValueRedactedWhenKeyUsesHexEscapeViaFailSafe() throws {
+    func testSecretValueRedactedWhenKeyUsesHexEscapeViaFailSafe() async throws {
         // The key `"API\x54OKEN"` is now spec-decoded to `APITOKEN` (issue #6141), so it matches the
         // parameter `APITOKEN` by name and its value is redacted directly. Even if decoding had
         // failed, the value-layer fail-safe would over-redact, so the secret still cannot leak
@@ -604,7 +619,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             parameters: ["APITOKEN": secret]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         XCTAssertFalse(
@@ -613,7 +628,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
-    func testSecretValueRedactedDespiteDecoyParameterMatchingUnDecodedHexKey() throws {
+    func testSecretValueRedactedDespiteDecoyParameterMatchingUnDecodedHexKey() async throws {
         // Parameters contain BOTH the real `APITOKEN` (what the scanner now decodes `"API\x54OKEN"`
         // to — issue #6141) and a decoy `APIx54OKEN` matching the OLD un-decoded spelling. Decoding
         // resolves the key to `APITOKEN`, so the real secret is redacted by exact match and the decoy
@@ -634,7 +649,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             parameters: ["APITOKEN": real, "APIx54OKEN": "DECOY-not-the-secret"]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         XCTAssertFalse(
@@ -643,7 +658,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
         )
     }
 
-    func testSecretSubstitutedIntoToolNameIsRedacted() throws {
+    func testSecretSubstitutedIntoToolNameIsRedacted() async throws {
         let client = RecoveryMCPClient()
         // The daemon reports the failed step's tool as the substituted secret value.
         client.queueExecutePlan(planJSON(
@@ -658,11 +673,12 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         let executor = makeExecutor(client: client, handler: handler)
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         XCTAssertFalse(
@@ -675,7 +691,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
     /// actually produced. With sorted-key substitution, `${TOKEN}` -> `sec-${AA}-zeta` (AA resolved
     /// before TOKEN inserts it, ZZ after) — neither the raw value nor a fully-resolved fixpoint. Using
     /// the executor's own substitution as the source of truth scrubs exactly that.
-    func testScrubsExactlyWhatTheExecutorSubstitutionProduced() throws {
+    func testScrubsExactlyWhatTheExecutorSubstitutionProduced() async throws {
         let plan = """
         name: P
         secretParameters:
@@ -698,7 +714,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             parameters: ["TOKEN": "sec-${AA}-${ZZ}", "AA": "alpha", "ZZ": "zeta"]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         let text = requestText(request)
@@ -710,7 +726,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
 
     /// #6029 review (701): a self-referential secret must not blow up (no fixpoint expansion) and must
     /// still be redacted. The executor's single pass turns `${TOKEN}` into `marker-${TOKEN}` once.
-    func testSelfReferentialSecretTerminatesAndIsRedacted() throws {
+    func testSelfReferentialSecretTerminatesAndIsRedacted() async throws {
         let plan = """
         name: P
         secretParameters:
@@ -733,7 +749,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             parameters: ["TOKEN": "marker-${TOKEN}"]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         let text = requestText(request)
@@ -744,7 +760,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
 
     /// #6029 review: a plan may parameterize the declared key name (`secretParameters: [${SECRET_KEY}]`)
     /// — parsed from the raw plan, then the key name resolved against parameters.
-    func testParameterizedSecretKeyNameIsRedacted() throws {
+    func testParameterizedSecretKeyNameIsRedacted() async throws {
         let plan = """
         name: P
         secretParameters:
@@ -767,7 +783,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             parameters: ["SECRET_KEY": "apiToken", "apiToken": secret]
         )
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         let request = try XCTUnwrap(captor.captured.first)
         let text = requestText(request)
@@ -784,7 +800,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
     /// the secret is absent from ALL of them — including the post-initial tool-result turns — while
     /// non-secret context survives. The secret is placed ONLY in the tool results here (the failure
     /// error/observation are clean), isolating this loop channel from #6092's initial-prompt fix.
-    func testSecretInToolResultIsRedactedFromEveryModelRequestInTheLoop() throws {
+    func testSecretInToolResultIsRedactedFromEveryModelRequestInTheLoop() async throws {
         let client = RecoveryMCPClient()
         // The live observe/tool results carry the on-screen secret plus non-secret context.
         client.observeText = "{\"elements\":{\"field\":\"token \(secret)\"},\"env\":\"\(visible)\"}"
@@ -807,11 +823,12 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         let executor = makeExecutor(client: client, handler: handler)
 
-        _ = try executor.execute(testMetadata: nil)
+        _ = try await executor.execute(testMetadata: nil)
 
         XCTAssertGreaterThanOrEqual(
             captor.captured.count, 2,
@@ -841,7 +858,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
     /// `FailedStepContext` with RAW (unredacted) fields and RAW concrete `secretValues`. The handler
     /// must normalize the values and scrub the static context fields itself, so the very first
     /// ModelRequest (the prompt) does not leak — not only the executor path (which pre-redacts).
-    func testDirectCallerRawContextIsRedactedFromTheInitialPrompt() throws {
+    func testDirectCallerRawContextIsRedactedFromTheInitialPrompt() async throws {
         let client = RecoveryMCPClient()
         let captor = ScriptedCapturingModelResponder([])
         let handler = TachikomaPlanRecoveryHandler(
@@ -850,7 +867,8 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
         let context = FailedStepContext(
             failedStepIndex: 1,
@@ -865,7 +883,7 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             secretValues: [secret] // RAW concrete value, not pre-expanded
         )
 
-        _ = handler.attemptRecovery(context)
+        _ = await handler.attemptRecovery(context)
 
         let request = try XCTUnwrap(captor.captured.first, "the handler must issue the initial prompt request")
         let text = requestText(request)
@@ -887,7 +905,8 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "claude-sonnet-4-20250514"),
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in captor }
+            responderFactory: { _ in captor },
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
     }
 
@@ -920,7 +939,10 @@ final class PlanRecoverySecretRedactionTests: XCTestCase {
             timer: FakeTimer(),
             logger: SilentLogger(),
             recoveryHandler: handler,
-            recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5)
+            recoveryConfigProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
+            recoveryModelConfig: nil,
+            daemonEnsurer: HermeticDaemonEnsurer(),
+            deadlineScheduler: VirtualDeadlineScheduler()
         )
     }
 
@@ -1484,6 +1506,7 @@ final class SecretRedactionTests: XCTestCase {
     }
 }
 
+@MainActor
 final class RunBlockingBoundTests: XCTestCase {
     private func makeContext() -> FailedStepContext {
         FailedStepContext(
@@ -1499,11 +1522,10 @@ final class RunBlockingBoundTests: XCTestCase {
         )
     }
 
-    // A hung model call must fail the recovery attempt (success == false) instead of blocking the
-    // XCTest runner forever. Uses a fake bridge so the handler's timeout handling is deterministic —
-    // no wall-clock wait, no leaked Task.
-    func testHungModelCallFailsRecoveryInsteadOfHanging() {
+    func testHungModelCallFailsRecoveryInsteadOfHanging() async throws {
         let client = RecoveryMCPClient()
+        let scheduler = VirtualDeadlineScheduler()
+        let responder = LateModelResponder()
         let handler = TachikomaPlanRecoveryHandler(
             mcpClient: client,
             configProvider: StaticRecoveryConfigProvider(enabled: true, maxToolCalls: 5),
@@ -1511,69 +1533,127 @@ final class RunBlockingBoundTests: XCTestCase {
             timeoutSeconds: 120,
             timer: FakeTimer(),
             logger: SilentLogger(),
-            responderFactory: { _ in NeverReturningModelResponder() },
-            asyncBridge: TimeoutAsyncCallBridge(timeoutSeconds: 0.05)
+            responderFactory: { _ in responder },
+            deadlineScheduler: scheduler
         )
-
-        let outcome = handler.attemptRecovery(makeContext())
-
+        let context = makeContext()
+        let task = Task { await handler.attemptRecovery(context) }
+        try await responder.started.wait(for: 1)
+        try await scheduler.registered.wait(for: 1)
+        scheduler.advance(by: 120)
+        let outcome = await task.value
         XCTAssertFalse(outcome.success, "a timed-out model call must yield a failed recovery outcome")
-        XCTAssertTrue(client.calls.isEmpty, "no device tool calls when the model call times out before returning")
+        XCTAssertEqual(scheduler.currentTime, 120)
+        XCTAssertEqual(responder.finished.count, 0, "deadline returns before the uncooperative call finishes")
+        XCTAssertTrue(client.calls.isEmpty, "no tools when the model times out")
+        try await responder.cancelled.wait(for: 1)
+        // A late tool call must never reach the device. The deadline already returned above.
+        XCTAssertTrue(responder.result.resume(returning: StubModelResponder.toolCall(name: "tapOn")))
+        try await responder.finished.wait(for: 1)
+        XCTAssertFalse(responder.result.resume(returning: StubModelResponder.final()))
+        XCTAssertTrue(client.calls.isEmpty, "late model results must not execute tools or observe")
     }
 
-    // The production bridge must actually bound the wait: a hung operation resolves via timeout, not
-    // by blocking forever. The op sleeps far longer (5s) than the timeout (0.05s), so the timeout
-    // path is deterministic with a huge margin — not flaky.
-    func testSemaphoreBridgeTimesOutOnHungOperation() {
-        let bridge = SemaphoreAsyncCallBridge()
-        let start = Date()
-        XCTAssertThrowsError(
-            try bridge.run(timeout: 0.05) { () async throws -> Int in
-                try await Task.sleep(nanoseconds: 5_000_000_000)
-                return 1
+    func testCancellationIgnoresLateModelResult() async throws {
+        let client = RecoveryMCPClient()
+        let scheduler = VirtualDeadlineScheduler()
+        let responder = LateModelResponder()
+        let handler = TachikomaPlanRecoveryHandler(
+            mcpClient: client,
+            configProvider: StaticRecoveryConfigProvider(),
+            modelConfig: RecoveryModelConfig(provider: .anthropic, modelName: "fake-model"),
+            timer: FakeTimer(),
+            logger: SilentLogger(),
+            responderFactory: { _ in responder },
+            deadlineScheduler: scheduler
+        )
+        let context = makeContext()
+        let task = Task { await handler.attemptRecovery(context) }
+        try await responder.started.wait(for: 1)
+        try await scheduler.registered.wait(for: 1)
+        task.cancel()
+        let outcome = await task.value
+        XCTAssertFalse(outcome.success)
+        XCTAssertEqual(responder.finished.count, 0, "cancellation must not join the abandoned model call")
+        XCTAssertEqual(scheduler.pendingCount, 0)
+        try await responder.cancelled.wait(for: 1)
+        responder.result.resume(returning: StubModelResponder.toolCall(name: "tapOn"))
+        try await responder.finished.wait(for: 1)
+        XCTAssertTrue(client.calls.isEmpty, "late recovery responses must not execute tools")
+    }
+
+    func testDeadlineTimesOutOnHungOperation() async throws {
+        let scheduler = VirtualDeadlineScheduler()
+        let pending = SingleResumeCell<Int>()
+        let started = TransportEvents()
+        let task = Task {
+            try await withDeadline(
+                seconds: 5,
+                scheduler: scheduler,
+                timeoutError: RecoveryTimeoutError(timeoutSeconds: 5)
+            ) {
+                started.signal()
+                return try await pending.wait()
             }
-        ) { error in
-            XCTAssertTrue(error is RecoveryTimeoutError, "expected RecoveryTimeoutError, got \(error)")
         }
-        XCTAssertLessThan(Date().timeIntervalSince(start), 2.0, "timeout must return promptly, not block on the op")
+        try await started.wait(for: 1)
+        try await scheduler.registered.wait(for: 1)
+        scheduler.advance(by: 5)
+        await assertAsyncThrowsError({ try await task.value }, verify: { error in
+            XCTAssertEqual(error as? RecoveryTimeoutError, RecoveryTimeoutError(timeoutSeconds: 5))
+            XCTAssertEqual(String(describing: error), "Recovery model call timed out after 5.0s")
+        })
     }
 
-    // On timeout the bridge must cancel the spawned task so a cancellation-aware operation unwinds
-    // promptly instead of running to completion and retaining its resources.
-    func testSemaphoreBridgeCancelsHungTaskOnTimeout() {
-        let cancelled = DispatchSemaphore(value: 0)
-        let bridge = SemaphoreAsyncCallBridge()
-        XCTAssertThrowsError(
-            try bridge.run(timeout: 0.05) { () async throws -> Int in
-                do {
-                    try await Task.sleep(nanoseconds: 5_000_000_000)
-                } catch {
-                    // `Task.sleep` throws `CancellationError` when the task is cancelled.
+    func testDeadlineCancelsHungTaskOnTimeout() async throws {
+        let scheduler = VirtualDeadlineScheduler()
+        let pending = SingleResumeCell<Int>()
+        let cancelled = TransportEvents()
+        let started = TransportEvents()
+        let task = Task {
+            try await withDeadline(
+                seconds: 5,
+                scheduler: scheduler,
+                timeoutError: RecoveryTimeoutError(timeoutSeconds: 5)
+            ) {
+                try await withTaskCancellationHandler {
+                    started.signal()
+                    return try await pending.wait()
+                } onCancel: {
                     cancelled.signal()
-                    throw error
                 }
-                return 1
             }
-        )
-        XCTAssertEqual(
-            cancelled.wait(timeout: .now() + 2.0),
-            .success,
-            "timed-out task must be cancelled so a cancellation-aware operation unwinds promptly"
-        )
+        }
+        try await started.wait(for: 1)
+        try await scheduler.registered.wait(for: 1)
+        scheduler.advance(by: 5)
+        await assertAsyncThrowsError { try await task.value }
+        try await cancelled.wait(for: 1)
+        XCTAssertFalse(pending.resume(returning: 1), "cancelled operation unwinds and rejects late results")
     }
 
-    func testSemaphoreBridgePassesThroughSuccess() throws {
-        let bridge = SemaphoreAsyncCallBridge()
-        let value = try bridge.run(timeout: 5) { () async throws -> Int in 42 }
+    func testDeadlinePassesThroughSuccess() async throws {
+        let value = try await withDeadline(
+            seconds: 5,
+            scheduler: VirtualDeadlineScheduler(),
+            timeoutError: RecoveryTimeoutError(timeoutSeconds: 5)
+        ) { 42 }
         XCTAssertEqual(value, 42)
     }
 
-    func testSemaphoreBridgeRethrowsOperationError() {
+    func testDeadlineRethrowsOperationError() async {
         struct Boom: Error {}
-        let bridge = SemaphoreAsyncCallBridge()
-        XCTAssertThrowsError(try bridge.run(timeout: 5) { () async throws -> Int in throw Boom() }) { error in
-            XCTAssertTrue(error is Boom, "operation errors must propagate, not be swallowed")
-        }
+        await assertAsyncThrowsError({
+            try await withDeadline(
+                seconds: 5,
+                scheduler: VirtualDeadlineScheduler(),
+                timeoutError: RecoveryTimeoutError(timeoutSeconds: 5)
+            ) { () async throws -> Int in
+                throw Boom()
+            }
+        }, verify: { error in
+            XCTAssertTrue(error is Boom, "operation errors must propagate")
+        })
     }
 }
 
@@ -1590,6 +1670,7 @@ private struct SilentLogger: AutoMobileLogger {
     func error(_: String) {}
 }
 
+/// Sequential fake: the executor invokes it serially; tests inspect only after awaiting execution.
 private final class SpyRecoveryHandler: PlanRecoveryHandler, @unchecked Sendable {
     private let outcome: RecoveryOutcome
     private(set) var receivedContexts: [FailedStepContext] = []
@@ -1598,12 +1679,14 @@ private final class SpyRecoveryHandler: PlanRecoveryHandler, @unchecked Sendable
         self.outcome = outcome
     }
 
-    func attemptRecovery(_ context: FailedStepContext) -> RecoveryOutcome {
+    func attemptRecovery(_ context: FailedStepContext) async -> RecoveryOutcome {
         receivedContexts.append(context)
         return outcome
     }
 }
 
+/// Sequential fake: setup precedes execution; inspection follows the awaited completion. No late model
+/// operation can access this client. The dynamic argument dictionary is intentionally retained locally.
 private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     struct Call {
         let name: String
@@ -1622,9 +1705,15 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
         executePlanResponses.append(MCPToolResponse(text: text))
     }
 
-    func initialize(timeout _: TimeInterval) throws {}
+    private func initializeResult(timeout _: TimeInterval) throws {}
 
-    func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
+    private func callToolResult(
+        name: String,
+        arguments: [String: Any],
+        timeout _: TimeInterval
+    )
+        throws -> MCPToolResponse
+    {
         calls.append(Call(name: name, arguments: arguments))
         if name == "setToolEnabled" {
             return MCPToolResponse(text: "{\"enabled\":true}")
@@ -1641,8 +1730,26 @@ private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable 
         return MCPToolResponse(text: toolResponseText)
     }
 
-    func readResource(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
+    private func readResourceResult(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
         MCPResourceResponse(text: flagResourceText)
+    }
+
+    func initialize(timeout: TimeInterval) throws { try initializeResult(timeout: timeout) }
+    func initialize(timeout: TimeInterval) async throws { try initializeResult(timeout: timeout) }
+    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) throws -> MCPToolResponse {
+        try callToolResult(name: name, arguments: arguments, timeout: timeout)
+    }
+
+    func callTool(name: String, arguments: [String: Any], timeout: TimeInterval) async throws -> MCPToolResponse {
+        try callToolResult(name: name, arguments: arguments, timeout: timeout)
+    }
+
+    func readResource(uri: String, timeout: TimeInterval) throws -> MCPResourceResponse {
+        try readResourceResult(uri: uri, timeout: timeout)
+    }
+
+    func readResource(uri: String, timeout: TimeInterval) async throws -> MCPResourceResponse {
+        try readResourceResult(uri: uri, timeout: timeout)
     }
 
     func resetSession() {}
@@ -1688,21 +1795,22 @@ private final class StubModelResponder: ModelResponding, @unchecked Sendable {
     }
 }
 
-/// Fake `ModelResponding` that never returns — models a hung provider call. Paired with a fake
-/// bridge in tests so the handler's timeout path is exercised without any real wait.
-private final class NeverReturningModelResponder: ModelResponding, @unchecked Sendable {
-    func respond(_: ModelRequest) async throws -> ModelResponse {
-        // Suspend forever without spinning; the fake bridge times out before this can complete.
-        await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
-        return StubModelResponder.final()
-    }
-}
+/// Ignores cancellation until the test explicitly releases it. No leaked continuation or real sleep.
+private final class LateModelResponder: ModelResponding {
+    let started = TransportEvents()
+    let cancelled = TransportEvents()
+    let finished = TransportEvents()
+    let result = SingleResumeCell<ModelResponse>()
 
-/// Fake `AsyncCallBridging` that always reports a timeout, deterministically and instantly.
-private struct TimeoutAsyncCallBridge: AsyncCallBridging {
-    let timeoutSeconds: TimeInterval
-    func run<T: Sendable>(timeout _: TimeInterval, _: @escaping @Sendable () async throws -> T) throws -> T {
-        throw RecoveryTimeoutError(timeoutSeconds: timeoutSeconds)
+    func respond(_: ModelRequest) async throws -> ModelResponse {
+        try await withTaskCancellationHandler {
+            started.signal()
+            let response = try await result.wait(cancellable: false)
+            finished.signal()
+            return response
+        } onCancel: {
+            self.cancelled.signal()
+        }
     }
 }
 

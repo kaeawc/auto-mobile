@@ -3,5 +3,5 @@
 /// `TachikomaPlanRecoveryHandler`, and unit tests inject a fake. Refines `Sendable` so the Sendable
 /// executor can hold it.
 public protocol PlanRecoveryHandler: Sendable {
-    func attemptRecovery(_ context: FailedStepContext) -> RecoveryOutcome
+    func attemptRecovery(_ context: FailedStepContext) async -> RecoveryOutcome
 }

@@ -17,6 +17,7 @@ teardown() {
   rm -rf "${fixture_repo:-}"
   rm -rf "${symlink_parent:-}"
   rm -f "${invocations_file:-}"
+  rm -f "${ktfmt_marker_file:-}"
 }
 
 @test "prints usage for --help" {
@@ -78,6 +79,93 @@ SCRIPT
   [ "$status" -eq 0 ]
   grep -qx 'detektMain' "${invocations_file}"
   grep -qx 'detektTest' "${invocations_file}"
+}
+
+@test "runs only apiCheck for an SDK API baseline-only change" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  ktfmt_marker_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/auto-mobile-sdk/api"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' called >> "${KTFMT_MARKER_FILE}"
+SCRIPT
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+SCRIPT
+  chmod +x "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'initial API baseline' > "${fixture_repo}/android/auto-mobile-sdk/api/auto-mobile-sdk.api"
+
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm "initial SDK API baseline"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' 'changed API baseline' > android/auto-mobile-sdk/api/auto-mobile-sdk.api
+  git add android/auto-mobile-sdk/api/auto-mobile-sdk.api
+  git commit -qm "change SDK API baseline"
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" \
+    GRADLEW_INVOCATIONS_FILE="${invocations_file}" \
+    KTFMT_MARKER_FILE="${ktfmt_marker_file}" \
+    bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "${invocations_file}")" = ':auto-mobile-sdk:apiCheck' ]
+  [ ! -s "${ktfmt_marker_file}" ]
+}
+
+@test "runs apiCheck once when another Kotlin module and the SDK baseline change" {
+  fixture_repo="$(cd "$(mktemp -d)" && pwd -P)"
+  invocations_file="$(mktemp)"
+  ktfmt_marker_file="$(mktemp)"
+  export GIT_CONFIG_GLOBAL=/dev/null
+  export GIT_CONFIG_SYSTEM=/dev/null
+
+  mkdir -p "${fixture_repo}/android/foo/src/main/kotlin" "${fixture_repo}/android/auto-mobile-sdk/api"
+  copy_prepush_fixture
+  cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' called >> "${KTFMT_MARKER_FILE}"
+SCRIPT
+  cat > "${fixture_repo}/android/gradlew" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$@" >> "${GRADLEW_INVOCATIONS_FILE}"
+SCRIPT
+  chmod +x "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" "${fixture_repo}/android/gradlew"
+  printf '%s\n' 'plugins {}' > "${fixture_repo}/android/foo/build.gradle.kts"
+  printf '%s\n' 'class X' > "${fixture_repo}/android/foo/src/main/kotlin/X.kt"
+  printf '%s\n' 'initial API baseline' > "${fixture_repo}/android/auto-mobile-sdk/api/auto-mobile-sdk.api"
+
+  cd "${fixture_repo}"
+  git init -q
+  git config user.email t@t.t
+  git config user.name t
+  git config commit.gpgsign false
+  git add -A
+  git commit -qm "initial Android module and SDK API baseline"
+  base_sha="$(git rev-parse HEAD)"
+  printf '%s\n' '// changed Kotlin source' >> android/foo/src/main/kotlin/X.kt
+  printf '%s\n' 'changed API baseline' > android/auto-mobile-sdk/api/auto-mobile-sdk.api
+  git add android/foo/src/main/kotlin/X.kt android/auto-mobile-sdk/api/auto-mobile-sdk.api
+  git commit -qm "change Kotlin source and SDK API baseline"
+
+  run env ANDROID_PREPUSH_BASE_REF="${base_sha}" \
+    GRADLEW_INVOCATIONS_FILE="${invocations_file}" \
+    KTFMT_MARKER_FILE="${ktfmt_marker_file}" \
+    bash "${fixture_repo}/${SCRIPT}"
+
+  [ "$status" -eq 0 ]
+  [ "$(grep -xc ':auto-mobile-sdk:apiCheck' "${invocations_file}")" -eq 1 ]
+  [ -s "${ktfmt_marker_file}" ]
 }
 
 @test "runs full-scope Detekt and module compile when Kotlin and Detekt config change" {

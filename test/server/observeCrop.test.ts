@@ -28,6 +28,13 @@ import { RealObserveScreen } from "../../src/features/observe/ObserveScreen";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 
+import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
+import {
+  SCREENSHOT_MIN_LIFETIME_MS,
+  selectScreenshotsToEvict,
+} from "../../src/features/observe/screenshotCacheEviction";
+import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
+
 const device: BootedDevice = { deviceId: "crop-device", name: "Fake", platform: "android" };
 const rect = { x: 10, y: 20, width: 30, height: 40 };
 const source = Buffer.from("fake-captured-raster");
@@ -182,6 +189,35 @@ describe("observe crop validation", () => {
 });
 
 describe("observe crop capture and output", () => {
+  test("returned crop path is protected from the next size sweep for 30 seconds", async () => {
+    const protection = new FakeScreenshotPathProtection(timer);
+    const protect = spyOn(screenshotPathProtection, "protect").mockImplementation(
+      protection.protect.bind(protection),
+    );
+    try {
+      timer.advanceTime(60_000);
+      const response = await call({ crop: { rect } });
+      const crop = getStructuredField<ObserveCropResult>(response, "crop")!;
+      expect(protection.calls.filter((path) => path === crop.cropPath)).toHaveLength(2);
+      const files = [{ path: crop.cropPath, size: 129 * 1024 * 1024, mtimeMs: 0 }];
+      const sweep = () =>
+        selectScreenshotsToEvict(
+          files,
+          128 * 1024 * 1024,
+          SCREENSHOT_MIN_LIFETIME_MS,
+          timer.now(),
+          () => false,
+          protection.isProtected.bind(protection),
+        );
+      timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS - 1);
+      expect(sweep().toEvict).toEqual([]);
+      timer.advanceTime(1);
+      expect(sweep().toEvict).toEqual([crop.cropPath]);
+    } finally {
+      protect.mockRestore();
+    }
+  });
+
   test("Android crops once, preserves full screenshot, and delivers scalar metadata only", async () => {
     const response = await call({ crop: { rect } });
     const crop = getStructuredField<ObserveCropResult>(response, "crop")!;

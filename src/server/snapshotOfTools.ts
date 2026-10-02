@@ -1,3 +1,7 @@
+import {
+  screenshotPathProtection,
+  type ScreenshotPathProtection,
+} from "../features/observe/ScreenshotPathProtection";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { z } from "zod/v4";
@@ -55,6 +59,7 @@ export interface SnapshotOfDependencies {
   screenshotFactory?: (device: BootedDevice) => Pick<ScreenshotService, "execute">;
   readFile?: (filePath: string) => Promise<Buffer>;
   writer?: ScreenshotFileWriter;
+  pathProtection?: ScreenshotPathProtection;
   imageBackend?: ImageBackend;
   outputDirectory?: () => string;
   ids?: IdGenerator;
@@ -130,7 +135,9 @@ export function registerSnapshotOfTools(dependencies: SnapshotOfDependencies = {
           outputDirectory,
           `snapshot-of-${(dependencies.ids ?? defaultIdGenerator).next()}.png`,
         );
+        await (dependencies.pathProtection ?? screenshotPathProtection).protect(outputPath);
         await (dependencies.writer ?? defaultScreenshotFileWriter).write(outputPath, cropped.png);
+        await (dependencies.pathProtection ?? screenshotPathProtection).protect(outputPath);
         return createJSONToolResponse({
           path: outputPath,
           unit: device.platform === "ios" ? "points" : "pixels",

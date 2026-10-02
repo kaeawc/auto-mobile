@@ -1,3 +1,7 @@
+import {
+  screenshotPathProtection,
+  type ScreenshotPathProtection,
+} from "../ScreenshotPathProtection";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { BootedDevice } from "../../../models";
@@ -99,6 +103,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     device: BootedDevice,
     screenshotUtil: TrackedScreenshotService,
     store: ScreenshotStateStore = getScreenshotStateStore(),
+    private readonly pathProtection: ScreenshotPathProtection = screenshotPathProtection,
   ) {
     this.device = device;
     this.screenshotUtil = screenshotUtil;
@@ -215,6 +220,9 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
           if (cancelled && attempt === 0 && !signal?.aborted) {
             logger.debug("[OBSERVE] Retrying screenshot cancelled by another capture");
             continue;
+          }
+          if (result.path) {
+            await this.pathProtection.protect(result.path);
           }
           const validated = await validateCapturedScreenshot(
             cancelled
@@ -360,6 +368,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       return;
     }
 
+    await this.pathProtection.protect(screenshotResult.path);
     const exists = await pathExists(screenshotResult.path);
     if (!exists) {
       update(undefined, "Screenshot file missing after capture");

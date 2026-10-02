@@ -1,3 +1,4 @@
+import { screenshotPathProtection } from "../features/observe/ScreenshotPathProtection";
 import {
   getRequestedResourceUri,
   ResourceRegistry,
@@ -113,14 +114,16 @@ async function getLatestScreenshotPath(deviceId: string): Promise<string | undef
       return undefined;
     }
 
+    await screenshotPathProtection.protect(screenshotPath);
     const fileStat = await screenshotFileSystem.stat(screenshotPath);
     if (!fileStat.isFile()) {
       return undefined;
     }
 
+    await screenshotPathProtection.protect(screenshotPath);
     return screenshotPath;
   } catch (error) {
-    logger.warn(`[ObservationResources] Failed to get latest screenshot: ${error}`);
+    logger.warn("[ObservationResources] Failed to get latest screenshot", error);
     return undefined;
   }
 }
@@ -216,6 +219,7 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
     }
 
     // Read the screenshot file and convert to base64
+    await screenshotPathProtection.protect(screenshotPath);
     const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
     const base64Image = imageBuffer.toString("base64");
 
@@ -387,6 +391,7 @@ async function getObservationScreenshot(params: Record<string, string>): Promise
       };
     }
 
+    await screenshotPathProtection.protect(screenshotPath);
     const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
     if (!matchesObservationId(deviceId, observationId)) {
       return observationScreenshotUnknownError(uri, deviceId, observationId);
@@ -531,6 +536,7 @@ async function readFreshScreenshot(
   path: string,
 ): Promise<ResourceContent> {
   try {
+    await screenshotPathProtection.protect(path);
     const imageBuffer = await screenshotFileSystem.readFile(path);
     if (context.signal?.aborted) {
       return freshSessionScreenshotError(
@@ -686,6 +692,7 @@ async function getSessionScreenshot(
       };
     }
 
+    await screenshotPathProtection.protect(screenshotPath);
     const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
     const base64Image = imageBuffer.toString("base64");
     const mimeType = screenshotMimeType(screenshotPath, imageBuffer);

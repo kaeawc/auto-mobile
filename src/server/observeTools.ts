@@ -1,3 +1,8 @@
+import { screenshotPathProtection } from "../features/observe/ScreenshotPathProtection";
+import {
+  SCREENSHOT_MIN_LIFETIME_MS,
+  SCREENSHOT_STALE_AGE_MS,
+} from "../features/observe/screenshotCacheEviction";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
@@ -1798,14 +1803,27 @@ type ObserveResponse = Omit<StructuredToolResponse<ObserveToolPayload>, "content
   >;
 };
 
-function createObserveResponse(
+async function createObserveResponse(
   result: ObserveToolPayload,
   includeScreenshotImage: boolean | undefined,
   signal?: AbortSignal,
-): Promise<ObserveResponse> | ObserveResponse {
-  return includeScreenshotImage
-    ? withCapturedScreenshotImage(result, result.screenshotPath, signal)
+): Promise<ObserveResponse> {
+  if (result.screenshotPath) {
+    await screenshotPathProtection.protect(result.screenshotPath);
+  }
+  if (result.crop) {
+    await screenshotPathProtection.protect(result.crop.cropPath);
+  }
+  const response = includeScreenshotImage
+    ? await withCapturedScreenshotImage(result, result.screenshotPath, signal)
     : createStructuredToolResponse(result);
+  if (result.screenshotPath) {
+    await screenshotPathProtection.protect(result.screenshotPath);
+  }
+  if (result.crop) {
+    await screenshotPathProtection.protect(result.crop.cropPath);
+  }
+  return response;
 }
 
 function requestedScreenshotMode(args: ObserveArgs): ScreenshotMode | undefined {
@@ -2074,7 +2092,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    "Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture.",
+    `Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture. Full-screen fresh, cached, per-panel and crop paths are protected in this process for ${SCREENSHOT_MIN_LIFETIME_MS / 1000} seconds from return, subject to the bounded protection capacity; other processes honor the same mtime-age floor. Release or device removal drops cache references; it does not delete the file early. Size cleanup may evict eligible files afterwards; stale files are swept after ${SCREENSHOT_STALE_AGE_MS / (60 * 60 * 1000)} hours on capture construction. Copy files needed longer.`,
     observeSchema,
     observeHandler,
     {

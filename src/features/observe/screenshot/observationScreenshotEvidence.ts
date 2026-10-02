@@ -3,6 +3,11 @@ import nodePath from "node:path";
 import { ActionableError } from "../../../models/ActionableError";
 import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 
+import {
+  screenshotPathProtection,
+  type ScreenshotPathProtection,
+} from "../ScreenshotPathProtection";
+
 export interface ScreenshotEvidenceFiles {
   stat(path: string): Promise<{ isFile(): boolean; size: number; mtimeMs: number }>;
 }
@@ -40,13 +45,18 @@ export async function observationScreenshotEvidence(
   freshFailure?: string,
   files: ScreenshotEvidenceFiles = fs,
   timer: Timer = defaultTimer,
+  protection: ScreenshotPathProtection = screenshotPathProtection,
 ): Promise<ObservationScreenshotEvidence> {
+  // Arm before stat so a concurrent local sweep cannot select a usable path.
+  await protection.protect(path);
   const stat = await files.stat(path);
   if (!stat.isFile() || stat.size === 0) {
     throw new ActionableError("Screenshot file is missing or empty.");
   }
   const capturedAt = Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : timer.now();
   const screenshotFormat = screenshotFormatForPath(path);
+  // Filesystem latency must not consume the caller's return window.
+  await protection.protect(path);
   return {
     screenshotPath: path,
     screenshotSource: source,

@@ -1,3 +1,6 @@
+import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { SCREENSHOT_MIN_LIFETIME_MS } from "../../src/features/observe/screenshotCacheEviction";
 import { afterEach, describe, expect, test } from "bun:test";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -47,6 +50,8 @@ describe("snapshotOf tool", () => {
     image.setMetadataResult({ width: 4, height: 4, format: "png", size: 8 });
     image.setExecuteResult(Buffer.from("png-crop"));
     let captures = 0;
+    const timer = new FakeTimer();
+    const protection = new FakeScreenshotPathProtection(timer);
     registerSnapshotOfTools({
       hierarchyCaptureFactory: () => ({
         capture: async (request) => ({
@@ -68,6 +73,7 @@ describe("snapshotOf tool", () => {
       imageBackend: image,
       outputDirectory: () => dir,
       ids: new CountingIdGenerator("crop"),
+      pathProtection: protection,
     });
     const tool = ToolRegistry.getTool("snapshotOf")!;
     expect(tool.defaultEnabled).toBe(false);
@@ -76,6 +82,9 @@ describe("snapshotOf tool", () => {
       tool.schema.parse({ elementId: "target" }),
     );
     const result = JSON.parse(response.content[0].text);
+    expect(protection.isProtected(result.path)).toBe(true);
+    timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS);
+    expect(protection.isProtected(result.path)).toBe(false);
     expect(captures).toBe(1);
     expect(result).toMatchObject({
       path: path.join(dir, "snapshot-of-crop-1.png"),

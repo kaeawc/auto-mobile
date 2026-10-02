@@ -1,3 +1,5 @@
+import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
+import { SCREENSHOT_MIN_LIFETIME_MS } from "../../../src/features/observe/screenshotCacheEviction";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -101,9 +103,13 @@ test.each(["android", "ios"] as const)(
   },
 );
 
-test.each([false, true])(
-  "physical iOS without a runner reports capture limitation (cached screenshot: %s)",
-  async (cached) => {
+test.each([
+  [false, true],
+  [true, true],
+  [true, false],
+])(
+  "physical iOS without a runner reports capture limitation (cached: %s, file exists: %s)",
+  async (cached, fileExists) => {
     const timer = new FakeTimer();
     const device: BootedDevice = {
       deviceId: "00008030-001C195E0C10802E",
@@ -142,14 +148,24 @@ test.each([false, true])(
     if (cached) {
       state.update(device.deviceId, "/fake/cached.png");
     }
+    const protection = new FakeScreenshotPathProtection(timer);
+    if (cached) {
+      timer.advanceTime(299_999);
+    }
     const screen = new RealObserveScreen(
       device,
       factory,
       {
         deviceReadOnly: true,
         window: new FakeWindow(),
+        screenshotPathProtection: protection,
         screenshotEvidenceFiles: {
-          stat: async () => ({ isFile: () => true, size: 12, mtimeMs: timer.now() }),
+          stat: async () => {
+            if (!fileExists) {
+              throw new Error("cached file gone");
+            }
+            return { isFile: () => true, size: 12, mtimeMs: 0 };
+          },
         },
         cacheStore: new FakeObserveCacheStore(timer),
         screenshotStateStore: state,
@@ -164,12 +180,18 @@ test.each([false, true])(
       expect(result.freshness?.unavailableDetail).toContain("no reachable hierarchy service");
       expect(result.screenshotCaptureAttempted).toBe(true);
       expect(result.screenshotSettled).toBe(false);
-      expect(result.screenshotPath).toBe(cached ? "/fake/cached.png" : undefined);
-      expect(result.screenshotSource).toBe(cached ? "cached" : undefined);
+      expect(result.screenshotPath).toBe(cached && fileExists ? "/fake/cached.png" : undefined);
+      expect(result.screenshotSource).toBe(cached && fileExists ? "cached" : undefined);
       expect(state.getPath(device.deviceId)).toBe(cached ? "/fake/cached.png" : undefined);
       expect(result.screenshotSettledError).toBe(
         "No screenshot could be captured: this unowned physical iOS device has no reachable runner. Physical iOS has no host-side screenshot capture path without the runner.",
       );
+      if (cached && fileExists) {
+        timer.advanceTime(2);
+        expect(protection.isProtected("/fake/cached.png")).toBe(true);
+        timer.advanceTime(SCREENSHOT_MIN_LIFETIME_MS - 2);
+        expect(protection.isProtected("/fake/cached.png")).toBe(false);
+      }
       expect(writer.written).toEqual([]);
       expect(connect).toHaveBeenCalledTimes(2);
       expect(close).toHaveBeenCalledTimes(2);

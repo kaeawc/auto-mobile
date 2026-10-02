@@ -59,7 +59,10 @@ export interface FileSystem {
    * @param filePath - Path to the file
    * @returns Promise resolving to file stats
    */
-  stat(filePath: string): Promise<{ size: number; mtimeMs: number }>;
+  stat(filePath: string): Promise<{ size: number; mtimeMs: number; isFile?(): boolean }>;
+
+  /** Non-following stats for cleanup: symlinks must never be treated as plain files. */
+  lstat?(filePath: string): Promise<{ size: number; mtimeMs: number; isFile(): boolean }>;
 
   /**
    * Write string content to a file asynchronously
@@ -133,9 +136,14 @@ export class DefaultFileSystem implements FileSystem {
     return pathExists(filePath);
   }
 
-  async stat(filePath: string): Promise<{ size: number; mtimeMs: number }> {
+  async stat(filePath: string): Promise<{ size: number; mtimeMs: number; isFile?(): boolean }> {
     const stats = await fsPromises.stat(filePath);
-    return { size: stats.size, mtimeMs: stats.mtimeMs };
+    return { size: stats.size, mtimeMs: stats.mtimeMs, isFile: () => stats.isFile() };
+  }
+
+  async lstat(filePath: string): Promise<{ size: number; mtimeMs: number; isFile(): boolean }> {
+    const stats = await fsPromises.lstat(filePath);
+    return { size: stats.size, mtimeMs: stats.mtimeMs, isFile: () => stats.isFile() };
   }
 
   async writeFile(

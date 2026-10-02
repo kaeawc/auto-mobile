@@ -1,4 +1,8 @@
 import { resolveIosObserveRotation } from "./iosObserveRotation";
+import {
+  screenshotPathProtection,
+  type ScreenshotPathProtection,
+} from "./ScreenshotPathProtection";
 import { createDeviceHierarchyCapture } from "./DeviceHierarchyCapture";
 import { ObserverPendingRequestTimeoutError } from "./DeviceServiceClient";
 import {
@@ -579,6 +583,7 @@ export class RealObserveScreen implements ObserveScreen {
   private screenshotRecorder: ObserveScreenshotRecorder;
   private readonly screenshotService: ScreenshotService;
   private screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
+  private readonly pathProtection: ScreenshotPathProtection;
   private hierarchyCollector: HierarchyCollector;
   private deviceStateCollector: DeviceStateCollector;
   private readonly iosLockStateProbe: IosLockStateProbe;
@@ -720,12 +725,14 @@ export class RealObserveScreen implements ObserveScreen {
     }
 
     // Composed services
+    this.pathProtection = dependencies?.screenshotPathProtection ?? screenshotPathProtection;
     this.screenshotRecorder =
       dependencies?.screenshotRecorder ??
       new DefaultObserveScreenshotRecorder(
         device,
         screenshotUtil as TrackedScreenshotService,
         getScreenshotStateStore(),
+        this.pathProtection,
       );
     this.screenshotEvidenceFiles = dependencies?.screenshotEvidenceFiles;
     this.hierarchyCollector =
@@ -821,6 +828,9 @@ export class RealObserveScreen implements ObserveScreen {
       screenshotOptions,
       requireFreshScreenshot,
     );
+    if (result.screenshotPath) {
+      await this.pathProtection.protect(result.screenshotPath);
+    }
     return result;
   }
 
@@ -873,6 +883,7 @@ export class RealObserveScreen implements ObserveScreen {
           undefined,
           this.screenshotEvidenceFiles,
           this.timer,
+          this.pathProtection,
         ),
       );
       result.screenshotSettled = true;
@@ -908,6 +919,7 @@ export class RealObserveScreen implements ObserveScreen {
             failure,
             this.screenshotEvidenceFiles,
             this.timer,
+            this.pathProtection,
           ),
         );
       } catch (error) {
@@ -1536,6 +1548,9 @@ export class RealObserveScreen implements ObserveScreen {
         }
       }
 
+      if (result.screenshotPath) {
+        await this.pathProtection.protect(result.screenshotPath);
+      }
       logger.debug("Observe command completed");
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
@@ -1689,6 +1704,7 @@ export class RealObserveScreen implements ObserveScreen {
         undefined,
         this.screenshotEvidenceFiles,
         this.timer,
+        this.pathProtection,
       );
       const screenshotOrientation =
         this.device.platform === "ios" && (this.device.displays?.panels.length ?? 0) > 1

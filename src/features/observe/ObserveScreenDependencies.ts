@@ -1,3 +1,4 @@
+import type { ScreenshotPathProtection } from "./ScreenshotPathProtection";
 import type { HierarchyCapture } from "./HierarchyCapture";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import type { ViewHierarchy } from "./interfaces/ViewHierarchy";
@@ -39,6 +40,7 @@ export interface ObserveScreenDependencies {
   cacheStore?: ObserveResultCacheStore;
   screenshotStateStore?: ScreenshotStateStore;
   screenshotEvidenceFiles?: ScreenshotEvidenceFiles;
+  screenshotPathProtection?: ScreenshotPathProtection;
 
   // Composed services. If omitted, defaults are built from the data sources above.
   screenshotRecorder?: ObserveScreenshotRecorder;

@@ -563,3 +563,76 @@ test("insert caret-warning acceptance defaults on and can explicitly opt out for
   }
   socket.close();
 });
+
+test("pre-dispatch state read round-trips and insert baseline is optional", async () => {
+  const timer = new FakeTimer();
+  const adb = new FakeAdbExecutor();
+  adb.setCommandResponse("forward tcp:9008 tcp:9008", "");
+  const device: BootedDevice = {
+    deviceId: "baseline-device",
+    platform: "android",
+    name: "Test Device",
+  };
+  let socket: CapturingWebSocket | null = null;
+  const client = AndroidCtrlProxyClient.createForTesting(
+    device,
+    adb,
+    (url: string) => {
+      socket = new CapturingWebSocket(url, "none", 0, timer);
+      return socket;
+    },
+    timer,
+  );
+  try {
+    expect(await client.ensureConnected()).toBe(true);
+    if (!socket) {
+      throw new Error("Expected a socket");
+    }
+    socket.simulateMessage(
+      JSON.stringify({
+        type: "connected",
+        supportedCommands: ["request_insert_text_state", "request_insert_text"],
+      }),
+    );
+    const promise = client.requestInsertTextState();
+    const request = await waitForRequest(socket, "request_insert_text_state");
+    const state = { text: "éx", isShowingHintText: false, selectionStart: 2, selectionEnd: 2 };
+    socket.simulateMessage(
+      JSON.stringify({
+        type: "insert_text_state_result",
+        requestId: request.requestId,
+        success: true,
+        state,
+      }),
+    );
+    expect(await promise).toEqual({ success: true, state });
+    for (const precedingState of [state, undefined]) {
+      socket.sentMessages.length = 0;
+      const insert = client.requestInsertText("😀", undefined, undefined, {
+        expectedSuffix: "x",
+        precedingState,
+      });
+      const wire = await waitForRequest(socket, "request_insert_text");
+      if (precedingState) {
+        expect(wire.precedingState).toEqual(state);
+      } else {
+        expect(wire).not.toHaveProperty("precedingState");
+      }
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "insert_text_result",
+          requestId: wire.requestId,
+          success: true,
+          totalTimeMs: 1,
+        }),
+      );
+      expect(await insert).toMatchObject({ success: true });
+    }
+    socket.sentMessages.length = 0;
+    socket.simulateMessage(JSON.stringify({ type: "connected", supportedCommands: [] }));
+    expect(await client.requestInsertTextState()).toEqual({ success: true });
+    expect(socket.sentMessages).toEqual([]);
+  } finally {
+    await client.close();
+  }
+});

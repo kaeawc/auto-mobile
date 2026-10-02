@@ -628,3 +628,82 @@ test("eventLast retains prefix warning when its real tail key event fails", asyn
     error: "tail failed",
   });
 });
+
+describe("pre-dispatch insert baselines", () => {
+  test("eventAll captures each run before dispatch and uses the post-insert state", async () => {
+    const h = createSendKeysHarness(android);
+    let state = { text: "éx", isShowingHintText: false, selectionStart: 2, selectionEnd: 2 };
+    const baselines: (typeof state)[] = [];
+    h.client.readInsertTextState = async () => {
+      baselines.push({ ...state });
+      expect(h.adb.getExecutedCommands().filter((c) => c.includes("input keyevent")).length).toBe(
+        baselines.length - 1,
+      );
+      return { ...state };
+    };
+    h.client.insert = async (text, options) => {
+      expect(options?.precedingState).toEqual(baselines[baselines.length - 1]);
+      expect(options?.expectedSuffix).toBe("x");
+      state = {
+        ...state,
+        text: state.text + "x" + text,
+        selectionStart: state.selectionStart + 1 + text.length,
+        selectionEnd: state.selectionEnd + 1 + text.length,
+      };
+      return { success: true };
+    };
+    expect(
+      await h.executor.type({ action: "type", text: "x😀x😀", mode: "eventAll" }),
+    ).toMatchObject({ success: true });
+    expect(baselines.map((b) => b.text)).toEqual(["éx", "éxx😀"]);
+  });
+
+  test("eventLast captures after the prefix and before its key event", async () => {
+    const h = createSendKeysHarness(android);
+    const state = { text: "éx", isShowingHintText: false, selectionStart: 2, selectionEnd: 2 };
+    h.client.readInsertTextState = async () => {
+      expect(h.adb.getExecutedCommands()).toEqual([]);
+      return state;
+    };
+    h.client.insert = async (_text, options) => {
+      expect(options).toEqual({ expectedSuffix: "x", precedingState: state });
+      expect(h.adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_X"]);
+      return { success: true };
+    };
+    expect(await h.executor.type({ action: "type", text: "x😀", mode: "eventLast" })).toMatchObject(
+      { success: true },
+    );
+  });
+
+  test("unused baselines are neither captured nor forwarded", async () => {
+    for (const [text, mode] of [
+      ["xx", "eventAll"],
+      ["😀", "eventAll"],
+      ["x", "eventLast"],
+    ] as const) {
+      const h = createSendKeysHarness(android);
+      h.client.readInsertTextState = async () => {
+        throw new Error("unnecessary baseline capture");
+      };
+      h.client.insert = async (_text, options) => {
+        expect(options?.precedingState).toBeUndefined();
+        return { success: true };
+      };
+      expect(await h.executor.type({ action: "type", text, mode })).toMatchObject({
+        success: true,
+      });
+    }
+  });
+
+  test("unavailable baseline omits the field and preserves legacy options", async () => {
+    const h = createSendKeysHarness(android);
+    h.client.readInsertTextState = async () => undefined;
+    h.client.insert = async (_text, options) => {
+      expect(options).toEqual({ expectedSuffix: "x" });
+      return { success: true };
+    };
+    expect(await h.executor.type({ action: "type", text: "x😀", mode: "eventAll" })).toMatchObject({
+      success: true,
+    });
+  });
+});

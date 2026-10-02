@@ -432,6 +432,7 @@ class WebSocketServer(
                               "node_selector_actions",
                               "request_activate_accessibility_link",
                               "request_insert_text",
+                              "request_insert_text_state",
                               "request_commit_text",
                               "ime_key_events_v1",
                               "request_cancel_ime_commit",

@@ -210,6 +210,29 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize pre-dispatch state read and optional insert baseline`() {
+    val capture =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text_state","requestId":"before"}"""
+      )
+    assertIs<RequestInsertTextState>(capture)
+    assertEquals("before", capture.requestId)
+    val insert =
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"request_insert_text","text":"😀","precedingState":{"text":"éx","selectionStart":2,"selectionEnd":2}}"""
+      )
+    assertIs<RequestInsertText>(insert)
+    assertEquals(InsertTextState("éx", false, 2, 2), insert.precedingState)
+    val legacy =
+      json.decodeFromString<WebSocketRequest>("""{"type":"request_insert_text","text":"😀"}""")
+    assertIs<RequestInsertText>(legacy)
+    assertEquals(null, legacy.precedingState)
+    assertFalse(
+      json.encodeToString(WebSocketRequest.serializer(), legacy).contains("precedingState")
+    )
+  }
+
+  @Test
   fun `deserialize request_insert_text with expectedSuffix`() {
     val request =
       json.decodeFromString<WebSocketRequest>(

@@ -332,6 +332,25 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     frameContext: String?,
   ) = record("requestSetText", requestId, text, resourceId, dismissKeyboard, frameContext)
 
+  override fun requestInsertTextState(requestId: String?) =
+    record("requestInsertTextState", requestId)
+
+  override fun requestInsertText(
+    requestId: String?,
+    text: String,
+    expectedSuffix: String?,
+    acceptsCaretNotPlaced: Boolean,
+    precedingState: dev.jasonpearson.automobile.protocol.InsertTextState?,
+  ) =
+    record(
+      "requestInsertText",
+      requestId,
+      text,
+      expectedSuffix,
+      acceptsCaretNotPlaced,
+      precedingState,
+    )
+
   override fun requestInsertText(requestId: String?, text: String) =
     record("requestInsertText", requestId, text)
 

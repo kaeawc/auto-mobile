@@ -187,12 +187,26 @@ export interface RequestSetTextMessage {
   frameContext?: string;
 }
 
+export interface InsertTextState {
+  text?: string | null;
+  isShowingHintText: boolean;
+  selectionStart: number;
+  selectionEnd: number;
+}
+
+/** `@SerialName("request_insert_text_state")` → `RequestInsertTextState` */
+export interface RequestInsertTextStateMessage {
+  type: "request_insert_text_state";
+  requestId: string;
+}
+
 /** `@SerialName("request_insert_text")` → `RequestInsertText` */
 export interface RequestInsertTextMessage {
   type: "request_insert_text";
   requestId: string;
   text: string;
   expectedSuffix?: string;
+  precedingState?: InsertTextState;
   acceptsCaretNotPlaced?: boolean;
 }
 
@@ -639,6 +653,7 @@ export type CtrlProxyRequest =
   | RequestGestureMoveMessage
   | RequestGestureEndMessage
   | RequestSetTextMessage
+  | RequestInsertTextStateMessage
   | RequestInsertTextMessage
   | RequestCommitTextMessage
   | RequestCancelImeCommitMessage
@@ -699,6 +714,7 @@ export type CtrlProxyRequestType = CtrlProxyRequest["type"];
 export const ANDROID_CAPABILITY_REQUEST_TYPES = [
   "set_hierarchy_interval",
   "request_activate_accessibility_link",
+  "request_insert_text_state",
   "request_insert_text",
   "request_commit_text",
   "request_cancel_ime_commit",
@@ -741,6 +757,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_gesture_move: true,
   request_gesture_end: true,
   request_set_text: true,
+  request_insert_text_state: true,
   request_insert_text: true,
   request_commit_text: true,
   request_cancel_ime_commit: true,

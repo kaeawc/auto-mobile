@@ -2040,6 +2040,52 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
+  override fun requestInsertTextState(requestId: String?) {
+    // The host awaits this reply BEFORE dispatching ADB key events. No baseline is stored globally.
+    launchRequestScope(requestId) {
+      if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+        Log.d(TAG, "WebSocket server not running, skipping insert text state result broadcast")
+        return@launchRequestScope
+      }
+      val node = findFocusedEditableNode(rootInActiveWindow)
+      val state =
+        try {
+          if (
+            node != null && node.refresh() && node.isEditable && node.isFocused && !node.isPassword
+          ) {
+            InsertTextSnapshot(
+              node.text?.toString(),
+              node.isShowingHintText,
+              node.textSelectionStart,
+              node.textSelectionEnd,
+            )
+          } else null
+        } finally {
+          node?.recycle()
+        }
+      resultBroadcaster.guard(requestId, "insert_text_state_result") {
+        webSocketServer.broadcastWithPerfSync { perfTiming ->
+          webSocketFrameJson(
+            "insert_text_state_result",
+            requestId = requestId,
+            perfTiming = perfTiming,
+          ) {
+            put("success", true)
+            if (state != null) put("state", jsonCompact.encodeToJsonElement(state))
+          }
+        }
+      }
+    }
+  }
+
+  override fun requestInsertText(
+    requestId: String?,
+    text: String,
+    expectedSuffix: String?,
+    acceptsCaretNotPlaced: Boolean,
+    precedingState: dev.jasonpearson.automobile.protocol.InsertTextState?,
+  ) = performInsertText(requestId, text, expectedSuffix, acceptsCaretNotPlaced, precedingState)
+
   override fun requestInsertText(requestId: String?, text: String) =
     performInsertText(requestId, text, null, false)
 
@@ -4552,6 +4598,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     text: String,
     expectedSuffix: String?,
     acceptsCaretNotPlaced: Boolean,
+    precedingState: InsertTextSnapshot? = null,
   ) {
     val startTime = System.currentTimeMillis()
     perfProvider.serial("performInsertText")
@@ -4662,6 +4709,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         val observed =
           awaitPrecedingInput(
             expectedSuffix = requireNotNull(expectedSuffix),
+            baseline = precedingState,
             readSnapshot = { readFreshSnapshot().also { snapshot = it } },
             nowMs = { android.os.SystemClock.uptimeMillis() },
             pause = { ms -> kotlinx.coroutines.runBlocking { kotlinx.coroutines.delay(ms) } },

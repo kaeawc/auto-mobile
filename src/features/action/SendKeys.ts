@@ -1,3 +1,4 @@
+import type { InsertTextState } from "../observe/android/ctrlProxyProtocol";
 import type { BootedDevice, ImeAction, ObserveResult } from "../../models";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -242,10 +243,16 @@ export type TextActionResult = {
 };
 
 export interface SendKeysTextClient {
+  /** Optional for older clients/APKs; captured before the host dispatches key events. */
+  readInsertTextState?(): Promise<InsertTextState | undefined>;
   replace(text: string): Promise<TextActionResult>;
   insert(
     text: string,
-    options?: { expectedSuffix?: string; acceptsCaretNotPlaced?: boolean },
+    options?: {
+      expectedSuffix?: string;
+      acceptsCaretNotPlaced?: boolean;
+      precedingState?: InsertTextState;
+    },
   ): Promise<TextActionResult>;
   clear(): Promise<TextActionResult>;
   ime(action: ImeAction, signal?: AbortSignal, onDispatch?: () => void): Promise<TextActionResult>;
@@ -267,6 +274,7 @@ interface AndroidEventAllProgress {
   mutated: boolean;
   committedGraphemes: number;
   pendingKeyText: string;
+  precedingState?: InsertTextState;
   warnings: string[];
   lastInsert?: TextActionResult;
   sinceLastInsertEvents: boolean;
@@ -1165,6 +1173,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           "eventLast requires a real tail key event, but the prefix insert could not place the caret; remaining text was not sent",
       });
     }
+    const precedingState = await this.readPrecedingState(suffix.length > 0);
     const eventFailure = await this.executeKeyEventPlanSafely(
       split.plan,
       operation === "replace" || prefix.length > 0,
@@ -1175,7 +1184,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     try {
       const suffixResult = suffix
-        ? await this.textClient.insert(suffix, { expectedSuffix: chars[split.index] })
+        ? await this.textClient.insert(suffix, {
+            expectedSuffix: chars[split.index],
+            ...(precedingState ? { precedingState } : {}),
+          })
         : { success: true };
       return this.withTextWarnings(markPartialAfterMutation(suffixResult), [initialResult.warning]);
     } catch (error) {
@@ -1276,6 +1288,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       signal?.throwIfAborted();
       const plan = await this.getEventAllKeyEventPlan(graphemes[index] ?? "");
       if (plan) {
+        await this.captureEventAllBaseline(graphemes, index, progress);
         const eventFailure = await this.executeKeyEventPlanSafely(plan, progress.mutated, signal);
         if (eventFailure) {
           return this.withTextWarnings(
@@ -1318,6 +1331,33 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     return this.finishEventAll(graphemes, replacing, progress);
   }
 
+  private async readPrecedingState(needed: boolean): Promise<InsertTextState | undefined> {
+    return needed ? this.textClient.readInsertTextState?.() : undefined;
+  }
+
+  private async captureEventAllBaseline(
+    graphemes: string[],
+    index: number,
+    progress: AndroidEventAllProgress,
+  ): Promise<void> {
+    if (progress.pendingKeyText) {
+      return;
+    }
+    // Each run gets its own pre-dispatch snapshot, including runs after a service insert.
+    progress.precedingState = await this.readPrecedingState(
+      await this.hasFollowingEventAllInsert(graphemes, index),
+    );
+  }
+
+  private async hasFollowingEventAllInsert(graphemes: string[], index: number): Promise<boolean> {
+    for (const grapheme of graphemes.slice(index + 1)) {
+      if (!(await this.getEventAllKeyEventPlan(grapheme))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private async eventAllInsertRunEnd(graphemes: string[], index: number): Promise<number> {
     while (
       index + 1 < graphemes.length &&
@@ -1336,12 +1376,18 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       run,
       progress.committedGraphemes,
       progress.mutated,
-      progress.pendingKeyText ? { expectedSuffix: progress.pendingKeyText } : undefined,
+      progress.pendingKeyText
+        ? {
+            expectedSuffix: progress.pendingKeyText,
+            ...(progress.precedingState ? { precedingState: progress.precedingState } : {}),
+          }
+        : undefined,
     );
     if (result.success) {
       progress.mutated = true;
       progress.committedGraphemes += run.length;
       progress.pendingKeyText = "";
+      progress.precedingState = undefined;
       progress.sinceLastInsertEvents = false;
       progress.lastInsert = result;
       if (result.warning) {
@@ -1400,7 +1446,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     run: string[],
     committedGraphemes: number,
     previouslyMutated: boolean,
-    options?: { expectedSuffix?: string; acceptsCaretNotPlaced?: boolean },
+    options?: {
+      expectedSuffix?: string;
+      acceptsCaretNotPlaced?: boolean;
+      precedingState?: InsertTextState;
+    },
   ): Promise<TextActionResult> {
     const text = run.join("");
     const codePoints = graphemeCodePoints(run);
@@ -1572,6 +1622,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (this.device.platform === "android") {
       const client = AndroidCtrlProxyClient.getInstance(this.device, adbFactory);
       return {
+        readInsertTextState: async () => {
+          const result = await client.requestInsertTextState();
+          return result.success ? result.state : undefined;
+        },
         replace: async (text) => client.requestSetText(text),
         insert: async (text, options) =>
           client.requestInsertText(text, undefined, undefined, {

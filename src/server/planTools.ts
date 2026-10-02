@@ -16,6 +16,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import {
+  INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
@@ -285,10 +286,12 @@ const recordStepsResultSchema = z.object({
 const recordStepsTool = async (params: {
   action: "begin" | "end" | "status";
   planName?: string;
+  [INTERNAL_MCP_SESSION_PARAM]?: string;
 }): Promise<any> => {
+  const connectionId = params[INTERNAL_MCP_SESSION_PARAM];
   // Status is always allowed — lets agents probe recording state even when the flag is off.
   if (params.action === "status") {
-    const status = getMcpRecordingStatus();
+    const status = getMcpRecordingStatus({ connectionId });
     return createStructuredToolResponse({
       success: true,
       action: "status",
@@ -310,7 +313,7 @@ const recordStepsTool = async (params: {
 
   try {
     if (params.action === "begin") {
-      const result = startMcpRecording();
+      const result = startMcpRecording({ connectionId });
       return createStructuredToolResponse({
         success: true,
         action: "begin",
@@ -323,7 +326,7 @@ const recordStepsTool = async (params: {
       });
     }
 
-    const result = stopMcpRecording(params.planName);
+    const result = stopMcpRecording({ connectionId, planName: params.planName });
     return createStructuredToolResponse({
       success: true,
       action: "end",

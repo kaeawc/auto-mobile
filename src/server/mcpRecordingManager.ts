@@ -34,18 +34,29 @@ interface McpRecordingSession {
   startedAt: number;
 }
 
-let activeSession: McpRecordingSession | null = null;
+export interface McpRecordingOptions {
+  connectionId?: string;
+  timer?: Timer;
+}
+
+// A symbol keeps anonymous callers together without colliding with a transport id.
+const DEFAULT_CONNECTION_KEY = Symbol("anonymous MCP connection");
+const activeSessions = new Map<string | symbol, McpRecordingSession>();
 
 /** Reset module state — test-only. */
 export function resetMcpRecordingState(): void {
-  activeSession = null;
+  activeSessions.clear();
 }
 
-export function getMcpRecorder(): McpCallRecorder | null {
-  return activeSession?.recorder ?? null;
+export function getMcpRecorder({ connectionId }: McpRecordingOptions = {}): McpCallRecorder | null {
+  return activeSessions.get(connectionId ?? DEFAULT_CONNECTION_KEY)?.recorder ?? null;
 }
 
-export function getMcpRecordingStatus(timer: Timer = defaultTimer): McpRecordingStatus | null {
+export function getMcpRecordingStatus({
+  connectionId,
+  timer = defaultTimer,
+}: McpRecordingOptions = {}): McpRecordingStatus | null {
+  const activeSession = activeSessions.get(connectionId ?? DEFAULT_CONNECTION_KEY);
   if (!activeSession) {
     return null;
   }
@@ -57,7 +68,12 @@ export function getMcpRecordingStatus(timer: Timer = defaultTimer): McpRecording
   };
 }
 
-export function startMcpRecording(timer: Timer = defaultTimer): McpRecordingStartResult {
+export function startMcpRecording({
+  connectionId,
+  timer = defaultTimer,
+}: McpRecordingOptions = {}): McpRecordingStartResult {
+  const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
+  const activeSession = activeSessions.get(connectionKey);
   if (activeSession) {
     logger.info("[McpRecording] Recording already active, returning existing session");
     return {
@@ -71,16 +87,14 @@ export function startMcpRecording(timer: Timer = defaultTimer): McpRecordingStar
   const recorder = new McpCallRecorder();
   recorder.start();
 
-  activeSession = {
-    recorder,
-    startedAt: timer.now(),
-  };
+  const session = { recorder, startedAt: timer.now() };
+  activeSessions.set(connectionKey, session);
 
   logger.info("[McpRecording] Started MCP call recording");
 
   return {
     recording: true,
-    startedAt: new Date(activeSession.startedAt).toISOString(),
+    startedAt: new Date(session.startedAt).toISOString(),
   };
 }
 
@@ -92,28 +106,29 @@ const formatPlanName = (planName?: string, timer: Timer = defaultTimer): string 
   return `mcp-recorded-plan-${timestamp}`;
 };
 
-export function stopMcpRecording(
-  planName?: string,
-  timer: Timer = defaultTimer,
-): McpRecordingStopResult {
-  const session = activeSession;
+export function stopMcpRecording({
+  connectionId,
+  planName,
+  timer = defaultTimer,
+}: McpRecordingOptions & { planName?: string } = {}): McpRecordingStopResult {
+  const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
+  const session = activeSessions.get(connectionKey);
   if (!session) {
     throw new Error("No active MCP recording. Call startMcpRecording first.");
   }
 
-  const steps = session.recorder.stop();
-  const stoppedAt = timer.now();
-  const resolvedName = formatPlanName(planName, timer);
-
-  if (steps.length === 0) {
-    activeSession = null;
-    throw new Error(
-      "No MCP tool calls were recorded. Ensure plan-relevant tools were called during the recording. " +
-        'Call recordSteps with action: "begin" to start a new session.',
-    );
-  }
-
   try {
+    const steps = session.recorder.stop();
+    const stoppedAt = timer.now();
+    const resolvedName = formatPlanName(planName, timer);
+
+    if (steps.length === 0) {
+      throw new Error(
+        "No MCP tool calls were recorded. Ensure plan-relevant tools were called during the recording. " +
+          'Call recordSteps with action: "begin" to start a new session.',
+      );
+    }
+
     const plan: Plan = {
       name: resolvedName,
       steps,
@@ -141,7 +156,6 @@ export function stopMcpRecording(
       noRefs: true,
     });
 
-    activeSession = null;
     logger.info(`[McpRecording] Stopped recording with ${steps.length} steps`);
 
     return {
@@ -152,8 +166,14 @@ export function stopMcpRecording(
       startedAt: new Date(session.startedAt).toISOString(),
       stoppedAt: new Date(stoppedAt).toISOString(),
     };
-  } catch (error) {
-    activeSession = null;
-    throw error;
+  } finally {
+    activeSessions.delete(connectionKey);
   }
+}
+
+/** Discard an MCP connection's recording on disconnect, without producing a plan. */
+export function dropMcpRecording(connectionId?: string): void {
+  const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
+  activeSessions.get(connectionKey)?.recorder.stop();
+  activeSessions.delete(connectionKey);
 }

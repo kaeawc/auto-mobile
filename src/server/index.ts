@@ -22,6 +22,7 @@ import { executionTracker } from "./executionTracker";
 import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
+import { dropMcpRecording } from "./mcpRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
@@ -745,6 +746,9 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   server.server.onclose = () => {
     unregisterSessionBindingRelease();
     unsubscribeSessionReleaseBroadcast();
+    if (!daemonMode) {
+      dropMcpRecording(options.sessionContext?.sessionId);
+    }
     existingServerOnClose?.();
   };
 

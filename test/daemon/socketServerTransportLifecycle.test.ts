@@ -1,16 +1,25 @@
 import type { Socket } from "node:net";
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import {
+  getMcpRecorder,
+  getMcpRecordingStatus,
+  resetMcpRecordingState,
+  startMcpRecording,
+} from "../../src/server/mcpRecordingManager";
 
 interface ServerInternals {
   mcpClients: Map<string, Client>;
   resetMcpClient(key: string): Promise<void>;
   acceptingRequests: boolean;
+  clientSockets: Map<string, Socket>;
+  releaseSocketSession(sessionId: string, socket: Socket): void;
   handleConnection(socket: Socket): void;
   handleRequest(
     sessionId: string,
@@ -27,6 +36,47 @@ class RpcSocket extends FakeSocket {
 }
 
 describe("daemon socket transport lifecycle", () => {
+  afterEach(() => resetMcpRecordingState());
+
+  for (const event of ["close", "error"]) {
+    test(`socket ${event} drops only that socket's recording`, () => {
+      const timer = new FakeTimer();
+      const server = new UnixSocketServer(
+        "/fake/socket",
+        "http://127.0.0.1:1/mcp",
+        undefined,
+        timer,
+        null,
+        {},
+        new CountingIdGenerator("recording-socket"),
+      );
+      const internals = server as unknown as ServerInternals;
+      internals.acceptingRequests = true;
+      const socket = new RpcSocket();
+      internals.handleConnection(socket as unknown as Socket);
+      startMcpRecording({ connectionId: "recording-socket-1", timer });
+      startMcpRecording({ connectionId: "other-socket", timer });
+      socket.emit(event, event === "error" ? new Error("fake disconnect") : false);
+      expect(getMcpRecorder({ connectionId: "recording-socket-1" })).toBeNull();
+      expect(getMcpRecordingStatus({ connectionId: "recording-socket-1", timer })).toBeNull();
+      expect(getMcpRecorder({ connectionId: "other-socket" })?.isRecording()).toBe(true);
+    });
+  }
+
+  test("a stale socket release preserves the newer incarnation's recording", () => {
+    const timer = new FakeTimer();
+    const server = new UnixSocketServer("/fake/socket", "http://127.0.0.1:1/mcp", undefined, timer);
+    const internals = server as unknown as ServerInternals;
+    const oldSocket = new RpcSocket() as unknown as Socket;
+    const newSocket = new RpcSocket() as unknown as Socket;
+    internals.clientSockets.set("reused-id", newSocket);
+    startMcpRecording({ connectionId: "reused-id", timer });
+    internals.releaseSocketSession("reused-id", oldSocket);
+    expect(getMcpRecorder({ connectionId: "reused-id" })?.isRecording()).toBe(true);
+    internals.releaseSocketSession("reused-id", newSocket);
+    expect(getMcpRecorder({ connectionId: "reused-id" })).toBeNull();
+  });
+
   test("reset sends HTTP DELETE before closing the loopback MCP client", async () => {
     const server = new UnixSocketServer(
       "/fake/socket",

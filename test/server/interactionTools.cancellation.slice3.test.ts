@@ -111,7 +111,6 @@ test.each(["keyboard", "openLink", "systemTray"])(
     ).rejects.toThrow("Operation cancelled");
     expect(dispatches).toBe(0);
   },
-  100,
 );
 
 test.each(["tap", "dismiss"])(
@@ -154,7 +153,6 @@ test.each(["tap", "dismiss"])(
     ).toBe(false);
     timer.resolveAll();
   },
-  100,
 );
 
 test("openLink stops before chooser launch if URL resolution cancels the request", async () => {
@@ -181,7 +179,7 @@ test("openLink stops before chooser launch if URL resolution cancels the request
     ),
   ).rejects.toThrow("Operation cancelled");
   expect(launches).toBe(0);
-}, 100);
+});
 
 // Exercise command dispatch while keeping the separately tested observation pipeline fake.
 class UnobservedOpenURL extends OpenURL {
@@ -276,7 +274,7 @@ test("keyboard cancels a pending hierarchy read without dispatch or rollback", a
   expect(timer.now()).toBe(0);
   expect(adb.getExecutedCommands()).toEqual([]);
   timer.resolveAll();
-}, 100);
+});
 
 test("openLink does not launch after physical iOS URL availability resolution aborts", async () => {
   const target = devices[1]!;
@@ -295,7 +293,7 @@ test("openLink does not launch after physical iOS URL availability resolution ab
     handler("openLink")(target, { url: "https://example.com" }, undefined, controller.signal),
   ).rejects.toThrow("Operation cancelled");
   expect(launcher.launchCalls).toEqual([]);
-}, 100);
+});
 
 test("openLink chooser cancels during handler metadata resolution before any chooser tap", async () => {
   const timer = new FakeTimer();
@@ -362,7 +360,7 @@ test("openLink chooser cancels during handler metadata resolution before any cho
   expect(adb.getExecutedCommands()).toEqual([]);
   expect(labels).toBe(0);
   expect(reads).toBe(0);
-}, 100);
+});
 
 test("keyboard forwards the exact request signal", async () => {
   const controller = new AbortController();
@@ -407,4 +405,4 @@ test("openLink cancels iOS foreground confirmation without waiting or rolling ba
   expect(timer.now()).toBe(0);
   expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
   timer.resolveAll();
-}, 100);
+});

@@ -130,7 +130,6 @@ describe("slice 2 registered handler cancellation", () => {
           wake.mockRestore();
         }
       },
-      100,
     );
 
     test.each(["copy", "paste", "clear", "get"] as const)(
@@ -155,7 +154,6 @@ describe("slice 2 registered handler cancellation", () => {
         expect(dispatches).toBe(0);
         expect(adb.getExecutedCommands()).toEqual([]);
       },
-      100,
     );
 
     test.each(["copy", "paste", "clear", "get"] as const)(
@@ -194,7 +192,6 @@ describe("slice 2 registered handler cancellation", () => {
           sleep.mockRestore();
         }
       },
-      100,
     );
   }
 
@@ -217,7 +214,6 @@ describe("slice 2 registered handler cancellation", () => {
       ).rejects.toThrow("cancelled");
       expect(adb.getExecutedCommands()).toEqual([]);
     },
-    100,
   );
 
   test("clipboard paste stops between Android clipboard read and paste", async () => {
@@ -247,7 +243,7 @@ describe("slice 2 registered handler cancellation", () => {
     } finally {
       dispatch.mockRestore();
     }
-  }, 100);
+  });
 
   test.each(["wake", "bouncer", "poll"])(
     "wakeAndUnlock stops during %s wait without timeout advance",
@@ -283,7 +279,6 @@ describe("slice 2 registered handler cancellation", () => {
         wake.mockRestore();
       }
     },
-    100,
   );
 
   test("iOS unlock cancels pending Home and never swipes later", async () => {
@@ -330,7 +325,7 @@ describe("slice 2 registered handler cancellation", () => {
       timer.resolveAll();
       sleep.mockRestore();
     }
-  }, 100);
+  });
 
   test("shake resets acceleration on cancellation without waiting for duration", async () => {
     const adb = new FakeAdbExecutor();
@@ -360,7 +355,7 @@ describe("slice 2 registered handler cancellation", () => {
       timer.resolveAll();
       sleep.mockRestore();
     }
-  }, 100);
+  });
   test("wakeAndUnlock cancels after the last PIN key before ENTER", async () => {
     const adb = new FakeAdbExecutor();
     const timer = new FakeTimer();
@@ -377,7 +372,7 @@ describe("slice 2 registered handler cancellation", () => {
       "shell wm dismiss-keyguard",
       "shell input keyevent KEYCODE_1",
     ]);
-  }, 100);
+  });
 
   test("wakeAndUnlock cancels API-level probing before its fallback", async () => {
     const adb = new FakeAdbExecutor();
@@ -391,7 +386,7 @@ describe("slice 2 registered handler cancellation", () => {
     ).rejects.toThrow("cancelled");
     expect(adb.getExecutedCommands()).toEqual(["shell wm dismiss-keyguard"]);
     expect(timer.getSleepHistory()).toEqual([]);
-  }, 100);
+  });
 
   test("shake cleanup escapes ambient cancellation and is bounded by its injected Timer", async () => {
     const adb = new FakeAdbExecutor();
@@ -440,7 +435,7 @@ describe("slice 2 registered handler cancellation", () => {
       sleep.mockRestore();
       dispatch.mockRestore();
     }
-  }, 100);
+  });
   test.each(["copy", "paste", "clear", "get"] as const)(
     "iOS clipboard %s never registers a request after a cancelled connection wait",
     async (action) => {
@@ -496,6 +491,5 @@ describe("slice 2 registered handler cancellation", () => {
         register.mockRestore();
       }
     },
-    100,
   );
 });

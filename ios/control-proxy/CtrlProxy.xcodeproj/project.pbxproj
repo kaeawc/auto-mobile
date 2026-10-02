@@ -123,6 +123,7 @@
 		8F8ED5E66C5A4352F9278528 /* RangeReplaceableCollection+MaxSizeEnforcement.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE3F18728033EBBB0EE739F5 /* RangeReplaceableCollection+MaxSizeEnforcement.swift */; };
 		928C3AEF40FCC6D7E491B4CA /* RequestExecuteSql.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32AE30FA5A10090859AA0A0D /* RequestExecuteSql.swift */; };
 		93FB1F2AD6C843D9D9B15A01 /* SdkHierarchyCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C7D0326E1B35DF9109E8677 /* SdkHierarchyCache.swift */; };
+		97EAAC89501A682F6B97E655 /* SdkEndpointResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = D360F9D9789EBB26ADD8FA97 /* SdkEndpointResolver.swift */; };
 		982B72985B6426E4DAE02A8A /* RequestSetText.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF22C1D3B8693A321680EC6B /* RequestSetText.swift */; };
 		98F705C8C54057FCB4B0CEDF /* SdkExecuteSqlResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = B94462B9A346CFA47B40D98F /* SdkExecuteSqlResult.swift */; };
 		9A4BB68D82D6B6C48EA4A7F2 /* RequestPressKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C2287CAA890BFCEDF55788 /* RequestPressKey.swift */; };
@@ -415,6 +416,7 @@
 		D08781690EC8B9310B23011D /* SetNetworkMockRulesResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetNetworkMockRulesResponse.swift; sourceTree = "<group>"; };
 		D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ObjCExceptionCatcher.h; sourceTree = "<group>"; };
 		D255CDBF98698FAA7A8CDCF3 /* PinchFallback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinchFallback.swift; sourceTree = "<group>"; };
+		D360F9D9789EBB26ADD8FA97 /* SdkEndpointResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkEndpointResolver.swift; sourceTree = "<group>"; };
 		D3DDB72652F5D4D46C41EC68 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D40FE00992971DF4071339CB /* RequestGetTableData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestGetTableData.swift; sourceTree = "<group>"; };
 		D6B661E440E6E947D57E698A /* ProxyTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProxyTimer.swift; sourceTree = "<group>"; };
@@ -537,6 +539,7 @@
 				87B4E19BA37655980362B1ED /* SdkDatabaseClient.swift */,
 				ACA8A585999962DCE24C448D /* SdkDatabaseError.swift */,
 				7F3F3FB03B719D66C271DA02 /* SdkDatabaseFetching.swift */,
+				D360F9D9789EBB26ADD8FA97 /* SdkEndpointResolver.swift */,
 				E9780A20937F392C5E3A0692 /* SdkEventBuffer.swift */,
 				7C7D0326E1B35DF9109E8677 /* SdkHierarchyCache.swift */,
 				E4E7F1D60628FFE452F918F0 /* SdkHierarchyCaching.swift */,
@@ -1040,6 +1043,7 @@
 				B9D0FF5EAF0305D305032599 /* SdkDatabaseInfo.swift in Sources */,
 				A8E7377854E946A300C0D0C9 /* SdkDisplayCutoutInfo.swift in Sources */,
 				A6A9EEE972BC6DF89E00E0D0 /* SdkEdgeInsets.swift in Sources */,
+				97EAAC89501A682F6B97E655 /* SdkEndpointResolver.swift in Sources */,
 				5938B43016EBBC580A0538E1 /* SdkEventBuffer.swift in Sources */,
 				98F705C8C54057FCB4B0CEDF /* SdkExecuteSqlResult.swift in Sources */,
 				70737508D4D228C704F53E33 /* SdkGestureInfo.swift in Sources */,

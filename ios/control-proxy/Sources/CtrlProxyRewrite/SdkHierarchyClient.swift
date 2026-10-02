@@ -1,24 +1,22 @@
 import Foundation
+import os
 
-/// Async HTTP client for the SDK's in-app hierarchy server (port 8766). Ported from the
-/// reference `SdkHierarchyClient.swift`.
-///
-/// Rewrite archetype: a **stateless `Sendable`** async client. The reference blocked a
-/// `URLSession` completion handler on a `DispatchSemaphore` per call; this replaces that
-/// with `await transport.data(for:)` over the injectable `HTTPRequesting` seam. All
-/// stored state is immutable (`baseURL` + two transports), so the client is `Sendable`
-/// with no isolation. The reference's `healthSession` was a `lazy var` (mutable, so
-/// non-`Sendable`); it is now an eagerly-created stored transport — the only behavioral
-/// difference is that the 0.5s-timeout session is built at init rather than on first
-/// `/health` call, which is not observable on the wire.
+/// Async HTTP client for the SDK's in-app hierarchy server. Immutable transports
+/// and a shared actor-isolated endpoint resolver keep the client Sendable. Production
+/// requests discover and verify the simulator; injected fixed URLs remain testable.
 public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     private let baseURL: URL
+    private let endpointResolver: SdkEndpointResolver?
     private let transport: any HTTPRequesting
     /// Separate transport for `/health`: the reference used a 0.5s-timeout session so an
     /// availability probe fails fast, distinct from the 2s data session.
     private let healthTransport: any HTTPRequesting
 
     public convenience init(port: UInt16 = 8766) {
+        self.init(port: port, endpointResolver: .production(legacyPort: port))
+    }
+
+    convenience init(port: UInt16 = 8766, endpointResolver: SdkEndpointResolver) {
         let baseURL = URL(string: "http://127.0.0.1:\(port)")! // swiftlint:disable:this force_unwrapping
 
         let dataConfig = URLSessionConfiguration.default
@@ -33,13 +31,20 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
         self.init(
             baseURL: baseURL,
             transport: URLSessionHTTPTransport(session: URLSession(configuration: dataConfig)),
-            healthTransport: URLSessionHTTPTransport(session: URLSession(configuration: healthConfig))
+            healthTransport: URLSessionHTTPTransport(session: URLSession(configuration: healthConfig)),
+            endpointResolver: endpointResolver
         )
     }
 
     /// Designated initializer over the `HTTPRequesting` seam (tests inject stubs).
-    init(baseURL: URL, transport: any HTTPRequesting, healthTransport: any HTTPRequesting) {
+    init(
+        baseURL: URL,
+        transport: any HTTPRequesting,
+        healthTransport: any HTTPRequesting,
+        endpointResolver: SdkEndpointResolver? = nil
+    ) {
         self.baseURL = baseURL
+        self.endpointResolver = endpointResolver
         self.transport = transport
         self.healthTransport = healthTransport
     }
@@ -107,9 +112,14 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     private func getData(path: String, transport: any HTTPRequesting) async -> Data? {
         let url = baseURL.appendingPathComponent(path)
         do {
-            let (data, response) = try await transport.data(for: URLRequest(url: url))
+            let (data, response) = try await SdkEndpointResolver.requestData(
+                for: URLRequest(url: url), transport: transport, resolver: endpointResolver
+            )
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
             return data
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return nil
         } catch {
             // The reference swallowed every URLSession error to nil (server absent is
             // the common case for a target app without the SDK embedded).
@@ -121,10 +131,15 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
     /// deliberate rejection (non-200) from the bridge being unreachable (no response).
     private func postHighlight(path: String, body: Data) async -> SdkHighlightOutcome {
         do {
-            let (_, response) = try await transport.data(for: jsonPost(path: path, body: body))
+            let (_, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: path, body: body), transport: transport, resolver: endpointResolver
+            )
             // No HTTP response means the in-app bridge was unreachable.
             guard let http = response as? HTTPURLResponse else { return .unavailable }
             return http.statusCode == 200 ? .rendered : .rejected
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return .unavailable
         } catch {
             return .unavailable
         }
@@ -132,12 +147,22 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
 
     private func postExpectingOK(path: String, body: Data) async -> Bool {
         do {
-            let (_, response) = try await transport.data(for: jsonPost(path: path, body: body))
+            let (_, response) = try await SdkEndpointResolver.requestData(
+                for: jsonPost(path: path, body: body), transport: transport, resolver: endpointResolver
+            )
             guard let http = response as? HTTPURLResponse else { return false }
             return http.statusCode == 200
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return false
         } catch {
             return false
         }
+    }
+
+    private static func logEndpointError(_ error: SdkEndpointError) {
+        Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+            .warning("\(error.localizedDescription, privacy: .public)")
     }
 
     private func jsonPost(path: String, body: Data) -> URLRequest {

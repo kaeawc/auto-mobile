@@ -99,9 +99,10 @@ public final class CtrlProxy {
         let perf = PerfProvider()
         let frameContext = FrameContext()
         let sdkHierarchyCache = SdkHierarchyCache()
-        let sdkHierarchyClient = SdkHierarchyClient()
-        let sdkDatabaseClient = SdkDatabaseClient()
-        let sdkPreferenceClient = SdkPreferenceClient()
+        let sdkEndpointResolver = SdkEndpointResolver.production()
+        let sdkHierarchyClient = SdkHierarchyClient(endpointResolver: sdkEndpointResolver)
+        let sdkDatabaseClient = SdkDatabaseClient(endpointResolver: sdkEndpointResolver)
+        let sdkPreferenceClient = SdkPreferenceClient(endpointResolver: sdkEndpointResolver)
         #if os(iOS)
             let elementLocator = ElementLocator(perf: perf)
         #else

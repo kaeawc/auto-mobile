@@ -23,11 +23,12 @@
 
     extension NWListener: SdkHierarchyListener {}
 
-    /// Minimal HTTP server running inside the target app on port 8766.
+    /// Minimal HTTP server running inside the target app on a simulator-specific port.
+    /// Port 8766 remains a best-effort compatibility listener (the sole port on devices).
     /// Serves view hierarchy snapshots to control-proxy on demand.
     ///
     /// Endpoints:
-    /// - `GET /health` -> `{"status":"ok","bundleId":"<sdk app bundle id>"}`
+    /// - `GET /health` -> status, bundle ID, capabilities, and optional simulator UDID
     /// - `GET /hierarchy` -> latest cached hierarchy (fast, no main-thread work)
     /// - `GET /hierarchy/fresh` -> synchronous main-thread walk (slower but guaranteed fresh)
     /// - `POST /highlight` -> render a debug highlight in the app-under-test process
@@ -38,7 +39,13 @@
 
         private let lock: any NSLocking
         private var listener: (any SdkHierarchyListener)?
-        private let listenerFactory: () throws -> any SdkHierarchyListener
+        private var legacyListener: (any SdkHierarchyListener)?
+        private var listenerToken: UUID?
+        private var legacyToken: UUID?
+        private var isStarted = false
+        private let identity: SdkSimulatorIdentity
+        private let warning: (String) -> Void
+        private let listenerFactory: (UInt16) throws -> any SdkHierarchyListener
         private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
         private weak var tracker: (any SdkHierarchyServing)?
         private let databaseRouteHandler = SdkDatabaseRouteHandler()
@@ -46,59 +53,136 @@
 
         init(
             tracker: any SdkHierarchyServing,
-            listenerFactory: @escaping () throws
-                -> any SdkHierarchyListener = { try SdkHierarchyServer.makeListener() },
-            lifecycleLock: any NSLocking = NSLock()
+            listenerFactory: (() throws -> any SdkHierarchyListener)? = nil,
+            lifecycleLock: any NSLocking = NSLock(),
+            identity: SdkSimulatorIdentity = SdkSimulatorIdentity(),
+            portListenerFactory: @escaping (UInt16) throws -> any SdkHierarchyListener = {
+                try SdkHierarchyServer.makeListener(port: $0)
+            },
+            warning: @escaping (String) -> Void = { InternalLogger.warning($0) }
         ) {
             self.tracker = tracker
-            self.listenerFactory = listenerFactory
+            self.identity = identity
+            self.warning = warning
+            if let listenerFactory {
+                self.listenerFactory = { _ in try listenerFactory() }
+            } else {
+                self.listenerFactory = portListenerFactory
+            }
             lock = lifecycleLock
         }
 
         // MARK: - Lifecycle
 
         func start() {
-            // Hold the lock across the entire start — assign, configure, and `start()` —
-            // so a concurrent `stop()` cannot interleave between the `listener` assignment
-            // and `nwListener.start()`, which would cancel the listener yet leave it
-            // started (and `listener == nil`, so a later `start()` re-binds port 8766). The
-            // handlers only fire asynchronously on `queue`, never synchronously here, so
-            // there is no re-entrancy while the lock is held.
+            // Keep assign/configure/start atomic with stop(). NWListener callbacks run
+            // asynchronously; fake listeners deliver state changes after start returns.
             lock.lock()
             defer { lock.unlock() }
-            guard listener == nil else { return }
+            guard !isStarted else { return }
+            isStarted = true
+            startPrimary(attempt: 0)
+            if identity.udid != nil {
+                startListener(port: Self.port, attempt: 0, legacy: true)
+            }
+        }
 
-            do {
-                let nwListener = try listenerFactory()
-                listener = nwListener
-
-                nwListener.stateUpdateHandler = { state in
-                    switch state {
-                    case .ready:
-                        InternalLogger.debug("[SdkHierarchyServer] Ready on port \(Self.port)")
-                    case let .failed(error):
-                        InternalLogger.warning("[SdkHierarchyServer] Failed: \(error)")
-                    default:
-                        break
-                    }
+        /// Called with the lifecycle lock held; creation failures probe synchronously.
+        private func startPrimary(attempt: Int) {
+            if let udid = identity.udid {
+                guard attempt < SdkSimulatorPort.probeCount else {
+                    warning(
+                        "[SdkHierarchyServer] Simulator \(udid): all \(SdkSimulatorPort.probeCount) "
+                            + "port candidates failed; the in-app server is unavailable on this device"
+                    )
+                    return
                 }
+                startListener(
+                    port: SdkSimulatorPort.simulatorPort(udid: udid, attempt: attempt),
+                    attempt: attempt,
+                    legacy: false
+                )
+            } else {
+                startListener(port: Self.port, attempt: 0, legacy: false)
+            }
+        }
 
-                nwListener.newConnectionHandler = { [weak self] connection in
+        private func startListener(port: UInt16, attempt: Int, legacy: Bool) {
+            do {
+                let nextListener = try listenerFactory(port)
+                let token = UUID()
+                if legacy {
+                    legacyListener = nextListener
+                    legacyToken = token
+                } else {
+                    listener = nextListener
+                    listenerToken = token
+                }
+                nextListener.stateUpdateHandler = { [weak self] state in
+                    self?.listenerStateChanged(state, token: token, port: port, attempt: attempt, legacy: legacy)
+                }
+                nextListener.newConnectionHandler = { [weak self] connection in
                     self?.handleConnection(connection)
                 }
-
-                nwListener.start(queue: queue)
+                nextListener.start(queue: queue)
             } catch {
-                InternalLogger.warning("[SdkHierarchyServer] Failed to create listener: \(error)")
+                listenerFailed(port: port, attempt: attempt, legacy: legacy, reason: String(describing: error))
+            }
+        }
+
+        private func listenerStateChanged(
+            _ state: NWListener.State, token: UUID, port: UInt16, attempt: Int, legacy: Bool
+        ) {
+            lock.lock()
+            defer { lock.unlock() }
+            // Ignore callbacks from a cancelled probe or an earlier start/stop cycle.
+            guard isStarted, token == (legacy ? legacyToken : listenerToken) else { return }
+            switch state {
+            case .ready:
+                InternalLogger.debug("[SdkHierarchyServer] Ready on port \(port)")
+            case let .failed(error):
+                if legacy {
+                    let failed = legacyListener
+                    legacyListener = nil
+                    legacyToken = nil
+                    failed?.cancel()
+                } else {
+                    let failed = listener
+                    listener = nil
+                    listenerToken = nil
+                    failed?.cancel()
+                }
+                listenerFailed(port: port, attempt: attempt, legacy: legacy, reason: String(describing: error))
+            default:
+                break
+            }
+        }
+
+        private func listenerFailed(port: UInt16, attempt: Int, legacy: Bool, reason: String) {
+            if legacy {
+                // Another simulator may own 8766. The identity-verified listener is sufficient.
+                InternalLogger.debug("[SdkHierarchyServer] Legacy port \(port) unavailable: \(reason)")
+            } else if identity.udid != nil {
+                InternalLogger.debug("[SdkHierarchyServer] Probe port \(port) failed: \(reason)")
+                startPrimary(attempt: attempt + 1)
+            } else {
+                isStarted = false
+                warning("[SdkHierarchyServer] Failed on port \(port): \(reason)")
             }
         }
 
         func stop() {
             lock.lock()
-            let listenerToCancel = listener
+            let listenersToCancel = [listener, legacyListener].compactMap { $0 }
             listener = nil
+            legacyListener = nil
+            listenerToken = nil
+            legacyToken = nil
+            isStarted = false
             lock.unlock()
-            listenerToCancel?.cancel()
+            for listener in listenersToCancel {
+                listener.cancel()
+            }
         }
 
         static func makeListener(port: UInt16 = SdkHierarchyServer.port) throws -> any SdkHierarchyListener {
@@ -110,7 +194,8 @@
             let parameters = NWParameters.tcp
             // Bind the SDK listener to loopback.
             parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(integerLiteral: port))
-            parameters.allowLocalEndpointReuse = true
+            // Simulator-specific ports have a single owner; preserve legacy/device reuse semantics.
+            parameters.allowLocalEndpointReuse = port == Self.port
             return parameters
         }
 
@@ -147,64 +232,96 @@
                         return
                     }
 
-                    guard self.requireApplicationActive(connection) else { return }
+                    if let rejection = self.authorizeRequest(headers: request, execute: {
+                        guard self.requireApplicationActive(connection) else { return }
 
-                    if request.contains("GET /hierarchy/fresh") {
-                        self.handleFreshHierarchy(connection)
-                    } else if request.contains("GET /hierarchy") {
-                        self.handleCachedHierarchy(connection)
-                    } else if request.contains("GET /health") {
-                        self.handleHealth(connection)
-                    } else if request.contains("POST /network/mock") {
-                        self.handleNetworkMock(connection, initialData: requestData)
-                    } else if request.contains("POST /network/error-simulation") {
-                        self.handleNetworkErrorSimulation(connection, initialData: requestData)
-                    } else if request.contains("POST /network/fault-rules") {
-                        self.handleNetworkFaultRules(connection, initialData: requestData)
-                    } else if request.contains("POST /highlight") {
-                        self.handleHighlight(connection, initialData: requestData)
-                    } else if request.contains("POST /db/execute") {
-                        self.handleBodyRoute(connection, initialData: requestData) {
-                            self.databaseRouteHandler.handleExecuteSql(body: $0)
+                        if request.contains("GET /hierarchy/fresh") {
+                            self.handleFreshHierarchy(connection)
+                        } else if request.contains("GET /hierarchy") {
+                            self.handleCachedHierarchy(connection)
+                        } else if request.contains("GET /health") {
+                            self.handleHealth(connection)
+                        } else if request.contains("POST /network/mock") {
+                            self.handleNetworkMock(connection, initialData: requestData)
+                        } else if request.contains("POST /network/error-simulation") {
+                            self.handleNetworkErrorSimulation(connection, initialData: requestData)
+                        } else if request.contains("POST /network/fault-rules") {
+                            self.handleNetworkFaultRules(connection, initialData: requestData)
+                        } else if request.contains("POST /highlight") {
+                            self.handleHighlight(connection, initialData: requestData)
+                        } else if request.contains("POST /db/execute") {
+                            self.handleBodyRoute(connection, initialData: requestData) {
+                                self.databaseRouteHandler.handleExecuteSql(body: $0)
+                            }
+                        } else if request.contains("POST /db/list") {
+                            self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
+                        } else if request.contains("POST /db/capabilities") {
+                            self.sendRouteResponse(connection, self.databaseRouteHandler.handleCapabilities())
+                        } else if request.contains("POST /db/tables") {
+                            self.handleBodyRoute(connection, initialData: requestData) {
+                                self.databaseRouteHandler.handleListTables(body: $0)
+                            }
+                        } else if request.contains("POST /db/table-data") {
+                            self.handleBodyRoute(connection, initialData: requestData) {
+                                self.databaseRouteHandler.handleTableData(body: $0)
+                            }
+                        } else if request.contains("POST /db/table-structure") {
+                            self.handleBodyRoute(connection, initialData: requestData) {
+                                self.databaseRouteHandler.handleTableStructure(body: $0)
+                            }
+                        } else if request.contains("POST /preferences") {
+                            self.handleBodyRoute(connection, initialData: requestData) {
+                                self.preferenceRouteHandler.handle(body: $0)
+                            }
+                        } else {
+                            self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
                         }
-                    } else if request.contains("POST /db/list") {
-                        self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
-                    } else if request.contains("POST /db/capabilities") {
-                        self.sendRouteResponse(connection, self.databaseRouteHandler.handleCapabilities())
-                    } else if request.contains("POST /db/tables") {
-                        self.handleBodyRoute(connection, initialData: requestData) {
-                            self.databaseRouteHandler.handleListTables(body: $0)
-                        }
-                    } else if request.contains("POST /db/table-data") {
-                        self.handleBodyRoute(connection, initialData: requestData) {
-                            self.databaseRouteHandler.handleTableData(body: $0)
-                        }
-                    } else if request.contains("POST /db/table-structure") {
-                        self.handleBodyRoute(connection, initialData: requestData) {
-                            self.databaseRouteHandler.handleTableStructure(body: $0)
-                        }
-                    } else if request.contains("POST /preferences") {
-                        self.handleBodyRoute(connection, initialData: requestData) {
-                            self.preferenceRouteHandler.handle(body: $0)
-                        }
-                    } else {
-                        self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
+                    }) {
+                        self.sendRouteResponse(connection, rejection)
                     }
                 }
             }
         }
 
-        private func handleHealth(_ connection: NWConnection) {
+        /// Guard before the foreground gate and before reading any body: a wrong
+        /// simulator must never reach routing or launch-scoped mutation authorization.
+        /// Missing headers deliberately retain old-runner compatibility.
+        @discardableResult
+        func authorizeRequest(headers: String, execute: () -> Void) -> SdkRouteResponse? {
+            if let expected = identity.udid {
+                for line in headers.components(separatedBy: "\r\n").dropFirst() {
+                    let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                    guard parts.count == 2,
+                          parts[0].trimmingCharacters(in: .whitespaces).lowercased()
+                          == "x-automobile-simulator-udid" else { continue }
+                    let actual = parts[1].trimmingCharacters(in: .whitespaces)
+                    if actual.lowercased() != expected.lowercased() {
+                        let body = try? JSONEncoder().encode([
+                            "error": "wrong_simulator", "expectedUdid": expected, "actualUdid": actual,
+                        ])
+                        return SdkRouteResponse(statusCode: 409, body: body ?? Data())
+                    }
+                }
+            }
+            execute()
+            return nil
+        }
+
+        func healthResponse() -> SdkRouteResponse {
             let payload = HealthPayload(
                 status: "ok",
                 bundleId: tracker?.bundleId,
-                capabilities: ["network-fault-rules"]
+                capabilities: ["network-fault-rules"],
+                simulatorUdid: identity.udid
             )
             guard let data = try? JSONEncoder().encode(payload) else {
-                sendResponse(connection, statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
-                return
+                return SdkRouteResponse(statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
             }
-            sendResponse(connection, statusCode: 200, body: data)
+            return SdkRouteResponse(statusCode: 200, body: data)
+        }
+
+        private func handleHealth(_ connection: NWConnection) {
+            sendRouteResponse(connection, healthResponse())
         }
 
         private func handleCachedHierarchy(_ connection: NWConnection) {
@@ -527,6 +644,7 @@
         let status: String
         let bundleId: String?
         let capabilities: Set<String>
+        let simulatorUdid: String?
     }
 
     private struct SetMockRulesBody: Decodable {

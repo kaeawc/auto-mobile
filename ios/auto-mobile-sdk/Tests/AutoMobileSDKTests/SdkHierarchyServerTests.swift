@@ -131,7 +131,8 @@ final class SdkHierarchyServerTests: XCTestCase {
         let server = SdkHierarchyServer(
             tracker: tracker,
             listenerFactory: { listener },
-            lifecycleLock: lifecycleLock
+            lifecycleLock: lifecycleLock,
+            identity: SdkSimulatorIdentity(environment: [:])
         )
         let startReturned = expectation(description: "start returns after the listener starts")
         let stopReturned = expectation(description: "stop returns after cancelling the listener")
@@ -278,7 +279,9 @@ final class SdkHierarchyServerTests: XCTestCase {
         throws
     {
         let listener = try LoopbackListener()
-        let server = SdkHierarchyServer(tracker: tracker, listenerFactory: { listener })
+        let server = SdkHierarchyServer(
+            tracker: tracker, listenerFactory: { listener }, identity: SdkSimulatorIdentity(environment: [:])
+        )
         server.start()
         defer { server.stop() }
 

@@ -311,6 +311,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     const succeededPlatforms = new Set<Platform>();
     const succeededSources = new Set<DiscoverySource>();
     const discoveryErrors: BootedDeviceDiscovery["discoveryErrors"] = {};
+    const sourceErrors: BootedDeviceDiscovery["sourceErrors"] = {};
     for (const p of requested) {
       // Delegate to getBootedDevices so operation tracking stays consistent,
       // then assemble per source: iOS's two sources fail independently, so a
@@ -319,6 +320,12 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       const platformDevices = await this.getBootedDevices(p);
       for (const source of sourcesForPlatform(p)) {
         if (this.failedPlatforms.has(p) || this.failedSources.has(source)) {
+          if (source === "ios-physical") {
+            sourceErrors[source] = {
+              code: "failed",
+              message: "devicectl could not list physical iOS devices (failed): fake",
+            };
+          }
           continue;
         }
         succeededSources.add(source);
@@ -345,6 +352,7 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
       devices,
       succeededPlatforms,
       discoveryErrors,
+      ...(Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
       ...(this.omitSucceededSources ? {} : { succeededSources }),
     };
   }

@@ -1,3 +1,12 @@
+import {
+  DEVICECTL_LIST_FIXTURES,
+  loadDevicectlListFixture,
+} from "../helpers/devicectlListFixtures";
+import {
+  DevicectlDeviceLister,
+  parseDevicectlDeviceList,
+} from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
+import { FakeDiscoveryObservationSequence } from "../fakes/FakeDiscoveryObservationSequence";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -415,6 +424,34 @@ describe("listDevices tool (#5870)", () => {
     ).toBe(true);
   });
 
+  for (const name of DEVICECTL_LIST_FIXTURES) {
+    test(`${name} leaves listDevices discovery complete`, async () => {
+      const raw = loadDevicectlListFixture(name);
+      const parsed = parseDevicectlDeviceList(JSON.parse(raw) as unknown);
+      if (!parsed.ok) {
+        throw new Error(parsed.reason);
+      }
+      const lister = new DevicectlDeviceLister({
+        platform: () => "darwin",
+        timer: new FakeTimer(),
+        observationSequence: new FakeDiscoveryObservationSequence(),
+        execute: async () => createExecResult("", ""),
+        readFile: async () => raw,
+        mkdtemp: async () => "/fake/devicectl",
+        rm: async () => {},
+        tmpdir: () => "/fake",
+        logger: { warn: () => {}, debug: () => {} },
+      });
+      const physical = await lister.listConnectedDevices();
+      expect(physical.complete).toBe(true);
+      fakeDeviceUtils.setBootedDevices("ios", [...parsed.simulators, ...physical.devices]);
+      const payload = await callListDevices({ platform: "ios" });
+      expect(payload.discovery.complete).toBe(true);
+      expect(payload.discovery.failedSources).toBeUndefined();
+      expect(payload.discovery.sourceErrors).toBeUndefined();
+    });
+  }
+
   test("marks discovery incomplete when only physical-iOS (devicectl) discovery fails (#5918)", async () => {
     // macOS mixed outcome: simctl completed but devicectl did not. The iOS
     // platform still aggregates as succeeded (it tracks the simulator source),
@@ -427,6 +464,8 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.discovery.complete).toBe(false);
     // ...and surfaces exactly which source failed, not the whole platform.
     expect(payload.discovery.failedSources).toEqual(["ios-physical"]);
+    expect(payload.discovery.sourceErrors["ios-physical"].code).toBe("failed");
+    expect(payload.discovery.sourceErrors["ios-physical"].message).toContain("devicectl");
     // The simulator source completed, so the platform aggregate is unaffected.
     expect(payload.discovery.failedPlatforms).toEqual([]);
   });

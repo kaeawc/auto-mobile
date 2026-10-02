@@ -97,10 +97,7 @@ export class IdleDeviceReaper {
     // Presence alone does not prove liveness: a failed devicectl sweep replays
     // its retained last-good iPhones, and treating those as fresh would hand an
     // unplugged device to a session instead of raising the intended
-    // unable-to-verify error. Freshness is decided per device rather than per
-    // source, because devicectl also reports source-wide incompleteness for a
-    // sweep in which a device WAS freshly parsed beside one unreadable record —
-    // dropping that device would reject a connected iPhone.
+    // unable-to-verify error. Only a fresh observation proves current presence.
     const fresh = discovery.freshDeviceIds;
     return {
       discoverySucceeded: sources ? sources.has("ios-simulator") : platformSucceeded,

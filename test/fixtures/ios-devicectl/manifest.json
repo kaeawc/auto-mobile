@@ -1,0 +1,29 @@
+[
+  {
+    "file": "list-devices-simulators-only.json",
+    "physical": 0,
+    "availableSimulators": 2,
+    "notAvailable": 6,
+    "unidentified": 0,
+    "complete": true,
+    "physicalUdids": [],
+    "simulatorUdids": [
+      "4E8A6FF9-36EC-4529-BB2A-5C480EE3C06F",
+      "CC665AC6-D46E-48AB-B745-856472FEB7CF"
+    ]
+  },
+  {
+    "file": "list-devices-simulators-only-omit-deprecated.json",
+    "physical": 0,
+    "availableSimulators": 2,
+    "notAvailable": 6,
+    "unidentified": 0,
+    "complete": true,
+    "physicalUdids": [],
+    "simulatorUdids": [
+      "4E8A6FF9-36EC-4529-BB2A-5C480EE3C06F",
+      "CC665AC6-D46E-48AB-B745-856472FEB7CF"
+    ],
+    "sameStateAs": "list-devices-simulators-only.json"
+  }
+]

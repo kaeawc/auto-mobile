@@ -46,6 +46,30 @@ function selectBootedDevices(
   return matching;
 }
 
+function listingDiscoveryObservation(
+  requestedPlatforms: Platform[],
+  succeededPlatforms: Set<Platform>,
+  succeededSources: Set<DiscoverySource> | undefined,
+  discoveryErrors: BootedDeviceDiscovery["discoveryErrors"],
+  sourceErrors: BootedDeviceDiscovery["sourceErrors"],
+) {
+  const failedPlatforms = requestedPlatforms.filter((p) => !succeededPlatforms.has(p));
+  const failedSources = succeededSources
+    ? requestedPlatforms
+        .flatMap((p) => sourcesForPlatform(p))
+        .filter((source) => !succeededSources!.has(source))
+    : undefined;
+  return {
+    complete: failedSources ? failedSources.length === 0 : failedPlatforms.length === 0,
+    failedPlatforms,
+    ...(sourceErrors && Object.keys(sourceErrors).length > 0 ? { sourceErrors } : {}),
+    ...(failedSources && failedSources.length > 0 ? { failedSources } : {}),
+    ...(discoveryErrors && Object.keys(discoveryErrors).length > 0
+      ? { errors: discoveryErrors }
+      : {}),
+  };
+}
+
 export function createListingHandlers() {
   // List AVDs handler
   const listDeviceImagesHandler = async (args: ListDeviceImagesArgs) => {
@@ -107,6 +131,7 @@ export function createListingHandlers() {
     // falling back to the platform aggregate for producers that predate #5683
     // (which return no `succeededSources`).
     let succeededSources: Set<DiscoverySource> | undefined;
+    let sourceErrors: BootedDeviceDiscovery["sourceErrors"];
     let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
       const discovery = await deviceManager.getBootedDevicesDetailed(
@@ -120,6 +145,7 @@ export function createListingHandlers() {
       succeededPlatforms = discovery.succeededPlatforms;
       succeededSources = discovery.succeededSources;
       discoveryErrors = discovery.discoveryErrors;
+      sourceErrors = discovery.sourceErrors;
     } catch (error) {
       // Discovery is best-effort — a partial/failed probe still returns the
       // resource guidance rather than failing the whole call. A thrown error
@@ -129,20 +155,13 @@ export function createListingHandlers() {
       succeededSources = new Set<DiscoverySource>();
     }
 
-    const failedPlatforms = requestedPlatforms.filter((p) => !succeededPlatforms.has(p));
-    const failedSources = succeededSources
-      ? requestedPlatforms
-          .flatMap((p) => sourcesForPlatform(p))
-          .filter((source) => !succeededSources!.has(source))
-      : undefined;
-    const discovery = {
-      complete: failedSources ? failedSources.length === 0 : failedPlatforms.length === 0,
-      failedPlatforms,
-      ...(failedSources && failedSources.length > 0 ? { failedSources } : {}),
-      ...(discoveryErrors && Object.keys(discoveryErrors).length > 0
-        ? { errors: discoveryErrors }
-        : {}),
-    };
+    const discovery = listingDiscoveryObservation(
+      requestedPlatforms,
+      succeededPlatforms,
+      succeededSources,
+      discoveryErrors,
+      sourceErrors,
+    );
 
     const resolvedBooted = await hydrateRequiredDisplayInventories(
       booted,

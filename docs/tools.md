@@ -35,10 +35,12 @@ same panel to the action. An explicit action rejects coordinates from another
 panel and asks you to re-observe the target. A display-transition refusal carries
 `staleDisplay: { observedGeneration, currentGeneration, currentDisplayKey?, retry: "observe" }`
 on the failure result (and in MCP `structuredContent`), with the same generations
-and re-observe instruction in `error`. Android single-finger input uses
-the selected panel's logical display ID. The current Android CtrlProxy APK does
-not expose per-display two-finger gesture dispatch, so `pinchOn` on an explicitly
-selected Android panel reports that limitation. iOS accepts only its live panel.
+and re-observe instruction in `error`. Android gestures use CtrlProxy with the
+selected panel's logical `displayId` when the APK advertises `gesture_display_id_v1`.
+Older APKs retain `input touchscreen -d` routing for taps, swipes, and drags;
+`pinchOn` on a non-default display reports the existing support limitation.
+Default-display gestures omit `displayId`. A CtrlProxy display-dispatch failure
+is returned directly without retrying through adb. iOS accepts only its live panel.
 On iOS, `tapOn`, `swipeOn`, `dragAndDrop`, and `pinchOn` validate the selected
 panel, then use their existing CtrlProxy gesture path on that live panel.
 For Android `sendKeys`, text, clear, and IME actions require a selector when

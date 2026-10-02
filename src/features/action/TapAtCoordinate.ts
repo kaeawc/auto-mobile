@@ -21,7 +21,7 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { withStaleDisplay } from "../../models/StaleDisplayError";
 import { snapshotReferences, type SnapshotReferenceStore } from "../observe/SnapshotReferenceStore";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
-import { executeTouchscreenInput } from "./touchscreenInput";
+import { executeTouchscreenInput, supportsCtrlProxyGestureDisplay } from "./touchscreenInput";
 import {
   BaseVisualChange,
   type DisplayFenceDependencies,
@@ -248,7 +248,7 @@ function hasSameTapTargetingLayout(previous: ObserveResult, refreshed: ObserveRe
 
 export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   timer?: Timer;
-  androidClient?: CoordinateTapClient;
+  androidClient?: CoordinateTapClient & { supportsCommand?: (name: string) => Promise<boolean> };
   iosClient?: CoordinateTapClient;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
@@ -259,7 +259,9 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
 
 /** Tap one absolute point in the native coordinate space reported by observe. */
 export class TapAtCoordinate extends BaseVisualChange {
-  private readonly androidClient: CoordinateTapClient;
+  private readonly androidClient: CoordinateTapClient & {
+    supportsCommand?: (name: string) => Promise<boolean>;
+  };
   private readonly iosClient: CoordinateTapClient;
   private readonly androidCoordinateTap: AndroidCoordinateTapDispatch;
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
@@ -693,6 +695,39 @@ export class TapAtCoordinate extends BaseVisualChange {
     return resolveTapAtCoordinates(options, observeResult, this.device.platform);
   }
 
+  private async dispatchAndroidDisplayGesture(
+    point: { x: number; y: number },
+    duration: number,
+    command: string,
+    displayId?: number,
+    signal?: AbortSignal,
+    assertCurrent?: () => void,
+  ): Promise<void> {
+    if (await supportsCtrlProxyGestureDisplay(this.androidClient, displayId)) {
+      throwIfAborted(signal);
+      assertCurrent?.();
+      const result = await this.androidClient.requestTapCoordinates(
+        point.x,
+        point.y,
+        duration,
+        duration > 3000 ? duration + 2000 : undefined,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+        displayId === 0 ? undefined : displayId,
+      );
+      throwIfAborted(signal);
+      if (!result.success) {
+        throw new ActionableError(result.error ?? "Android tap failed");
+      }
+    } else {
+      throwIfAborted(signal);
+      assertCurrent?.();
+      await executeTouchscreenInput(this.adb, command, displayId, signal);
+    }
+  }
+
   private async dispatchGesture(
     options: TapAtOptions,
     point: { x: number; y: number },
@@ -711,7 +746,14 @@ export class TapAtCoordinate extends BaseVisualChange {
           action === "longPress"
             ? `swipe ${point.x} ${point.y} ${point.x} ${point.y} ${duration}`
             : `tap ${point.x} ${point.y}`;
-        await executeTouchscreenInput(this.adb, command, displayId, signal);
+        await this.dispatchAndroidDisplayGesture(
+          point,
+          duration,
+          command,
+          displayId,
+          signal,
+          assertCurrent,
+        );
       } else if (this.device.platform === "ios") {
         await this.iosCoordinateTap(
           this.iosClient,

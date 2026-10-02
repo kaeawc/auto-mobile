@@ -36,6 +36,7 @@ const androidAdvertisedCommands = [
   "request_insert_text_state",
   "request_commit_text",
   "ime_key_events_v1",
+  "gesture_display_id_v1",
   "request_cancel_ime_commit",
   "request_set_keyboard_profile",
   "request_list_keyboard_profiles",
@@ -132,7 +133,15 @@ describe("CtrlProxy command support", () => {
       supportedCommands: androidAdvertisedCommands,
     });
     const context = client["createDelegateContext"]();
-    for (const messageType of ["request_tap_coordinates", "request_set_text"]) {
+    for (const messageType of [
+      "request_tap_coordinates",
+      "request_swipe",
+      "request_two_finger_swipe",
+      "request_drag",
+      "request_pinch",
+      "request_gesture_start",
+      "request_set_text",
+    ]) {
       expect(context.isCommandSupported?.(messageType)).toBe(true);
       const { result, sent } = await sendWithClientContext(client, messageType);
       expect(result.success).toBe(true);

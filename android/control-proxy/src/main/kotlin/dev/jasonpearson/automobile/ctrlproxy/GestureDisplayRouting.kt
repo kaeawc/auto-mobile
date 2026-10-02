@@ -6,7 +6,7 @@ internal fun interface GestureDisplayIdApplier {
 }
 
 internal object GestureDisplayRouting {
-  private const val DISPLAY_API = 30
+  const val DISPLAY_API = 30
 
   fun error(displayId: Int?, sdkInt: Int): String? =
     when {

@@ -254,6 +254,8 @@ interface SendCommandBaseOptions {
    * immediately when the caller goes away.
    */
   abortSignal?: AbortSignal;
+  /** Must be explicitly confirmed on the current connection immediately before sending. */
+  requiredCapability?: string;
   /**
    * Invoked synchronously right after `ws.send()` succeeds — i.e. the wire
    * request was actually dispatched to the device (#6249 P1 follow-up).
@@ -377,8 +379,21 @@ export async function sendCommand<T>(
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         throw new Error("WebSocket not connected");
       }
-      ws.send(msg);
-      options.onDispatch?.(requestId);
+      if (
+        options.requiredCapability &&
+        context.isCommandSupported?.(options.requiredCapability) !== true
+      ) {
+        context.requestManager.resolve(
+          requestId,
+          responseErrorFactory(
+            `${options.requiredCapability} is not confirmed by the connected device service`,
+            0,
+          ),
+        );
+      } else {
+        ws.send(msg);
+        options.onDispatch?.(requestId);
+      }
     }
   } catch (error) {
     context.requestManager.reject(

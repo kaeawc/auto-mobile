@@ -67,6 +67,22 @@ class WebSocketServerTest {
   }
 
   @Test
+  fun `display gestures are advertised only on supported Android versions`() {
+    for (sdk in listOf(29, 30, 36)) {
+      val commands =
+        WebSocketServer(port = 0, scope = testScope, sdkInt = { sdk }).supportedCommands()
+      assertEquals(
+        "Gesture display capability on API $sdk",
+        sdk >= 30,
+        commands.contains("gesture_display_id_v1"),
+      )
+      assertTrue(commands.contains("request_insert_text"))
+      assertTrue(commands.contains("discover_keystore"))
+      assertFalse(commands.contains("request_press_key"))
+    }
+  }
+
+  @Test
   fun `server starts successfully`() =
     runTest(testScope.testScheduler) {
       // Given

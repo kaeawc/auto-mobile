@@ -14,6 +14,8 @@ export interface CoordinateTapClient<Dispatch = never> {
     perf?: unknown,
     frameContext?: string,
     onDispatch?: Dispatch,
+    signal?: AbortSignal,
+    displayId?: number,
   ): Promise<{ success: boolean; error?: string }>;
 }
 

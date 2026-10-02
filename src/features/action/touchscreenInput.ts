@@ -23,3 +23,15 @@ export async function executeTouchscreenInput(
   const result = await adb.executeCommand(command, undefined, undefined, undefined, signal);
   assertTouchscreenInputSucceeded(command, result);
 }
+
+/** Core gestures always remain available; only non-default routing needs the new flag. */
+export async function supportsCtrlProxyGestureDisplay(
+  client: { supportsCommand?: (name: string) => Promise<boolean> },
+  displayId?: number,
+): Promise<boolean> {
+  return (
+    displayId === undefined ||
+    displayId === 0 ||
+    (await client.supportsCommand?.("gesture_display_id_v1")) === true
+  );
+}

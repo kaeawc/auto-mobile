@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -8,11 +8,11 @@ import {
   defaultDeviceObservationAccess,
   type DeviceObservationAccess,
 } from "../../src/server/deviceObservationAccess";
-import { registerObserveTools } from "../../src/server/observeTools";
+import { observeSchema, registerObserveTools } from "../../src/server/observeTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { observationScreenshotEvidence } from "../../src/features/observe/screenshot/observationScreenshotEvidence";
 import {
   loadAndroidHomeObserve,
@@ -51,7 +51,16 @@ const callDeviceRead = (args: Record<string, unknown>) =>
     ToolRegistry.getTool("observe")!.handler(args),
   );
 
+let restoreInventory: () => void;
+beforeEach(() => {
+  ToolRegistry.setToolCallRepositoryForTesting({ recordToolCall: async () => {} });
+  restoreInventory = ToolRegistry.setPipelineOverridesForTesting({
+    displayInventory: new FakeDisplayInventoryProvider(),
+  });
+});
+
 afterEach(() => {
+  restoreInventory();
   Reflect.set(ToolRegistry, "deviceSessionManager", originalManager);
   DaemonState.getInstance().reset();
   ToolRegistry.clearTools();
@@ -61,6 +70,67 @@ afterEach(() => {
 });
 
 describe("session-free observe device read", () => {
+  test.each([
+    [
+      { waitFor: { text: "Home" } },
+      "waitFor is not available on deviceId reads; use a session observe (pass sessionUuid).",
+    ],
+    [
+      { waitFor: { text: "Home" }, settled: { quietPeriodMs: 1 } },
+      "waitFor is not available on deviceId reads; use a session observe (pass sessionUuid).",
+    ],
+    [
+      { raw: true },
+      'raw is not available on deviceId reads; use project: "full" for the full filtered hierarchy.',
+    ],
+    [
+      { skipBackStack: true },
+      "skipBackStack is not available on deviceId reads; use a session observe (pass sessionUuid) with waitFor.",
+    ],
+  ])(
+    "rejects unsupported device-read options before creating a screen: %j",
+    async (options, message) => {
+      const calls: string[] = [];
+      registerObserveTools({
+        deviceReadAccess: { listBooted: async () => [device], isAuthorized: () => true },
+        createScreen: () => {
+          calls.push("createScreen");
+          return {
+            executeDeviceRead: async () => {
+              calls.push("hierarchy-and-screenshot");
+              return loadAndroidHomeObserve().observe;
+            },
+            execute: async () => {
+              calls.push("session-observe");
+              return loadAndroidHomeObserve().observe;
+            },
+            appendRawViewHierarchy: async () => {
+              calls.push("raw");
+            },
+            getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
+          };
+        },
+      });
+      const promise = callDeviceRead({ deviceId: device.deviceId, ...options });
+      await expect(promise).rejects.toBeInstanceOf(ActionableError);
+      await expect(promise).rejects.toThrow(message);
+      expect(calls).toEqual([]);
+    },
+  );
+
+  test("settled without waitFor is rejected by the schema", () => {
+    const parsed = observeSchema.safeParse({
+      deviceId: device.deviceId,
+      settled: { quietPeriodMs: 1 },
+    });
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toContainEqual(
+        expect.objectContaining({ message: "settled requires waitFor" }),
+      );
+    }
+  });
+
   test("retired screenshot tool is absent from live and generated definitions", () => {
     registerObserveTools();
     const retiredName = ["capture", "Device", "Screenshot"].join("");
@@ -299,7 +369,9 @@ describe("session-free observe device read", () => {
           },
         },
         createScreen: () => ({
-          execute: async () => {
+          execute: async (options) => {
+            expect(options?.skipBackStack).toBe(true);
+            expect(options?.skipScreenshot).toBe(true);
             expect(getToolSelectionContext()?.routingSessionUuid).toBe(sessionUuid);
             expect(getToolSelectionContext()?.explicitObserveDeviceRead).toBe(false);
             events.push("session-observe");
@@ -308,13 +380,31 @@ describe("session-free observe device read", () => {
           executeDeviceRead: async () => {
             throw new Error("entered sessionless device read");
           },
-          appendRawViewHierarchy: async () => {},
+          appendRawViewHierarchy: async (result) => {
+            events.push("raw");
+            result.rawViewHierarchy = {
+              json: "{}",
+              source: "accessibility-service",
+              timestamp: 0,
+              device,
+            };
+          },
           getMostRecentCachedObserveResult: async () => loadAndroidHomeObserve().observe,
         }),
       });
-      const response = await callDeviceRead({ deviceId: device.deviceId, sessionUuid });
+      const response = await callDeviceRead({
+        deviceId: device.deviceId,
+        sessionUuid,
+        waitFor: { activeWindow: { appId: "com.google.android.apps.nexuslauncher" } },
+        raw: true,
+        skipBackStack: true,
+        screenshot: "none",
+      });
+      expect(getStructuredField(response, "matched")).toBe(true);
+      expect(getStructuredField(response, "polls")).toBe(1);
+      expect(getStructuredField(response, "rawViewHierarchy")).toBeDefined();
       expect(response.isError).not.toBe(true);
-      expect(events).toEqual(["navigation", "audit", "session-observe"]);
+      expect(events).toEqual(["navigation", "audit", "session-observe", "raw"]);
       expect(reads).toEqual([]);
       expect(manager.getLastEnsureDeviceReadyDeviceId()).toBe(device.deviceId);
     } finally {
@@ -518,7 +608,14 @@ describe("session-free observe device read", () => {
             timer,
           ),
       });
-      const response = await callDeviceRead({ deviceId: device.deviceId, project: "full" });
+      const response = await callDeviceRead({
+        deviceId: device.deviceId,
+        project: "full",
+        screenshot: "settled",
+        skipBackStack: false,
+        raw: false,
+      });
+      expect(getStructuredField(response, "snapshotReference")).toBeUndefined();
       expect(response.structuredContent).toMatchObject({ screenshotPath: "/fake/read.png" });
       expect(getStructuredField(response, "viewHierarchy")?.hierarchy?.node).toBeDefined();
       expect(getStructuredField(response, "screenSize")).toMatchObject({

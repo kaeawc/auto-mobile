@@ -1672,6 +1672,33 @@ function attachSnapshotReference(deviceId: string, result: ObserveResult): void 
   }
 }
 
+function assertObserveOptionsSupported(
+  platform: BootedDevice["platform"],
+  args: ObserveArgs,
+  deviceRead: boolean,
+): void {
+  if (deviceRead) {
+    if (args.waitFor !== undefined) {
+      throw new ActionableError(
+        "waitFor is not available on deviceId reads; use a session observe (pass sessionUuid).",
+      );
+    }
+    if (args.raw === true) {
+      // collectRaw uses the owner's client and invalidates its shared cache;
+      // project: "full" preserves the full filtered tree without that write.
+      throw new ActionableError(
+        'raw is not available on deviceId reads; use project: "full" for the full filtered hierarchy.',
+      );
+    }
+    if (args.skipBackStack === true) {
+      throw new ActionableError(
+        "skipBackStack is not available on deviceId reads; use a session observe (pass sessionUuid) with waitFor.",
+      );
+    }
+  }
+  assertActiveWindowWaitForSupportedOnPlatform(platform, args.waitFor);
+}
+
 export function registerObserveTools(dependencies: ObserveToolDependencies = {}) {
   // Observe handler
   const observeHandler = async (
@@ -1687,7 +1714,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
     // platform) can be skipped entirely when the caller omitted it. Re-validate
     // against the resolved `device.platform`, before the try/catch below so the
     // actionable message isn't re-wrapped as a generic execution failure.
-    assertActiveWindowWaitForSupportedOnPlatform(device.platform, waitFor);
+    assertObserveOptionsSupported(device.platform, args, deviceRead);
     const screenshotMode = deviceRead
       ? (requestedScreenshotMode(args) ?? "settled")
       : requestedScreenshotMode(args);
@@ -1833,7 +1860,7 @@ export function registerObserveTools(dependencies: ObserveToolDependencies = {})
   // `--tool-results-no-structured-content`, which suppresses the advertisement.
   ToolRegistry.registerDeviceAware(
     "observe",
-    "Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device.",
+    "Get screen view hierarchy and screenshot. An explicit deviceId without sessionUuid reads without acquiring a session or changing ownership. With sessionUuid, observe uses the session and deviceId must match the session's device. DeviceId reads reject waitFor, raw: true and skipBackStack: true; use project: 'full' for the full filtered hierarchy. They omit snapshotReference and default to a settled screenshot; async also awaits capture.",
     observeSchema,
     observeHandler,
     {

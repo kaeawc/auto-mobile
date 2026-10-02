@@ -102,21 +102,15 @@ public enum HierarchyMerger {
         guard let xcuitestRoot = xcuitest.hierarchy else { return xcuitest }
 
         // Build flat lookups + a once-sorted-by-area list from the SDK tree.
-        var lookup: [LookupKey: SdkViewNode] = [:]
-        var boundsLookup: [BoundsKey: SdkViewNode] = [:]
         var identifierLookup: [String: SdkViewNode] = [:]
         var allSdkNodes: [SdkViewNode] = []
         buildLookup(
             node: sdkRoot,
-            into: &lookup,
-            boundsLookup: &boundsLookup,
             identifierLookup: &identifierLookup,
             allNodes: &allSdkNodes
         )
 
         let context = MatchContext(
-            lookup: lookup,
-            boundsLookup: boundsLookup,
             identifierLookup: identifierLookup,
             allSdkNodes: allSdkNodes,
             counter: matchCounter
@@ -160,6 +154,9 @@ public enum HierarchyMerger {
     }
 
     // MARK: - Lookup
+
+    /// Pre-order SDK document index; `allNodes[id]` resolves the original node.
+    private typealias NodeID = Int
 
     private struct LookupKey: Hashable {
         let className: String
@@ -254,31 +251,10 @@ public enum HierarchyMerger {
 
     private static func buildLookup(
         node: SdkViewNode,
-        into lookup: inout [LookupKey: SdkViewNode],
-        boundsLookup: inout [BoundsKey: SdkViewNode],
         identifierLookup: inout [String: SdkViewNode],
         allNodes: inout [SdkViewNode]
     ) {
         allNodes.append(node)
-        // Index by exact bounds only (one insert per node). Tolerance matching is
-        // done at lookup time by probing the query's ±tol neighborhood (see
-        // findDirectMatch) instead of pre-expanding every node into (2*tol+1)^4
-        // dictionary entries, which was ~625 inserts per node at tol=2 (issue #3634).
-        let key = LookupKey(
-            className: node.className,
-            left: node.bounds.left, top: node.bounds.top,
-            right: node.bounds.right, bottom: node.bounds.bottom
-        )
-        if lookup[key] == nil {
-            lookup[key] = node
-        }
-        let bKey = BoundsKey(
-            left: node.bounds.left, top: node.bounds.top,
-            right: node.bounds.right, bottom: node.bounds.bottom
-        )
-        if boundsLookup[bKey] == nil {
-            boundsLookup[bKey] = node
-        }
         // Index by accessibilityIdentifier for fallback when bounds don't match
         if let identifier = node.accessibilityIdentifier, !identifier.isEmpty {
             if identifierLookup[identifier] == nil {
@@ -289,8 +265,6 @@ public enum HierarchyMerger {
             for child in children {
                 buildLookup(
                     node: child,
-                    into: &lookup,
-                    boundsLookup: &boundsLookup,
                     identifierLookup: &identifierLookup,
                     allNodes: &allNodes
                 )
@@ -298,11 +272,129 @@ public enum HierarchyMerger {
         }
     }
 
+    /// One endpoint's values sorted by (value, pre-order NodeID), retaining duplicates.
+    private struct CoordinateIndex {
+        let entries: [(value: Int, id: NodeID)]
+
+        init(entries: [(value: Int, id: NodeID)]) {
+            self.entries = entries.sorted {
+                $0.value < $1.value || ($0.value == $1.value && $0.id < $1.id)
+            }
+        }
+
+        func ids(inRange range: ClosedRange<Int>) -> Set<NodeID> {
+            Set(window(inRange: range).map { $0.id })
+        }
+
+        func window(inRange range: ClosedRange<Int>) -> ArraySlice<(value: Int, id: NodeID)> {
+            entries[lowerBound(range.lowerBound) ..< upperBound(range.upperBound)]
+        }
+
+        private func lowerBound(_ value: Int) -> Int {
+            var low = 0
+            var high = entries.count
+            while low < high {
+                let mid = low + (high - low) / 2
+                if entries[mid].value < value {
+                    low = mid + 1
+                } else {
+                    high = mid
+                }
+            }
+            return low
+        }
+
+        private func upperBound(_ value: Int) -> Int {
+            var low = 0
+            var high = entries.count
+            while low < high {
+                let mid = low + (high - low) / 2
+                if entries[mid].value <= value {
+                    low = mid + 1
+                } else {
+                    high = mid
+                }
+            }
+            return low
+        }
+    }
+
+    /// Tiny test seam for the private coordinate index's inclusive NodeID set API.
+    static func coordinateIDs(values: [Int], inRange range: ClosedRange<Int>) -> Set<Int> {
+        CoordinateIndex(entries: values.enumerated().map { (value: $0.element, id: $0.offset) })
+            .ids(inRange: range)
+    }
+
+    /// Built once per merge in O(n log n) time and O(n) space.
+    private struct GeometryIndex {
+        let allNodes: [SdkViewNode]
+        let left: CoordinateIndex
+        let top: CoordinateIndex
+        let right: CoordinateIndex
+        let bottom: CoordinateIndex
+
+        init(allNodes: [SdkViewNode]) {
+            self.allNodes = allNodes
+            left = CoordinateIndex(entries: allNodes.enumerated().map {
+                (value: $0.element.bounds.left, id: $0.offset)
+            })
+            top = CoordinateIndex(entries: allNodes.enumerated().map {
+                (value: $0.element.bounds.top, id: $0.offset)
+            })
+            right = CoordinateIndex(entries: allNodes.enumerated().map {
+                (value: $0.element.bounds.right, id: $0.offset)
+            })
+            bottom = CoordinateIndex(entries: allNodes.enumerated().map {
+                (value: $0.element.bounds.bottom, id: $0.offset)
+            })
+        }
+
+        /// Replaces ~625 probes per step (O(tol^4)) with four binary range searches
+        /// (lower/upper bounds each), O(log n), independent of tol, then O(k) checks
+        /// of the smallest coordinate window. Worst case k == n when all windows
+        /// contain every node; no whole-tree scan or per-query sort is performed.
+        /// All compatible candidates, including duplicates and exact bounds, compete
+        /// by (L-infinity distance, NodeID), regardless of coordinate traversal order.
+        func nearest(bounds: ElementBounds, accept: (SdkViewNode) -> Bool) -> SdkViewNode? {
+            let tol = boundsTolerance
+            let leftRange = (bounds.left - tol) ... (bounds.left + tol)
+            let topRange = (bounds.top - tol) ... (bounds.top + tol)
+            let rightRange = (bounds.right - tol) ... (bounds.right + tol)
+            let bottomRange = (bounds.bottom - tol) ... (bounds.bottom + tol)
+            let windows = [
+                left.window(inRange: leftRange),
+                top.window(inRange: topRange),
+                right.window(inRange: rightRange),
+                bottom.window(inRange: bottomRange),
+            ]
+            guard let candidates = windows.min(by: { $0.count < $1.count }) else { return nil }
+            var bestID: NodeID?
+            var bestDistance = Int.max
+            for entry in candidates {
+                let node = allNodes[entry.id]
+                let nb = node.bounds
+                guard leftRange.contains(nb.left), topRange.contains(nb.top),
+                      rightRange.contains(nb.right), bottomRange.contains(nb.bottom),
+                      accept(node)
+                else { continue }
+                let distance = max(
+                    max(abs(nb.left - bounds.left), abs(nb.top - bounds.top)),
+                    max(abs(nb.right - bounds.right), abs(nb.bottom - bounds.bottom))
+                )
+                if distance < bestDistance || (distance == bestDistance && entry.id < (bestID ?? Int.max)) {
+                    bestID = entry.id
+                    bestDistance = distance
+                }
+            }
+            return bestID.map { allNodes[$0] }
+        }
+    }
+
     // MARK: - Match context
 
     /// Cache key for a direct match query. Direct matches depend only on the query's
     /// class name, resource id, and bounds, so identical-bounds siblings share a slot
-    /// and never re-run the 625-probe tolerance neighborhood.
+    /// and never re-run the coordinate range query.
     private struct DirectKey: Hashable {
         let className: String?
         let resourceId: String?
@@ -313,8 +405,7 @@ public enum HierarchyMerger {
     /// (direct match, smallest-enclosing scan). The enclosing scan runs against a list
     /// sorted by area once, so the first container encountered is the smallest-area one.
     private final class MatchContext {
-        let lookup: [LookupKey: SdkViewNode]
-        let boundsLookup: [BoundsKey: SdkViewNode]
+        let geometryIndex: GeometryIndex
         let identifierLookup: [String: SdkViewNode]
         let sdkNodesByClass: [String: [SdkViewNode]]
         /// SDK nodes sorted by ascending area. Swift's sort is stable, so equal-area
@@ -329,14 +420,11 @@ public enum HierarchyMerger {
         private var enclosingCache: [BoundsKey: SdkViewNode?] = [:]
 
         init(
-            lookup: [LookupKey: SdkViewNode],
-            boundsLookup: [BoundsKey: SdkViewNode],
             identifierLookup: [String: SdkViewNode],
             allSdkNodes: [SdkViewNode],
             counter: MatchCounter?
         ) {
-            self.lookup = lookup
-            self.boundsLookup = boundsLookup
+            geometryIndex = GeometryIndex(allNodes: allSdkNodes)
             self.identifierLookup = identifierLookup
             sdkNodesByClass = Dictionary(grouping: allSdkNodes, by: { classFamily($0.className) })
             sortedByArea = allSdkNodes.sorted { lhs, rhs in
@@ -374,8 +462,7 @@ public enum HierarchyMerger {
                 className: className,
                 resourceId: resourceId,
                 bounds: bounds,
-                in: lookup,
-                boundsLookup: boundsLookup,
+                in: geometryIndex,
                 identifierLookup: identifierLookup
             )
             directCache[key] = result
@@ -439,44 +526,28 @@ public enum HierarchyMerger {
     /// Find a direct SDK counterpart for an XCUITest element.
     /// Direct matches are safe to use for SDK-only injection placement; containment
     /// matches are enrichment-only because broad containers can match many descendants.
-    /// Strategy: (1) exact className+bounds, (2) bounds-only, (3) accessibilityIdentifier.
+    /// Strategy: (1) exact className + nearest bounds, (2) nearest bounds-only,
+    /// (3) accessibilityIdentifier. Exact bounds naturally compete at distance zero.
     private static func findDirectMatch(
         className: String?,
         resourceId: String?,
         bounds: ElementBounds?,
-        in lookup: [LookupKey: SdkViewNode],
-        boundsLookup: [BoundsKey: SdkViewNode],
+        in index: GeometryIndex,
         identifierLookup: [String: SdkViewNode]
     )
         -> SdkViewNode?
     {
         if let bounds = bounds {
-            // 1. className + bounds, exact then within ±tolerance.
+            // 1. Exact className + bounds within ±tolerance (not classFamily).
             if let className = className {
-                if let exact = lookup[LookupKey(
-                    className: className,
-                    left: bounds.left, top: bounds.top,
-                    right: bounds.right, bottom: bounds.bottom
-                )], identifiersCompatible(exact, resourceId) {
-                    return exact
-                }
-                if let near = probeToleranceMatch(bounds: bounds, in: lookup, makeKey: { l, t, r, b in
-                    LookupKey(className: className, left: l, top: t, right: r, bottom: b)
-                }, accept: { identifiersCompatible($0, resourceId) }) {
+                if let near = index.nearest(bounds: bounds, accept: {
+                    $0.className == className && identifiersCompatible($0, resourceId)
+                }) {
                     return near
                 }
             }
-            // 2. Bounds-only fallback: different class names at the same position,
-            //    exact then within ±tolerance.
-            if let boundsMatch = boundsLookup[BoundsKey(
-                left: bounds.left, top: bounds.top,
-                right: bounds.right, bottom: bounds.bottom
-            )], identifiersCompatible(boundsMatch, resourceId) {
-                return boundsMatch
-            }
-            if let near = probeToleranceMatch(bounds: bounds, in: boundsLookup, makeKey: { l, t, r, b in
-                BoundsKey(left: l, top: t, right: r, bottom: b)
-            }, accept: { identifiersCompatible($0, resourceId) }) {
+            // 2. Bounds-only fallback: different class names at the same position.
+            if let near = index.nearest(bounds: bounds, accept: { identifiersCompatible($0, resourceId) }) {
                 return near
             }
         }
@@ -484,39 +555,6 @@ public enum HierarchyMerger {
         if let resourceId = resourceId, !resourceId.isEmpty {
             if let idMatch = identifierLookup[resourceId] {
                 return idMatch
-            }
-        }
-        return nil
-    }
-
-    /// Probe the ±`boundsTolerance` neighborhood of `bounds` against an exact-bounds
-    /// index, returning the first hit. Replaces the old per-node pre-expansion:
-    /// a node with exact bounds within ±tol of the query is found here because
-    /// `node.bounds == query + delta` for some `delta ∈ [-tol, tol]` (issue #3634).
-    /// The exact (all-zero) offset is skipped because callers check it first.
-    private static func probeToleranceMatch<Key: Hashable>(
-        bounds: ElementBounds,
-        in index: [Key: SdkViewNode],
-        makeKey: (_ left: Int, _ top: Int, _ right: Int, _ bottom: Int) -> Key,
-        accept: (SdkViewNode) -> Bool
-    )
-        -> SdkViewNode?
-    {
-        let tol = boundsTolerance
-        for dl in -tol ... tol {
-            for dt in -tol ... tol {
-                for dr in -tol ... tol {
-                    for db in -tol ... tol {
-                        if dl == 0, dt == 0, dr == 0, db == 0 { continue }
-                        let key = makeKey(
-                            bounds.left + dl, bounds.top + dt,
-                            bounds.right + dr, bounds.bottom + db
-                        )
-                        if let hit = index[key], accept(hit) {
-                            return hit
-                        }
-                    }
-                }
             }
         }
         return nil

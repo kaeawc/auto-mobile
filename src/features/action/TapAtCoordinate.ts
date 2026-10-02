@@ -15,7 +15,7 @@ import {
   type PerformanceTracker,
 } from "../../utils/PerformanceTracker";
 import type { Timer } from "../../utils/SystemTimer";
-import { throwIfAborted } from "../../utils/toolUtils";
+import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { displayTransitions } from "../observe/DisplayTransition";
@@ -35,12 +35,15 @@ import {
   isStaleFrameContextRejection,
 } from "./coordinateTapDispatch";
 
+import {
+  DOUBLE_TAP_GAP_MS,
+  LONG_PRESS_DEFAULT_MS,
+  LONG_PRESS_MIN_MS,
+  LONG_PRESS_MAX_MS,
+} from "./tapAtGesture";
+
 const ANDROID_TAP_DURATION_MS = 10;
 const IOS_TAP_DURATION_MS = 50;
-const DOUBLE_TAP_GAP_MS = 200;
-const LONG_PRESS_DEFAULT_MS = 1000;
-const LONG_PRESS_MIN_MS = 500;
-const LONG_PRESS_MAX_MS = 10000;
 
 // These capture-only fields are documented by the observation diff as nondeterministic between
 // captures of one unchanged Android screen. They cannot establish that a coordinate was retargeted.
@@ -290,6 +293,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     display: string,
     signal?: AbortSignal,
   ): Promise<TapAtResult> {
+    const action = options.action ?? "tap";
     const { observation, displayId, assertCurrent } = await prepareTargetDisplayAction(
       this.device,
       display,
@@ -300,7 +304,13 @@ export class TapAtCoordinate extends BaseVisualChange {
     );
     const stale = this.staleSnapshotReason(options, observation);
     if (stale) {
-      return { success: false, x: options.x, y: options.y, error: stale };
+      return {
+        success: false,
+        x: options.x,
+        y: options.y,
+        action,
+        error: stale,
+      };
     }
     const resolved = this.resolveCoordinates(options, observation);
     if ("error" in resolved) {
@@ -308,7 +318,7 @@ export class TapAtCoordinate extends BaseVisualChange {
         success: false,
         x: resolved.x,
         y: resolved.y,
-        action: options.action ?? "tap",
+        action,
         error: resolved.error,
       };
     }
@@ -323,7 +333,7 @@ export class TapAtCoordinate extends BaseVisualChange {
       success: true,
       x: resolved.x,
       y: resolved.y,
-      action: options.action ?? "tap",
+      action,
       observation: after,
     };
   }
@@ -333,6 +343,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal,
   ): Promise<TapAtResult> {
+    const action = options.action ?? "tap";
     const perf = createGlobalPerformanceTracker();
     perf.serial("tapAt");
     let dispatchedCoordinates: { x: number; y: number } | undefined;
@@ -349,6 +360,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           success: false,
           x: options.x,
           y: options.y,
+          action,
           error: STALE_DISPLAY_COORDINATES_ERROR,
         };
       }
@@ -366,21 +378,35 @@ export class TapAtCoordinate extends BaseVisualChange {
               success: false,
               x: options.x,
               y: options.y,
+              action,
               error: STALE_DISPLAY_COORDINATES_ERROR,
             };
           }
           const stale = this.staleSnapshotReason(options, observeResult);
           if (stale) {
-            return { success: false, x: options.x, y: options.y, error: stale };
+            return {
+              success: false,
+              x: options.x,
+              y: options.y,
+              action,
+              error: stale,
+            };
           }
           const resolved = this.resolveCoordinates(options, observeResult);
           if ("error" in resolved) {
-            return { success: false, x: resolved.x, y: resolved.y, error: resolved.error };
+            return {
+              success: false,
+              x: resolved.x,
+              y: resolved.y,
+              action,
+              error: resolved.error,
+            };
           }
           dispatchedCoordinates = resolved;
 
           const frameContext = observeResult.viewHierarchy?.frameContext;
           this.assertDisplayRevisionCurrent(transitionRevision);
+          throwIfAborted(signal);
           switch (this.device.platform) {
             case "android":
               const dispatchedFrameContext = await this.dispatchAndroidTapWithOneFreshRetry(
@@ -421,7 +447,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               throw unsupportedPlatformError(this.device.platform, "tap at coordinates");
           }
 
-          return { success: true, x: resolved.x, y: resolved.y, action: options.action ?? "tap" };
+          return { success: true, x: resolved.x, y: resolved.y, action };
         },
         {
           changeExpected: false,
@@ -437,7 +463,7 @@ export class TapAtCoordinate extends BaseVisualChange {
             toolArgs: {
               x: options.x,
               y: options.y,
-              action: options.action ?? "tap",
+              action,
               platform: this.device.platform,
             },
           },
@@ -454,7 +480,7 @@ export class TapAtCoordinate extends BaseVisualChange {
           dispatchedCoordinates?.y ??
           (this.device.platform === "android" ? Math.round(options.y) : options.y),
         error: `Failed to tap at coordinates: ${errorMessage(error)}`,
-        action: options.action ?? "tap",
+        action,
       };
     } finally {
       perf.end();
@@ -585,7 +611,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     if (options.action !== "doubleTap") {
       return;
     }
-    await this.timer.sleep(DOUBLE_TAP_GAP_MS);
+    await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
     throwIfAborted(signal);
     this.assertDisplayRevisionCurrent(revision);
     await this.androidCoordinateTap(
@@ -609,7 +635,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     if (options.action !== "doubleTap") {
       return;
     }
-    await this.timer.sleep(DOUBLE_TAP_GAP_MS);
+    await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
     throwIfAborted(signal);
     this.assertDisplayRevisionCurrent(revision);
     await this.iosCoordinateTap(
@@ -667,7 +693,7 @@ export class TapAtCoordinate extends BaseVisualChange {
     };
     await dispatch(false);
     if (action === "doubleTap") {
-      await this.timer.sleep(DOUBLE_TAP_GAP_MS);
+      await awaitWhileRequestIsLive(this.timer.sleep(DOUBLE_TAP_GAP_MS), signal);
       await dispatch(true);
     }
   }

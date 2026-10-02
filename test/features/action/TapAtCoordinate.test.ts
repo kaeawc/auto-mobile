@@ -1,5 +1,12 @@
+import { createTapAt, observation } from "../../helpers/tapAtCoordinate";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { issue8379Hierarchy, issue8379SyntheticOutlier } from "../../fixtures/issue8379Hierarchy";
+import {
+  DOUBLE_TAP_GAP_MS,
+  LONG_PRESS_MIN_MS,
+  LONG_PRESS_MAX_MS,
+} from "../../../src/features/action/tapAtGesture";
+import { tapAtSchema } from "../../../src/server/interactionTools";
 import { TapAtCoordinate } from "../../../src/features/action/TapAtCoordinate";
 import type { CoordinateTapClient } from "../../../src/features/action/coordinateTapDispatch";
 import { dispatchAndroidCoordinateTap } from "../../../src/features/action/coordinateTapDispatch";
@@ -29,30 +36,6 @@ const iosDevice = {
   deviceId: "ios-test-device",
 } as BootedDevice;
 
-function observation(
-  width: number,
-  height: number,
-  frameContext = "frame-123",
-  rotation = 0,
-  node: Record<string, unknown> = {},
-): ObserveResult {
-  return {
-    observationId: "test-observation",
-    timestamp: 1,
-    screenSize: { width, height },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    rotation,
-    viewHierarchy: {
-      hierarchy: { node },
-      frameContext,
-      nativeScale: 1,
-      rotation,
-      screenWidth: width,
-      screenHeight: height,
-    },
-  } as ObserveResult;
-}
-
 function createAndroidTapAtWithClient(
   observations: ObserveResult[],
   androidClient: CoordinateTapClient,
@@ -69,58 +52,6 @@ function createAndroidTapAtWithClient(
   });
   tapAt.observeScreen = observeScreen;
   return { tapAt, observeScreen, adb };
-}
-
-function createTapAt(
-  device: BootedDevice,
-  width = 10,
-  height = 10,
-  onIosDispatch?: (timer: FakeTimer) => void,
-  renderedDisplayRevision?: () => number | undefined,
-  snapshotReferences?: SnapshotReferenceStore,
-) {
-  const observeScreen = new FakeObserveScreen();
-  observeScreen.setObserveResult(observation(width, height));
-  const timer = new FakeTimer();
-  timer.enableAutoAdvance();
-  let iosCacheInvalidations = 0;
-  const androidDispatches: Array<{
-    x: number;
-    y: number;
-    duration: number;
-    frameContext?: string;
-  }> = [];
-  const iosDispatches: Array<{ x: number; y: number; duration: number; frameContext?: string }> =
-    [];
-  const unusedClient: CoordinateTapClient = {
-    requestTapCoordinates: async () => ({ success: true }),
-  };
-  const tapAt = new TapAtCoordinate(device, new FakeAdbExecutor(), {
-    timer,
-    renderedDisplayRevision,
-    snapshotReferences,
-    androidClient: unusedClient,
-    iosClient: unusedClient,
-    dispatchAndroidCoordinateTap: async (_client, _adb, x, y, duration, frameContext) => {
-      androidDispatches.push({ x, y, duration, frameContext });
-    },
-    dispatchIosCoordinateTap: async (_client, x, y, duration, frameContext) => {
-      iosDispatches.push({ x, y, duration, frameContext });
-      onIosDispatch?.(timer);
-    },
-    invalidateIosCache: () => {
-      iosCacheInvalidations++;
-    },
-  });
-  tapAt.observeScreen = observeScreen;
-  return {
-    tapAt,
-    observeScreen,
-    androidDispatches,
-    iosDispatches,
-    timer,
-    iosCacheInvalidations: () => iosCacheInvalidations,
-  };
 }
 
 describe("TapAtCoordinate", () => {
@@ -189,7 +120,83 @@ describe("TapAtCoordinate", () => {
         [10, 20],
         [10, 20],
       ]);
-      expect(timer.now() - start).toBeGreaterThanOrEqual(200);
+      expect(timer.now() - start).toBe(DOUBLE_TAP_GAP_MS);
+    },
+  );
+
+  test.each([androidDevice, iosDevice])(
+    "schema and implementation share duration bounds on %s",
+    async (device) => {
+      for (const durationMs of [
+        LONG_PRESS_MIN_MS - 1,
+        LONG_PRESS_MIN_MS,
+        LONG_PRESS_MAX_MS,
+        LONG_PRESS_MAX_MS + 1,
+      ]) {
+        const options = { x: 1, y: 2, action: "longPress" as const, durationMs };
+        const valid = durationMs >= LONG_PRESS_MIN_MS && durationMs <= LONG_PRESS_MAX_MS;
+        expect(tapAtSchema.safeParse(options).success).toBe(valid);
+        const { tapAt } = createTapAt(device);
+        expect(await tapAt.execute(options)).toMatchObject({ success: valid, action: "longPress" });
+      }
+    },
+  );
+
+  test.each([androidDevice, iosDevice])(
+    "cancels during the double-tap gap on %s",
+    async (device) => {
+      const { tapAt, timer, androidDispatches, iosDispatches } = createTapAt(device);
+      const gapTimer = new FakeTimer();
+      const controller = new AbortController();
+      let gapStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        gapStarted = resolve;
+      });
+      const sleep = spyOn(timer, "sleep").mockImplementation((ms) => {
+        expect(ms).toBe(DOUBLE_TAP_GAP_MS);
+        const pending = gapTimer.sleep(ms);
+        gapStarted();
+        return pending;
+      });
+      try {
+        const pending = tapAt.execute(
+          { x: 1, y: 2, action: "doubleTap" },
+          undefined,
+          controller.signal,
+        );
+        await started;
+        gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
+        controller.abort();
+        expect(await pending).toMatchObject({
+          success: false,
+          action: "doubleTap",
+          error: expect.stringContaining("cancel"),
+        });
+        const dispatches = device.platform === "android" ? androidDispatches : iosDispatches;
+        expect(dispatches).toHaveLength(1);
+        gapTimer.advanceTime(DOUBLE_TAP_GAP_MS / 2);
+        await Promise.resolve();
+        expect(dispatches).toHaveLength(1);
+      } finally {
+        gapTimer.resolveAll();
+        sleep.mockRestore();
+      }
+    },
+  );
+
+  test.each([androidDevice, iosDevice])(
+    "pre-aborted gestures dispatch nothing on %s",
+    async (device) => {
+      const { tapAt, androidDispatches, iosDispatches } = createTapAt(device);
+      const controller = new AbortController();
+      controller.abort();
+      for (const action of ["longPress", "doubleTap"] as const) {
+        expect(
+          await tapAt.execute({ x: 1, y: 2, action }, undefined, controller.signal),
+        ).toMatchObject({ success: false, action });
+      }
+      expect(androidDispatches).toHaveLength(0);
+      expect(iosDispatches).toHaveLength(0);
     },
   );
 
@@ -255,35 +262,47 @@ describe("TapAtCoordinate", () => {
     displayTransitions.reset(iosDevice.deviceId);
   });
 
-  test("rejects an expired snapshot before dispatch", async () => {
-    const timer = new FakeTimer();
-    const references = new SnapshotReferenceStore(timer, new CountingIdGenerator("snapshot"));
-    const captured = {
-      ...observation(100, 100),
-      display: { key: "main", role: "unknown" as const },
-      displayRevision: 0,
-    } as ObserveResult;
-    const capture = references.capture(androidDevice.deviceId, captured);
-    expect(capture.status).toBe("captured");
-    if (capture.status !== "captured") {
-      throw new Error("Snapshot reference unavailable");
-    }
-    const reference = capture.reference;
-    expect(reference.snapshotId).toBe("snapshot-1");
-    timer.advanceTime(300_000);
-    const { tapAt, observeScreen, androidDispatches } = createTapAt(
-      androidDevice,
-      100,
-      100,
-      undefined,
-      undefined,
-      references,
-    );
-    observeScreen.setObserveResult(captured);
-    const result = await tapAt.execute({ x: 30, y: 40, snapshotId: reference.snapshotId });
-    expect(result).toMatchObject({ success: false, error: expect.stringContaining("expired") });
-    expect(androidDispatches).toEqual([]);
-  });
+  test.each(["longPress", "doubleTap"] as const)(
+    "rejects an expired snapshot before %s dispatch",
+    async (action) => {
+      const timer = new FakeTimer();
+      const references = new SnapshotReferenceStore(timer, new CountingIdGenerator("snapshot"));
+      const captured = {
+        ...observation(100, 100),
+        display: { key: "main", role: "unknown" as const },
+        displayRevision: 0,
+      } as ObserveResult;
+      const capture = references.capture(androidDevice.deviceId, captured);
+      expect(capture.status).toBe("captured");
+      if (capture.status !== "captured") {
+        throw new Error("Snapshot reference unavailable");
+      }
+      const reference = capture.reference;
+      expect(reference.snapshotId).toBe("snapshot-1");
+      timer.advanceTime(300_000);
+      const { tapAt, observeScreen, androidDispatches } = createTapAt(
+        androidDevice,
+        100,
+        100,
+        undefined,
+        undefined,
+        references,
+      );
+      observeScreen.setObserveResult(captured);
+      const result = await tapAt.execute({
+        x: 30,
+        y: 40,
+        action,
+        snapshotId: reference.snapshotId,
+      });
+      expect(result).toMatchObject({
+        success: false,
+        action,
+        error: expect.stringContaining("expired"),
+      });
+      expect(androidDispatches).toEqual([]);
+    },
+  );
 
   test("dispatches a tap bound to an unchanged snapshot frame", async () => {
     const references = new SnapshotReferenceStore(new FakeTimer(), new CountingIdGenerator());
@@ -356,7 +375,7 @@ describe("TapAtCoordinate", () => {
       { x: 30, y: 40, duration: 10, frameContext: "frame-123" },
       { x: 30, y: 40, duration: 10, frameContext: "frame-123" },
     ]);
-    expect(timer.now() - start).toBeGreaterThanOrEqual(200);
+    expect(timer.now() - start).toBe(DOUBLE_TAP_GAP_MS);
   });
 
   test("reuses a snapshot after a tap when only the event frame token advances", async () => {

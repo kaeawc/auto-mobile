@@ -4,6 +4,11 @@ import { nodeAttributes } from "../models/ViewHierarchyResult";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
+import {
+  LONG_PRESS_MIN_MS,
+  LONG_PRESS_MAX_MS,
+  LONG_PRESS_DEFAULT_MS,
+} from "../features/action/tapAtGesture";
 import { TapAtCoordinate } from "../features/action/TapAtCoordinate";
 import { previewHierarchyHitTest } from "../features/observe/HierarchyHitTest";
 import { snapshotReferences } from "../features/observe/SnapshotReferenceStore";
@@ -555,11 +560,11 @@ export const tapAtSchema = withJsonSchemaOverride(
       durationMs: z
         .number()
         .int()
-        .min(500)
-        .max(10000)
+        .min(LONG_PRESS_MIN_MS)
+        .max(LONG_PRESS_MAX_MS)
         .optional()
         .describe(
-          "Long-press duration in milliseconds (500–10000; default 1000); only with longPress",
+          `Long-press duration in milliseconds (${LONG_PRESS_MIN_MS}–${LONG_PRESS_MAX_MS}; default ${LONG_PRESS_DEFAULT_MS}); only with longPress`,
         ),
     })
     .superRefine((value, context) => {
@@ -1864,6 +1869,7 @@ export async function tapOnHandler(
   device: BootedDevice,
   args: TapOnArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const tapOnTextCommand = tapOnElementFactory(device);
@@ -1889,6 +1895,7 @@ export async function tapOnHandler(
       subtext: args.subtext,
     },
     progress,
+    signal,
   );
 
   const searchSummary = buildTapOnSearchSummary(result, Boolean(args.searchUntil));
@@ -1911,6 +1918,7 @@ export async function tapAtHandler(
   device: BootedDevice,
   args: TapAtArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const result = await tapAtElementFactory(device).execute(
@@ -1924,6 +1932,7 @@ export async function tapAtHandler(
       durationMs: args.durationMs,
     },
     progress,
+    signal,
   );
   const message = result.success
     ? `${result.action === "longPress" ? "Long pressed" : result.action === "doubleTap" ? "Double tapped" : "Tapped"} at (${result.x}, ${result.y})`
@@ -1996,6 +2005,7 @@ export async function tapAnyHandler(
   device: BootedDevice,
   args: TapAnyArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const tapAnyCommand = tapAnyElementFactory(device);
@@ -2009,6 +2019,7 @@ export async function tapAnyHandler(
       searchUntil: args.searchUntil,
     },
     progress,
+    signal,
   );
 
   const searchSummary = buildTapAnySearchSummary(result);
@@ -2047,6 +2058,7 @@ export async function dragAndDropHandler(
   device: BootedDevice,
   args: DragAndDropArgs,
   progress?: ProgressCallback,
+  signal?: AbortSignal,
 ) {
   RecompositionTracker.getInstance().recordInteraction();
   const dragAndDrop = dragAndDropFactory(device);
@@ -2060,6 +2072,7 @@ export async function dragAndDropHandler(
       holdDurationMs: args.holdDurationMs,
     },
     progress,
+    signal,
   );
 
   const message = result.success

@@ -43,10 +43,10 @@ export async function applyStateAfterBiometricCaptureFailure(
 }
 
 /**
- * Publish a newly captured enrollment state before mutating the simulator, then
- * bind the mutation to the session lifecycle. Release waits for this work before
- * restoring the original state, so a late simctl write cannot leak into a reused
- * simulator.
+ * Publish a newly captured enrollment state at the start of tracked setup, only
+ * if setup is admitted, before mutating the simulator. Release waits for this
+ * work before restoring the original state, so a late simctl write cannot leak
+ * into a reused simulator.
  */
 export async function runSessionBiometricMutation<T>(
   sessionManager: SessionManager | undefined,
@@ -69,13 +69,12 @@ export async function runSessionBiometricMutation<T>(
       `Cannot mutate biometric enrollment: session ${sessionUuid} is bound to ${session.assignedDevice}, not ${deviceId}.`,
     );
   }
-  if (initialEnrollment) {
-    sessionManager.setBiometricEnrollment(sessionUuid, { initialEnrollment });
-  }
-
   let completed = false;
   let result!: T;
   await sessionManager.trackSessionSetup(session, async () => {
+    if (initialEnrollment) {
+      sessionManager.setBiometricEnrollment(sessionUuid, { initialEnrollment });
+    }
     result = await mutation();
     completed = true;
   });

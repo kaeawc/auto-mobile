@@ -583,7 +583,6 @@ public class AutoMobileURLProtocol: URLProtocol {
                 if !body.isEmpty {
                     client?.urlProtocol(self, didLoad: body)
                 }
-                client?.urlProtocolDidFinishLoading(self)
                 AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                     url: url.absoluteString,
                     method: request.httpMethod ?? "GET",
@@ -602,6 +601,7 @@ public class AutoMobileURLProtocol: URLProtocol {
                     responseBody: match.responseBody,
                     contentType: match.contentType
                 ))
+                client?.urlProtocolDidFinishLoading(self)
                 return
             }
 
@@ -670,10 +670,10 @@ public class AutoMobileURLProtocol: URLProtocol {
             }
 
             if fault.action == .error || fault.action == .closeConnection {
-                client?.urlProtocol(self, didFailWithError: error)
                 AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                     url: url.absoluteString, method: method, error: "fault:\(fault.faultId):\(fault.action.rawValue)"
                 ))
+                client?.urlProtocol(self, didFailWithError: error)
                 return
             }
 
@@ -692,7 +692,6 @@ public class AutoMobileURLProtocol: URLProtocol {
             if !delivered.isEmpty {
                 client?.urlProtocol(self, didLoad: Data(delivered))
             }
-            client?.urlProtocolDidFinishLoading(self)
             AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: url.absoluteString, method: method, statusCode: status,
                 responseHeaders: headers, responseBodySize: delivered.count,
@@ -700,6 +699,7 @@ public class AutoMobileURLProtocol: URLProtocol {
                 responseBody: String(decoding: delivered, as: UTF8.self),
                 contentType: fault.contentType
             ))
+            client?.urlProtocolDidFinishLoading(self)
         }
 
         private func capturedRequestBodyData(limit: Int?) -> Data? {

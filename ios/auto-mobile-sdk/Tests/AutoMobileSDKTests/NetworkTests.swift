@@ -11,6 +11,34 @@ private final class EventCollector: @unchecked Sendable {
     func collect(_ events: [any SdkEvent]) { lock.lock(); _events = events; lock.unlock() }
 }
 
+#if DEBUG
+    /// Flushes and snapshots network events synchronously from URLProtocol terminal callbacks.
+    private final class EventObservingURLProtocolClient: NSObject, URLProtocolClient {
+        private let buffer: SdkEventBuffer
+        private let collector: EventCollector
+        private(set) var eventsAtTerminalCallback: [any SdkEvent] = []
+
+        init(buffer: SdkEventBuffer, collector: EventCollector) {
+            self.buffer = buffer
+            self.collector = collector
+        }
+
+        private func captureEvents() {
+            buffer.flush()
+            eventsAtTerminalCallback = collector.events
+        }
+
+        func urlProtocol(_: URLProtocol, wasRedirectedTo _: URLRequest, redirectResponse _: URLResponse) {}
+        func urlProtocol(_: URLProtocol, cachedResponseIsValid _: CachedURLResponse) {}
+        func urlProtocol(_: URLProtocol, didReceive _: URLResponse, cacheStoragePolicy _: URLCache.StoragePolicy) {}
+        func urlProtocol(_: URLProtocol, didLoad _: Data) {}
+        func urlProtocolDidFinishLoading(_: URLProtocol) { captureEvents() }
+        func urlProtocol(_: URLProtocol, didFailWithError _: Error) { captureEvents() }
+        func urlProtocol(_: URLProtocol, didReceive _: URLAuthenticationChallenge) {}
+        func urlProtocol(_: URLProtocol, didCancel _: URLAuthenticationChallenge) {}
+    }
+#endif
+
 private final class NetworkRecordCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var _records: [NetworkRequestRecord] = []
@@ -33,6 +61,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         AutoMobileNetwork.shared.reset()
         #if DEBUG
             NetworkMockRuleStore.shared.setRules([])
+            NetworkMockRuleStore.shared.setFaultRules([])
             NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
                 enabled: false,
                 errorType: nil,
@@ -275,6 +304,27 @@ final class AutoMobileNetworkTests: XCTestCase {
     // MARK: - Network Mock Rules
 
     #if DEBUG
+        private func makeEventObservingClient() -> EventObservingURLProtocolClient {
+            let collector = EventCollector()
+            let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+                collector.collect(events)
+            }
+            AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+            return EventObservingURLProtocolClient(buffer: buffer, collector: collector)
+        }
+
+        private func assertRecordedEvent(
+            _ client: EventObservingURLProtocolClient,
+            url: String,
+            error: String?,
+            file: StaticString = #filePath,
+            line: UInt = #line
+        ) {
+            let event = client.eventsAtTerminalCallback.first as? SdkNetworkRequestEvent
+            XCTAssertEqual(event?.url, url, file: file, line: line)
+            XCTAssertEqual(event?.error, error, file: file, line: line)
+        }
+
         func testNetworkMockRuleStoreMatchesWildcardMethodAndRegex() {
             let store = NetworkMockRuleStore()
             store.setRules([
@@ -648,6 +698,122 @@ final class AutoMobileNetworkTests: XCTestCase {
             XCTAssertEqual(event?.statusCode, 418)
             XCTAssertEqual(event?.responseBody, "mock-wins")
             XCTAssertEqual(event?.error, "mocked:mock-1")
+        }
+
+        func testMockRuleRecordsBeforeFinishCallback() {
+            let client = makeEventObservingClient()
+            let url = "https://api.example.com/v1/items"
+            NetworkMockRuleStore.shared.setRules([
+                NetworkMockRuleDTO(
+                    mockId: "mock-1", host: "api\\.example\\.com", path: "^/v1/items$", method: "GET",
+                    limit: nil, remaining: nil, statusCode: 418, responseHeaders: [:],
+                    responseBody: "mock-wins", contentType: "text/plain"
+                ),
+            ])
+            NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true, errorType: "timeout", limit: nil, expiresAtEpochMs: nil
+            ))
+            let request = URLRequest(url: URL(string: url)!)
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+
+            proto.startLoading()
+
+            assertRecordedEvent(client, url: url, error: "mocked:mock-1")
+        }
+
+        func testFaultResponseRecordsBeforeFinishCallback() {
+            let client = makeEventObservingClient()
+            let url = "https://api.example.com/v1/fault-response"
+            NetworkMockRuleStore.shared.setFaultRules([
+                NetworkFaultRuleDTO(
+                    faultId: "fault-response", transport: .urlSession, host: "api\\.example\\.com",
+                    port: nil, scheme: "https", path: "/v1/fault-response", method: "GET",
+                    headers: nil, origin: nil, connectionId: nil, sessionId: nil, action: .response,
+                    statusCode: 503, responseHeaders: [:], responseBody: "fault", contentType: "text/plain",
+                    errorType: nil, delayMs: nil, bandwidthBytesPerSecond: nil, dropBytes: nil,
+                    limit: nil, expiresAtEpochMs: nil, scope: nil, dryRun: false
+                ),
+            ])
+            let request = URLRequest(url: URL(string: url)!)
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+
+            proto.startLoading()
+
+            assertRecordedEvent(client, url: url, error: "fault:fault-response:response")
+        }
+
+        func testFaultErrorRecordsBeforeFailureCallback() {
+            let client = makeEventObservingClient()
+            let url = "https://api.example.com/v1/fault-error"
+            NetworkMockRuleStore.shared.setFaultRules([
+                NetworkFaultRuleDTO(
+                    faultId: "fault-error", transport: .urlSession, host: "api\\.example\\.com",
+                    port: nil, scheme: "https", path: "/v1/fault-error", method: "GET",
+                    headers: nil, origin: nil, connectionId: nil, sessionId: nil, action: .error,
+                    statusCode: nil, responseHeaders: nil, responseBody: nil, contentType: nil,
+                    errorType: "timeout", delayMs: nil, bandwidthBytesPerSecond: nil, dropBytes: nil,
+                    limit: nil, expiresAtEpochMs: nil, scope: nil, dryRun: false
+                ),
+            ])
+            let request = URLRequest(url: URL(string: url)!)
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+
+            proto.startLoading()
+
+            assertRecordedEvent(client, url: url, error: "fault:fault-error:error")
+        }
+
+        func testSimulatedHttp500RecordsBeforeFinishCallback() {
+            let client = makeEventObservingClient()
+            let url = "https://api.example.com/v1/simulated-http500"
+            NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true, errorType: "http500", limit: nil, expiresAtEpochMs: nil
+            ))
+            let request = URLRequest(url: URL(string: url)!)
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+
+            proto.startLoading()
+
+            assertRecordedEvent(client, url: url, error: "simulated:http500")
+        }
+
+        func testSimulatedErrorRecordsBeforeFailureCallback() {
+            let client = makeEventObservingClient()
+            let url = "https://api.example.com/v1/simulated-timeout"
+            NetworkMockRuleStore.shared.setErrorSimulation(NetworkErrorSimulationDTO(
+                enabled: true, errorType: "timeout", limit: nil, expiresAtEpochMs: nil
+            ))
+            let request = URLRequest(url: URL(string: url)!)
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+
+            proto.startLoading()
+
+            assertRecordedEvent(client, url: url, error: "simulated:timeout")
+        }
+
+        func testPassthroughSuccessRecordsBeforeFinishCallback() {
+            let client = makeEventObservingClient()
+            let url = "https://api.example.com/v1/passthrough-success"
+            let request = URLRequest(url: URL(string: url)!)
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+            let task = URLSession.shared.dataTask(with: request)
+
+            proto.urlSession(URLSession.shared, task: task, didCompleteWithError: nil)
+
+            assertRecordedEvent(client, url: url, error: nil)
+        }
+
+        func testPassthroughFailureRecordsBeforeFailureCallback() {
+            let client = makeEventObservingClient()
+            let url = "https://api.example.com/v1/passthrough-failure"
+            let request = URLRequest(url: URL(string: url)!)
+            let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+            let task = URLSession.shared.dataTask(with: request)
+            let error = URLError(.timedOut)
+
+            proto.urlSession(URLSession.shared, task: task, didCompleteWithError: error)
+
+            assertRecordedEvent(client, url: url, error: error.localizedDescription)
         }
 
         func testURLProtocolServesSimulatedHttp500AndRecordsRequest() async throws {

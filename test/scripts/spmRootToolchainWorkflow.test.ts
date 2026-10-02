@@ -155,11 +155,14 @@ describe("root SPM toolchain floor workflow", () => {
       desktop,
       "Stop isolated Gradle daemon and remove desktop home",
     );
-    expect(desktopCleanup?.["working-directory"]).toBe("android");
-    expect(desktopCleanup?.run).toContain("if ! ./gradlew --stop; then");
+    expect(desktopCleanup?.["working-directory"]).toBe(".");
+    expect(desktopCleanup?.run).toContain("if ! (cd android && ./gradlew --stop); then");
     expect(desktopCleanup?.run).toContain("::warning::Failed to stop");
-    expect(desktopCleanup?.run?.indexOf("./gradlew --stop")).toBeLessThan(
+    expect(desktopCleanup?.run?.indexOf("cd android && ./gradlew --stop")).toBeLessThan(
       desktopCleanup?.run?.indexOf("rm -rf --") ?? 0,
+    );
+    expect(desktopCleanup?.run).toContain(
+      'rm -rf -- "$RUNNER_TEMP/desktop-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"',
     );
   });
 

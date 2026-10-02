@@ -2,10 +2,11 @@
 # Trusted default-branch code only. Inputs: TOKEN, HEAD_REF, HEAD_SHA,
 # GITHUB_REPOSITORY, PINS_DIR. Local tests can override RUNTIME_PINS_CLONE_URL,
 # RUNTIME_PINS_PUSH_URL and RUNTIME_PINS_MAX_BYTES; never set these from PR data.
+# Artifact package.json may change only dependency fields from the verified PR head.
 set -euo pipefail
 
 if [[ -z "${TOKEN:-}" ]]; then
-  echo '::error::Missing AUTO_MOBILE_PR_TOKEN. A repository owner must configure it in the Dependabot secrets store (Actions secrets are not exposed to Dependabot pull_request runs).'
+  echo '::error::Missing AUTO_MOBILE_PR_TOKEN. A repository owner must configure it in both the Dependabot secrets store (Dependabot-actor runs) and the Actions secrets store (maintainer re-runs).'
   exit 1
 fi
 printf '::add-mask::%s\n' "$TOKEN"
@@ -92,6 +93,28 @@ if [[ "$remote_head" != "$HEAD_SHA" ]]; then
   echo '::error::Remote PR head moved since this job started; refusing to push runtime pins.'
   exit 1
 fi
+head_package_path="$(run_git ls-tree --name-only "$HEAD_SHA" -- package.json)"
+if [[ "$head_package_path" != package.json ]]; then
+  echo '::error::PR head must contain package.json; refusing to push runtime pins.'
+  exit 1
+fi
+run_git show "$HEAD_SHA:package.json" > "$work_dir/head-package.json"
+# scripts/release/pin-runtime-deps.ts writeMode() is the source of truth for
+# these written keys; update both together. Canonical JSON ignores formatter changes.
+package_keys='["dependencies","devDependencies","bundledDependencies"]'
+# $keys is a jq variable, not a shell expansion.
+# shellcheck disable=SC2016
+package_filter='delpaths($keys | map([.]))'
+if ! head_package="$(jq -S -c --argjson keys "$package_keys" "$package_filter" "$work_dir/head-package.json")" ||
+   ! artifact_package="$(jq -S -c --argjson keys "$package_keys" "$package_filter" "$PINS_DIR/package.json")"; then
+  echo '::error::Unable to compare artifact package.json with the PR head.'
+  exit 1
+fi
+if [[ "$artifact_package" != "$head_package" ]]; then
+  echo '::error::Artifact package.json changed fields outside the allowed dependency keys.'
+  exit 1
+fi
+# Accepting regenerated bun.lock data beyond the existing checks is an owner decision.
 # Populate HEAD/index only, never the PR working tree. This avoids PR-controlled
 # symlinks, .gitattributes filters and scripts when copying/staging the artifact.
 run_git reset --quiet --mixed "$HEAD_SHA"

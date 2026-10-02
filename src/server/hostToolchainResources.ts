@@ -42,7 +42,6 @@ export interface HostToolchainEntry {
     requiredVersion: string;
     simulatorBootState: SimulatorBootSummary;
     capabilities: CoreDeviceCapabilities;
-    downgradeGuard: "not checked";
   };
 }
 
@@ -208,7 +207,6 @@ function devicectlEntry(diagnostic: CoreDeviceDiagnostic): HostToolchainEntry {
         reason: "simulator state unavailable",
       },
       capabilities: diagnostic.capabilities ?? { status: "not probed", entries: [] },
-      downgradeGuard: "not checked",
     },
   };
 }

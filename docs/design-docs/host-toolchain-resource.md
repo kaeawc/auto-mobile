@@ -47,8 +47,5 @@ invocation. Capability commands stay lazy: diagnostic reads never spawn them.
 There is currently no production simulator command caller; the existing
 simulator tools use simctl. No new tool is introduced.
 
-`downgradeGuard` remains exactly `not checked`. A production guard provider is
-not configured: measuring the selected Xcode's bundled CoreDevice version and
-the installed system framework (and identifying the installing Xcode) still
-needs a capture and a comparison contract. Injected guard providers continue
-to block unverifiable or older developer directories before any devicectl call.
+The downgrade guard is out of scope per the owner decision on 2026-10-02 and is
+not reported.

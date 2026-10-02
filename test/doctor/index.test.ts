@@ -208,6 +208,38 @@ describe("formatConsoleOutput", () => {
     expect(output).toContain("[PASS] OS: the message");
   });
 
+  test.each(["pass", "warn", "fail", "skip"] as const)(
+    "prints detail under %s checks in every section, before any tip",
+    (status) => {
+      const detail =
+        "simulator boot state: 2 booted, 18 shutdown, 0 unknown; capabilities: not probed";
+      const check = makeCheck({
+        name: "CoreDevice",
+        status,
+        message: "version message",
+        value: "651.13.4",
+        detail,
+        recommendation: "Check toolchain",
+      });
+      for (const section of ["system", "android", "ios", "autoMobile"] as const) {
+        const output = formatConsoleOutput(makeReport({ [section]: { checks: [check] } }), false);
+        expect(output).toContain(`CoreDevice: 651.13.4\n       ${detail}\n`);
+        expect(output.split(`       ${detail}`)).toHaveLength(2);
+        expect(output).not.toContain("version message");
+        if (section !== "system" && (status === "warn" || status === "fail")) {
+          expect(output).toContain(`       ${detail}\n       Tip: Check toolchain`);
+        }
+      }
+    },
+  );
+
+  test("checks without detail have no extra indented line", () => {
+    const check = makeCheck({ name: "OS", status: "pass", value: "darwin" });
+    const output = formatConsoleOutput(makeReport({ system: { checks: [check] } }), false);
+    expect(output).toContain("[PASS] OS: darwin\n\n--- AutoMobile ---");
+    expect(output).not.toContain("       ");
+  });
+
   test("recommendations on warn/fail checks in autoMobile section show tips", () => {
     const report = makeReport({
       system: { checks: [] },
@@ -377,7 +409,13 @@ describe("formatJsonOutput", () => {
       },
       android: {
         checks: [
-          makeCheck({ name: "ADB", status: "warn", message: "old", recommendation: "update" }),
+          makeCheck({
+            name: "ADB",
+            status: "warn",
+            message: "old",
+            detail: "more context",
+            recommendation: "update",
+          }),
         ],
       },
       autoMobile: {

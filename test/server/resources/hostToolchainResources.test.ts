@@ -66,6 +66,8 @@ describe("host toolchain resource", () => {
 
     expect(payload.lastUpdated).toBe("2026-09-14T12:00:00.000Z");
     expect(payload.entries).toHaveLength(9);
+    const entry = payload.entries.find((item: { name: string }) => item.name === "devicectl");
+    expect("downgradeGuard" in entry.coreDevice).toBe(false);
     expect(
       Object.fromEntries(payload.entries.map((entry: { name: string }) => [entry.name, entry])),
     ).toMatchObject({
@@ -105,7 +107,6 @@ describe("host toolchain resource", () => {
           requiredVersion: "651.0.0",
           simulatorBootState: { status: "available", booted: 1, shutdown: 2, unknown: 0 },
           capabilities: { status: "not probed", entries: [] },
-          downgradeGuard: "not checked",
         },
       },
     });
@@ -159,7 +160,7 @@ describe("host toolchain resource", () => {
       reason: "simulator state unavailable",
     });
     expect(entry.coreDevice.capabilities).toEqual({ status: "not probed", entries: [] });
-    expect(entry.coreDevice.downgradeGuard).toBe("not checked");
+    expect("downgradeGuard" in entry.coreDevice).toBe(false);
     expect(entry.version ?? entry.error).toBe(detail);
   });
 
@@ -354,7 +355,7 @@ describe("host toolchain resource", () => {
         name: "devicectl",
         available,
         ...(version ? { version } : { error }),
-        coreDevice: { status, requiredVersion: "651.0.0", downgradeGuard: "not checked" },
+        coreDevice: { status, requiredVersion: "651.0.0" },
       });
       expect(calls).toEqual(platform === "darwin" ? ["xcrun devicectl --version"] : []);
       expect(executor.getExecutedCommands()).toEqual([]);
@@ -418,8 +419,8 @@ describe("host toolchain resource", () => {
       requiredVersion: "651.0.0",
       simulatorBootState: { status: "available", booted: 1, shutdown: 1, unknown: 0 },
       capabilities: { status: "not probed", entries: [] },
-      downgradeGuard: "not checked",
     });
+    expect("downgradeGuard" in entry.coreDevice).toBe(false);
     expect(entry.available).toBe(true);
     expect(entry.version).toBe("651.13.4");
     expect(entry.error).toBeUndefined();

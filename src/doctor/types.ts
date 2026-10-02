@@ -16,6 +16,8 @@ export interface CheckResult {
   status: CheckStatus;
   message: string;
   value?: string | number | boolean | null;
+  /** Additional context displayed below the check in console output. */
+  detail?: string;
   recommendation?: string;
 }
 

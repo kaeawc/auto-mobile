@@ -2538,6 +2538,7 @@ export class DevicePool {
     if (
       !attemptDeviceLossRecovery ||
       !session ||
+      !this.sessionManager.isAdmittedForAutomation(session) ||
       !this.isSessionPreservingBinding(device, session)
     ) {
       return false;
@@ -2831,7 +2832,11 @@ export class DevicePool {
       return undefined;
     }
     const session = this.sessionManager.getSession(sessionId);
-    if (!session || !this.isEligibleSessionPreservingRecoveryTarget(device, session)) {
+    if (
+      !session ||
+      !this.sessionManager.isAdmittedForAutomation(session) ||
+      !this.isEligibleSessionPreservingRecoveryTarget(device, session)
+    ) {
       return undefined;
     }
     return { device, session };

@@ -1,3 +1,5 @@
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { releasingSessionHarness, releasingSessionId } from "../helpers/releasingSessionHarness";
 import { EventEmitter } from "node:events";
 import type {
   IncomingHttpHeaders,
@@ -5,7 +7,7 @@ import type {
   Server as HttpServer,
   ServerResponse,
 } from "node:http";
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { MCP_STREAMABLE_PATH } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -14,6 +16,7 @@ const port = 41321;
 
 interface DaemonHttpInternals {
   startHttpServer(): Promise<void>;
+  sessionManager: SessionManager;
   transports: Map<string, FakeTransport>;
 }
 
@@ -27,6 +30,7 @@ class FakeRequest extends EventEmitter {
 }
 
 class FakeResponse extends EventEmitter {
+  body = "";
   statusCode = 200;
   headersSent = false;
   writableEnded = false;
@@ -56,7 +60,8 @@ class FakeResponse extends EventEmitter {
     return this;
   }
 
-  end(): this {
+  end(body?: string): this {
+    this.body = body ?? "";
     this.writableEnded = true;
     this.emit("finish");
     this.finishResponse();
@@ -116,7 +121,9 @@ class FakeTransport {
   }
 }
 
-async function harness(): Promise<{ server: FakeHttpServer; transport: FakeTransport }> {
+async function harness(
+  sessionManager?: SessionManager,
+): Promise<{ server: FakeHttpServer; transport: FakeTransport }> {
   const server = new FakeHttpServer();
   const daemon = new Daemon(
     { port, host: "127.0.0.1" },
@@ -135,6 +142,9 @@ async function harness(): Promise<{ server: FakeHttpServer; transport: FakeTrans
   );
   const transport = new FakeTransport();
   const internals = daemon as unknown as DaemonHttpInternals;
+  if (sessionManager) {
+    internals.sessionManager = sessionManager;
+  }
   internals.transports.set(transport.sessionId, transport);
   await internals.startHttpServer();
   return { server, transport };
@@ -198,5 +208,71 @@ describe("Daemon HTTP request admission", () => {
     const { server } = await harness();
     const response = await server.dispatch({ host: "evil.com:41321" }, "OPTIONS", "/heartbeat");
     expect(response.statusCode).toBe(403);
+  });
+});
+
+describe("HTTP heartbeat during release", () => {
+  for (const phase of ["A", "B"] as const) {
+    test(`heartbeat refuses Phase ${phase}, drains release, then keeps unknown-session behavior`, async () => {
+      const h = releasingSessionHarness();
+      const heartbeat = spyOn(h.manager, "recordHeartbeat");
+      try {
+        await h.create();
+        const { server } = await harness(h.manager);
+        const send = () =>
+          server.dispatch(
+            { host: `127.0.0.1:${port}` },
+            "POST",
+            "/heartbeat",
+            JSON.stringify({ sessionId: releasingSessionId }),
+          );
+        const healthy = await send();
+        expect(healthy.statusCode).toBe(200);
+        expect(healthy.body).toBe('{"status":"ok"}');
+        expect(heartbeat).toHaveBeenCalledTimes(1);
+        heartbeat.mockClear();
+        const finish = await h.beginRelease(phase);
+        const response = await send();
+        const called = heartbeat.mock.calls.length;
+        await finish();
+        expect(response.statusCode).toBe(404);
+        expect(response.body).toBe(
+          JSON.stringify({ error: `Session not found: ${releasingSessionId}` }),
+        );
+        expect(called).toBe(0);
+        const after = await send();
+        expect(after.statusCode).toBe(200);
+        expect(after.body).toBe('{"status":"ok"}');
+        expect(heartbeat).toHaveBeenCalledTimes(1);
+      } finally {
+        heartbeat.mockRestore();
+        h.dispose();
+      }
+    });
+  }
+
+  test("HTTP heartbeat keeps observer and rebind behavior", async () => {
+    const h = releasingSessionHarness();
+    try {
+      const { server } = await harness(h.manager);
+      const send = () =>
+        server.dispatch(
+          { host: `127.0.0.1:${port}` },
+          "POST",
+          "/heartbeat",
+          JSON.stringify({ sessionId: releasingSessionId }),
+        );
+      h.observers.register(releasingSessionId, "desktop");
+      expect((await send()).statusCode).toBe(200);
+      await h.create();
+      h.persistence.deferUpsert = true;
+      const rebind = h.manager.rebindSession(releasingSessionId, "emulator-5556", "android");
+      await h.persistence.upsertStarted.promise;
+      expect((await send()).statusCode).toBe(200);
+      h.persistence.finishUpsert.resolve();
+      await rebind;
+    } finally {
+      h.dispose();
+    }
   });
 });

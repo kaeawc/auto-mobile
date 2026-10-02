@@ -357,16 +357,22 @@ export async function handleDaemonRequest(
           lastUsedAt: session.lastUsedAt,
           expiresAt: session.expiresAt,
           cacheSize: JSON.stringify(session.cacheData).length,
+          ...(manager.isAdmittedForAutomation?.(session) === false ? { releasing: true } : {}),
         },
       };
     }
     case "daemon/activeSessions": {
-      const sessions = state.getSessionManager().getAllSessions?.() ?? [];
+      const manager = state.getSessionManager();
+      const sessions = manager.getAllSessions?.() ?? [];
+      const releasingSessions = sessions.filter(
+        (session) => manager.isAdmittedForAutomation?.(session) === false,
+      ).length;
       return {
         success: true,
         result: {
           activeSessions: sessions.length,
           activeExecutions: executionTracker.getActiveExecutionCount(),
+          ...(releasingSessions > 0 ? { releasingSessions } : {}),
         },
       };
     }

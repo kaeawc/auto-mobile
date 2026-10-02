@@ -1068,6 +1068,14 @@ export class Daemon {
           return;
         }
 
+        const session =
+          this.sessionManager.getSession(sessionId) ??
+          this.sessionManager.getReleasingSession(sessionId);
+        if (session && !this.sessionManager.isAdmittedForAutomation(session)) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: `Session not found: ${sessionId}` }));
+          return;
+        }
         this.sessionManager.recordHeartbeat(sessionId);
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok" }));

@@ -424,7 +424,9 @@ export async function runDaemonCommand(
         const daemonState = manager.getDaemonState();
         if (daemonState.isInitialized()) {
           const sessionManager = daemonState.getSessionManager();
-          if (!sessionManager.getSession(sessionId)) {
+          const session =
+            sessionManager.getSession(sessionId) ?? sessionManager.getReleasingSession(sessionId);
+          if (!session || !sessionManager.isAdmittedForAutomation(session)) {
             throw new ActionableError(`Session not found: ${sessionId}`);
           }
           sessionManager.recordHeartbeat(sessionId);

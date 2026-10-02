@@ -1,3 +1,7 @@
+import type {
+  DisplayInventoryUnavailableDetails,
+  PinnedDisplayDetails,
+} from "./PinnedDisplayError";
 import type { TapEffect } from "./TapOnElementResult";
 import type { StaleDisplayDetails } from "./StaleDisplayError";
 import { ObserveResult } from "./ObserveResult";
@@ -15,6 +19,8 @@ export interface BaseActionResult {
   effect?: TapEffect;
   error?: string;
   staleDisplay?: StaleDisplayDetails;
+  pinnedDisplay?: PinnedDisplayDetails;
+  displayInventory?: DisplayInventoryUnavailableDetails;
   /**
    * Advisory notes about a SUCCESSFUL action: a best-effort post-action epilogue
    * (keyboard dismissal, cleanup) that failed without preventing the primary

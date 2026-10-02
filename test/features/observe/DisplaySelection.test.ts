@@ -66,3 +66,33 @@ describe("resolveTargetDisplay", () => {
     );
   });
 });
+
+describe("session display pin precedence", () => {
+  for (const [request, pin, focus, posture, expected] of [
+    ["rear", "inner", "cover-id", "closed", "rear-id"],
+    [undefined, "inner", "cover-id", "closed", "inner-id"],
+    [undefined, undefined, "rear-id", "closed", "rear-id"],
+    [undefined, undefined, undefined, "closed", "cover-id"],
+    ["active", "missing", "rear-id", "closed", "rear-id"],
+    ["active", "inner", undefined, "closed", "cover-id"],
+  ] as const) {
+    test(`${request ?? "omitted"}/${pin ?? "no pin"}/${focus ?? "no focus"}`, () => {
+      expect(
+        resolveTargetDisplay(displays, request, {
+          ...{ displayPin: pin },
+          focusedPanelKey: focus,
+          posture,
+        }).key,
+      ).toBe(expected);
+    });
+  }
+  test("missing pin refuses instead of falling back", () => {
+    expect(() =>
+      resolveTargetDisplay(displays, undefined, {
+        ...{ displayPin: "unplugged" },
+        focusedPanelKey: "inner-id",
+        posture: "closed",
+      }),
+    ).toThrow(/unplugged.*setActiveDevice.*display: null/);
+  });
+});

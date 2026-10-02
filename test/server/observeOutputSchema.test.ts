@@ -207,7 +207,13 @@ describe("observe.outputSchema: requires usable screenshot-resource join keys on
       required: string[];
     };
     expect(display.required).toEqual(["key", "role", "posture", "generation"]);
-    expect(Object.keys(display.properties)).toEqual(["key", "role", "posture", "generation"]);
+    expect(Object.keys(display.properties)).toEqual([
+      "key",
+      "pinned",
+      "role",
+      "posture",
+      "generation",
+    ]);
   });
 
   test("the join-key requirement does NOT depend on accessibilityAuditSkipped being present", () => {

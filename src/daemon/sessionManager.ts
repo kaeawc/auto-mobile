@@ -164,6 +164,7 @@ export interface SessionCacheData {
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   lastRenderedDisplayGeneration?: number; // Last caller-visible display.generation; survives invalidation
   lastRenderedDisplayRevision?: number; // Caller-visible display revision; survives panel cache invalidation
+  displayPin?: string; // Session/device physical panel selector; dropped on release/rebind
   lastRenderedDisplayKey?: string; // Caller-visible panel, independent of the diff baseline
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
   biometricEnrollment?: BiometricEnrollmentSessionState; // Original iOS Simulator biometric enrollment, restored on release
@@ -4200,6 +4201,20 @@ export class SessionManager {
     return this.getSession(sessionId)?.cacheData.lastRenderedDisplayGeneration;
   }
 
+  setDisplayPin(sessionId: string, pin: string | null): void {
+    this.updateSessionCache(sessionId, { displayPin: pin ?? undefined });
+    if (pin === null) {
+      const session = this.getSession(sessionId);
+      if (session) {
+        delete session.cacheData.displayPin;
+      }
+    }
+  }
+
+  getDisplayPin(sessionId: string): string | undefined {
+    return this.getSession(sessionId)?.cacheData.displayPin;
+  }
+
   getLastRenderedDisplayKey(sessionId: string): string | undefined {
     return this.getSession(sessionId)?.cacheData.lastRenderedDisplayKey;
   }
@@ -4743,7 +4758,11 @@ export class SessionManager {
     if (key) {
       delete session.cacheData[key as keyof SessionCacheData];
     } else {
-      session.cacheData = {};
+      // Observation-cache invalidation must not clear a deliberate session selection.
+      session.cacheData =
+        session.cacheData.displayPin === undefined
+          ? {}
+          : { displayPin: session.cacheData.displayPin };
     }
 
     logger.debug(`Cleared cache for session ${sessionId}${key ? ` (key: ${key})` : " (all)"}`);

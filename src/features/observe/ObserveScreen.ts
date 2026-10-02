@@ -1,3 +1,4 @@
+import { displayPinFailure } from "./SessionDisplayContext";
 import { resolveIosObserveRotation } from "./iosObserveRotation";
 import {
   screenshotPathProtection,
@@ -1871,7 +1872,7 @@ export class RealObserveScreen implements ObserveScreen {
         throw toActionableError(err, `Unable to observe device ${this.device.deviceId}`);
       }
       if (this.shouldPropagateCaptureError(err, { display: displayRequest, signal })) {
-        throw err;
+        throw displayPinFailure(err);
       }
       const errorMessage = err instanceof Error ? err.stack || err.message : String(err);
       logger.error(`Critical error in observe command: ${errorMessage}`);

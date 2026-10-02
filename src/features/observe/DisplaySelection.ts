@@ -1,5 +1,11 @@
 import type { DeviceDisplays, DisplayPanel, Posture } from "../../models/DisplayPanel";
+import type { DisplayInventoryOutcome } from "../../models/DeviceInfo";
 import { POSTURE_PANEL_ROLES } from "../../models/DisplayPanel";
+import {
+  DisplayInventoryUnavailableError,
+  InvalidDisplayPinError,
+  PinnedDisplayUnavailableError,
+} from "../../models/PinnedDisplayError";
 import { ActionableError } from "../../models/ActionableError";
 
 /** Selection errors are returned directly to the tool caller. */
@@ -30,6 +36,8 @@ export interface DisplayLiveState {
   /** Physical key of the screen currently shown by a single-screen simulator. */
   activePanelKey?: string;
   posture?: Posture;
+  /** Used only when the caller omitted display; explicit active bypasses it. */
+  displayPin?: string;
 }
 
 const roles = new Set(["inner", "cover", "rear", "external"]);
@@ -52,8 +60,54 @@ function selectExplicitPanel(panels: readonly DisplayPanel[], request: string): 
   return selected;
 }
 
+/** A successful single-display read may omit panels; a failed read must not blame the pin. */
+export function readableDisplayInventory(input: {
+  inventory?: DeviceDisplays;
+  outcome?: DisplayInventoryOutcome;
+  pin?: string;
+}): DeviceDisplays {
+  if (
+    input.outcome?.kind === "unreadable" ||
+    (!input.inventory && input.outcome?.kind !== "single")
+  ) {
+    throw new DisplayInventoryUnavailableError({ pin: input.pin });
+  }
+  return input.inventory ?? { panels: [], postures: [] };
+}
+
+/** Pins are physical keys or roles, never dynamic selectors or logical IDs. */
+export function validateDisplayPin(inventory: DeviceDisplays | undefined, pin: unknown): string {
+  if (typeof pin !== "string" || !pin || pin === "active" || pin === "all") {
+    throw new InvalidDisplayPinError(pin, inventory);
+  }
+  inventory = readableDisplayInventory({ inventory, pin });
+  if (
+    !inventory.panels.some((panel) => panel.key === pin || (roles.has(pin) && panel.role === pin))
+  ) {
+    throw new InvalidDisplayPinError(pin, inventory);
+  }
+  return pin;
+}
+
+function pinnedPanel(inventory: DeviceDisplays | undefined, pin: string): DisplayPanel {
+  const panels = readableDisplayInventory({ inventory, pin }).panels;
+  const panel =
+    panels.find((candidate) => candidate.key === pin) ??
+    (roles.has(pin) ? panels.find((candidate) => candidate.role === pin) : undefined);
+  if (!panel || pin === "active" || pin === "all") {
+    throw new PinnedDisplayUnavailableError(pin, inventory);
+  }
+  return panel;
+}
+
 function postureDefault(posture: Posture | undefined): DisplayPanel["role"] | undefined {
   return POSTURE_PANEL_ROLES.find(([defaultPosture]) => defaultPosture === posture)?.[1];
+}
+
+function selectablePanels(inventory: DeviceDisplays | undefined): DisplayPanel[] {
+  return inventory?.panels?.length
+    ? inventory.panels
+    : [{ key: "0", role: "unknown", sizePx: { width: 0, height: 0 } }];
 }
 
 /** Pure per-call panel selection. Inventory order is the stable final fallback. */
@@ -62,11 +116,12 @@ export function resolveTargetDisplay(
   request: string | undefined,
   liveState: DisplayLiveState,
 ): DisplayPanel {
-  const panels = inventory?.panels?.length
-    ? inventory.panels
-    : [{ key: "0", role: "unknown" as const, sizePx: { width: 0, height: 0 } }];
+  const panels = selectablePanels(inventory);
   if (request !== undefined && request !== "active") {
     return selectExplicitPanel(panels, request);
+  }
+  if (request === undefined && liveState.displayPin !== undefined) {
+    return pinnedPanel(inventory, liveState.displayPin);
   }
   const focused = panels.find((panel) => panel.key === liveState.focusedPanelKey);
   if (focused) {

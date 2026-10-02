@@ -27,6 +27,8 @@ export interface DisplayPanel {
 
 /** Observation identity reserved for display targeting and transition fencing. */
 export interface DisplayRef {
+  /** This call used the session display pin, rather than an explicit selector. */
+  pinned?: true;
   key: string;
   role: PanelRole;
   posture: Posture;

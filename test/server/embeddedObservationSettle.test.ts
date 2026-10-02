@@ -833,3 +833,51 @@ describe("handler settle verdicts skip the generic gate (#6890 review)", () => {
     expect((response.structuredContent as Record<string, any>).observation.settled).toBe(true);
   });
 });
+
+describe("session-pinned embedded observation", () => {
+  test("settle polls retain the pinned panel and additive selection marker", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.display = {
+      key: "outside",
+      role: "cover",
+      posture: "closed",
+      generation: 2,
+      pinned: true,
+    };
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.display = { key: "outside", role: "cover", posture: "closed", generation: 2 };
+    let requestedDisplay: string | undefined;
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: {
+        execute: async (options) => {
+          requestedDisplay = options?.display;
+          return { observation: settled, settled: true, polls: 2 };
+        },
+      },
+    });
+    expect(requestedDisplay).toBe("outside");
+    expect(result.observation.display).toEqual({ ...settled.display, pinned: true });
+    expect(settled.display).not.toHaveProperty("pinned");
+  });
+
+  test("a settle capture from another panel cannot replace the pinned capture", async () => {
+    const action = obs(AIRPLANE_ROW_HALF_INFLATED, 10);
+    action.display = {
+      key: "outside",
+      role: "cover",
+      posture: "closed",
+      generation: 2,
+      pinned: true,
+    };
+    const settled = obs(AIRPLANE_ROW_INFLATED, 11);
+    settled.display = { key: "inside", role: "inner", posture: "opened", generation: 2 };
+    const result = await settleEmbeddedObservation({
+      actionClass: "navigation",
+      observation: action,
+      settleObserve: { execute: async () => ({ observation: settled, settled: true, polls: 2 }) },
+    });
+    expect(result.observation).toBe(action);
+  });
+});

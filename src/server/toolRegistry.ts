@@ -1,3 +1,4 @@
+import { runSessionDisplayPin } from "./sessionDisplayPin";
 import { toActionableError } from "../models/ActionableError";
 import {
   clearToolTransportRecovery,
@@ -5,7 +6,7 @@ import {
   type ToolTransportRecovery,
 } from "./toolTransportRecovery";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { toJSONSchema } from "zod/v4";
+import { toJSONSchema, ZodType } from "zod/v4";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import {
   DeviceSessionManager,
@@ -1533,6 +1534,43 @@ function assertSessionlessReadAuthorization(
   }
 }
 
+// Reuse the display capability across registrations and internal dispatch without
+// retaining schemas after their tools are removed.
+const sessionDisplaySchemaCapabilities = new WeakMap<ZodType, boolean>();
+
+function schemaAcceptsSessionDisplay(schema: unknown): boolean {
+  if (!(schema instanceof ZodType)) {
+    return false;
+  }
+  const cached = sessionDisplaySchemaCapabilities.get(schema);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const acceptsDisplay = Object.hasOwn(
+    toAdvertisedJsonSchema(schema, { constrainAppIds: false }).properties ?? {},
+    "display",
+  );
+  sessionDisplaySchemaCapabilities.set(schema, acceptsDisplay);
+  return acceptsDisplay;
+}
+
+function sessionDisplayPinnedHandler(input: {
+  name: string;
+  schema: unknown;
+  handler: DeviceAwareToolHandler;
+}): DeviceAwareToolHandler {
+  const acceptsDisplay = schemaAcceptsSessionDisplay(input.schema);
+  return (device, args, progress, signal) =>
+    runSessionDisplayPin({
+      name: input.name,
+      acceptsDisplay,
+      device,
+      args,
+      sessionUuid: getToolSelectionContext()?.routingSessionUuid ?? args.sessionUuid,
+      invoke: (effectiveArgs) => input.handler(device, effectiveArgs, progress, signal),
+    });
+}
+
 async function invokeResolvedDeviceHandler(input: {
   options: DeviceAwareToolOptions;
   selectionContext: ReturnType<typeof getToolSelectionContext>;
@@ -1703,6 +1741,7 @@ export class ToolRegistryClass {
     handler: DeviceAwareToolHandler,
     options: DeviceAwareToolOptions = {},
   ): void {
+    const pinnedHandler = sessionDisplayPinnedHandler({ name, schema, handler });
     // Device-aware tools may reconnect before dispatch. Replaying an ambiguous
     // delivery requires an explicit per-tool opt-in.
     const transportRecovery = this.prepareDeviceAwareRegistration(name, options);
@@ -1763,7 +1802,7 @@ export class ToolRegistryClass {
                   target: { ...resolvedTarget, device: resolvedTarget.device },
                   name,
                   args: handlerArgs,
-                  handler,
+                  handler: pinnedHandler,
                   progress,
                   signal,
                   auditRunner: this.auditRunner,
@@ -1983,7 +2022,12 @@ export class ToolRegistryClass {
     targetDevice: BootedDevice | undefined,
   ): Promise<any> {
     if (targetDevice && tool.deviceAwareHandler) {
-      return tool.deviceAwareHandler(targetDevice, markInternalToolCall(args), progress, signal);
+      const pinnedHandler = sessionDisplayPinnedHandler({
+        name: tool.name,
+        schema: tool.schema,
+        handler: tool.deviceAwareHandler,
+      });
+      return pinnedHandler(targetDevice, markInternalToolCall(args), progress, signal);
     }
     return tool.handler(markInternalToolCall(args), progress, signal);
   }

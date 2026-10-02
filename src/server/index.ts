@@ -319,7 +319,7 @@ import {
 } from "./toolSelectionTools";
 import { isAlwaysOnTool } from "../features/toolSelection/toolSelectionControl";
 import {
-  DEVICE_SESSION_RECOVERY_TOOLS,
+  sessionOwnershipLostPayload,
   getDeviceSessionIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "./deviceSessionResult";
@@ -1550,20 +1550,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
             );
       }
       if (error instanceof TerminalSessionError) {
-        const sessionOwnershipLost = {
-          error: {
-            code: "session_ownership_lost",
-            message: error.message,
-            sessionUuid: error.sessionUuid,
-            reason: error.release.releaseReason,
-            retryable: true,
-            recovery: {
-              action: "acquire_replacement_session",
-              tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
-            },
-            release: error.release,
-          },
-        };
+        const sessionOwnershipLost = sessionOwnershipLostPayload({
+          message: error.message,
+          sessionUuid: error.sessionUuid,
+          reason: error.release.releaseReason,
+          release: error.release,
+        });
         return {
           content: [{ type: "text" as const, text: JSON.stringify(sessionOwnershipLost) }],
           isError: true,

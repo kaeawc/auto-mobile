@@ -26,7 +26,7 @@ export const DEVICE_SESSION_ACQUISITION_TOOLS = [
  * omits it and call enforcement rejects it (`src/server/index.ts`) — a client
  * following advice that named either had nothing to call. Advertised in every
  * `session_ownership_lost` / `no_active_device_session` recovery payload
- * (`src/server/index.ts`, `src/server/proxyServer.ts`) and in the prose that
+ * (ownership loss is built by {@link sessionOwnershipLostPayload}) and in the prose that
  * accompanies them (`src/daemon/daemonMcpProxy.ts`). Pinned to the registry by
  * `test/server/deviceSessionRecoveryTools.test.ts`.
  */
@@ -53,6 +53,34 @@ export function appendHeartbeatExpiryMessage(
   }
   const { ageMs, timeoutMs } = release.heartbeat;
   return `${message} No heartbeat for ${ageMs} ms (limit ${timeoutMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
+}
+
+/** Build the ownership-loss envelope shared by the direct MCP server and daemon proxy. */
+export function sessionOwnershipLostPayload({
+  message,
+  sessionUuid,
+  reason,
+  release,
+}: {
+  message: string;
+  sessionUuid: string;
+  reason: string;
+  release?: SessionReleaseSnapshot;
+}) {
+  return {
+    error: {
+      code: "session_ownership_lost",
+      message: appendHeartbeatExpiryMessage(message, release),
+      sessionUuid,
+      reason,
+      retryable: true,
+      recovery: {
+        action: "acquire_replacement_session",
+        tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
+      },
+      ...(release ? { release } : {}),
+    },
+  };
 }
 
 /** Whether `name` is a device-session acquisition tool (see above). */

@@ -33,7 +33,7 @@ import {
 import {
   DEVICE_SESSION_RECOVERY_PROMPT,
   DEVICE_SESSION_RECOVERY_TOOLS,
-  appendHeartbeatExpiryMessage,
+  sessionOwnershipLostPayload,
 } from "./deviceSessionResult";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../daemon/constants";
 import { getStartupToolDefaults } from "../features/toolSelection/SessionToolSelectionService";
@@ -67,29 +67,19 @@ export interface ProxyMcpServerOptions {
   sessionContext?: { sessionId?: string };
 }
 
-function sessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
-  return {
-    error: {
-      code: "session_ownership_lost",
-      message: appendHeartbeatExpiryMessage(
-        `Session ownership lost for ${error.sessionUuid}: ${error.reason}. ` +
-          DEVICE_SESSION_RECOVERY_PROMPT,
-        error.release,
-      ),
-      sessionUuid: error.sessionUuid,
-      reason: error.reason,
-      retryable: true,
-      recovery: {
-        action: "acquire_replacement_session",
-        tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
-      },
-      ...(error.release ? { release: error.release } : {}),
-    },
-  };
+function boundSessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError) {
+  return sessionOwnershipLostPayload({
+    message:
+      `Session ownership lost for ${error.sessionUuid}: ${error.reason}. ` +
+      DEVICE_SESSION_RECOVERY_PROMPT,
+    sessionUuid: error.sessionUuid,
+    reason: error.reason,
+    release: error.release,
+  });
 }
 
 function sessionOwnershipLostMessage(error: DaemonBoundSessionExpiredError): string {
-  return JSON.stringify(sessionOwnershipLostPayload(error));
+  return JSON.stringify(boundSessionOwnershipLostPayload(error));
 }
 
 function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): CallToolResult {
@@ -105,7 +95,7 @@ function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): Call
 }
 
 function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
-  const payload = sessionOwnershipLostPayload(error);
+  const payload = boundSessionOwnershipLostPayload(error);
   return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
 }
 

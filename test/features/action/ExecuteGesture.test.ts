@@ -25,6 +25,7 @@ describe("ExecuteGesture", () => {
   afterEach(() => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
+    AndroidCtrlProxyClient.resetInstances();
   });
 
   test("an already aborted gesture dispatches no device command", async () => {

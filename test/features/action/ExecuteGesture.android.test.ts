@@ -25,6 +25,7 @@ describe("ExecuteGesture Android swipe", () => {
   afterEach(() => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
+    AndroidCtrlProxyClient.resetInstances();
   });
 
   const createGesture = () => new ExecuteGesture(androidDevice, fakeAdb);

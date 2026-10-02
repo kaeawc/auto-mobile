@@ -60,6 +60,7 @@ describe("DragAndDrop", () => {
   });
 
   beforeEach(() => {
+    AndroidCtrlProxyClient.removeInstance(device.deviceId);
     fakeObserveScreen = new FakeObserveScreen();
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeWindow = new FakeWindow();

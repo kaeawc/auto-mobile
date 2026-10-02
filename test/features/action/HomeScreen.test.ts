@@ -108,6 +108,7 @@ describe("HomeScreen", () => {
   afterEach(() => {
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
+    AndroidCtrlProxyClient.resetInstances();
   });
 
   function createIosHomeScreen(options?: {

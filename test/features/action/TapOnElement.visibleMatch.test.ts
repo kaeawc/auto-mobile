@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { ResolverElementSelector } from "../../../src/features/utility/ResolverElementSelector";
 import type {
   ElementSelectionResult,
@@ -12,6 +13,10 @@ import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { iosFormsSwitch } from "../../fixtures/observe/ios-forms-switch";
+
+afterEach(() => {
+  AndroidCtrlProxyClient.resetInstances();
+});
 
 const screen = { left: 0, top: 0, right: 402, bottom: 874 };
 const offscreenRow = { left: 16, top: 870, right: 386, bottom: 948 };

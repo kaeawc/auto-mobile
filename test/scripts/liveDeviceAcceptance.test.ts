@@ -81,6 +81,44 @@ const iosArgs: AcceptanceArgs = {
   androidConfig: undefined,
 };
 
+// Give nested fake calls and late-response observers time to progress between ticks.
+// The five deadline tests pass at 16 turns but fail at 8; 64 leaves a 4x margin
+// while keeping even the bounded hang path cheap (at most 201 x 64 turns).
+const FAKE_TIME_MICROTASK_TURNS = 64;
+
+async function settleWithFakeTime<T>(
+  timer: FakeTimer,
+  promise: Promise<T>,
+  options: { stepMs: number; maxSteps: number; label: string },
+): Promise<T> {
+  let outcome: { ok: true; value: T } | { ok: false; error: unknown } | undefined;
+  void promise.then(
+    (value) => {
+      outcome = { ok: true, value };
+    },
+    (error: unknown) => {
+      outcome = { ok: false, error };
+    },
+  );
+  for (let steps = 0; steps <= options.maxSteps; steps++) {
+    for (let turn = 0; turn < FAKE_TIME_MICROTASK_TURNS; turn++) {
+      await Promise.resolve();
+    }
+    if (outcome) {
+      if (!outcome.ok) {
+        throw outcome.error;
+      }
+      return outcome.value;
+    }
+    if (steps < options.maxSteps) {
+      timer.advanceTime(options.stepMs);
+    }
+  }
+  throw new Error(
+    `acceptance did not settle within ${options.maxSteps} fake-time steps (${options.label}, stepMs=${options.stepMs}, fakeNow=${timer.now()})`,
+  );
+}
+
 function restoreEnvironmentVariable(name: string, value: string | undefined): void {
   if (value === undefined) {
     delete process.env[name];
@@ -2028,17 +2066,16 @@ describe("live device acceptance harness", () => {
 
     await connectStarted.promise;
     // Drive the connection deadline and its reaping reserve on fake time.
-    // A missing cancellation fence fails through the test runner's timeout.
-    await expect(timer.resolvePromise(result)).rejects.toThrow(
-      "Acceptance deadline elapsed during provision MCP connect",
-    );
+    await expect(
+      // 20 x 500 ms covers the 10 s absolute budget, including all reserves.
+      settleWithFakeTime(timer, result, { stepMs: 500, maxSteps: 20, label: "MCP connect" }),
+    ).rejects.toThrow("Acceptance deadline elapsed during provision MCP connect");
     expect(aborted).toBe(true);
     expect(timer.now()).toBeLessThanOrEqual(10_000);
   });
 
   test("returns by the deadline when a late session-bearing response ignores abort", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     const harness = createHarness();
     const createMcpClient = harness.dependencies.createMcpClient!;
     const lateResponse = Promise.withResolvers<{ structuredContent: Record<string, unknown> }>();
@@ -2072,7 +2109,14 @@ describe("live device acceptance harness", () => {
     };
 
     const result = runAcceptanceMatrix({ ...iosArgs, timeoutMs: 100 }, harness.dependencies);
-    await expect(result).rejects.toThrow(
+    await expect(
+      // One-ms steps preserve the 100 ms deadline assertion and small reap slices.
+      settleWithFakeTime(timer, result, {
+        stepMs: 1,
+        maxSteps: 200,
+        label: "late session response",
+      }),
+    ).rejects.toThrow(
       "Acceptance deadline elapsed during controlled-discovery-forward-exact-uuid-selection getApple",
     );
     expect(aborted).toBe(true);
@@ -2090,7 +2134,9 @@ describe("live device acceptance harness", () => {
         },
       },
     });
-    await Promise.resolve();
+    for (let turn = 0; turn < FAKE_TIME_MICROTASK_TURNS; turn++) {
+      await Promise.resolve();
+    }
     expect(daemonConnections).toBe(0);
     expect(harness.releases).not.toContain("late-session");
   });
@@ -2098,7 +2144,6 @@ describe("live device acceptance harness", () => {
   test("uses the evidence reserve and abort signal so a late writer cannot turn timeout into success", async () => {
     const started = Promise.withResolvers<void>();
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     let lateSuccess = false;
     const harness = createHarness({
       writeFile: async (_path, _content, signal) => {
@@ -2113,11 +2158,14 @@ describe("live device acceptance harness", () => {
     harness.dependencies.skipCoordinateAcceptance = true;
 
     const result = runAcceptanceMatrix({ ...androidArgs, timeoutMs: 100 }, harness.dependencies);
-    const rejection = expect(result).rejects.toThrow(
-      "Acceptance deadline elapsed during evidence write",
-    );
-    await started.promise;
-    await rejection;
+    await expect(
+      settleWithFakeTime(timer, result, { stepMs: 1, maxSteps: 200, label: "evidence write" }),
+    ).rejects.toThrow("Acceptance deadline elapsed during evidence write");
+    await settleWithFakeTime(timer, started.promise, {
+      stepMs: 0,
+      maxSteps: 0,
+      label: "evidence writer started",
+    });
     expect(lateSuccess).toBe(false);
   });
 
@@ -2564,13 +2612,17 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
 
   test("reports a coordinate client that remains unresolved after deadline", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
 
     await expect(
-      runTapAtReliabilityLoop(coordinateArgs("android", { timeoutMs: 100 }), {
+      // Cover the 100 ms deadline plus the 1,000 ms late-client close reserve.
+      settleWithFakeTime(
         timer,
-        createMcpClient: async () => await new Promise<McpSessionClient>(() => {}),
-      }),
+        runTapAtReliabilityLoop(coordinateArgs("android", { timeoutMs: 100 }), {
+          timer,
+          createMcpClient: async () => await new Promise<McpSessionClient>(() => {}),
+        }),
+        { stepMs: 100, maxSteps: 20, label: "unresolved coordinate client" },
+      ),
     ).rejects.toThrow("failed and client cleanup also failed");
   });
 
@@ -2618,7 +2670,6 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
 
   test("restores orientation with a fresh cleanup signal after deadline abort", async () => {
     const timer = new FakeTimer();
-    timer.enableAutoAdvance();
     let orientation: "portrait" | "landscape" = "portrait";
     const rotateRequests: Array<Record<string, unknown>> = [];
     const client: McpSessionClient = {
@@ -2651,10 +2702,15 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
     };
 
     await expect(
-      runTapAtReliabilityLoop(coordinateArgs("android", { timeoutMs: 1_000 }), {
-        ...coordinateDependencies(client),
+      // Cover the 1 s deadline, 5 s restoration, and 1 s close reserves.
+      settleWithFakeTime(
         timer,
-      }),
+        runTapAtReliabilityLoop(coordinateArgs("android", { timeoutMs: 1_000 }), {
+          ...coordinateDependencies(client),
+          timer,
+        }),
+        { stepMs: 50, maxSteps: 160, label: "orientation restoration" },
+      ),
     ).rejects.toThrow("Coordinate acceptance deadline elapsed");
     expect(rotateRequests.at(-1)).toMatchObject({
       orientation: "portrait",

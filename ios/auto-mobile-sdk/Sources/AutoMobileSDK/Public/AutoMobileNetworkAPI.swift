@@ -9,7 +9,7 @@ public protocol AutoMobileNetworkAPI: AnyObject, Sendable {
 }
 
 /// Default implementation of `AutoMobileNetworkAPI` backed by `AutoMobileNetwork.shared`.
-public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked Sendable {
+public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, Sendable {
     private let network = AutoMobileNetwork.shared
 
     public init() {}

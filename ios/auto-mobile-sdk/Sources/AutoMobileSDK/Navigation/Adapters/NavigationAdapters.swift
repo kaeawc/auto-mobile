@@ -1,12 +1,16 @@
 import Foundation
+import os
 
 /// Shared opt-in event sink for adapters that must coexist with host routers.
-public final class NavigationAdapterHub: @unchecked Sendable {
+public final class NavigationAdapterHub: Sendable {
     public static let shared = NavigationAdapterHub()
 
-    private let lock = NSLock()
-    private var activeOwners: Set<String> = []
-    private var _factory = NavigationEventFactory()
+    private struct State: Sendable {
+        var activeOwners: Set<String> = []
+        var factory = NavigationEventFactory()
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private init() {}
 
     public var isActive: Bool {
@@ -14,22 +18,23 @@ public final class NavigationAdapterHub: @unchecked Sendable {
     }
 
     public func isActive(owner: String?) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        if let owner {
-            return activeOwners.contains(owner)
+        state.withLock { state in
+            if let owner {
+                return state.activeOwners.contains(owner)
+            }
+            return !state.activeOwners.isEmpty
         }
-        return !activeOwners.isEmpty
     }
 
     public func start(owner: String = "default", redactor: any NavigationDataRedacting = NoOpNavigationRedactor()) {
-        lock.lock()
-        _factory = NavigationEventFactory(redactor: redactor)
-        activeOwners.insert(owner)
-        lock.unlock()
+        state.withLock { state in
+            state.factory = NavigationEventFactory(redactor: redactor)
+            state.activeOwners.insert(owner)
+        }
     }
 
     public func stop(owner: String = "default") {
-        lock.lock(); activeOwners.remove(owner); lock.unlock()
+        state.withLock { _ = $0.activeOwners.remove(owner) }
     }
 
     public func record(
@@ -43,10 +48,9 @@ public final class NavigationAdapterHub: @unchecked Sendable {
         arguments: [String: String] = [:],
         metadata: [String: String] = [:]
     ) {
-        lock.lock()
-        let active = activeOwners.contains(owner)
-        let factory = _factory
-        lock.unlock()
+        let (active, factory) = state.withLock { state in
+            (state.activeOwners.contains(owner), state.factory)
+        }
         guard active, transitionCompleted else { return }
         AutoMobileSDK.shared.notifyNavigationEvent(factory.make(
             destination: destination,
@@ -62,7 +66,7 @@ public final class NavigationAdapterHub: @unchecked Sendable {
 }
 
 /// Adapter for routers, universal links, notifications, and state restoration.
-public final class DeepLinkNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable {
+public final class DeepLinkNavigationAdapter: NavigationFrameworkAdapter, Sendable {
     public static let shared = DeepLinkNavigationAdapter()
     private init() {}
     public var isActive: Bool { NavigationAdapterHub.shared.isActive(owner: "deep_link") }
@@ -85,7 +89,7 @@ public final class DeepLinkNavigationAdapter: NavigationFrameworkAdapter, @unche
 }
 
 /// Adapter for application-owned routers that do not use UIKit or SwiftUI.
-public final class CustomNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable {
+public final class CustomNavigationAdapter: NavigationFrameworkAdapter, Sendable {
     public static let shared = CustomNavigationAdapter()
     private init() {}
     public var isActive: Bool { NavigationAdapterHub.shared.isActive(owner: "custom") }
@@ -111,54 +115,90 @@ public final class CustomNavigationAdapter: NavigationFrameworkAdapter, @uncheck
 }
 
 #if canImport(UIKit) && !os(watchOS)
-import UIKit
+    import UIKit
 
-/// UIKit lifecycle adapter. Hosts call these hooks from their existing delegates;
-/// no global swizzling or delegate replacement is performed.
-public final class UIKitNavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable {
-    public static let shared = UIKitNavigationAdapter()
-    private init() {}
-    public var isActive: Bool { NavigationAdapterHub.shared.isActive(owner: "uikit") }
-    public func start() { NavigationAdapterHub.shared.start(owner: "uikit") }
-    public func stop() { NavigationAdapterHub.shared.stop(owner: "uikit") }
+    /// UIKit lifecycle adapter. Hosts call these hooks from their existing delegates;
+    /// no global swizzling or delegate replacement is performed.
+    public final class UIKitNavigationAdapter: NavigationFrameworkAdapter, Sendable {
+        public static let shared = UIKitNavigationAdapter()
+        private init() {}
+        public var isActive: Bool { NavigationAdapterHub.shared.isActive(owner: "uikit") }
+        public func start() { NavigationAdapterHub.shared.start(owner: "uikit") }
+        public func stop() { NavigationAdapterHub.shared.stop(owner: "uikit") }
 
-    public func recordPush(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true) {
-        record(viewController, sceneIdentifier: sceneIdentifier, metadata: ["transition": "push"], completed: completed)
+        public func recordPush(
+            _ viewController: UIViewController,
+            sceneIdentifier: String? = nil,
+            completed: Bool = true
+        ) {
+            record(
+                viewController,
+                sceneIdentifier: sceneIdentifier,
+                metadata: ["transition": "push"],
+                completed: completed
+            )
+        }
+
+        public func recordPop(
+            _ viewController: UIViewController,
+            sceneIdentifier: String? = nil,
+            completed: Bool = true
+        ) {
+            record(
+                viewController,
+                sceneIdentifier: sceneIdentifier,
+                metadata: ["transition": "pop"],
+                completed: completed
+            )
+        }
+
+        public func recordPresentation(
+            _ viewController: UIViewController,
+            sceneIdentifier: String? = nil,
+            completed: Bool = true
+        ) {
+            record(
+                viewController,
+                sceneIdentifier: sceneIdentifier,
+                metadata: ["transition": "presentation"],
+                completed: completed
+            )
+        }
+
+        public func recordTabSelection(_ viewController: UIViewController, sceneIdentifier: String? = nil) {
+            record(viewController, sceneIdentifier: sceneIdentifier, metadata: ["transition": "tab"])
+        }
+
+        public func recordSplitColumn(
+            _ viewController: UIViewController,
+            column: String,
+            sceneIdentifier: String? = nil
+        ) {
+            record(
+                viewController,
+                sceneIdentifier: sceneIdentifier,
+                metadata: ["transition": "split", "column": column]
+            )
+        }
+
+        private func record(
+            _ viewController: UIViewController,
+            sceneIdentifier: String?,
+            metadata: [String: String],
+            completed: Bool = true
+        ) {
+            let destination = String(describing: type(of: viewController))
+            NavigationAdapterHub.shared.record(
+                owner: "uikit",
+                destination: destination,
+                source: .uiKitNavigation,
+                identity: NavigationScreenIdentity(route: destination),
+                sceneIdentifier: sceneIdentifier ?? viewController.viewIfLoaded?.window?.windowScene?.session
+                    .persistentIdentifier,
+                transitionIdentifier: UUID().uuidString,
+                transitionCompleted: completed,
+                metadata: metadata
+            )
+        }
     }
-
-    public func recordPop(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true) {
-        record(viewController, sceneIdentifier: sceneIdentifier, metadata: ["transition": "pop"], completed: completed)
-    }
-
-    public func recordPresentation(_ viewController: UIViewController, sceneIdentifier: String? = nil, completed: Bool = true) {
-        record(viewController, sceneIdentifier: sceneIdentifier, metadata: ["transition": "presentation"], completed: completed)
-    }
-
-    public func recordTabSelection(_ viewController: UIViewController, sceneIdentifier: String? = nil) {
-        record(viewController, sceneIdentifier: sceneIdentifier, metadata: ["transition": "tab"])
-    }
-
-    public func recordSplitColumn(_ viewController: UIViewController, column: String, sceneIdentifier: String? = nil) {
-        record(viewController, sceneIdentifier: sceneIdentifier, metadata: ["transition": "split", "column": column])
-    }
-
-    private func record(
-        _ viewController: UIViewController,
-        sceneIdentifier: String?,
-        metadata: [String: String],
-        completed: Bool = true
-    ) {
-        let destination = String(describing: type(of: viewController))
-        NavigationAdapterHub.shared.record(
-            owner: "uikit",
-            destination: destination,
-            source: .uiKitNavigation,
-            identity: NavigationScreenIdentity(route: destination),
-            sceneIdentifier: sceneIdentifier ?? viewController.viewIfLoaded?.window?.windowScene?.session.persistentIdentifier,
-            transitionIdentifier: UUID().uuidString,
-            transitionCompleted: completed,
-            metadata: metadata
-        )
-    }
-}
 #endif

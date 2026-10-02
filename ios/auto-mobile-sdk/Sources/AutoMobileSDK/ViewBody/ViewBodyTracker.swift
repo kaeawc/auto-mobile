@@ -1,18 +1,22 @@
 import Foundation
+import os
 import SwiftUI
 
 /// Tracks SwiftUI view body evaluations.
 /// iOS equivalent of Android's RecompositionTracker for Compose.
-public final class ViewBodyTracker: @unchecked Sendable {
+public final class ViewBodyTracker: Sendable {
     public static let shared = ViewBodyTracker()
 
-    private let lock = NSLock()
-    private var entries: [String: Entry] = [:]
-    private var _isEnabled = false
-    private var buffer: SdkEventBuffer?
-    private var snapshotTimer: (any TimerScheduling)?
-    private let snapshotIntervalMs: Int = 1000
-    private var dateProvider: DateProvider = SystemDateProvider()
+    private struct State: Sendable {
+        var entries: [String: Entry] = [:]
+        var isEnabled = false
+        var buffer: SdkEventBuffer?
+        var snapshotTimer: (any TimerScheduling)?
+        var dateProvider: DateProvider = SystemDateProvider()
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let snapshotIntervalMs = 1000
 
     /// Upper bound on tracked entries. Apps may use per-instance ids (e.g.
     /// `trackViewBody(id: item.uuid)` over a long/paginated feed), which would
@@ -25,17 +29,15 @@ public final class ViewBodyTracker: @unchecked Sendable {
     private init() {}
 
     func initialize(buffer: SdkEventBuffer, dateProvider: DateProvider = SystemDateProvider()) {
-        lock.lock()
-        self.buffer = buffer
-        self.dateProvider = dateProvider
-        lock.unlock()
+        state.withLock { state in
+            state.buffer = buffer
+            state.dateProvider = dateProvider
+        }
     }
 
     /// Whether tracking is enabled.
     public var isEnabled: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isEnabled
+        state.withLock { $0.isEnabled }
     }
 
     /// Enable or disable tracking.
@@ -44,23 +46,22 @@ public final class ViewBodyTracker: @unchecked Sendable {
     }
 
     /// Enable or disable tracking with an injectable timer factory (internal for testing).
-    func setEnabled(_ enabled: Bool, timerFactory: (() -> any TimerScheduling)?) {
-        lock.lock()
-        _isEnabled = enabled
+    func setEnabled(_ enabled: Bool, timerFactory: (@Sendable () -> any TimerScheduling)?) {
+        let timerToSchedule = state.withLock { state -> (any TimerScheduling)? in
+            state.isEnabled = enabled
 
-        if enabled && snapshotTimer == nil {
-            let timer = timerFactory?() ?? GCDTimer()
-            snapshotTimer = timer
-            lock.unlock()
-            timer.schedule(intervalMs: snapshotIntervalMs) { [weak self] in
-                self?.broadcastSnapshot()
+            if enabled && state.snapshotTimer == nil {
+                let timer = timerFactory?() ?? GCDTimer()
+                state.snapshotTimer = timer
+                return timer
+            } else if !enabled {
+                state.snapshotTimer?.cancel()
+                state.snapshotTimer = nil
             }
-        } else if !enabled {
-            snapshotTimer?.cancel()
-            snapshotTimer = nil
-            lock.unlock()
-        } else {
-            lock.unlock()
+            return nil
+        }
+        timerToSchedule?.schedule(intervalMs: snapshotIntervalMs) { [weak self] in
+            self?.broadcastSnapshot()
         }
     }
 
@@ -71,34 +72,34 @@ public final class ViewBodyTracker: @unchecked Sendable {
     ) {
         guard isEnabled else { return }
 
-        lock.lock()
-        let entry = entries[id] ?? Entry(id: id, viewName: viewName)
-        var updated = entry
-        updated.totalCount += 1
-        let now = dateProvider.now().timeIntervalSince1970
-        updated.lastUpdated = now
-        updated.recentTimestamps.append(now)
-        // Keep only timestamps from the last second for rolling average
-        let cutoff = now - 1.0
-        updated.recentTimestamps.removeAll { $0 < cutoff }
-        entries[id] = updated
-        enforceEntryCapLocked()
-        lock.unlock()
+        state.withLock { state in
+            let entry = state.entries[id] ?? Entry(id: id, viewName: viewName)
+            var updated = entry
+            updated.totalCount += 1
+            let now = state.dateProvider.now().timeIntervalSince1970
+            updated.lastUpdated = now
+            updated.recentTimestamps.append(now)
+            // Keep only timestamps from the last second for rolling average
+            let cutoff = now - 1.0
+            updated.recentTimestamps.removeAll { $0 < cutoff }
+            state.entries[id] = updated
+            enforceEntryCapLocked(&state)
+        }
     }
 
     /// Evict least-recently-updated entries once the cap is exceeded, down to a
     /// low-water mark so this scan runs at most once per `evictionBatch` inserts.
-    /// Must be called with `lock` held.
-    private func enforceEntryCapLocked() {
-        guard entries.count > maxEntries else { return }
+    /// Must be called with `state` locked.
+    private func enforceEntryCapLocked(_ state: inout State) {
+        guard state.entries.count > maxEntries else { return }
         let target = maxEntries - evictionBatch
-        let removeCount = entries.count - target
-        let oldestKeys = entries
+        let removeCount = state.entries.count - target
+        let oldestKeys = state.entries
             .sorted { $0.value.lastUpdated < $1.value.lastUpdated }
             .prefix(removeCount)
             .map { $0.key }
         for key in oldestKeys {
-            entries.removeValue(forKey: key)
+            state.entries.removeValue(forKey: key)
         }
     }
 
@@ -106,23 +107,19 @@ public final class ViewBodyTracker: @unchecked Sendable {
     public func recordDuration(id: String, durationMs: Double) {
         guard isEnabled else { return }
 
-        lock.lock()
-        guard var entry = entries[id] else {
-            lock.unlock()
-            return
+        state.withLock { state in
+            guard var entry = state.entries[id] else { return }
+            entry.totalDurationMs += durationMs
+            entry.durationCount += 1
+            state.entries[id] = entry
         }
-        entry.totalDurationMs += durationMs
-        entry.durationCount += 1
-        entries[id] = entry
-        lock.unlock()
     }
 
     /// Get current snapshots.
     public func getSnapshots() -> [ViewBodySnapshot] {
-        lock.lock()
-        let currentEntries = entries
-        let currentDateProvider = dateProvider
-        lock.unlock()
+        let (currentEntries, currentDateProvider) = state.withLock { state in
+            (state.entries, state.dateProvider)
+        }
 
         return currentEntries.values.map { entry in
             let cutoff = currentDateProvider.now().timeIntervalSince1970 - 1.0
@@ -147,36 +144,34 @@ public final class ViewBodyTracker: @unchecked Sendable {
         guard !snapshots.isEmpty else { return }
 
         let event = SdkViewBodySnapshotEvent(snapshots: snapshots)
-        lock.lock()
-        let currentBuffer = buffer
-        lock.unlock()
+        let currentBuffer = state.withLock { $0.buffer }
         currentBuffer?.add(event)
     }
 
     // MARK: - Testing Support
 
-    internal func reset() {
-        lock.lock()
-        snapshotTimer?.cancel()
-        snapshotTimer = nil
-        entries.removeAll()
-        _isEnabled = false
-        buffer = nil
-        dateProvider = SystemDateProvider()
-        lock.unlock()
+    func reset() {
+        state.withLock { state in
+            state.snapshotTimer?.cancel()
+            state.snapshotTimer = nil
+            state.entries.removeAll()
+            state.isEnabled = false
+            state.buffer = nil
+            state.dateProvider = SystemDateProvider()
+        }
     }
 }
 
 // MARK: - Entry
 
 extension ViewBodyTracker {
-    struct Entry {
+    struct Entry: Sendable {
         let id: String
         let viewName: String?
-        var totalCount: Int = 0
+        var totalCount = 0
         var recentTimestamps: [TimeInterval] = []
         var totalDurationMs: Double = 0
-        var durationCount: Int = 0
+        var durationCount = 0
         /// Timestamp of the most recent body evaluation, used for LRU eviction.
         var lastUpdated: TimeInterval = 0
     }
@@ -195,9 +190,9 @@ public struct TrackViewBodyModifier: ViewModifier {
     }
 }
 
-public extension View {
+extension View {
     /// Track body evaluations of this view.
-    func trackViewBody(id: String, viewName: String? = nil) -> some View {
+    public func trackViewBody(id: String, viewName: String? = nil) -> some View {
         modifier(TrackViewBodyModifier(id: id, viewName: viewName))
     }
 }

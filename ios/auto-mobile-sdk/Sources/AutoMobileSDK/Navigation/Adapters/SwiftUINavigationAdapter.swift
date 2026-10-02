@@ -1,34 +1,28 @@
 import Foundation
+import os
 import SwiftUI
 
 /// Adapter for tracking SwiftUI NavigationStack/NavigationPath navigation events.
 /// iOS equivalent of Android's Navigation3Adapter.
-public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchecked Sendable {
+public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, Sendable {
     public static let shared = SwiftUINavigationAdapter()
 
-    private let lock = NSLock()
-    private var _isActive = false
+    private let active = OSAllocatedUnfairLock(initialState: false)
 
     public var isActive: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _isActive && NavigationAdapterHub.shared.isActive(owner: "swiftui")
+        active.withLock { $0 && NavigationAdapterHub.shared.isActive(owner: "swiftui") }
     }
 
     private init() {}
 
     public func start() {
         NavigationAdapterHub.shared.start(owner: "swiftui")
-        lock.lock()
-        _isActive = true
-        lock.unlock()
+        active.withLock { $0 = true }
     }
 
     public func stop() {
         NavigationAdapterHub.shared.stop(owner: "swiftui")
-        lock.lock()
-        _isActive = false
-        lock.unlock()
+        active.withLock { $0 = false }
     }
 
     /// Manually track a navigation event.
@@ -49,21 +43,36 @@ public final class SwiftUINavigationAdapter: NavigationFrameworkAdapter, @unchec
     }
 
     public func trackSheet(destination: String, sceneIdentifier: String? = nil, metadata: [String: String] = [:]) {
-        NavigationAdapterHub.shared.record(owner: "swiftui", destination: destination, source: .swiftUINavigation,
-            identity: NavigationScreenIdentity(route: destination), sceneIdentifier: sceneIdentifier,
-            metadata: metadata.merging(["transition": "sheet"]) { _, new in new })
+        NavigationAdapterHub.shared.record(
+            owner: "swiftui",
+            destination: destination,
+            source: .swiftUINavigation,
+            identity: NavigationScreenIdentity(route: destination),
+            sceneIdentifier: sceneIdentifier,
+            metadata: metadata.merging(["transition": "sheet"]) { _, new in new }
+        )
     }
 
     public func trackTab(destination: String, sceneIdentifier: String? = nil) {
-        NavigationAdapterHub.shared.record(owner: "swiftui", destination: destination, source: .swiftUINavigation,
-            identity: NavigationScreenIdentity(route: destination), sceneIdentifier: sceneIdentifier,
-            metadata: ["transition": "tab"])
+        NavigationAdapterHub.shared.record(
+            owner: "swiftui",
+            destination: destination,
+            source: .swiftUINavigation,
+            identity: NavigationScreenIdentity(route: destination),
+            sceneIdentifier: sceneIdentifier,
+            metadata: ["transition": "tab"]
+        )
     }
 
     public func trackSplitColumn(destination: String, column: String, sceneIdentifier: String? = nil) {
-        NavigationAdapterHub.shared.record(owner: "swiftui", destination: destination, source: .swiftUINavigation,
-            identity: NavigationScreenIdentity(route: destination), sceneIdentifier: sceneIdentifier,
-            metadata: ["transition": "split", "column": column])
+        NavigationAdapterHub.shared.record(
+            owner: "swiftui",
+            destination: destination,
+            source: .swiftUINavigation,
+            identity: NavigationScreenIdentity(route: destination),
+            sceneIdentifier: sceneIdentifier,
+            metadata: ["transition": "split", "column": column]
+        )
     }
 }
 
@@ -86,13 +95,15 @@ public struct TrackNavigationModifier: ViewModifier {
     }
 }
 
-public extension View {
+extension View {
     /// Track navigation to this view using the SwiftUI navigation adapter.
-    func trackNavigation(
+    public func trackNavigation(
         destination: String,
         arguments: [String: String] = [:],
         metadata: [String: String] = [:]
-    ) -> some View {
+    )
+        -> some View
+    {
         modifier(TrackNavigationModifier(
             destination: destination,
             arguments: arguments,

@@ -75,6 +75,7 @@ internal constructor(
   internal val stats: CtrlProxyWorkStats = CtrlProxyWorkStats(),
   private val beforeDebounceLock: () -> Unit = {},
   private val beforeDebounceCompletion: () -> Unit = {},
+  private val onDiscardedHierarchy: (ViewHierarchy) -> Unit = {},
   private val extractHierarchy:
     (disableAllFiltering: Boolean, snapshotOptions: HierarchySnapshotOptions) -> ViewHierarchy?,
 ) {
@@ -92,7 +93,7 @@ internal constructor(
   /*
    * Threading (#6447): this class is driven from the AccessibilityService main thread
    * (onAccessibilityEvent), the injected IO scope (debounced and immediate extractions) and caller
-   * threads (extractNowBlocking/extractAfterQuiescence/reset). Every field below is guarded by
+   * threads (extractImmediately/extractAfterQuiescence/reset). Every field below is guarded by
    * [eventLock], a short lock that is never held across extractHierarchy. [extractionLock] serializes
    * whole extractions; when both are needed the order is always extractionLock -> eventLock.
    */
@@ -241,16 +242,16 @@ internal constructor(
   }
 
   /**
-   * Perform an immediate extraction and wait for it to complete (blocking). This ensures the
-   * hierarchy is extracted and pushed before returning. Use this when you need to guarantee the
-   * hierarchy is fresh before sending a result.
+   * Perform an immediate extraction in the caller coroutine and wait for it to complete. This
+   * ensures the hierarchy is extracted and pushed before returning. Use this when you need to
+   * guarantee the hierarchy is fresh before sending a result.
    *
    * @param skipFlowEmit If true, skips emitting to the flow. Use this when the caller will
    *   broadcast the hierarchy directly to avoid race conditions with flow-based async broadcasts.
    * @param disableAllFiltering If true, disables filtering/optimization for this extraction.
    * @return The extracted hierarchy, or null if extraction failed.
    */
-  fun extractNowBlocking(
+  suspend fun extractImmediately(
     skipFlowEmit: Boolean = false,
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
@@ -263,13 +264,11 @@ internal constructor(
         pendingRefresh = false
       }
     }
-    return kotlinx.coroutines.runBlocking {
-      extractAndCompare(
-        skipFlowEmit = skipFlowEmit,
-        disableAllFiltering = disableAllFiltering,
-        snapshotOptions = snapshotOptions,
-      )
-    }
+    return extractAndCompare(
+      skipFlowEmit = skipFlowEmit,
+      disableAllFiltering = disableAllFiltering,
+      snapshotOptions = snapshotOptions,
+    )
   }
 
   /**
@@ -289,6 +288,27 @@ internal constructor(
    * @return The extracted hierarchy, or null if extraction failed.
    */
   fun extractAfterQuiescence(
+    quiescenceMs: Long = HierarchyQuiescence.POLL_MS,
+    maxWaitMs: Long = HierarchyQuiescence.TIMEOUT_MS,
+    pollIntervalMs: Long = 10L,
+    initialEventWaitMs: Long = 200L, // Max time to wait for first event
+    snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
+  ): ViewHierarchy? {
+    return kotlinx.coroutines.runBlocking {
+      extractAfterQuiescenceSuspending(
+        quiescenceMs,
+        maxWaitMs,
+        pollIntervalMs,
+        initialEventWaitMs,
+        snapshotOptions,
+      )
+    }
+  }
+
+  /**
+   * Suspend core; suppression remains held across polling suspension and releases on cancellation.
+   */
+  suspend fun extractAfterQuiescenceSuspending(
     quiescenceMs: Long = HierarchyQuiescence.POLL_MS,
     maxWaitMs: Long = HierarchyQuiescence.TIMEOUT_MS,
     pollIntervalMs: Long = 10L,
@@ -316,71 +336,68 @@ internal constructor(
         inAnimationMode = false
       }
 
-      val hierarchy =
-        kotlinx.coroutines.runBlocking {
-          // PHASE 1: Wait for at least one new accessibility event to fire
-          // This is critical because ACTION_SET_TEXT completes before the accessibility
-          // tree is updated. The tree update triggers TYPE_WINDOW_CONTENT_CHANGED events.
-          var sawFirstEvent = false
-          while (!sawFirstEvent) {
-            val now = timeProvider.currentTimeMillis()
-            val elapsed = now - startTime
+      // PHASE 1: Wait for at least one new accessibility event to fire
+      // This is critical because ACTION_SET_TEXT completes before the accessibility
+      // tree is updated. The tree update triggers TYPE_WINDOW_CONTENT_CHANGED events.
+      var sawFirstEvent = false
+      while (!sawFirstEvent) {
+        val now = timeProvider.currentTimeMillis()
+        val elapsed = now - startTime
 
-            // Check if we've exceeded initial event wait time
-            if (elapsed >= initialEventWaitMs) {
-              Log.d(TAG, "extractAfterQuiescence: no events after ${elapsed}ms, proceeding anyway")
-              break
-            }
-
-            // Check if a new event has fired since we started
-            if (lastEventTimestamp != initialTimestamp) {
-              Log.d(TAG, "extractAfterQuiescence: first event detected after ${elapsed}ms")
-              sawFirstEvent = true
-              break
-            }
-
-            delay(pollIntervalMs)
-          }
-
-          // PHASE 2: Wait for quiescence (no events for quiescenceMs)
-          var lastCheckedTimestamp = lastEventTimestamp
-
-          while (true) {
-            val now = timeProvider.currentTimeMillis()
-            val elapsed = now - startTime
-            val timeSinceLastEvent = now - lastEventTimestamp
-
-            // Check if we've exceeded max wait time
-            if (elapsed >= maxWaitMs) {
-              Log.w(
-                TAG,
-                "extractAfterQuiescence: max wait time exceeded (${elapsed}ms); hierarchy may be stale",
-              )
-              break
-            }
-
-            // Check if we've achieved quiescence
-            if (timeSinceLastEvent >= quiescenceMs) {
-              Log.d(
-                TAG,
-                "extractAfterQuiescence: quiescence achieved after ${elapsed}ms (no events for ${timeSinceLastEvent}ms)",
-              )
-              break
-            }
-
-            // Log if new event was detected
-            if (lastEventTimestamp != lastCheckedTimestamp) {
-              Log.d(TAG, "extractAfterQuiescence: new event detected, resetting quiescence timer")
-              lastCheckedTimestamp = lastEventTimestamp
-            }
-
-            // Wait before checking again
-            delay(pollIntervalMs)
-          }
-
-          // Now extract the hierarchy
-          extractAndCompare(skipFlowEmit = true, snapshotOptions = snapshotOptions)
+        // Check if we've exceeded initial event wait time
+        if (elapsed >= initialEventWaitMs) {
+          Log.d(TAG, "extractAfterQuiescence: no events after ${elapsed}ms, proceeding anyway")
+          break
         }
+
+        // Check if a new event has fired since we started
+        if (lastEventTimestamp != initialTimestamp) {
+          Log.d(TAG, "extractAfterQuiescence: first event detected after ${elapsed}ms")
+          sawFirstEvent = true
+          break
+        }
+
+        delay(pollIntervalMs)
+      }
+
+      // PHASE 2: Wait for quiescence (no events for quiescenceMs)
+      var lastCheckedTimestamp = lastEventTimestamp
+
+      while (true) {
+        val now = timeProvider.currentTimeMillis()
+        val elapsed = now - startTime
+        val timeSinceLastEvent = now - lastEventTimestamp
+
+        // Check if we've exceeded max wait time
+        if (elapsed >= maxWaitMs) {
+          Log.w(
+            TAG,
+            "extractAfterQuiescence: max wait time exceeded (${elapsed}ms); hierarchy may be stale",
+          )
+          break
+        }
+
+        // Check if we've achieved quiescence
+        if (timeSinceLastEvent >= quiescenceMs) {
+          Log.d(
+            TAG,
+            "extractAfterQuiescence: quiescence achieved after ${elapsed}ms (no events for ${timeSinceLastEvent}ms)",
+          )
+          break
+        }
+
+        // Log if new event was detected
+        if (lastEventTimestamp != lastCheckedTimestamp) {
+          Log.d(TAG, "extractAfterQuiescence: new event detected, resetting quiescence timer")
+          lastCheckedTimestamp = lastEventTimestamp
+        }
+
+        // Wait before checking again
+        delay(pollIntervalMs)
+      }
+
+      // Now extract the hierarchy
+      val hierarchy = extractAndCompare(skipFlowEmit = true, snapshotOptions = snapshotOptions)
 
       val totalWait = timeProvider.currentTimeMillis() - startTime
       Log.d(TAG, "extractAfterQuiescence: completed in ${totalWait}ms")
@@ -430,7 +447,13 @@ internal constructor(
         val hierarchy = extractHierarchy(disableAllFiltering, snapshotOptions)
         perfProvider.endOperation("extractHierarchy")
 
-        if (hierarchy == null) {
+        if (snapshotOptions.isCancelled()) {
+          // A cancelled walk can return a truncated tree. Preserve the previous hash/cache and
+          // emit nothing; the next live capture must compare against the last complete snapshot.
+          Log.d(TAG, "Discarding cancelled hierarchy extraction")
+          // Release per-extraction resources even when cancellation wins after the walk returns.
+          hierarchy?.let(onDiscardedHierarchy)
+        } else if (hierarchy == null) {
           // Set the Error and fall through to the emit below. A `return` here would
           // unwind through `finally` and exit the function, skipping the emit block
           // so consumers never saw the Error (#3608).

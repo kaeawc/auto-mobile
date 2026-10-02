@@ -94,6 +94,8 @@ import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
+import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
+import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
@@ -112,11 +114,14 @@ import kotlin.coroutines.resume
 import kotlin.math.max
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -269,7 +274,7 @@ internal fun advancesFrameContext(eventType: Int): Boolean =
  * client ever consumes, so with zero observers they are skipped entirely. The `frameContext`
  * staleness token is NOT gated here (see [advancesFrameContext]); it keeps advancing regardless.
  *
- * This does NOT govern the on-demand PULL path (`request_hierarchy` → `extractNowBlocking`): that
+ * This does NOT govern the on-demand PULL path (`request_hierarchy` → `extractImmediately`): that
  * extracts the live accessibility tree directly and reads none of the push-path side effects
  * (frameContext counter, debouncer hash/cache), so it stays fully correct with zero prior push
  * activity and zero observers. Gating is race-tolerant by design — the count may change between
@@ -1441,6 +1446,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           animationSkipWindowMs = 100L,
           unsolicitedIntervalMs = DEFAULT_HIERARCHY_BROADCAST_INTERVAL_MS,
           stats = workStats,
+          onDiscardedHierarchy = { extractedHierarchyFrameContexts.remove(it) },
           extractHierarchy = { disableAllFiltering, snapshotOptions ->
             extractHierarchyDirect(disableAllFiltering, snapshotOptions)
           },
@@ -1519,18 +1525,13 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           }
           .launchIn(serviceScope)
 
-      // Start the WebSocket server. This service implements CtrlProxyActions, so inbound requests
-      // are dispatched straight to its perform*/handle* methods via CtrlProxyMessageHandler.
+      // Keep inbound blocking work off Ktor's read loops, preserving each connection's wire order.
       try {
         webSocketServer =
           WebSocketServer(
             port = 8765,
             scope = serviceScope,
-            messageHandler =
-              CtrlProxyMessageHandler(
-                actions = this,
-                log = { message -> Log.w(TAG, message) },
-              ),
+            messageHandler = queuedMessageHandler(),
             onPermanentStartFailure = { disableSelf() },
           )
         webSocketLifecycle.replace(webSocketServer)
@@ -1733,10 +1734,63 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // Each method delegates to the corresponding perform*/handle* implementation below.
   // ===========================================================================
 
-  override fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
+  internal fun queuedMessageHandler(
+    delegate: WebSocketMessageHandler =
+      CtrlProxyMessageHandler(actions = this, log = { Log.w(TAG, it) }),
+    scope: CoroutineScope = serviceScope,
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
+  ): QueuedWebSocketMessageHandler {
+    val commands =
+      ConnectionCommandQueue<Job>(
+        scope = scope,
+        dispatcher = dispatcher,
+        delegate = delegate,
+        reply = ::replyToQueuedCommand,
+        hasRequestOwner = { requestId ->
+          ::webSocketServer.isInitialized &&
+            webSocketServer.isRunning() &&
+            webSocketServer.hasRequestOwner(requestId)
+        },
+        logError = { message, error -> Log.e(TAG, message, error) },
+        logWarning = { message -> Log.w(TAG, message) },
+        logDebug = { message -> Log.d(TAG, message) },
+      )
+    return QueuedWebSocketMessageHandler(delegate, commands)
+  }
+
+  /**
+   * Ownership policy is fixed at enqueue time, never inferred after a terminal reply/disconnect.
+   * Unowned handler errors and busy rejections must currently use the external broadcast fallback:
+   * follow-up: pass the originating client into dispatch so sendErrorResponse targets only it.
+   * Non-null successful unowned results retain the inline server's broadcast(response) behavior
+   * (including dropping an orphaned correlation ID), rather than using the error fallback.
+   */
+  internal suspend fun replyToQueuedCommand(
+    requestId: String?,
+    response: WebSocketResponse,
+    routing: QueuedReplyRouting,
+  ) {
+    if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+      if (routing == QueuedReplyRouting.EXTERNAL_ERROR) {
+        webSocketServer.broadcastExternallyCorrelatedResponse(response)
+      } else {
+        if (
+          routing == QueuedReplyRouting.OWNER &&
+            requestId != null &&
+            !webSocketServer.hasRequestOwner(requestId)
+        ) {
+          Log.d(TAG, "Dropping queued reply for disconnected or completed request $requestId")
+        }
+        // Always use atomic owner routing for owned replies, even if the owner just vanished.
+        webSocketServer.broadcast(response)
+      }
+    }
+  }
+
+  override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) =
     extractHierarchyNow(disableAllFiltering, requestId = requestId)
 
-  override fun requestHierarchy(
+  override suspend fun requestHierarchy(
     disableAllFiltering: Boolean,
     maxDepth: Int?,
     maxNodes: Int?,
@@ -1749,7 +1803,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         maxDepth = maxDepth ?: 100,
         maxNodes = maxNodes ?: 10_000,
         displayId = displayId,
-        isCancelled = { serviceScope.coroutineContext[Job]?.isActive == false },
       ),
       requestId,
     )
@@ -2133,14 +2186,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       duration,
     )
 
-  override fun requestSetText(
+  override suspend fun requestSetText(
     requestId: String?,
     text: String,
     resourceId: String?,
     dismissKeyboard: Boolean,
   ) = performSetText(requestId, text, resourceId, dismissKeyboard)
 
-  override fun requestSetText(
+  override suspend fun requestSetText(
     requestId: String?,
     text: String,
     resourceId: String?,
@@ -3429,6 +3482,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           true,
           disableAllFiltering,
           occlusionEnabled,
+          snapshotOptions = snapshotOptions,
           displayId = targetDisplayId,
           panelUniqueId = panelUniqueId(targetDisplayId),
         )
@@ -3439,10 +3493,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           screenDimensions,
           true,
           disableAllFiltering,
+          snapshotOptions = snapshotOptions,
           displayId = targetDisplayId,
           panelUniqueId = panelUniqueId(targetDisplayId),
         )
       }
+
+    if (snapshotOptions.isCancelled()) {
+      // A cancelled snapshot will not be delivered; do not retain its frame-context entry.
+      Log.d(TAG, "Discarding cancelled direct hierarchy extraction")
+      return null
+    }
 
     val rotation =
       rotationProvenance.rotationIfUnchanged(
@@ -3515,39 +3576,47 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * SharedFlow async path. Used for explicit WebSocket requests where the daemon is waiting for
    * fresh data. Matches the sync=true pattern used by tap/setText/imeAction handlers.
    */
-  private fun extractHierarchyNow(
+  private suspend fun extractHierarchyNow(
     disableAllFiltering: Boolean = false,
     snapshotOptions: HierarchySnapshotOptions = HierarchySnapshotOptions(),
     requestId: String? = null,
   ) {
     Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
+    val commandJob = currentCoroutineContext()[Job]
+    val cancellableOptions =
+      snapshotOptions.copy(
+        isCancelled = {
+          snapshotOptions.isCancelled() ||
+            commandJob?.isActive == false ||
+            serviceScope.coroutineContext[Job]?.isActive == false
+        }
+      )
     val hierarchy =
-      hierarchyDebouncer.extractNowBlocking(
+      hierarchyDebouncer.extractImmediately(
         skipFlowEmit = true,
         disableAllFiltering = disableAllFiltering,
-        snapshotOptions = snapshotOptions,
+        snapshotOptions = cancellableOptions,
       )
     if (hierarchy != null) {
       // Explicit request: force-write the file and broadcast, serializing the tree once (#5469).
       // Routed through deliverHierarchyFrame so the frame-context entry is released even if the
       // encode throws (leak fix).
-      kotlinx.coroutines.runBlocking {
-        deliverHierarchyFrame(
-          serialize = {
-            perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
-          },
-          write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
-          broadcast = { serialized ->
-            broadcastHierarchyUpdate(
-              hierarchy,
-              sync = true,
-              serialized = serialized,
-              requestId = requestId,
-            )
-          },
-          releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
-        )
-      }
+      deliverHierarchyFrame(
+        serialize = {
+          commandJob?.ensureActive()
+          perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+        },
+        write = { serialized -> writeHierarchyToFile(hierarchy, serialized = serialized) },
+        broadcast = { serialized ->
+          broadcastHierarchyUpdate(
+            hierarchy,
+            sync = true,
+            serialized = serialized,
+            requestId = requestId,
+          )
+        },
+        releaseFrameContext = { extractedHierarchyFrameContexts.remove(hierarchy) },
+      )
     }
   }
 
@@ -4577,7 +4646,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    * Perform text input using AccessibilityService's ACTION_SET_TEXT. This is significantly faster
    * than ADB's input text command.
    */
-  private fun performSetText(
+  private suspend fun performSetText(
     requestId: String?,
     text: String,
     resourceId: String?,
@@ -4658,6 +4727,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             android.accessibilityservice.AccessibilityService.SHOW_MODE_HIDDEN
           )
           Log.d(TAG, "[KeyboardDismiss] Set SHOW_MODE_HIDDEN after text injection")
+        } catch (e: CancellationException) {
+          throw e
         } catch (e: Exception) {
           Log.w(TAG, "[KeyboardDismiss] softKeyboardController failed", e)
         }
@@ -4668,23 +4739,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       // ACTION_SET_TEXT and the requested keyboard state are complete, so acknowledge before
       // optional hierarchy work. Waiting for quiescence/extraction first can turn a completed
       // write into a host-side timeout.
-      kotlinx.coroutines.runBlocking {
-        broadcastSetTextResult(
-          requestId,
-          success,
-          if (success) null else "performAction returned false",
-          totalTime,
-        )
-      }
+      broadcastSetTextResult(
+        requestId,
+        success,
+        if (success) null else "performAction returned false",
+        totalTime,
+      )
 
       if (success) refreshHierarchyAfterTextInput()
+    } catch (e: CancellationException) {
+      perfProvider.end()
+      throw e
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing set text", e)
-      kotlinx.coroutines.runBlocking {
-        broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
-      }
+      broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
     }
   }
 
@@ -4695,7 +4765,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     serviceScope.launch {
       try {
         val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescence(
+          hierarchyDebouncer.extractAfterQuiescenceSuspending(
             quiescenceMs = HierarchyQuiescence.POLL_MS,
             maxWaitMs = HierarchyQuiescence.TIMEOUT_MS,
             pollIntervalMs = 10L,

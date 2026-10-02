@@ -20,7 +20,7 @@ class SetTextAcknowledgementOrderTest {
   @Test
   fun `performSetText acknowledges a successful action before hierarchy postprocessing`() {
     val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
-    val body = functionBody(source, "private fun performSetText(")
+    val body = functionBody(source, "private suspend fun performSetText(")
     val action = body.indexOf("targetNode.performAction(")
     val acknowledgement = body.indexOf("broadcastSetTextResult(", startIndex = action)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = action)
@@ -41,7 +41,7 @@ class SetTextAcknowledgementOrderTest {
     val refreshBody = functionBody(source, "private fun refreshHierarchyAfterTextInput()")
     assertTrue(
       "text hierarchy refresh must wait for quiescence",
-      "hierarchyDebouncer.extractAfterQuiescence(" in refreshBody,
+      "hierarchyDebouncer.extractAfterQuiescenceSuspending(" in refreshBody,
     )
 
     val broadcaster = functionBody(source, "private suspend fun broadcastSetTextResult(")
@@ -96,7 +96,7 @@ class SetTextAcknowledgementOrderTest {
     )
     for (signature in
       listOf(
-        "private fun performSetText(",
+        "private suspend fun performSetText(",
         "private fun performImeAction(",
         "private fun performSelectAll(",
         "private fun performNodeAction(",

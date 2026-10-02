@@ -6,6 +6,7 @@ import {
   DisplayTransitionTracker,
   type DisplayTransitionSink,
 } from "../../../src/features/observe/DisplayTransition";
+import { ObservedAndroidDisplayCache } from "../../../src/features/observe/ObservationDisplay";
 import type { ObserveScreen } from "../../../src/features/observe/interfaces/ObserveScreen";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -90,6 +91,55 @@ describe("SetPosture", () => {
     expect("display" in result && result.display.generation).toBe(
       tracker.identityRevision(device.deviceId),
     );
+  });
+
+  test("refreshes cached Android posture on the same panel without a transition push", async () => {
+    const device = makeDevice("posture-cache-regression");
+    device.displays = {
+      panels: [
+        { key: display.key, role: "inner", sizePx: { width: 200, height: 300 } },
+        { key: "panel-cover", role: "cover", sizePx: { width: 100, height: 150 } },
+      ],
+      postures: ["opened", "closed"],
+    };
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(openedState, ""));
+    const cache = new ObservedAndroidDisplayCache(timer);
+    const tracker = new DisplayTransitionTracker(() => {});
+    const observe = async (): Promise<ObserveResult> => {
+      const result = {
+        ...observation,
+        display: { ...display, posture: await cache.posture(device, adb) },
+      };
+      tracker.checkIdentity(device.deviceId, result.display);
+      tracker.record(device.deviceId, result);
+      return result;
+    };
+    try {
+      expect((await observe()).display.posture).toBe("opened");
+      const before = tracker.identityRevision(device.deviceId);
+      adb.setCommandResponse("shell cmd device_state state", createExecResult(closedState, ""));
+      // The cache is still warm and geometry/panel identity have not changed.
+      expect(await cache.posture(device, adb)).toBe("opened");
+      const feature = new SetPosture(device, {
+        adbFactory: { create: () => adb },
+        observeFactory: () => ({ execute: observe }) as ObserveScreen,
+        timer,
+        transitionSink: tracker,
+      });
+      const result = await feature.execute("closed");
+      expect(result).toMatchObject({
+        posture: "closed",
+        display: { key: display.key, posture: "closed", generation: before + 1 },
+      });
+      expect(tracker.identityRevision(device.deviceId)).toBe(before + 1);
+      expect(timer.now()).toBe(0);
+    } finally {
+      ObservedAndroidDisplayCache.release(device.deviceId);
+    }
   });
 
   test("parses only the committed state, even when base and override differ", () => {

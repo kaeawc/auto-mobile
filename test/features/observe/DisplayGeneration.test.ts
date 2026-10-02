@@ -303,6 +303,29 @@ test("display and state callbacks for one fold still count once before a fresh o
   expect((await h.screen.execute(options)).display.generation).toBe(first.display.generation + 1);
 });
 
+test("a state-first fold with a stale panel snapshot advances generation exactly once", async () => {
+  const h = harness();
+  const first = await h.screen.execute(options);
+  displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+    change: "device_state",
+    displayId: 0,
+    deviceState: 0,
+    panelUniqueId: "local:inner",
+    width: 200,
+    height: 300,
+  });
+  displayTransitions.notifyAndroidTransition(h.device.deviceId, {
+    change: "changed",
+    displayId: 0,
+    panelUniqueId: "local:cover",
+    width: 100,
+    height: 150,
+  });
+  expect(displayTransitions.identityRevision(h.device.deviceId)).toBe(first.display.generation + 1);
+  h.panel("cover");
+  expect((await h.screen.execute(options)).display.generation).toBe(first.display.generation + 1);
+});
+
 test("two physical-panel pushes before the next observation count both sides of a round trip", async () => {
   const h = harness();
   const first = await h.screen.execute(options);

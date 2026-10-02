@@ -99,7 +99,8 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     string,
     {
       revision: number;
-      deviceState?: number;
+      displayCallbackSeen: boolean;
+      stateCallbackSeen: boolean;
       panel?: Pick<PanelGeometry, "key" | "width" | "height">;
     }
   >();
@@ -363,7 +364,8 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     this.emitPanel(deviceId, key ? { key, role: "unknown" } : undefined);
     this.pendingPushes.set(deviceId, {
       revision: this.revision(deviceId),
-      deviceState: event.deviceState,
+      displayCallbackSeen: event.change !== "device_state",
+      stateCallbackSeen: event.change === "device_state",
       panel: this.panelFromPush(deviceId, event),
     });
   }
@@ -399,7 +401,10 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
       return false;
     }
     if (event.change === "changed") {
-      const corroboratesState = pending.panel === undefined;
+      // A state callback may carry the old panel snapshot; only callback kind
+      // determines whether this is the complementary display callback.
+      const corroboratesState = !pending.displayCallbackSeen;
+      pending.displayCallbackSeen = true;
       pending.panel = this.panelFromPush(deviceId, event);
       return corroboratesState;
     }
@@ -408,8 +413,8 @@ export class DisplayTransitionTracker implements DisplayTransitionSink {
     }
     // The first state callback can corroborate a display callback for the same
     // fold. A subsequent distinct state is another transition, not a duplicate.
-    const corroboratesDisplay = pending.deviceState === undefined;
-    pending.deviceState = event.deviceState;
+    const corroboratesDisplay = !pending.stateCallbackSeen;
+    pending.stateCallbackSeen = true;
     return corroboratesDisplay;
   }
 

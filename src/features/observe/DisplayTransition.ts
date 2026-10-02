@@ -1,4 +1,5 @@
-import type { DisplayRef, ObserveResult } from "../../models";
+import type { BootedDevice, DisplayRef, ObserveResult } from "../../models";
+import { POSTURE_PANEL_ROLES } from "../../models/DisplayPanel";
 import { DaemonState } from "../../daemon/daemonState";
 import { logger } from "../../utils/logger";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
@@ -45,6 +46,11 @@ export interface PushedDisplayTransition {
 export interface DisplayTransitionSink {
   identityRevision(deviceId: string): number;
   notifyTransition(deviceId: string, reason: string): void;
+  rememberIosPosture(
+    device: BootedDevice,
+    display: DisplayRef,
+    posture: DisplayRef["posture"],
+  ): DisplayRef;
   notifyAndroidTransition(deviceId: string, event: PushedDisplayTransition): void;
 }
 
@@ -334,7 +340,29 @@ export class DisplayTransitionTracker implements DisplayTransitionSink, DisplayT
     this.notifyTransition(deviceId, "display geometry changed");
   }
 
+  /** Align reconciliation with the successful command after its final transition fence. */
+  rememberIosPosture(
+    device: BootedDevice,
+    display: DisplayRef,
+    posture: DisplayRef["posture"],
+  ): DisplayRef {
+    const expectedRole = POSTURE_PANEL_ROLES.find(
+      ([value]) => value === (posture === "half_opened" ? "opened" : posture),
+    )?.[1];
+    if ((device.displays?.panels.length ?? 0) < 2 || display.role !== expectedRole) {
+      return display;
+    }
+    const remembered = { ...display, posture };
+    ObservedAndroidDisplayCache.rememberIosPosture(device.deviceId, remembered);
+    const panel = this.panels.get(device.deviceId);
+    if (panel?.key === display.key && panel.role === display.role) {
+      panel.posture = posture;
+    }
+    return remembered;
+  }
+
   notifyTransition(deviceId: string, reason: string): void {
+    ObservedAndroidDisplayCache.clear(deviceId);
     this.identityRevisions.set(deviceId, this.identityRevision(deviceId) + 1);
     this.notifyGeometryTransition(deviceId, reason);
     this.lastIdentityChangeRevisions.set(deviceId, this.revision(deviceId));

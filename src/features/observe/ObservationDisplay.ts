@@ -1,5 +1,6 @@
 import type { BootedDevice, DisplayPanel, DisplayRef, ViewHierarchyResult } from "../../models";
-import type { Posture } from "../../models/DisplayPanel";
+import { POSTURE_PANEL_ROLES, type Posture } from "../../models/DisplayPanel";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import {
   parseAndroidCommittedStateIdentifier,
@@ -54,6 +55,8 @@ interface CachedAndroidDisplay {
   at: number;
 }
 
+const rememberedIosPostures = new Map<string, DisplayRef>();
+
 const androidDisplayCache = new Map<string, CachedAndroidDisplay>();
 const lastKnownAndroidDisplay = new Map<string, ObservedAndroidDisplay>();
 const androidPostureCache = new Map<string, { inventory: string; at: number; posture: Posture }>();
@@ -96,14 +99,35 @@ export class ObservedAndroidDisplayCache {
   private static readonly TTL_MS = 5000;
 
   static clear(deviceId: string): void {
+    rememberedIosPostures.delete(deviceId);
     androidDisplayCache.delete(deviceId);
     androidPostureCache.delete(deviceId);
   }
 
   static release(deviceId: string): void {
+    rememberedIosPostures.delete(deviceId);
     androidDisplayCache.delete(deviceId);
     lastKnownAndroidDisplay.delete(deviceId);
     androidPostureCache.delete(deviceId);
+  }
+
+  static rememberIosPosture(deviceId: string, display: DisplayRef): void {
+    rememberedIosPostures.set(deviceId, { ...display });
+  }
+
+  static iosPosture(device: BootedDevice, panel: DisplayPanel | undefined): Posture | undefined {
+    const remembered = rememberedIosPostures.get(device.deviceId);
+    if (
+      remembered === undefined ||
+      (device.displays?.panels.length ?? 0) < 2 ||
+      !isIosSimulatorUdid(device.deviceId) ||
+      panel?.key !== remembered.key ||
+      panel?.role !== remembered.role
+    ) {
+      rememberedIosPostures.delete(device.deviceId);
+      return undefined;
+    }
+    return remembered.posture;
   }
 
   constructor(private readonly timer: Pick<Timer, "now">) {}
@@ -288,13 +312,7 @@ function liveIosPanel(
 }
 
 function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
-  if (role === "inner") {
-    return "opened";
-  }
-  if (role === "cover") {
-    return "closed";
-  }
-  return "unknown";
+  return POSTURE_PANEL_ROLES.find(([, panelRole]) => panelRole === role)?.[0] ?? "unknown";
 }
 
 /** Match the runner's live pixel size against the enumerated physical panels. */
@@ -309,7 +327,7 @@ export function observedIosDisplay(
   return {
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",
-    posture: iosPanelPosture(panel?.role),
+    posture: ObservedAndroidDisplayCache.iosPosture(device, panel) ?? iosPanelPosture(panel?.role),
     // ObserveScreen stamps the tracker generation after recording the final display.
     generation: 0,
   };

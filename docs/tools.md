@@ -18,7 +18,11 @@ panel. The returned `display` stamp identifies the panel actually observed.
 For Android it uses the physical panel key from the hierarchy's `panelUniqueId`
 or mapped `displayId`; for iOS it uses the matched simulator screen name. Its
 `role` comes from inventory. Android foldables include the current device-state
-`posture` when available; iOS and single-panel devices report `unknown`.
+`posture` when available. Multi-panel iOS simulators infer posture from the active
+panel (cover → `closed`, inner → `opened`), retaining a successful `setPosture`
+value such as `half_opened` while that panel matches and no transition occurs.
+This is not read from the device. Single-panel simulators and physical iOS
+devices report `unknown`.
 When inventory has two or more panels, `otherDisplays` lists each remaining
 panel's `key`, `role`, and pixel `size` (`width`, `height`).
 `display: "all"` is not supported yet. Android routes the hierarchy and
@@ -674,9 +678,9 @@ available from its artifact pointer.
 panel key or a role. These conditions compare the returned observation's
 `display` stamp. Posture waits accept only known postures; `unknown` remains a
 possible observation stamp but cannot be requested as a wait condition. Posture
-waits need a device that reports posture: supported Android foldables and iPhone
-Duo report it in the display stamp. Posture waits fail immediately with an
-actionable error only when hydrated display inventory confirms a single panel.
+waits need a known posture stamp: supported Android foldables report device
+posture, while iPhone Duo simulators report inferred or remembered posture.
+Posture waits fail immediately with an actionable error only when hydrated display inventory confirms a single panel.
 Multi-panel or unavailable inventory keeps polling, including a first capture
 with no hierarchy and an unknown display stamp. Posture waits also tolerate
 transient observation failures after the first capture during a fold;

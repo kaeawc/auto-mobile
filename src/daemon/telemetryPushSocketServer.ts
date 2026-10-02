@@ -118,7 +118,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   TelemetryFilter,
   TelemetryEvent
 > {
-  private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  protected override deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
   private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
 
   constructor(

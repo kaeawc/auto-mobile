@@ -2240,6 +2240,7 @@ export async function restoreDeviceSnapshot(
 ): Promise<{
   result: RestoreSnapshotResult;
   manifest: DeviceSnapshotManifest;
+  deviceSessionUuid?: string;
 }> {
   const {
     snapshotRepository,
@@ -2312,6 +2313,7 @@ export async function restoreDeviceSnapshot(
     let loaded = false;
     let settled = false;
     let ready = false;
+    let restoredEpoch: { deviceSessionUuid?: string } = {};
     const prepareOnce = async (): Promise<void> => {
       if (
         prepared ||
@@ -2336,7 +2338,10 @@ export async function restoreDeviceSnapshot(
         return;
       }
       invalidated = true;
-      await deviceIncarnationInvalidator.invalidate(device);
+      const epoch = await deviceIncarnationInvalidator.invalidate(device);
+      if (typeof epoch === "string") {
+        restoredEpoch = { deviceSessionUuid: epoch };
+      }
     };
     const invalidateAfterLoad = async (): Promise<void> => {
       loaded = true;
@@ -2380,7 +2385,11 @@ export async function restoreDeviceSnapshot(
     await snapshotRepository.touchSnapshot(record.snapshotName, timestamp);
     await notifySnapshotResources();
 
-    return { result, manifest: record.manifest };
+    return {
+      result,
+      manifest: record.manifest,
+      ...restoredEpoch,
+    };
   });
 }
 

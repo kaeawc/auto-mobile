@@ -9,7 +9,7 @@ import {
 import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session, type SessionReleaseSnapshot } from "./sessionManager";
 import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
-import type { DeviceSessionRecord } from "./deviceSessionRegistry";
+import type { DeviceSessionRecord, RetiredDeviceSession } from "./deviceSessionRegistry";
 import type { BootedDevice } from "../models";
 import {
   CLI_SESSION_LIVENESS_POLICY,
@@ -93,6 +93,7 @@ export interface DaemonStateAccess {
   };
   getDeviceSessionRegistry(): {
     list(): DeviceSessionRecord[];
+    getRetiredByUuid?(uuid: string): RetiredDeviceSession | undefined;
   };
 }
 

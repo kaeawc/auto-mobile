@@ -11,6 +11,9 @@ import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotReposit
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
 import { FakeDeviceSnapshotStore } from "../fakes/FakeDeviceSnapshotStore";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
+import { DefaultDeviceIncarnationInvalidator } from "../../src/server/DeviceIncarnationInvalidator";
 
 describe("snapshot tool", () => {
   let repository: FakeDeviceSnapshotRepository;
@@ -213,6 +216,47 @@ describe("snapshot tool", () => {
     expect(payload.success).toBe(true);
     expect(payload.failures).toEqual([]);
     expect(restoreCalls).toHaveLength(1);
+    expect(payload).not.toHaveProperty("deviceSessionUuid");
+  });
+
+  test("VM restore tool returns the new device-session UUID", async () => {
+    const emulator: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+    };
+    await createDeviceRestoreEpochHarness(emulator, fakeTimer);
+    try {
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: "tool-epoch",
+        timestamp,
+        deviceId: emulator.deviceId,
+        deviceName: emulator.name,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        ...manifest,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 0,
+        manifest,
+      });
+      await setDeviceSnapshotManagerDependencies({
+        deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([]),
+      });
+      const response = await ToolRegistry.getTool("deviceSnapshot")!.deviceAwareHandler!(emulator, {
+        action: "restore",
+        snapshotName: manifest.snapshotName,
+        useVmSnapshot: true,
+      });
+      expect(JSON.parse(response.content?.[0]?.text ?? "{}").deviceSessionUuid).toBe("epoch-new");
+    } finally {
+      DaemonState.getInstance().reset();
+    }
   });
 
   test("surfaces settings-only mode and VM degradation note", async () => {

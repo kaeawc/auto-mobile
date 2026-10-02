@@ -64,7 +64,7 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
   FailureFilter,
   FailureNotificationPush
 > {
-  private deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
+  protected override deviceSessionResolver: DeviceSessionResolver = nullDeviceSessionResolver;
   private readonly suspendedRoutingLog = new SuspendedDeviceRoutingLog();
 
   constructor(

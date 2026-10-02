@@ -1,5 +1,6 @@
 import type { DeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
 import { ActionableError } from "../../src/models/ActionableError";
+import { unknownDeviceSessionError } from "../../src/daemon/deviceSessionResolver";
 
 /**
  * In-memory {@link DeviceSessionResolver} for unit tests. Seed live serial↔uuid
@@ -11,6 +12,8 @@ import { ActionableError } from "../../src/models/ActionableError";
  * directions, and routing for that serial reports as suspended.
  */
 export class FakeDeviceSessionResolver implements DeviceSessionResolver {
+  getSessionError = unknownDeviceSessionError;
+  getRestoreSupersededError = (): undefined => undefined;
   private readonly deviceIdToUuid = new Map<string, string>();
   private readonly uuidToDeviceId = new Map<string, string>();
   private readonly quarantined = new Set<string>();

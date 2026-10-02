@@ -12,6 +12,82 @@ function makeRegistry(scripted?: string[]) {
 }
 
 describe("DeviceSessionRegistry", () => {
+  it("restore retires with reason before starting the successor and records a tombstone", () => {
+    const { registry } = makeRegistry(["old", "new"]);
+    const events: unknown[] = [];
+    const observedDuringEnd: string[] = [];
+    registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 1 });
+    registry.setLifecycleListener({
+      onSessionStarted: (record) => events.push(["started", record.deviceSessionUuid]),
+      onSessionEnded: (record, options) => {
+        events.push(["ended", record.deviceSessionUuid, options]);
+        observedDuringEnd.push(registry.getByDeviceId("d")!.deviceSessionUuid);
+        // A readiness callback re-entering the registry cannot double-mint.
+        if (observedDuringEnd.length === 1) {
+          observedDuringEnd.push(
+            registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 2 })
+              .deviceSessionUuid,
+          );
+        }
+      },
+    });
+    registry.onDeviceConnected({
+      deviceId: "d",
+      platform: "android",
+      incarnation: 2,
+      retireReason: "superseded-by-restore",
+    });
+    expect(events).toEqual([
+      ["ended", "old", { successorSessionUuid: "new", reason: "superseded-by-restore" }],
+      ["started", "new"],
+    ]);
+    expect(registry.getByUuid("old")).toBeUndefined();
+    expect(observedDuringEnd).toEqual(["new", "new"]);
+    expect(registry.getRetiredByUuid("old")).toEqual({
+      deviceId: "d",
+      successorSessionUuid: "new",
+      reason: "superseded-by-restore",
+    });
+  });
+
+  it("bounds restore tombstones to 256 and clears them on disconnect", () => {
+    const { registry } = makeRegistry();
+    const connect = (incarnation: number) =>
+      registry.onDeviceConnected({
+        deviceId: "d",
+        platform: "android",
+        incarnation,
+        retireReason: "superseded-by-restore",
+      });
+    const first = connect(0);
+    const second = connect(1);
+    for (let incarnation = 2; incarnation <= 257; incarnation++) {
+      connect(incarnation);
+    }
+    expect(registry.getRetiredByUuid(first.deviceSessionUuid)).toBeUndefined();
+    expect(registry.getRetiredByUuid(second.deviceSessionUuid)).toBeDefined();
+    registry.onDeviceDisconnected("d");
+    expect(registry.getRetiredByUuid(second.deviceSessionUuid)).toBeUndefined();
+  });
+
+  it("never mints backwards or twice when reconnect follows a restore incarnation", () => {
+    const { registry, idGenerator } = makeRegistry(["old", "new", "unused"]);
+    registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 1 });
+    const restored = registry.onDeviceConnected({
+      deviceId: "d",
+      platform: "android",
+      incarnation: 3,
+      retireReason: "superseded-by-restore",
+    });
+    expect(registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 3 })).toBe(
+      restored,
+    );
+    expect(registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 2 })).toBe(
+      restored,
+    );
+    expect(idGenerator.pendingCount()).toBe(1);
+  });
+
   it("mints a deviceSessionUuid on device-connect via the injected IdGenerator", () => {
     const { registry } = makeRegistry(["uuid-a"]);
 
@@ -160,13 +236,13 @@ describe("DeviceSessionRegistry", () => {
             deviceId: record.deviceId,
             platform: record.platform,
           }),
-        onSessionEnded: (record, successorSessionUuid) =>
+        onSessionEnded: (record, options) =>
           events.push({
             kind: "ended",
             uuid: record.deviceSessionUuid,
             deviceId: record.deviceId,
             platform: record.platform,
-            ...(successorSessionUuid === undefined ? {} : { successorSessionUuid }),
+            ...options,
           }),
       });
       return { registry, timer, idGenerator, events };

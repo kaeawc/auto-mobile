@@ -272,6 +272,34 @@ Further Android work and the measurement protocol are tracked in
 
 ## VM snapshot incarnation lifecycle
 
+An Android VM restore advances the pooled incarnation and synchronously calls
+the registry's reconnect primitive to retire the old `deviceSessionUuid` and
+mint its successor before any post-load incarnation listener runs. Same or
+older incarnation inputs return the current record, so a later readiness
+callback cannot mint twice or move identity backwards. The owning tool
+`sessionUuid` and serial assignment survive; direct mode and pooled devices
+without a live registry epoch mint nothing during restore.
+
+The `deviceSnapshot` restore result includes the new `deviceSessionUuid` when
+one exists. The old epoch's ended frame carries `successorSessionUuid` and the
+typed reason `superseded-by-restore`; reconnect/disconnect frames retain their
+existing shape. All-device subscribers see ended/started; old-UUID subscribers
+see ended and must subscribe again to the successor. Frames pushed for the
+restored serial are stamped with the new UUID. Restore-retired UUIDs fail
+validated stream requests with `DEVICE_SESSION_SUPERSEDED_BY_RESTORE` and
+recovery instructions shared through the device-session resolver. Device-control
+replay rejects the old epoch through its existing typed transport failure and
+uses the same restore-specific message.
+
+The registry keeps at most 256 restore tombstones (UUID, serial, immediate
+successor, reason), evicting oldest first and clearing a serial's tombstones on
+disconnect. Tombstones diagnose retirement; they never resolve as live and an
+immediate successor may itself later retire, so clients must discover the
+current UUID from the result, started frame, session listing, or device runtime.
+Definitive pre-load failures leave identity untouched. Once load succeeds, a
+readiness failure still re-mints because the guest has already rewound; an
+ambiguous load failure retains the existing conservative invalidation policy.
+
 Per-device host-state owners register a `DeviceIncarnationListener`.
 `prepareForIncarnationChange(deviceId)` runs before the VM load;
 `onDeviceIncarnationChanged(deviceId)` invalidates caches immediately after loading.

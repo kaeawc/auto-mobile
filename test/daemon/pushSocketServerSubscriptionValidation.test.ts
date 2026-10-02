@@ -5,6 +5,12 @@ import { FailuresPushSocketServer } from "../../src/daemon/failuresPushSocketSer
 import { PerformancePushSocketServer } from "../../src/daemon/performancePushSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
+import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
+import {
+  createRegistryDeviceSessionResolver,
+  type DeviceSessionResolver,
+} from "../../src/daemon/deviceSessionResolver";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 interface SubscribeReply {
   id?: string;
@@ -12,6 +18,7 @@ interface SubscribeReply {
   success?: boolean;
   error?: string;
   subscriptionId?: string;
+  code?: string;
 }
 
 /**
@@ -54,6 +61,7 @@ const servers: Array<{
   name: string;
   create: () => LineDrivable & {
     getSubscriberCount(): number;
+    setDeviceSessionResolver(resolver: DeviceSessionResolver): void;
   };
 }> = [
   {
@@ -74,6 +82,68 @@ const servers: Array<{
 describe("push socket subscription deviceSessionUuid validation (#6676)", () => {
   for (const { name, create } of servers) {
     describe(name, () => {
+      it("acks an unknown UUID with no live epoch under a registry-backed resolver", async () => {
+        const registry = new DeviceSessionRegistry(new FakeTimer(), new FakeIdGenerator());
+        const server = create();
+        server.setDeviceSessionResolver(createRegistryDeviceSessionResolver(registry));
+
+        const reply = await subscribe(server, { deviceSessionUuid: "unknown-uuid" });
+
+        expect(reply.success).toBe(true);
+        expect(reply.subscriptionId).toBeDefined();
+        expect(server.getSubscriberCount()).toBe(1);
+      });
+
+      it("acks an arbitrary UUID under the default null resolver", async () => {
+        const server = create();
+
+        const reply = await subscribe(server, { deviceSessionUuid: "arbitrary-uuid" });
+
+        expect(reply.success).toBe(true);
+        expect(reply.subscriptionId).toBeDefined();
+        expect(server.getSubscriberCount()).toBe(1);
+      });
+
+      it("acks a disconnected UUID under a registry-backed resolver", async () => {
+        const registry = new DeviceSessionRegistry(
+          new FakeTimer(),
+          new FakeIdGenerator(["disconnected-uuid"]),
+        );
+        registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 1 });
+        registry.onDeviceDisconnected("d");
+        const server = create();
+        server.setDeviceSessionResolver(createRegistryDeviceSessionResolver(registry));
+
+        const reply = await subscribe(server, { deviceSessionUuid: "disconnected-uuid" });
+
+        expect(reply.success).toBe(true);
+        expect(reply.subscriptionId).toBeDefined();
+        expect(server.getSubscriberCount()).toBe(1);
+      });
+
+      it("rejects restore-retired UUIDs with typed instructions and no subscription", async () => {
+        const registry = new DeviceSessionRegistry(
+          new FakeTimer(),
+          new FakeIdGenerator(["old", "new"]),
+        );
+        registry.onDeviceConnected({ deviceId: "d", platform: "android", incarnation: 1 });
+        registry.onDeviceConnected({
+          deviceId: "d",
+          platform: "android",
+          incarnation: 2,
+          retireReason: "superseded-by-restore",
+        });
+        const server = create();
+        server.setDeviceSessionResolver(createRegistryDeviceSessionResolver(registry));
+        const reply = await subscribe(server, { deviceSessionUuid: "old" });
+        expect(reply).toMatchObject({
+          success: false,
+          code: "DEVICE_SESSION_SUPERSEDED_BY_RESTORE",
+        });
+        expect(reply.error).toContain("snapshot restore");
+        expect(reply.error).toContain("deviceSnapshot");
+        expect(server.getSubscriberCount()).toBe(0);
+      });
       it("rejects a blank deviceSessionUuid instead of acking a dead subscription", async () => {
         const server = create();
 

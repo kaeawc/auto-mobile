@@ -1,6 +1,38 @@
 import { logger } from "../utils/logger";
 import type { DeviceSessionRegistry } from "./deviceSessionRegistry";
 import type { DeviceAdmissionGate } from "./deviceAdmissionGate";
+import { ActionableError } from "../models/ActionableError";
+import type { RetiredDeviceSession } from "./deviceSessionRegistry";
+
+/** Restore retirement is distinct from an unknown or disconnected epoch. */
+export class DeviceSessionSupersededByRestoreError extends ActionableError {
+  readonly code = "DEVICE_SESSION_SUPERSEDED_BY_RESTORE";
+
+  constructor(
+    deviceSessionUuid: string,
+    readonly retired: RetiredDeviceSession,
+  ) {
+    super(
+      `deviceSessionUuid '${deviceSessionUuid}' was superseded by a snapshot restore. ` +
+        "Get the current deviceSessionUuid from the deviceSnapshot restore result, the " +
+        "device_session_started frame, daemon/listDeviceSessions, or the device description's runtime.deviceSessionUuid.",
+    );
+  }
+}
+
+/** Preserve the legacy text for unknown, disconnected, and quarantined UUIDs. */
+export function unknownDeviceSessionError(deviceSessionUuid: string): ActionableError {
+  return new ActionableError(
+    `deviceSessionUuid '${deviceSessionUuid}' does not identify a live device session`,
+  );
+}
+
+/** Add restore typing to existing wire errors without changing other envelopes. */
+export function deviceSessionErrorFields(error: unknown): {
+  code?: "DEVICE_SESSION_SUPERSEDED_BY_RESTORE";
+} {
+  return error instanceof DeviceSessionSupersededByRestoreError ? { code: error.code } : {};
+}
 
 /**
  * Bidirectional resolver between a device's mutable serial/UDID (`deviceId`) and
@@ -18,6 +50,14 @@ export interface DeviceSessionResolver {
   resolveUuid(deviceId: string): string | null;
   /** Live serial/UDID for a `deviceSessionUuid`, or `null` when the epoch is retired/unknown. */
   resolveDeviceId(deviceSessionUuid: string): string | null;
+  /** Client-facing diagnosis for a UUID that failed live resolution. */
+  getSessionError(
+    deviceSessionUuid: string,
+  ): ActionableError | DeviceSessionSupersededByRestoreError;
+  /** Restore tombstone diagnosis only; other UUIDs remain valid push filters. */
+  getRestoreSupersededError(
+    deviceSessionUuid: string,
+  ): DeviceSessionSupersededByRestoreError | undefined;
   /**
    * Whether this serial currently has NO routing identity because the pool's
    * entry for it is quarantined (`PooledDevice.identityUnresolved`): the serial
@@ -42,6 +82,25 @@ export interface DeviceSessionResolver {
   assertDeviceActionable(deviceId: string, purpose: string): void;
 }
 
+/** The transport boundary needs retirement diagnostics, without serial routing. */
+export function createDeviceSessionErrorResolver(registry: {
+  getRetiredByUuid?(uuid: string): RetiredDeviceSession | undefined;
+}): Pick<DeviceSessionResolver, "getSessionError" | "getRestoreSupersededError"> {
+  const getRestoreSupersededError = (
+    deviceSessionUuid: string,
+  ): DeviceSessionSupersededByRestoreError | undefined => {
+    const retired = registry.getRetiredByUuid?.(deviceSessionUuid);
+    return retired
+      ? new DeviceSessionSupersededByRestoreError(deviceSessionUuid, retired)
+      : undefined;
+  };
+  return {
+    getRestoreSupersededError,
+    getSessionError: (deviceSessionUuid) =>
+      getRestoreSupersededError(deviceSessionUuid) ?? unknownDeviceSessionError(deviceSessionUuid),
+  };
+}
+
 /**
  * Null resolver — every lookup misses. The default in each push server before the
  * daemon wires the real registry, and a safe stand-in for unit tests that do not
@@ -51,6 +110,8 @@ export interface DeviceSessionResolver {
 export const nullDeviceSessionResolver: DeviceSessionResolver = {
   resolveUuid: () => null,
   resolveDeviceId: () => null,
+  getSessionError: unknownDeviceSessionError,
+  getRestoreSupersededError: () => undefined,
   isRoutingSuspended: () => false,
   assertDeviceActionable: () => {},
 };
@@ -89,6 +150,7 @@ export function createRegistryDeviceSessionResolver(
       : (registry.getByDeviceId(deviceId)?.deviceSessionUuid ?? null);
   return {
     resolveUuid,
+    ...createDeviceSessionErrorResolver(registry),
     resolveDeviceId: (deviceSessionUuid: string) => {
       const deviceId = registry.getByUuid(deviceSessionUuid)?.deviceId;
       if (deviceId === undefined || isIdentityQuarantined(deviceId)) {

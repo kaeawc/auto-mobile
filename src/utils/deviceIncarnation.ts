@@ -16,7 +16,13 @@
  * "no epoch information", never as an epoch of its own.
  */
 export type DeviceIncarnationResolver = (deviceId: string) => number | undefined;
-export type DeviceIncarnationBumper = (deviceId: string) => boolean;
+/** A pooled bump synchronously publishes its successor epoch before returning. */
+export type DeviceIncarnationBumper = (deviceId: string) => false | { deviceSessionUuid?: string };
+
+export interface DeviceIncarnationAdvanceResult {
+  incarnation: string;
+  deviceSessionUuid?: string;
+}
 
 /** One owner of state keyed by a device serial. */
 export interface DeviceIncarnationListener {
@@ -58,13 +64,14 @@ export function setDeviceIncarnationBumper(next: DeviceIncarnationBumper | undef
  * Advance a serial's incarnation. Pooled devices use DevicePool's counter;
  * direct mode retains a process-local counter so restore still fences caches.
  */
-export function advanceDeviceIncarnation(deviceId: string): string {
-  if (bumper?.(deviceId)) {
-    return deviceIncarnationToken(deviceId) ?? "unknown";
+export function advanceDeviceIncarnation(deviceId: string): DeviceIncarnationAdvanceResult {
+  const pooled = bumper?.(deviceId);
+  if (pooled) {
+    return { incarnation: deviceIncarnationToken(deviceId) ?? "unknown", ...pooled };
   }
   const next = (directModeIncarnations.get(deviceId) ?? 0) + 1;
   directModeIncarnations.set(deviceId, next);
-  return String(next);
+  return { incarnation: String(next) };
 }
 
 /** Register a per-serial cache owner. Re-registering a name replaces its owner. */

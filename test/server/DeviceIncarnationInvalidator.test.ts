@@ -1,4 +1,8 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
+import { createRegistryDeviceSessionResolver } from "../../src/daemon/deviceSessionResolver";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   DefaultDeviceIncarnationInvalidator,
   type CtrlProxyClientLifecycle,
@@ -19,6 +23,53 @@ const ANDROID_DEVICE: BootedDevice = {
 };
 
 describe("DefaultDeviceIncarnationInvalidator", () => {
+  afterEach(() => DaemonState.getInstance().reset());
+
+  test("restore does not establish an epoch for an unregistered or unpooled device", async () => {
+    const { registry } = await createDeviceRestoreEpochHarness(ANDROID_DEVICE, new FakeTimer());
+    registry.onDeviceDisconnected(ANDROID_DEVICE.deviceId);
+    const invalidator = new DefaultDeviceIncarnationInvalidator([]);
+    expect(await invalidator.invalidate(ANDROID_DEVICE)).toBeUndefined();
+    expect(
+      await invalidator.invalidate({ ...ANDROID_DEVICE, deviceId: "emulator-9999" }),
+    ).toBeUndefined();
+    expect(registry.list()).toEqual([]);
+    DaemonState.getInstance().reset();
+    expect(await invalidator.invalidate(ANDROID_DEVICE)).toBeUndefined();
+    expect(registry.list()).toEqual([]);
+  });
+
+  test("restore re-mints before every listener and a racing reconnect cannot mint twice", async () => {
+    const { registry, pool, incarnation } = await createDeviceRestoreEpochHarness(
+      ANDROID_DEVICE,
+      new FakeTimer(),
+    );
+    const resolver = createRegistryDeviceSessionResolver(registry);
+    const stamped: Array<string | null> = [];
+    const invalidator = new DefaultDeviceIncarnationInvalidator([
+      {
+        name: "frames",
+        onDeviceIncarnationChanged: (id) => {
+          stamped.push(resolver.resolveUuid(id));
+        },
+      },
+      {
+        name: "reconnect",
+        onDeviceIncarnationChanged: (id) => {
+          registry.onDeviceConnected({
+            ...ANDROID_DEVICE,
+            incarnation: pool.getDeviceIncarnation(id)!,
+          });
+          registry.onDeviceConnected({ ...ANDROID_DEVICE, incarnation });
+          stamped.push(resolver.resolveUuid(id));
+        },
+      },
+    ]);
+    expect(await invalidator.invalidate(ANDROID_DEVICE)).toBe("epoch-new");
+    expect(stamped).toEqual(["epoch-new", "epoch-new"]);
+    expect(registry.getByUuid("epoch-old")).toBeUndefined();
+    expect(registry.list()).toHaveLength(1);
+  });
   test("clears window state, closes and evicts CtrlProxy, and marks installed apps stale", async () => {
     let windowInvalidations = 0;
     const windowCacheInvalidator: DeviceWindowCacheInvalidator = {

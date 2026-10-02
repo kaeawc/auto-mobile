@@ -174,6 +174,10 @@ import {
 } from "./liveAcceptanceCapability";
 import { daemonGenerationMatches } from "./processGeneration";
 import {
+  createDeviceSessionErrorResolver,
+  DeviceSessionSupersededByRestoreError,
+} from "./deviceSessionResolver";
+import {
   DEVICE_CONTROL_TRANSPORT_FAILURE_CODE,
   DeviceControlTransportError,
   deviceControlToolName,
@@ -3157,7 +3161,24 @@ export class UnixSocketServer {
     const message = input.recoveryExhausted
       ? `Device-control transport recovery exhausted while handling ${toolName}`
       : `Device-control transport closed while handling ${toolName}`;
-    return new DeviceControlTransportError(message, failure);
+    // Preserve replay state/code while sharing the restore diagnosis with push requests.
+    return new DeviceControlTransportError(
+      this.deviceControlTransportErrorMessage(input.identity, message),
+      failure,
+    );
+  }
+
+  private deviceControlTransportErrorMessage(
+    identity: DeviceControlTransportIdentity,
+    fallback: string,
+  ): string {
+    if (!identity.deviceSessionUuid || !this.daemonState.isInitialized()) {
+      return fallback;
+    }
+    const error = createDeviceSessionErrorResolver(
+      this.daemonState.getDeviceSessionRegistry(),
+    ).getSessionError(identity.deviceSessionUuid);
+    return error instanceof DeviceSessionSupersededByRestoreError ? error.message : fallback;
   }
 
   private remainingMcpForwardBudget(input: { deadline: ProgressExtendableDeadline }): number {

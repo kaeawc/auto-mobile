@@ -943,7 +943,7 @@
   },
   {
     "name": "deviceSnapshot",
-    "description": "Capture or restore device snapshot.",
+    "description": "Capture or restore device snapshot. An Android VM restore in daemon mode returns the new deviceSessionUuid; the previous device-session UUID is superseded by the restore.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

@@ -20,7 +20,7 @@ import "./videoRecordingIncarnationListener";
 /** Invalidates host-side state that belongs to one physical device incarnation. */
 export interface DeviceIncarnationInvalidator {
   prepareForIncarnationChange(device: BootedDevice): Promise<void>;
-  invalidate(device: BootedDevice): Promise<void>;
+  invalidate(device: BootedDevice): Promise<string | void>;
   settleIncarnationChange(device: BootedDevice, outcome: { ready: boolean }): Promise<void>;
 }
 
@@ -91,12 +91,12 @@ export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInv
     }
   }
 
-  async invalidate(device: BootedDevice): Promise<void> {
+  async invalidate(device: BootedDevice): Promise<string | void> {
     if (device.platform !== "android") {
       return;
     }
 
-    advanceDeviceIncarnation(device.deviceId);
+    const { deviceSessionUuid } = advanceDeviceIncarnation(device.deviceId);
     const listeners = this.listeners ?? getDeviceIncarnationListeners();
     const results = await Promise.allSettled(
       listeners.map(async (listener) => {
@@ -114,5 +114,6 @@ export class DefaultDeviceIncarnationInvalidator implements DeviceIncarnationInv
         );
       }
     }
+    return deviceSessionUuid;
   }
 }

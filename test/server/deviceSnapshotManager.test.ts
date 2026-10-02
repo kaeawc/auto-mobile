@@ -32,6 +32,8 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { RestoreSnapshot } from "../../src/features/action/RestoreSnapshot";
 import { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
 
 const TEST_DEVICE: BootedDevice = {
   deviceId: "test-device",
@@ -99,7 +101,85 @@ describe("deviceSnapshotManager", () => {
 
   afterEach(() => {
     resetDeviceSnapshotManagerDependencies();
+    DaemonState.getInstance().reset();
   });
+
+  test.each(["success", "readiness-failure", "preload-failure", "recovery-failure"] as const)(
+    "VM restore epoch boundary: %s",
+    async (exit) => {
+      const device = { ...TEST_DEVICE, deviceId: "emulator-5554" };
+      const { registry } = await createDeviceRestoreEpochHarness(device, fakeTimer);
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: "epoch-restore",
+        timestamp,
+        deviceId: device.deviceId,
+        deviceName: device.name,
+        platform: "android",
+        snapshotType: "vm",
+        includeAppData: true,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        ...manifest,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 0,
+        manifest,
+      });
+      const stamped: string[] = [];
+      await setDeviceSnapshotManagerDependencies({
+        deviceIncarnationInvalidator: new DefaultDeviceIncarnationInvalidator([
+          {
+            name: "restored-events",
+            onDeviceIncarnationChanged: () => {
+              stamped.push(registry.getByDeviceId(device.deviceId)!.deviceSessionUuid);
+            },
+          },
+        ]),
+        createRestoreProvider: () => ({
+          restore: async (args) => {
+            if (exit === "preload-failure") {
+              throw Object.assign(new Error("load rejected"), {
+                isDefinitiveVmSnapshotLoadFailure: true,
+              });
+            }
+            await args.onBeforeVmSnapshotLoad?.();
+            await args.onVmSnapshotLoaded?.();
+            if (exit === "readiness-failure") {
+              throw new Error("readiness failed");
+            }
+            return { snapshotType: "vm", restoredAt: timestamp };
+          },
+        }),
+      });
+      if (exit === "recovery-failure") {
+        store.recoverSnapshotData = async () => {
+          throw new Error("recovery failed");
+        };
+      }
+      const restoring = restoreDeviceSnapshot(device, {
+        snapshotName: manifest.snapshotName,
+        useVmSnapshot: true,
+      });
+      if (exit === "success") {
+        expect((await restoring).deviceSessionUuid).toBe("epoch-new");
+      } else {
+        await expect(restoring).rejects.toThrow(
+          exit === "preload-failure"
+            ? "load rejected"
+            : exit === "recovery-failure"
+              ? "recovery failed"
+              : "readiness failed",
+        );
+      }
+      const rewound = exit === "success" || exit === "readiness-failure";
+      expect(registry.getByDeviceId(device.deviceId)?.deviceSessionUuid).toBe(
+        rewound ? "epoch-new" : "epoch-old",
+      );
+      expect(stamped).toEqual(rewound ? ["epoch-new"] : []);
+    },
+  );
 
   test("captureDeviceSnapshot uses defaults, generates name, and evicts old snapshots", async () => {
     const config: DeviceSnapshotConfig = {

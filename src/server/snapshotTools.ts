@@ -80,7 +80,7 @@ export function registerSnapshotTools() {
         if (!args.snapshotName) {
           throw new ActionableError("snapshotName is required when action is restore");
         }
-        const { result } = await restoreDeviceSnapshot(device, {
+        const { result, deviceSessionUuid } = await restoreDeviceSnapshot(device, {
           snapshotName: args.snapshotName,
           useVmSnapshot: args.useVmSnapshot,
           vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs,
@@ -97,6 +97,7 @@ export function registerSnapshotTools() {
           restoreMode: result.restoreMode,
           restoreNote: result.restoreNote,
           restoredAt: result.restoredAt,
+          ...(deviceSessionUuid ? { deviceSessionUuid } : {}),
           success,
           failures,
           deviceId: device.deviceId,
@@ -116,7 +117,7 @@ export function registerSnapshotTools() {
 
   ToolRegistry.registerDeviceAware(
     "deviceSnapshot",
-    "Capture or restore device snapshot.",
+    "Capture or restore device snapshot. An Android VM restore in daemon mode returns the new deviceSessionUuid; the previous device-session UUID is superseded by the restore.",
     deviceSnapshotSchema,
     deviceSnapshotHandler,
     { defaultEnabled: false },

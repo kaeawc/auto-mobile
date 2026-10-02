@@ -519,7 +519,7 @@ for (const platform of ["android", "ios"] as const) {
     const result = await feature.execute("closed");
     expect(result).toMatchObject({
       display: { generation: old.display.generation },
-      warning: expect.any(String),
+      warnings: [expect.any(String)],
     });
     expect(execute).toHaveBeenCalledTimes(2);
     expect(execute.mock.calls[1]?.[0]?.freshness).toBe("fresh");

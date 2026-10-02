@@ -29,7 +29,7 @@ export interface SetPostureResult {
   posture: RequestedPosture;
   display: DisplayRef;
   locked?: boolean;
-  warning?: string;
+  warnings?: string[];
 }
 
 export interface SetPostureUnsupportedResult {
@@ -431,6 +431,10 @@ export class SetPosture {
       return await this.observeFinalPosture(
         requested,
         () => this.observeFactory(this.device).execute({ signal }),
+        () => {
+          ObservedAndroidDisplayCache.clear(this.device.deviceId);
+          return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+        },
         signal,
       );
     } catch (error) {
@@ -447,6 +451,7 @@ export class SetPosture {
   private async observeFinalPosture(
     requested: RequestedPosture,
     observe: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
+    observeRetry: () => Promise<Awaited<ReturnType<ObserveScreen["execute"]>>>,
     signal?: AbortSignal,
   ): Promise<SetPostureResult> {
     let observation = await awaitWhileRequestIsLive(observe(), signal);
@@ -454,14 +459,8 @@ export class SetPosture {
     // including iOS geometry changes, before the legitimate settle notification.
     let stale = observation.displayRevision !== this.transitionSink.revision(this.device.deviceId);
     if (stale) {
-      if (this.device.platform === "android") {
-        ObservedAndroidDisplayCache.clear(this.device.deviceId);
-      }
       throwIfAborted(signal);
-      observation = await awaitWhileRequestIsLive(
-        this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
-        signal,
-      );
+      observation = await awaitWhileRequestIsLive(observeRetry(), signal);
       stale = observation.displayRevision !== this.transitionSink.revision(this.device.deviceId);
     }
     throwIfAborted(signal);
@@ -483,8 +482,9 @@ export class SetPosture {
       ...(observation.deviceLock ? { locked: observation.deviceLock.locked } : {}),
       ...(stale
         ? {
-            warning:
+            warnings: [
               "The posture changed, but the returned observation predates it. Re-observe before acting.",
+            ],
           }
         : {}),
     };
@@ -534,17 +534,14 @@ export class SetPosture {
       "setPosture changed the iPhone Duo hinge angle",
     );
     const expectedRole = requested === "closed" ? "cover" : "inner";
-    return await this.observeFinalPosture(
-      requested,
-      () =>
-        observeIosPosture(
-          () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
-          this.device.displays?.panels,
-          expectedRole,
-          this.timer,
-          signal,
-        ),
-      signal,
-    );
+    const observe = () =>
+      observeIosPosture(
+        () => this.observeFactory(this.device).execute({ freshness: "fresh", signal }),
+        this.device.displays?.panels,
+        expectedRole,
+        this.timer,
+        signal,
+      );
+    return await this.observeFinalPosture(requested, observe, observe, signal);
   }
 }

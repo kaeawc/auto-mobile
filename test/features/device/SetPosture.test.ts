@@ -886,8 +886,45 @@ for (const platform of ["android", "ios"] as const) {
         timer,
         transitionSink: sink,
       });
-      return { feature, observe, sink, stamped, events, device };
+      return { feature, observe, sink, stamped, events, device, timer };
     }
+
+    if (platform === "ios") {
+      test("validates the retry panel when a requested-panel observation is stale", async () => {
+        const h = harness();
+        h.timer.enableAutoAdvance();
+        h.observe.setObserveResult((index) =>
+          index === 0
+            ? h.stamped(h.sink.revision() - 1)
+            : {
+                ...h.stamped(),
+                display: { ...display, generation: h.sink.identityRevision() },
+                screenSize: { width: 400, height: 600 },
+              },
+        );
+        const attempt = h.feature.execute("closed");
+        await expect(attempt).rejects.toBeInstanceOf(ActionableError);
+        await expect(attempt).rejects.toThrow("active display is still the inner panel");
+        expect(h.observe.getExecuteOptions()).toHaveLength(14);
+        expect(
+          h.observe.getExecuteOptions().every((options) => options?.freshness === "fresh"),
+        ).toBe(true);
+        expect(h.events).not.toContain("setPosture settled on the iPhone Duo display");
+      });
+    }
+
+    test("emits stale warnings as a string array for plan promotion without a singular warning", async () => {
+      const h = harness();
+      h.observe.setObserveResult(() => h.stamped(h.sink.revision() - 1));
+      const result = await h.feature.execute("closed");
+      if (!("display" in result)) {
+        throw new Error("Expected a supported posture result");
+      }
+      expect(Array.isArray(result.warnings)).toBe(true);
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings?.every((entry) => typeof entry === "string")).toBe(true);
+      expect("warning" in result).toBe(false);
+    });
 
     test("re-observes a stale final stamp once and adopts the fresh panel", async () => {
       const h = harness();
@@ -933,8 +970,9 @@ for (const platform of ["android", "ios"] as const) {
         posture: "closed",
         display: h.stamped(0, 2).display,
         locked: true,
-        warning:
+        warnings: [
           "The posture changed, but the returned observation predates it. Re-observe before acting.",
+        ],
       });
       expect(h.observe.getExecuteOptions()).toHaveLength(2);
       if (platform === "ios") {
@@ -959,8 +997,9 @@ for (const platform of ["android", "ios"] as const) {
       h.observe.setObserveResult(() => ({ ...h.stamped(), displayRevision: undefined }));
       expect(await h.feature.execute("closed")).toMatchObject({
         display: { generation: 1 },
-        warning:
+        warnings: [
           "The posture changed, but the returned observation predates it. Re-observe before acting.",
+        ],
       });
       expect(h.observe.getExecuteOptions()).toHaveLength(2);
     });

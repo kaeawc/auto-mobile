@@ -526,8 +526,8 @@ support is confirmed; they must still confirm the resulting posture.
 On Android and iOS, `setPosture` checks the final observation's display revision
 and retries once with a fresh capture if it is stale or has no revision stamp.
 If the retry is also stale, the result preserves that observation's own
-`display.generation` and includes `warning`: "The posture changed, but the returned
-observation predates it. Re-observe before acting." Coordinate actions remain
+`display.generation` and includes `warnings`: ["The posture changed, but the returned
+observation predates it. Re-observe before acting."]. Coordinate actions remain
 subject to the display-transition fence. On iOS, the settle notification still
 follows the final observation; freshness is checked before that notification.
 

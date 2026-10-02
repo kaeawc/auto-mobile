@@ -12,10 +12,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.BuildContextStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.StreamBuildKey
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
@@ -24,7 +26,9 @@ import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.navigation.DefaultNavigationScreenshotLoaderRegistry
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoaderRegistry
+import dev.jasonpearson.automobile.desktop.core.navigation.ProvenanceBuildKey
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenNode
+import dev.jasonpearson.automobile.desktop.core.navigation.ScreenProvenance
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersion
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
@@ -93,6 +97,66 @@ class NavigationFacetTest {
       edges = emptyList(),
       currentScreen = currentScreen,
     )
+
+  @Test
+  fun `stream build context reaches dashboard provenance and null restores fallback`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      val app = "com.example.app"
+      val home =
+        screen("Home")
+          .copy(
+            provenance =
+              listOf(
+                ScreenProvenance(ProvenanceBuildKey(app, 2L, "hashB"), "dev-1", "epoch-1", 250L)
+              )
+          )
+      val source =
+        StubNavigationDataSource(Result.Success(NavigationGraph(listOf(home), emptyList())))
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides testGraph()) {
+          MaterialTheme {
+            NavigationFacet(
+              column = column(),
+              observationStreamFactory = { fake },
+              navigationDataSourceProvider = { source },
+            )
+          }
+        }
+      }
+      waitForIdle()
+      val update =
+        BuildContextStreamUpdate(
+          "dev-1",
+          "epoch-1",
+          42L,
+          app,
+          StreamBuildKey(app, 1L, null, "hashA"),
+        )
+      fake.emitBuildContext(update)
+      fake.emitNavigation(navUpdate(app, "Home"))
+      val historical =
+        "Home — historical: build v2 (hashB), device dev-1, session epoch-1, last seen 250"
+      val active = "Home — active in current context"
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithContentDescription(historical).fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithContentDescription(historical).assertExists()
+
+      fake.emitBuildContext(update.copy(buildKey = StreamBuildKey(app, 2L, null, "hashB")))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithContentDescription(active).fetchSemanticsNodes().isNotEmpty()
+      }
+      fake.emitBuildContext(update)
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithContentDescription(historical).fetchSemanticsNodes().isNotEmpty()
+      }
+      fake.emitBuildContext(update.copy(buildKey = null))
+      waitUntil(timeoutMillis = 5_000) {
+        onAllNodesWithContentDescription(active).fetchSemanticsNodes().isNotEmpty()
+      }
+      onNodeWithContentDescription(active).assertExists()
+    }
 
   @Test
   fun `connects the stream to the pane device, requests the graph, and disposes on removal`() =

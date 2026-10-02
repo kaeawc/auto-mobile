@@ -160,6 +160,15 @@ class ObservationStreamClient(
   override val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> =
     _navigationUpdates.asSharedFlow()
 
+  private val _buildContextUpdates =
+    MutableSharedFlow<BuildContextStreamUpdate>(
+      replay = 1,
+      extraBufferCapacity = 16,
+      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+  override val buildContextUpdates: SharedFlow<BuildContextStreamUpdate> =
+    _buildContextUpdates.asSharedFlow()
+
   // Flow for performance metrics updates (use extraBufferCapacity + DROP_OLDEST to avoid blocking)
   private val _performanceUpdates =
     MutableSharedFlow<PerformanceStreamUpdate>(
@@ -711,6 +720,23 @@ class ObservationStreamClient(
           storageReconciliationRequestChannel.send(StorageSubscriptionKey(packageName, fileName))
         }
       }
+      "device_build_context" -> {
+        val deviceId = response.deviceId
+        val packageId = response.packageId
+        if (deviceId.isNullOrBlank() || packageId.isNullOrBlank()) {
+          log.warn("device_build_context without deviceId/packageId, ignoring")
+        } else {
+          _buildContextUpdates.emit(
+            BuildContextStreamUpdate(
+              deviceId = deviceId,
+              deviceSessionUuid = response.deviceSessionUuid,
+              timestamp = response.timestamp ?: System.currentTimeMillis(),
+              packageId = packageId,
+              buildKey = response.buildKey,
+            )
+          )
+        }
+      }
       "device_session_ended" -> {
         val deviceId = response.deviceId
         val retiredUuid = response.deviceSessionUuid
@@ -1093,6 +1119,8 @@ data class StreamResponse(
   val screenshotByteLength: Int? = null,
   val screenshotBase64Length: Int? = null,
   val navigationGraph: NavigationGraphStreamData? = null,
+  val packageId: String? = null,
+  val buildKey: StreamBuildKey? = null,
   val performanceData: PerformanceStreamData? = null,
   val hierarchyDiff: HierarchyDiffSummary? = null,
   val storageEvent: StorageEventData? = null,

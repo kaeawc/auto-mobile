@@ -38,6 +38,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   private val _navigationUpdates = flow<NavigationGraphStreamUpdate>()
   override val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> =
     _navigationUpdates.asSharedFlow()
+  private val _buildContextUpdates = flow<BuildContextStreamUpdate>()
+  override val buildContextUpdates: SharedFlow<BuildContextStreamUpdate> =
+    _buildContextUpdates.asSharedFlow()
   private val _performanceUpdates = flow<PerformanceStreamUpdate>()
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
@@ -169,6 +172,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
 
   fun emitNavigation(update: NavigationGraphStreamUpdate): Boolean =
     _navigationUpdates.tryEmit(update)
+
+  fun emitBuildContext(update: BuildContextStreamUpdate): Boolean =
+    _buildContextUpdates.tryEmit(update)
 
   fun emitPerformance(update: PerformanceStreamUpdate): Boolean =
     _performanceUpdates.tryEmit(update)

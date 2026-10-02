@@ -16,7 +16,7 @@ class NavigationProvenanceTest {
     NavigationActiveContext(deviceId = "emulator-5554", packageId = "com.example.app")
 
   private fun record(
-    versionCode: Int = 1,
+    versionCode: Long = 1L,
     contentHash: String = "hashA",
     deviceId: String = "emulator-5554",
     sessionUuid: String = "session-1",
@@ -81,6 +81,33 @@ class NavigationProvenanceTest {
   }
 
   @Test
+  fun `large build version matches exactly and each build dimension can fade`() {
+    val matching = record(versionCode = 20260102123L)
+    val context = activeContext.copy(buildKey = matching.buildKey)
+    assertTrue(ProvenanceOpacity.isActiveRecord(matching, context))
+    assertTrue(ProvenanceOpacity.isFaded(listOf(record(versionCode = 20260102124L)), context))
+    assertTrue(
+      ProvenanceOpacity.isFaded(
+        listOf(record(versionCode = 20260102123L, contentHash = "other")),
+        context,
+      )
+    )
+    assertFalse(
+      ProvenanceOpacity.isActiveRecord(
+        matching,
+        context.copy(buildKey = matching.buildKey.copy(packageId = "other")),
+      )
+    )
+    assertTrue(ProvenanceOpacity.isActiveRecord(matching, activeContext))
+    assertTrue(
+      ProvenanceOpacity.isActiveRecord(
+        record(versionCode = 20260102124L, contentHash = "other"),
+        activeContext,
+      )
+    )
+  }
+
+  @Test
   fun `null context renders union at full opacity (offline)`() {
     val provenance = listOf(record(deviceId = "emulator-9999"))
     assertEquals(ProvenanceOpacity.ACTIVE_ALPHA, ProvenanceOpacity.alphaFor(provenance, null))
@@ -129,9 +156,8 @@ class NavigationProvenanceTest {
 
   @Test
   fun `legacy unknown-device record is opaque not faded`() {
-    // iOS events (and any pre-build-context write) carry the legacy device sentinel. We cannot
-    // confidently call these "another device's" reach, so they are UNCLASSIFIED → full opacity,
-    // NOT historical/faded (#4985; iOS eager build-context is deferred #4991).
+    // Pre-build-context writes and genuinely unknown devices carry the legacy sentinel. We cannot
+    // confidently call these "another device's" reach, so they remain UNCLASSIFIED → full opacity.
     val provenance =
       listOf(
         record(

@@ -229,7 +229,7 @@ private data class McpNavigationProvenance(
 @Serializable
 private data class McpNavigationBuildKey(
   val packageId: String,
-  val versionCode: Int,
+  val versionCode: Long,
   val contentHash: String,
 )
 

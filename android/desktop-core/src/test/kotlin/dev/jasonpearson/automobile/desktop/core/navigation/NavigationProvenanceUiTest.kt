@@ -46,7 +46,7 @@ class NavigationProvenanceUiTest {
     }
   }
 
-  private fun provenance(deviceId: String, versionCode: Int = 1, contentHash: String = "hashA") =
+  private fun provenance(deviceId: String, versionCode: Long = 1L, contentHash: String = "hashA") =
     ScreenProvenance(
       buildKey = ProvenanceBuildKey("com.example.app", versionCode, contentHash),
       deviceId = deviceId,

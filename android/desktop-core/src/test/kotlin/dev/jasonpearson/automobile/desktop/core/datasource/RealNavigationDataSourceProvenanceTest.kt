@@ -69,7 +69,7 @@ class RealNavigationDataSourceProvenanceTest {
     val home = graph.screens.first { it.name == "Home" }
     assertEquals(1, home.provenance.size)
     assertEquals("emulator-5554", home.provenance[0].deviceId)
-    assertEquals(2, home.provenance[0].buildKey.versionCode)
+    assertEquals(2L, home.provenance[0].buildKey.versionCode)
     assertEquals("hashB", home.provenance[0].buildKey.contentHash)
     assertEquals(250L, home.provenance[0].lastSeen)
 
@@ -77,6 +77,28 @@ class RealNavigationDataSourceProvenanceTest {
     assertEquals(1, edge.provenance.size)
     assertEquals("emulator-9999", edge.provenance[0].deviceId)
     assertEquals("session-2", edge.provenance[0].sessionUuid)
+  }
+
+  @Test
+  fun `parses provenance version above Int range without truncation`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setResourceResponseWithText(
+      graphUri,
+      """
+      {"nodes":[{"id":1,"screenName":"Home","visitCount":1,"provenance":[{
+        "buildKey":{"packageId":"com.example.app","versionCode":20260102123,"contentHash":"hashB"},
+        "deviceId":"emulator-5554","sessionUuid":"session-1","lastSeen":250
+      }]}],"edges":[]}
+      """
+        .trimIndent(),
+    )
+    val source = RealNavigationDataSource(clientProvider = { client }, appId = "com.example.app")
+    val result = source.getNavigationGraph()
+    assertTrue(result is Result.Success)
+    val key = (result as Result.Success).data.screens.single().provenance.single().buildKey
+    assertEquals(20260102123L, key.versionCode)
+    assertEquals("com.example.app", key.packageId)
+    assertEquals("hashB", key.contentHash)
   }
 
   @Test
